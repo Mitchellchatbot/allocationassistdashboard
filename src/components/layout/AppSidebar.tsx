@@ -45,15 +45,15 @@ export function AppSidebar() {
 
   return (
     <Sidebar collapsible="icon">
-      <SidebarHeader className="px-4 py-4 border-b border-sidebar-border" style={{ backgroundColor: "hsl(170, 45%, 35%)" }}>
+      <SidebarHeader className="px-4 py-4 border-b border-sidebar-border" style={{ backgroundColor: "hsl(170, 45%, 28%)" }}>
         <div className="flex items-center justify-center gap-2.5">
           <img src={logo} alt="Allocation Assist" className="h-12 w-12 shrink-0 object-contain" />
           {!collapsed && (
             <div className="leading-tight">
-              <span className="text-[14px] font-semibold text-foreground tracking-tight block">
+              <span className="text-[14px] font-semibold text-white tracking-tight block">
                 Allocation Assist
               </span>
-              <span className="text-[10px] text-muted-foreground block">The source of workforce</span>
+              <span className="text-[10px] text-white/70 block">The source of workforce</span>
             </div>
           )}
         </div>
