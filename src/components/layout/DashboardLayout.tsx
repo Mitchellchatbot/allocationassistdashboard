@@ -12,22 +12,22 @@ import { useState } from "react";
 import { Link, useLocation } from "react-router-dom";
 
 const notifications = [
-  { id: 1, icon: AlertTriangle, color: "text-warning", title: "Licensing Delay — Dr. Raj Mehta", detail: "QCHP license stuck for 28 days. Escalation recommended.", time: "5 min ago", unread: true },
-  { id: 2, icon: UserPlus, color: "text-info", title: "New Application Received", detail: "Dr. Anna Kowalski — Anesthesiology, Poland → UAE", time: "12 min ago", unread: true },
-  { id: 3, icon: Award, color: "text-success", title: "Placement Confirmed", detail: "Dr. Sophie Laurent placed at Cleveland Clinic Abu Dhabi", time: "1 hour ago", unread: true },
-  { id: 4, icon: Clock, color: "text-warning", title: "Document Collection Overdue", detail: "Dr. Chen Wei — missing credentials (15 days)", time: "2 hours ago", unread: false },
-  { id: 5, icon: Handshake, color: "text-primary", title: "New Hospital Partnership", detail: "Hamad Medical Corporation, Qatar — agreement signed", time: "Yesterday", unread: false },
-  { id: 6, icon: FileText, color: "text-primary", title: "DHA License Approved", detail: "Dr. Amira Khan — ready for placement in UAE", time: "Yesterday", unread: false },
+  { id: 1, icon: AlertTriangle, color: "text-warning", title: "License Delay — Dr. Raj Mehta", detail: "Qatar license stuck for 28 days. Needs escalation.", time: "5 min ago", unread: true },
+  { id: 2, icon: UserPlus, color: "text-info", title: "New Doctor Applied", detail: "Dr. Anna Kowalski — Anesthesiology, from Poland to UAE", time: "12 min ago", unread: true },
+  { id: 3, icon: Award, color: "text-success", title: "Doctor Successfully Placed", detail: "Dr. Sophie Laurent placed at Cleveland Clinic Abu Dhabi", time: "1 hour ago", unread: true },
+  { id: 4, icon: Clock, color: "text-warning", title: "Documents Overdue", detail: "Dr. Chen Wei — missing credentials for 15 days", time: "2 hours ago", unread: false },
+  { id: 5, icon: Handshake, color: "text-primary", title: "New Hospital Partner", detail: "Hamad Medical Corporation, Qatar — agreement signed", time: "Yesterday", unread: false },
+  { id: 6, icon: FileText, color: "text-primary", title: "License Approved", detail: "Dr. Amira Khan — DHA License approved, ready for placement", time: "Yesterday", unread: false },
 ];
 
 const breadcrumbMap: Record<string, string> = {
-  "/": "Overview",
-  "/sales": "Sales & Pipeline",
+  "/": "Dashboard",
+  "/sales": "Sales Tracker",
   "/marketing": "Marketing",
-  "/leads-pipeline": "Doctor Pipeline",
-  "/team": "Team",
+  "/leads-pipeline": "Doctor Progress",
+  "/team": "Team Performance",
   "/finance": "Finance",
-  "/operations": "Operations",
+  "/operations": "Operations & Roadmap",
   "/settings": "Settings",
 };
 
@@ -63,18 +63,8 @@ export function DashboardLayout({ children, title, subtitle }: DashboardLayoutPr
                 <Link to="/" className="text-muted-foreground hover:text-foreground transition-colors shrink-0">
                   <Home className="h-3 w-3" />
                 </Link>
-                {currentPath !== "/" && (
-                  <>
-                    <ChevronRight className="h-3 w-3 text-muted-foreground/50 shrink-0" />
-                    <span className="font-medium text-foreground truncate">{breadcrumbLabel}</span>
-                  </>
-                )}
-                {currentPath === "/" && (
-                  <>
-                    <ChevronRight className="h-3 w-3 text-muted-foreground/50 shrink-0" />
-                    <span className="font-medium text-foreground truncate">Dashboard</span>
-                  </>
-                )}
+                <ChevronRight className="h-3 w-3 text-muted-foreground/50 shrink-0" />
+                <span className="font-medium text-foreground truncate">{breadcrumbLabel}</span>
               </nav>
             </div>
             <div className="flex items-center gap-1 sm:gap-1.5 shrink-0">
@@ -108,7 +98,7 @@ export function DashboardLayout({ children, title, subtitle }: DashboardLayoutPr
                     <Download className="h-3 w-3 mr-1" />Export
                   </Button>
                 </TooltipTrigger>
-                <TooltipContent side="bottom" className="text-[10px]">Export dashboard data as CSV</TooltipContent>
+                <TooltipContent side="bottom" className="text-[10px]">Download this page's data as a spreadsheet</TooltipContent>
               </Tooltip>
               <Popover>
                 <PopoverTrigger asChild>
@@ -126,7 +116,7 @@ export function DashboardLayout({ children, title, subtitle }: DashboardLayoutPr
                     <span className="text-[12px] font-semibold">Notifications</span>
                     {unreadCount > 0 && (
                       <button onClick={markAllRead} className="text-[10px] text-primary hover:underline font-medium">
-                        Mark all read
+                        Mark all as read
                       </button>
                     )}
                   </div>

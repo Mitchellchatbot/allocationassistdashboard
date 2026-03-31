@@ -31,7 +31,7 @@ const Index = () => {
   const { kpis, timeData, funnel, channels, regions, activity } = useFilteredData();
 
   return (
-    <DashboardLayout title="Overview" subtitle="Doctor placement and operational performance at a glance">
+    <DashboardLayout title="Dashboard" subtitle="A quick look at how doctor placements and operations are performing">
       {/* KPI Grid - responsive */}
       <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-6 gap-3 mb-5">
         {kpis.map((kpi) => <KpiCard key={kpi.label} {...kpi} />)}
@@ -55,13 +55,13 @@ const Index = () => {
                 <XAxis dataKey="month" fontSize={10} tickLine={false} axisLine={false} stroke="hsl(220,10%,55%)" />
                 <YAxis fontSize={10} tickLine={false} axisLine={false} stroke="hsl(220,10%,55%)" />
                 <Tooltip contentStyle={tip} />
-                <Area type="monotone" dataKey="doctors" stroke="hsl(170,55%,45%)" strokeWidth={2} fill="url(#docFill)" name="Applications" />
+                <Area type="monotone" dataKey="doctors" stroke="hsl(170,55%,45%)" strokeWidth={2} fill="url(#docFill)" name="Applied" />
                 <Line type="monotone" dataKey="qualified" stroke="hsl(210,75%,52%)" strokeWidth={1.5} dot={false} name="Qualified" />
                 <Line type="monotone" dataKey="placed" stroke="hsl(158,50%,42%)" strokeWidth={1.5} dot={false} name="Placed" />
               </AreaChart>
             </ResponsiveContainer>
             <div className="flex gap-4 mt-2 justify-center">
-              {[{ c: "bg-primary", l: "Applications" }, { c: "bg-info", l: "Qualified" }, { c: "bg-success", l: "Placed" }].map(i => (
+              {[{ c: "bg-primary", l: "Applied" }, { c: "bg-info", l: "Qualified" }, { c: "bg-success", l: "Placed" }].map(i => (
                 <span key={i.l} className="flex items-center gap-1.5 text-[10px] text-muted-foreground">
                   <span className={`h-2 w-2 rounded-full ${i.c}`} />{i.l}
                 </span>
@@ -72,7 +72,7 @@ const Index = () => {
 
         <Card className="lg:col-span-2 shadow-sm border-border/50 hover:shadow-md transition-shadow">
           <CardHeader className="pb-1 pt-4 px-4">
-            <CardTitle className="text-[12px] font-medium text-muted-foreground uppercase tracking-wide">Placement Funnel</CardTitle>
+            <CardTitle className="text-[12px] font-medium text-muted-foreground uppercase tracking-wide">How Doctors Move Through the Process</CardTitle>
           </CardHeader>
           <CardContent className="px-4 pb-4">
             <div className="space-y-3">
@@ -100,7 +100,7 @@ const Index = () => {
       <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
         <Card className="shadow-sm border-border/50 hover:shadow-md transition-shadow">
           <CardHeader className="pb-1 pt-4 px-4">
-            <CardTitle className="text-[12px] font-medium text-muted-foreground uppercase tracking-wide">By Region</CardTitle>
+            <CardTitle className="text-[12px] font-medium text-muted-foreground uppercase tracking-wide">Performance by Region</CardTitle>
           </CardHeader>
           <CardContent className="px-4 pb-4">
             <div className="space-y-2">
@@ -122,7 +122,7 @@ const Index = () => {
 
         <Card className="shadow-sm border-border/50 hover:shadow-md transition-shadow">
           <CardHeader className="pb-1 pt-4 px-4">
-            <CardTitle className="text-[12px] font-medium text-muted-foreground uppercase tracking-wide">Channel Performance</CardTitle>
+            <CardTitle className="text-[12px] font-medium text-muted-foreground uppercase tracking-wide">Where Doctors Come From</CardTitle>
           </CardHeader>
           <CardContent className="px-2 sm:px-4 pb-4">
             <ResponsiveContainer width="100%" height={200}>
