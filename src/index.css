@@ -6,59 +6,61 @@
 
 @layer base {
   :root {
-    --background: 210 20% 98%;
-    --foreground: 215 25% 17%;
+    --background: 220 15% 97%;
+    --foreground: 220 20% 18%;
 
     --card: 0 0% 100%;
-    --card-foreground: 215 25% 17%;
+    --card-foreground: 220 20% 18%;
 
     --popover: 0 0% 100%;
-    --popover-foreground: 215 25% 17%;
+    --popover-foreground: 220 20% 18%;
 
-    --primary: 172 58% 40%;
+    /* Allocation Assist teal */
+    --primary: 170 55% 45%;
     --primary-foreground: 0 0% 100%;
 
-    --secondary: 210 18% 95%;
-    --secondary-foreground: 215 20% 30%;
+    --secondary: 220 14% 94%;
+    --secondary-foreground: 220 15% 35%;
 
-    --muted: 210 14% 96%;
-    --muted-foreground: 215 12% 55%;
+    --muted: 220 12% 95%;
+    --muted-foreground: 220 10% 48%;
 
-    --accent: 172 40% 94%;
-    --accent-foreground: 172 58% 28%;
+    --accent: 170 35% 93%;
+    --accent-foreground: 170 55% 30%;
 
-    --destructive: 4 72% 56%;
+    --destructive: 4 68% 55%;
     --destructive-foreground: 0 0% 100%;
 
-    --success: 158 58% 40%;
+    --success: 158 50% 42%;
     --success-foreground: 0 0% 100%;
 
-    --warning: 40 92% 50%;
-    --warning-foreground: 0 0% 100%;
+    --warning: 38 88% 50%;
+    --warning-foreground: 30 80% 15%;
 
-    --info: 214 80% 52%;
+    --info: 210 75% 52%;
     --info-foreground: 0 0% 100%;
 
-    --border: 214 16% 91%;
-    --input: 214 16% 91%;
-    --ring: 172 58% 40%;
+    --border: 220 14% 90%;
+    --input: 220 14% 90%;
+    --ring: 170 55% 45%;
 
-    --radius: 0.625rem;
+    --radius: 0.5rem;
 
-    --chart-1: 172 58% 40%;
-    --chart-2: 214 80% 52%;
-    --chart-3: 158 58% 40%;
-    --chart-4: 40 92% 50%;
-    --chart-5: 280 55% 52%;
+    --chart-1: 170 55% 45%;
+    --chart-2: 210 75% 52%;
+    --chart-3: 158 50% 42%;
+    --chart-4: 38 88% 50%;
+    --chart-5: 280 50% 52%;
 
-    --sidebar-background: 215 30% 13%;
-    --sidebar-foreground: 210 12% 80%;
-    --sidebar-primary: 172 58% 48%;
+    /* Sidebar — AA dark slate from their presentations */
+    --sidebar-background: 230 18% 22%;
+    --sidebar-foreground: 220 10% 78%;
+    --sidebar-primary: 170 55% 52%;
     --sidebar-primary-foreground: 0 0% 100%;
-    --sidebar-accent: 215 25% 19%;
-    --sidebar-accent-foreground: 210 12% 92%;
-    --sidebar-border: 215 22% 18%;
-    --sidebar-ring: 172 58% 48%;
+    --sidebar-accent: 230 15% 28%;
+    --sidebar-accent-foreground: 220 10% 92%;
+    --sidebar-border: 230 14% 26%;
+    --sidebar-ring: 170 55% 52%;
   }
 }
 
@@ -66,30 +68,9 @@
   * {
     @apply border-border;
   }
-
   body {
     @apply bg-background text-foreground antialiased;
     font-family: 'Inter', -apple-system, BlinkMacSystemFont, sans-serif;
     font-feature-settings: 'cv02', 'cv03', 'cv04', 'cv11';
-  }
-}
-
-@layer utilities {
-  .font-display {
-    font-family: 'Inter', -apple-system, BlinkMacSystemFont, sans-serif;
-    font-weight: 600;
-  }
-
-  .stat-value {
-    @apply text-2xl font-semibold tracking-tight text-foreground;
-    font-variant-numeric: tabular-nums;
-  }
-
-  .stat-label {
-    @apply text-[13px] font-medium text-muted-foreground;
-  }
-
-  .section-title {
-    @apply text-[13px] font-semibold uppercase tracking-wider text-muted-foreground;
   }
 }

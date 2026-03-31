@@ -13,7 +13,7 @@ interface DashboardLayoutProps {
 }
 
 export function DashboardLayout({ children, title, subtitle }: DashboardLayoutProps) {
-  const [timeRange, setTimeRange] = useState("30d");
+  const [timeRange, setTimeRange] = useState("quarter");
   const [region, setRegion] = useState("all");
 
   return (
@@ -21,63 +21,50 @@ export function DashboardLayout({ children, title, subtitle }: DashboardLayoutPr
       <div className="min-h-screen flex w-full bg-background">
         <AppSidebar />
         <div className="flex-1 flex flex-col min-w-0">
-          {/* Top Bar */}
-          <header className="h-[56px] flex items-center justify-between border-b bg-card px-4 lg:px-6 shrink-0">
+          <header className="h-[52px] flex items-center justify-between border-b bg-card px-4 lg:px-5 shrink-0">
             <div className="flex items-center gap-3">
               <SidebarTrigger className="text-muted-foreground hover:text-foreground" />
-              <div className="hidden sm:block h-5 w-px bg-border" />
+              <div className="h-4 w-px bg-border hidden sm:block" />
               <div>
-                <h1 className="text-[15px] font-semibold text-foreground leading-tight">{title}</h1>
+                <h1 className="text-[14px] font-semibold text-foreground leading-tight">{title}</h1>
                 {subtitle && <p className="text-[11px] text-muted-foreground leading-tight">{subtitle}</p>}
               </div>
             </div>
-
-            <div className="flex items-center gap-2">
-              {/* Time Range Filter */}
+            <div className="flex items-center gap-1.5">
               <Select value={timeRange} onValueChange={setTimeRange}>
-                <SelectTrigger className="h-8 w-[130px] text-xs bg-muted/50 border-0">
-                  <CalendarDays className="h-3.5 w-3.5 mr-1.5 text-muted-foreground" />
+                <SelectTrigger className="h-7 w-[110px] text-[11px] bg-secondary border-0 rounded-md">
+                  <CalendarDays className="h-3 w-3 mr-1 text-muted-foreground" />
                   <SelectValue />
                 </SelectTrigger>
                 <SelectContent>
-                  <SelectItem value="7d">Last 7 days</SelectItem>
-                  <SelectItem value="30d">Last 30 days</SelectItem>
-                  <SelectItem value="90d">Last 90 days</SelectItem>
-                  <SelectItem value="12m">Last 12 months</SelectItem>
+                  <SelectItem value="week">This Week</SelectItem>
+                  <SelectItem value="month">This Month</SelectItem>
+                  <SelectItem value="quarter">This Quarter</SelectItem>
+                  <SelectItem value="year">This Year</SelectItem>
                 </SelectContent>
               </Select>
-
-              {/* Region Filter */}
               <Select value={region} onValueChange={setRegion}>
-                <SelectTrigger className="h-8 w-[120px] text-xs bg-muted/50 border-0 hidden md:flex">
+                <SelectTrigger className="h-7 w-[100px] text-[11px] bg-secondary border-0 rounded-md hidden md:flex">
                   <SelectValue />
                 </SelectTrigger>
                 <SelectContent>
                   <SelectItem value="all">All Regions</SelectItem>
                   <SelectItem value="uae">UAE</SelectItem>
-                  <SelectItem value="saudi">Saudi Arabia</SelectItem>
+                  <SelectItem value="ksa">Saudi Arabia</SelectItem>
                   <SelectItem value="qatar">Qatar</SelectItem>
                   <SelectItem value="kuwait">Kuwait</SelectItem>
                 </SelectContent>
               </Select>
-
-              <div className="hidden sm:block h-5 w-px bg-border" />
-
-              {/* Export */}
-              <Button variant="ghost" size="sm" className="h-8 text-xs text-muted-foreground hidden sm:flex">
-                <Download className="h-3.5 w-3.5 mr-1.5" />
-                Export
+              <Button variant="ghost" size="sm" className="h-7 text-[11px] text-muted-foreground hidden sm:flex px-2">
+                <Download className="h-3 w-3 mr-1" />Export
               </Button>
-
-              {/* Notifications */}
-              <Button variant="ghost" size="icon" className="relative h-8 w-8">
-                <Bell className="h-4 w-4 text-muted-foreground" />
-                <Badge className="absolute -top-0.5 -right-0.5 h-4 w-4 p-0 flex items-center justify-center text-[9px]">3</Badge>
+              <Button variant="ghost" size="icon" className="relative h-7 w-7">
+                <Bell className="h-3.5 w-3.5 text-muted-foreground" />
+                <Badge className="absolute -top-0.5 -right-0.5 h-3.5 min-w-[14px] p-0 flex items-center justify-center text-[8px]">3</Badge>
               </Button>
             </div>
           </header>
-
-          <main className="flex-1 overflow-auto p-4 lg:p-6">{children}</main>
+          <main className="flex-1 overflow-auto p-4 lg:p-5">{children}</main>
         </div>
       </div>
     </SidebarProvider>

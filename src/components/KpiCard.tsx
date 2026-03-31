@@ -1,39 +1,51 @@
 import { Card, CardContent } from "@/components/ui/card";
-import { TrendingUp, TrendingDown, type LucideIcon } from "lucide-react";
+import { TrendingUp, TrendingDown, Users, CheckCircle, FileText, Building2, Clock, DollarSign, type LucideIcon } from "lucide-react";
+
+const iconMap: Record<string, LucideIcon> = {
+  users: Users,
+  check: CheckCircle,
+  file: FileText,
+  building: Building2,
+  clock: Clock,
+  dollar: DollarSign,
+};
 
 interface KpiCardProps {
   label: string;
   value: string;
   change: number;
   period: string;
-  icon?: LucideIcon;
+  icon?: string;
 }
 
-const KpiCard = ({ label, value, change, period, icon: Icon }: KpiCardProps) => {
+const KpiCard = ({ label, value, change, period, icon }: KpiCardProps) => {
   const isPositive = change >= 0;
+  const Icon = icon ? iconMap[icon] : null;
+  // For "processing time" type metrics, negative is good
+  const isGood = label.includes("Processing") || label.includes("Cost") ? !isPositive : isPositive;
 
   return (
-    <Card className="shadow-sm hover:shadow-md transition-all duration-200 border-border/60">
+    <Card className="shadow-sm border-border/50 hover:shadow transition-shadow">
       <CardContent className="p-4">
-        <div className="flex items-start justify-between mb-3">
-          <p className="stat-label leading-tight">{label}</p>
+        <div className="flex items-start justify-between mb-2">
+          <span className="text-[11px] font-medium text-muted-foreground uppercase tracking-wide">{label}</span>
           {Icon && (
-            <div className="flex h-7 w-7 items-center justify-center rounded-lg bg-primary/8">
-              <Icon className="h-3.5 w-3.5 text-primary" />
+            <div className="flex h-6 w-6 items-center justify-center rounded bg-primary/8">
+              <Icon className="h-3 w-3 text-primary" />
             </div>
           )}
         </div>
-        <p className="stat-value">{value}</p>
-        <div className="flex items-center gap-1.5 mt-2">
-          <div className={`flex items-center gap-0.5 rounded-full px-1.5 py-0.5 text-[11px] font-medium ${
-            isPositive 
-              ? "bg-success/10 text-success" 
-              : "bg-destructive/10 text-destructive"
+        <p className="text-[22px] font-semibold text-foreground tracking-tight leading-none mb-2" style={{ fontVariantNumeric: "tabular-nums" }}>
+          {value}
+        </p>
+        <div className="flex items-center gap-1">
+          <span className={`inline-flex items-center gap-0.5 text-[10px] font-medium px-1.5 py-0.5 rounded-full ${
+            isGood ? "bg-success/10 text-success" : "bg-destructive/10 text-destructive"
           }`}>
-            {isPositive ? <TrendingUp className="h-3 w-3" /> : <TrendingDown className="h-3 w-3" />}
+            {isPositive ? <TrendingUp className="h-2.5 w-2.5" /> : <TrendingDown className="h-2.5 w-2.5" />}
             {isPositive ? "+" : ""}{change}%
-          </div>
-          <span className="text-[11px] text-muted-foreground">{period}</span>
+          </span>
+          <span className="text-[10px] text-muted-foreground">{period}</span>
         </div>
       </CardContent>
     </Card>

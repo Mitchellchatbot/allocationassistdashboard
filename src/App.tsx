@@ -9,6 +9,7 @@ import Marketing from "./pages/Marketing";
 import LeadsPipeline from "./pages/LeadsPipeline";
 import TeamPerformance from "./pages/TeamPerformance";
 import Finance from "./pages/Finance";
+import Operations from "./pages/Operations";
 import Settings from "./pages/Settings";
 import NotFound from "./pages/NotFound";
 
@@ -27,6 +28,7 @@ const App = () => (
           <Route path="/leads-pipeline" element={<LeadsPipeline />} />
           <Route path="/team" element={<TeamPerformance />} />
           <Route path="/finance" element={<Finance />} />
+          <Route path="/operations" element={<Operations />} />
           <Route path="/settings" element={<Settings />} />
           <Route path="*" element={<NotFound />} />
         </Routes>
