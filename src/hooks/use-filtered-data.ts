@@ -171,15 +171,44 @@ export function useFilteredData() {
       spend: scale(c.spend, tm, rm),
     }));
 
+    // Operational health — scale values by time multiplier
+    const operationalHealth = data.operationalHealth.map(m => {
+      let scaledValue = m.value;
+      if (m.unit === "hrs") {
+        // Response time improves slightly with longer time range (more data)
+        const timeAdjust: Record<string, number> = { week: 1.3, month: 1.1, quarter: 1, year: 0.85 };
+        scaledValue = Math.round(m.value * (timeAdjust[timeRange] || 1));
+      } else {
+        // Percentages shift slightly by time range
+        const pctAdjust: Record<string, number> = { week: 0.85, month: 0.92, quarter: 1, year: 1.15 };
+        scaledValue = Math.min(100, Math.round(m.value * (pctAdjust[timeRange] || 1)));
+      }
+      return { ...m, value: scaledValue };
+    });
+
+    // Bottlenecks — scale affected count and adjust delay
+    const bottlenecks = data.bottlenecks.map(b => {
+      const affected = scale(b.affected, tm, rm);
+      const delayNum = parseInt(b.avgDelay);
+      const timeDelayAdjust: Record<string, number> = { week: 0.7, month: 0.85, quarter: 1, year: 1.2 };
+      const adjustedDelay = Math.round(delayNum * (timeDelayAdjust[timeRange] || 1));
+      return { ...b, affected, avgDelay: `${adjustedDelay} days` };
+    });
+
+    // Stage conversion rates shift slightly by time range
+    const stageConversion = data.stageConversion.map(s => {
+      const rateAdjust: Record<string, number> = { week: 0.92, month: 0.96, quarter: 1, year: 1.04 };
+      return { ...s, rate: Math.min(100, +(s.rate * (rateAdjust[timeRange] || 1)).toFixed(1)) };
+    });
+
     return {
       kpis, timeData, funnel, channels, regions, pipeline, workflow,
       sales, recruiters, marketing, costVsConv, finance, roiData,
-      doctors, campaigns, timeLabel,
-      stageConversion: data.stageConversion,
+      doctors, campaigns, timeLabel, stageConversion,
       activity: data.recentActivity,
-      operationalHealth: data.operationalHealth,
+      operationalHealth,
       roadmapPhases: data.roadmapPhases,
-      bottlenecks: data.bottlenecks,
+      bottlenecks,
     };
   }, [timeRange, region]);
 }
