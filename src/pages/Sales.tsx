@@ -15,11 +15,11 @@ const Sales = () => {
           <CardTitle className="text-[12px] font-medium text-muted-foreground uppercase tracking-wide">Pipeline Overview</CardTitle>
         </CardHeader>
         <CardContent className="px-4 pb-4">
-          <div className="flex flex-wrap items-center gap-1.5">
+          <div className="flex flex-wrap items-center gap-1.5 overflow-x-auto">
             {pipeline.map((stage, i) => (
               <div key={stage.stage} className="flex items-center gap-1.5">
-                <div className="rounded-lg border p-3 text-center min-w-[110px] hover:shadow-sm transition-shadow">
-                  <div className="h-1 rounded-full mb-2" style={{ backgroundColor: stage.color }} />
+                <div className="rounded-lg border p-3 text-center min-w-[110px] hover:shadow-md hover:scale-[1.02] transition-all duration-200">
+                  <div className="h-1.5 rounded-full mb-2" style={{ backgroundColor: stage.color }} />
                   <p className="text-[10px] text-muted-foreground mb-0.5">{stage.stage}</p>
                   <p className="text-lg font-semibold text-foreground tabular-nums">{stage.count}</p>
                 </div>
@@ -30,8 +30,8 @@ const Sales = () => {
         </CardContent>
       </Card>
 
-      <div className="grid grid-cols-1 lg:grid-cols-3 gap-4 mb-5">
-        <Card className="shadow-sm border-border/50">
+      <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4 mb-5">
+        <Card className="shadow-sm border-border/50 hover:shadow-md transition-shadow">
           <CardHeader className="pb-1 pt-4 px-4">
             <CardTitle className="text-[12px] font-medium text-muted-foreground uppercase tracking-wide">Performance</CardTitle>
           </CardHeader>
@@ -41,15 +41,15 @@ const Sales = () => {
               { label: "Conversion Rate", val: `${sales.conversionRate}%` },
               { label: "Avg Processing Time", val: sales.avgCycleTime },
             ].map(m => (
-              <div key={m.label} className="flex items-center justify-between p-2.5 rounded-md bg-secondary/50">
+              <div key={m.label} className="flex items-center justify-between p-3 rounded-lg bg-secondary/50 hover:bg-secondary transition-colors">
                 <span className="text-[11px] text-muted-foreground">{m.label}</span>
-                <span className="text-[14px] font-semibold text-foreground tabular-nums">{m.val}</span>
+                <span className="text-[15px] font-semibold text-foreground tabular-nums">{m.val}</span>
               </div>
             ))}
           </CardContent>
         </Card>
 
-        <Card className="shadow-sm border-border/50">
+        <Card className="shadow-sm border-border/50 hover:shadow-md transition-shadow">
           <CardHeader className="pb-1 pt-4 px-4">
             <CardTitle className="text-[12px] font-medium text-muted-foreground uppercase tracking-wide">Outbound Activity</CardTitle>
           </CardHeader>
@@ -59,30 +59,30 @@ const Sales = () => {
               { icon: Mail, label: "Emails Sent", val: sales.emailsSent.toLocaleString(), color: "text-info" },
               { icon: Clock, label: "Follow-ups Pending", val: sales.followUpsPending.toString(), color: "text-warning" },
             ].map(m => (
-              <div key={m.label} className="flex items-center gap-2.5 p-2.5 rounded-md bg-secondary/50">
-                <m.icon className={`h-3.5 w-3.5 ${m.color}`} />
+              <div key={m.label} className="flex items-center gap-3 p-3 rounded-lg bg-secondary/50 hover:bg-secondary transition-colors">
+                <m.icon className={`h-4 w-4 ${m.color}`} />
                 <div className="flex-1">
                   <p className="text-[10px] text-muted-foreground">{m.label}</p>
-                  <p className="text-[14px] font-semibold tabular-nums">{m.val}</p>
+                  <p className="text-[15px] font-semibold tabular-nums">{m.val}</p>
                 </div>
               </div>
             ))}
           </CardContent>
         </Card>
 
-        <Card className="shadow-sm border-border/50">
+        <Card className="shadow-sm border-border/50 hover:shadow-md transition-shadow md:col-span-2 lg:col-span-1">
           <CardHeader className="pb-1 pt-4 px-4">
             <CardTitle className="text-[12px] font-medium text-muted-foreground uppercase tracking-wide">Stage Conversion</CardTitle>
           </CardHeader>
-          <CardContent className="px-4 pb-4 space-y-2">
+          <CardContent className="px-4 pb-4 space-y-2.5">
             {stageConversion.map(s => (
               <div key={s.stage}>
-                <div className="flex justify-between mb-0.5">
-                  <span className="text-[10px] text-foreground">{s.stage}</span>
-                  <span className="text-[10px] font-medium text-primary tabular-nums">{s.rate}%</span>
+                <div className="flex justify-between mb-1">
+                  <span className="text-[11px] text-foreground">{s.stage}</span>
+                  <span className="text-[11px] font-medium text-primary tabular-nums">{s.rate}%</span>
                 </div>
-                <div className="h-1.5 rounded-full bg-muted overflow-hidden">
-                  <div className="h-full rounded-full bg-primary transition-all" style={{ width: `${s.rate}%` }} />
+                <div className="h-2 rounded-full bg-muted overflow-hidden">
+                  <div className="h-full rounded-full bg-primary transition-all duration-500" style={{ width: `${s.rate}%` }} />
                 </div>
               </div>
             ))}
@@ -97,38 +97,40 @@ const Sales = () => {
           </CardTitle>
         </CardHeader>
         <CardContent className="px-4 pb-4">
-          <Table>
-            <TableHeader>
-              <TableRow className="hover:bg-transparent">
-                <TableHead className="text-[10px] uppercase tracking-wide h-8">Name</TableHead>
-                <TableHead className="text-[10px] uppercase tracking-wide h-8">Region</TableHead>
-                <TableHead className="text-[10px] uppercase tracking-wide h-8 text-right">Doctors</TableHead>
-                <TableHead className="text-[10px] uppercase tracking-wide h-8 text-right">Placements</TableHead>
-                <TableHead className="text-[10px] uppercase tracking-wide h-8 text-right">Revenue</TableHead>
-              </TableRow>
-            </TableHeader>
-            <TableBody>
-              {recruiters.map(rep => (
-                <TableRow key={rep.name}>
-                  <TableCell className="py-2">
-                    <div className="flex items-center gap-2">
-                      <div className="h-6 w-6 rounded-full bg-primary/10 text-primary flex items-center justify-center text-[9px] font-bold">
-                        {rep.name.split(" ").map(n => n[0]).join("")}
-                      </div>
-                      <div>
-                        <p className="text-[12px] font-medium">{rep.name}</p>
-                        <p className="text-[10px] text-muted-foreground">{rep.role}</p>
-                      </div>
-                    </div>
-                  </TableCell>
-                  <TableCell className="py-2 text-[11px]">{rep.region}</TableCell>
-                  <TableCell className="py-2 text-[12px] text-right tabular-nums">{rep.doctors}</TableCell>
-                  <TableCell className="py-2 text-[12px] text-right font-medium tabular-nums">{rep.placements}</TableCell>
-                  <TableCell className="py-2 text-[12px] text-right tabular-nums">{rep.revenue}</TableCell>
+          <div className="overflow-x-auto -mx-4 px-4">
+            <Table>
+              <TableHeader>
+                <TableRow className="hover:bg-transparent">
+                  <TableHead className="text-[10px] uppercase tracking-wide h-8">Name</TableHead>
+                  <TableHead className="text-[10px] uppercase tracking-wide h-8 hidden sm:table-cell">Region</TableHead>
+                  <TableHead className="text-[10px] uppercase tracking-wide h-8 text-right">Doctors</TableHead>
+                  <TableHead className="text-[10px] uppercase tracking-wide h-8 text-right">Placements</TableHead>
+                  <TableHead className="text-[10px] uppercase tracking-wide h-8 text-right hidden md:table-cell">Revenue</TableHead>
                 </TableRow>
-              ))}
-            </TableBody>
-          </Table>
+              </TableHeader>
+              <TableBody>
+                {recruiters.map(rep => (
+                  <TableRow key={rep.name} className="hover:bg-muted/30">
+                    <TableCell className="py-2.5">
+                      <div className="flex items-center gap-2">
+                        <div className="h-7 w-7 rounded-full bg-primary/10 text-primary flex items-center justify-center text-[9px] font-bold">
+                          {rep.name.split(" ").map(n => n[0]).join("")}
+                        </div>
+                        <div>
+                          <p className="text-[12px] font-medium">{rep.name}</p>
+                          <p className="text-[10px] text-muted-foreground">{rep.role}</p>
+                        </div>
+                      </div>
+                    </TableCell>
+                    <TableCell className="py-2.5 text-[11px] hidden sm:table-cell">{rep.region}</TableCell>
+                    <TableCell className="py-2.5 text-[12px] text-right tabular-nums">{rep.doctors}</TableCell>
+                    <TableCell className="py-2.5 text-[12px] text-right font-medium tabular-nums">{rep.placements}</TableCell>
+                    <TableCell className="py-2.5 text-[12px] text-right tabular-nums hidden md:table-cell">{rep.revenue}</TableCell>
+                  </TableRow>
+                ))}
+              </TableBody>
+            </Table>
+          </div>
         </CardContent>
       </Card>
     </DashboardLayout>

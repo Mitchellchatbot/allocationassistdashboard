@@ -23,55 +23,57 @@ const TeamPerformance = () => {
           </CardTitle>
         </CardHeader>
         <CardContent className="px-4 pb-4">
-          <Table>
-            <TableHeader>
-              <TableRow className="hover:bg-transparent">
-                <TableHead className="text-[10px] uppercase tracking-wide h-8 w-8">#</TableHead>
-                <TableHead className="text-[10px] uppercase tracking-wide h-8">Name</TableHead>
-                <TableHead className="text-[10px] uppercase tracking-wide h-8">Region</TableHead>
-                <TableHead className="text-[10px] uppercase tracking-wide h-8 text-right">Doctors</TableHead>
-                <TableHead className="text-[10px] uppercase tracking-wide h-8 text-right">Placements</TableHead>
-                <TableHead className="text-[10px] uppercase tracking-wide h-8 text-right">Revenue</TableHead>
-                <TableHead className="text-[10px] uppercase tracking-wide h-8 text-right">Score</TableHead>
-              </TableRow>
-            </TableHeader>
-            <TableBody>
-              {recruiters.map((m, i) => (
-                <TableRow key={m.name}>
-                  <TableCell className="py-2">
-                    {i < 3 ? (
-                      <Trophy className={`h-3.5 w-3.5 ${i === 0 ? "text-warning" : i === 1 ? "text-muted-foreground" : "text-orange-400"}`} />
-                    ) : (
-                      <span className="text-[11px] text-muted-foreground">{i + 1}</span>
-                    )}
-                  </TableCell>
-                  <TableCell className="py-2">
-                    <div className="flex items-center gap-2">
-                      <div className="h-6 w-6 rounded-full bg-primary/10 text-primary flex items-center justify-center text-[9px] font-bold">
-                        {m.name.split(" ").map(n => n[0]).join("")}
-                      </div>
-                      <div>
-                        <p className="text-[12px] font-medium">{m.name}</p>
-                        <p className="text-[10px] text-muted-foreground">{m.role}</p>
-                      </div>
-                    </div>
-                  </TableCell>
-                  <TableCell className="text-[11px] py-2">{m.region}</TableCell>
-                  <TableCell className="text-[12px] text-right py-2 tabular-nums">{m.doctors}</TableCell>
-                  <TableCell className="text-[12px] text-right font-medium py-2 tabular-nums">{m.placements}</TableCell>
-                  <TableCell className="text-[12px] text-right py-2 tabular-nums">{m.revenue}</TableCell>
-                  <TableCell className="text-right py-2">
-                    <div className="flex items-center justify-end gap-1.5">
-                      <div className="w-12 h-1 rounded-full bg-muted overflow-hidden">
-                        <div className="h-full rounded-full bg-primary" style={{ width: `${m.score}%` }} />
-                      </div>
-                      <span className="text-[10px] font-medium tabular-nums w-5 text-right">{m.score}</span>
-                    </div>
-                  </TableCell>
+          <div className="overflow-x-auto -mx-4 px-4">
+            <Table>
+              <TableHeader>
+                <TableRow className="hover:bg-transparent">
+                  <TableHead className="text-[10px] uppercase tracking-wide h-8 w-8">#</TableHead>
+                  <TableHead className="text-[10px] uppercase tracking-wide h-8">Name</TableHead>
+                  <TableHead className="text-[10px] uppercase tracking-wide h-8 hidden sm:table-cell">Region</TableHead>
+                  <TableHead className="text-[10px] uppercase tracking-wide h-8 text-right">Doctors</TableHead>
+                  <TableHead className="text-[10px] uppercase tracking-wide h-8 text-right">Placements</TableHead>
+                  <TableHead className="text-[10px] uppercase tracking-wide h-8 text-right hidden md:table-cell">Revenue</TableHead>
+                  <TableHead className="text-[10px] uppercase tracking-wide h-8 text-right hidden lg:table-cell">Score</TableHead>
                 </TableRow>
-              ))}
-            </TableBody>
-          </Table>
+              </TableHeader>
+              <TableBody>
+                {recruiters.map((m, i) => (
+                  <TableRow key={m.name} className="hover:bg-muted/30">
+                    <TableCell className="py-2.5">
+                      {i < 3 ? (
+                        <Trophy className={`h-3.5 w-3.5 ${i === 0 ? "text-warning" : i === 1 ? "text-muted-foreground" : "text-orange-400"}`} />
+                      ) : (
+                        <span className="text-[11px] text-muted-foreground">{i + 1}</span>
+                      )}
+                    </TableCell>
+                    <TableCell className="py-2.5">
+                      <div className="flex items-center gap-2">
+                        <div className="h-7 w-7 rounded-full bg-primary/10 text-primary flex items-center justify-center text-[9px] font-bold">
+                          {m.name.split(" ").map(n => n[0]).join("")}
+                        </div>
+                        <div>
+                          <p className="text-[12px] font-medium">{m.name}</p>
+                          <p className="text-[10px] text-muted-foreground">{m.role}</p>
+                        </div>
+                      </div>
+                    </TableCell>
+                    <TableCell className="text-[11px] py-2.5 hidden sm:table-cell">{m.region}</TableCell>
+                    <TableCell className="text-[12px] text-right py-2.5 tabular-nums">{m.doctors}</TableCell>
+                    <TableCell className="text-[12px] text-right font-medium py-2.5 tabular-nums">{m.placements}</TableCell>
+                    <TableCell className="text-[12px] text-right py-2.5 tabular-nums hidden md:table-cell">{m.revenue}</TableCell>
+                    <TableCell className="text-right py-2.5 hidden lg:table-cell">
+                      <div className="flex items-center justify-end gap-1.5">
+                        <div className="w-14 h-1.5 rounded-full bg-muted overflow-hidden">
+                          <div className="h-full rounded-full bg-primary" style={{ width: `${m.score}%` }} />
+                        </div>
+                        <span className="text-[10px] font-medium tabular-nums w-5 text-right">{m.score}</span>
+                      </div>
+                    </TableCell>
+                  </TableRow>
+                ))}
+              </TableBody>
+            </Table>
+          </div>
         </CardContent>
       </Card>
 
@@ -80,30 +82,32 @@ const TeamPerformance = () => {
           <CardTitle className="text-[12px] font-medium text-muted-foreground uppercase tracking-wide">Campaigns</CardTitle>
         </CardHeader>
         <CardContent className="px-4 pb-4">
-          <Table>
-            <TableHeader>
-              <TableRow className="hover:bg-transparent">
-                <TableHead className="text-[10px] uppercase tracking-wide h-8">Campaign</TableHead>
-                <TableHead className="text-[10px] uppercase tracking-wide h-8">Channel</TableHead>
-                <TableHead className="text-[10px] uppercase tracking-wide h-8 text-right">Doctors</TableHead>
-                <TableHead className="text-[10px] uppercase tracking-wide h-8 text-right">Spend</TableHead>
-                <TableHead className="text-[10px] uppercase tracking-wide h-8">Status</TableHead>
-              </TableRow>
-            </TableHeader>
-            <TableBody>
-              {campaigns.map(c => (
-                <TableRow key={c.name}>
-                  <TableCell className="text-[12px] font-medium py-2">{c.name}</TableCell>
-                  <TableCell className="text-[11px] text-muted-foreground py-2">{c.channel}</TableCell>
-                  <TableCell className="text-[12px] text-right py-2 tabular-nums">{c.doctors}</TableCell>
-                  <TableCell className="text-[12px] text-right py-2 tabular-nums">${c.spend.toLocaleString()}</TableCell>
-                  <TableCell className="py-2">
-                    <Badge variant="outline" className={`text-[9px] capitalize ${statusColors[c.status]}`}>{c.status}</Badge>
-                  </TableCell>
+          <div className="overflow-x-auto -mx-4 px-4">
+            <Table>
+              <TableHeader>
+                <TableRow className="hover:bg-transparent">
+                  <TableHead className="text-[10px] uppercase tracking-wide h-8">Campaign</TableHead>
+                  <TableHead className="text-[10px] uppercase tracking-wide h-8 hidden sm:table-cell">Channel</TableHead>
+                  <TableHead className="text-[10px] uppercase tracking-wide h-8 text-right">Doctors</TableHead>
+                  <TableHead className="text-[10px] uppercase tracking-wide h-8 text-right hidden sm:table-cell">Spend</TableHead>
+                  <TableHead className="text-[10px] uppercase tracking-wide h-8">Status</TableHead>
                 </TableRow>
-              ))}
-            </TableBody>
-          </Table>
+              </TableHeader>
+              <TableBody>
+                {campaigns.map(c => (
+                  <TableRow key={c.name} className="hover:bg-muted/30">
+                    <TableCell className="text-[12px] font-medium py-2.5">{c.name}</TableCell>
+                    <TableCell className="text-[11px] text-muted-foreground py-2.5 hidden sm:table-cell">{c.channel}</TableCell>
+                    <TableCell className="text-[12px] text-right py-2.5 tabular-nums">{c.doctors}</TableCell>
+                    <TableCell className="text-[12px] text-right py-2.5 tabular-nums hidden sm:table-cell">${c.spend.toLocaleString()}</TableCell>
+                    <TableCell className="py-2.5">
+                      <Badge variant="outline" className={`text-[9px] capitalize ${statusColors[c.status]}`}>{c.status}</Badge>
+                    </TableCell>
+                  </TableRow>
+                ))}
+              </TableBody>
+            </Table>
+          </div>
         </CardContent>
       </Card>
     </DashboardLayout>
