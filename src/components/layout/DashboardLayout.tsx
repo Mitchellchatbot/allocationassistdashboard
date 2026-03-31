@@ -1,10 +1,10 @@
-import { useState } from "react";
 import { SidebarProvider, SidebarTrigger } from "@/components/ui/sidebar";
 import { AppSidebar } from "./AppSidebar";
 import { Bell, Download, CalendarDays } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Badge } from "@/components/ui/badge";
+import { useFilters, getTimeLabel, getRegionLabel, type TimeRange, type Region } from "@/lib/filters";
 
 interface DashboardLayoutProps {
   children: React.ReactNode;
@@ -13,8 +13,7 @@ interface DashboardLayoutProps {
 }
 
 export function DashboardLayout({ children, title, subtitle }: DashboardLayoutProps) {
-  const [timeRange, setTimeRange] = useState("quarter");
-  const [region, setRegion] = useState("all");
+  const { timeRange, setTimeRange, region, setRegion } = useFilters();
 
   return (
     <SidebarProvider>
@@ -31,7 +30,7 @@ export function DashboardLayout({ children, title, subtitle }: DashboardLayoutPr
               </div>
             </div>
             <div className="flex items-center gap-1.5">
-              <Select value={timeRange} onValueChange={setTimeRange}>
+              <Select value={timeRange} onValueChange={(v) => setTimeRange(v as TimeRange)}>
                 <SelectTrigger className="h-7 w-[110px] text-[11px] bg-secondary border-0 rounded-md">
                   <CalendarDays className="h-3 w-3 mr-1 text-muted-foreground" />
                   <SelectValue />
@@ -43,7 +42,7 @@ export function DashboardLayout({ children, title, subtitle }: DashboardLayoutPr
                   <SelectItem value="year">This Year</SelectItem>
                 </SelectContent>
               </Select>
-              <Select value={region} onValueChange={setRegion}>
+              <Select value={region} onValueChange={(v) => setRegion(v as Region)}>
                 <SelectTrigger className="h-7 w-[100px] text-[11px] bg-secondary border-0 rounded-md hidden md:flex">
                   <SelectValue />
                 </SelectTrigger>
