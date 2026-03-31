@@ -26,7 +26,7 @@ export function useFilteredData() {
     const tm = getTimeMultiplier(timeRange);
     const rm = getRegionMultiplier(region);
     const timeLabel = getTimeLabel(timeRange);
-    console.log("[FILTER DEBUG]", { timeRange, region, tm, rm });
+    
 
     // KPIs
     const kpis = data.overviewKpis.map(k => {
