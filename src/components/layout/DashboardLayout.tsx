@@ -25,6 +25,10 @@ interface DashboardLayoutProps {
 
 export function DashboardLayout({ children, title, subtitle }: DashboardLayoutProps) {
   const { timeRange, setTimeRange, region, setRegion } = useFilters();
+  const [readIds, setReadIds] = useState<number[]>([]);
+  const unreadCount = notifications.filter(n => n.unread && !readIds.includes(n.id)).length;
+
+  const markAllRead = () => setReadIds(notifications.map(n => n.id));
 
   return (
     <SidebarProvider>
