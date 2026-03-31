@@ -27,7 +27,7 @@ const Operations = () => {
           const pct = m.unit === "hrs" ? Math.max(0, 100 - (m.value / m.target) * 100) : (m.value / m.target) * 100;
           const isGood = pct >= 60;
           return (
-            <Card key={m.metric} className="shadow-sm border-border/50">
+            <Card key={m.metric} className="shadow-sm border-kpi/60 bg-kpi">
               <CardContent className="p-4">
                 <p className="text-[10px] font-medium text-muted-foreground uppercase tracking-wide mb-2">{m.metric}</p>
                 <div className="flex items-end gap-1 mb-2">

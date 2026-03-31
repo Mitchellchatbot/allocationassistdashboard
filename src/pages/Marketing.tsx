@@ -25,7 +25,7 @@ const Marketing = () => {
     <DashboardLayout title="Marketing" subtitle="Channel performance and doctor acquisition cost">
       <div className="grid grid-cols-2 md:grid-cols-5 gap-3 mb-5">
         {marketing.map(ch => (
-          <Card key={ch.channel} className={`shadow-sm border-border/50 ${ch.channel === bestChannel.channel ? "ring-1 ring-primary/40" : ""}`}>
+          <Card key={ch.channel} className={`shadow-sm border-kpi/60 bg-kpi ${ch.channel === bestChannel.channel ? "ring-1 ring-primary/40" : ""}`}>
             <CardContent className="p-3">
               <div className="flex items-center justify-between mb-1">
                 <p className="text-[10px] font-medium text-muted-foreground uppercase tracking-wide">{ch.channel}</p>
