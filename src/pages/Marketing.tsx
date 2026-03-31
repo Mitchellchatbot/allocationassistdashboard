@@ -12,9 +12,10 @@ import { Star } from "lucide-react";
 const tip = {
   backgroundColor: "#fff",
   border: "1px solid hsl(220,14%,90%)",
-  borderRadius: "6px",
+  borderRadius: "8px",
   fontSize: "11px",
-  boxShadow: "0 2px 8px rgba(0,0,0,0.08)",
+  boxShadow: "0 4px 12px rgba(0,0,0,0.08)",
+  padding: "8px 12px",
 };
 
 const Marketing = () => {
@@ -23,9 +24,9 @@ const Marketing = () => {
 
   return (
     <DashboardLayout title="Marketing" subtitle="Channel performance and doctor acquisition cost">
-      <div className="grid grid-cols-2 md:grid-cols-5 gap-3 mb-5">
+      <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-5 gap-3 mb-5">
         {marketing.map(ch => (
-          <Card key={ch.channel} className={`shadow-sm border-kpi/60 bg-kpi ${ch.channel === bestChannel.channel ? "ring-1 ring-primary/40" : ""}`}>
+          <Card key={ch.channel} className={`shadow-sm border-kpi/60 bg-kpi hover:shadow-md hover:scale-[1.02] transition-all duration-200 ${ch.channel === bestChannel.channel ? "ring-1 ring-primary/40" : ""}`}>
             <CardContent className="p-3">
               <div className="flex items-center justify-between mb-1">
                 <p className="text-[10px] font-medium text-muted-foreground uppercase tracking-wide">{ch.channel}</p>
@@ -39,28 +40,28 @@ const Marketing = () => {
       </div>
 
       <div className="grid grid-cols-1 lg:grid-cols-2 gap-4 mb-5">
-        <Card className="shadow-sm border-border/50">
+        <Card className="shadow-sm border-border/50 hover:shadow-md transition-shadow">
           <CardHeader className="pb-1 pt-4 px-4">
             <CardTitle className="text-[12px] font-medium text-muted-foreground uppercase tracking-wide">Doctors by Channel</CardTitle>
           </CardHeader>
-          <CardContent className="px-4 pb-4">
+          <CardContent className="px-2 sm:px-4 pb-4">
             <ResponsiveContainer width="100%" height={220}>
               <BarChart data={marketing}>
                 <CartesianGrid strokeDasharray="3 3" stroke="hsl(220,14%,92%)" />
                 <XAxis dataKey="channel" fontSize={10} tickLine={false} axisLine={false} stroke="hsl(220,10%,55%)" />
                 <YAxis fontSize={10} tickLine={false} axisLine={false} stroke="hsl(220,10%,55%)" />
                 <Tooltip contentStyle={tip} />
-                <Bar dataKey="doctors" fill="hsl(170,55%,45%)" radius={[3, 3, 0, 0]} name="Doctors" />
+                <Bar dataKey="doctors" fill="hsl(170,55%,45%)" radius={[4, 4, 0, 0]} name="Doctors" />
               </BarChart>
             </ResponsiveContainer>
           </CardContent>
         </Card>
 
-        <Card className="shadow-sm border-border/50">
+        <Card className="shadow-sm border-border/50 hover:shadow-md transition-shadow">
           <CardHeader className="pb-1 pt-4 px-4">
             <CardTitle className="text-[12px] font-medium text-muted-foreground uppercase tracking-wide">Cost vs Placements</CardTitle>
           </CardHeader>
-          <CardContent className="px-4 pb-4">
+          <CardContent className="px-2 sm:px-4 pb-4">
             <ResponsiveContainer width="100%" height={220}>
               <ComposedChart data={costVsConv}>
                 <CartesianGrid strokeDasharray="3 3" stroke="hsl(220,14%,92%)" />
@@ -68,7 +69,7 @@ const Marketing = () => {
                 <YAxis yAxisId="left" fontSize={10} tickLine={false} axisLine={false} stroke="hsl(220,10%,55%)" tickFormatter={v => `$${v / 1000}k`} />
                 <YAxis yAxisId="right" orientation="right" fontSize={10} tickLine={false} axisLine={false} stroke="hsl(220,10%,55%)" />
                 <Tooltip contentStyle={tip} />
-                <Bar yAxisId="left" dataKey="cost" fill="hsl(210,75%,52%)" radius={[3, 3, 0, 0]} name="Spend ($)" />
+                <Bar yAxisId="left" dataKey="cost" fill="hsl(210,75%,52%)" radius={[4, 4, 0, 0]} name="Spend ($)" />
                 <Line yAxisId="right" dataKey="placements" stroke="hsl(158,50%,42%)" strokeWidth={2} dot={{ r: 3 }} name="Placements" />
               </ComposedChart>
             </ResponsiveContainer>
@@ -81,32 +82,34 @@ const Marketing = () => {
           <CardTitle className="text-[12px] font-medium text-muted-foreground uppercase tracking-wide">Channel ROI Comparison</CardTitle>
         </CardHeader>
         <CardContent className="px-4 pb-4">
-          <Table>
-            <TableHeader>
-              <TableRow className="hover:bg-transparent">
-                <TableHead className="text-[10px] uppercase tracking-wide h-8">Channel</TableHead>
-                <TableHead className="text-[10px] uppercase tracking-wide h-8 text-right">Doctors</TableHead>
-                <TableHead className="text-[10px] uppercase tracking-wide h-8 text-right">Spend</TableHead>
-                <TableHead className="text-[10px] uppercase tracking-wide h-8 text-right">CPA</TableHead>
-                <TableHead className="text-[10px] uppercase tracking-wide h-8 text-right">Placements</TableHead>
-                <TableHead className="text-[10px] uppercase tracking-wide h-8 text-right">ROI</TableHead>
-              </TableRow>
-            </TableHeader>
-            <TableBody>
-              {marketing.map(ch => (
-                <TableRow key={ch.channel}>
-                  <TableCell className="text-[12px] font-medium py-2">{ch.channel}</TableCell>
-                  <TableCell className="text-[12px] text-right py-2 tabular-nums">{ch.doctors}</TableCell>
-                  <TableCell className="text-[12px] text-right py-2 tabular-nums">${ch.spend.toLocaleString()}</TableCell>
-                  <TableCell className="text-[12px] text-right py-2 tabular-nums">${ch.spend > 0 ? Math.round(ch.spend / Math.max(ch.placements, 1)) : 0}</TableCell>
-                  <TableCell className="text-[12px] text-right py-2 tabular-nums">{ch.placements}</TableCell>
-                  <TableCell className="text-right py-2">
-                    <Badge variant={ch.roi >= 4 ? "default" : "secondary"} className="text-[10px] tabular-nums">{ch.roi}x</Badge>
-                  </TableCell>
+          <div className="overflow-x-auto -mx-4 px-4">
+            <Table>
+              <TableHeader>
+                <TableRow className="hover:bg-transparent">
+                  <TableHead className="text-[10px] uppercase tracking-wide h-8">Channel</TableHead>
+                  <TableHead className="text-[10px] uppercase tracking-wide h-8 text-right">Doctors</TableHead>
+                  <TableHead className="text-[10px] uppercase tracking-wide h-8 text-right hidden sm:table-cell">Spend</TableHead>
+                  <TableHead className="text-[10px] uppercase tracking-wide h-8 text-right hidden sm:table-cell">CPA</TableHead>
+                  <TableHead className="text-[10px] uppercase tracking-wide h-8 text-right">Placements</TableHead>
+                  <TableHead className="text-[10px] uppercase tracking-wide h-8 text-right">ROI</TableHead>
                 </TableRow>
-              ))}
-            </TableBody>
-          </Table>
+              </TableHeader>
+              <TableBody>
+                {marketing.map(ch => (
+                  <TableRow key={ch.channel} className="hover:bg-muted/30">
+                    <TableCell className="text-[12px] font-medium py-2.5">{ch.channel}</TableCell>
+                    <TableCell className="text-[12px] text-right py-2.5 tabular-nums">{ch.doctors}</TableCell>
+                    <TableCell className="text-[12px] text-right py-2.5 tabular-nums hidden sm:table-cell">${ch.spend.toLocaleString()}</TableCell>
+                    <TableCell className="text-[12px] text-right py-2.5 tabular-nums hidden sm:table-cell">${ch.spend > 0 ? Math.round(ch.spend / Math.max(ch.placements, 1)) : 0}</TableCell>
+                    <TableCell className="text-[12px] text-right py-2.5 tabular-nums">{ch.placements}</TableCell>
+                    <TableCell className="text-right py-2.5">
+                      <Badge variant={ch.roi >= 4 ? "default" : "secondary"} className="text-[10px] tabular-nums">{ch.roi}x</Badge>
+                    </TableCell>
+                  </TableRow>
+                ))}
+              </TableBody>
+            </Table>
+          </div>
         </CardContent>
       </Card>
     </DashboardLayout>
