@@ -4,6 +4,7 @@ import { Badge } from "@/components/ui/badge";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import { useFilteredData } from "@/hooks/use-filtered-data";
 import { Trophy } from "lucide-react";
+import { ChannelIcon } from "@/components/ChannelIcon";
 
 const statusColors = {
   active: "bg-success/10 text-success",
@@ -97,7 +98,12 @@ const TeamPerformance = () => {
                 {campaigns.map(c => (
                   <TableRow key={c.name} className="hover:bg-muted/30">
                     <TableCell className="text-[12px] font-medium py-2.5">{c.name}</TableCell>
-                    <TableCell className="text-[11px] text-muted-foreground py-2.5 hidden sm:table-cell">{c.channel}</TableCell>
+                    <TableCell className="text-[11px] text-muted-foreground py-2.5 hidden sm:table-cell">
+                      <div className="flex items-center gap-1.5">
+                        <ChannelIcon channel={c.channel} size={12} />
+                        {c.channel}
+                      </div>
+                    </TableCell>
                     <TableCell className="text-[12px] text-right py-2.5 tabular-nums">{c.doctors}</TableCell>
                     <TableCell className="text-[12px] text-right py-2.5 tabular-nums hidden sm:table-cell">${c.spend.toLocaleString()}</TableCell>
                     <TableCell className="py-2.5">
