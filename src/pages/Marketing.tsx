@@ -8,6 +8,7 @@ import {
   ComposedChart, Line,
 } from "recharts";
 import { Star } from "lucide-react";
+import { ChannelIcon } from "@/components/ChannelIcon";
 
 const tip = {
   backgroundColor: "#fff",
