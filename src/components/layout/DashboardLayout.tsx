@@ -35,7 +35,7 @@ export function DashboardLayout({ children, title, subtitle }: DashboardLayoutPr
       <div className="min-h-screen flex w-full bg-background">
         <AppSidebar />
         <div className="flex-1 flex flex-col min-w-0">
-          <header className="h-[52px] flex items-center justify-between border-b bg-card px-4 lg:px-5 shrink-0">
+          <header className="h-[52px] flex items-center justify-between border-b px-4 lg:px-5 shrink-0" style={{ backgroundColor: "hsl(170, 45%, 92%)" }}>
             <div className="flex items-center gap-3">
               <SidebarTrigger className="text-muted-foreground hover:text-foreground" />
               <div className="h-4 w-px bg-border hidden sm:block" />
