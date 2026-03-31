@@ -7,6 +7,7 @@ import {
   CartesianGrid, Line,
 } from "recharts";
 import { Activity, Award, AlertTriangle, Calendar, FileText, Handshake, UserPlus } from "lucide-react";
+import { ChannelIcon } from "@/components/ChannelIcon";
 
 const activityIcons: Record<string, React.ReactNode> = {
   lead: <UserPlus className="h-3 w-3 text-info" />,
