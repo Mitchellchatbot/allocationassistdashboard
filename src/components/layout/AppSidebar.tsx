@@ -5,11 +5,11 @@ import {
   Users as UsersIcon,
   DollarSign,
   Settings,
-  HeartPulse,
   ChevronDown,
   GitBranch,
   ClipboardList,
 } from "lucide-react";
+import logo from "@/assets/logo.png";
 import { NavLink } from "@/components/NavLink";
 import {
   Sidebar,
