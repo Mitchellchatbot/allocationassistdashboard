@@ -57,7 +57,7 @@
 
     /* Sidebar — AA teal/turquoise */
     --sidebar-background: 170 55% 30%;
-    --sidebar-foreground: 170 15% 90%;
+    --sidebar-foreground: 0 0% 100%;
     --sidebar-primary: 49 100% 88%;
     --sidebar-primary-foreground: 170 55% 20%;
     --sidebar-accent: 170 45% 36%;
