@@ -1,156 +1,167 @@
 import { DashboardLayout } from "@/components/layout/DashboardLayout";
 import KpiCard from "@/components/KpiCard";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
-import { Badge } from "@/components/ui/badge";
-import { overviewKpis, leadsOverTime, conversionFunnel, channelPerformance, recentActivity } from "@/lib/mock-data";
+import { overviewKpis, leadsOverTime, placementFunnel, channelPerformance, recentActivity, regionData } from "@/lib/mock-data";
 import {
-  LineChart, Line, BarChart, Bar, XAxis, YAxis, Tooltip, ResponsiveContainer,
-  CartesianGrid, Area, AreaChart,
+  AreaChart, Area, BarChart, Bar, XAxis, YAxis, Tooltip, ResponsiveContainer,
+  CartesianGrid, Line,
 } from "recharts";
-import { Activity, Phone, Mail, AlertTriangle, Award, Calendar } from "lucide-react";
+import { Activity, Award, AlertTriangle, Calendar, FileText, Handshake, UserPlus } from "lucide-react";
 
 const activityIcons: Record<string, React.ReactNode> = {
-  lead: <Activity className="h-3.5 w-3.5 text-info" />,
-  deal: <Award className="h-3.5 w-3.5 text-success" />,
-  campaign: <Mail className="h-3.5 w-3.5 text-primary" />,
-  alert: <AlertTriangle className="h-3.5 w-3.5 text-warning" />,
-  interview: <Calendar className="h-3.5 w-3.5 text-muted-foreground" />,
-  milestone: <Award className="h-3.5 w-3.5 text-primary" />,
+  lead: <UserPlus className="h-3 w-3 text-info" />,
+  placement: <Award className="h-3 w-3 text-success" />,
+  license: <FileText className="h-3 w-3 text-primary" />,
+  alert: <AlertTriangle className="h-3 w-3 text-warning" />,
+  interview: <Calendar className="h-3 w-3 text-muted-foreground" />,
+  document: <Activity className="h-3 w-3 text-info" />,
+  partnership: <Handshake className="h-3 w-3 text-primary" />,
 };
 
-const tooltipStyle = {
-  backgroundColor: "hsl(0, 0%, 100%)",
-  border: "1px solid hsl(214, 20%, 90%)",
-  borderRadius: "8px",
-  fontSize: "12px",
+const tip = {
+  backgroundColor: "#fff",
+  border: "1px solid hsl(220,14%,90%)",
+  borderRadius: "6px",
+  fontSize: "11px",
+  boxShadow: "0 2px 8px rgba(0,0,0,0.08)",
 };
 
-const Index = () => {
-  return (
-    <DashboardLayout title="Dashboard" subtitle="Overview of key metrics and performance">
-      {/* KPI Cards */}
-      <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-6 gap-3 mb-6">
-        {overviewKpis.map((kpi) => (
-          <KpiCard key={kpi.label} {...kpi} />
-        ))}
-      </div>
+const Index = () => (
+  <DashboardLayout title="Overview" subtitle="Doctor placement and operational performance">
+    {/* KPIs */}
+    <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-6 gap-3 mb-5">
+      {overviewKpis.map((kpi) => <KpiCard key={kpi.label} {...kpi} />)}
+    </div>
 
-      {/* Charts Row */}
-      <div className="grid grid-cols-1 lg:grid-cols-3 gap-4 mb-6">
-        {/* Leads Over Time */}
-        <Card className="lg:col-span-2 shadow-sm">
-          <CardHeader className="pb-2">
-            <CardTitle className="text-sm font-medium text-muted-foreground">Leads Over Time</CardTitle>
-          </CardHeader>
-          <CardContent>
-            <ResponsiveContainer width="100%" height={280}>
-              <AreaChart data={leadsOverTime}>
-                <defs>
-                  <linearGradient id="leadsFill" x1="0" y1="0" x2="0" y2="1">
-                    <stop offset="5%" stopColor="hsl(174, 65%, 42%)" stopOpacity={0.15} />
-                    <stop offset="95%" stopColor="hsl(174, 65%, 42%)" stopOpacity={0} />
-                  </linearGradient>
-                </defs>
-                <CartesianGrid strokeDasharray="3 3" stroke="hsl(214, 20%, 93%)" />
-                <XAxis dataKey="month" fontSize={12} tickLine={false} axisLine={false} stroke="hsl(215,15%,50%)" />
-                <YAxis fontSize={12} tickLine={false} axisLine={false} stroke="hsl(215,15%,50%)" />
-                <Tooltip contentStyle={tooltipStyle} />
-                <Area type="monotone" dataKey="leads" stroke="hsl(174, 65%, 42%)" strokeWidth={2} fill="url(#leadsFill)" />
-                <Line type="monotone" dataKey="qualified" stroke="hsl(210, 80%, 55%)" strokeWidth={2} dot={false} />
-                <Line type="monotone" dataKey="closed" stroke="hsl(152, 60%, 42%)" strokeWidth={2} dot={false} />
-              </AreaChart>
-            </ResponsiveContainer>
-            <div className="flex gap-4 mt-2 justify-center">
-              <div className="flex items-center gap-1.5 text-xs text-muted-foreground">
-                <div className="h-2 w-2 rounded-full bg-primary" /> Leads
-              </div>
-              <div className="flex items-center gap-1.5 text-xs text-muted-foreground">
-                <div className="h-2 w-2 rounded-full bg-info" /> Qualified
-              </div>
-              <div className="flex items-center gap-1.5 text-xs text-muted-foreground">
-                <div className="h-2 w-2 rounded-full bg-success" /> Closed
-              </div>
-            </div>
-          </CardContent>
-        </Card>
+    {/* Charts row */}
+    <div className="grid grid-cols-1 lg:grid-cols-5 gap-4 mb-5">
+      {/* Doctor Applications Over Time */}
+      <Card className="lg:col-span-3 shadow-sm border-border/50">
+        <CardHeader className="pb-1 pt-4 px-4">
+          <CardTitle className="text-[12px] font-medium text-muted-foreground uppercase tracking-wide">Doctor Applications Over Time</CardTitle>
+        </CardHeader>
+        <CardContent className="px-4 pb-4">
+          <ResponsiveContainer width="100%" height={240}>
+            <AreaChart data={leadsOverTime}>
+              <defs>
+                <linearGradient id="docFill" x1="0" y1="0" x2="0" y2="1">
+                  <stop offset="5%" stopColor="hsl(170,55%,45%)" stopOpacity={0.12} />
+                  <stop offset="95%" stopColor="hsl(170,55%,45%)" stopOpacity={0} />
+                </linearGradient>
+              </defs>
+              <CartesianGrid strokeDasharray="3 3" stroke="hsl(220,14%,92%)" />
+              <XAxis dataKey="month" fontSize={10} tickLine={false} axisLine={false} stroke="hsl(220,10%,55%)" />
+              <YAxis fontSize={10} tickLine={false} axisLine={false} stroke="hsl(220,10%,55%)" />
+              <Tooltip contentStyle={tip} />
+              <Area type="monotone" dataKey="doctors" stroke="hsl(170,55%,45%)" strokeWidth={2} fill="url(#docFill)" name="Applications" />
+              <Line type="monotone" dataKey="qualified" stroke="hsl(210,75%,52%)" strokeWidth={1.5} dot={false} name="Qualified" />
+              <Line type="monotone" dataKey="placed" stroke="hsl(158,50%,42%)" strokeWidth={1.5} dot={false} name="Placed" />
+            </AreaChart>
+          </ResponsiveContainer>
+          <div className="flex gap-4 mt-1 justify-center">
+            {[{ c: "bg-primary", l: "Applications" }, { c: "bg-info", l: "Qualified" }, { c: "bg-success", l: "Placed" }].map(i => (
+              <span key={i.l} className="flex items-center gap-1 text-[10px] text-muted-foreground">
+                <span className={`h-1.5 w-1.5 rounded-full ${i.c}`} />{i.l}
+              </span>
+            ))}
+          </div>
+        </CardContent>
+      </Card>
 
-        {/* Conversion Funnel */}
-        <Card className="shadow-sm">
-          <CardHeader className="pb-2">
-            <CardTitle className="text-sm font-medium text-muted-foreground">Conversion Funnel</CardTitle>
-          </CardHeader>
-          <CardContent>
-            <div className="space-y-3">
-              {conversionFunnel.map((item, i) => (
-                <div key={item.stage}>
-                  <div className="flex items-center justify-between mb-1">
-                    <span className="text-xs font-medium text-foreground">{item.stage}</span>
-                    <span className="text-xs text-muted-foreground">{item.count.toLocaleString()}</span>
-                  </div>
-                  <div className="h-8 rounded-md bg-muted overflow-hidden">
-                    <div
-                      className="h-full rounded-md flex items-center pl-3 transition-all"
-                      style={{
-                        width: `${item.pct}%`,
-                        backgroundColor: `hsl(174, 65%, ${42 + i * 8}%)`,
-                      }}
-                    >
-                      <span className="text-[10px] font-bold text-primary-foreground">{item.pct}%</span>
-                    </div>
+      {/* Placement Funnel */}
+      <Card className="lg:col-span-2 shadow-sm border-border/50">
+        <CardHeader className="pb-1 pt-4 px-4">
+          <CardTitle className="text-[12px] font-medium text-muted-foreground uppercase tracking-wide">Placement Funnel</CardTitle>
+        </CardHeader>
+        <CardContent className="px-4 pb-4">
+          <div className="space-y-2.5">
+            {placementFunnel.map((item, i) => (
+              <div key={item.stage}>
+                <div className="flex items-center justify-between mb-0.5">
+                  <span className="text-[11px] font-medium text-foreground">{item.stage}</span>
+                  <span className="text-[11px] text-muted-foreground tabular-nums">{item.count.toLocaleString()}</span>
+                </div>
+                <div className="h-6 rounded bg-muted overflow-hidden">
+                  <div
+                    className="h-full rounded flex items-center pl-2 transition-all"
+                    style={{ width: `${item.pct}%`, backgroundColor: `hsl(170, ${55 - i * 5}%, ${45 + i * 4}%)` }}
+                  >
+                    <span className="text-[9px] font-semibold text-white">{item.pct}%</span>
                   </div>
                 </div>
-              ))}
-            </div>
-          </CardContent>
-        </Card>
-      </div>
+              </div>
+            ))}
+          </div>
+        </CardContent>
+      </Card>
+    </div>
 
-      {/* Bottom Row */}
-      <div className="grid grid-cols-1 lg:grid-cols-5 gap-4">
-        {/* Channel Performance */}
-        <Card className="lg:col-span-3 shadow-sm">
-          <CardHeader className="pb-2">
-            <CardTitle className="text-sm font-medium text-muted-foreground">Channel Performance</CardTitle>
-          </CardHeader>
-          <CardContent>
-            <ResponsiveContainer width="100%" height={240}>
-              <BarChart data={channelPerformance} barCategoryGap="20%">
-                <CartesianGrid strokeDasharray="3 3" stroke="hsl(214, 20%, 93%)" />
-                <XAxis dataKey="channel" fontSize={11} tickLine={false} axisLine={false} stroke="hsl(215,15%,50%)" />
-                <YAxis fontSize={11} tickLine={false} axisLine={false} stroke="hsl(215,15%,50%)" />
-                <Tooltip contentStyle={tooltipStyle} />
-                <Bar dataKey="leads" fill="hsl(174, 65%, 42%)" radius={[4, 4, 0, 0]} name="Leads" />
-                <Bar dataKey="conversions" fill="hsl(210, 80%, 55%)" radius={[4, 4, 0, 0]} name="Conversions" />
-              </BarChart>
-            </ResponsiveContainer>
-          </CardContent>
-        </Card>
-
-        {/* Recent Activity */}
-        <Card className="lg:col-span-2 shadow-sm">
-          <CardHeader className="pb-2">
-            <CardTitle className="text-sm font-medium text-muted-foreground">Recent Activity</CardTitle>
-          </CardHeader>
-          <CardContent>
-            <div className="space-y-3">
-              {recentActivity.map((item, i) => (
-                <div key={i} className="flex items-start gap-3 pb-3 border-b last:border-0 last:pb-0">
-                  <div className="mt-0.5 flex h-6 w-6 shrink-0 items-center justify-center rounded-full bg-muted">
-                    {activityIcons[item.type]}
-                  </div>
-                  <div className="min-w-0 flex-1">
-                    <p className="text-xs font-medium text-foreground">{item.action}</p>
-                    <p className="text-[11px] text-muted-foreground truncate">{item.detail}</p>
-                  </div>
-                  <span className="text-[10px] text-muted-foreground shrink-0">{item.time}</span>
+    {/* Bottom row */}
+    <div className="grid grid-cols-1 lg:grid-cols-3 gap-4">
+      {/* Regions */}
+      <Card className="shadow-sm border-border/50">
+        <CardHeader className="pb-1 pt-4 px-4">
+          <CardTitle className="text-[12px] font-medium text-muted-foreground uppercase tracking-wide">By Region</CardTitle>
+        </CardHeader>
+        <CardContent className="px-4 pb-4">
+          <div className="space-y-2">
+            {regionData.map((r) => (
+              <div key={r.region} className="flex items-center justify-between p-2.5 rounded-md bg-secondary/50 hover:bg-secondary transition-colors">
+                <div>
+                  <p className="text-[12px] font-medium text-foreground">{r.region}</p>
+                  <p className="text-[10px] text-muted-foreground">{r.hospitals} hospitals · {r.doctors} doctors</p>
                 </div>
-              ))}
-            </div>
-          </CardContent>
-        </Card>
-      </div>
-    </DashboardLayout>
-  );
-};
+                <div className="text-right">
+                  <p className="text-[13px] font-semibold text-foreground tabular-nums">{r.placements}</p>
+                  <p className="text-[10px] text-muted-foreground">placed</p>
+                </div>
+              </div>
+            ))}
+          </div>
+        </CardContent>
+      </Card>
+
+      {/* Channel Performance */}
+      <Card className="shadow-sm border-border/50">
+        <CardHeader className="pb-1 pt-4 px-4">
+          <CardTitle className="text-[12px] font-medium text-muted-foreground uppercase tracking-wide">Channel Performance</CardTitle>
+        </CardHeader>
+        <CardContent className="px-4 pb-4">
+          <ResponsiveContainer width="100%" height={200}>
+            <BarChart data={channelPerformance} layout="vertical" barCategoryGap="18%">
+              <XAxis type="number" fontSize={10} tickLine={false} axisLine={false} stroke="hsl(220,10%,55%)" />
+              <YAxis dataKey="channel" type="category" fontSize={10} tickLine={false} axisLine={false} width={80} stroke="hsl(220,10%,55%)" />
+              <Tooltip contentStyle={tip} />
+              <Bar dataKey="doctors" fill="hsl(170,55%,45%)" radius={[0, 3, 3, 0]} name="Doctors" />
+            </BarChart>
+          </ResponsiveContainer>
+        </CardContent>
+      </Card>
+
+      {/* Activity Feed */}
+      <Card className="shadow-sm border-border/50">
+        <CardHeader className="pb-1 pt-4 px-4">
+          <CardTitle className="text-[12px] font-medium text-muted-foreground uppercase tracking-wide">Recent Activity</CardTitle>
+        </CardHeader>
+        <CardContent className="px-4 pb-4">
+          <div className="space-y-2">
+            {recentActivity.slice(0, 6).map((item, i) => (
+              <div key={i} className="flex items-start gap-2 pb-2 border-b border-border/40 last:border-0 last:pb-0">
+                <div className="mt-0.5 flex h-5 w-5 shrink-0 items-center justify-center rounded bg-muted">
+                  {activityIcons[item.type]}
+                </div>
+                <div className="min-w-0 flex-1">
+                  <p className="text-[11px] font-medium text-foreground leading-tight">{item.action}</p>
+                  <p className="text-[10px] text-muted-foreground truncate">{item.detail}</p>
+                </div>
+                <span className="text-[9px] text-muted-foreground shrink-0 mt-0.5">{item.time}</span>
+              </div>
+            ))}
+          </div>
+        </CardContent>
+      </Card>
+    </div>
+  </DashboardLayout>
+);
 
 export default Index;
