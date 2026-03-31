@@ -26,13 +26,13 @@ import {
 } from "@/components/ui/sidebar";
 
 const mainNav = [
-  { title: "Overview", url: "/", icon: LayoutDashboard },
-  { title: "Sales & Pipeline", url: "/sales", icon: TrendingUp },
+  { title: "Dashboard", url: "/", icon: LayoutDashboard },
+  { title: "Sales Tracker", url: "/sales", icon: TrendingUp },
   { title: "Marketing", url: "/marketing", icon: Megaphone },
-  { title: "Doctor Pipeline", url: "/leads-pipeline", icon: GitBranch },
-  { title: "Team", url: "/team", icon: UsersIcon },
+  { title: "Doctor Progress", url: "/leads-pipeline", icon: GitBranch },
+  { title: "Team Performance", url: "/team", icon: UsersIcon },
   { title: "Finance", url: "/finance", icon: DollarSign },
-  { title: "Operations", url: "/operations", icon: ClipboardList },
+  { title: "Operations & Roadmap", url: "/operations", icon: ClipboardList },
 ];
 
 const bottomNav = [
@@ -63,7 +63,7 @@ export function AppSidebar() {
         <SidebarGroup>
           {!collapsed && (
             <SidebarGroupLabel className="text-[10px] uppercase tracking-[0.1em] text-sidebar-foreground/35 px-3 mb-0.5">
-              Navigation
+              Menu
             </SidebarGroupLabel>
           )}
           <SidebarGroupContent>

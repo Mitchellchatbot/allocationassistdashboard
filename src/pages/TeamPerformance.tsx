@@ -15,11 +15,11 @@ const TeamPerformance = () => {
   const { recruiters, campaigns } = useFilteredData();
 
   return (
-    <DashboardLayout title="Team" subtitle="Recruiter leaderboard and campaign tracking">
+    <DashboardLayout title="Team Performance" subtitle="See how each recruiter is performing and track active campaigns">
       <Card className="mb-5 shadow-sm border-border/50">
         <CardHeader className="pb-1 pt-4 px-4">
           <CardTitle className="text-[12px] font-medium text-muted-foreground uppercase tracking-wide">
-            Recruiter Leaderboard {recruiters.length === 0 && <span className="text-muted-foreground/50 normal-case font-normal">— no data for selected region</span>}
+            Top Performing Recruiters {recruiters.length === 0 && <span className="text-muted-foreground/50 normal-case font-normal">— no data for selected region</span>}
           </CardTitle>
         </CardHeader>
         <CardContent className="px-4 pb-4">
@@ -30,10 +30,10 @@ const TeamPerformance = () => {
                   <TableHead className="text-[10px] uppercase tracking-wide h-8 w-8">#</TableHead>
                   <TableHead className="text-[10px] uppercase tracking-wide h-8">Name</TableHead>
                   <TableHead className="text-[10px] uppercase tracking-wide h-8 hidden sm:table-cell">Region</TableHead>
-                  <TableHead className="text-[10px] uppercase tracking-wide h-8 text-right">Doctors</TableHead>
-                  <TableHead className="text-[10px] uppercase tracking-wide h-8 text-right">Placements</TableHead>
-                  <TableHead className="text-[10px] uppercase tracking-wide h-8 text-right hidden md:table-cell">Revenue</TableHead>
-                  <TableHead className="text-[10px] uppercase tracking-wide h-8 text-right hidden lg:table-cell">Score</TableHead>
+                  <TableHead className="text-[10px] uppercase tracking-wide h-8 text-right">Doctors Managed</TableHead>
+                  <TableHead className="text-[10px] uppercase tracking-wide h-8 text-right">Successfully Placed</TableHead>
+                  <TableHead className="text-[10px] uppercase tracking-wide h-8 text-right hidden md:table-cell">Revenue Earned</TableHead>
+                  <TableHead className="text-[10px] uppercase tracking-wide h-8 text-right hidden lg:table-cell">Performance</TableHead>
                 </TableRow>
               </TableHeader>
               <TableBody>
@@ -79,17 +79,17 @@ const TeamPerformance = () => {
 
       <Card className="shadow-sm border-border/50">
         <CardHeader className="pb-1 pt-4 px-4">
-          <CardTitle className="text-[12px] font-medium text-muted-foreground uppercase tracking-wide">Campaigns</CardTitle>
+          <CardTitle className="text-[12px] font-medium text-muted-foreground uppercase tracking-wide">Active Campaigns</CardTitle>
         </CardHeader>
         <CardContent className="px-4 pb-4">
           <div className="overflow-x-auto -mx-4 px-4">
             <Table>
               <TableHeader>
                 <TableRow className="hover:bg-transparent">
-                  <TableHead className="text-[10px] uppercase tracking-wide h-8">Campaign</TableHead>
+                  <TableHead className="text-[10px] uppercase tracking-wide h-8">Campaign Name</TableHead>
                   <TableHead className="text-[10px] uppercase tracking-wide h-8 hidden sm:table-cell">Channel</TableHead>
-                  <TableHead className="text-[10px] uppercase tracking-wide h-8 text-right">Doctors</TableHead>
-                  <TableHead className="text-[10px] uppercase tracking-wide h-8 text-right hidden sm:table-cell">Spend</TableHead>
+                  <TableHead className="text-[10px] uppercase tracking-wide h-8 text-right">Doctors Reached</TableHead>
+                  <TableHead className="text-[10px] uppercase tracking-wide h-8 text-right hidden sm:table-cell">Amount Spent</TableHead>
                   <TableHead className="text-[10px] uppercase tracking-wide h-8">Status</TableHead>
                 </TableRow>
               </TableHeader>

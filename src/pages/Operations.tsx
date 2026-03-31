@@ -12,7 +12,7 @@ const severityConfig = {
 
 const phaseStatusConfig = {
   "in-progress": { label: "In Progress", className: "bg-primary/10 text-primary" },
-  "upcoming": { label: "Upcoming", className: "bg-warning/10 text-warning" },
+  "upcoming": { label: "Coming Soon", className: "bg-warning/10 text-warning" },
   "planned": { label: "Planned", className: "bg-secondary text-muted-foreground" },
 };
 
@@ -20,7 +20,7 @@ const Operations = () => {
   const { operationalHealth, roadmapPhases, bottlenecks } = useFilteredData();
 
   return (
-    <DashboardLayout title="Operations" subtitle="Organizational health, roadmap progress, and bottlenecks">
+    <DashboardLayout title="Operations & Roadmap" subtitle="How the organization is running and what's being built next">
       {/* Operational Health */}
       <div className="grid grid-cols-2 lg:grid-cols-4 gap-3 mb-5">
         {operationalHealth.map(m => {
@@ -32,7 +32,7 @@ const Operations = () => {
                 <p className="text-[10px] font-medium text-muted-foreground uppercase tracking-wide mb-2">{m.metric}</p>
                 <div className="flex items-end gap-1 mb-2">
                   <span className="text-[22px] font-semibold text-foreground tabular-nums leading-none">{m.value}{m.unit}</span>
-                  <span className="text-[10px] text-muted-foreground mb-0.5">/ {m.target}{m.unit}</span>
+                  <span className="text-[10px] text-muted-foreground mb-0.5">goal: {m.target}{m.unit}</span>
                 </div>
                 <div className="h-2 rounded-full bg-muted overflow-hidden">
                   <div
@@ -49,7 +49,7 @@ const Operations = () => {
       {/* Roadmap */}
       <Card className="mb-5 shadow-sm border-border/50">
         <CardHeader className="pb-1 pt-4 px-4">
-          <CardTitle className="text-[12px] font-medium text-muted-foreground uppercase tracking-wide">Transformation Roadmap</CardTitle>
+          <CardTitle className="text-[12px] font-medium text-muted-foreground uppercase tracking-wide">Growth Plan</CardTitle>
         </CardHeader>
         <CardContent className="px-4 pb-4">
           <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
@@ -99,7 +99,7 @@ const Operations = () => {
       {/* Bottlenecks */}
       <Card className="shadow-sm border-border/50">
         <CardHeader className="pb-1 pt-4 px-4">
-          <CardTitle className="text-[12px] font-medium text-muted-foreground uppercase tracking-wide">Active Bottlenecks</CardTitle>
+          <CardTitle className="text-[12px] font-medium text-muted-foreground uppercase tracking-wide">Current Delays & Issues</CardTitle>
         </CardHeader>
         <CardContent className="px-4 pb-4">
           <div className="space-y-2">

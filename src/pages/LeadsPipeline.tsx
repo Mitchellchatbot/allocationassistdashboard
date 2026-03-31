@@ -9,7 +9,7 @@ import { useState } from "react";
 
 const statusConfig = {
   "on-track": { label: "On Track", className: "bg-success/10 text-success border-success/20", icon: CheckCircle },
-  "at-risk": { label: "At Risk", className: "bg-warning/10 text-warning border-warning/20", icon: Clock },
+  "at-risk": { label: "Needs Attention", className: "bg-warning/10 text-warning border-warning/20", icon: Clock },
   "delayed": { label: "Delayed", className: "bg-destructive/10 text-destructive border-destructive/20", icon: AlertTriangle },
 };
 
@@ -24,10 +24,10 @@ const LeadsPipeline = () => {
   );
 
   return (
-    <DashboardLayout title="Doctor Pipeline" subtitle="Track doctors through the placement workflow">
+    <DashboardLayout title="Doctor Progress" subtitle="Track each doctor's journey from application to placement">
       <Card className="mb-5 shadow-sm border-border/50">
         <CardHeader className="pb-1 pt-4 px-4">
-          <CardTitle className="text-[12px] font-medium text-muted-foreground uppercase tracking-wide">Workflow Tracker</CardTitle>
+          <CardTitle className="text-[12px] font-medium text-muted-foreground uppercase tracking-wide">Where Doctors Are Right Now</CardTitle>
         </CardHeader>
         <CardContent className="px-4 pb-4">
           <div className="flex flex-wrap items-center gap-1.5 overflow-x-auto">
@@ -48,12 +48,12 @@ const LeadsPipeline = () => {
         <CardHeader className="pb-2 pt-4 px-4">
           <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-2">
             <CardTitle className="text-[12px] font-medium text-muted-foreground uppercase tracking-wide">
-              All Doctors in Pipeline ({filteredDoctors.length})
+              All Doctors ({filteredDoctors.length})
             </CardTitle>
             <div className="relative w-full sm:w-[220px]">
               <Search className="absolute left-2.5 top-1/2 -translate-y-1/2 h-3 w-3 text-muted-foreground" />
               <Input
-                placeholder="Search doctors..."
+                placeholder="Search by name, specialty..."
                 value={search}
                 onChange={(e) => setSearch(e.target.value)}
                 className="h-7 pl-7 text-[11px] bg-secondary/50 border-0"
@@ -74,11 +74,11 @@ const LeadsPipeline = () => {
                     <TableHead className="text-[10px] uppercase tracking-wide h-8">ID</TableHead>
                     <TableHead className="text-[10px] uppercase tracking-wide h-8">Doctor</TableHead>
                     <TableHead className="text-[10px] uppercase tracking-wide h-8 hidden sm:table-cell">Specialty</TableHead>
-                    <TableHead className="text-[10px] uppercase tracking-wide h-8">Stage</TableHead>
-                    <TableHead className="text-[10px] uppercase tracking-wide h-8 hidden md:table-cell">Route</TableHead>
-                    <TableHead className="text-[10px] uppercase tracking-wide h-8 hidden lg:table-cell">License</TableHead>
-                    <TableHead className="text-[10px] uppercase tracking-wide h-8 hidden lg:table-cell">Assigned</TableHead>
-                    <TableHead className="text-[10px] uppercase tracking-wide h-8 text-right">Days</TableHead>
+                    <TableHead className="text-[10px] uppercase tracking-wide h-8">Current Step</TableHead>
+                    <TableHead className="text-[10px] uppercase tracking-wide h-8 hidden md:table-cell">From → To</TableHead>
+                    <TableHead className="text-[10px] uppercase tracking-wide h-8 hidden lg:table-cell">License Type</TableHead>
+                    <TableHead className="text-[10px] uppercase tracking-wide h-8 hidden lg:table-cell">Recruiter</TableHead>
+                    <TableHead className="text-[10px] uppercase tracking-wide h-8 text-right">Days in Step</TableHead>
                     <TableHead className="text-[10px] uppercase tracking-wide h-8">Status</TableHead>
                   </TableRow>
                 </TableHeader>

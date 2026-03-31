@@ -9,10 +9,10 @@ const Sales = () => {
   const { pipeline, sales, recruiters, stageConversion } = useFilteredData();
 
   return (
-    <DashboardLayout title="Sales & Pipeline" subtitle="Doctor placement pipeline and recruiter performance">
+    <DashboardLayout title="Sales Tracker" subtitle="See where doctors are in the process and how recruiters are performing">
       <Card className="mb-5 shadow-sm border-border/50">
         <CardHeader className="pb-1 pt-4 px-4">
-          <CardTitle className="text-[12px] font-medium text-muted-foreground uppercase tracking-wide">Pipeline Overview</CardTitle>
+          <CardTitle className="text-[12px] font-medium text-muted-foreground uppercase tracking-wide">Where Doctors Are in the Process</CardTitle>
         </CardHeader>
         <CardContent className="px-4 pb-4">
           <div className="flex flex-wrap items-center gap-1.5 overflow-x-auto">
@@ -33,13 +33,13 @@ const Sales = () => {
       <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4 mb-5">
         <Card className="shadow-sm border-border/50 hover:shadow-md transition-shadow">
           <CardHeader className="pb-1 pt-4 px-4">
-            <CardTitle className="text-[12px] font-medium text-muted-foreground uppercase tracking-wide">Performance</CardTitle>
+            <CardTitle className="text-[12px] font-medium text-muted-foreground uppercase tracking-wide">Key Numbers</CardTitle>
           </CardHeader>
           <CardContent className="px-4 pb-4 space-y-2">
             {[
-              { label: "Placements", val: sales.dealsClosed },
-              { label: "Conversion Rate", val: `${sales.conversionRate}%` },
-              { label: "Avg Processing Time", val: sales.avgCycleTime },
+              { label: "Doctors Placed", val: sales.dealsClosed },
+              { label: "Success Rate", val: `${sales.conversionRate}%` },
+              { label: "Avg. Time to Place", val: sales.avgCycleTime },
             ].map(m => (
               <div key={m.label} className="flex items-center justify-between p-3 rounded-lg bg-secondary/50 hover:bg-secondary transition-colors">
                 <span className="text-[11px] text-muted-foreground">{m.label}</span>
@@ -51,13 +51,13 @@ const Sales = () => {
 
         <Card className="shadow-sm border-border/50 hover:shadow-md transition-shadow">
           <CardHeader className="pb-1 pt-4 px-4">
-            <CardTitle className="text-[12px] font-medium text-muted-foreground uppercase tracking-wide">Outbound Activity</CardTitle>
+            <CardTitle className="text-[12px] font-medium text-muted-foreground uppercase tracking-wide">Team Outreach</CardTitle>
           </CardHeader>
           <CardContent className="px-4 pb-4 space-y-2">
             {[
-              { icon: Phone, label: "Outbound Calls", val: sales.outboundCalls.toLocaleString(), color: "text-primary" },
+              { icon: Phone, label: "Calls Made", val: sales.outboundCalls.toLocaleString(), color: "text-primary" },
               { icon: Mail, label: "Emails Sent", val: sales.emailsSent.toLocaleString(), color: "text-info" },
-              { icon: Clock, label: "Follow-ups Pending", val: sales.followUpsPending.toString(), color: "text-warning" },
+              { icon: Clock, label: "Follow-ups Needed", val: sales.followUpsPending.toString(), color: "text-warning" },
             ].map(m => (
               <div key={m.label} className="flex items-center gap-3 p-3 rounded-lg bg-secondary/50 hover:bg-secondary transition-colors">
                 <m.icon className={`h-4 w-4 ${m.color}`} />
@@ -72,7 +72,7 @@ const Sales = () => {
 
         <Card className="shadow-sm border-border/50 hover:shadow-md transition-shadow md:col-span-2 lg:col-span-1">
           <CardHeader className="pb-1 pt-4 px-4">
-            <CardTitle className="text-[12px] font-medium text-muted-foreground uppercase tracking-wide">Stage Conversion</CardTitle>
+            <CardTitle className="text-[12px] font-medium text-muted-foreground uppercase tracking-wide">Success Rate at Each Step</CardTitle>
           </CardHeader>
           <CardContent className="px-4 pb-4 space-y-2.5">
             {stageConversion.map(s => (
@@ -103,9 +103,9 @@ const Sales = () => {
                 <TableRow className="hover:bg-transparent">
                   <TableHead className="text-[10px] uppercase tracking-wide h-8">Name</TableHead>
                   <TableHead className="text-[10px] uppercase tracking-wide h-8 hidden sm:table-cell">Region</TableHead>
-                  <TableHead className="text-[10px] uppercase tracking-wide h-8 text-right">Doctors</TableHead>
-                  <TableHead className="text-[10px] uppercase tracking-wide h-8 text-right">Placements</TableHead>
-                  <TableHead className="text-[10px] uppercase tracking-wide h-8 text-right hidden md:table-cell">Revenue</TableHead>
+                  <TableHead className="text-[10px] uppercase tracking-wide h-8 text-right">Doctors Managed</TableHead>
+                  <TableHead className="text-[10px] uppercase tracking-wide h-8 text-right">Successfully Placed</TableHead>
+                  <TableHead className="text-[10px] uppercase tracking-wide h-8 text-right hidden md:table-cell">Revenue Earned</TableHead>
                 </TableRow>
               </TableHeader>
               <TableBody>

@@ -12,14 +12,17 @@ const iconMap: Record<string, LucideIcon> = {
 };
 
 const tooltipMap: Record<string, string> = {
-  "Active Doctors": "Total doctors currently in the placement pipeline",
-  "Placements": "Successfully placed doctors this period",
-  "Applications": "New doctor applications received",
-  "Hospitals": "Partner hospitals across all regions",
-  "Processing Time": "Average days from application to placement",
-  "Revenue": "Total revenue generated from placements",
-  "Placement Rate": "Percentage of doctors successfully placed",
-  "Cost per Placement": "Average cost to place one doctor",
+  "Active Doctors": "Doctors currently going through the placement process",
+  "Doctors Placed": "Doctors who have been successfully placed at hospitals this period",
+  "Awaiting License": "Doctors waiting for their medical license to be approved",
+  "Partner Hospitals": "Hospitals we work with across all regions",
+  "Avg. Time to Place": "Average number of days it takes to place a doctor from start to finish",
+  "Revenue": "Total income earned from placements",
+  "Placement Rate": "Percentage of doctors who are successfully placed",
+  "Marketing Spend": "Total money spent on advertising and marketing",
+  "Placement Revenue": "Total income earned from placing doctors",
+  "Cost per Doctor Placed": "How much it costs on average to place one doctor",
+  "Return on Investment": "How much revenue we earn for every dollar spent",
 };
 
 interface KpiCardProps {
@@ -33,7 +36,7 @@ interface KpiCardProps {
 const KpiCard = ({ label, value, change, period, icon }: KpiCardProps) => {
   const isPositive = change >= 0;
   const Icon = icon ? iconMap[icon] : null;
-  const isGood = label.includes("Processing") || label.includes("Cost") ? !isPositive : isPositive;
+  const isGood = label.includes("Time to Place") || label.includes("Cost") ? !isPositive : isPositive;
   const tooltipText = tooltipMap[label];
 
   const cardContent = (
