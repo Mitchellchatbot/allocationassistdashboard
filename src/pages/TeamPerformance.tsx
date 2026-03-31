@@ -4,6 +4,7 @@ import { Badge } from "@/components/ui/badge";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import { useFilteredData } from "@/hooks/use-filtered-data";
 import { Trophy } from "lucide-react";
+import { ChannelIcon } from "@/components/ChannelIcon";
 
 const statusColors = {
   active: "bg-success/10 text-success",
