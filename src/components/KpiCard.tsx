@@ -43,8 +43,8 @@ const KpiCard = ({ label, value, change, period, icon }: KpiCardProps) => {
     <Card className="shadow-sm border-kpi/60 bg-kpi hover:shadow-md hover:scale-[1.01] transition-all duration-200 cursor-default">
       <CardContent className="p-4 text-center">
         {Icon && (
-          <div className="flex h-7 w-7 items-center justify-center rounded-lg bg-primary/8 mx-auto mb-2">
-            <Icon className="h-3.5 w-3.5 text-primary" />
+          <div className="flex h-9 w-9 items-center justify-center rounded-lg bg-primary/8 mx-auto mb-2">
+            <Icon className="h-5 w-5 text-primary" />
           </div>
         )}
         <span className="text-[11px] font-medium text-muted-foreground uppercase tracking-wide">{label}</span>
