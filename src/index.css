@@ -55,15 +55,15 @@
     --kpi: 49 100% 88%;
     --kpi-foreground: 42 60% 25%;
 
-    /* Sidebar — AA dark slate from their presentations */
-    --sidebar-background: 230 18% 22%;
-    --sidebar-foreground: 220 10% 78%;
-    --sidebar-primary: 170 55% 52%;
-    --sidebar-primary-foreground: 0 0% 100%;
-    --sidebar-accent: 230 15% 28%;
-    --sidebar-accent-foreground: 220 10% 92%;
-    --sidebar-border: 230 14% 26%;
-    --sidebar-ring: 170 55% 52%;
+    /* Sidebar — AA teal/turquoise */
+    --sidebar-background: 170 55% 30%;
+    --sidebar-foreground: 170 15% 90%;
+    --sidebar-primary: 49 100% 88%;
+    --sidebar-primary-foreground: 170 55% 20%;
+    --sidebar-accent: 170 45% 36%;
+    --sidebar-accent-foreground: 0 0% 100%;
+    --sidebar-border: 170 45% 26%;
+    --sidebar-ring: 49 100% 88%;
   }
 }
 
