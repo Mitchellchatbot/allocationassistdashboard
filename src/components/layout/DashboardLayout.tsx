@@ -1,10 +1,21 @@
 import { SidebarProvider, SidebarTrigger } from "@/components/ui/sidebar";
 import { AppSidebar } from "./AppSidebar";
-import { Bell, Download, CalendarDays } from "lucide-react";
+import { Bell, Download, CalendarDays, FileText, AlertTriangle, UserPlus, Award, Clock, Handshake } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Badge } from "@/components/ui/badge";
+import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
 import { useFilters, getTimeLabel, getRegionLabel, type TimeRange, type Region } from "@/lib/filters";
+import { useState } from "react";
+
+const notifications = [
+  { id: 1, icon: AlertTriangle, color: "text-warning", title: "Licensing Delay — Dr. Raj Mehta", detail: "QCHP license stuck for 28 days. Escalation recommended.", time: "5 min ago", unread: true },
+  { id: 2, icon: UserPlus, color: "text-info", title: "New Application Received", detail: "Dr. Anna Kowalski — Anesthesiology, Poland → UAE", time: "12 min ago", unread: true },
+  { id: 3, icon: Award, color: "text-success", title: "Placement Confirmed", detail: "Dr. Sophie Laurent placed at Cleveland Clinic Abu Dhabi", time: "1 hour ago", unread: true },
+  { id: 4, icon: Clock, color: "text-warning", title: "Document Collection Overdue", detail: "Dr. Chen Wei — missing credentials (15 days)", time: "2 hours ago", unread: false },
+  { id: 5, icon: Handshake, color: "text-primary", title: "New Hospital Partnership", detail: "Hamad Medical Corporation, Qatar — agreement signed", time: "Yesterday", unread: false },
+  { id: 6, icon: FileText, color: "text-primary", title: "DHA License Approved", detail: "Dr. Amira Khan — ready for placement in UAE", time: "Yesterday", unread: false },
+];
 
 interface DashboardLayoutProps {
   children: React.ReactNode;
