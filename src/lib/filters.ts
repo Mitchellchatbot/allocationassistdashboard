@@ -1,27 +1,16 @@
-import { createContext, useContext, useState, ReactNode } from "react";
+import { createContext, useContext } from "react";
 
-type TimeRange = "week" | "month" | "quarter" | "year";
-type Region = "all" | "uae" | "ksa" | "qatar" | "kuwait";
+export type TimeRange = "week" | "month" | "quarter" | "year";
+export type Region = "all" | "uae" | "ksa" | "qatar" | "kuwait";
 
-interface FilterContextType {
+export interface FilterContextType {
   timeRange: TimeRange;
   setTimeRange: (v: TimeRange) => void;
   region: Region;
   setRegion: (v: Region) => void;
 }
 
-const FilterContext = createContext<FilterContextType | null>(null);
-
-export function FilterProvider({ children }: { children: ReactNode }) {
-  const [timeRange, setTimeRange] = useState<TimeRange>("quarter");
-  const [region, setRegion] = useState<Region>("all");
-
-  return (
-    <FilterContext.Provider value={{ timeRange, setTimeRange, region, setRegion }}>
-      {children}
-    </FilterContext.Provider>
-  );
-}
+export const FilterContext = createContext<FilterContextType | null>(null);
 
 export function useFilters() {
   const ctx = useContext(FilterContext);
@@ -83,5 +72,3 @@ export function getRegionLabel(region: Region) {
   };
   return labels[region];
 }
-
-export type { TimeRange, Region };

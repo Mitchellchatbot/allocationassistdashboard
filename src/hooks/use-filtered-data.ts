@@ -26,6 +26,7 @@ export function useFilteredData() {
     const tm = getTimeMultiplier(timeRange);
     const rm = getRegionMultiplier(region);
     const timeLabel = getTimeLabel(timeRange);
+    
 
     // KPIs
     const kpis = data.overviewKpis.map(k => {
