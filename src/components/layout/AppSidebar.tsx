@@ -46,8 +46,8 @@ export function AppSidebar() {
   return (
     <Sidebar collapsible="icon">
       <SidebarHeader className="px-4 py-4 border-b border-sidebar-border">
-        <div className="flex items-center gap-2.5">
-          <img src={logo} alt="Allocation Assist" className="h-8 w-8 shrink-0" />
+        <div className="flex items-center justify-center gap-2.5">
+          <img src={logo} alt="Allocation Assist" className="h-8 w-8 shrink-0 object-contain" />
           {!collapsed && (
             <div className="leading-tight">
               <span className="text-[14px] font-semibold text-white tracking-tight block">
