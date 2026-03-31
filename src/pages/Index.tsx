@@ -126,14 +126,23 @@ const Index = () => {
             <CardTitle className="text-[12px] font-medium text-muted-foreground uppercase tracking-wide">Where Doctors Come From</CardTitle>
           </CardHeader>
           <CardContent className="px-2 sm:px-4 pb-4">
-            <ResponsiveContainer width="100%" height={200}>
-              <BarChart data={channels} layout="vertical" barCategoryGap="18%">
-                <XAxis type="number" fontSize={10} tickLine={false} axisLine={false} stroke="hsl(220,10%,55%)" />
-                <YAxis dataKey="channel" type="category" fontSize={10} tickLine={false} axisLine={false} width={80} stroke="hsl(220,10%,55%)" />
-                <Tooltip contentStyle={tip} />
-                <Bar dataKey="doctors" fill="hsl(170,55%,45%)" radius={[0, 4, 4, 0]} name="Doctors" />
-              </BarChart>
-            </ResponsiveContainer>
+            <div className="space-y-2">
+              {channels.map((ch) => (
+                <div key={ch.channel} className="flex items-center gap-2.5 p-2.5 rounded-lg bg-secondary/50 hover:bg-secondary transition-colors">
+                  <ChannelIcon channel={ch.channel} size={14} />
+                  <div className="flex-1 min-w-0">
+                    <p className="text-[11px] font-medium text-foreground">{ch.channel}</p>
+                    <div className="h-2 rounded-full bg-muted mt-1 overflow-hidden">
+                      <div
+                        className="h-full rounded-full bg-primary transition-all"
+                        style={{ width: `${Math.round((ch.doctors / Math.max(...channels.map(c => c.doctors))) * 100)}%` }}
+                      />
+                    </div>
+                  </div>
+                  <span className="text-[13px] font-semibold text-foreground tabular-nums">{ch.doctors}</span>
+                </div>
+              ))}
+            </div>
           </CardContent>
         </Card>
 
