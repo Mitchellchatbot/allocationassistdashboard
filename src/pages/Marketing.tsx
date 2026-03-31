@@ -99,7 +99,12 @@ const Marketing = () => {
               <TableBody>
                 {marketing.map(ch => (
                   <TableRow key={ch.channel} className="hover:bg-muted/30">
-                    <TableCell className="text-[12px] font-medium py-2.5">{ch.channel}</TableCell>
+                    <TableCell className="text-[12px] font-medium py-2.5">
+                      <div className="flex items-center gap-2">
+                        <ChannelIcon channel={ch.channel} size={13} />
+                        {ch.channel}
+                      </div>
+                    </TableCell>
                     <TableCell className="text-[12px] text-right py-2.5 tabular-nums">{ch.doctors}</TableCell>
                     <TableCell className="text-[12px] text-right py-2.5 tabular-nums hidden sm:table-cell">${ch.spend.toLocaleString()}</TableCell>
                     <TableCell className="text-[12px] text-right py-2.5 tabular-nums hidden sm:table-cell">${ch.spend > 0 ? Math.round(ch.spend / Math.max(ch.placements, 1)) : 0}</TableCell>
