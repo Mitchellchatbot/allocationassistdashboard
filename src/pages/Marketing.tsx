@@ -2,7 +2,7 @@ import { DashboardLayout } from "@/components/layout/DashboardLayout";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
-import { marketingChannelMetrics, costVsConversions } from "@/lib/mock-data";
+import { useFilteredData } from "@/hooks/use-filtered-data";
 import {
   BarChart, Bar, XAxis, YAxis, Tooltip, ResponsiveContainer, CartesianGrid,
   ComposedChart, Line,
@@ -18,13 +18,13 @@ const tip = {
 };
 
 const Marketing = () => {
-  const bestChannel = marketingChannelMetrics.reduce((a, b) => (a.roi > b.roi ? a : b));
+  const { marketing, costVsConv } = useFilteredData();
+  const bestChannel = marketing.reduce((a, b) => (a.roi > b.roi ? a : b));
 
   return (
     <DashboardLayout title="Marketing" subtitle="Channel performance and doctor acquisition cost">
-      {/* Channel Cards */}
       <div className="grid grid-cols-2 md:grid-cols-5 gap-3 mb-5">
-        {marketingChannelMetrics.map(ch => (
+        {marketing.map(ch => (
           <Card key={ch.channel} className={`shadow-sm border-border/50 ${ch.channel === bestChannel.channel ? "ring-1 ring-primary/40" : ""}`}>
             <CardContent className="p-3">
               <div className="flex items-center justify-between mb-1">
@@ -32,7 +32,7 @@ const Marketing = () => {
                 {ch.channel === bestChannel.channel && <Star className="h-3 w-3 text-primary fill-primary" />}
               </div>
               <p className="text-lg font-semibold tabular-nums">{ch.doctors}</p>
-              <p className="text-[10px] text-muted-foreground">doctors · ${ch.cpa} CPA</p>
+              <p className="text-[10px] text-muted-foreground">doctors · ${ch.spend > 0 ? Math.round(ch.spend / Math.max(ch.placements, 1)) : 0} CPA</p>
             </CardContent>
           </Card>
         ))}
@@ -45,7 +45,7 @@ const Marketing = () => {
           </CardHeader>
           <CardContent className="px-4 pb-4">
             <ResponsiveContainer width="100%" height={220}>
-              <BarChart data={marketingChannelMetrics}>
+              <BarChart data={marketing}>
                 <CartesianGrid strokeDasharray="3 3" stroke="hsl(220,14%,92%)" />
                 <XAxis dataKey="channel" fontSize={10} tickLine={false} axisLine={false} stroke="hsl(220,10%,55%)" />
                 <YAxis fontSize={10} tickLine={false} axisLine={false} stroke="hsl(220,10%,55%)" />
@@ -62,7 +62,7 @@ const Marketing = () => {
           </CardHeader>
           <CardContent className="px-4 pb-4">
             <ResponsiveContainer width="100%" height={220}>
-              <ComposedChart data={costVsConversions}>
+              <ComposedChart data={costVsConv}>
                 <CartesianGrid strokeDasharray="3 3" stroke="hsl(220,14%,92%)" />
                 <XAxis dataKey="channel" fontSize={10} tickLine={false} axisLine={false} stroke="hsl(220,10%,55%)" />
                 <YAxis yAxisId="left" fontSize={10} tickLine={false} axisLine={false} stroke="hsl(220,10%,55%)" tickFormatter={v => `$${v / 1000}k`} />
@@ -76,7 +76,6 @@ const Marketing = () => {
         </Card>
       </div>
 
-      {/* ROI Table */}
       <Card className="shadow-sm border-border/50">
         <CardHeader className="pb-1 pt-4 px-4">
           <CardTitle className="text-[12px] font-medium text-muted-foreground uppercase tracking-wide">Channel ROI Comparison</CardTitle>
@@ -94,12 +93,12 @@ const Marketing = () => {
               </TableRow>
             </TableHeader>
             <TableBody>
-              {marketingChannelMetrics.map(ch => (
+              {marketing.map(ch => (
                 <TableRow key={ch.channel}>
                   <TableCell className="text-[12px] font-medium py-2">{ch.channel}</TableCell>
                   <TableCell className="text-[12px] text-right py-2 tabular-nums">{ch.doctors}</TableCell>
                   <TableCell className="text-[12px] text-right py-2 tabular-nums">${ch.spend.toLocaleString()}</TableCell>
-                  <TableCell className="text-[12px] text-right py-2 tabular-nums">${ch.cpa}</TableCell>
+                  <TableCell className="text-[12px] text-right py-2 tabular-nums">${ch.spend > 0 ? Math.round(ch.spend / Math.max(ch.placements, 1)) : 0}</TableCell>
                   <TableCell className="text-[12px] text-right py-2 tabular-nums">{ch.placements}</TableCell>
                   <TableCell className="text-right py-2">
                     <Badge variant={ch.roi >= 4 ? "default" : "secondary"} className="text-[10px] tabular-nums">{ch.roi}x</Badge>
