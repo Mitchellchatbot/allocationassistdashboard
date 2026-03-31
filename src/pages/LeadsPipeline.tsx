@@ -24,7 +24,7 @@ const LeadsPipeline = () => {
           <div className="flex flex-wrap items-center gap-1.5">
             {workflow.map((stage, i) => (
               <div key={stage.name} className="flex items-center gap-1.5">
-                <div className="rounded-lg border border-primary/20 bg-primary/5 px-3 py-2.5 text-center min-w-[100px]">
+                <div className="rounded-lg border border-kpi/60 bg-kpi px-3 py-2.5 text-center min-w-[100px]">
                   <p className="text-lg font-semibold text-foreground tabular-nums">{stage.count}</p>
                   <p className="text-[9px] text-muted-foreground leading-tight">{stage.name}</p>
                 </div>
