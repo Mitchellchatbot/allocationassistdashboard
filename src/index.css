@@ -52,6 +52,9 @@
     --chart-4: 38 88% 50%;
     --chart-5: 280 50% 52%;
 
+    --kpi: 45 70% 95%;
+    --kpi-foreground: 38 60% 30%;
+
     /* Sidebar — AA dark slate from their presentations */
     --sidebar-background: 230 18% 22%;
     --sidebar-foreground: 220 10% 78%;

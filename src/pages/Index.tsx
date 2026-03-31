@@ -31,7 +31,7 @@ const Index = () => {
 
   return (
     <DashboardLayout title="Overview" subtitle="Doctor placement and operational performance">
-      <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-6 gap-3 mb-5">
+      <div className="grid grid-cols-2 md:grid-cols-3 gap-3 mb-5">
         {kpis.map((kpi) => <KpiCard key={kpi.label} {...kpi} />)}
       </div>
 
