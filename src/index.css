@@ -1,4 +1,4 @@
-@import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=DM+Sans:wght@400;500;600;700&display=swap');
+@import url('https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&display=swap');
 
 @tailwind base;
 @tailwind components;
@@ -6,59 +6,59 @@
 
 @layer base {
   :root {
-    --background: 0 0% 98%;
-    --foreground: 210 30% 15%;
+    --background: 210 20% 98%;
+    --foreground: 215 25% 17%;
 
     --card: 0 0% 100%;
-    --card-foreground: 210 30% 15%;
+    --card-foreground: 215 25% 17%;
 
     --popover: 0 0% 100%;
-    --popover-foreground: 210 30% 15%;
+    --popover-foreground: 215 25% 17%;
 
-    --primary: 174 65% 42%;
+    --primary: 172 58% 40%;
     --primary-foreground: 0 0% 100%;
 
-    --secondary: 210 25% 95%;
-    --secondary-foreground: 210 30% 25%;
+    --secondary: 210 18% 95%;
+    --secondary-foreground: 215 20% 30%;
 
-    --muted: 210 20% 96%;
-    --muted-foreground: 215 15% 50%;
+    --muted: 210 14% 96%;
+    --muted-foreground: 215 12% 55%;
 
-    --accent: 174 50% 94%;
-    --accent-foreground: 174 65% 30%;
+    --accent: 172 40% 94%;
+    --accent-foreground: 172 58% 28%;
 
-    --destructive: 0 72% 55%;
+    --destructive: 4 72% 56%;
     --destructive-foreground: 0 0% 100%;
 
-    --success: 152 60% 42%;
+    --success: 158 58% 40%;
     --success-foreground: 0 0% 100%;
 
-    --warning: 38 92% 50%;
+    --warning: 40 92% 50%;
     --warning-foreground: 0 0% 100%;
 
-    --info: 210 80% 55%;
+    --info: 214 80% 52%;
     --info-foreground: 0 0% 100%;
 
-    --border: 214 20% 90%;
-    --input: 214 20% 90%;
-    --ring: 174 65% 42%;
+    --border: 214 16% 91%;
+    --input: 214 16% 91%;
+    --ring: 172 58% 40%;
 
-    --radius: 0.75rem;
+    --radius: 0.625rem;
 
-    --chart-1: 174 65% 42%;
-    --chart-2: 210 80% 55%;
-    --chart-3: 152 60% 42%;
-    --chart-4: 38 92% 50%;
-    --chart-5: 280 65% 55%;
+    --chart-1: 172 58% 40%;
+    --chart-2: 214 80% 52%;
+    --chart-3: 158 58% 40%;
+    --chart-4: 40 92% 50%;
+    --chart-5: 280 55% 52%;
 
-    --sidebar-background: 210 35% 15%;
-    --sidebar-foreground: 210 15% 85%;
-    --sidebar-primary: 174 65% 50%;
+    --sidebar-background: 215 30% 13%;
+    --sidebar-foreground: 210 12% 80%;
+    --sidebar-primary: 172 58% 48%;
     --sidebar-primary-foreground: 0 0% 100%;
-    --sidebar-accent: 210 30% 22%;
-    --sidebar-accent-foreground: 210 15% 90%;
-    --sidebar-border: 210 25% 22%;
-    --sidebar-ring: 174 65% 42%;
+    --sidebar-accent: 215 25% 19%;
+    --sidebar-accent-foreground: 210 12% 92%;
+    --sidebar-border: 215 22% 18%;
+    --sidebar-ring: 172 58% 48%;
   }
 }
 
@@ -68,13 +68,28 @@
   }
 
   body {
-    @apply bg-background text-foreground;
-    font-family: 'Inter', sans-serif;
+    @apply bg-background text-foreground antialiased;
+    font-family: 'Inter', -apple-system, BlinkMacSystemFont, sans-serif;
+    font-feature-settings: 'cv02', 'cv03', 'cv04', 'cv11';
   }
 }
 
 @layer utilities {
   .font-display {
-    font-family: 'DM Sans', sans-serif;
+    font-family: 'Inter', -apple-system, BlinkMacSystemFont, sans-serif;
+    font-weight: 600;
+  }
+
+  .stat-value {
+    @apply text-2xl font-semibold tracking-tight text-foreground;
+    font-variant-numeric: tabular-nums;
+  }
+
+  .stat-label {
+    @apply text-[13px] font-medium text-muted-foreground;
+  }
+
+  .section-title {
+    @apply text-[13px] font-semibold uppercase tracking-wider text-muted-foreground;
   }
 }
