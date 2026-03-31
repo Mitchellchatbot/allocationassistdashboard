@@ -25,7 +25,7 @@ const KpiCard = ({ label, value, change, period, icon }: KpiCardProps) => {
   const isGood = label.includes("Processing") || label.includes("Cost") ? !isPositive : isPositive;
 
   return (
-    <Card className="shadow-sm border-border/50 hover:shadow transition-shadow">
+    <Card className="shadow-sm border-kpi/60 bg-kpi hover:shadow transition-shadow">
       <CardContent className="p-4">
         <div className="flex items-start justify-between mb-2">
           <span className="text-[11px] font-medium text-muted-foreground uppercase tracking-wide">{label}</span>

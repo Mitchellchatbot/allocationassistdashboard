@@ -61,6 +61,10 @@ export default {
           DEFAULT: "hsl(var(--info))",
           foreground: "hsl(var(--info-foreground))",
         },
+        kpi: {
+          DEFAULT: "hsl(var(--kpi))",
+          foreground: "hsl(var(--kpi-foreground))",
+        },
         sidebar: {
           DEFAULT: "hsl(var(--sidebar-background))",
           foreground: "hsl(var(--sidebar-foreground))",
