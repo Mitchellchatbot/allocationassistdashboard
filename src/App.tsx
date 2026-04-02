@@ -12,6 +12,7 @@ import TeamPerformance from "./pages/TeamPerformance";
 import Finance from "./pages/Finance";
 import Operations from "./pages/Operations";
 import Settings from "./pages/Settings";
+import Onboarding from "./pages/Onboarding";
 import NotFound from "./pages/NotFound";
 
 const queryClient = new QueryClient();
