@@ -12,7 +12,6 @@ import TeamPerformance from "./pages/TeamPerformance";
 import Finance from "./pages/Finance";
 import Operations from "./pages/Operations";
 import Settings from "./pages/Settings";
-import Onboarding from "./pages/Onboarding";
 import NotFound from "./pages/NotFound";
 
 const queryClient = new QueryClient();
@@ -33,7 +32,6 @@ const App = () => (
             <Route path="/finance" element={<Finance />} />
             <Route path="/operations" element={<Operations />} />
             <Route path="/settings" element={<Settings />} />
-            <Route path="/onboarding" element={<Onboarding />} />
             <Route path="*" element={<NotFound />} />
           </Routes>
         </BrowserRouter>
