@@ -33,6 +33,12 @@ const Index = () => {
 
   return (
     <DashboardLayout title="Dashboard" subtitle="A quick look at how doctor placements and operations are performing">
+      {/* Welcome Banner */}
+      <div className="mb-5 rounded-xl bg-gradient-to-r from-primary/10 via-primary/5 to-transparent border border-primary/20 p-5">
+        <h2 className="text-lg font-semibold text-foreground">Welcome back 👋</h2>
+        <p className="text-sm text-muted-foreground mt-1">Here's what's happening with your doctor placements and operations today.</p>
+      </div>
+
       {/* KPI Grid - responsive */}
       <div className="grid grid-cols-2 sm:grid-cols-3 gap-3 mb-5">
         {kpis.map((kpi) => <KpiCard key={kpi.label} {...kpi} />)}
