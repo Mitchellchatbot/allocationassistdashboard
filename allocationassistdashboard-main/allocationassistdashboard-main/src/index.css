@@ -1,0 +1,79 @@
+@import url('https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&display=swap');
+
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+@layer base {
+  :root {
+    --background: 220 15% 97%;
+    --foreground: 220 20% 18%;
+
+    --card: 0 0% 100%;
+    --card-foreground: 220 20% 18%;
+
+    --popover: 0 0% 100%;
+    --popover-foreground: 220 20% 18%;
+
+    /* Allocation Assist teal */
+    --primary: 170 55% 45%;
+    --primary-foreground: 0 0% 100%;
+
+    --secondary: 220 14% 94%;
+    --secondary-foreground: 220 15% 35%;
+
+    --muted: 220 12% 95%;
+    --muted-foreground: 220 10% 48%;
+
+    --accent: 170 35% 93%;
+    --accent-foreground: 170 55% 30%;
+
+    --destructive: 4 68% 55%;
+    --destructive-foreground: 0 0% 100%;
+
+    --success: 158 50% 42%;
+    --success-foreground: 0 0% 100%;
+
+    --warning: 38 88% 50%;
+    --warning-foreground: 30 80% 15%;
+
+    --info: 210 75% 52%;
+    --info-foreground: 0 0% 100%;
+
+    --border: 220 14% 90%;
+    --input: 220 14% 90%;
+    --ring: 170 55% 45%;
+
+    --radius: 0.5rem;
+
+    --chart-1: 170 55% 45%;
+    --chart-2: 210 75% 52%;
+    --chart-3: 158 50% 42%;
+    --chart-4: 38 88% 50%;
+    --chart-5: 280 50% 52%;
+
+    --kpi: 49 100% 95%;
+    --kpi-foreground: 42 60% 25%;
+
+    /* Sidebar — AA teal/turquoise */
+    --sidebar-background: 170 55% 30%;
+    --sidebar-foreground: 0 0% 100%;
+    --sidebar-primary: 49 100% 88%;
+    --sidebar-primary-foreground: 170 55% 20%;
+    --sidebar-accent: 170 45% 36%;
+    --sidebar-accent-foreground: 0 0% 100%;
+    --sidebar-border: 170 45% 26%;
+    --sidebar-ring: 49 100% 88%;
+  }
+}
+
+@layer base {
+  * {
+    @apply border-border;
+  }
+  body {
+    @apply bg-background text-foreground antialiased;
+    font-family: 'Inter', -apple-system, BlinkMacSystemFont, sans-serif;
+    font-feature-settings: 'cv02', 'cv03', 'cv04', 'cv11';
+  }
+}
