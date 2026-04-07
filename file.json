@@ -1,0 +1,73 @@
+{
+  "name": "Allocation Assist | Meta Leads → Supabase",
+  "nodes": [
+    {
+      "parameters": {
+        "pollTimes": {
+          "item": [{ "mode": "everyMinutes", "value": 15 }]
+        },
+        "documentId": {
+          "__rl": true,
+          "value": "PASTE_YOUR_SPREADSHEET_ID_HERE",
+          "mode": "id"
+        },
+        "sheetName": {
+          "__rl": true,
+          "value": "gid=0",
+          "mode": "id"
+        },
+        "event": "rowAdded",
+        "options": {}
+      },
+      "id": "f1a2b3c4-d5e6-7890-abcd-ef1234567890",
+      "name": "Google Sheets Trigger",
+      "type": "n8n-nodes-base.googleSheetsTrigger",
+      "typeVersion": 4,
+      "position": [100, 300],
+      "credentials": {
+        "googleSheetsOAuth2Api": {
+          "id": "1",
+          "name": "Google Sheets account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "jsCode": "const row = $input.first().json;\nconst keys = Object.keys(row);\nconst find = (partial) => {\n  const k = keys.find(k => k.toLowerCase().includes(partial.toLowerCase()));\n  return k ? row[k] || null : null;\n};\n\nreturn [{\n  json: {\n    first_name:       row['First name'] || null,\n    last_name:        row['Last name'] || null,\n    age:              row['And what is your age?'] || null,\n    email:            find('email') || null,\n    phone:            find('Phone') || null,\n    location:         find('country and city') || null,\n    employed:         find('currently employed') === 'TRUE',\n    profession:       find('profession') || null,\n    monthly_salary:   find('monthly salary') || null,\n    calendly_url:     find('Schedule your free') || null,\n    utm_source:       row['utm_source'] || null,\n    utm_medium:       row['utm_medium'] || null,\n    utm_campaign:     row['utm_campaign'] || null,\n    utm_content:      row['utm_content'] || null,\n    speciality:       find('speciality') || null,\n    years_experience: find('years of experience') || null,\n    additional_info:  find('anything else') || null,\n    family_medicine:  find('Family Medicine') || null,\n    client_id:        row['client_id'] || null,\n    traffic_source:   row['traffic_source'] || null,\n    is_new:           row['new'] || null,\n    training_country: find('training in your speciality') || null,\n    submitted_at:     row['Submitted At'] || null,\n    token:            row['Token'] || null,\n    channel:          row['Channel'] || null\n  }\n}];"
+      },
+      "id": "a1b2c3d4-e5f6-7890-abcd-ef1234567891",
+      "name": "Map Columns",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [360, 300]
+    },
+    {
+      "parameters": {
+        "operation": "insert",
+        "tableId": "meta_leads",
+        "dataToSend": "autoMapInputData",
+        "options": {}
+      },
+      "id": "b2c3d4e5-f6a7-8901-bcde-f12345678902",
+      "name": "Supabase - Insert Lead",
+      "type": "n8n-nodes-base.supabase",
+      "typeVersion": 1,
+      "position": [620, 300],
+      "credentials": {
+        "supabaseApi": {
+          "id": "2",
+          "name": "Supabase account"
+        }
+      }
+    }
+  ],
+  "connections": {
+    "Google Sheets Trigger": {
+      "main": [[{ "node": "Map Columns", "type": "main", "index": 0 }]]
+    },
+    "Map Columns": {
+      "main": [[{ "node": "Supabase - Insert Lead", "type": "main", "index": 0 }]]
+    }
+  },
+  "settings": { "executionOrder": "v1" }
+}

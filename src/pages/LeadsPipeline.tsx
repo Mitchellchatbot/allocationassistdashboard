@@ -3,8 +3,10 @@ import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import { useFilteredData } from "@/hooks/use-filtered-data";
-import { ArrowRight, AlertTriangle, CheckCircle, Clock, Search } from "lucide-react";
+import { useMetaLeads, PAGE_SIZE } from "@/hooks/use-meta-leads";
+import { ArrowRight, AlertTriangle, CheckCircle, Clock, Search, ChevronLeft, ChevronRight } from "lucide-react";
 import { Input } from "@/components/ui/input";
+import { Button } from "@/components/ui/button";
 import { useState } from "react";
 
 const statusConfig = {
@@ -14,14 +16,19 @@ const statusConfig = {
 };
 
 const LeadsPipeline = () => {
-  const { workflow, doctors } = useFilteredData();
+  const { workflow } = useFilteredData();
   const [search, setSearch] = useState("");
+  const [page, setPage] = useState(0);
 
-  const filteredDoctors = doctors.filter(doc =>
-    doc.name.toLowerCase().includes(search.toLowerCase()) ||
-    doc.specialty.toLowerCase().includes(search.toLowerCase()) ||
-    doc.stage.toLowerCase().includes(search.toLowerCase())
-  );
+  const { data, isLoading, isError } = useMetaLeads(page, search);
+  const doctors = data?.doctors ?? [];
+  const total = data?.total ?? 0;
+  const totalPages = Math.ceil(total / PAGE_SIZE);
+
+  const handleSearch = (value: string) => {
+    setSearch(value);
+    setPage(0); // reset to first page on new search
+  };
 
   return (
     <DashboardLayout title="Doctor Progress" subtitle="Track each doctor's journey from application to placement">
@@ -48,67 +55,101 @@ const LeadsPipeline = () => {
         <CardHeader className="pb-2 pt-4 px-4">
           <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-2">
             <CardTitle className="text-[12px] font-medium text-muted-foreground uppercase tracking-wide">
-              All Doctors ({filteredDoctors.length})
+              All Doctors ({total.toLocaleString()})
             </CardTitle>
             <div className="relative w-full sm:w-[220px]">
               <Search className="absolute left-2.5 top-1/2 -translate-y-1/2 h-3 w-3 text-muted-foreground" />
               <Input
                 placeholder="Search by name, specialty..."
                 value={search}
-                onChange={(e) => setSearch(e.target.value)}
+                onChange={(e) => handleSearch(e.target.value)}
                 className="h-7 pl-7 text-[11px] bg-secondary/50 border-0"
               />
             </div>
           </div>
         </CardHeader>
         <CardContent className="px-4 pb-4">
-          {filteredDoctors.length === 0 ? (
+          {isLoading ? (
+            <p className="text-[12px] text-muted-foreground py-8 text-center">Loading leads…</p>
+          ) : isError ? (
+            <p className="text-[12px] text-destructive py-8 text-center">Failed to load leads. Check your Supabase connection.</p>
+          ) : doctors.length === 0 ? (
             <p className="text-[12px] text-muted-foreground py-8 text-center">
-              {search ? "No doctors match your search" : "No doctors found for selected region"}
+              {search ? "No doctors match your search" : "No leads found for selected region"}
             </p>
           ) : (
-            <div className="overflow-x-auto -mx-4 px-4">
-              <Table>
-                <TableHeader>
-                  <TableRow className="hover:bg-transparent">
-                    <TableHead className="text-[10px] uppercase tracking-wide h-8">ID</TableHead>
-                    <TableHead className="text-[10px] uppercase tracking-wide h-8">Doctor</TableHead>
-                    <TableHead className="text-[10px] uppercase tracking-wide h-8 hidden sm:table-cell">Specialty</TableHead>
-                    <TableHead className="text-[10px] uppercase tracking-wide h-8">Current Step</TableHead>
-                    <TableHead className="text-[10px] uppercase tracking-wide h-8 hidden md:table-cell">From → To</TableHead>
-                    <TableHead className="text-[10px] uppercase tracking-wide h-8 hidden lg:table-cell">License Type</TableHead>
-                    <TableHead className="text-[10px] uppercase tracking-wide h-8 hidden lg:table-cell">Recruiter</TableHead>
-                    <TableHead className="text-[10px] uppercase tracking-wide h-8 text-right">Days in Step</TableHead>
-                    <TableHead className="text-[10px] uppercase tracking-wide h-8">Status</TableHead>
-                  </TableRow>
-                </TableHeader>
-                <TableBody>
-                  {filteredDoctors.map(doc => {
-                    const st = statusConfig[doc.status];
-                    const StIcon = st.icon;
-                    return (
-                      <TableRow key={doc.id} className="hover:bg-muted/30">
-                        <TableCell className="text-[10px] font-mono text-muted-foreground py-2.5">{doc.id}</TableCell>
-                        <TableCell className="text-[12px] font-medium py-2.5">{doc.name}</TableCell>
-                        <TableCell className="text-[11px] text-muted-foreground py-2.5 hidden sm:table-cell">{doc.specialty}</TableCell>
-                        <TableCell className="py-2.5">
-                          <Badge variant="outline" className="text-[9px] font-medium">{doc.stage}</Badge>
-                        </TableCell>
-                        <TableCell className="text-[10px] text-muted-foreground py-2.5 hidden md:table-cell">{doc.origin} → {doc.destination}</TableCell>
-                        <TableCell className="text-[10px] font-medium py-2.5 hidden lg:table-cell">{doc.license}</TableCell>
-                        <TableCell className="text-[11px] text-muted-foreground py-2.5 hidden lg:table-cell">{doc.assignedTo}</TableCell>
-                        <TableCell className="text-[12px] text-right font-medium py-2.5 tabular-nums">{doc.daysInStage}</TableCell>
-                        <TableCell className="py-2.5">
-                          <div className={`inline-flex items-center gap-0.5 rounded-full border px-1.5 py-0.5 text-[9px] font-medium ${st.className}`}>
-                            <StIcon className="h-2.5 w-2.5" />{st.label}
-                          </div>
-                        </TableCell>
-                      </TableRow>
-                    );
-                  })}
-                </TableBody>
-              </Table>
-            </div>
+            <>
+              <div className="overflow-x-auto -mx-4 px-4">
+                <Table>
+                  <TableHeader>
+                    <TableRow className="hover:bg-transparent">
+                      <TableHead className="text-[10px] uppercase tracking-wide h-8">ID</TableHead>
+                      <TableHead className="text-[10px] uppercase tracking-wide h-8">Doctor</TableHead>
+                      <TableHead className="text-[10px] uppercase tracking-wide h-8 hidden sm:table-cell">Specialty</TableHead>
+                      <TableHead className="text-[10px] uppercase tracking-wide h-8">Current Step</TableHead>
+                      <TableHead className="text-[10px] uppercase tracking-wide h-8 hidden md:table-cell">From → To</TableHead>
+                      <TableHead className="text-[10px] uppercase tracking-wide h-8 hidden lg:table-cell">License Type</TableHead>
+                      <TableHead className="text-[10px] uppercase tracking-wide h-8 hidden lg:table-cell">Recruiter</TableHead>
+                      <TableHead className="text-[10px] uppercase tracking-wide h-8 text-right">Days in Step</TableHead>
+                      <TableHead className="text-[10px] uppercase tracking-wide h-8">Status</TableHead>
+                    </TableRow>
+                  </TableHeader>
+                  <TableBody>
+                    {doctors.map(doc => {
+                      const st = statusConfig[doc.status];
+                      const StIcon = st.icon;
+                      return (
+                        <TableRow key={doc.id} className="hover:bg-muted/30">
+                          <TableCell className="text-[10px] font-mono text-muted-foreground py-2.5">{doc.id}</TableCell>
+                          <TableCell className="text-[12px] font-medium py-2.5">{doc.name}</TableCell>
+                          <TableCell className="text-[11px] text-muted-foreground py-2.5 hidden sm:table-cell">{doc.specialty}</TableCell>
+                          <TableCell className="py-2.5">
+                            <Badge variant="outline" className="text-[9px] font-medium">{doc.stage}</Badge>
+                          </TableCell>
+                          <TableCell className="text-[10px] text-muted-foreground py-2.5 hidden md:table-cell">{doc.origin} → {doc.destination}</TableCell>
+                          <TableCell className="text-[10px] font-medium py-2.5 hidden lg:table-cell">{doc.license}</TableCell>
+                          <TableCell className="text-[11px] text-muted-foreground py-2.5 hidden lg:table-cell">{doc.assignedTo}</TableCell>
+                          <TableCell className="text-[12px] text-right font-medium py-2.5 tabular-nums">{doc.daysInStage}</TableCell>
+                          <TableCell className="py-2.5">
+                            <div className={`inline-flex items-center gap-0.5 rounded-full border px-1.5 py-0.5 text-[9px] font-medium ${st.className}`}>
+                              <StIcon className="h-2.5 w-2.5" />{st.label}
+                            </div>
+                          </TableCell>
+                        </TableRow>
+                      );
+                    })}
+                  </TableBody>
+                </Table>
+              </div>
+
+              {totalPages > 1 && (
+                <div className="flex items-center justify-between pt-3 border-t border-border/50 mt-3">
+                  <p className="text-[11px] text-muted-foreground">
+                    Page {page + 1} of {totalPages.toLocaleString()} — {total.toLocaleString()} total
+                  </p>
+                  <div className="flex items-center gap-1">
+                    <Button
+                      variant="outline"
+                      size="sm"
+                      className="h-6 w-6 p-0"
+                      onClick={() => setPage(p => Math.max(0, p - 1))}
+                      disabled={page === 0}
+                    >
+                      <ChevronLeft className="h-3 w-3" />
+                    </Button>
+                    <Button
+                      variant="outline"
+                      size="sm"
+                      className="h-6 w-6 p-0"
+                      onClick={() => setPage(p => Math.min(totalPages - 1, p + 1))}
+                      disabled={page >= totalPages - 1}
+                    >
+                      <ChevronRight className="h-3 w-3" />
+                    </Button>
+                  </div>
+                </div>
+              )}
+            </>
           )}
         </CardContent>
       </Card>
