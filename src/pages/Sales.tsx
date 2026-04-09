@@ -105,6 +105,7 @@ const Sales = () => {
                   <TableHead className="text-[10px] uppercase tracking-wide h-8 hidden sm:table-cell">Region</TableHead>
                   <TableHead className="text-[10px] uppercase tracking-wide h-8 text-right">Doctors Managed</TableHead>
                   <TableHead className="text-[10px] uppercase tracking-wide h-8 text-right">Successfully Placed</TableHead>
+                  <TableHead className="text-[10px] uppercase tracking-wide h-8 text-right hidden md:table-cell">Calls Made</TableHead>
                   <TableHead className="text-[10px] uppercase tracking-wide h-8 text-right hidden md:table-cell">Revenue Earned</TableHead>
                 </TableRow>
               </TableHeader>
@@ -125,6 +126,7 @@ const Sales = () => {
                     <TableCell className="py-2.5 text-[11px] hidden sm:table-cell">{rep.region}</TableCell>
                     <TableCell className="py-2.5 text-[12px] text-right tabular-nums">{rep.doctors}</TableCell>
                     <TableCell className="py-2.5 text-[12px] text-right font-medium tabular-nums">{rep.placements}</TableCell>
+                    <TableCell className="py-2.5 text-[12px] text-right tabular-nums hidden md:table-cell">{(rep as { calls?: number }).calls ?? '—'}</TableCell>
                     <TableCell className="py-2.5 text-[12px] text-right tabular-nums hidden md:table-cell">{rep.revenue}</TableCell>
                   </TableRow>
                 ))}

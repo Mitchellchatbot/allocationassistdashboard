@@ -1,5 +1,5 @@
 /**
- * useZohoData — fetches Leads + Deals from Zoho CRM and aggregates
+ * useZohoData — fetches Leads + Deals + Calls from Zoho CRM and aggregates
  * them into the shape the dashboard needs.
  *
  * Real field names confirmed from live API on 2026-04-09:
@@ -7,6 +7,8 @@
  *           Specialty_New, Country_of_Specialty_training, Created_Time,
  *           Has_DOH, Has_DHA, Has_MOH, License, Recruiter, Age
  *   Deals:  Deal_Name, Stage, Amount, Owner{name}, Closing_Date, Lead_Source
+ *   Calls:  Call_Type, Call_Status, Owner{name}, Created_Time
+ *           (Emails module blocked by Zoho permissions — stays mock)
  */
 
 import { useQuery } from '@tanstack/react-query';
@@ -43,6 +45,14 @@ interface ZohoDeal {
   Owner: { name: string; email: string };
   Closing_Date: string;
   Lead_Source: string | null;
+}
+
+interface ZohoCall {
+  id: string;
+  Call_Type: string;   // "Outbound" | "Inbound" | "Missed"
+  Call_Status: string;
+  Owner: { name: string; email: string };
+  Created_Time: string;
 }
 
 // ── Aggregation helpers ───────────────────────────────────────────────────────
@@ -104,7 +114,7 @@ function displaySource(src: string | null): string {
 
 // ── Main aggregation ──────────────────────────────────────────────────────────
 
-function aggregateZohoData(leads: ZohoLead[], deals: ZohoDeal[]) {
+function aggregateZohoData(leads: ZohoLead[], deals: ZohoDeal[], calls: ZohoCall[]) {
   // ── KPIs ──────────────────────────────────────────────────────────────────
   const activeleadStatuses = new Set([
     'Not Contacted', 'Attempted to Contact', 'Initial Sales Call Completed',
@@ -187,10 +197,11 @@ function aggregateZohoData(leads: ZohoLead[], deals: ZohoDeal[]) {
       const revenue = sumBy(won, d => d.Amount);
       return {
         name,
-        region: 'UAE',   // Region not on Deals — fallback
+        region: 'GCC',   // Destination not stored on Deals
         doctors: recruiterLeads[name] ?? 0,
         placements: won.length,
         revenue: `AED ${revenue.toLocaleString()}`,
+        calls: callsByRecruiter[name] ?? 0,
         score: Math.min(100, Math.round((won.length / Math.max(rDeals.length, 1)) * 100)),
       };
     })
@@ -247,6 +258,10 @@ function aggregateZohoData(leads: ZohoLead[], deals: ZohoDeal[]) {
     { label: 'Revenue',           value: fmtAED(totalRevenue),                  change: 0, period: 'Closed Won deals', icon: 'dollar' as const },
   ];
 
+  // ── Calls (real data from Zoho Calls module) ──────────────────────────────
+  const outboundCalls = calls.filter(c => c.Call_Type === 'Outbound');
+  const callsByRecruiter = countBy(outboundCalls, c => c.Owner?.name ?? 'Unknown');
+
   // ── Sales metrics ─────────────────────────────────────────────────────────
   const sales = {
     dealsClosed: closedWon.length,
@@ -254,8 +269,8 @@ function aggregateZohoData(leads: ZohoLead[], deals: ZohoDeal[]) {
       ? parseFloat(((closedWon.length / deals.length) * 100).toFixed(1))
       : 0,
     avgCycleTime: 0,
-    outboundCalls: 0,   // needs Activities module
-    emailsSent: 0,      // needs Activities module
+    outboundCalls: outboundCalls.length,   // live from Zoho Calls module
+    emailsSent: 0,                          // Zoho Emails module blocked by permissions
     followUpsPending: leads.filter(l => l.Lead_Status === 'High Priority Follow up').length,
   };
 
@@ -292,15 +307,20 @@ const DEAL_FIELDS = [
   'Deal_Name', 'Stage', 'Amount', 'Owner', 'Closing_Date', 'Lead_Source',
 ];
 
+const CALL_FIELDS = [
+  'Call_Type', 'Call_Status', 'Owner', 'Created_Time',
+];
+
 export function useZohoData() {
   return useQuery({
     queryKey: ['zoho-data'],
     queryFn: async () => {
-      const [leads, deals] = await Promise.all([
+      const [leads, deals, calls] = await Promise.all([
         zohoFetchAll<ZohoLead>('Leads', LEAD_FIELDS, 15),  // up to 3,000 leads
         zohoFetchAll<ZohoDeal>('Deals', DEAL_FIELDS, 5),
+        zohoFetchAll<ZohoCall>('Calls', CALL_FIELDS, 10),  // up to 2,000 calls
       ]);
-      return aggregateZohoData(leads, deals);
+      return aggregateZohoData(leads, deals, calls);
     },
     staleTime: 10 * 60 * 1000,   // re-fetch every 10 minutes
     gcTime:    30 * 60 * 1000,
