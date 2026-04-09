@@ -12,6 +12,7 @@ import TeamPerformance from "./pages/TeamPerformance";
 import Finance from "./pages/Finance";
 import Operations from "./pages/Operations";
 import Settings from "./pages/Settings";
+import ChatPortal from "./pages/ChatPortal";
 import NotFound from "./pages/NotFound";
 
 const queryClient = new QueryClient();
@@ -32,6 +33,7 @@ const App = () => (
             <Route path="/finance" element={<Finance />} />
             <Route path="/operations" element={<Operations />} />
             <Route path="/settings" element={<Settings />} />
+            <Route path="/chat" element={<ChatPortal />} />
             <Route path="*" element={<NotFound />} />
           </Routes>
         </BrowserRouter>

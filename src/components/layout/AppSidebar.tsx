@@ -8,6 +8,7 @@ import {
   ChevronDown,
   GitBranch,
   ClipboardList,
+  MessageSquare,
 } from "lucide-react";
 import logo from "@/assets/logo.png";
 import { NavLink } from "@/components/NavLink";
@@ -33,6 +34,7 @@ const mainNav = [
   { title: "Team Performance", url: "/team", icon: UsersIcon },
   { title: "Finance", url: "/finance", icon: DollarSign },
   { title: "Operations & Roadmap", url: "/operations", icon: ClipboardList },
+  { title: "Chat Portal", url: "/chat", icon: MessageSquare },
 ];
 
 const bottomNav = [
