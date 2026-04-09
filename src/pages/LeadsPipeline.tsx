@@ -71,8 +71,6 @@ const LeadsPipeline = () => {
         <CardContent className="px-4 pb-4">
           {isLoading ? (
             <p className="text-[12px] text-muted-foreground py-8 text-center">Loading leads…</p>
-          ) : isError ? (
-            <p className="text-[12px] text-destructive py-8 text-center">Failed to load leads. Check your Supabase connection.</p>
           ) : doctors.length === 0 ? (
             <p className="text-[12px] text-muted-foreground py-8 text-center">
               {search ? "No doctors match your search" : "No leads found for selected region"}

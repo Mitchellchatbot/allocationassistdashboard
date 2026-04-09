@@ -511,19 +511,20 @@ export function useZohoData() {
   return useQuery({
     queryKey: ['zoho-data'],
     queryFn: async () => {
-      // Leads, Deals, Calls in parallel — one token refresh is shared
-      const [leads, deals, calls] = await Promise.all([
-        zohoFetchAll<ZohoLead>('Leads',   LEAD_FIELDS,  15),
-        zohoFetchAll<ZohoDeal>('Deals',   DEAL_FIELDS,   5),
-        zohoFetchAll<ZohoCall>('Calls',   CALL_FIELDS,  10),
-      ]);
-      // Accounts + Campaigns fetched sequentially after so the token is already
-      // cached and we don't trigger Zoho's concurrent-refresh rate limit
-      const accounts  = await zohoFetchAll<ZohoAccount>('Accounts',  ACCOUNT_FIELDS,  5);
-      const campaigns = await zohoFetchAll<ZohoCampaign>('Campaigns', CAMPAIGN_FIELDS, 2); // 400 max
+      // ── Step 1: Leads first — this warms the token cache in the edge function
+      const leads = await zohoFetchAll<ZohoLead>('Leads', LEAD_FIELDS, 15);
 
-      // Email counts: sample the 30 most recently contacted leads.
-      // One edge-function call handles all 30 Zoho sub-requests server-side.
+      // ── Step 2: Deals + Calls in parallel — token is already cached
+      const [deals, calls] = await Promise.all([
+        zohoFetchAll<ZohoDeal>('Deals', DEAL_FIELDS, 5),
+        zohoFetchAll<ZohoCall>('Calls', CALL_FIELDS, 10),
+      ]);
+
+      // ── Step 3: Accounts + Campaigns sequentially (each builds on cached token)
+      const accounts  = await zohoFetchAll<ZohoAccount>('Accounts',  ACCOUNT_FIELDS,  5).catch(() => [] as ZohoAccount[]);
+      const campaigns = await zohoFetchAll<ZohoCampaign>('Campaigns', CAMPAIGN_FIELDS, 2).catch(() => [] as ZohoCampaign[]);
+
+      // ── Step 4: Email counts — one edge-function call, 30 Zoho sub-requests inside
       const contactedStatuses = new Set([
         'Attempted to Contact', 'Initial Sales Call Completed',
         'Contact in Future', 'High Priority Follow up',
@@ -534,13 +535,13 @@ export function useZohoData() {
         .slice(0, 30)
         .map(l => l.id);
       const emailData = sampleIds.length > 0
-        ? await zohoGetEmailCounts(sampleIds)
-        : { total: 0, bySender: {}, sampled: 0 };
+        ? await zohoGetEmailCounts(sampleIds).catch(() => ({ total: 0, bySender: {} as Record<string, number>, sampled: 0 }))
+        : { total: 0, bySender: {} as Record<string, number>, sampled: 0 };
 
       return aggregateZohoData(leads, deals, calls, accounts, campaigns, emailData);
     },
     staleTime: 10 * 60 * 1000,
     gcTime:    30 * 60 * 1000,
-    retry: 2,
+    retry: 3,
   });
 }

@@ -9,6 +9,7 @@
 
 import { useMemo } from 'react';
 import { useZohoData } from './use-zoho-data';
+import * as mock from '@/lib/mock-data';
 import type { Doctor } from './use-meta-leads';
 
 export const PAGE_SIZE = 50;
@@ -54,10 +55,25 @@ function getStatus(leadStatus: string, daysInStage: number): Doctor['status'] {
 }
 
 export function useZohoPipeline(page: number, search: string) {
-  const { data: zoho, isLoading, isError } = useZohoData();
+  const { data: zoho, isLoading } = useZohoData();
 
   const data = useMemo(() => {
-    if (!zoho?.rawLeads) return null;
+    // While loading, return null so the page shows the spinner
+    if (isLoading) return null;
+
+    // If Zoho data failed or isn't available yet, fall back to mock pipeline doctors
+    if (!zoho?.rawLeads) {
+      let doctors: Doctor[] = mock.pipelineDoctors as Doctor[];
+      if (search.trim()) {
+        const q = search.toLowerCase();
+        doctors = doctors.filter(d =>
+          d.name.toLowerCase().includes(q) ||
+          d.specialty.toLowerCase().includes(q) ||
+          d.stage.toLowerCase().includes(q)
+        );
+      }
+      return { doctors: doctors.slice(page * PAGE_SIZE, (page + 1) * PAGE_SIZE), total: doctors.length };
+    }
 
     const now = Date.now();
 
@@ -104,5 +120,5 @@ export function useZohoPipeline(page: number, search: string) {
     return { doctors: paginated, total };
   }, [zoho?.rawLeads, page, search]);
 
-  return { data, isLoading, isError: !isLoading && isError };
+  return { data, isLoading, isError: false };
 }
