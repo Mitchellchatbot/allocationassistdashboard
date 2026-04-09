@@ -61,6 +61,41 @@ serve(async (req: Request) => {
   try {
     const url    = new URL(req.url);
     const module = url.searchParams.get('module');
+    const action = url.searchParams.get('action');
+
+    // ── Special action: count emails for a batch of lead IDs server-side ──
+    // Called as: ?action=email-counts&lead_ids=id1,id2,...
+    // Runs all Zoho calls inside this single edge-function invocation so the
+    // token is cached and the browser only makes one request.
+    if (action === 'email-counts') {
+      const ids   = (url.searchParams.get('lead_ids') ?? '').split(',').filter(Boolean).slice(0, 30);
+      const token = await getAccessToken();
+
+      let total = 0;
+      const bySender: Record<string, number> = {};
+
+      for (const id of ids) {
+        try {
+          const r = await fetch(`${API_DOMAIN}/crm/v2/Leads/${id}/Emails`, {
+            headers: { Authorization: `Zoho-oauthtoken ${token}` },
+          });
+          if (r.ok) {
+            const d = await r.json() as { email_related_list?: Array<{ owner?: { name?: string } }> };
+            const emails = d.email_related_list ?? [];
+            total += emails.length;
+            for (const e of emails) {
+              const name = e.owner?.name ?? 'Unknown';
+              bySender[name] = (bySender[name] ?? 0) + 1;
+            }
+          }
+        } catch { /* skip failed individual lead */ }
+      }
+
+      return new Response(
+        JSON.stringify({ total, bySender, sampled: ids.length }),
+        { status: 200, headers: { ...CORS, 'Content-Type': 'application/json' } }
+      );
+    }
 
     if (!module) {
       return new Response(

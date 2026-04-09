@@ -13,7 +13,7 @@
  */
 
 import { useQuery } from '@tanstack/react-query';
-import { zohoFetchAll } from '@/lib/zoho';
+import { zohoFetchAll, zohoGetEmailCounts } from '@/lib/zoho';
 
 // ── Zoho field types ─────────────────────────────────────────────────────────
 
@@ -161,6 +161,7 @@ function aggregateZohoData(
   calls: ZohoCall[],
   accounts: ZohoAccount[],
   campaigns: ZohoCampaign[],
+  emailData: { total: number; bySender: Record<string, number>; sampled: number },
 ) {
   // ── Status sets ───────────────────────────────────────────────────────────
   const activeStatuses = new Set([
@@ -309,6 +310,7 @@ function aggregateZohoData(
         placements: won.length,
         revenue:    `AED ${revenue.toLocaleString()}`,
         calls:      callsByRecruiter[name] ?? 0,
+        emails:     emailData.bySender[name] ?? 0,
         score: Math.min(100, Math.round((won.length / Math.max(rDeals.length, 1)) * 100)),
       };
     })
@@ -351,6 +353,7 @@ function aggregateZohoData(
   ];
 
   // ── Sales metrics ─────────────────────────────────────────────────────────
+  // emailsSent is sampled from the 30 most recently contacted leads — real but approximate
   const sales = {
     dealsClosed:        closedWon.length,
     conversionRate:     deals.length > 0
@@ -358,7 +361,7 @@ function aggregateZohoData(
       : 0,
     avgCycleTime,
     outboundCalls:      outboundCalls.length,
-    emailsSent:         0,   // Zoho Emails module permission denied
+    emailsSent:         emailData.total,
     followUpsPending:   leads.filter(l => l.Lead_Status === 'High Priority Follow up').length,
   };
 
@@ -518,7 +521,23 @@ export function useZohoData() {
       // cached and we don't trigger Zoho's concurrent-refresh rate limit
       const accounts  = await zohoFetchAll<ZohoAccount>('Accounts',  ACCOUNT_FIELDS,  5);
       const campaigns = await zohoFetchAll<ZohoCampaign>('Campaigns', CAMPAIGN_FIELDS, 2); // 400 max
-      return aggregateZohoData(leads, deals, calls, accounts, campaigns);
+
+      // Email counts: sample the 30 most recently contacted leads.
+      // One edge-function call handles all 30 Zoho sub-requests server-side.
+      const contactedStatuses = new Set([
+        'Attempted to Contact', 'Initial Sales Call Completed',
+        'Contact in Future', 'High Priority Follow up',
+      ]);
+      const sampleIds = leads
+        .filter(l => contactedStatuses.has(l.Lead_Status))
+        .sort((a, b) => new Date(b.Created_Time).getTime() - new Date(a.Created_Time).getTime())
+        .slice(0, 30)
+        .map(l => l.id);
+      const emailData = sampleIds.length > 0
+        ? await zohoGetEmailCounts(sampleIds)
+        : { total: 0, bySender: {}, sampled: 0 };
+
+      return aggregateZohoData(leads, deals, calls, accounts, campaigns, emailData);
     },
     staleTime: 10 * 60 * 1000,
     gcTime:    30 * 60 * 1000,

@@ -38,6 +38,33 @@ export async function zohoGet<T = unknown>(
   return res.json() as Promise<T>;
 }
 
+/**
+ * Fetch email counts for up to 30 leads in a single edge-function call.
+ * The proxy handles all Zoho sub-requests server-side so the browser only
+ * makes one network round-trip.
+ * Returns { total, bySender: Record<recruiterName, count>, sampled }
+ */
+export async function zohoGetEmailCounts(leadIds: string[]): Promise<{
+  total: number;
+  bySender: Record<string, number>;
+  sampled: number;
+}> {
+  const ids = leadIds.slice(0, 30).join(',');
+  const url = new URL(PROXY_URL);
+  url.searchParams.set('action', 'email-counts');
+  url.searchParams.set('lead_ids', ids);
+
+  const res = await fetch(url.toString(), {
+    headers: {
+      'apikey':        SUPABASE_ANON_KEY,
+      'Authorization': `Bearer ${SUPABASE_ANON_KEY}`,
+    },
+  });
+
+  if (!res.ok) return { total: 0, bySender: {}, sampled: 0 };
+  return res.json();
+}
+
 /** Fetch every page of a Zoho module and return all records. */
 export async function zohoFetchAll<T = Record<string, unknown>>(
   module: string,
