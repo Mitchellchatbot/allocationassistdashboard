@@ -3,7 +3,7 @@ import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import { useFilteredData } from "@/hooks/use-filtered-data";
-import { useMetaLeads, PAGE_SIZE } from "@/hooks/use-meta-leads";
+import { useZohoPipeline, PAGE_SIZE } from "@/hooks/use-zoho-pipeline";
 import { ArrowRight, AlertTriangle, CheckCircle, Clock, Search, ChevronLeft, ChevronRight } from "lucide-react";
 import { Input } from "@/components/ui/input";
 import { Button } from "@/components/ui/button";
@@ -20,7 +20,7 @@ const LeadsPipeline = () => {
   const [search, setSearch] = useState("");
   const [page, setPage] = useState(0);
 
-  const { data, isLoading, isError } = useMetaLeads(page, search);
+  const { data, isLoading, isError } = useZohoPipeline(page, search);
   const doctors = data?.doctors ?? [];
   const total = data?.total ?? 0;
   const totalPages = Math.ceil(total / PAGE_SIZE);

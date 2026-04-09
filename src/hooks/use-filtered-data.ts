@@ -95,8 +95,10 @@ export function useFilteredData() {
             placements: scale(r.placements, tm, 1),
           }));
 
-    // Workflow stages (mock — no direct Zoho equivalent)
-    const workflow = mock.workflowStages.map(s => ({ ...s, count: scale(s.count, tm, rm) }));
+    // Workflow stages — real pipeline stage counts from Zoho
+    const workflow = zoho
+      ? zoho.workflow.map(s => ({ ...s, count: scale(s.count, tm, rm) }))
+      : mock.workflowStages.map(s => ({ ...s, count: scale(s.count, tm, rm) }));
 
     // Sales metrics
     const sales = zoho
@@ -191,23 +193,27 @@ export function useFilteredData() {
     }));
 
     const timeDelayAdjust: Record<string, number> = { week: 0.7, month: 0.85, quarter: 1, year: 1.2 };
-    const bottlenecks = mock.bottlenecks.map(b => ({
-      ...b,
-      affected: scale(b.affected, tm, rm),
-      avgDelay: `${Math.round(parseInt(b.avgDelay) * (timeDelayAdjust[timeRange] ?? 1))} days`,
-    }));
+    const bottlenecks = zoho
+      ? zoho.bottlenecks   // real counts from Zoho lead statuses
+      : mock.bottlenecks.map(b => ({
+          ...b,
+          affected: scale(b.affected, tm, rm),
+          avgDelay: `${Math.round(parseInt(b.avgDelay) * (timeDelayAdjust[timeRange] ?? 1))} days`,
+        }));
 
     const rateAdjust: Record<string, number> = { week: 0.92, month: 0.96, quarter: 1, year: 1.04 };
-    const stageConversion = mock.stageConversion.map(s => ({
-      ...s,
-      rate: Math.min(100, +(s.rate * (rateAdjust[timeRange] ?? 1)).toFixed(1)),
-    }));
+    const stageConversion = zoho
+      ? zoho.stageConversion   // real rates computed from Zoho Lead_Status distribution
+      : mock.stageConversion.map(s => ({
+          ...s,
+          rate: Math.min(100, +(s.rate * (rateAdjust[timeRange] ?? 1)).toFixed(1)),
+        }));
 
     return {
       kpis, timeData, funnel, channels, regions, pipeline, workflow,
       sales, recruiters, marketing, costVsConv, finance, roiData,
       doctors, campaigns, timeLabel, stageConversion,
-      activity: mock.recentActivity,
+      activity: zoho ? zoho.recentActivity : mock.recentActivity,
       operationalHealth,
       roadmapPhases: mock.roadmapPhases,
       bottlenecks,
