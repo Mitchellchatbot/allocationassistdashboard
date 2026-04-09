@@ -106,8 +106,8 @@ export function useFilteredData() {
           dealsClosed: zoho.sales.dealsClosed,
           conversionRate: zoho.sales.conversionRate,
           avgCycleTime: zoho.sales.avgCycleTime || mock.salesMetrics.avgCycleTime,
-          outboundCalls: scale(mock.salesMetrics.outboundCalls, tm, rm),  // mock until Activities API
-          emailsSent: scale(mock.salesMetrics.emailsSent, tm, rm),
+          outboundCalls: zoho.sales.outboundCalls,   // real from Zoho Calls module
+          emailsSent: zoho.sales.emailsSent,         // real from Zoho email counts
           followUpsPending: zoho.sales.followUpsPending,
         }
       : {

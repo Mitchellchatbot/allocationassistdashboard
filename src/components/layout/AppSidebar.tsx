@@ -9,6 +9,7 @@ import {
   GitBranch,
   ClipboardList,
   MessageSquare,
+  Image,
 } from "lucide-react";
 import logo from "@/assets/logo.png";
 import { NavLink } from "@/components/NavLink";
@@ -35,6 +36,7 @@ const mainNav = [
   { title: "Finance", url: "/finance", icon: DollarSign },
   { title: "Operations & Roadmap", url: "/operations", icon: ClipboardList },
   { title: "Chat Portal", url: "/chat", icon: MessageSquare },
+  { title: "Meta Ads", url: "/meta-ads", icon: Image },
 ];
 
 const bottomNav = [

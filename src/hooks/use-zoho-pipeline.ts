@@ -62,7 +62,7 @@ export function useZohoPipeline(page: number, search: string) {
     if (isLoading) return null;
 
     // If Zoho data failed or isn't available yet, fall back to mock pipeline doctors
-    if (!zoho?.rawLeads) {
+    if (!zoho?.rawLeads || zoho.rawLeads.length === 0) {
       let doctors: Doctor[] = mock.pipelineDoctors as Doctor[];
       if (search.trim()) {
         const q = search.toLowerCase();
@@ -118,7 +118,7 @@ export function useZohoPipeline(page: number, search: string) {
     const paginated = doctors.slice(page * PAGE_SIZE, (page + 1) * PAGE_SIZE);
 
     return { doctors: paginated, total };
-  }, [zoho?.rawLeads, page, search]);
+  }, [zoho?.rawLeads, isLoading, page, search]);
 
   return { data, isLoading, isError: false };
 }

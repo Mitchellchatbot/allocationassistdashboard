@@ -13,6 +13,7 @@ import Finance from "./pages/Finance";
 import Operations from "./pages/Operations";
 import Settings from "./pages/Settings";
 import ChatPortal from "./pages/ChatPortal";
+import MetaAds from "./pages/MetaAds";
 import NotFound from "./pages/NotFound";
 
 const queryClient = new QueryClient();
@@ -34,6 +35,7 @@ const App = () => (
             <Route path="/operations" element={<Operations />} />
             <Route path="/settings" element={<Settings />} />
             <Route path="/chat" element={<ChatPortal />} />
+            <Route path="/meta-ads" element={<MetaAds />} />
             <Route path="*" element={<NotFound />} />
           </Routes>
         </BrowserRouter>

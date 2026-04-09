@@ -540,8 +540,10 @@ export function useZohoData() {
 
       return aggregateZohoData(leads, deals, calls, accounts, campaigns, emailData);
     },
-    staleTime: 10 * 60 * 1000,
-    gcTime:    30 * 60 * 1000,
-    retry: 3,
+    staleTime:            15 * 60 * 1000,   // treat data as fresh for 15 min
+    gcTime:               60 * 60 * 1000,   // keep in cache for 1 hr
+    retry:                1,                // only 1 retry (not 3) to reduce token hammering
+    retryDelay:           30_000,           // wait 30 s before retry
+    refetchOnWindowFocus: false,            // don't re-fetch when user switches tabs
   });
 }
