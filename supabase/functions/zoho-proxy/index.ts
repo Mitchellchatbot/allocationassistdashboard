@@ -1,31 +1,51 @@
 /**
  * Zoho Proxy — Supabase Edge Function
  *
- * Runs server-side (Deno). Stores Zoho credentials as Supabase secrets
- * so they are never exposed to the browser. Handles token refresh
- * automatically — tokens are cached in memory for the function instance
- * lifetime.
+ * Token caching strategy:
+ *  1. Check in-memory cache (fast, same instance)
+ *  2. Check zoho_tokens table in Supabase (shared across all instances)
+ *  3. Only call Zoho's token endpoint if both caches are stale
  *
- * Usage from frontend:
- *   GET /functions/v1/zoho-proxy?module=Leads&fields=Full_Name,Lead_Status&page=1&per_page=200
- *   GET /functions/v1/zoho-proxy?module=Deals&fields=Stage,Amount,Owner&page=1&per_page=200
+ * This prevents the "too many requests" error that occurs when many
+ * edge function instances all try to refresh the token simultaneously.
  */
 
 import { serve } from 'https://deno.land/std@0.168.0/http/server.ts';
+import { createClient } from 'https://esm.sh/@supabase/supabase-js@2';
 
-// Secrets set via: supabase secrets set ZOHO_CLIENT_ID=... etc.
 const CLIENT_ID     = Deno.env.get('ZOHO_CLIENT_ID')!;
 const CLIENT_SECRET = Deno.env.get('ZOHO_CLIENT_SECRET')!;
 const REFRESH_TOKEN = Deno.env.get('ZOHO_REFRESH_TOKEN')!;
 const API_DOMAIN    = 'https://www.zohoapis.com';
 
-// In-memory token cache (lives for the duration of the function instance)
+// Built-in Supabase edge function env vars — no need to set as secrets
+const supabase = createClient(
+  Deno.env.get('SUPABASE_URL')!,
+  Deno.env.get('SUPABASE_SERVICE_ROLE_KEY')!,
+);
+
+// In-memory cache (lives for this instance's lifetime)
 let _token: string | null = null;
 let _expiresAt = 0;
 
 async function getAccessToken(): Promise<string> {
+  // 1. In-memory hit
   if (_token && Date.now() < _expiresAt) return _token;
 
+  // 2. Supabase shared cache
+  const { data } = await supabase
+    .from('zoho_tokens')
+    .select('access_token, expires_at')
+    .eq('id', 1)
+    .single();
+
+  if (data && new Date(data.expires_at).getTime() > Date.now() + 60_000) {
+    _token     = data.access_token;
+    _expiresAt = new Date(data.expires_at).getTime();
+    return _token!;
+  }
+
+  // 3. Refresh from Zoho (only when truly expired)
   const res = await fetch('https://accounts.zoho.com/oauth/v2/token', {
     method: 'POST',
     headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
@@ -37,13 +57,23 @@ async function getAccessToken(): Promise<string> {
     }),
   });
 
-  const data = await res.json();
-  if (!data.access_token) {
-    throw new Error(`Zoho token refresh failed: ${JSON.stringify(data)}`);
+  const tokenData = await res.json();
+  if (!tokenData.access_token) {
+    throw new Error(`Zoho token refresh failed: ${JSON.stringify(tokenData)}`);
   }
 
-  _token     = data.access_token as string;
-  _expiresAt = Date.now() + ((data.expires_in ?? 3600) - 120) * 1000;
+  const expiresAt = new Date(Date.now() + ((tokenData.expires_in ?? 3600) - 120) * 1000);
+
+  // Update both caches
+  _token     = tokenData.access_token as string;
+  _expiresAt = expiresAt.getTime();
+
+  await supabase.from('zoho_tokens').upsert({
+    id:           1,
+    access_token: tokenData.access_token,
+    expires_at:   expiresAt.toISOString(),
+  });
+
   return _token;
 }
 
@@ -53,7 +83,6 @@ const CORS = {
 };
 
 serve(async (req: Request) => {
-  // Handle CORS preflight
   if (req.method === 'OPTIONS') {
     return new Response(null, { headers: CORS });
   }
@@ -63,10 +92,6 @@ serve(async (req: Request) => {
     const module = url.searchParams.get('module');
     const action = url.searchParams.get('action');
 
-    // ── Special action: count emails for a batch of lead IDs server-side ──
-    // Called as: ?action=email-counts&lead_ids=id1,id2,...
-    // Runs all Zoho calls inside this single edge-function invocation so the
-    // token is cached and the browser only makes one request.
     if (action === 'email-counts') {
       const ids   = (url.searchParams.get('lead_ids') ?? '').split(',').filter(Boolean).slice(0, 30);
       const token = await getAccessToken();
@@ -104,7 +129,6 @@ serve(async (req: Request) => {
       );
     }
 
-    // Build Zoho URL — pass through all params except 'module'
     const zohoUrl = new URL(`${API_DOMAIN}/crm/v2/${module}`);
     url.searchParams.forEach((v, k) => {
       if (k !== 'module') zohoUrl.searchParams.set(k, v);
