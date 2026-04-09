@@ -175,12 +175,14 @@ export function useFilteredData() {
           return d.destination === destMap[region];
         });
 
-    // Campaigns (mock — Zoho Campaigns module not yet integrated)
-    const campaigns = mock.campaignPerformance.map(c => ({
-      ...c,
-      doctors: scale(c.doctors, tm, rm),
-      spend: scale(c.spend, tm, rm),
-    }));
+    // Campaigns — real from Zoho Campaigns module (197 campaigns)
+    const campaigns = zoho
+      ? zoho.campaignsList
+      : mock.campaignPerformance.map(c => ({
+          ...c,
+          doctors: scale(c.doctors, tm, rm),
+          spend:   scale(c.spend, tm, rm),
+        }));
 
     // Operational health — mock
     const timeAdjust: Record<string, number> = { week: 1.3, month: 1.1, quarter: 1, year: 0.85 };

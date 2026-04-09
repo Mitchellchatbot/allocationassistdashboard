@@ -65,6 +65,18 @@ interface ZohoAccount {
   Owner: { name: string; email: string };
 }
 
+interface ZohoCampaign {
+  id: string;
+  Campaign_Name: string;
+  Type: string | null;
+  Status: string | null;
+  Start_Date: string | null;
+  End_Date: string | null;
+  Budgeted_Cost: number | null;
+  Actual_Cost: number | null;
+  Owner: { name: string; email: string };
+}
+
 // ── Aggregation helpers ───────────────────────────────────────────────────────
 
 function countBy<T>(arr: T[], key: (item: T) => string): Record<string, number> {
@@ -148,6 +160,7 @@ function aggregateZohoData(
   deals: ZohoDeal[],
   calls: ZohoCall[],
   accounts: ZohoAccount[],
+  campaigns: ZohoCampaign[],
 ) {
   // ── Status sets ───────────────────────────────────────────────────────────
   const activeStatuses = new Set([
@@ -415,6 +428,26 @@ function aggregateZohoData(
     detail: string;
   }>;
 
+  // ── Real campaigns from Zoho Campaigns module ─────────────────────────────
+  const zohoStatusMap: Record<string, 'active' | 'completed' | 'paused'> = {
+    'Active':    'active',
+    'Inactive':  'paused',
+    'Completed': 'completed',
+    'Planning':  'paused',
+  };
+
+  const campaignsList = campaigns
+    .slice(0, 20)   // show 20 most recent
+    .map(c => ({
+      name:    c.Campaign_Name.length > 65
+        ? c.Campaign_Name.slice(0, 62) + '…'
+        : c.Campaign_Name,
+      channel: 'Email Marketing',
+      doctors: 0,               // no reach stats stored in Zoho CRM
+      spend:   c.Actual_Cost ?? c.Budgeted_Cost ?? 0,
+      status:  zohoStatusMap[c.Status ?? ''] ?? 'active',
+    }));
+
   // ── Raw leads (for pipeline doctor table) ─────────────────────────────────
   const rawLeads = leads;
   const rawDeals = deals;
@@ -439,6 +472,7 @@ function aggregateZohoData(
     closedWon:      closedWon.length,
     totalRevenue,
     partnerHospitals: accounts.length,
+    campaignsList,
     rawLeads,
     rawDeals,
   };
@@ -465,6 +499,11 @@ const ACCOUNT_FIELDS = [
   'Account_Name', 'Industry', 'Owner',
 ];
 
+const CAMPAIGN_FIELDS = [
+  'Campaign_Name', 'Type', 'Status', 'Start_Date', 'End_Date',
+  'Budgeted_Cost', 'Actual_Cost', 'Owner',
+];
+
 export function useZohoData() {
   return useQuery({
     queryKey: ['zoho-data'],
@@ -475,9 +514,11 @@ export function useZohoData() {
         zohoFetchAll<ZohoDeal>('Deals',   DEAL_FIELDS,   5),
         zohoFetchAll<ZohoCall>('Calls',   CALL_FIELDS,  10),
       ]);
-      // Accounts fetched after so the token is already cached (avoids concurrent refresh rate-limit)
-      const accounts = await zohoFetchAll<ZohoAccount>('Accounts', ACCOUNT_FIELDS, 5);
-      return aggregateZohoData(leads, deals, calls, accounts);
+      // Accounts + Campaigns fetched sequentially after so the token is already
+      // cached and we don't trigger Zoho's concurrent-refresh rate limit
+      const accounts  = await zohoFetchAll<ZohoAccount>('Accounts',  ACCOUNT_FIELDS,  5);
+      const campaigns = await zohoFetchAll<ZohoCampaign>('Campaigns', CAMPAIGN_FIELDS, 2); // 400 max
+      return aggregateZohoData(leads, deals, calls, accounts, campaigns);
     },
     staleTime: 10 * 60 * 1000,
     gcTime:    30 * 60 * 1000,

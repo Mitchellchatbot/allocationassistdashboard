@@ -80,7 +80,10 @@ const TeamPerformance = () => {
 
       <Card className="shadow-sm border-border/50">
         <CardHeader className="pb-1 pt-4 px-4">
-          <CardTitle className="text-[12px] font-medium text-muted-foreground uppercase tracking-wide">Active Campaigns</CardTitle>
+          <CardTitle className="text-[12px] font-medium text-muted-foreground uppercase tracking-wide">
+            Active Campaigns
+            {campaigns.length > 0 && <span className="ml-2 text-muted-foreground/50 normal-case font-normal">— showing {campaigns.length} most recent</span>}
+          </CardTitle>
         </CardHeader>
         <CardContent className="px-4 pb-4">
           <div className="overflow-x-auto -mx-4 px-4">
@@ -104,8 +107,8 @@ const TeamPerformance = () => {
                         {c.channel}
                       </div>
                     </TableCell>
-                    <TableCell className="text-[12px] text-right py-2.5 tabular-nums">{c.doctors}</TableCell>
-                    <TableCell className="text-[12px] text-right py-2.5 tabular-nums hidden sm:table-cell">${c.spend.toLocaleString()}</TableCell>
+                    <TableCell className="text-[12px] text-right py-2.5 tabular-nums">{c.doctors > 0 ? c.doctors : '—'}</TableCell>
+                    <TableCell className="text-[12px] text-right py-2.5 tabular-nums hidden sm:table-cell">{c.spend > 0 ? `$${c.spend.toLocaleString()}` : '—'}</TableCell>
                     <TableCell className="py-2.5">
                       <Badge variant="outline" className={`text-[9px] capitalize ${statusColors[c.status]}`}>{c.status}</Badge>
                     </TableCell>
