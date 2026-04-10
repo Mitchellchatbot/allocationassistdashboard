@@ -5,7 +5,7 @@
  */
 import { useState, useMemo } from "react";
 import {
-  LineChart, Line, BarChart, Bar, PieChart, Pie, Cell,
+  AreaChart, Area, BarChart, Bar, PieChart, Pie, Cell,
   XAxis, YAxis, CartesianGrid, Tooltip, Legend, ResponsiveContainer,
 } from "recharts";
 import { Loader2, TrendingUp, Trash2, ClipboardList } from "lucide-react";
@@ -203,18 +203,27 @@ export function WorkerAnalyticsPanel() {
           </div>
         </div>
         <ResponsiveContainer width="100%" height={200}>
-          <LineChart data={activityData} margin={{ top: 4, right: 8, left: -20, bottom: 0 }}>
+          <AreaChart data={activityData} margin={{ top: 4, right: 8, left: -20, bottom: 0 }}>
+            <defs>
+              {chartWorkers.map((email, i) => (
+                <linearGradient key={email} id={`apGrad-${email.split("@")[0]}`} x1="0" y1="0" x2="0" y2="1">
+                  <stop offset="5%"  stopColor={WORKER_COLORS[i % WORKER_COLORS.length]} stopOpacity={0.35} />
+                  <stop offset="95%" stopColor={WORKER_COLORS[i % WORKER_COLORS.length]} stopOpacity={0} />
+                </linearGradient>
+              ))}
+            </defs>
             <CartesianGrid strokeDasharray="3 3" stroke="hsl(var(--border))" />
             <XAxis dataKey="date" tick={{ fontSize: 9, fill: "hsl(var(--muted-foreground))" }} tickLine={false} interval={4} />
             <YAxis tick={{ fontSize: 9, fill: "hsl(var(--muted-foreground))" }} tickLine={false} allowDecimals={false} />
             <Tooltip contentStyle={{ fontSize: 11, borderRadius: 8, border: "1px solid hsl(var(--border))" }} />
             {chartWorkers.length > 1 && <Legend wrapperStyle={{ fontSize: 10 }} />}
             {chartWorkers.map((email, i) => (
-              <Line key={email} type="monotone" dataKey={email.split("@")[0]}
+              <Area key={email} type="monotone" dataKey={email.split("@")[0]}
                 stroke={WORKER_COLORS[i % WORKER_COLORS.length]}
+                fill={`url(#apGrad-${email.split("@")[0]})`}
                 strokeWidth={2} dot={false} activeDot={{ r: 4 }} />
             ))}
-          </LineChart>
+          </AreaChart>
         </ResponsiveContainer>
       </div>
 

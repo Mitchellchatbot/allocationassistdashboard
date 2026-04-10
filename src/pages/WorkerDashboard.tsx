@@ -5,7 +5,7 @@ import logo from "@/assets/logo.png";
 import { useAuth } from "@/hooks/use-auth";
 import { useWorkerEntries, useSaveEntries, useDeleteEntry, type WorkerEntry } from "@/hooks/use-worker-entries";
 import {
-  LineChart, Line, BarChart, Bar, PieChart, Pie, Cell,
+  AreaChart, Area, BarChart, Bar, PieChart, Pie, Cell,
   XAxis, YAxis, CartesianGrid, Tooltip, Legend, ResponsiveContainer,
 } from "recharts";
 import {
@@ -223,18 +223,27 @@ function ActivityChart({ entries, workerEmails, title, subtitle }: {
         </div>
       </div>
       <ResponsiveContainer width="100%" height={200}>
-        <LineChart data={data} margin={{ top: 4, right: 8, left: -20, bottom: 0 }}>
+        <AreaChart data={data} margin={{ top: 4, right: 8, left: -20, bottom: 0 }}>
+          <defs>
+            {keys.map((k, i) => (
+              <linearGradient key={k} id={`wdGrad-${k}`} x1="0" y1="0" x2="0" y2="1">
+                <stop offset="5%"  stopColor={WORKER_COLORS[i % WORKER_COLORS.length]} stopOpacity={0.35} />
+                <stop offset="95%" stopColor={WORKER_COLORS[i % WORKER_COLORS.length]} stopOpacity={0} />
+              </linearGradient>
+            ))}
+          </defs>
           <CartesianGrid strokeDasharray="3 3" stroke="hsl(var(--border))" />
           <XAxis dataKey="date" tick={{ fontSize: 9, fill: "hsl(var(--muted-foreground))" }} tickLine={false} interval={4} />
           <YAxis tick={{ fontSize: 9, fill: "hsl(var(--muted-foreground))" }} tickLine={false} allowDecimals={false} />
           <Tooltip contentStyle={{ fontSize: 11, borderRadius: 8, border: "1px solid hsl(var(--border))" }} />
           {keys.length > 1 && <Legend wrapperStyle={{ fontSize: 10 }} />}
           {keys.map((k, i) => (
-            <Line key={k} type="monotone" dataKey={k}
+            <Area key={k} type="monotone" dataKey={k}
               stroke={WORKER_COLORS[i % WORKER_COLORS.length]}
+              fill={`url(#wdGrad-${k})`}
               strokeWidth={2} dot={false} activeDot={{ r: 4 }} />
           ))}
-        </LineChart>
+        </AreaChart>
       </ResponsiveContainer>
     </div>
   );
