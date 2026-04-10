@@ -10,9 +10,12 @@ import {
   ClipboardList,
   MessageSquare,
   Image,
+  LogOut,
 } from "lucide-react";
 import logo from "@/assets/logo.png";
 import { NavLink } from "@/components/NavLink";
+import { useAuth } from "@/hooks/use-auth";
+import { useNavigate } from "react-router-dom";
 import {
   Sidebar,
   SidebarContent,
@@ -46,6 +49,13 @@ const bottomNav = [
 export function AppSidebar() {
   const { state } = useSidebar();
   const collapsed = state === "collapsed";
+  const { user, signOut } = useAuth();
+  const navigate = useNavigate();
+
+  const handleSignOut = async () => {
+    await signOut();
+    navigate("/login", { replace: true });
+  };
 
   return (
     <Sidebar collapsible="icon">
@@ -110,16 +120,35 @@ export function AppSidebar() {
           ))}
         </SidebarMenu>
         {!collapsed && (
-          <div className="mt-2 mx-1 flex items-center gap-2 rounded-md bg-sidebar-accent/50 p-2 cursor-pointer hover:bg-sidebar-accent transition-colors">
-            <div className="flex h-6 w-6 items-center justify-center rounded-full bg-sidebar-primary text-white text-[9px] font-bold">
-              RA
+          <div className="mt-2 mx-1 rounded-md bg-sidebar-accent/50 overflow-hidden">
+            <div className="flex items-center gap-2 p-2">
+              <div className="flex h-6 w-6 items-center justify-center rounded-full bg-sidebar-primary text-white text-[9px] font-bold shrink-0">
+                {user?.email ? user.email.slice(0, 2).toUpperCase() : "AA"}
+              </div>
+              <div className="flex-1 min-w-0">
+                <p className="text-[11px] font-medium text-sidebar-foreground truncate">
+                  {user?.email ?? "admin@allocationassist.com"}
+                </p>
+                <p className="text-[9px] text-sidebar-foreground/40 truncate">Signed in</p>
+              </div>
             </div>
-            <div className="flex-1 min-w-0">
-              <p className="text-[11px] font-medium text-sidebar-foreground truncate">Ruba AbuHussein</p>
-              <p className="text-[9px] text-sidebar-foreground/40 truncate">admin@allocationassist.com</p>
-            </div>
-            <ChevronDown className="h-3 w-3 text-sidebar-foreground/30" />
+            <button
+              onClick={handleSignOut}
+              className="w-full flex items-center gap-2 px-2 py-1.5 text-[11px] text-sidebar-foreground/60 hover:text-sidebar-foreground hover:bg-sidebar-accent transition-colors border-t border-sidebar-border/30"
+            >
+              <LogOut className="h-3 w-3" />
+              Sign out
+            </button>
           </div>
+        )}
+        {collapsed && (
+          <button
+            onClick={handleSignOut}
+            className="w-full flex items-center justify-center py-2 text-sidebar-foreground/50 hover:text-sidebar-foreground transition-colors"
+            title="Sign out"
+          >
+            <LogOut className="h-4 w-4" />
+          </button>
         )}
       </SidebarFooter>
     </Sidebar>

@@ -1,9 +1,11 @@
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
-import { BrowserRouter, Route, Routes } from "react-router-dom";
+import { BrowserRouter, Route, Routes, Navigate } from "react-router-dom";
 import { Toaster as Sonner } from "@/components/ui/sonner";
 import { Toaster } from "@/components/ui/toaster";
 import { TooltipProvider } from "@/components/ui/tooltip";
 import { FilterProvider } from "@/lib/FilterProvider";
+import { ProtectedRoute } from "@/components/ProtectedRoute";
+import Login from "./pages/Login";
 import Index from "./pages/Index";
 import Sales from "./pages/Sales";
 import Marketing from "./pages/Marketing";
@@ -26,16 +28,21 @@ const App = () => (
         <Sonner />
         <BrowserRouter>
           <Routes>
-            <Route path="/" element={<Index />} />
-            <Route path="/sales" element={<Sales />} />
-            <Route path="/marketing" element={<Marketing />} />
-            <Route path="/leads-pipeline" element={<LeadsPipeline />} />
-            <Route path="/team" element={<TeamPerformance />} />
-            <Route path="/finance" element={<Finance />} />
-            <Route path="/operations" element={<Operations />} />
-            <Route path="/settings" element={<Settings />} />
-            <Route path="/chat" element={<ChatPortal />} />
-            <Route path="/meta-ads" element={<MetaAds />} />
+            {/* Public */}
+            <Route path="/login" element={<Login />} />
+
+            {/* Protected — must be logged in */}
+            <Route path="/"               element={<ProtectedRoute><Index /></ProtectedRoute>} />
+            <Route path="/sales"          element={<ProtectedRoute><Sales /></ProtectedRoute>} />
+            <Route path="/marketing"      element={<ProtectedRoute><Marketing /></ProtectedRoute>} />
+            <Route path="/leads-pipeline" element={<ProtectedRoute><LeadsPipeline /></ProtectedRoute>} />
+            <Route path="/team"           element={<ProtectedRoute><TeamPerformance /></ProtectedRoute>} />
+            <Route path="/finance"        element={<ProtectedRoute><Finance /></ProtectedRoute>} />
+            <Route path="/operations"     element={<ProtectedRoute><Operations /></ProtectedRoute>} />
+            <Route path="/settings"       element={<ProtectedRoute><Settings /></ProtectedRoute>} />
+            <Route path="/chat"           element={<ProtectedRoute><ChatPortal /></ProtectedRoute>} />
+            <Route path="/meta-ads"       element={<ProtectedRoute><MetaAds /></ProtectedRoute>} />
+
             <Route path="*" element={<NotFound />} />
           </Routes>
         </BrowserRouter>
