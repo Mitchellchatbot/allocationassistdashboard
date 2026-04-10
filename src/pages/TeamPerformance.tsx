@@ -5,6 +5,7 @@ import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@
 import { useFilteredData } from "@/hooks/use-filtered-data";
 import { Trophy } from "lucide-react";
 import { ChannelIcon } from "@/components/ChannelIcon";
+import { WorkerAnalyticsPanel } from "@/components/WorkerAnalyticsPanel";
 
 const statusColors = {
   active: "bg-success/10 text-success",
@@ -119,6 +120,9 @@ const TeamPerformance = () => {
           </div>
         </CardContent>
       </Card>
+
+      {/* ── Worker Activity ─────────────────────────────────────── */}
+      <WorkerAnalyticsPanel />
     </DashboardLayout>
   );
 };

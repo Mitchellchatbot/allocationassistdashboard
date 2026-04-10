@@ -293,8 +293,8 @@ function WorkerBarChart({ entries, workerEmails }: { entries: WorkerEntry[]; wor
 
 // ── Overview tab ───────────────────────────────────────────────────────────────
 
-function OverviewTab({ isAdmin }: { isAdmin: boolean }) {
-  const { data: allEntries = [], isLoading } = useWorkerEntries("all");
+function OverviewTab({ isAdmin, userId }: { isAdmin: boolean; userId?: string }) {
+  const { data: allEntries = [], isLoading } = useWorkerEntries("all", userId);
   const [selectedWorker, setSelectedWorker] = useState("all");
 
   const workerEmails = useMemo(
@@ -603,8 +603,8 @@ function AddEntryTab() {
 
 type DateFilter = "today" | "week" | "month" | "all";
 
-function RecordsTab({ filter, isAdmin }: { filter: DateFilter; isAdmin: boolean }) {
-  const { data: entries = [], isLoading } = useWorkerEntries(filter);
+function RecordsTab({ filter, isAdmin, userId }: { filter: DateFilter; isAdmin: boolean; userId?: string }) {
+  const { data: entries = [], isLoading } = useWorkerEntries(filter, userId);
   const { mutate: del } = useDeleteEntry();
   const [statusFilter, setStatusFilter] = useState("");
   const [workerFilter, setWorkerFilter] = useState("all");
@@ -728,19 +728,21 @@ function RecordsTab({ filter, isAdmin }: { filter: DateFilter; isAdmin: boolean 
 // ── Main ───────────────────────────────────────────────────────────────────────
 
 const WorkerDashboard = () => {
-  const { role } = useAuth();
+  const { role, user } = useAuth();
   const isAdmin = role === "admin";
+  // Workers get their own ID so queries are scoped to their data only
+  const userId  = isAdmin ? undefined : (user?.id ?? undefined);
   const [tab, setTab] = useState<Tab>("overview");
 
   return (
     <div className="flex min-h-screen bg-background">
       <WorkerSidebar tab={tab} setTab={setTab} isAdmin={isAdmin} />
       <main className="flex-1 overflow-auto">
-        {tab === "overview" &&                <OverviewTab isAdmin={isAdmin} />}
-        {tab === "add"      && !isAdmin &&    <AddEntryTab />}
-        {tab === "today"    && !isAdmin &&    <RecordsTab filter="today" isAdmin={false} />}
-        {tab === "week"     && !isAdmin &&    <RecordsTab filter="week"  isAdmin={false} />}
-        {tab === "all"      &&                <RecordsTab filter="all"   isAdmin={isAdmin} />}
+        {tab === "overview" &&             <OverviewTab isAdmin={isAdmin} userId={userId} />}
+        {tab === "add"      && !isAdmin && <AddEntryTab />}
+        {tab === "today"    && !isAdmin && <RecordsTab filter="today" isAdmin={false} userId={userId} />}
+        {tab === "week"     && !isAdmin && <RecordsTab filter="week"  isAdmin={false} userId={userId} />}
+        {tab === "all"      &&             <RecordsTab filter="all"   isAdmin={isAdmin} userId={userId} />}
       </main>
     </div>
   );

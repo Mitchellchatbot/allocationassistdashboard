@@ -41,15 +41,20 @@ function dateRange(filter: DateFilter): { from: string; to: string } | null {
   return null; // all
 }
 
-export function useWorkerEntries(filter: DateFilter = "all") {
+export function useWorkerEntries(filter: DateFilter = "all", userId?: string) {
   return useQuery<WorkerEntry[]>({
-    queryKey: ["worker-entries", filter],
+    queryKey: ["worker-entries", filter, userId],
     queryFn: async () => {
       let q = supabase
         .from("worker_entries")
         .select("*")
         .order("call_date", { ascending: false })
         .order("created_at", { ascending: false });
+
+      // Workers only see their own entries (belt-and-suspenders alongside RLS)
+      if (userId) {
+        q = q.eq("created_by", userId);
+      }
 
       const range = dateRange(filter);
       if (range) {
