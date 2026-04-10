@@ -16,6 +16,7 @@ import Operations from "./pages/Operations";
 import Settings from "./pages/Settings";
 import ChatPortal from "./pages/ChatPortal";
 import MetaAds from "./pages/MetaAds";
+import WorkerDashboard from "./pages/WorkerDashboard";
 import NotFound from "./pages/NotFound";
 
 const queryClient = new QueryClient();
@@ -42,6 +43,7 @@ const App = () => (
             <Route path="/settings"       element={<ProtectedRoute><Settings /></ProtectedRoute>} />
             <Route path="/chat"           element={<ProtectedRoute><ChatPortal /></ProtectedRoute>} />
             <Route path="/meta-ads"       element={<ProtectedRoute><MetaAds /></ProtectedRoute>} />
+            <Route path="/worker"         element={<ProtectedRoute><WorkerDashboard /></ProtectedRoute>} />
 
             <Route path="*" element={<NotFound />} />
           </Routes>
