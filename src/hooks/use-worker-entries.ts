@@ -3,7 +3,7 @@ import { supabase } from "@/lib/supabase";
 
 export type WorkerEntry = {
   id?: string;
-  call_date: string;        // ISO date e.g. "2025-02-11"
+  call_date: string;
   status: string;
   name: string;
   specialty: string;
@@ -12,6 +12,7 @@ export type WorkerEntry = {
   meeting_type: string;
   country_of_training: string;
   notes: string;
+  worker_email?: string;
   created_by?: string;
   created_at?: string;
 };
@@ -69,10 +70,10 @@ export function useSaveEntries() {
   return useMutation({
     mutationFn: async (entries: WorkerEntry[]) => {
       const { data: { user } } = await supabase.auth.getUser();
-      const rows = entries.map(e => ({
-        ...e,
-        id:         undefined,   // let DB generate
-        created_by: user?.id ?? null,
+      const rows = entries.map(({ id: _id, created_at: _ca, created_by: _cb, worker_email: _we, ...fields }) => ({
+        ...fields,
+        worker_email: user?.email ?? null,
+        created_by:   user?.id   ?? null,
       }));
       const { error } = await supabase.from("worker_entries").insert(rows);
       if (error) throw error;
