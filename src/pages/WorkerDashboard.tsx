@@ -397,7 +397,7 @@ function OverviewTab({ isAdmin, userId }: { isAdmin: boolean; userId?: string })
 
 // ── Sidebar ────────────────────────────────────────────────────────────────────
 
-type Tab = "overview" | "add" | "today" | "week" | "all";
+type Tab = "overview" | "daily" | "week" | "all";
 
 function WorkerSidebar({ tab, setTab, isAdmin }: { tab: Tab; setTab: (t: Tab) => void; isAdmin: boolean }) {
   const { signOut, user } = useAuth();
@@ -406,8 +406,7 @@ function WorkerSidebar({ tab, setTab, isAdmin }: { tab: Tab; setTab: (t: Tab) =>
 
   const workerNav: { id: Tab; icon: React.ElementType; label: string }[] = [
     { id: "overview", icon: LayoutDashboard, label: "Overview"    },
-    { id: "add",      icon: PlusCircle,      label: "Add Entry"   },
-    { id: "today",    icon: Clock,           label: "Today"       },
+    { id: "daily",    icon: PlusCircle,      label: "Daily Log"   },
     { id: "week",     icon: CalendarDays,    label: "This Week"   },
     { id: "all",      icon: BarChart2,       label: "All Records" },
   ];
@@ -736,12 +735,92 @@ function RecordsTab({ filter, isAdmin, userId }: { filter: DateFilter; isAdmin: 
   );
 }
 
+// ── Daily Log tab (Add Entry + Today's saved entries combined) ────────────────
+
+function DailyTab({ userId }: { userId?: string }) {
+  const { data: todayEntries = [], isLoading } = useWorkerEntries("today", userId);
+  const { mutate: del } = useDeleteEntry();
+
+  const headers = ["Date", "Status", "Name", "Specialty", "Qualifications", "State", "Meeting", "Country", "Notes", ""];
+
+  return (
+    <div className="p-6 space-y-6">
+      {/* ── Entry form ── */}
+      <AddEntryTab />
+
+      {/* ── Divider ── */}
+      <div className="flex items-center gap-3">
+        <div className="flex-1 h-px bg-border/60" />
+        <span className="text-[10px] font-semibold uppercase tracking-widest text-muted-foreground/50">
+          Today's saved entries
+        </span>
+        <div className="flex-1 h-px bg-border/60" />
+      </div>
+
+      {/* ── Today's records ── */}
+      {isLoading ? (
+        <div className="flex items-center justify-center py-10 gap-2 text-muted-foreground">
+          <Loader2 className="h-4 w-4 animate-spin" /> Loading…
+        </div>
+      ) : todayEntries.length === 0 ? (
+        <div className="rounded-xl border border-border/50 bg-muted/20 flex flex-col items-center justify-center py-12 gap-2">
+          <ClipboardList className="h-8 w-8 text-muted-foreground/25" />
+          <p className="text-[12px] text-muted-foreground">No entries saved yet today</p>
+        </div>
+      ) : (
+        <div className="rounded-xl border border-border/60 overflow-hidden shadow-sm">
+          <div className="overflow-x-auto">
+            <table className="w-full text-left border-collapse min-w-[1100px]">
+              <thead>
+                <tr style={{ backgroundColor: "hsl(170, 45%, 28%)" }}>
+                  {headers.map(h => (
+                    <th key={h} className="px-3 py-2.5 text-[10px] font-semibold text-white/90 uppercase tracking-wide border-r border-white/10 last:border-r-0 whitespace-nowrap">{h}</th>
+                  ))}
+                </tr>
+              </thead>
+              <tbody>
+                {todayEntries.map((e, i) => (
+                  <tr key={e.id}
+                    className={`border-t border-border/40 hover:bg-primary/[0.03] transition-colors ${i % 2 === 0 ? "bg-white" : "bg-muted/10"}`}>
+                    <td className="px-3 py-2 text-[11px] text-foreground border-r border-border/30 whitespace-nowrap">
+                      {e.call_date ? new Date(e.call_date + "T00:00:00").toLocaleDateString("en-GB", { day: "numeric", month: "short", year: "2-digit" }) : "—"}
+                    </td>
+                    <td className="px-3 py-2 border-r border-border/30">
+                      {e.status ? <StatusBadge status={e.status} /> : <span className="text-[10px] text-muted-foreground">—</span>}
+                    </td>
+                    <td className="px-3 py-2 text-[11px] font-medium text-foreground border-r border-border/30">{e.name || "—"}</td>
+                    <td className="px-3 py-2 text-[11px] text-foreground border-r border-border/30">{e.specialty || "—"}</td>
+                    <td className="px-3 py-2 text-[11px] text-muted-foreground border-r border-border/30 max-w-[140px] truncate">{e.qualifications || "—"}</td>
+                    <td className="px-3 py-2 text-[11px] text-foreground border-r border-border/30">{e.state || "—"}</td>
+                    <td className="px-3 py-2 text-[11px] text-foreground border-r border-border/30">{e.meeting_type || "—"}</td>
+                    <td className="px-3 py-2 text-[11px] text-foreground border-r border-border/30">{e.country_of_training || "—"}</td>
+                    <td className="px-3 py-2 text-[11px] text-muted-foreground border-r border-border/30 max-w-[180px]">
+                      <span title={e.notes} className="line-clamp-2">{e.notes || "—"}</span>
+                    </td>
+                    <td className="px-3 py-2 text-center">
+                      {e.id && (
+                        <button onClick={() => window.confirm("Delete this entry?") && del(e.id!)}
+                          className="text-muted-foreground/40 hover:text-destructive transition-colors">
+                          <Trash2 className="h-3.5 w-3.5" />
+                        </button>
+                      )}
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        </div>
+      )}
+    </div>
+  );
+}
+
 // ── Main ───────────────────────────────────────────────────────────────────────
 
 const WorkerDashboard = () => {
   const { role, user } = useAuth();
   const isAdmin = role === "admin";
-  // Workers get their own ID so queries are scoped to their data only
   const userId  = isAdmin ? undefined : (user?.id ?? undefined);
   const [tab, setTab] = useState<Tab>("overview");
 
@@ -750,8 +829,7 @@ const WorkerDashboard = () => {
       <WorkerSidebar tab={tab} setTab={setTab} isAdmin={isAdmin} />
       <main className="flex-1 overflow-auto">
         {tab === "overview" &&             <OverviewTab isAdmin={isAdmin} userId={userId} />}
-        {tab === "add"      && !isAdmin && <AddEntryTab />}
-        {tab === "today"    && !isAdmin && <RecordsTab filter="today" isAdmin={false} userId={userId} />}
+        {tab === "daily"    && !isAdmin && <DailyTab userId={userId} />}
         {tab === "week"     && !isAdmin && <RecordsTab filter="week"  isAdmin={false} userId={userId} />}
         {tab === "all"      &&             <RecordsTab filter="all"   isAdmin={isAdmin} userId={userId} />}
       </main>
