@@ -45,11 +45,14 @@ function weekStartISO() {
   const d = new Date(); d.setDate(d.getDate() - d.getDay());
   return d.toISOString().split("T")[0];
 }
-function getLast30Days() {
+function getChartDays() {
+  const start = new Date("2026-04-06");
+  const end   = new Date();
   const days: string[] = [];
-  for (let i = 29; i >= 0; i--) {
-    const d = new Date(); d.setDate(d.getDate() - i);
+  const d = new Date(start);
+  while (d <= end) {
     days.push(d.toISOString().split("T")[0]);
+    d.setDate(d.getDate() + 1);
   }
   return days;
 }
@@ -58,7 +61,7 @@ function fmtDay(iso: string) {
 }
 
 function buildActivityData(entries: WorkerEntry[], workerEmails: string[]) {
-  return getLast30Days().map(date => {
+  return getChartDays().map(date => {
     const point: Record<string, string | number> = { date: fmtDay(date) };
     workerEmails.forEach(email => {
       point[email.split("@")[0]] = entries.filter(e => e.call_date === date && e.worker_email === email).length;
