@@ -397,7 +397,7 @@ function OverviewTab({ isAdmin, userId }: { isAdmin: boolean; userId?: string })
 
 // ── Sidebar ────────────────────────────────────────────────────────────────────
 
-type Tab = "overview" | "daily" | "week" | "all";
+type Tab = "overview" | "daily" | "week" | "month" | "all";
 
 function WorkerSidebar({ tab, setTab, isAdmin }: { tab: Tab; setTab: (t: Tab) => void; isAdmin: boolean }) {
   const { signOut, user } = useAuth();
@@ -408,6 +408,7 @@ function WorkerSidebar({ tab, setTab, isAdmin }: { tab: Tab; setTab: (t: Tab) =>
     { id: "overview", icon: LayoutDashboard, label: "Overview"    },
     { id: "daily",    icon: PlusCircle,      label: "Daily Log"   },
     { id: "week",     icon: CalendarDays,    label: "This Week"   },
+    { id: "month",    icon: Clock,           label: "This Month"  },
     { id: "all",      icon: BarChart2,       label: "All Records" },
   ];
 
@@ -831,6 +832,7 @@ const WorkerDashboard = () => {
         {tab === "overview" &&             <OverviewTab isAdmin={isAdmin} userId={userId} />}
         {tab === "daily"    && !isAdmin && <DailyTab userId={userId} />}
         {tab === "week"     && !isAdmin && <RecordsTab filter="week"  isAdmin={false} userId={userId} />}
+        {tab === "month"    && !isAdmin && <RecordsTab filter="month" isAdmin={false} userId={userId} />}
         {tab === "all"      &&             <RecordsTab filter="all"   isAdmin={isAdmin} userId={userId} />}
       </main>
     </div>
