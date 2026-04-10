@@ -4,8 +4,9 @@ import type { Session, User } from "@supabase/supabase-js";
 
 // Map usernames to Supabase emails
 export const USERNAME_MAP: Record<string, string> = {
-  admin:  "admin@allocationassist.com",
-  worker: "worker@allocationassist.com",
+  admin:   "admin@allocationassist.com",
+  worker:  "worker@allocationassist.com",
+  worker2: "worker2@allocationassist.com",
 };
 
 // Determine role from email
