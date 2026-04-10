@@ -54,11 +54,8 @@ function weekStartISO() {
   d.setDate(d.getDate() - d.getDay());
   return d.toISOString().split("T")[0];
 }
-function getChartDays(entries: WorkerEntry[]): string[] {
-  const allDates = entries.map(e => e.call_date).filter(Boolean).sort();
-  const fallback = new Date();
-  fallback.setDate(fallback.getDate() - 6);
-  const start = allDates.length > 0 ? new Date(allDates[0] + "T00:00:00") : fallback;
+function getChartDays(): string[] {
+  const start = new Date("2026-04-06");
   const end   = new Date();
   const days: string[] = [];
   const d = new Date(start);
@@ -75,7 +72,7 @@ function fmtDay(iso: string) {
 // ── Chart data builders ────────────────────────────────────────────────────────
 
 function buildActivityData(entries: WorkerEntry[], workerEmails: string[]) {
-  const days = getChartDays(entries);
+  const days = getChartDays();
   return days.map(date => {
     const point: Record<string, string | number> = { date: fmtDay(date) };
     if (workerEmails.length === 0) {
