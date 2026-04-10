@@ -207,8 +207,8 @@ export function WorkerAnalyticsPanel() {
             <defs>
               {chartWorkers.map((email, i) => (
                 <linearGradient key={email} id={`apGrad-${email.split("@")[0]}`} x1="0" y1="0" x2="0" y2="1">
-                  <stop offset="5%"  stopColor={WORKER_COLORS[i % WORKER_COLORS.length]} stopOpacity={0.35} />
-                  <stop offset="95%" stopColor={WORKER_COLORS[i % WORKER_COLORS.length]} stopOpacity={0} />
+                  <stop offset="5%"  stopColor={WORKER_COLORS[i % WORKER_COLORS.length]} stopOpacity={0.7} />
+                  <stop offset="95%" stopColor={WORKER_COLORS[i % WORKER_COLORS.length]} stopOpacity={0.15} />
                 </linearGradient>
               ))}
             </defs>

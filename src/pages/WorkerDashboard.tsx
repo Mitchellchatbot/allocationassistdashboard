@@ -227,8 +227,8 @@ function ActivityChart({ entries, workerEmails, title, subtitle }: {
           <defs>
             {keys.map((k, i) => (
               <linearGradient key={k} id={`wdGrad-${k}`} x1="0" y1="0" x2="0" y2="1">
-                <stop offset="5%"  stopColor={WORKER_COLORS[i % WORKER_COLORS.length]} stopOpacity={0.35} />
-                <stop offset="95%" stopColor={WORKER_COLORS[i % WORKER_COLORS.length]} stopOpacity={0} />
+                <stop offset="5%"  stopColor={WORKER_COLORS[i % WORKER_COLORS.length]} stopOpacity={0.7} />
+                <stop offset="95%" stopColor={WORKER_COLORS[i % WORKER_COLORS.length]} stopOpacity={0.15} />
               </linearGradient>
             ))}
           </defs>
