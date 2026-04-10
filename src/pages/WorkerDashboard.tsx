@@ -35,15 +35,15 @@ const STATUS_STYLE: Record<string, { bg: string; text: string; border: string }>
 };
 
 const STATUS_CHART_COLOR: Record<string, string> = {
-  "High Priority":     "#16a34a",
-  "Contact in Future": "#db2777",
-  "Declined":          "#7f1d1d",
-  "Not Interested":    "#dc2626",
-  "Minimal Follow Up": "#374151",
-  "Initial Sales":     "#2563eb",
+  "High Priority":     "#86efac",
+  "Contact in Future": "#f9a8d4",
+  "Declined":          "#fca5a5",
+  "Not Interested":    "#fdba74",
+  "Minimal Follow Up": "#cbd5e1",
+  "Initial Sales":     "#93c5fd",
 };
 
-const WORKER_COLORS = ["#0ea5e9", "#10b981", "#f59e0b", "#8b5cf6", "#ef4444", "#ec4899", "#14b8a6"];
+const WORKER_COLORS = ["#93c5fd", "#6ee7b7", "#fcd34d", "#c4b5fd", "#fda4af", "#f0abfc", "#67e8f9"];
 const MEETING_TYPES = ["Phone Call", "Video Call", "In Person", "Email", "WhatsApp", "Other"];
 
 // ── Date helpers ───────────────────────────────────────────────────────────────
