@@ -21,7 +21,7 @@ const TeamPerformance = () => {
       <Card className="mb-5 shadow-sm border-border/50">
         <CardHeader className="pb-1 pt-4 px-4">
           <CardTitle className="text-[12px] font-medium text-muted-foreground uppercase tracking-wide">
-            Top Performing Recruiters {recruiters.length === 0 && <span className="text-muted-foreground/50 normal-case font-normal">— no data for selected region</span>}
+            Top Performing Recruiters
           </CardTitle>
         </CardHeader>
         <CardContent className="px-4 pb-4">

@@ -1,13 +1,5 @@
 import { useQuery } from "@tanstack/react-query";
 import { supabase } from "@/lib/supabase";
-import { useFilters } from "@/lib/filters";
-
-const regionToDestination: Record<string, string> = {
-  uae: "UAE",
-  ksa: "KSA",
-  qatar: "Qatar",
-  kuwait: "Kuwait",
-};
 
 export const PAGE_SIZE = 50;
 
@@ -25,12 +17,11 @@ export type Doctor = {
 };
 
 export function useMetaLeads(page: number = 0, search: string = "") {
-  const { region } = useFilters();
   const from = page * PAGE_SIZE;
   const to = from + PAGE_SIZE - 1;
 
   return useQuery<{ doctors: Doctor[]; total: number }>({
-    queryKey: ["meta-leads", region, page, search],
+    queryKey: ["meta-leads", page, search],
     queryFn: async () => {
       let query = supabase
         .from("meta_leads_pipeline")
@@ -40,10 +31,6 @@ export function useMetaLeads(page: number = 0, search: string = "") {
         )
         .order("created_at", { ascending: false })
         .range(from, to);
-
-      if (region !== "all") {
-        query = query.eq("destination", regionToDestination[region]);
-      }
 
       if (search.trim()) {
         query = query.or(

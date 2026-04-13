@@ -7,7 +7,7 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@
 import { Badge } from "@/components/ui/badge";
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
-import { useFilters, type TimeRange, type Region } from "@/lib/filters";
+import { useFilters, type TimeRange } from "@/lib/filters";
 import { useState } from "react";
 import { Link, useLocation } from "react-router-dom";
 
@@ -38,7 +38,7 @@ interface DashboardLayoutProps {
 }
 
 export function DashboardLayout({ children, title, subtitle }: DashboardLayoutProps) {
-  const { timeRange, setTimeRange, region, setRegion } = useFilters();
+  const { timeRange, setTimeRange } = useFilters();
   const [readIds, setReadIds] = useState<number[]>([]);
   const unreadCount = notifications.filter(n => n.unread && !readIds.includes(n.id)).length;
   const location = useLocation();
@@ -53,7 +53,7 @@ export function DashboardLayout({ children, title, subtitle }: DashboardLayoutPr
         <AppSidebar />
         <div className="flex-1 flex flex-col min-w-0">
           {/* Top header bar */}
-          <header className="h-[52px] flex items-center justify-between border-b px-3 sm:px-4 lg:px-5 shrink-0" style={{ backgroundColor: "hsl(170, 45%, 85%)" }}>
+          <header className="h-[52px] flex items-center justify-between border-b bg-card px-3 sm:px-4 lg:px-5 shrink-0">
             <div className="flex items-center gap-2 sm:gap-3 min-w-0">
               <SidebarTrigger className="text-muted-foreground hover:text-foreground shrink-0" />
               <div className="h-4 w-px bg-border/60 hidden sm:block shrink-0" />
@@ -80,19 +80,7 @@ export function DashboardLayout({ children, title, subtitle }: DashboardLayoutPr
                   <SelectItem value="year">This Year</SelectItem>
                 </SelectContent>
               </Select>
-              <Select value={region} onValueChange={(v) => setRegion(v as Region)}>
-                <SelectTrigger className="h-7 w-[90px] sm:w-[100px] text-[11px] bg-white/60 border-0 rounded-md backdrop-blur-sm hidden md:flex">
-                  <SelectValue />
-                </SelectTrigger>
-                <SelectContent>
-                  <SelectItem value="all">All Regions</SelectItem>
-                  <SelectItem value="uae">UAE</SelectItem>
-                  <SelectItem value="ksa">Saudi Arabia</SelectItem>
-                  <SelectItem value="qatar">Qatar</SelectItem>
-                  <SelectItem value="kuwait">Kuwait</SelectItem>
-                </SelectContent>
-              </Select>
-              <Tooltip>
+<Tooltip>
                 <TooltipTrigger asChild>
                   <Button variant="ghost" size="sm" className="h-7 text-[11px] text-muted-foreground hidden sm:flex px-2">
                     <Download className="h-3 w-3 mr-1" />Export
@@ -151,12 +139,12 @@ export function DashboardLayout({ children, title, subtitle }: DashboardLayoutPr
           </header>
 
           {/* Page title section */}
-          <div className="px-4 lg:px-5 pt-4 pb-2">
-            <h1 className="text-[18px] sm:text-[20px] font-semibold text-foreground leading-tight">{title}</h1>
-            {subtitle && <p className="text-[12px] text-muted-foreground mt-0.5">{subtitle}</p>}
+          <div className="px-4 lg:px-5 pt-5 pb-3 border-b border-border/40 bg-card">
+            <h1 className="text-[20px] sm:text-[22px] font-semibold text-foreground leading-tight">{title}</h1>
+            {subtitle && <p className="text-[13px] text-muted-foreground mt-1">{subtitle}</p>}
           </div>
 
-          <main className="flex-1 overflow-auto px-4 lg:px-5 pb-5">
+          <main className="flex-1 overflow-auto px-4 lg:px-6 pb-6 pt-5">
             <PageTransition>{children}</PageTransition>
           </main>
         </div>

@@ -1,226 +1,123 @@
 import { useMemo } from "react";
-import { useFilters, getTimeMultiplier, getRegionMultiplier, getTimeLabel } from "@/lib/filters";
-import * as mock from "@/lib/mock-data";
+import { useFilters, getTimeLabel } from "@/lib/filters";
 import { useZohoData } from "@/hooks/use-zoho-data";
 
-function scale(val: number, tm: number, rm: number) {
-  return Math.round(val * tm * rm);
-}
-
-function fmtMoney(val: number) {
-  if (val >= 1_000_000) return `$${(val / 1_000_000).toFixed(2)}M`;
-  if (val >= 1000) return `$${(val / 1000).toFixed(0)}K`;
-  return `$${val}`;
-}
-
-const regionToDestination: Record<string, string> = {
-  uae: "UAE",
-  ksa: "KSA",
-  qatar: "Qatar",
-  kuwait: "Kuwait",
-};
-
 export function useFilteredData() {
-  const { timeRange, region } = useFilters();
-  const { data: zoho, isLoading: zohoLoading } = useZohoData();
+  const { timeRange } = useFilters();
+  const { data: zoho, isLoading: zohoLoading, error: zohoError } = useZohoData();
 
   return useMemo(() => {
-    const tm = getTimeMultiplier(timeRange);
-    const rm = getRegionMultiplier(region);
     const timeLabel = getTimeLabel(timeRange);
 
-    // ── If Zoho data is available use it, otherwise fall back to mock ──────
-
-    // KPIs
-    const kpis = zoho
-      ? zoho.kpis.map(k => ({ ...k, period: timeLabel }))
-      : mock.overviewKpis.map(k => {
-          const rawNum = parseFloat(k.value.replace(/[$,%M\s]/g, "").replace(/,/g, ""));
-          let filtered: string;
-          if (k.value.includes("days")) {
-            filtered = k.value;
-          } else if (k.value.includes("$") && k.value.includes("M")) {
-            filtered = `$${(rawNum * tm * rm).toFixed(2)}M`;
-          } else if (k.value.includes("$") || k.value.includes("%")) {
-            filtered = k.value;
-          } else {
-            filtered = scale(rawNum, tm, rm).toLocaleString();
-          }
-          return { ...k, value: filtered, period: timeLabel };
-        });
-
-    // Leads over time
+    // Month slice mapping for time-series charts
     const monthSlice = { week: 1, month: 1, quarter: 3, year: 9 }[timeRange];
-    const timeData = zoho
-      ? zoho.leadsOverTime.slice(-monthSlice)
-      : mock.leadsOverTime.slice(-monthSlice).map(d => ({
-          ...d,
-          doctors: scale(d.doctors, 1, rm),
-          qualified: scale(d.qualified, 1, rm),
-          placed: scale(d.placed, 1, rm),
-        }));
 
-    // Placement funnel
-    const funnel = zoho
-      ? zoho.placementFunnel.map(f => ({ ...f, count: scale(f.count, tm, rm) }))
-      : mock.placementFunnel.map(f => ({ ...f, count: scale(f.count, tm, rm) }));
+    // ── Live data only — no mock fallback ─────────────────────────────────
+    const kpis = zoho
+      ? zoho.kpis.map(k => ({ ...k, period: k.period ?? timeLabel }))
+      : [];
 
-    // Pipeline stages (Sales page)
-    const pipeline = zoho
-      ? zoho.pipelineStages.map(s => ({ ...s, count: scale(s.count, tm, rm) }))
-      : mock.pipelineStages.map(s => ({ ...s, count: scale(s.count, tm, rm) }));
+    const timeData = zoho ? zoho.leadsOverTime.slice(-monthSlice) : [];
 
-    // Source channels
-    const channels = zoho
-      ? zoho.channels.map(c => ({ ...c, doctors: scale(c.doctors, tm, rm), placed: scale(c.placed, tm, rm) }))
-      : mock.channelPerformance.map(c => ({
-          ...c,
-          doctors: scale(c.doctors, tm, rm),
-          cost: scale(c.cost, tm, rm),
-          placed: scale(c.placed, tm, rm),
-        }));
+    const funnel = zoho ? zoho.placementFunnel : [];
 
-    // Regions — still mock (region data not in Zoho Leads without Destination Country)
-    const regions = region === "all"
-      ? mock.regionData.map(r => ({
-          ...r,
-          doctors: scale(r.doctors, tm, 1),
-          placements: scale(r.placements, tm, 1),
-        }))
-      : mock.regionData
-          .filter(r => r.region.toLowerCase().replace(" ", "") === region || r.region === regionToDestination[region])
-          .map(r => ({
-            ...r,
-            doctors: scale(r.doctors, tm, 1),
-            placements: scale(r.placements, tm, 1),
-          }));
+    const pipeline = zoho ? zoho.pipelineStages : [];
 
-    // Workflow stages — real pipeline stage counts from Zoho
-    const workflow = zoho
-      ? zoho.workflow.map(s => ({ ...s, count: scale(s.count, tm, rm) }))
-      : mock.workflowStages.map(s => ({ ...s, count: scale(s.count, tm, rm) }));
+    const channels = zoho ? zoho.channels : [];
 
-    // Sales metrics
+    // Regions — no region data available from Zoho (no Destination Country field)
+    const regions: Array<{ region: string; doctors: number; placements: number; hospitals: number }> = [];
+
+    const workflow = zoho ? zoho.workflow : [];
+
     const sales = zoho
       ? {
-          dealsClosed: zoho.sales.dealsClosed,
-          conversionRate: zoho.sales.conversionRate,
-          avgCycleTime: zoho.sales.avgCycleTime || mock.salesMetrics.avgCycleTime,
-          outboundCalls: zoho.sales.outboundCalls,   // real from Zoho Calls module
-          emailsSent: zoho.sales.emailsSent,         // real from Zoho email counts
+          dealsClosed:      zoho.sales.dealsClosed,
+          conversionRate:   zoho.sales.conversionRate,
+          avgCycleTime:     zoho.sales.avgCycleTime,
+          outboundCalls:    zoho.sales.outboundCalls,
+          emailsSent:       zoho.sales.emailsSent,
           followUpsPending: zoho.sales.followUpsPending,
         }
       : {
-          dealsClosed: scale(mock.salesMetrics.dealsClosed, tm, rm),
-          conversionRate: mock.salesMetrics.conversionRate,
-          avgCycleTime: mock.salesMetrics.avgCycleTime,
-          outboundCalls: scale(mock.salesMetrics.outboundCalls, tm, rm),
-          emailsSent: scale(mock.salesMetrics.emailsSent, tm, rm),
-          followUpsPending: scale(mock.salesMetrics.followUpsPending, 1, rm),
+          dealsClosed: 0,
+          conversionRate: 0,
+          avgCycleTime: "—",
+          outboundCalls: 0,
+          emailsSent: 0,
+          followUpsPending: 0,
         };
 
-    // Recruiters
     const recruiters = zoho
-      ? (region === "all"
-          ? zoho.recruiters.map(r => ({ ...r, doctors: scale(r.doctors, tm, 1), placements: scale(r.placements, tm, 1) }))
-          : zoho.recruiters.map(r => ({ ...r, doctors: scale(r.doctors, tm, 1), placements: scale(r.placements, tm, 1) })))
-      : (region === "all"
-          ? mock.topRecruiters.map(r => ({ ...r, doctors: scale(r.doctors, tm, 1), placements: scale(r.placements, tm, 1) }))
-          : mock.topRecruiters
-              .filter(r => {
-                const regionMap: Record<string, string> = { uae: "UAE", ksa: "KSA", qatar: "Qatar", kuwait: "Kuwait" };
-                return r.region === regionMap[region];
-              })
-              .map(r => ({ ...r, doctors: scale(r.doctors, tm, 1), placements: scale(r.placements, tm, 1) })));
+      ? zoho.recruiters.map(r => ({ ...r, role: 'Recruiter' }))
+      : [];
 
-    // Marketing
-    const marketing = zoho
-      ? zoho.marketing.map(m => ({ ...m, doctors: scale(m.doctors, tm, rm), placements: scale(m.placements, tm, rm) }))
-      : mock.marketingChannelMetrics.map(m => ({
-          ...m,
-          doctors: scale(m.doctors, tm, rm),
-          spend: scale(m.spend, tm, rm),
-          placements: scale(m.placements, tm, rm),
-        }));
+    const marketing = zoho ? zoho.marketing : [];
 
-    const costVsConv = mock.costVsConversions.map(c => ({
-      ...c,
-      cost: scale(c.cost, tm, rm),
-      placements: scale(c.placements, tm, rm),
-    }));
+    const costVsConv: Array<{ month: string; cost: number; placements: number }> = [];
 
-    // Finance
     const finance = zoho
-      ? zoho.financeMetrics.map(f => ({ ...f, period: timeLabel }))
-      : mock.financeMetrics.map(f => {
-          const rawNum = parseFloat(f.value.replace(/[$,%Mx\s]/g, "").replace(/,/g, ""));
-          let filtered: string;
-          if (f.value.includes("M")) {
-            filtered = `$${(rawNum * tm * rm).toFixed(2)}M`;
-          } else if (f.value.includes("x") || f.label.includes("CAC")) {
-            filtered = f.value;
-          } else {
-            filtered = `$${scale(rawNum, tm, rm).toLocaleString()}`;
-          }
-          return { ...f, value: filtered, period: timeLabel };
-        });
+      ? zoho.financeMetrics.map(f => ({ ...f, period: f.period ?? timeLabel }))
+      : [];
 
-    const roiData = mock.channelROI;
+    const roiData: Array<{ channel: string; roi: number }> = [];
 
-    // Pipeline doctors (LeadsPipeline page — kept on Supabase)
-    const doctors = region === "all"
-      ? mock.pipelineDoctors
-      : mock.pipelineDoctors.filter(d => {
-          const destMap: Record<string, string> = { uae: "UAE", ksa: "KSA", qatar: "Qatar", kuwait: "Kuwait" };
-          return d.destination === destMap[region];
-        });
+    // Pipeline doctors — drive from real Zoho leads
+    const doctors = zoho
+      ? zoho.rawLeads.slice(0, 200).map(l => ({
+          id: l.id,
+          name: l.Full_Name ?? `${l.First_Name ?? ''} ${l.Last_Name ?? ''}`.trim() ?? '—',
+          specialty: l.Specialty ?? l.Specialty_New ?? '—',
+          stage: l.Lead_Status ?? '—',
+          origin: l.Country_of_Specialty_training ?? '—',
+          destination: 'UAE',
+          assignedTo: l.Owner?.name ?? '—',
+          daysInStage: Math.max(
+            0,
+            Math.floor((Date.now() - new Date(l.Created_Time).getTime()) / 86_400_000)
+          ),
+          status: (['Unqualified Leads', 'Not Interested'].includes(l.Lead_Status)
+            ? 'at-risk'
+            : l.Lead_Status === 'High Priority Follow up'
+              ? 'delayed'
+              : 'on-track') as 'on-track' | 'delayed' | 'at-risk',
+          license:
+            l.Has_DHA && l.Has_DHA !== 'No' ? `DHA (${l.Has_DHA})` :
+            l.Has_DOH && l.Has_DOH !== 'No' ? `DOH (${l.Has_DOH})` :
+            l.Has_MOH && l.Has_MOH !== 'No' ? `MOH (${l.Has_MOH})` :
+            l.License ?? '—',
+        }))
+      : [];
 
-    // Campaigns — real from Zoho Campaigns module (197 campaigns)
-    const campaigns = zoho
-      ? zoho.campaignsList
-      : mock.campaignPerformance.map(c => ({
-          ...c,
-          doctors: scale(c.doctors, tm, rm),
-          spend:   scale(c.spend, tm, rm),
-        }));
+    const campaigns = zoho ? zoho.campaignsList : [];
 
-    // Operational health — mock
-    const timeAdjust: Record<string, number> = { week: 1.3, month: 1.1, quarter: 1, year: 0.85 };
-    const pctAdjust:  Record<string, number> = { week: 0.85, month: 0.92, quarter: 1, year: 1.15 };
-    const operationalHealth = mock.operationalHealth.map(m => ({
-      ...m,
-      value: m.unit === "hrs"
-        ? Math.round(m.value * (timeAdjust[timeRange] ?? 1))
-        : Math.min(100, Math.round(m.value * (pctAdjust[timeRange] ?? 1))),
-    }));
+    // Operational health / roadmap — no live source yet
+    const operationalHealth: Array<{ metric: string; value: number; unit: string; target?: number }> = [];
+    const roadmapPhases: Array<{
+      phase: string;
+      timeline: string;
+      status: 'completed' | 'in-progress' | 'planned';
+      progress: number;
+      items: Array<{ task: string; done: boolean }>;
+    }> = [];
 
-    const timeDelayAdjust: Record<string, number> = { week: 0.7, month: 0.85, quarter: 1, year: 1.2 };
-    const bottlenecks = zoho
-      ? zoho.bottlenecks   // real counts from Zoho lead statuses
-      : mock.bottlenecks.map(b => ({
-          ...b,
-          affected: scale(b.affected, tm, rm),
-          avgDelay: `${Math.round(parseInt(b.avgDelay) * (timeDelayAdjust[timeRange] ?? 1))} days`,
-        }));
+    const bottlenecks = zoho ? zoho.bottlenecks : [];
 
-    const rateAdjust: Record<string, number> = { week: 0.92, month: 0.96, quarter: 1, year: 1.04 };
-    const stageConversion = zoho
-      ? zoho.stageConversion   // real rates computed from Zoho Lead_Status distribution
-      : mock.stageConversion.map(s => ({
-          ...s,
-          rate: Math.min(100, +(s.rate * (rateAdjust[timeRange] ?? 1)).toFixed(1)),
-        }));
+    const stageConversion = zoho ? zoho.stageConversion : [];
+
+    const activity = zoho ? zoho.recentActivity : [];
 
     return {
       kpis, timeData, funnel, channels, regions, pipeline, workflow,
       sales, recruiters, marketing, costVsConv, finance, roiData,
       doctors, campaigns, timeLabel, stageConversion,
-      activity: zoho ? zoho.recentActivity : mock.recentActivity,
+      activity,
       operationalHealth,
-      roadmapPhases: mock.roadmapPhases,
+      roadmapPhases,
       bottlenecks,
       zohoLoading,
+      zohoError,
       isLive: !!zoho,
     };
-  }, [timeRange, region, zoho, zohoLoading]);
+  }, [timeRange, zoho, zohoLoading, zohoError]);
 }

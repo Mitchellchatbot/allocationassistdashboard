@@ -91,6 +91,61 @@ serve(async (req: Request) => {
     const url    = new URL(req.url);
     const module = url.searchParams.get('module');
     const action = url.searchParams.get('action');
+    const code   = url.searchParams.get('code');
+
+    // ── OAuth callback: Zoho redirects here with ?code=… on authorization ──
+    if (code) {
+      const redirectUri = 'https://elfkqmbwuspjaoorqggq.supabase.co/functions/v1/zoho-proxy';
+      const accountsServer = url.searchParams.get('accounts-server') || 'https://accounts.zoho.com';
+      const tokenRes = await fetch(`${accountsServer}/oauth/v2/token`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+        body: new URLSearchParams({
+          code,
+          client_id:     CLIENT_ID,
+          client_secret: CLIENT_SECRET,
+          grant_type:    'authorization_code',
+          redirect_uri:  redirectUri,
+        }),
+      });
+
+      const tokenData = await tokenRes.json();
+      if (!tokenData.refresh_token) {
+        return new Response(
+          `<h2>Zoho token exchange failed</h2><pre>${JSON.stringify(tokenData, null, 2)}</pre>`,
+          { status: 400, headers: { ...CORS, 'Content-Type': 'text/html' } }
+        );
+      }
+
+      // Best-effort: persist to zoho_tokens. Tolerate missing refresh_token column.
+      try {
+        await supabase.from('zoho_tokens').upsert({
+          id:            1,
+          access_token:  tokenData.access_token,
+          refresh_token: tokenData.refresh_token,
+          expires_at:    new Date(Date.now() + ((tokenData.expires_in ?? 3600) - 120) * 1000).toISOString(),
+        });
+      } catch {
+        await supabase.from('zoho_tokens').upsert({
+          id:           1,
+          access_token: tokenData.access_token,
+          expires_at:   new Date(Date.now() + ((tokenData.expires_in ?? 3600) - 120) * 1000).toISOString(),
+        }).then(() => {}).catch(() => {});
+      }
+
+      // Reset in-memory cache so next call re-reads from DB
+      _token = tokenData.access_token;
+      _expiresAt = Date.now() + ((tokenData.expires_in ?? 3600) - 120) * 1000;
+
+      return new Response(
+        `<h2>✅ Zoho connected</h2>
+         <p>Refresh token stored in <code>zoho_tokens</code>.</p>
+         <p><strong>Next step:</strong> copy this refresh token into your Supabase edge-function secret <code>ZOHO_REFRESH_TOKEN</code>:</p>
+         <pre style="background:#f4f4f4;padding:12px;border-radius:6px;user-select:all">${tokenData.refresh_token}</pre>
+         <p>Then redeploy the function. You can close this tab.</p>`,
+        { status: 200, headers: { ...CORS, 'Content-Type': 'text/html' } }
+      );
+    }
 
     if (action === 'email-counts') {
       const ids   = (url.searchParams.get('lead_ids') ?? '').split(',').filter(Boolean).slice(0, 30);

@@ -132,18 +132,44 @@ const STAGE_COLORS: Record<string, string> = {
   'Closed Lost':          'hsl(0, 60%, 55%)',
 };
 
-const SOURCE_DISPLAY: Record<string, string> = {
-  'Website/SEO':          'SEO / Organic',
-  'Website Landing Page': 'Landing Page',
-  'Facebook':             'Facebook Ads',
-  'LinkedIn':             'LinkedIn',
-  'Google Ads':           'Google Ads',
-  'Referral':             'Referrals',
-};
-
+// Aggressive normalization — merges variants and junks garbage data.
 function displaySource(src: string | null): string {
-  if (!src) return 'Direct / Unknown';
-  return SOURCE_DISPLAY[src] ?? src;
+  if (!src) return 'Uncategorized';
+  const s = src.trim().toLowerCase();
+
+  // Junk / test entries
+  if (!s || /^x+$/i.test(s) || s === 'none' || s === 'null' || s === 'n/a' || s.length < 2) {
+    return 'Uncategorized';
+  }
+
+  // Instagram variants
+  if (s.includes('instagram') || s === 'ig') return 'Instagram';
+
+  // Facebook variants
+  if (s.includes('facebook')) return 'Facebook';
+
+  // Website / SEO
+  if (s.includes('website') && s.includes('seo')) return 'SEO / Organic';
+  if (s.includes('landing page')) return 'Landing Page';
+  if (s.includes('website')) return 'Website';
+
+  // Paid ads
+  if (s.includes('google') && s.includes('ad')) return 'Google Ads';
+  if (s.includes('tiktok')) return 'TikTok';
+
+  // Social / professional
+  if (s.includes('linkedin')) return 'LinkedIn';
+  if (s.includes('whatsapp')) return 'WhatsApp';
+
+  // Referral / word of mouth
+  if (s.includes('referral') || s.includes('referrer') || s.includes('word of mouth')) return 'Referrals';
+
+  // Agencies / external
+  if (s.includes('go hire') || s.includes('gohire')) return 'Go Hire';
+  if (s.includes('chatgpt') || s.includes('gpt') || s.includes('openai')) return 'ChatGPT';
+
+  // Fallback: Title Case the raw value
+  return src.replace(/_/g, ' ').replace(/\b\w/g, c => c.toUpperCase()).trim();
 }
 
 function licenseLabel(lead: Pick<ZohoLead, 'Has_DHA' | 'Has_DOH' | 'Has_MOH' | 'License'>): string {
@@ -168,13 +194,42 @@ function aggregateZohoData(
     'Not Contacted', 'Attempted to Contact', 'Initial Sales Call Completed',
     'Contact in Future', 'High Priority Follow up',
   ]);
+  const unqualifiedStatuses = new Set(['Unqualified Leads', 'Not Interested']);
 
+  const qualifiedLeads = leads.filter(l => !unqualifiedStatuses.has(l.Lead_Status));
   const activeLeads    = leads.filter(l => activeStatuses.has(l.Lead_Status));
   const closedWon      = deals.filter(d => d.Stage === 'Closed Won');
+  const closedLost     = deals.filter(d => d.Stage === 'Closed Lost');
+  const openDeals      = deals.filter(d => d.Stage !== 'Closed Won' && d.Stage !== 'Closed Lost');
   const totalRevenue   = sumBy(closedWon, d => d.Amount);
   const awaitingLicense = leads.filter(
     l => l.Has_DOH === 'In Progress' || l.Has_DHA === 'In Progress' || l.Has_MOH === 'In Progress'
   ).length;
+
+  // ── Pipeline value — weighted by stage probability ───────────────────────
+  const stageProb: Record<string, number> = {
+    'Qualification':        0.10,
+    'Needs Analysis':       0.25,
+    'Value Proposition':    0.40,
+    'Identify Decision Makers': 0.50,
+    'Proposal/Price Quote': 0.65,
+    'Negotiation/Review':   0.80,
+    'Closed Won':           1.00,
+    'Closed Lost':          0.00,
+  };
+  const openPipelineValue = sumBy(openDeals, d => d.Amount);
+  const weightedPipelineValue = openDeals.reduce((sum, d) => {
+    const p = stageProb[d.Stage] ?? 0.30;
+    return sum + (d.Amount ?? 0) * p;
+  }, 0);
+
+  // ── Conversion rates ─────────────────────────────────────────────────────
+  const conversionRate = leads.length > 0
+    ? (closedWon.length / leads.length) * 100
+    : 0;
+  const qualificationRate = leads.length > 0
+    ? (qualifiedLeads.length / leads.length) * 100
+    : 0;
 
   // ── Avg time to place (Created_Time → Closing_Date on Closed Won deals) ──
   const wonWithDates = closedWon.filter(d => d.Created_Time && d.Closing_Date);
@@ -188,22 +243,93 @@ function aggregateZohoData(
     : 0;
   const avgCycleTime = avgCycleDays > 0 ? `${avgCycleDays} days` : '—';
 
+  // ── Period-over-period deltas (last 30 days vs previous 30 days) ─────────
+  const now = Date.now();
+  const DAY = 86_400_000;
+  const period1Start = now - 30 * DAY;   // last 30 days
+  const period2Start = now - 60 * DAY;   // 30 days before that
+
+  const leadsCurrent = leads.filter(l => new Date(l.Created_Time).getTime() >= period1Start).length;
+  const leadsPrev    = leads.filter(l => {
+    const t = new Date(l.Created_Time).getTime();
+    return t >= period2Start && t < period1Start;
+  }).length;
+  const qualifiedCurrent = leads.filter(l => {
+    return new Date(l.Created_Time).getTime() >= period1Start && !unqualifiedStatuses.has(l.Lead_Status);
+  }).length;
+  const qualifiedPrev = leads.filter(l => {
+    const t = new Date(l.Created_Time).getTime();
+    return t >= period2Start && t < period1Start && !unqualifiedStatuses.has(l.Lead_Status);
+  }).length;
+
+  const wonCurrent = closedWon.filter(d => new Date(d.Closing_Date).getTime() >= period1Start).length;
+  const wonPrev    = closedWon.filter(d => {
+    const t = new Date(d.Closing_Date).getTime();
+    return t >= period2Start && t < period1Start;
+  }).length;
+  const revenueCurrent = sumBy(closedWon.filter(d => new Date(d.Closing_Date).getTime() >= period1Start), d => d.Amount);
+  const revenuePrev    = sumBy(
+    closedWon.filter(d => {
+      const t = new Date(d.Closing_Date).getTime();
+      return t >= period2Start && t < period1Start;
+    }),
+    d => d.Amount
+  );
+
+  const pctDelta = (curr: number, prev: number): number => {
+    if (prev === 0) return curr > 0 ? 100 : 0;
+    return +(((curr - prev) / prev) * 100).toFixed(1);
+  };
+
   // ── KPI cards ─────────────────────────────────────────────────────────────
   const fmtAED = (v: number) =>
     v >= 1_000_000 ? `AED ${(v / 1_000_000).toFixed(2)}M`
     : v >= 1000    ? `AED ${(v / 1000).toFixed(0)}K`
-    : `AED ${v}`;
+    : `AED ${Math.round(v)}`;
 
   const kpis = [
-    { label: 'Active Doctors',    value: activeLeads.length.toLocaleString(), change: 0, period: 'live from Zoho',     icon: 'users'     as const },
-    { label: 'Doctors Placed',    value: closedWon.length.toString(),          change: 0, period: 'Closed Won deals',  icon: 'check'     as const },
-    { label: 'Awaiting License',  value: awaitingLicense > 0
-      ? awaitingLicense.toString()
-      : leads.filter(l => l.Has_DOH || l.Has_DHA || l.Has_MOH).length.toString(),
-      change: 0, period: 'license in progress', icon: 'file' as const },
-    { label: 'Partner Hospitals', value: accounts.length.toLocaleString(),     change: 0, period: 'Zoho Accounts',     icon: 'building'  as const },
-    { label: 'Avg. Time to Place', value: avgCycleTime,                        change: 0, period: 'deal create → close', icon: 'clock'   as const },
-    { label: 'Revenue',           value: fmtAED(totalRevenue),                 change: 0, period: 'Closed Won deals',  icon: 'dollar'    as const },
+    {
+      label:  'Qualified Active',
+      value:  qualifiedLeads.filter(l => activeStatuses.has(l.Lead_Status)).length.toLocaleString(),
+      change: pctDelta(qualifiedCurrent, qualifiedPrev),
+      period: 'vs prior 30 days',
+      icon:   'users' as const,
+    },
+    {
+      label:  'Lead → Placement',
+      value:  `${conversionRate.toFixed(1)}%`,
+      change: 0,
+      period: `${closedWon.length} placed / ${leads.length.toLocaleString()} leads`,
+      icon:   'check' as const,
+    },
+    {
+      label:  'Pipeline Value',
+      value:  fmtAED(openPipelineValue),
+      change: 0,
+      period: `weighted ${fmtAED(weightedPipelineValue)} · ${openDeals.length} open deals`,
+      icon:   'dollar' as const,
+    },
+    {
+      label:  'Closed Revenue',
+      value:  fmtAED(totalRevenue),
+      change: pctDelta(revenueCurrent, revenuePrev),
+      period: 'last 30 days vs prior',
+      icon:   'dollar' as const,
+    },
+    {
+      label:  'Avg. Time to Place',
+      value:  avgCycleTime,
+      change: 0,
+      period: `${wonWithDates.length} closed-won deals`,
+      icon:   'clock' as const,
+    },
+    {
+      label:  'Qualification Rate',
+      value:  `${qualificationRate.toFixed(0)}%`,
+      change: pctDelta(qualificationRate, qualifiedPrev / Math.max(leadsPrev, 1) * 100),
+      period: `${qualifiedLeads.length.toLocaleString()} qualified / ${leads.length.toLocaleString()}`,
+      icon:   'file' as const,
+    },
   ];
 
   // ── Pipeline funnel (leads by status) ────────────────────────────────────
@@ -472,8 +598,16 @@ function aggregateZohoData(
     bottlenecks,
     totalLeads,
     activeLeads:    activeLeads.length,
+    qualifiedLeads: qualifiedLeads.length,
+    unqualifiedLeads: leads.length - qualifiedLeads.length,
+    qualificationRate: +qualificationRate.toFixed(1),
     closedWon:      closedWon.length,
+    closedLost:     closedLost.length,
+    openDeals:      openDeals.length,
     totalRevenue,
+    openPipelineValue,
+    weightedPipelineValue,
+    conversionRate: +conversionRate.toFixed(2),
     partnerHospitals: accounts.length,
     campaignsList,
     rawLeads,
