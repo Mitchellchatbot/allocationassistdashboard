@@ -1,13 +1,10 @@
 import { createContext, useContext } from "react";
 
 export type TimeRange = "week" | "month" | "quarter" | "year";
-export type Region = "all" | "uae" | "ksa" | "qatar" | "kuwait";
 
 export interface FilterContextType {
   timeRange: TimeRange;
   setTimeRange: (v: TimeRange) => void;
-  region: Region;
-  setRegion: (v: Region) => void;
 }
 
 export const FilterContext = createContext<FilterContextType | null>(null);
@@ -26,29 +23,16 @@ const timeMultipliers: Record<TimeRange, number> = {
   year: 3.8,
 };
 
-// Region filter ratios (approximate share of total)
-const regionShares: Record<Region, number> = {
-  all: 1,
-  uae: 0.42,
-  ksa: 0.30,
-  qatar: 0.15,
-  kuwait: 0.13,
-};
-
 export function getTimeMultiplier(timeRange: TimeRange) {
   return timeMultipliers[timeRange];
 }
 
-export function getRegionMultiplier(region: Region) {
-  return regionShares[region];
+export function applyFilters(value: number, timeRange: TimeRange) {
+  return Math.round(value * timeMultipliers[timeRange]);
 }
 
-export function applyFilters(value: number, timeRange: TimeRange, region: Region) {
-  return Math.round(value * timeMultipliers[timeRange] * regionShares[region]);
-}
-
-export function formatFilteredValue(value: number, timeRange: TimeRange, region: Region, prefix = "") {
-  const filtered = applyFilters(value, timeRange, region);
+export function formatFilteredValue(value: number, timeRange: TimeRange, prefix = "") {
+  const filtered = applyFilters(value, timeRange);
   return `${prefix}${filtered.toLocaleString()}`;
 }
 
@@ -60,15 +44,4 @@ export function getTimeLabel(timeRange: TimeRange) {
     year: "this year",
   };
   return labels[timeRange];
-}
-
-export function getRegionLabel(region: Region) {
-  const labels: Record<Region, string> = {
-    all: "All Regions",
-    uae: "UAE",
-    ksa: "Saudi Arabia",
-    qatar: "Qatar",
-    kuwait: "Kuwait",
-  };
-  return labels[region];
 }

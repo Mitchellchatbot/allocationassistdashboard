@@ -33,21 +33,15 @@ const Index = () => {
 
   return (
     <DashboardLayout title="Dashboard" subtitle="A quick look at how doctor placements and operations are performing">
-      {/* Welcome Banner */}
-      <div className="mb-5 rounded-xl bg-gradient-to-r from-primary/10 via-primary/5 to-transparent border border-primary/20 p-5">
-        <h2 className="text-lg font-semibold text-foreground">Welcome back 👋</h2>
-        <p className="text-sm text-muted-foreground mt-1">Here's what's happening with your doctor placements and operations today.</p>
-      </div>
-
       {/* KPI Grid - responsive */}
-      <div className="grid grid-cols-2 sm:grid-cols-3 gap-3 mb-5">
+      <div className="grid grid-cols-2 sm:grid-cols-3 gap-4 mb-6">
         {kpis.map((kpi) => <KpiCard key={kpi.label} {...kpi} />)}
       </div>
 
-      <div className="grid grid-cols-1 lg:grid-cols-5 gap-4 mb-5">
+      <div className="grid grid-cols-1 lg:grid-cols-5 gap-4 mb-6">
         <Card className="lg:col-span-3 shadow-sm border-border/50 hover:shadow-md transition-shadow">
           <CardHeader className="pb-1 pt-4 px-4">
-            <CardTitle className="text-[12px] font-medium text-muted-foreground uppercase tracking-wide">Doctor Applications Over Time</CardTitle>
+            <CardTitle className="text-[14px] font-semibold text-foreground">Doctor Applications Over Time</CardTitle>
           </CardHeader>
           <CardContent className="px-2 sm:px-4 pb-4">
             <ResponsiveContainer width="100%" height={240}>
@@ -79,23 +73,24 @@ const Index = () => {
 
         <Card className="lg:col-span-2 shadow-sm border-border/50 hover:shadow-md transition-shadow">
           <CardHeader className="pb-1 pt-4 px-4">
-            <CardTitle className="text-[12px] font-medium text-muted-foreground uppercase tracking-wide">How Doctors Move Through the Process</CardTitle>
+            <CardTitle className="text-[14px] font-semibold text-foreground">How Doctors Move Through the Process</CardTitle>
           </CardHeader>
           <CardContent className="px-4 pb-4">
             <div className="space-y-3">
               {funnel.map((item, i) => (
                 <div key={item.stage}>
-                  <div className="flex items-center justify-between mb-1">
-                    <span className="text-[11px] font-medium text-foreground">{item.stage}</span>
-                    <span className="text-[11px] text-muted-foreground tabular-nums">{item.count.toLocaleString()}</span>
-                  </div>
-                  <div className="h-7 rounded-md bg-muted overflow-hidden">
-                    <div
-                      className="h-full rounded-md flex items-center pl-2.5 transition-all duration-500"
-                      style={{ width: `${item.pct}%`, backgroundColor: `hsl(170, ${55 - i * 5}%, ${45 + i * 4}%)` }}
-                    >
-                      <span className="text-[9px] font-semibold text-white drop-shadow-sm">{item.pct}%</span>
+                  <div className="flex items-center justify-between mb-1.5">
+                    <span className="text-[13px] font-medium text-foreground">{item.stage}</span>
+                    <div className="flex items-center gap-2">
+                      <span className="text-[12px] font-semibold text-foreground tabular-nums">{item.count.toLocaleString()}</span>
+                      <span className="text-[11px] text-muted-foreground w-8 text-right tabular-nums">{item.pct}%</span>
                     </div>
+                  </div>
+                  <div className="h-2 rounded-full bg-muted overflow-hidden">
+                    <div
+                      className="h-full rounded-full transition-all duration-500"
+                      style={{ width: `${item.pct}%`, backgroundColor: `hsl(170, ${55 - i * 5}%, ${45 + i * 4}%)` }}
+                    />
                   </div>
                 </div>
               ))}
@@ -107,19 +102,19 @@ const Index = () => {
       <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
         <Card className="shadow-sm border-border/50 hover:shadow-md transition-shadow">
           <CardHeader className="pb-1 pt-4 px-4">
-            <CardTitle className="text-[12px] font-medium text-muted-foreground uppercase tracking-wide">Performance by Region</CardTitle>
+            <CardTitle className="text-[14px] font-semibold text-foreground">Performance by Region</CardTitle>
           </CardHeader>
           <CardContent className="px-4 pb-4">
             <div className="space-y-2">
               {regions.map((r) => (
                 <div key={r.region} className="flex items-center justify-between p-3 rounded-lg bg-secondary/50 hover:bg-secondary transition-colors">
                   <div>
-                    <p className="text-[12px] font-medium text-foreground">{r.region}</p>
-                    <p className="text-[10px] text-muted-foreground">{r.hospitals} hospitals · {r.doctors} doctors</p>
+                    <p className="text-[13px] font-medium text-foreground">{r.region}</p>
+                    <p className="text-[12px] text-muted-foreground">{r.hospitals} hospitals · {r.doctors} doctors</p>
                   </div>
                   <div className="text-right">
-                    <p className="text-[14px] font-semibold text-foreground tabular-nums">{r.placements}</p>
-                    <p className="text-[10px] text-muted-foreground">placed</p>
+                    <p className="text-[16px] font-semibold text-foreground tabular-nums">{r.placements}</p>
+                    <p className="text-[11px] text-muted-foreground">placed</p>
                   </div>
                 </div>
               ))}
@@ -129,7 +124,7 @@ const Index = () => {
 
         <Card className="shadow-sm border-border/50 hover:shadow-md transition-shadow">
           <CardHeader className="pb-1 pt-4 px-4">
-            <CardTitle className="text-[12px] font-medium text-muted-foreground uppercase tracking-wide">Where Doctors Come From</CardTitle>
+            <CardTitle className="text-[14px] font-semibold text-foreground">Where Doctors Come From</CardTitle>
           </CardHeader>
           <CardContent className="px-2 sm:px-4 pb-4">
             <div className="space-y-2">
@@ -137,7 +132,7 @@ const Index = () => {
                 <div key={ch.channel} className="flex items-center gap-2.5 p-2.5 rounded-lg bg-secondary/50 hover:bg-secondary transition-colors">
                   <ChannelIcon channel={ch.channel} size={14} />
                   <div className="flex-1 min-w-0">
-                    <p className="text-[11px] font-medium text-foreground">{ch.channel}</p>
+                    <p className="text-[13px] font-medium text-foreground">{ch.channel}</p>
                     <div className="h-2 rounded-full bg-muted mt-1 overflow-hidden">
                       <div
                         className="h-full rounded-full bg-primary transition-all"
@@ -145,7 +140,7 @@ const Index = () => {
                       />
                     </div>
                   </div>
-                  <span className="text-[13px] font-semibold text-foreground tabular-nums">{ch.doctors}</span>
+                  <span className="text-[15px] font-semibold text-foreground tabular-nums">{ch.doctors}</span>
                 </div>
               ))}
             </div>
@@ -154,7 +149,7 @@ const Index = () => {
 
         <Card className="shadow-sm border-border/50 hover:shadow-md transition-shadow md:col-span-2 lg:col-span-1">
           <CardHeader className="pb-1 pt-4 px-4">
-            <CardTitle className="text-[12px] font-medium text-muted-foreground uppercase tracking-wide">Recent Activity</CardTitle>
+            <CardTitle className="text-[14px] font-semibold text-foreground">Recent Activity</CardTitle>
           </CardHeader>
           <CardContent className="px-4 pb-4">
             <div className="space-y-2">
@@ -164,10 +159,10 @@ const Index = () => {
                     {activityIcons[item.type]}
                   </div>
                   <div className="min-w-0 flex-1">
-                    <p className="text-[11px] font-medium text-foreground leading-tight">{item.action}</p>
-                    <p className="text-[10px] text-muted-foreground truncate">{item.detail}</p>
+                    <p className="text-[12px] font-medium text-foreground leading-tight">{item.action}</p>
+                    <p className="text-[11px] text-muted-foreground truncate">{item.detail}</p>
                   </div>
-                  <span className="text-[9px] text-muted-foreground shrink-0 mt-0.5">{item.time}</span>
+                  <span className="text-[11px] text-muted-foreground shrink-0 mt-0.5">{item.time}</span>
                 </div>
               ))}
             </div>

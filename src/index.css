@@ -1,4 +1,4 @@
-@import url('https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&display=swap');
+@import url('https://fonts.googleapis.com/css2?family=Poppins:wght@300;400;500;600;700&display=swap');
 
 @tailwind base;
 @tailwind components;
@@ -6,11 +6,11 @@
 
 @layer base {
   :root {
-    --background: 220 15% 97%;
-    --foreground: 220 20% 18%;
+    --background: 170 12% 97%;
+    --foreground: 170 20% 15%;
 
     --card: 0 0% 100%;
-    --card-foreground: 220 20% 18%;
+    --card-foreground: 170 20% 15%;
 
     --popover: 0 0% 100%;
     --popover-foreground: 220 20% 18%;
@@ -44,7 +44,7 @@
     --input: 220 14% 90%;
     --ring: 170 55% 45%;
 
-    --radius: 0.5rem;
+    --radius: 0.75rem;
 
     --chart-1: 170 55% 45%;
     --chart-2: 210 75% 52%;
@@ -52,8 +52,8 @@
     --chart-4: 38 88% 50%;
     --chart-5: 280 50% 52%;
 
-    --kpi: 49 100% 95%;
-    --kpi-foreground: 42 60% 25%;
+    --kpi: 0 0% 100%;
+    --kpi-foreground: 170 20% 15%;
 
     /* Sidebar — AA teal/turquoise */
     --sidebar-background: 170 55% 30%;
@@ -73,7 +73,6 @@
   }
   body {
     @apply bg-background text-foreground antialiased;
-    font-family: 'Inter', -apple-system, BlinkMacSystemFont, sans-serif;
-    font-feature-settings: 'cv02', 'cv03', 'cv04', 'cv11';
+    font-family: 'Poppins', -apple-system, BlinkMacSystemFont, sans-serif;
   }
 }
