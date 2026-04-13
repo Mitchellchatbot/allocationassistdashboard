@@ -188,9 +188,9 @@ export function DashboardLayout({ children, title, subtitle }: DashboardLayoutPr
                   <button
                     onClick={() => !sync.isPending && sync.mutate()}
                     disabled={sync.isPending}
-                    className="hidden sm:flex items-center gap-1 text-[9px] text-muted-foreground/70 hover:text-foreground transition-colors disabled:opacity-50 rounded px-1 py-0.5 hover:bg-muted"
+                    className="hidden sm:flex items-center gap-1.5 h-7 px-2.5 text-[11px] font-medium rounded-md border border-border/60 bg-card text-muted-foreground hover:text-foreground hover:border-border hover:bg-muted/50 transition-all duration-150 disabled:opacity-50 shadow-sm"
                   >
-                    <RefreshCw className={`h-2.5 w-2.5 ${sync.isPending ? "animate-spin" : ""}`} />
+                    <RefreshCw className={`h-3 w-3 shrink-0 ${sync.isPending ? "animate-spin" : ""}`} />
                     {sync.isPending
                       ? "Syncing…"
                       : syncedAt
