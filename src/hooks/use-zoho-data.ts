@@ -14,10 +14,13 @@
 
 import { useQuery } from '@tanstack/react-query';
 import { zohoFetchAll, zohoGetEmailCounts } from '@/lib/zoho';
+import { supabase } from '@/lib/supabase';
+
+const CACHE_MAX_AGE_MS = 60 * 60 * 1000; // 1 hour
 
 // ── Zoho field types ─────────────────────────────────────────────────────────
 
-interface ZohoLead {
+export interface ZohoLead {
   id: string;
   Full_Name: string;
   First_Name: string;
@@ -38,7 +41,7 @@ interface ZohoLead {
   Prime_Classification: string | null;
 }
 
-interface ZohoDeal {
+export interface ZohoDeal {
   id: string;
   Deal_Name: string;
   Stage: string;
@@ -49,7 +52,7 @@ interface ZohoDeal {
   Created_Time: string;
 }
 
-interface ZohoCall {
+export interface ZohoCall {
   id: string;
   Subject: string | null;
   Call_Type: string;   // "Outbound" | "Inbound" | "Missed"
@@ -58,14 +61,14 @@ interface ZohoCall {
   Created_Time: string;
 }
 
-interface ZohoAccount {
+export interface ZohoAccount {
   id: string;
   Account_Name: string;
   Industry: string | null;
   Owner: { name: string; email: string };
 }
 
-interface ZohoCampaign {
+export interface ZohoCampaign {
   id: string;
   Campaign_Name: string;
   Type: string | null;
@@ -133,7 +136,7 @@ const STAGE_COLORS: Record<string, string> = {
 };
 
 // Aggressive normalization — merges variants and junks garbage data.
-function displaySource(src: string | null): string {
+export function displaySource(src: string | null): string {
   if (!src) return 'Uncategorized';
   const s = src.trim().toLowerCase();
 
@@ -172,16 +175,10 @@ function displaySource(src: string | null): string {
   return src.replace(/_/g, ' ').replace(/\b\w/g, c => c.toUpperCase()).trim();
 }
 
-function licenseLabel(lead: Pick<ZohoLead, 'Has_DHA' | 'Has_DOH' | 'Has_MOH' | 'License'>): string {
-  if (lead.Has_DHA && lead.Has_DHA !== 'No') return `DHA (${lead.Has_DHA})`;
-  if (lead.Has_DOH && lead.Has_DOH !== 'No') return `DOH (${lead.Has_DOH})`;
-  if (lead.Has_MOH && lead.Has_MOH !== 'No') return `MOH (${lead.Has_MOH})`;
-  return lead.License ?? '—';
-}
 
 // ── Main aggregation ──────────────────────────────────────────────────────────
 
-function aggregateZohoData(
+export function aggregateZohoData(
   leads: ZohoLead[],
   deals: ZohoDeal[],
   calls: ZohoCall[],
@@ -202,9 +199,6 @@ function aggregateZohoData(
   const closedLost     = deals.filter(d => d.Stage === 'Closed Lost');
   const openDeals      = deals.filter(d => d.Stage !== 'Closed Won' && d.Stage !== 'Closed Lost');
   const totalRevenue   = sumBy(closedWon, d => d.Amount);
-  const awaitingLicense = leads.filter(
-    l => l.Has_DOH === 'In Progress' || l.Has_DHA === 'In Progress' || l.Has_MOH === 'In Progress'
-  ).length;
 
   // ── Pipeline value — weighted by stage probability ───────────────────────
   const stageProb: Record<string, number> = {
@@ -249,7 +243,6 @@ function aggregateZohoData(
   const period1Start = now - 30 * DAY;   // last 30 days
   const period2Start = now - 60 * DAY;   // 30 days before that
 
-  const leadsCurrent = leads.filter(l => new Date(l.Created_Time).getTime() >= period1Start).length;
   const leadsPrev    = leads.filter(l => {
     const t = new Date(l.Created_Time).getTime();
     return t >= period2Start && t < period1Start;
@@ -262,11 +255,6 @@ function aggregateZohoData(
     return t >= period2Start && t < period1Start && !unqualifiedStatuses.has(l.Lead_Status);
   }).length;
 
-  const wonCurrent = closedWon.filter(d => new Date(d.Closing_Date).getTime() >= period1Start).length;
-  const wonPrev    = closedWon.filter(d => {
-    const t = new Date(d.Closing_Date).getTime();
-    return t >= period2Start && t < period1Start;
-  }).length;
   const revenueCurrent = sumBy(closedWon.filter(d => new Date(d.Closing_Date).getTime() >= period1Start), d => d.Amount);
   const revenuePrev    = sumBy(
     closedWon.filter(d => {
@@ -414,33 +402,38 @@ function aggregateZohoData(
     roi: 0,
   }));
 
-  // ── Recruiter performance ─────────────────────────────────────────────────
+  // ── Recruiter performance (built from lead owners, not deals) ────────────
   const outboundCalls    = calls.filter(c => c.Call_Type === 'Outbound');
   const callsByRecruiter = countBy(outboundCalls, c => c.Owner?.name ?? 'Unknown');
-  const recruiterLeads   = countBy(leads, l => l.Owner?.name ?? 'Unknown');
 
-  const recruiterDeals: Record<string, ZohoDeal[]> = {};
-  deals.forEach(d => {
-    const name = d.Owner?.name ?? 'Unknown';
-    recruiterDeals[name] = [...(recruiterDeals[name] ?? []), d];
+  const leadsByOwner: Record<string, ZohoLead[]> = {};
+  leads.forEach(l => {
+    const name = l.Owner?.name ?? 'Unknown';
+    if (!leadsByOwner[name]) leadsByOwner[name] = [];
+    leadsByOwner[name].push(l);
   });
 
-  const recruiters = Object.entries(recruiterDeals)
-    .map(([name, rDeals]) => {
-      const won     = rDeals.filter(d => d.Stage === 'Closed Won');
-      const revenue = sumBy(won, d => d.Amount);
+  const recruiters = Object.entries(leadsByOwner)
+    .filter(([name]) => name !== 'Unknown')
+    .map(([name, rLeads]) => {
+      const contacted   = rLeads.filter(l => l.Lead_Status !== 'Not Contacted').length;
+      const highPri     = rLeads.filter(l => l.Lead_Status === 'High Priority Follow up').length;
+      const contactRate = rLeads.length > 0 ? Math.round((contacted / rLeads.length) * 100) : 0;
       return {
         name,
-        region: 'GCC',
-        doctors:    recruiterLeads[name] ?? 0,
-        placements: won.length,
-        revenue:    `AED ${revenue.toLocaleString()}`,
-        calls:      callsByRecruiter[name] ?? 0,
-        emails:     emailData.bySender[name] ?? 0,
-        score: Math.min(100, Math.round((won.length / Math.max(rDeals.length, 1)) * 100)),
+        region:      'GCC',
+        doctors:     rLeads.length,
+        contacted,
+        contactRate,
+        highPriority: highPri,
+        placements:  0,           // not tracked in this setup
+        revenue:     'N/A',
+        calls:       callsByRecruiter[name] ?? 0,
+        emails:      emailData.bySender[name] ?? 0,
+        score:       contactRate,
       };
     })
-    .sort((a, b) => b.placements - a.placements);
+    .sort((a, b) => b.doctors - a.doctors);
 
   // ── Leads over time (group by month of Created_Time) ─────────────────────
   const monthBuckets: Record<string, { doctors: number; qualified: number }> = {};
@@ -481,14 +474,21 @@ function aggregateZohoData(
   // ── Sales metrics ─────────────────────────────────────────────────────────
   // emailsSent is sampled from the 30 most recently contacted leads — real but approximate
   const sales = {
-    dealsClosed:        closedWon.length,
-    conversionRate:     deals.length > 0
+    // Metrics relevant to a recruitment outsourcing company
+    totalLeadsManaged: leads.length,
+    activeInPipeline:  activeLeads.length,
+    contactedRate:     totalLeads > 0
+      ? parseFloat(((contacted / totalLeads) * 100).toFixed(1))
+      : 0,
+    outboundCalls:     outboundCalls.length,
+    emailsSent:        emailData.total,
+    followUpsPending:  leads.filter(l => l.Lead_Status === 'High Priority Follow up').length,
+    // Kept for backward compat but not meaningful without Deals usage
+    dealsClosed:       closedWon.length,
+    conversionRate:    deals.length > 0
       ? parseFloat(((closedWon.length / deals.length) * 100).toFixed(1))
       : 0,
     avgCycleTime,
-    outboundCalls:      outboundCalls.length,
-    emailsSent:         emailData.total,
-    followUpsPending:   leads.filter(l => l.Lead_Status === 'High Priority Follow up').length,
   };
 
   // ── Real recent activity (most recent calls) ──────────────────────────────
@@ -527,6 +527,7 @@ function aggregateZohoData(
       avgDelay: '—',
       affected: highPriorityLeads.length,
       detail:   'Leads flagged for urgent follow-up by recruiter',
+      leads:    highPriorityLeads,
     },
     {
       area:     'License Applications In Progress',
@@ -534,6 +535,7 @@ function aggregateZohoData(
       avgDelay: 'Ongoing',
       affected: inProgressLicense.length,
       detail:   'Doctors waiting on DOH / DHA / MOH license approval',
+      leads:    inProgressLicense,
     },
     {
       area:     'Contact Attempts — No Response',
@@ -541,6 +543,7 @@ function aggregateZohoData(
       avgDelay: '—',
       affected: noResponseLeads.length,
       detail:   'Recruiter attempted contact but doctor has not responded',
+      leads:    noResponseLeads,
     },
     {
       area:     'New Applications — Not Yet Contacted',
@@ -548,6 +551,7 @@ function aggregateZohoData(
       avgDelay: '—',
       affected: uncontactedLeads.length,
       detail:   'Fresh leads that no recruiter has reached out to yet',
+      leads:    uncontactedLeads,
     },
   ].filter(b => b.affected > 0) as Array<{
     area: string;
@@ -555,7 +559,23 @@ function aggregateZohoData(
     avgDelay: string;
     affected: number;
     detail: string;
+    leads: ZohoLead[];
   }>;
+
+  // ── License pipeline overview ─────────────────────────────────────────────
+  const dohLeads = { yes: leads.filter(l => l.Has_DOH === 'Yes'), inProgress: leads.filter(l => l.Has_DOH === 'In Progress'), no: leads.filter(l => l.Has_DOH === 'No') };
+  const dhaLeads = { yes: leads.filter(l => l.Has_DHA === 'Yes'), inProgress: leads.filter(l => l.Has_DHA === 'In Progress'), no: leads.filter(l => l.Has_DHA === 'No') };
+  const mohLeads = { yes: leads.filter(l => l.Has_MOH === 'Yes'), inProgress: leads.filter(l => l.Has_MOH === 'In Progress'), no: leads.filter(l => l.Has_MOH === 'No') };
+  const licenseOverview = { doh: dohLeads, dha: dhaLeads, moh: mohLeads };
+
+  // ── Real alerts derived from Zoho data (replaces hardcoded notifications) ──
+  const thirtyDaysAgo = Date.now() - 30 * 86_400_000;
+  const staleUncontacted = leads.filter(l => l.Lead_Status === 'Not Contacted' && new Date(l.Created_Time).getTime() < thirtyDaysAgo);
+  const alerts: Array<{ type: 'warning' | 'info' | 'success'; message: string }> = [];
+  if (highPriorityLeads.length > 0) alerts.push({ type: 'warning', message: `${highPriorityLeads.length} doctors need urgent follow-up` });
+  if (inProgressLicense.length > 0) alerts.push({ type: 'info', message: `${inProgressLicense.length} license applications currently in progress` });
+  if (staleUncontacted.length > 0) alerts.push({ type: 'warning', message: `${staleUncontacted.length} leads uncontacted for over 30 days` });
+  if (noResponseLeads.length > 0) alerts.push({ type: 'info', message: `${noResponseLeads.length} contact attempts with no response yet` });
 
   // ── Real campaigns from Zoho Campaigns module ─────────────────────────────
   const zohoStatusMap: Record<string, 'active' | 'completed' | 'paused'> = {
@@ -577,9 +597,12 @@ function aggregateZohoData(
       status:  zohoStatusMap[c.Status ?? ''] ?? 'active',
     }));
 
-  // ── Raw leads (for pipeline doctor table) ─────────────────────────────────
+  // ── Raw data (passed through for downstream filtering) ───────────────────
   const rawLeads = leads;
   const rawDeals = deals;
+  const rawCalls = calls;
+  const rawAccounts = accounts;
+  const rawCampaigns = campaigns;
 
   return {
     kpis,
@@ -610,8 +633,13 @@ function aggregateZohoData(
     conversionRate: +conversionRate.toFixed(2),
     partnerHospitals: accounts.length,
     campaignsList,
+    licenseOverview,
+    alerts,
     rawLeads,
     rawDeals,
+    rawCalls,
+    rawAccounts,
+    rawCampaigns,
   };
 }
 
@@ -645,20 +673,46 @@ export function useZohoData() {
   return useQuery({
     queryKey: ['zoho-data'],
     queryFn: async () => {
-      // ── Step 1: Leads first — this warms the token cache in the edge function
-      const leads = await zohoFetchAll<ZohoLead>('Leads', LEAD_FIELDS, 15);
+      // ── Try Supabase cache first ─────────────────────────────────────────
+      const { data: cached } = await supabase
+        .from('zoho_cache')
+        .select('data, synced_at')
+        .eq('id', 1)
+        .single();
 
-      // ── Step 2: Deals + Calls in parallel — token is already cached
+      if (cached?.data && cached?.synced_at) {
+        const age = Date.now() - new Date(cached.synced_at).getTime();
+        if (age < CACHE_MAX_AGE_MS) {
+          const { leads, deals, calls, accounts, campaigns } = cached.data as {
+            leads: ZohoLead[]; deals: ZohoDeal[]; calls: ZohoCall[];
+            accounts: ZohoAccount[]; campaigns: ZohoCampaign[];
+          };
+          return {
+            ...aggregateZohoData(leads, deals, calls, accounts, campaigns,
+              { total: 0, bySender: {} as Record<string, number>, sampled: 0 }),
+            syncedAt: cached.synced_at as string,
+          };
+        }
+      }
+
+      // ── Cache is stale or missing — fetch from Zoho ───────────────────────
+      const leads = await zohoFetchAll<ZohoLead>('Leads', LEAD_FIELDS, 200);
+
       const [deals, calls] = await Promise.all([
         zohoFetchAll<ZohoDeal>('Deals', DEAL_FIELDS, 5),
         zohoFetchAll<ZohoCall>('Calls', CALL_FIELDS, 10),
       ]);
 
-      // ── Step 3: Accounts + Campaigns sequentially (each builds on cached token)
       const accounts  = await zohoFetchAll<ZohoAccount>('Accounts',  ACCOUNT_FIELDS,  5).catch(() => [] as ZohoAccount[]);
       const campaigns = await zohoFetchAll<ZohoCampaign>('Campaigns', CAMPAIGN_FIELDS, 2).catch(() => [] as ZohoCampaign[]);
 
-      // ── Step 4: Email counts — one edge-function call, 30 Zoho sub-requests inside
+      // Persist to cache for next load (fire-and-forget)
+      void supabase.from('zoho_cache').upsert({
+        id:        1,
+        data:      { leads, deals, calls, accounts, campaigns },
+        synced_at: new Date().toISOString(),
+      });
+
       const contactedStatuses = new Set([
         'Attempted to Contact', 'Initial Sales Call Completed',
         'Contact in Future', 'High Priority Follow up',
@@ -672,12 +726,15 @@ export function useZohoData() {
         ? await zohoGetEmailCounts(sampleIds).catch(() => ({ total: 0, bySender: {} as Record<string, number>, sampled: 0 }))
         : { total: 0, bySender: {} as Record<string, number>, sampled: 0 };
 
-      return aggregateZohoData(leads, deals, calls, accounts, campaigns, emailData);
+      return {
+        ...aggregateZohoData(leads, deals, calls, accounts, campaigns, emailData),
+        syncedAt: new Date().toISOString(),
+      };
     },
-    staleTime:            15 * 60 * 1000,   // treat data as fresh for 15 min
-    gcTime:               60 * 60 * 1000,   // keep in cache for 1 hr
-    retry:                1,                // only 1 retry (not 3) to reduce token hammering
-    retryDelay:           30_000,           // wait 30 s before retry
-    refetchOnWindowFocus: false,            // don't re-fetch when user switches tabs
+    staleTime:            55 * 60 * 1000,   // React Query cache matches Supabase cache (1 hr)
+    gcTime:               2 * 60 * 60 * 1000,
+    retry:                1,
+    retryDelay:           30_000,
+    refetchOnWindowFocus: false,
   });
 }

@@ -5,6 +5,8 @@ export const PAGE_SIZE = 50;
 
 export type Doctor = {
   id: string;
+  zohoId?: string;       // raw Zoho record ID (for status updates)
+  leadStatus?: string;   // raw Zoho Lead_Status value
   name: string;
   specialty: string;
   stage: string;

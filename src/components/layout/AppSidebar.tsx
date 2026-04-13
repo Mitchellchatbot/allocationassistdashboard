@@ -8,7 +8,6 @@ import {
   ChevronDown,
   GitBranch,
   ClipboardList,
-  MessageSquare,
   Image,
   LogOut,
 } from "lucide-react";
@@ -38,7 +37,6 @@ const mainNav = [
   { title: "Team Performance", url: "/team", icon: UsersIcon },
   { title: "Finance", url: "/finance", icon: DollarSign },
   { title: "Operations & Roadmap", url: "/operations", icon: ClipboardList },
-  { title: "Chat Portal", url: "/chat", icon: MessageSquare },
   { title: "Meta Ads", url: "/meta-ads", icon: Image },
 ];
 

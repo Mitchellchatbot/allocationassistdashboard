@@ -14,9 +14,9 @@ import TeamPerformance from "./pages/TeamPerformance";
 import Finance from "./pages/Finance";
 import Operations from "./pages/Operations";
 import Settings from "./pages/Settings";
-import ChatPortal from "./pages/ChatPortal";
 import MetaAds from "./pages/MetaAds";
 import WorkerDashboard from "./pages/WorkerDashboard";
+import CallLogImport from "./pages/CallLogImport";
 import NotFound from "./pages/NotFound";
 
 const queryClient = new QueryClient();
@@ -41,9 +41,9 @@ const App = () => (
             <Route path="/finance"        element={<ProtectedRoute><Finance /></ProtectedRoute>} />
             <Route path="/operations"     element={<ProtectedRoute><Operations /></ProtectedRoute>} />
             <Route path="/settings"       element={<ProtectedRoute><Settings /></ProtectedRoute>} />
-            <Route path="/chat"           element={<ProtectedRoute><ChatPortal /></ProtectedRoute>} />
             <Route path="/meta-ads"       element={<ProtectedRoute><MetaAds /></ProtectedRoute>} />
             <Route path="/worker"         element={<ProtectedRoute><WorkerDashboard /></ProtectedRoute>} />
+            <Route path="/import"         element={<ProtectedRoute><CallLogImport /></ProtectedRoute>} />
 
             <Route path="*" element={<NotFound />} />
           </Routes>

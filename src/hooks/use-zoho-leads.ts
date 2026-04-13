@@ -1,23 +1,15 @@
 /**
- * useZohoLeads — infinite-scroll paginated leads directly from Zoho.
+ * useZohoLeads — client-side search + pagination over the cached Zoho data.
  *
- * - Initial load: 100 leads
- * - Each subsequent page: 50 leads
- * - When search is set: hits Zoho's /Leads/search endpoint instead,
- *   so only matching records come back — no need to load everything first.
- * - 300ms debounce on search to avoid hammering on every keypress.
+ * Reads rawLeads from useZohoData (TanStack Query cache) instead of making
+ * direct Zoho API calls. This eliminates all rate-limiting issues entirely —
+ * no network requests happen when scrolling or typing in search.
  */
 
-import { useInfiniteQuery } from "@tanstack/react-query";
-import { useEffect, useState } from "react";
-import { zohoGet } from "@/lib/zoho";
+import { useMemo, useState, useEffect } from "react";
+import { useZohoData } from "@/hooks/use-zoho-data";
+import type { ZohoLead } from "@/hooks/use-zoho-data";
 import type { Doctor } from "./use-meta-leads";
-
-const FIELDS = [
-  "Full_Name", "Lead_Status", "Specialty_New", "Specialty",
-  "Country_of_Specialty_training", "Owner", "Has_DOH", "Has_DHA",
-  "Has_MOH", "License", "Created_Time",
-].join(",");
 
 const STATUS_TO_STAGE: Record<string, string> = {
   "Not Contacted":                "New Application",
@@ -29,8 +21,7 @@ const STATUS_TO_STAGE: Record<string, string> = {
   "Not Interested":               "Not Interested",
 };
 
-// eslint-disable-next-line @typescript-eslint/no-explicit-any
-function mapLead(l: any): Doctor {
+function mapLead(l: ZohoLead): Doctor {
   const daysOld = Math.max(1, Math.floor(
     (Date.now() - new Date(l.Created_Time).getTime()) / 86_400_000
   ));
@@ -56,9 +47,11 @@ function mapLead(l: any): Doctor {
 
   return {
     id:         `AA-${l.id.slice(-5).toUpperCase()}`,
+    zohoId:     l.id,
+    leadStatus: l.Lead_Status,
     name:       l.Full_Name || "—",
     specialty:  l.Specialty_New || l.Specialty || "—",
-    stage:      STATUS_TO_STAGE[l.Lead_Status] ?? l.Lead_Status,
+    stage:      STATUS_TO_STAGE[l.Lead_Status ?? ""] ?? l.Lead_Status ?? "—",
     origin:     l.Country_of_Specialty_training ?? "—",
     destination,
     assignedTo: l.Owner?.name ?? "—",
@@ -78,45 +71,74 @@ export function useDebounce(value: string, delay = 300) {
   return debounced;
 }
 
-interface ZohoLeadPage {
-  doctors: Doctor[];
-  hasMore: boolean;
+const PAGE_SIZE = 100;
+
+export interface LeadsFilters {
+  stage?:     string; // Lead_Status value, e.g. "Not Contacted"
+  recruiter?: string; // Owner.name
+  badge?:     string; // "on-track" | "delayed" | "at-risk"
 }
 
-export function useZohoLeads(search: string) {
-  const isSearching = search.trim().length > 0;
+/** Compute the status badge from raw lead fields (mirrors mapLead logic). */
+function getBadge(l: ZohoLead): Doctor["status"] {
+  const daysOld = Math.max(1, Math.floor(
+    (Date.now() - new Date(l.Created_Time).getTime()) / 86_400_000
+  ));
+  const daysInStage = daysOld <= 44 ? daysOld : (daysOld % 44) + 1;
+  if (l.Lead_Status === "High Priority Follow up") return "at-risk";
+  if (daysInStage > 30) return "delayed";
+  if (daysInStage > 18) return "at-risk";
+  return "on-track";
+}
 
-  return useInfiniteQuery<ZohoLeadPage>({
-    queryKey: ["zoho-leads-infinite", search],
-    initialPageParam: 1,
-    queryFn: async ({ pageParam }) => {
-      const page = pageParam as number;
-      // First load: 100, subsequent: 50
-      const perPage = page === 1 ? "100" : "50";
-      const module = isSearching ? "Leads/search" : "Leads";
+export function useZohoLeads(search: string, filters: LeadsFilters = {}) {
+  const { data: zoho, isLoading } = useZohoData();
+  const [shownCount, setShownCount] = useState(PAGE_SIZE);
 
-      const params: Record<string, string> = {
-        fields: FIELDS,
-        per_page: perPage,
-        page: String(page),
-      };
+  // Reset to first page whenever search or filters change
+  useEffect(() => {
+    setShownCount(PAGE_SIZE);
+  }, [search, filters.stage, filters.recruiter, filters.badge]);
 
-      if (isSearching) {
-        // Zoho word search — searches across all text fields
-        params.word = search.trim();
-      }
+  // Client-side filtering across search + all filter dimensions — no network calls
+  const filtered = useMemo(() => {
+    const leads = zoho?.rawLeads ?? [];
+    const term = search.trim().toLowerCase();
 
-      const data = await zohoGet<{
-        data?: Record<string, unknown>[];
-        info?: { more_records: boolean };
-      }>(module, params);
+    return leads.filter(l => {
+      // Text search
+      if (term && !(
+        l.Full_Name?.toLowerCase().includes(term) ||
+        l.Specialty_New?.toLowerCase().includes(term) ||
+        l.Specialty?.toLowerCase().includes(term) ||
+        l.Lead_Status?.toLowerCase().includes(term) ||
+        l.Country_of_Specialty_training?.toLowerCase().includes(term)
+      )) return false;
 
-      return {
-        doctors: (data.data ?? []).map(mapLead),
-        hasMore: data.info?.more_records ?? false,
-      };
-    },
-    getNextPageParam: (lastPage, allPages) =>
-      lastPage.hasMore ? allPages.length + 1 : undefined,
-  });
+      // Stage filter
+      if (filters.stage && l.Lead_Status !== filters.stage) return false;
+
+      // Recruiter filter
+      if (filters.recruiter && l.Owner?.name !== filters.recruiter) return false;
+
+      // Badge filter (computed from raw fields to avoid double-pass)
+      if (filters.badge && getBadge(l) !== filters.badge) return false;
+
+      return true;
+    });
+  }, [zoho?.rawLeads, search, filters.stage, filters.recruiter, filters.badge]);
+
+  const doctors = useMemo(
+    () => filtered.slice(0, shownCount).map(mapLead),
+    [filtered, shownCount]
+  );
+
+  return {
+    doctors,
+    hasNextPage:        shownCount < filtered.length,
+    fetchNextPage:      () => setShownCount(c => c + 50),
+    isLoading,
+    isFetchingNextPage: false,
+    totalCount:         filtered.length,
+  };
 }

@@ -80,6 +80,7 @@ async function getAccessToken(): Promise<string> {
 const CORS = {
   'Access-Control-Allow-Origin':  '*',
   'Access-Control-Allow-Headers': 'authorization, x-client-info, apikey, content-type',
+  'Access-Control-Allow-Methods': 'GET, POST, PUT, OPTIONS',
 };
 
 serve(async (req: Request) => {
@@ -189,7 +190,27 @@ serve(async (req: Request) => {
       if (k !== 'module') zohoUrl.searchParams.set(k, v);
     });
 
-    const token   = await getAccessToken();
+    const token = await getAccessToken();
+
+    // ── PUT: forward body to Zoho (e.g. updating a record field) ────────────
+    if (req.method === 'PUT') {
+      const reqBody = await req.text();
+      const zohoRes = await fetch(zohoUrl.toString(), {
+        method: 'PUT',
+        headers: {
+          'Authorization': `Zoho-oauthtoken ${token}`,
+          'Content-Type':  'application/json',
+        },
+        body: reqBody,
+      });
+      const respBody = await zohoRes.text();
+      return new Response(respBody, {
+        status: zohoRes.status,
+        headers: { ...CORS, 'Content-Type': 'application/json' },
+      });
+    }
+
+    // ── GET (default) ────────────────────────────────────────────────────────
     const zohoRes = await fetch(zohoUrl.toString(), {
       headers: { Authorization: `Zoho-oauthtoken ${token}` },
     });
