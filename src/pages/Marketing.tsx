@@ -2,12 +2,13 @@ import { DashboardLayout } from "@/components/layout/DashboardLayout";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import {
-  BarChart, Bar, XAxis, YAxis, Tooltip, ResponsiveContainer, CartesianGrid,
+  BarChart, Bar, XAxis, YAxis, Tooltip, ResponsiveContainer, CartesianGrid, Cell, LabelList,
 } from "recharts";
-import { Star } from "lucide-react";
+import { Star, User, ArrowLeft, X } from "lucide-react";
 import { ChannelIcon } from "@/components/ChannelIcon";
 import { useZohoData, displaySource } from "@/hooks/use-zoho-data";
-import { useState, useMemo } from "react";
+import { useFilters } from "@/lib/filters";
+import { useMemo, useState } from "react";
 
 const tip = {
   backgroundColor: "#fff",
@@ -18,23 +19,18 @@ const tip = {
   padding: "8px 12px",
 };
 
-const DATE_RANGES = [
-  { label: "1W", days: 7 },
-  { label: "1M", days: 30 },
-  { label: "3M", days: 90 },
-  { label: "1Y", days: 365 },
-] as const;
-
 const Marketing = () => {
   const { data: zoho } = useZohoData();
-  const [channelDays, setChannelDays] = useState<number>(30);
+  const { dateRange } = useFilters();
 
   const marketing = useMemo(() => {
     if (!zoho?.rawLeads) return [];
-    const cutoff = Date.now() - channelDays * 86_400_000;
-    const recentLeads = zoho.rawLeads.filter(l =>
-      new Date(l.Created_Time).getTime() >= cutoff
-    );
+    const fromMs = dateRange.from.getTime();
+    const toMs   = dateRange.to.getTime() + 86_400_000;
+    const recentLeads = zoho.rawLeads.filter(l => {
+      const t = new Date(l.Created_Time).getTime();
+      return t >= fromMs && t < toMs;
+    });
 
     const leadsByChannel:     Record<string, number> = {};
     const contactedByChannel: Record<string, number> = {};
@@ -51,100 +47,303 @@ const Marketing = () => {
       .sort((a, b) => b[1] - a[1])
       .map(([channel, doctors]) => {
         const contacted    = contactedByChannel[channel] ?? 0;
+        const uncontacted  = doctors - contacted;
         const contactRate  = doctors > 0 ? Math.round((contacted / doctors) * 100) : 0;
-        return { channel, doctors, contacted, contactRate };
+        return { channel, doctors, contacted, uncontacted, contactRate };
       });
-  }, [zoho?.rawLeads, channelDays]);
+  }, [zoho?.rawLeads, dateRange]);
 
   const bestChannel = marketing.length > 0
     ? marketing.reduce((a, b) => (a.doctors > b.doctors ? a : b))
     : null;
 
+  // KPI card expand panel
+  const [selectedKpiChannel, setSelectedKpiChannel] = useState<string | null>(null);
+
+  const kpiPanelDoctors = useMemo(() => {
+    if (!selectedKpiChannel || !zoho?.rawLeads) return [];
+    const fromMs = dateRange.from.getTime();
+    const toMs   = dateRange.to.getTime() + 86_400_000;
+    return zoho.rawLeads.filter(l => {
+      const t = new Date(l.Created_Time).getTime();
+      return t >= fromMs && t < toMs && displaySource(l.Lead_Source) === selectedKpiChannel;
+    }).map(l => ({
+      name:      l.Full_Name || `${l.First_Name ?? ''} ${l.Last_Name ?? ''}`.trim() || '—',
+      specialty: l.Specialty ?? l.Specialty_New ?? '—',
+      status:    l.Lead_Status ?? '—',
+      contacted: l.Lead_Status !== 'Not Contacted',
+    }));
+  }, [selectedKpiChannel, zoho?.rawLeads, dateRange]);
+
+  // Flip state for chart cards
+  const [acquiredChannel, setAcquiredChannel] = useState<string | null>(null);
+  const [uncontactedChannel, setUncontactedChannel] = useState<string | null>(null);
+
+  // Doctor lists for back faces (derived from raw leads in the date window)
+  const acquiredDoctors = useMemo(() => {
+    if (!acquiredChannel || !zoho?.rawLeads) return [];
+    const fromMs = dateRange.from.getTime();
+    const toMs   = dateRange.to.getTime() + 86_400_000;
+    return zoho.rawLeads.filter(l => {
+      const t = new Date(l.Created_Time).getTime();
+      return t >= fromMs && t < toMs && displaySource(l.Lead_Source) === acquiredChannel;
+    }).map(l => ({
+      name:      l.Full_Name || `${l.First_Name ?? ''} ${l.Last_Name ?? ''}`.trim() || '—',
+      specialty: l.Specialty ?? l.Specialty_New ?? '—',
+      status:    l.Lead_Status ?? '—',
+    }));
+  }, [acquiredChannel, zoho?.rawLeads, dateRange]);
+
+  const uncontactedDoctors = useMemo(() => {
+    if (!uncontactedChannel || !zoho?.rawLeads) return [];
+    const fromMs = dateRange.from.getTime();
+    const toMs   = dateRange.to.getTime() + 86_400_000;
+    return zoho.rawLeads.filter(l => {
+      const t = new Date(l.Created_Time).getTime();
+      return t >= fromMs && t < toMs
+        && displaySource(l.Lead_Source) === uncontactedChannel
+        && l.Lead_Status === 'Not Contacted';
+    }).map(l => ({
+      name:      l.Full_Name || `${l.First_Name ?? ''} ${l.Last_Name ?? ''}`.trim() || '—',
+      specialty: l.Specialty ?? l.Specialty_New ?? '—',
+    }));
+  }, [uncontactedChannel, zoho?.rawLeads, dateRange]);
+
   return (
     <DashboardLayout title="Marketing" subtitle="See which channels bring in the most doctors and how well they convert">
-      {/* Date range filter */}
-      <div className="flex items-center justify-between mb-4">
-        <p className="text-[11px] text-muted-foreground">Showing leads created in the last:</p>
-        <div className="flex gap-0.5">
-          {DATE_RANGES.map(r => (
-            <button
-              key={r.label}
-              onClick={() => setChannelDays(r.days)}
-              className={`px-2.5 py-1 rounded text-[10px] font-medium transition-colors ${
-                channelDays === r.days
-                  ? "bg-primary text-white"
-                  : "text-muted-foreground hover:bg-secondary"
-              }`}
-            >
-              {r.label}
-            </button>
-          ))}
-        </div>
-      </div>
-
       {/* Channel KPI cards */}
-      <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-5 gap-3 mb-5">
-        {marketing.map(ch => (
-          <Card
-            key={ch.channel}
-            className={`shadow-sm border-kpi/60 bg-kpi hover:shadow-md hover:scale-[1.02] transition-all duration-200 ${bestChannel && ch.channel === bestChannel.channel ? "ring-1 ring-primary/40" : ""}`}
-          >
-            <CardContent className="p-3">
+      <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-5 gap-3">
+        {marketing.map(ch => {
+          const isSelected = selectedKpiChannel === ch.channel;
+          const isBest = bestChannel?.channel === ch.channel;
+          return (
+            <button
+              key={ch.channel}
+              onClick={() => setSelectedKpiChannel(isSelected ? null : ch.channel)}
+              className={`text-left rounded-xl border p-3 bg-kpi shadow-sm transition-all duration-200
+                hover:shadow-md hover:scale-[1.02] focus:outline-none
+                ${isSelected
+                  ? 'ring-2 ring-primary border-primary/40 scale-[1.02]'
+                  : isBest
+                  ? 'ring-1 ring-primary/40 border-kpi/60'
+                  : 'border-kpi/60'
+                }`}
+            >
               <div className="flex items-center gap-2 mb-1">
                 <ChannelIcon channel={ch.channel} size={14} />
                 <p className="text-[10px] font-medium text-muted-foreground uppercase tracking-wide truncate">{ch.channel}</p>
-                {bestChannel && ch.channel === bestChannel.channel && <Star className="h-3 w-3 text-primary fill-primary ml-auto shrink-0" />}
+                {isBest && !isSelected && <Star className="h-3 w-3 text-primary fill-primary ml-auto shrink-0" />}
+                {isSelected && <X className="h-3 w-3 text-primary ml-auto shrink-0" />}
               </div>
               <p className="text-lg font-semibold tabular-nums">{ch.doctors}</p>
               <p className="text-[10px] text-muted-foreground">{ch.contactRate}% contacted</p>
-            </CardContent>
-          </Card>
-        ))}
+            </button>
+          );
+        })}
+      </div>
+
+      {/* Expand panel — slides open below cards when one is selected */}
+      <div
+        className="overflow-hidden transition-all duration-300 ease-in-out"
+        style={{ maxHeight: selectedKpiChannel ? '320px' : '0px', opacity: selectedKpiChannel ? 1 : 0, marginBottom: selectedKpiChannel ? '20px' : '0px', marginTop: selectedKpiChannel ? '12px' : '0px' }}
+      >
+        {selectedKpiChannel && (
+          <div className="rounded-xl border border-border/50 bg-card shadow-sm p-4">
+            <div className="flex items-center gap-2 mb-3">
+              <ChannelIcon channel={selectedKpiChannel} size={14} />
+              <span className="text-[12px] font-semibold uppercase tracking-wide">{selectedKpiChannel}</span>
+              <span className="text-[11px] text-muted-foreground ml-1">· {kpiPanelDoctors.length} doctor{kpiPanelDoctors.length !== 1 ? 's' : ''}</span>
+              <div className="ml-auto flex items-center gap-3 text-[10px] text-muted-foreground">
+                <span className="flex items-center gap-1"><span className="h-2 w-2 rounded-full bg-primary/70 inline-block" />{kpiPanelDoctors.filter(d => d.contacted).length} contacted</span>
+                <span className="flex items-center gap-1"><span className="h-2 w-2 rounded-full bg-muted-foreground/30 inline-block" />{kpiPanelDoctors.filter(d => !d.contacted).length} to reach</span>
+              </div>
+            </div>
+            <div className="overflow-y-auto" style={{ maxHeight: '240px' }}>
+              {kpiPanelDoctors.length === 0 ? (
+                <p className="text-[12px] text-muted-foreground text-center py-6">No doctors found in this period</p>
+              ) : (
+                <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-1.5">
+                  {kpiPanelDoctors.map((d, i) => (
+                    <div key={i} className="flex items-center gap-2 py-1.5 px-2 rounded-lg hover:bg-muted/40 transition-colors">
+                      <div className={`h-6 w-6 rounded-full flex items-center justify-center shrink-0 ${d.contacted ? 'bg-primary/10' : 'bg-warning/10'}`}>
+                        <User className={`h-3 w-3 ${d.contacted ? 'text-primary' : 'text-warning'}`} />
+                      </div>
+                      <div className="min-w-0">
+                        <p className="text-[12px] font-medium truncate leading-tight">{d.name}</p>
+                        <p className="text-[10px] text-muted-foreground truncate leading-tight">{d.specialty}</p>
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              )}
+            </div>
+          </div>
+        )}
       </div>
 
       <div className="grid grid-cols-1 lg:grid-cols-2 gap-4 mb-5">
-        {/* Doctors Acquired by Channel */}
-        <Card className="shadow-sm border-border/50 hover:shadow-md transition-shadow">
-          <CardHeader className="pb-1 pt-4 px-4">
-            <CardTitle className="text-[12px] font-medium text-muted-foreground uppercase tracking-wide">Doctors Acquired by Channel</CardTitle>
-          </CardHeader>
-          <CardContent className="px-2 sm:px-4 pb-4">
-            <ResponsiveContainer width="100%" height={220}>
-              <BarChart data={marketing}>
-                <CartesianGrid strokeDasharray="3 3" stroke="hsl(220,14%,92%)" />
-                <XAxis dataKey="channel" fontSize={10} tickLine={false} axisLine={false} stroke="hsl(220,10%,55%)" />
-                <YAxis fontSize={10} tickLine={false} axisLine={false} stroke="hsl(220,10%,55%)" />
-                <Tooltip contentStyle={tip} />
-                <Bar dataKey="doctors" fill="hsl(170,55%,45%)" radius={[4, 4, 0, 0]} name="Doctors" />
-              </BarChart>
-            </ResponsiveContainer>
-          </CardContent>
-        </Card>
+        {/* Doctors Acquired by Channel — top 8, horizontal — flippable */}
+        <div style={{ perspective: '1000px' }} className="rounded-lg">
+          <div style={{
+            position: 'relative',
+            transformStyle: 'preserve-3d',
+            transition: 'transform 0.45s ease, height 0.35s ease',
+            transform: acquiredChannel ? 'rotateX(-180deg)' : 'rotateX(0deg)',
+            height: acquiredChannel ? '340px' : '340px',
+          }}>
+            {/* Front */}
+            <Card className="shadow-sm border-border/50 hover:shadow-md transition-shadow absolute inset-0" style={{ backfaceVisibility: 'hidden' }}>
+              <CardHeader className="pb-1 pt-4 px-4">
+                <CardTitle className="text-[12px] font-medium text-muted-foreground uppercase tracking-wide">Doctors Acquired by Channel</CardTitle>
+              </CardHeader>
+              <CardContent className="px-2 sm:px-4 pb-4">
+                <ResponsiveContainer width="100%" height={260}>
+                  <BarChart
+                    data={marketing.slice(0, 8)}
+                    layout="vertical"
+                    margin={{ left: 4, right: 40 }}
+                  >
+                    <CartesianGrid strokeDasharray="3 3" stroke="hsl(220,14%,92%)" horizontal={false} />
+                    <XAxis
+                      type="number"
+                      fontSize={10} tickLine={false} axisLine={false} stroke="hsl(220,10%,55%)"
+                    />
+                    <YAxis
+                      type="category" dataKey="channel"
+                      fontSize={10} width={90} tickLine={false} axisLine={false} stroke="hsl(220,10%,55%)"
+                    />
+                    <Tooltip contentStyle={tip} formatter={(v: number) => [v.toLocaleString(), 'Doctors']} />
+                    <Bar dataKey="doctors" radius={[0, 4, 4, 0]} name="Doctors" cursor="pointer" onClick={(data) => setAcquiredChannel(data.channel)}>
+                      {marketing.slice(0, 8).map((_, i) => (
+                        <Cell key={i} fill={`hsl(170, ${55 - i * 3}%, ${42 + i * 3}%)`} />
+                      ))}
+                      <LabelList dataKey="doctors" position="right" fontSize={10} fill="hsl(220,10%,45%)" formatter={(v: number) => v.toLocaleString()} />
+                    </Bar>
+                  </BarChart>
+                </ResponsiveContainer>
+                <p className="text-center text-[10px] text-muted-foreground mt-1">Click a bar to see the doctors list</p>
+              </CardContent>
+            </Card>
+            {/* Back */}
+            <Card className="shadow-sm border-border/50 absolute inset-0 overflow-hidden" style={{ backfaceVisibility: 'hidden', transform: 'rotateX(180deg)' }}>
+              <CardHeader className="pb-1 pt-3 px-4">
+                <div className="flex items-center justify-between">
+                  <CardTitle className="text-[12px] font-medium text-muted-foreground uppercase tracking-wide flex items-center gap-1.5">
+                    <ChannelIcon channel={acquiredChannel ?? ''} size={13} />
+                    {acquiredChannel}
+                  </CardTitle>
+                  <button onClick={() => setAcquiredChannel(null)} className="flex items-center gap-1 text-[11px] text-primary hover:text-primary/70 transition-colors">
+                    <ArrowLeft className="h-3 w-3" /> Back
+                  </button>
+                </div>
+                <p className="text-[10px] text-muted-foreground mt-0.5">{acquiredDoctors.length} doctor{acquiredDoctors.length !== 1 ? 's' : ''} from this channel</p>
+              </CardHeader>
+              <CardContent className="px-4 pb-4 overflow-y-auto" style={{ maxHeight: '256px' }}>
+                {acquiredDoctors.length === 0 ? (
+                  <p className="text-[12px] text-muted-foreground text-center py-8">No doctors found</p>
+                ) : (
+                  <div className="space-y-1.5">
+                    {acquiredDoctors.map((d, i) => (
+                      <div key={i} className="flex items-center gap-2 py-1.5 px-2 rounded-md hover:bg-muted/40 transition-colors">
+                        <div className="h-6 w-6 rounded-full bg-primary/10 flex items-center justify-center shrink-0">
+                          <User className="h-3 w-3 text-primary" />
+                        </div>
+                        <div className="min-w-0 flex-1">
+                          <p className="text-[12px] font-medium truncate">{d.name}</p>
+                          <p className="text-[10px] text-muted-foreground truncate">{d.specialty} · {d.status}</p>
+                        </div>
+                      </div>
+                    ))}
+                  </div>
+                )}
+              </CardContent>
+            </Card>
+          </div>
+        </div>
 
-        {/* Contact Rate by Channel */}
-        <Card className="shadow-sm border-border/50 hover:shadow-md transition-shadow">
-          <CardHeader className="pb-1 pt-4 px-4">
-            <CardTitle className="text-[12px] font-medium text-muted-foreground uppercase tracking-wide">Contact Rate by Channel</CardTitle>
-          </CardHeader>
-          <CardContent className="px-2 sm:px-4 pb-4">
-            <ResponsiveContainer width="100%" height={220}>
-              <BarChart data={marketing} layout="vertical" margin={{ left: 8 }}>
-                <CartesianGrid strokeDasharray="3 3" stroke="hsl(220,14%,92%)" horizontal={false} />
-                <XAxis
-                  type="number" domain={[0, 100]}
-                  tickFormatter={(v: number) => `${v}%`}
-                  fontSize={10} tickLine={false} axisLine={false} stroke="hsl(220,10%,55%)"
-                />
-                <YAxis
-                  type="category" dataKey="channel"
-                  fontSize={10} width={70} tickLine={false} axisLine={false} stroke="hsl(220,10%,55%)"
-                />
-                <Tooltip contentStyle={tip} formatter={(v: number) => [`${v}%`, 'Contact Rate']} />
-                <Bar dataKey="contactRate" fill="hsl(210,75%,52%)" radius={[0, 4, 4, 0]} name="Contact Rate" />
-              </BarChart>
-            </ResponsiveContainer>
-          </CardContent>
-        </Card>
+        {/* Contacted vs Uncontacted — top 8, stacked horizontal — flippable */}
+        <div style={{ perspective: '1000px' }} className="rounded-lg">
+          <div style={{
+            position: 'relative',
+            transformStyle: 'preserve-3d',
+            transition: 'transform 0.45s ease, height 0.35s ease',
+            transform: uncontactedChannel ? 'rotateX(-180deg)' : 'rotateX(0deg)',
+            height: '340px',
+          }}>
+            {/* Front */}
+            <Card className="shadow-sm border-border/50 hover:shadow-md transition-shadow absolute inset-0" style={{ backfaceVisibility: 'hidden' }}>
+              <CardHeader className="pb-1 pt-4 px-4">
+                <div className="flex items-center justify-between">
+                  <CardTitle className="text-[12px] font-medium text-muted-foreground uppercase tracking-wide">Contacted vs Still to Reach</CardTitle>
+                  <div className="flex items-center gap-3">
+                    <span className="flex items-center gap-1 text-[10px] text-muted-foreground"><span className="h-2 w-2 rounded-sm bg-info/80 inline-block" />Contacted</span>
+                    <span className="flex items-center gap-1 text-[10px] text-muted-foreground"><span className="h-2 w-2 rounded-sm bg-muted-foreground/30 inline-block" />Uncontacted</span>
+                  </div>
+                </div>
+              </CardHeader>
+              <CardContent className="px-2 sm:px-4 pb-4">
+                <ResponsiveContainer width="100%" height={260}>
+                  <BarChart
+                    data={marketing.slice(0, 8)}
+                    layout="vertical"
+                    margin={{ left: 4, right: 8 }}
+                  >
+                    <CartesianGrid strokeDasharray="3 3" stroke="hsl(220,14%,92%)" horizontal={false} />
+                    <XAxis
+                      type="number"
+                      fontSize={10} tickLine={false} axisLine={false} stroke="hsl(220,10%,55%)"
+                    />
+                    <YAxis
+                      type="category" dataKey="channel"
+                      fontSize={10} width={90} tickLine={false} axisLine={false} stroke="hsl(220,10%,55%)"
+                    />
+                    <Tooltip
+                      contentStyle={tip}
+                      formatter={(v: number, name: string) => [v.toLocaleString(), name]}
+                    />
+                    <Bar dataKey="contacted"   stackId="a" fill="hsl(210,75%,52%)" radius={[0, 0, 0, 0]} name="Contacted" />
+                    <Bar dataKey="uncontacted" stackId="a" fill="hsl(220,14%,85%)" radius={[0, 4, 4, 0]} name="Uncontacted" cursor="pointer" onClick={(data) => setUncontactedChannel(data.channel)} />
+                  </BarChart>
+                </ResponsiveContainer>
+                <p className="text-center text-[10px] text-muted-foreground mt-1">Click a bar to see uncontacted doctors</p>
+              </CardContent>
+            </Card>
+            {/* Back */}
+            <Card className="shadow-sm border-border/50 absolute inset-0 overflow-hidden" style={{ backfaceVisibility: 'hidden', transform: 'rotateX(180deg)' }}>
+              <CardHeader className="pb-1 pt-3 px-4">
+                <div className="flex items-center justify-between">
+                  <CardTitle className="text-[12px] font-medium text-muted-foreground uppercase tracking-wide flex items-center gap-1.5">
+                    <ChannelIcon channel={uncontactedChannel ?? ''} size={13} />
+                    {uncontactedChannel} — Uncontacted
+                  </CardTitle>
+                  <button onClick={() => setUncontactedChannel(null)} className="flex items-center gap-1 text-[11px] text-primary hover:text-primary/70 transition-colors">
+                    <ArrowLeft className="h-3 w-3" /> Back
+                  </button>
+                </div>
+                <p className="text-[10px] text-muted-foreground mt-0.5">{uncontactedDoctors.length} doctor{uncontactedDoctors.length !== 1 ? 's' : ''} still to reach</p>
+              </CardHeader>
+              <CardContent className="px-4 pb-4 overflow-y-auto" style={{ maxHeight: '256px' }}>
+                {uncontactedDoctors.length === 0 ? (
+                  <p className="text-[12px] text-muted-foreground text-center py-8">All doctors contacted!</p>
+                ) : (
+                  <div className="space-y-1.5">
+                    {uncontactedDoctors.map((d, i) => (
+                      <div key={i} className="flex items-center gap-2 py-1.5 px-2 rounded-md hover:bg-muted/40 transition-colors">
+                        <div className="h-6 w-6 rounded-full bg-warning/10 flex items-center justify-center shrink-0">
+                          <User className="h-3 w-3 text-warning" />
+                        </div>
+                        <div className="min-w-0 flex-1">
+                          <p className="text-[12px] font-medium truncate">{d.name}</p>
+                          <p className="text-[10px] text-muted-foreground truncate">{d.specialty}</p>
+                        </div>
+                      </div>
+                    ))}
+                  </div>
+                )}
+              </CardContent>
+            </Card>
+          </div>
+        </div>
       </div>
 
       {/* Channel summary table */}

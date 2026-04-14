@@ -2,30 +2,18 @@ import { useMemo } from "react";
 import { useFilters, getTimeLabel } from "@/lib/filters";
 import { useZohoData, aggregateZohoData, type ZohoLead, type ZohoDeal } from "@/hooks/use-zoho-data";
 
-const CUTOFF_DAYS: Record<string, number> = {
-  week:    7,
-  month:   30,
-  quarter: 90,
-  year:    365,
-};
-
-// How many months of time-series history to show per range
-const MONTH_SLICE: Record<string, number> = {
-  week:    1,
-  month:   1,
-  quarter: 3,
-  year:    9,
-};
-
 const EMPTY_EMAIL = { total: 0, bySender: {} as Record<string, number>, sampled: 0 };
 
 export function useFilteredData() {
-  const { timeRange } = useFilters();
+  const { preset, dateRange } = useFilters();
   const { data: zoho, isLoading: zohoLoading, error: zohoError } = useZohoData();
 
   return useMemo(() => {
-    const timeLabel  = getTimeLabel(timeRange);
-    const monthSlice = MONTH_SLICE[timeRange] ?? 1;
+    const timeLabel = getTimeLabel(preset, dateRange);
+
+    // How many months to show in the time-series chart
+    const spanDays   = Math.ceil((dateRange.to.getTime() - dateRange.from.getTime()) / 86_400_000) + 1;
+    const monthSlice = Math.max(1, Math.ceil(spanDays / 28));
 
     if (!zoho) {
       return {
@@ -45,27 +33,32 @@ export function useFilteredData() {
       };
     }
 
-    // ── Filter raw arrays to the selected time window ─────────────────────
-    const cutoff = Date.now() - CUTOFF_DAYS[timeRange] * 86_400_000;
-    const inWindow = (dateStr: string) => new Date(dateStr).getTime() >= cutoff;
+    // ── Filter raw arrays to the selected date window ────────────────────
+    // `to` is treated as inclusive end-of-day: add 1 full day before comparison
+    const fromMs = dateRange.from.getTime();
+    const toMs   = dateRange.to.getTime() + 86_400_000; // exclusive upper bound
+
+    const inWindow = (dateStr: string) => {
+      const t = new Date(dateStr).getTime();
+      return t >= fromMs && t < toMs;
+    };
 
     const filteredLeads = zoho.rawLeads.filter(l => inWindow(l.Created_Time));
     const filteredCalls = zoho.rawCalls.filter(c => inWindow(c.Created_Time));
 
-    // Closed deals: filter by Closing_Date (when the deal was actually won/lost).
-    // Open deals: keep all — they represent the current pipeline state regardless of
-    // when they were created, so don't cut them off with a Created_Time filter.
+    // Closed deals: filter by Closing_Date.
+    // Open deals: keep all — they represent current pipeline state.
     const filteredDeals = zoho.rawDeals.filter(d => {
       if (d.Stage === 'Closed Won' || d.Stage === 'Closed Lost') {
         return d.Closing_Date ? inWindow(d.Closing_Date) : false;
       }
-      return true; // keep all open/active deals
+      return true;
     });
-    // accounts and campaigns are not time-sensitive — keep full set
+
     const filteredAccounts  = zoho.rawAccounts;
     const filteredCampaigns = zoho.rawCampaigns;
 
-    // ── Re-aggregate with filtered data ───────────────────────────────────
+    // ── Re-aggregate ──────────────────────────────────────────────────────
     const agg = aggregateZohoData(
       filteredLeads,
       filteredDeals,
@@ -75,17 +68,18 @@ export function useFilteredData() {
       EMPTY_EMAIL,
     );
 
-    // ── Time-series chart: use full history sliced to N months ────────────
-    // (filtering to e.g. last 7 days would leave the chart nearly empty)
+    // ── Time-series chart: slice to the number of months in the range ────
     const timeData = zoho.leadsOverTime.slice(-monthSlice);
 
-    const kpis = agg.kpis.map(k => ({ ...k, period: k.period ?? timeLabel }));
+    const kpis      = agg.kpis.map(k => ({ ...k, period: k.period ?? timeLabel }));
+    const finance   = agg.financeMetrics.map(f => ({ ...f, period: f.period ?? timeLabel }));
+    const recruiters = agg.recruiters.map(r => ({ ...r, role: 'Recruiter' }));
 
-    const regions: Array<{ region: string; doctors: number; placements: number; hospitals: number }> = [];
-    const costVsConv: Array<{ month: string; cost: number; placements: number }> = [];
-    const roiData: Array<{ channel: string; roi: number }> = [];
+    const regions:          Array<{ region: string; doctors: number; placements: number; hospitals: number }> = [];
+    const costVsConv:       Array<{ month: string; cost: number; placements: number }> = [];
+    const roiData:          Array<{ channel: string; roi: number }> = [];
     const operationalHealth: Array<{ metric: string; value: number; unit: string; target?: number }> = [];
-    const roadmapPhases: Array<{
+    const roadmapPhases:    Array<{
       phase: string; timeline: string;
       status: 'completed' | 'in-progress' | 'planned';
       progress: number;
@@ -112,9 +106,6 @@ export function useFilteredData() {
         l.Has_MOH && l.Has_MOH !== 'No' ? `MOH (${l.Has_MOH})` :
         l.License ?? '—',
     }));
-
-    const finance = agg.financeMetrics.map(f => ({ ...f, period: f.period ?? timeLabel }));
-    const recruiters = agg.recruiters.map(r => ({ ...r, role: 'Recruiter' }));
 
     return {
       kpis,
@@ -146,5 +137,5 @@ export function useFilteredData() {
       zohoError,
       isLive: true,
     };
-  }, [timeRange, zoho, zohoLoading, zohoError]);
+  }, [preset, dateRange, zoho, zohoLoading, zohoError]);
 }

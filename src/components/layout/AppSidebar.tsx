@@ -56,7 +56,7 @@ export function AppSidebar() {
   };
 
   return (
-    <Sidebar collapsible="icon">
+    <Sidebar collapsible="offcanvas">
       <SidebarHeader className="px-4 py-4 border-b border-sidebar-border" style={{ backgroundColor: "hsl(170, 45%, 28%)" }}>
         <div className="flex items-center justify-center gap-2.5">
           <img src={logo} alt="Allocation Assist" className="h-12 w-12 shrink-0 object-contain" />
