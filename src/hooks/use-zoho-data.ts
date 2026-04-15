@@ -176,6 +176,100 @@ export function displaySource(src: string | null): string {
 }
 
 
+// ── Normalisation helpers ─────────────────────────────────────────────────────
+
+/** Title-cases a string and collapses extra whitespace. */
+function toTitleCase(s: string): string {
+  return s.trim().replace(/\s+/g, ' ').replace(/\b\w/g, c => c.toUpperCase());
+}
+
+/** Normalises Lead_Status — handles casing variants and common typos. */
+function normaliseStatus(raw: string | null | undefined): string {
+  if (!raw) return 'Not Contacted';
+  const s = raw.trim().toLowerCase();
+  if (s === 'not contacted' || s === 'not_contacted' || s === 'new' || s === 'new lead') return 'Not Contacted';
+  if (s.includes('attempted') || s.includes('attempt to contact') || s === 'attempted contact') return 'Attempted to Contact';
+  if (s.includes('initial sales call') || s.includes('initial call') || s === 'call completed') return 'Initial Sales Call Completed';
+  if (s.includes('contact in future') || s.includes('future') || s === 'follow up') return 'Contact in Future';
+  if (s.includes('high priority') || s === 'hot' || s === 'urgent') return 'High Priority Follow up';
+  if (s.includes('unqualified') || s === 'junk' || s === 'spam' || s === 'test') return 'Unqualified Leads';
+  if (s.includes('not interested') || s === 'rejected' || s === 'declined' || s === 'no') return 'Not Interested';
+  // Return original title-cased if no match
+  return toTitleCase(raw);
+}
+
+/** Normalises a person's name — trims, collapses spaces, title-cases. */
+function normaliseName(raw: string | null | undefined): string {
+  if (!raw) return 'Unknown';
+  return toTitleCase(raw);
+}
+
+/** Normalises specialty names — collapses variants. */
+function normaliseSpecialty(raw: string | null | undefined): string {
+  if (!raw) return null as unknown as string;
+  const s = raw.trim().toLowerCase();
+  if (s.includes('general') && s.includes('pract')) return 'General Practitioner';
+  if (s.includes('general') && s.includes('surg')) return 'General Surgery';
+  if (s.includes('paediat') || s.includes('pediatr')) return 'Paediatrics';
+  if (s.includes('obstet') || s.includes('gynae') || s.includes('gyneco')) return 'OB/GYN';
+  if (s.includes('cardio')) return 'Cardiology';
+  if (s.includes('ortho')) return 'Orthopaedics';
+  if (s.includes('anaesth') || s.includes('anesthes')) return 'Anaesthesiology';
+  if (s.includes('radio') || s.includes('imaging')) return 'Radiology';
+  if (s.includes('emergency') || s === 'er' || s === 'a&e') return 'Emergency Medicine';
+  if (s.includes('internal med')) return 'Internal Medicine';
+  if (s.includes('dermat')) return 'Dermatology';
+  if (s.includes('psychiat')) return 'Psychiatry';
+  if (s.includes('neurol')) return 'Neurology';
+  if (s.includes('ophthal') || s.includes('eye')) return 'Ophthalmology';
+  if (s.includes('ent') || s.includes('otolaryn')) return 'ENT';
+  if (s.includes('oncol')) return 'Oncology';
+  if (s.includes('urol')) return 'Urology';
+  if (s.includes('nephrol')) return 'Nephrology';
+  if (s.includes('gastro')) return 'Gastroenterology';
+  if (s.includes('pulmon') || s.includes('respirat') || s.includes('chest')) return 'Pulmonology';
+  return toTitleCase(raw);
+}
+
+/** Normalises country names — maps variants to a single canonical name. */
+function normaliseCountry(raw: string | null | undefined): string {
+  if (!raw) return null as unknown as string;
+  const s = raw.trim().toLowerCase();
+  if (s.includes('egypt') || s === 'eg') return 'Egypt';
+  if (s.includes('saudi') || s === 'ksa' || s === 'sa') return 'Saudi Arabia';
+  if (s === 'uae' || s.includes('united arab') || s === 'dubai' || s === 'abu dhabi') return 'UAE';
+  if (s.includes('jordan') || s === 'jo') return 'Jordan';
+  if (s.includes('lebanon') || s === 'lb') return 'Lebanon';
+  if (s.includes('syria') || s === 'sy') return 'Syria';
+  if (s.includes('iraq') || s === 'iq') return 'Iraq';
+  if (s.includes('sudan') || s === 'sd') return 'Sudan';
+  if (s.includes('morocco') || s === 'ma') return 'Morocco';
+  if (s.includes('tunisia') || s === 'tn') return 'Tunisia';
+  if (s.includes('libya') || s === 'ly') return 'Libya';
+  if (s.includes('pakistan') || s === 'pk') return 'Pakistan';
+  if (s.includes('india') || s === 'in') return 'India';
+  if (s.includes('philippines') || s === 'ph' || s.includes('filipino')) return 'Philippines';
+  if (s.includes('uk') || s.includes('united kingdom') || s.includes('britain')) return 'United Kingdom';
+  if (s.includes('usa') || s.includes('united states') || s === 'us' || s === 'america') return 'United States';
+  return toTitleCase(raw);
+}
+
+/** Applies all normalisation to a raw Zoho lead before aggregation. */
+function normaliseLead(l: ZohoLead): ZohoLead {
+  return {
+    ...l,
+    Lead_Status:   normaliseStatus(l.Lead_Status),
+    Full_Name:     normaliseName(l.Full_Name || `${l.First_Name ?? ''} ${l.Last_Name ?? ''}`.trim()),
+    First_Name:    l.First_Name ? toTitleCase(l.First_Name) : l.First_Name,
+    Last_Name:     l.Last_Name  ? toTitleCase(l.Last_Name)  : l.Last_Name,
+    Owner:         { ...l.Owner, name: normaliseName(l.Owner?.name) },
+    Specialty:     normaliseSpecialty(l.Specialty ?? l.Specialty_New),
+    Specialty_New: normaliseSpecialty(l.Specialty_New),
+    Country_of_Specialty_training: normaliseCountry(l.Country_of_Specialty_training),
+    Lead_Source:   l.Lead_Source?.trim() || null,
+  };
+}
+
 // ── Main aggregation ──────────────────────────────────────────────────────────
 
 export function aggregateZohoData(
@@ -186,6 +280,9 @@ export function aggregateZohoData(
   campaigns: ZohoCampaign[],
   emailData: { total: number; bySender: Record<string, number>; sampled: number },
 ) {
+  // ── Normalise all leads before any aggregation ────────────────────────────
+  leads = leads.map(normaliseLead);
+
   // ── Status sets ───────────────────────────────────────────────────────────
   const activeStatuses = new Set([
     'Not Contacted', 'Attempted to Contact', 'Initial Sales Call Completed',
