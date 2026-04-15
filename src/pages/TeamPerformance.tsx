@@ -35,14 +35,14 @@ const TeamPerformance = () => {
                   <TableHead className="text-[10px] uppercase tracking-wide h-8 hidden sm:table-cell">Region</TableHead>
                   <TableHead className="text-[10px] uppercase tracking-wide h-8 text-right">Leads Managed</TableHead>
                   <TableHead className="text-[10px] uppercase tracking-wide h-8 text-right">Contacted</TableHead>
-                  <TableHead className="text-[10px] uppercase tracking-wide h-8 text-right hidden md:table-cell">Contact Rate</TableHead>
+                  <TableHead className="text-[10px] uppercase tracking-wide h-8 text-right hidden md:table-cell">Conv. Rate</TableHead>
                   <TableHead className="text-[10px] uppercase tracking-wide h-8 text-right hidden lg:table-cell">Performance</TableHead>
                 </TableRow>
               </TableHeader>
               <TableBody>
                 {recruiters.map((m, i) => {
-                  const contactRate = (m as { contactRate?: number }).contactRate ?? 0;
-                  const contacted   = (m as { contacted?: number }).contacted ?? 0;
+                  const conversionRate = (m as { conversionRate?: number }).conversionRate ?? 0;
+                  const contacted      = (m as { contacted?: number }).contacted ?? 0;
                   return (
                     <TableRow key={m.name} className="hover:bg-muted/30">
                       <TableCell className="py-2.5">
@@ -68,11 +68,11 @@ const TeamPerformance = () => {
                       <TableCell className="text-[12px] text-right py-2.5 tabular-nums">{contacted}</TableCell>
                       <TableCell className="text-right py-2.5 hidden md:table-cell">
                         <span className={`text-[12px] font-semibold tabular-nums ${
-                          contactRate >= 70 ? 'text-success' :
-                          contactRate >= 40 ? 'text-primary' :
+                          conversionRate >= 5 ? 'text-success' :
+                          conversionRate >= 2 ? 'text-primary' :
                           'text-warning'
                         }`}>
-                          {contactRate}%
+                          {conversionRate}%
                         </span>
                       </TableCell>
                       <TableCell className="text-right py-2.5 hidden lg:table-cell">

@@ -59,22 +59,23 @@ const Sales = () => {
     </div>
   );
 
-  // 3. Contact Rate → contact rate per recruiter
-  const contactRateContent = (
+  // 3. Conversion Rate → lead conversion rate per recruiter
+  const conversionRateContent = (
     <div className="space-y-2">
       {recruiters.length === 0
         ? <p className="text-[11px] text-muted-foreground py-2">No recruiter data</p>
         : recruiters.slice(0, 5).map(r => {
-          const rate = (r as { contactRate?: number }).contactRate ?? 0;
-          const barColor = rate >= 70 ? 'bg-success' : rate >= 40 ? 'bg-primary' : 'bg-warning';
+          const rate = (r as { conversionRate?: number }).conversionRate ?? 0;
+          const barColor = rate >= 5 ? 'bg-success' : rate >= 2 ? 'bg-primary' : 'bg-warning';
+          const maxRate = Math.max(...recruiters.map(x => (x as { conversionRate?: number }).conversionRate ?? 0), 1);
           return (
             <div key={r.name}>
               <div className="flex items-center justify-between mb-1">
                 <span className="text-[11px] text-muted-foreground truncate max-w-[120px]">{r.name}</span>
-                <span className={`text-[11px] font-semibold tabular-nums ${rate >= 70 ? 'text-success' : rate >= 40 ? 'text-primary' : 'text-warning'}`}>{rate}%</span>
+                <span className={`text-[11px] font-semibold tabular-nums ${rate >= 5 ? 'text-success' : rate >= 2 ? 'text-primary' : 'text-warning'}`}>{rate}%</span>
               </div>
               <div className="h-1.5 rounded-full bg-muted overflow-hidden">
-                <div className={`h-full rounded-full ${barColor} transition-all`} style={{ width: `${rate}%` }} />
+                <div className={`h-full rounded-full ${barColor} transition-all`} style={{ width: `${(rate / maxRate) * 100}%` }} />
               </div>
             </div>
           );
@@ -136,12 +137,12 @@ const Sales = () => {
           expandedHeight={260}
         />
         <ExpandableKPICard
-          title="Contact Rate"
-          value={`${sales.contactedRate}%`}
+          title="Lead Conversion Rate"
+          value={`${sales.conversionRate}%`}
           icon={UserCheck}
           color="text-info"
           bg="bg-info/10"
-          expandedContent={contactRateContent}
+          expandedContent={conversionRateContent}
           expandedHeight={240}
         />
         <ExpandableKPICard
@@ -256,7 +257,7 @@ const Sales = () => {
               <span className="text-[10px] font-medium text-muted-foreground uppercase tracking-wide text-right">Leads</span>
               <span className="text-[10px] font-medium text-muted-foreground uppercase tracking-wide text-right">Contacted</span>
               <span className="text-[10px] font-medium text-muted-foreground uppercase tracking-wide text-right hidden md:block">Calls</span>
-              <span className="text-[10px] font-medium text-muted-foreground uppercase tracking-wide text-right hidden md:block">Rate</span>
+              <span className="text-[10px] font-medium text-muted-foreground uppercase tracking-wide text-right hidden md:block">Conv. Rate</span>
             </div>
 
             {recruiters.map((rep, i) => (
@@ -291,10 +292,10 @@ const Sales = () => {
                   {(rep as { calls?: number }).calls ?? 0}
                 </span>
                 <span className={`text-[12px] font-semibold tabular-nums text-right hidden md:block ${
-                  ((rep as { contactRate?: number }).contactRate ?? 0) >= 50 ? 'text-success' :
-                  ((rep as { contactRate?: number }).contactRate ?? 0) >= 25 ? 'text-primary' : 'text-warning'
+                  ((rep as { conversionRate?: number }).conversionRate ?? 0) >= 5 ? 'text-success' :
+                  ((rep as { conversionRate?: number }).conversionRate ?? 0) >= 2 ? 'text-primary' : 'text-warning'
                 }`}>
-                  {(rep as { contactRate?: number }).contactRate ?? 0}%
+                  {(rep as { conversionRate?: number }).conversionRate ?? 0}%
                 </span>
               </div>
             ))}

@@ -413,27 +413,39 @@ export function aggregateZohoData(
     leadsByOwner[name].push(l);
   });
 
+  const wonDealsByOwner: Record<string, number> = {};
+  closedWon.forEach(d => {
+    const name = d.Owner?.name ?? 'Unknown';
+    wonDealsByOwner[name] = (wonDealsByOwner[name] ?? 0) + 1;
+  });
+
   const recruiters = Object.entries(leadsByOwner)
     .filter(([name]) => name !== 'Unknown')
     .map(([name, rLeads]) => {
-      const contacted   = rLeads.filter(l => l.Lead_Status !== 'Not Contacted').length;
-      const highPri     = rLeads.filter(l => l.Lead_Status === 'High Priority Follow up').length;
-      const contactRate = rLeads.length > 0 ? Math.round((contacted / rLeads.length) * 100) : 0;
+      const contacted      = rLeads.filter(l => l.Lead_Status !== 'Not Contacted').length;
+      const highPri        = rLeads.filter(l => l.Lead_Status === 'High Priority Follow up').length;
+      const contactRate    = rLeads.length > 0 ? Math.round((contacted / rLeads.length) * 100) : 0;
+      const wonDeals       = wonDealsByOwner[name] ?? 0;
+      const conversionRate = rLeads.length > 0
+        ? parseFloat(((wonDeals / rLeads.length) * 100).toFixed(1))
+        : 0;
       return {
         name,
-        region:      'GCC',
-        doctors:     rLeads.length,
+        region:         'GCC',
+        doctors:        rLeads.length,
         contacted,
         contactRate,
-        highPriority: highPri,
-        placements:  0,           // not tracked in this setup
-        revenue:     'N/A',
-        calls:       callsByRecruiter[name] ?? 0,
-        emails:      emailData.bySender[name] ?? 0,
-        score:       contactRate,
+        wonDeals,
+        conversionRate,
+        highPriority:   highPri,
+        placements:     wonDeals,
+        revenue:        'N/A',
+        calls:          callsByRecruiter[name] ?? 0,
+        emails:         emailData.bySender[name] ?? 0,
+        score:          conversionRate,
       };
     })
-    .sort((a, b) => b.doctors - a.doctors);
+    .sort((a, b) => b.conversionRate - a.conversionRate);
 
   // ── Leads over time (group by month of Created_Time) ─────────────────────
   const monthBuckets: Record<string, { doctors: number; qualified: number }> = {};
