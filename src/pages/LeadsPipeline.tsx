@@ -134,6 +134,8 @@ const LeadsPipeline = () => {
   const sentinelRef = useRef<HTMLDivElement>(null);
   const queryClient = useQueryClient();
   const [updatedIds, setUpdatedIds] = useState<Set<string>>(new Set());
+  const [pendingId,  setPendingId]  = useState<string | null>(null);
+  const [errorMsg,   setErrorMsg]   = useState<string | null>(null);
   const [expandedId, setExpandedId] = useState<string | null>(null);
 
   const setFilter = <K extends keyof LeadsFilters>(key: K, value: LeadsFilters[K]) =>
@@ -171,7 +173,13 @@ const LeadsPipeline = () => {
   const updateStatus = useMutation({
     mutationFn: ({ zohoId, newStatus }: { zohoId: string; newStatus: string }) =>
       zohoPut(`Leads/${zohoId}`, { data: [{ Lead_Status: newStatus }] }),
+    onMutate: ({ zohoId }) => {
+      setPendingId(zohoId);
+      setErrorMsg(null);
+    },
     onSuccess: (_data, { zohoId, newStatus }) => {
+      setPendingId(null);
+
       // Show ✓ checkmark briefly
       setUpdatedIds(prev => new Set(prev).add(zohoId));
       setTimeout(() => {
@@ -208,6 +216,11 @@ const LeadsPipeline = () => {
           .update({ data: { ...cacheData, leads: updatedLeads } })
           .eq('id', 1);
       })();
+    },
+    onError: (_err, { zohoId }) => {
+      setPendingId(null);
+      setErrorMsg(`Failed to update lead ${zohoId.slice(-5).toUpperCase()} — check Zoho permissions or try again.`);
+      setTimeout(() => setErrorMsg(null), 5000);
     },
   });
 
@@ -340,6 +353,11 @@ const LeadsPipeline = () => {
           </div>
         </CardHeader>
         <CardContent className="px-4 pb-4">
+          {errorMsg && (
+            <div className="mb-3 rounded-md bg-destructive/10 border border-destructive/20 px-3 py-2 text-[11px] text-destructive">
+              {errorMsg}
+            </div>
+          )}
           {isLoading ? (
             <p className="text-[12px] text-muted-foreground py-8 text-center">Loading leads…</p>
           ) : doctors.length === 0 ? (
@@ -389,7 +407,7 @@ const LeadsPipeline = () => {
                                     onValueChange={(newStatus) =>
                                       updateStatus.mutate({ zohoId: doc.zohoId!, newStatus })
                                     }
-                                    disabled={updateStatus.isPending}
+                                    disabled={pendingId === doc.zohoId}
                                   >
                                     <SelectTrigger className="h-6 w-[150px] text-[10px] border-border/50 bg-secondary/40 px-2 py-0">
                                       <SelectValue />
@@ -402,6 +420,9 @@ const LeadsPipeline = () => {
                                       ))}
                                     </SelectContent>
                                   </Select>
+                                  {pendingId === doc.zohoId && (
+                                    <Loader2 className="h-3 w-3 animate-spin text-muted-foreground shrink-0" />
+                                  )}
                                   {doc.zohoId && updatedIds.has(doc.zohoId) && (
                                     <Check className="h-3 w-3 text-success shrink-0" />
                                   )}
