@@ -23,7 +23,7 @@ const DOTS = Array.from({ length: 28 }, (_, i) => ({
 }));
 
 const Login = () => {
-  const { signIn, session, role } = useAuth();
+  const { signIn, session, profile, allowedPages } = useAuth();
   const navigate = useNavigate();
 
   const [username, setUsername] = useState("");
@@ -35,22 +35,25 @@ const Login = () => {
 
   useEffect(() => { setMounted(true); }, []);
 
+  // Redirect once both session and profile are loaded — uses actual allowedPages
+  // so every role lands on the correct first page (not hardcoded /worker)
   useEffect(() => {
-    if (session) navigate(role === "admin" ? "/" : "/worker", { replace: true });
-  }, [session, role, navigate]);
+    if (session && profile) {
+      navigate(allowedPages[0] ?? "/", { replace: true });
+    }
+  }, [session, profile, allowedPages, navigate]);
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     setError("");
     setLoading(true);
-    const { error: authError, data } = await signIn(username.trim(), password);
+    const { error: authError } = await signIn(username.trim(), password);
     if (authError) {
       setError("Incorrect username or password.");
       setLoading(false);
-    } else {
-      const email = data.user?.email ?? "";
-      navigate(email === "admin@allocationassist.com" ? "/" : "/worker", { replace: true });
     }
+    // On success: leave loading spinner showing — the useEffect above redirects
+    // once the profile finishes loading (avoids navigating before role is known)
   };
 
   return (

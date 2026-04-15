@@ -23,7 +23,7 @@ const PAGE_LABELS: Record<string, string> = {
   "/operations":     "Operations",
   "/meta-ads":       "Meta Ads",
   "/settings":       "Settings",
-  "/worker":         "Worker Portal",
+  "/worker":         "Worker Portal (upload & view records)",
 };
 
 const ROLE_COLORS: Record<string, string> = {
