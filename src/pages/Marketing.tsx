@@ -149,6 +149,7 @@ const Marketing = () => {
               </div>
               <p className="text-lg font-semibold tabular-nums">{ch.doctors}</p>
               <p className="text-[10px] text-muted-foreground">{ch.contactRate}% contacted</p>
+              <p className="text-[10px] text-primary/70">{ch.converted} converted ({ch.conversionRate}%)</p>
             </button>
           );
         })}
