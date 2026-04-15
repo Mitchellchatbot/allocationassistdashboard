@@ -2,7 +2,7 @@ import { DashboardLayout } from "@/components/layout/DashboardLayout";
 import { ExpandableKPICard } from "@/components/ExpandableKPICard";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { useFilteredData } from "@/hooks/use-filtered-data";
-import { Phone, Mail, Clock, Users, UserCheck, Activity, ArrowRight } from "lucide-react";
+import { Phone, Mail, Clock, Users, UserCheck, Activity, ArrowRight, PhoneCall } from "lucide-react";
 
 const Sales = () => {
   const { pipeline, sales, recruiters, stageConversion, filteredLeads } = useFilteredData();
@@ -84,7 +84,39 @@ const Sales = () => {
     </div>
   );
 
-  // 4. Urgent Follow-ups → list of high priority leads
+  // 4. Qualified Contact Rate → contact rate per recruiter (qualified leads only)
+  const qualifiedStatuses = new Set(['Not Contacted', 'Attempted to Contact', 'Initial Sales Call Completed', 'Contact in Future', 'High Priority Follow up']);
+  const qualifiedLeads = filteredLeads.filter(l => qualifiedStatuses.has(l.Lead_Status));
+  const qualifiedContacted = qualifiedLeads.filter(l => l.Lead_Status !== 'Not Contacted');
+  const qualifiedContactRate = qualifiedLeads.length > 0
+    ? parseFloat(((qualifiedContacted.length / qualifiedLeads.length) * 100).toFixed(1))
+    : 0;
+
+  const contactRateContent = (
+    <div className="space-y-2">
+      {recruiters.length === 0
+        ? <p className="text-[11px] text-muted-foreground py-2">No recruiter data</p>
+        : recruiters.slice(0, 5).map(r => {
+          const rate = (r as { contactRate?: number }).contactRate ?? 0;
+          const barColor = rate >= 70 ? 'bg-success' : rate >= 40 ? 'bg-primary' : 'bg-warning';
+          return (
+            <div key={r.name}>
+              <div className="flex items-center justify-between mb-1">
+                <span className="text-[11px] text-muted-foreground truncate max-w-[120px]">{r.name}</span>
+                <span className={`text-[11px] font-semibold tabular-nums ${rate >= 70 ? 'text-success' : rate >= 40 ? 'text-primary' : 'text-warning'}`}>{rate}%</span>
+              </div>
+              <div className="h-1.5 rounded-full bg-muted overflow-hidden">
+                <div className={`h-full rounded-full ${barColor} transition-all`} style={{ width: `${rate}%` }} />
+              </div>
+            </div>
+          );
+        })
+      }
+      <p className="text-[10px] text-muted-foreground pt-1 border-t border-border/30">Qualified leads only (excl. unqualified/not interested)</p>
+    </div>
+  );
+
+  // 5. Urgent Follow-ups → list of high priority leads
   const urgentLeads = filteredLeads
     .filter(l => l.Lead_Status === 'High Priority Follow up')
     .slice(0, 8);
@@ -117,7 +149,7 @@ const Sales = () => {
     <DashboardLayout title="Sales Tracker" subtitle="See where doctors are in the process and how recruiters are performing">
 
       {/* ── KPI strip ─────────────────────────────────────────────────────── */}
-      <div className="grid grid-cols-2 lg:grid-cols-4 gap-3 mb-5">
+      <div className="grid grid-cols-2 lg:grid-cols-5 gap-3 mb-5">
         <ExpandableKPICard
           title="Total Leads Managed"
           value={sales.totalLeadsManaged.toLocaleString()}
@@ -143,6 +175,15 @@ const Sales = () => {
           color="text-info"
           bg="bg-info/10"
           expandedContent={conversionRateContent}
+          expandedHeight={240}
+        />
+        <ExpandableKPICard
+          title="Qualified Contact Rate"
+          value={`${qualifiedContactRate}%`}
+          icon={PhoneCall}
+          color="text-warning"
+          bg="bg-warning/10"
+          expandedContent={contactRateContent}
           expandedHeight={240}
         />
         <ExpandableKPICard
@@ -252,18 +293,18 @@ const Sales = () => {
         <CardContent className="px-5 pb-5">
           <div className="space-y-2">
             {/* Header */}
-            <div className="grid grid-cols-[1fr_80px_70px_60px_70px] gap-3 px-3 pb-1 border-b border-border/40">
+            <div className="grid grid-cols-[1fr_70px_60px_65px_65px] gap-3 px-3 pb-1 border-b border-border/40">
               <span className="text-[10px] font-medium text-muted-foreground uppercase tracking-wide">Recruiter</span>
               <span className="text-[10px] font-medium text-muted-foreground uppercase tracking-wide text-right">Leads</span>
               <span className="text-[10px] font-medium text-muted-foreground uppercase tracking-wide text-right">Contacted</span>
-              <span className="text-[10px] font-medium text-muted-foreground uppercase tracking-wide text-right hidden md:block">Calls</span>
-              <span className="text-[10px] font-medium text-muted-foreground uppercase tracking-wide text-right hidden md:block">Conv. Rate</span>
+              <span className="text-[10px] font-medium text-muted-foreground uppercase tracking-wide text-right hidden md:block">Contact %</span>
+              <span className="text-[10px] font-medium text-muted-foreground uppercase tracking-wide text-right hidden md:block">Conv. %</span>
             </div>
 
             {recruiters.map((rep, i) => (
               <div
                 key={rep.name}
-                className="grid grid-cols-[1fr_80px_70px_60px_70px] gap-3 items-center px-3 py-2.5 rounded-xl hover:bg-muted/40 transition-colors group"
+                className="grid grid-cols-[1fr_70px_60px_65px_65px] gap-3 items-center px-3 py-2.5 rounded-xl hover:bg-muted/40 transition-colors group"
               >
                 {/* Avatar + name */}
                 <div className="flex items-center gap-2.5 min-w-0">
@@ -288,8 +329,11 @@ const Sales = () => {
                 <span className="text-[12px] tabular-nums text-right text-foreground">
                   {(rep as { contacted?: number }).contacted?.toLocaleString() ?? '—'}
                 </span>
-                <span className="text-[12px] tabular-nums text-right text-muted-foreground hidden md:block">
-                  {(rep as { calls?: number }).calls ?? 0}
+                <span className={`text-[12px] font-semibold tabular-nums text-right hidden md:block ${
+                  ((rep as { contactRate?: number }).contactRate ?? 0) >= 70 ? 'text-success' :
+                  ((rep as { contactRate?: number }).contactRate ?? 0) >= 40 ? 'text-primary' : 'text-warning'
+                }`}>
+                  {(rep as { contactRate?: number }).contactRate ?? 0}%
                 </span>
                 <span className={`text-[12px] font-semibold tabular-nums text-right hidden md:block ${
                   ((rep as { conversionRate?: number }).conversionRate ?? 0) >= 40 ? 'text-success' :
