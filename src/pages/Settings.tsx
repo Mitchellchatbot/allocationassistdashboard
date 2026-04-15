@@ -5,10 +5,8 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Switch } from "@/components/ui/switch";
-import { Badge } from "@/components/ui/badge";
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from "@/components/ui/dialog";
 import { useAuth, ROLE_PRESETS, ALL_PAGES } from "@/hooks/use-auth";
-import { supabase } from "@/lib/supabase";
 import { Trash2, Plus, UserCog } from "lucide-react";
 import { toast } from "sonner";
 
@@ -182,11 +180,20 @@ function UsersTab({ session }: { session: { access_token: string } | null }) {
 
   async function loadUsers() {
     setLoading(true);
-    const { data } = await supabase
-      .from("user_profiles")
-      .select("id, email, full_name, role, allowed_pages, created_at")
-      .order("created_at", { ascending: true });
-    setUsers((data as UserRow[]) ?? []);
+    try {
+      const res = await fetch(`${SUPABASE_URL}/functions/v1/get-users`, {
+        method: "POST",
+        headers: {
+          "apikey":        SUPABASE_ANON_KEY,
+          "Authorization": `Bearer ${session?.access_token}`,
+          "Content-Type":  "application/json",
+        },
+      });
+      const json = await res.json();
+      setUsers((json.users as UserRow[]) ?? []);
+    } catch {
+      setUsers([]);
+    }
     setLoading(false);
   }
 
