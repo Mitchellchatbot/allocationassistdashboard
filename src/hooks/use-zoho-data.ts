@@ -315,6 +315,17 @@ export function aggregateZohoData(
   }, 0);
 
   // ── Conversion rates ─────────────────────────────────────────────────────
+  // Statuses that represent a real engagement (beyond just attempting to call)
+  const convertedStatuses = new Set([
+    'Initial Sales Call Completed',
+    'Contact in Future',
+    'High Priority Follow up',
+  ]);
+  const convertedLeads = leads.filter(l => convertedStatuses.has(l.Lead_Status));
+  const leadConversionRate = leads.length > 0
+    ? parseFloat(((convertedLeads.length / leads.length) * 100).toFixed(1))
+    : 0;
+
   const conversionRate = leads.length > 0
     ? (closedWon.length / leads.length) * 100
     : 0;
@@ -333,6 +344,15 @@ export function aggregateZohoData(
       )
     : 0;
   const avgCycleTime = avgCycleDays > 0 ? `${avgCycleDays} days` : '—';
+
+  // When there are no Closed Won deals, fall back to avg age of active leads
+  const avgActiveLeadDays = activeLeads.length > 0
+    ? Math.round(activeLeads.reduce((sum, l) => sum + (Date.now() - new Date(l.Created_Time).getTime()) / 86_400_000, 0) / activeLeads.length)
+    : 0;
+  const avgTimeDisplay  = wonWithDates.length > 0 ? avgCycleTime : avgActiveLeadDays > 0 ? `${avgActiveLeadDays} days` : '—';
+  const avgTimePeriod   = wonWithDates.length > 0
+    ? `${wonWithDates.length} closed-won deals`
+    : `avg age across ${activeLeads.length.toLocaleString()} active leads`;
 
   // ── Period-over-period deltas (last 30 days vs previous 30 days) ─────────
   const now = Date.now();
@@ -382,9 +402,9 @@ export function aggregateZohoData(
     },
     {
       label:  'Lead → Placement',
-      value:  `${conversionRate.toFixed(1)}%`,
+      value:  `${leadConversionRate}%`,
       change: 0,
-      period: `${closedWon.length} placed / ${leads.length.toLocaleString()} leads`,
+      period: `${convertedLeads.length} converted / ${leads.length.toLocaleString()} leads`,
       icon:   'check' as const,
     },
     {
@@ -403,9 +423,9 @@ export function aggregateZohoData(
     },
     {
       label:  'Avg. Time to Place',
-      value:  avgCycleTime,
+      value:  avgTimeDisplay,
       change: 0,
-      period: `${wonWithDates.length} closed-won deals`,
+      period: avgTimePeriod,
       icon:   'clock' as const,
     },
     {
@@ -512,12 +532,7 @@ export function aggregateZohoData(
     leadsByOwner[name].push(l);
   });
 
-  // Statuses that represent a real engagement (beyond just attempting to call)
-  const convertedStatuses = new Set([
-    'Initial Sales Call Completed',
-    'Contact in Future',
-    'High Priority Follow up',
-  ]);
+  // convertedStatuses is defined above (near conversionRate computation)
 
   const recruiters = Object.entries(leadsByOwner)
     .filter(([name]) => name !== 'Unknown')

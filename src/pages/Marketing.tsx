@@ -34,6 +34,13 @@ const Marketing = () => {
 
     const leadsByChannel:     Record<string, number> = {};
     const contactedByChannel: Record<string, number> = {};
+    const convertedByChannel: Record<string, number> = {};
+
+    const convertedStatuses = new Set([
+      'Initial Sales Call Completed',
+      'Contact in Future',
+      'High Priority Follow up',
+    ]);
 
     for (const l of recentLeads) {
       const ch = displaySource(l.Lead_Source);
@@ -41,15 +48,20 @@ const Marketing = () => {
       if (l.Lead_Status !== 'Not Contacted') {
         contactedByChannel[ch] = (contactedByChannel[ch] ?? 0) + 1;
       }
+      if (convertedStatuses.has(l.Lead_Status)) {
+        convertedByChannel[ch] = (convertedByChannel[ch] ?? 0) + 1;
+      }
     }
 
     return Object.entries(leadsByChannel)
       .sort((a, b) => b[1] - a[1])
       .map(([channel, doctors]) => {
         const contacted    = contactedByChannel[channel] ?? 0;
+        const converted    = convertedByChannel[channel] ?? 0;
         const uncontacted  = doctors - contacted;
-        const contactRate  = doctors > 0 ? Math.round((contacted / doctors) * 100) : 0;
-        return { channel, doctors, contacted, uncontacted, contactRate };
+        const contactRate    = doctors > 0 ? Math.round((contacted / doctors) * 100) : 0;
+        const conversionRate = doctors > 0 ? Math.round((converted / doctors) * 100) : 0;
+        return { channel, doctors, contacted, uncontacted, contactRate, conversionRate };
       });
   }, [zoho?.rawLeads, dateRange]);
 
@@ -360,6 +372,7 @@ const Marketing = () => {
                   <TableHead className="text-[10px] uppercase tracking-wide h-8 text-right">Doctors</TableHead>
                   <TableHead className="text-[10px] uppercase tracking-wide h-8 text-right">Contacted</TableHead>
                   <TableHead className="text-[10px] uppercase tracking-wide h-8 text-right">Contact Rate</TableHead>
+                  <TableHead className="text-[10px] uppercase tracking-wide h-8 text-right">Conv. Rate</TableHead>
                 </TableRow>
               </TableHeader>
               <TableBody>
@@ -380,6 +393,15 @@ const Marketing = () => {
                         'text-warning'
                       }`}>
                         {ch.contactRate}%
+                      </span>
+                    </TableCell>
+                    <TableCell className="text-right py-2.5">
+                      <span className={`text-[12px] font-semibold tabular-nums ${
+                        ch.conversionRate >= 40 ? 'text-success' :
+                        ch.conversionRate >= 20 ? 'text-primary' :
+                        'text-warning'
+                      }`}>
+                        {ch.conversionRate}%
                       </span>
                     </TableCell>
                   </TableRow>
