@@ -47,8 +47,16 @@ const bottomNav = [
 export function AppSidebar() {
   const { state } = useSidebar();
   const collapsed = state === "collapsed";
-  const { user, signOut } = useAuth();
+  const { user, signOut, role, allowedPages } = useAuth();
   const navigate = useNavigate();
+
+  // Admins see all nav items; restricted users only see their allowed pages
+  const visibleNav = role === "admin"
+    ? mainNav
+    : mainNav.filter(item => allowedPages.includes(item.url));
+
+  // Settings only shown to admins
+  const visibleBottom = role === "admin" ? bottomNav : [];
 
   const handleSignOut = async () => {
     await signOut();
@@ -80,7 +88,7 @@ export function AppSidebar() {
           )}
           <SidebarGroupContent>
             <SidebarMenu>
-              {mainNav.map((item) => (
+              {visibleNav.map((item) => (
                 <SidebarMenuItem key={item.title}>
                   <SidebarMenuButton asChild>
                     <NavLink
@@ -102,7 +110,7 @@ export function AppSidebar() {
 
       <SidebarFooter className="px-2 pb-3 border-t border-sidebar-border pt-3">
         <SidebarMenu>
-          {bottomNav.map((item) => (
+          {visibleBottom.map((item) => (
             <SidebarMenuItem key={item.title}>
               <SidebarMenuButton asChild>
                 <NavLink

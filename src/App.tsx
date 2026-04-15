@@ -1,5 +1,5 @@
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
-import { BrowserRouter, Route, Routes, Navigate } from "react-router-dom";
+import { BrowserRouter, Route, Routes } from "react-router-dom";
 import { Toaster as Sonner } from "@/components/ui/sonner";
 import { Toaster } from "@/components/ui/toaster";
 import { TooltipProvider } from "@/components/ui/tooltip";
@@ -32,18 +32,18 @@ const App = () => (
             {/* Public */}
             <Route path="/login" element={<Login />} />
 
-            {/* Protected — must be logged in */}
-            <Route path="/"               element={<ProtectedRoute><Index /></ProtectedRoute>} />
-            <Route path="/sales"          element={<ProtectedRoute><Sales /></ProtectedRoute>} />
-            <Route path="/marketing"      element={<ProtectedRoute><Marketing /></ProtectedRoute>} />
-            <Route path="/leads-pipeline" element={<ProtectedRoute><LeadsPipeline /></ProtectedRoute>} />
-            <Route path="/team"           element={<ProtectedRoute><TeamPerformance /></ProtectedRoute>} />
-            <Route path="/finance"        element={<ProtectedRoute><Finance /></ProtectedRoute>} />
-            <Route path="/operations"     element={<ProtectedRoute><Operations /></ProtectedRoute>} />
-            <Route path="/settings"       element={<ProtectedRoute><Settings /></ProtectedRoute>} />
-            <Route path="/meta-ads"       element={<ProtectedRoute><MetaAds /></ProtectedRoute>} />
+            {/* Protected — page-level role gating via requiredPage */}
+            <Route path="/"               element={<ProtectedRoute requiredPage="/"><Index /></ProtectedRoute>} />
+            <Route path="/sales"          element={<ProtectedRoute requiredPage="/sales"><Sales /></ProtectedRoute>} />
+            <Route path="/marketing"      element={<ProtectedRoute requiredPage="/marketing"><Marketing /></ProtectedRoute>} />
+            <Route path="/leads-pipeline" element={<ProtectedRoute requiredPage="/leads-pipeline"><LeadsPipeline /></ProtectedRoute>} />
+            <Route path="/team"           element={<ProtectedRoute requiredPage="/team"><TeamPerformance /></ProtectedRoute>} />
+            <Route path="/finance"        element={<ProtectedRoute requiredPage="/finance"><Finance /></ProtectedRoute>} />
+            <Route path="/operations"     element={<ProtectedRoute requiredPage="/operations"><Operations /></ProtectedRoute>} />
+            <Route path="/settings"       element={<ProtectedRoute requiredPage="/settings"><Settings /></ProtectedRoute>} />
+            <Route path="/meta-ads"       element={<ProtectedRoute requiredPage="/meta-ads"><MetaAds /></ProtectedRoute>} />
             <Route path="/worker"         element={<ProtectedRoute><WorkerDashboard /></ProtectedRoute>} />
-            <Route path="/import"         element={<ProtectedRoute><CallLogImport /></ProtectedRoute>} />
+            <Route path="/import"         element={<ProtectedRoute requiredPage="/"><CallLogImport /></ProtectedRoute>} />
 
             <Route path="*" element={<NotFound />} />
           </Routes>
