@@ -360,6 +360,8 @@ export function aggregateZohoData(
     || l.Lead_Status === 'Contact in Future'
     || l.Lead_Status === 'High Priority Follow up').length;
 
+  const highPriority = leads.filter(l => l.Lead_Status === 'High Priority Follow up').length;
+
   const stageConversion = [
     {
       stage: 'Applied → Contacted',
@@ -370,16 +372,16 @@ export function aggregateZohoData(
       rate: contacted > 0 ? parseFloat(((callCompleted / contacted) * 100).toFixed(1)) : 0,
     },
     {
+      stage: 'Initial Call → High Priority',
+      rate: callCompleted > 0 ? parseFloat(((highPriority / callCompleted) * 100).toFixed(1)) : 0,
+    },
+    {
       stage: 'Leads → Deals',
       rate: totalLeads > 0 ? parseFloat(((deals.length / totalLeads) * 100).toFixed(1)) : 0,
     },
     {
-      stage: 'Deals → Placement',
-      rate: deals.length > 0 ? parseFloat(((closedWon.length / deals.length) * 100).toFixed(1)) : 0,
-    },
-    {
       stage: 'Overall Conversion',
-      rate: totalLeads > 0 ? parseFloat(((closedWon.length / totalLeads) * 100).toFixed(2)) : 0,
+      rate: totalLeads > 0 ? parseFloat(((callCompleted / totalLeads) * 100).toFixed(1)) : 0,
     },
   ];
 
