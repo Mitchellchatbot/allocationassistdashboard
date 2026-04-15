@@ -52,10 +52,22 @@ function formatSyncedAt(iso: string): string {
   return new Date(iso).toLocaleDateString("en-GB", { day: "numeric", month: "short" });
 }
 
-/** Closes sidebar when AI panel opens, reopens it when AI panel closes. */
+/** Manages sidebar open state relative to AI panel and navigation. */
 function SidebarCloser({ aiOpen }: { aiOpen: boolean }) {
-  const { setOpen } = useSidebar();
-  useEffect(() => { setOpen(!aiOpen); }, [aiOpen, setOpen]);
+  const { setOpen, isMobile } = useSidebar();
+  const location = useLocation();
+
+  // Close sidebar when AI opens; reopen when AI closes (desktop only)
+  useEffect(() => {
+    if (!isMobile) setOpen(!aiOpen);
+  }, [aiOpen, isMobile, setOpen]);
+
+  // Reopen sidebar after any navigation (desktop only, AI not open)
+  useEffect(() => {
+    if (!isMobile && !aiOpen) setOpen(true);
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [location.pathname]);
+
   return null;
 }
 
