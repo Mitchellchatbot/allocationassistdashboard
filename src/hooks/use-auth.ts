@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { supabase } from "@/lib/supabase";
 import type { Session, User } from "@supabase/supabase-js";
 
@@ -32,6 +32,14 @@ export function useAuth() {
   const [loading, setLoading]     = useState(true);
   const [profile, setProfile]     = useState<UserProfile | null>(null);
 
+  // Cache the last known good profile so nav never flashes empty during re-fetches
+  const profileCache = useRef<UserProfile | null>(null);
+
+  function applyProfile(p: UserProfile) {
+    profileCache.current = p;
+    setProfile(p);
+  }
+
   // Fetch DB profile for a user; fall back to admin if no row exists (legacy account)
   async function fetchProfile(u: User) {
     const { data } = await supabase
@@ -41,14 +49,14 @@ export function useAuth() {
       .single();
 
     if (data) {
-      setProfile({
+      applyProfile({
         role:         data.role,
         allowedPages: data.allowed_pages ?? [],
         fullName:     data.full_name ?? null,
       });
     } else {
       // No profile row → legacy admin account
-      setProfile({ role: "admin", allowedPages: ALL_PAGES, fullName: null });
+      applyProfile({ role: "admin", allowedPages: ALL_PAGES, fullName: null });
     }
   }
 
@@ -68,6 +76,7 @@ export function useAuth() {
       if (u) {
         await fetchProfile(u);
       } else {
+        profileCache.current = null;
         setProfile(null);
       }
       setLoading(false);
@@ -83,9 +92,10 @@ export function useAuth() {
 
   const signOut = () => supabase.auth.signOut();
 
-  // While profile is loading but user is authenticated, default to admin so nav never flashes empty
-  const role         = profile?.role         ?? (user ? "admin" : "worker");
-  const allowedPages = profile?.allowedPages ?? (user ? ALL_PAGES : []);
+  // Use cached profile if current profile is null (prevents nav flashing empty during re-fetches)
+  const effectiveProfile = profile ?? profileCache.current;
+  const role         = effectiveProfile?.role         ?? "admin";
+  const allowedPages = effectiveProfile?.allowedPages ?? ALL_PAGES;
 
   return { session, user, loading, signIn, signOut, role, allowedPages, profile };
 }
