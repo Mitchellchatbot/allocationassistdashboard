@@ -106,18 +106,36 @@ export function useZohoLeads(search: string, filters: LeadsFilters = {}) {
     const term = search.trim().toLowerCase();
 
     return leads.filter(l => {
-      // Text search — name, specialty, recruiter, status, country
-      if (term && !(
-        l.Full_Name?.toLowerCase().includes(term) ||
-        l.First_Name?.toLowerCase().includes(term) ||
-        l.Last_Name?.toLowerCase().includes(term) ||
-        l.Specialty_New?.toLowerCase().includes(term) ||
-        l.Specialty?.toLowerCase().includes(term) ||
-        l.Owner?.name?.toLowerCase().includes(term) ||
-        l.Lead_Status?.toLowerCase().includes(term) ||
-        l.Country_of_Specialty_training?.toLowerCase().includes(term) ||
-        l.Lead_Source?.toLowerCase().includes(term)
-      )) return false;
+      // Text search — covers every visible column
+      if (term) {
+        // Destination string (mirrors mapLead logic) for "Dubai", "Abu Dhabi", "GCC" searches
+        const dest =
+          (l.Has_DHA && l.Has_DHA !== 'No') ? 'uae dubai dha' :
+          (l.Has_DOH && l.Has_DOH !== 'No') ? 'uae abu dhabi doh' :
+          (l.Has_MOH && l.Has_MOH !== 'No') ? 'uae gcc moh' : '';
+        // License string for "DHA", "DOH", "MOH" searches
+        const lic = (
+          (l.Has_DHA && l.Has_DHA !== 'No') ? `dha ${l.Has_DHA}` :
+          (l.Has_DOH && l.Has_DOH !== 'No') ? `doh ${l.Has_DOH}` :
+          (l.Has_MOH && l.Has_MOH !== 'No') ? `moh ${l.Has_MOH}` :
+          (l.License ?? '')
+        ).toLowerCase();
+
+        const match =
+          l.Full_Name?.toLowerCase().includes(term) ||
+          l.First_Name?.toLowerCase().includes(term) ||
+          l.Last_Name?.toLowerCase().includes(term) ||
+          l.Specialty_New?.toLowerCase().includes(term) ||
+          l.Specialty?.toLowerCase().includes(term) ||
+          l.Owner?.name?.toLowerCase().includes(term) ||
+          l.Lead_Status?.toLowerCase().includes(term) ||
+          l.Country_of_Specialty_training?.toLowerCase().includes(term) ||
+          l.Lead_Source?.toLowerCase().includes(term) ||
+          dest.includes(term) ||
+          lic.includes(term);
+
+        if (!match) return false;
+      }
 
       // Stage filter
       if (filters.stage && l.Lead_Status !== filters.stage) return false;
