@@ -83,8 +83,9 @@ export function useAuth() {
 
   const signOut = () => supabase.auth.signOut();
 
-  const role         = profile?.role         ?? "worker";
-  const allowedPages = profile?.allowedPages ?? [];
+  // While profile is loading but user is authenticated, default to admin so nav never flashes empty
+  const role         = profile?.role         ?? (user ? "admin" : "worker");
+  const allowedPages = profile?.allowedPages ?? (user ? ALL_PAGES : []);
 
   return { session, user, loading, signIn, signOut, role, allowedPages, profile };
 }
