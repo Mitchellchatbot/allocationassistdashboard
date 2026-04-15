@@ -106,13 +106,17 @@ export function useZohoLeads(search: string, filters: LeadsFilters = {}) {
     const term = search.trim().toLowerCase();
 
     return leads.filter(l => {
-      // Text search
+      // Text search — name, specialty, recruiter, status, country
       if (term && !(
         l.Full_Name?.toLowerCase().includes(term) ||
+        l.First_Name?.toLowerCase().includes(term) ||
+        l.Last_Name?.toLowerCase().includes(term) ||
         l.Specialty_New?.toLowerCase().includes(term) ||
         l.Specialty?.toLowerCase().includes(term) ||
+        l.Owner?.name?.toLowerCase().includes(term) ||
         l.Lead_Status?.toLowerCase().includes(term) ||
-        l.Country_of_Specialty_training?.toLowerCase().includes(term)
+        l.Country_of_Specialty_training?.toLowerCase().includes(term) ||
+        l.Lead_Source?.toLowerCase().includes(term)
       )) return false;
 
       // Stage filter

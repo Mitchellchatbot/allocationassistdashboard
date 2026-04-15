@@ -266,7 +266,7 @@ const LeadsPipeline = () => {
               <div className="relative w-full sm:w-[220px]">
                 <Search className="absolute left-2.5 top-1/2 -translate-y-1/2 h-3 w-3 text-muted-foreground" />
                 <Input
-                  placeholder="Search by name, specialty..."
+                  placeholder="Search name, specialty, recruiter, country…"
                   value={search}
                   onChange={(e) => setSearch(e.target.value)}
                   className="h-7 pl-7 text-[11px] bg-secondary/50 border-0"
