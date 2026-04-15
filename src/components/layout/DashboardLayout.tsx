@@ -52,10 +52,10 @@ function formatSyncedAt(iso: string): string {
   return new Date(iso).toLocaleDateString("en-GB", { day: "numeric", month: "short" });
 }
 
-/** Closes the sidebar when the AI panel opens. Must be inside SidebarProvider. */
+/** Closes sidebar when AI panel opens, reopens it when AI panel closes. */
 function SidebarCloser({ aiOpen }: { aiOpen: boolean }) {
   const { setOpen } = useSidebar();
-  useEffect(() => { if (aiOpen) setOpen(false); }, [aiOpen, setOpen]);
+  useEffect(() => { setOpen(!aiOpen); }, [aiOpen, setOpen]);
   return null;
 }
 
