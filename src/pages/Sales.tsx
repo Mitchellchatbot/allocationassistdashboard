@@ -66,13 +66,13 @@ const Sales = () => {
         ? <p className="text-[11px] text-muted-foreground py-2">No recruiter data</p>
         : recruiters.slice(0, 5).map(r => {
           const rate = (r as { conversionRate?: number }).conversionRate ?? 0;
-          const barColor = rate >= 5 ? 'bg-success' : rate >= 2 ? 'bg-primary' : 'bg-warning';
+          const barColor = rate >= 40 ? 'bg-success' : rate >= 20 ? 'bg-primary' : 'bg-warning';
           const maxRate = Math.max(...recruiters.map(x => (x as { conversionRate?: number }).conversionRate ?? 0), 1);
           return (
             <div key={r.name}>
               <div className="flex items-center justify-between mb-1">
                 <span className="text-[11px] text-muted-foreground truncate max-w-[120px]">{r.name}</span>
-                <span className={`text-[11px] font-semibold tabular-nums ${rate >= 5 ? 'text-success' : rate >= 2 ? 'text-primary' : 'text-warning'}`}>{rate}%</span>
+                <span className={`text-[11px] font-semibold tabular-nums ${rate >= 40 ? 'text-success' : rate >= 20 ? 'text-primary' : 'text-warning'}`}>{rate}%</span>
               </div>
               <div className="h-1.5 rounded-full bg-muted overflow-hidden">
                 <div className={`h-full rounded-full ${barColor} transition-all`} style={{ width: `${(rate / maxRate) * 100}%` }} />
@@ -292,8 +292,8 @@ const Sales = () => {
                   {(rep as { calls?: number }).calls ?? 0}
                 </span>
                 <span className={`text-[12px] font-semibold tabular-nums text-right hidden md:block ${
-                  ((rep as { conversionRate?: number }).conversionRate ?? 0) >= 5 ? 'text-success' :
-                  ((rep as { conversionRate?: number }).conversionRate ?? 0) >= 2 ? 'text-primary' : 'text-warning'
+                  ((rep as { conversionRate?: number }).conversionRate ?? 0) >= 40 ? 'text-success' :
+                  ((rep as { conversionRate?: number }).conversionRate ?? 0) >= 20 ? 'text-primary' : 'text-warning'
                 }`}>
                   {(rep as { conversionRate?: number }).conversionRate ?? 0}%
                 </span>

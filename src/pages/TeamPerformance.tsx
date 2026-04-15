@@ -68,8 +68,8 @@ const TeamPerformance = () => {
                       <TableCell className="text-[12px] text-right py-2.5 tabular-nums">{contacted}</TableCell>
                       <TableCell className="text-right py-2.5 hidden md:table-cell">
                         <span className={`text-[12px] font-semibold tabular-nums ${
-                          conversionRate >= 5 ? 'text-success' :
-                          conversionRate >= 2 ? 'text-primary' :
+                          conversionRate >= 40 ? 'text-success' :
+                          conversionRate >= 20 ? 'text-primary' :
                           'text-warning'
                         }`}>
                           {conversionRate}%

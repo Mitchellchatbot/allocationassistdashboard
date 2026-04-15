@@ -413,11 +413,12 @@ export function aggregateZohoData(
     leadsByOwner[name].push(l);
   });
 
-  const wonDealsByOwner: Record<string, number> = {};
-  closedWon.forEach(d => {
-    const name = d.Owner?.name ?? 'Unknown';
-    wonDealsByOwner[name] = (wonDealsByOwner[name] ?? 0) + 1;
-  });
+  // Statuses that represent a real engagement (beyond just attempting to call)
+  const convertedStatuses = new Set([
+    'Initial Sales Call Completed',
+    'Contact in Future',
+    'High Priority Follow up',
+  ]);
 
   const recruiters = Object.entries(leadsByOwner)
     .filter(([name]) => name !== 'Unknown')
@@ -425,9 +426,9 @@ export function aggregateZohoData(
       const contacted      = rLeads.filter(l => l.Lead_Status !== 'Not Contacted').length;
       const highPri        = rLeads.filter(l => l.Lead_Status === 'High Priority Follow up').length;
       const contactRate    = rLeads.length > 0 ? Math.round((contacted / rLeads.length) * 100) : 0;
-      const wonDeals       = wonDealsByOwner[name] ?? 0;
+      const converted      = rLeads.filter(l => convertedStatuses.has(l.Lead_Status)).length;
       const conversionRate = rLeads.length > 0
-        ? parseFloat(((wonDeals / rLeads.length) * 100).toFixed(1))
+        ? parseFloat(((converted / rLeads.length) * 100).toFixed(1))
         : 0;
       return {
         name,
@@ -435,10 +436,10 @@ export function aggregateZohoData(
         doctors:        rLeads.length,
         contacted,
         contactRate,
-        wonDeals,
+        converted,
         conversionRate,
         highPriority:   highPri,
-        placements:     wonDeals,
+        placements:     0,
         revenue:        'N/A',
         calls:          callsByRecruiter[name] ?? 0,
         emails:         emailData.bySender[name] ?? 0,
