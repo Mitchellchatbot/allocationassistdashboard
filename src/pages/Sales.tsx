@@ -9,6 +9,12 @@ const Sales = () => {
 
   const maxLeads = Math.max(...recruiters.map(r => r.doctors), 1);
 
+  // Overall conversion rate using the same lead-status metric as per-recruiter breakdown
+  const convertedStatuses = new Set(['Initial Sales Call Completed', 'Contact in Future', 'High Priority Follow up']);
+  const overallConversionRate = filteredLeads.length > 0
+    ? parseFloat(((filteredLeads.filter(l => convertedStatuses.has(l.Lead_Status)).length / filteredLeads.length) * 100).toFixed(1))
+    : 0;
+
   // ── Expanded content for KPI cards ──────────────────────────────────────────
 
   // 1. Total Leads Managed → top 5 recruiters
@@ -170,7 +176,7 @@ const Sales = () => {
         />
         <ExpandableKPICard
           title="Lead Conversion Rate"
-          value={`${sales.conversionRate}%`}
+          value={`${overallConversionRate}%`}
           icon={UserCheck}
           color="text-info"
           bg="bg-info/10"
