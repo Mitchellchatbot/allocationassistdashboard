@@ -72,6 +72,7 @@ export function useMetaLeadsStats(dateRange: DateRangeInput) {
       ).toISOString();
 
       // ── Fetch all rows in ONE query (much faster than 6 separate column queries)
+      // Filter by submitted_at (actual form submission date), not created_at (import date)
       const PAGE = 1000;
       const allRows: Record<string, string>[] = [];
       let offset = 0;
@@ -80,8 +81,8 @@ export function useMetaLeadsStats(dateRange: DateRangeInput) {
         const { data, error } = await supabase
           .from("meta_leads")
           .select("utm_content, utm_campaign, utm_source, location, speciality, stage")
-          .gte("created_at", fromISO)
-          .lte("created_at", toISO)
+          .gte("submitted_at", fromISO)
+          .lte("submitted_at", toISO)
           .range(offset, offset + PAGE - 1);
 
         if (error) throw error;
