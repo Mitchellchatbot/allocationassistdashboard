@@ -23,6 +23,11 @@ interface CallLog {
   country_training: string;
   years_experience: number | null;
   created_at: string;
+  // extras from doctor_sessions
+  qualifications?: string;
+  call_state?: string;
+  meeting_type?: string;
+  source?: "call_log" | "doctor_sessions";
 }
 
 const LOG_STATUS_STYLE: Record<string, string> = {
@@ -51,15 +56,40 @@ function CallLogPanel({ doctorName }: { doctorName: string }) {
 
   useEffect(() => {
     const name = normalizeName(doctorName);
-    supabase
-      .from("call_log")
-      .select("id, call_date, status, notes, specialty, country_training, years_experience, created_at")
-      .ilike("doctor_name", `%${name}%`)
-      .order("created_at", { ascending: true })
-      .then(({ data }) => {
-        setLogs(data ?? []);
-        setLoading(false);
-      });
+    Promise.all([
+      supabase
+        .from("call_log")
+        .select("id, call_date, status, notes, specialty, country_training, years_experience, created_at")
+        .ilike("doctor_name", `%${name}%`)
+        .order("created_at", { ascending: true }),
+      supabase
+        .from("doctor_sessions")
+        .select("id, session_date, status, notes, specialty, country_training, qualifications, call_state, meeting_type, created_at")
+        .ilike("doctor_name", `%${name}%`)
+        .order("created_at", { ascending: true }),
+    ]).then(([callRes, sessRes]) => {
+      const callLogs: CallLog[] = (callRes.data ?? []).map(r => ({ ...r, source: "call_log" as const }));
+      const sessLogs: CallLog[] = (sessRes.data ?? []).map(r => ({
+        id:               r.id,
+        call_date:        r.session_date ?? "",
+        status:           r.status ?? "",
+        notes:            r.notes ?? "",
+        specialty:        r.specialty ?? "",
+        country_training: r.country_training ?? "",
+        years_experience: null,
+        created_at:       r.created_at ?? "",
+        qualifications:   r.qualifications ?? "",
+        call_state:       r.call_state ?? "",
+        meeting_type:     r.meeting_type ?? "",
+        source:           "doctor_sessions" as const,
+      }));
+      // Merge and sort chronologically
+      const merged = [...callLogs, ...sessLogs].sort((a, b) =>
+        (a.created_at ?? "").localeCompare(b.created_at ?? "")
+      );
+      setLogs(merged);
+      setLoading(false);
+    });
   }, [doctorName]);
 
   if (loading) {
@@ -82,6 +112,9 @@ function CallLogPanel({ doctorName }: { doctorName: string }) {
     <div className="px-4 py-3 bg-muted/20 border-t border-border/30">
       <p className="text-[10px] font-semibold text-muted-foreground uppercase tracking-wide mb-2.5 flex items-center gap-1.5">
         <Phone className="h-3 w-3" /> Call history · {logs.length} {logs.length === 1 ? "entry" : "entries"}
+        {logs.some(l => l.source === "doctor_sessions") && (
+          <span className="ml-1 text-[9px] rounded-full bg-primary/10 text-primary px-1.5 py-0.5">+ session notes</span>
+        )}
       </p>
       <div className="relative">
         {/* Timeline line */}
@@ -103,10 +136,19 @@ function CallLogPanel({ doctorName }: { doctorName: string }) {
                   <span className={`inline-flex rounded-full border px-1.5 py-0.5 text-[9px] font-medium ${logStatusStyle(log.status)}`}>
                     {log.status}
                   </span>
+                  {log.call_state && (
+                    <span className="text-[9px] text-muted-foreground bg-muted rounded px-1.5 py-0.5 capitalize">{log.call_state}</span>
+                  )}
+                  {log.meeting_type && (
+                    <span className="text-[9px] text-muted-foreground bg-muted rounded px-1.5 py-0.5">{log.meeting_type}</span>
+                  )}
                   {log.years_experience != null && (
                     <span className="text-[10px] text-muted-foreground">{log.years_experience} yrs exp</span>
                   )}
                 </div>
+                {log.qualifications && (
+                  <p className="text-[10px] text-muted-foreground mb-1">{log.qualifications}</p>
+                )}
                 {log.notes && (
                   <p className="text-[11px] text-foreground leading-relaxed">{log.notes}</p>
                 )}
