@@ -3,9 +3,14 @@ import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import { useFilteredData } from "@/hooks/use-filtered-data";
-import { Trophy } from "lucide-react";
+import { useWeeklySales } from "@/hooks/use-weekly-sales";
+import { Trophy, Phone, ThumbsUp } from "lucide-react";
 import { ChannelIcon } from "@/components/ChannelIcon";
 import { WorkerAnalyticsPanel } from "@/components/WorkerAnalyticsPanel";
+import {
+  BarChart, Bar, XAxis, YAxis, Tooltip,
+  ResponsiveContainer, CartesianGrid, Legend,
+} from "recharts";
 
 const statusColors: Record<string, string> = {
   active:    "bg-success/10 text-success",
@@ -13,12 +18,36 @@ const statusColors: Record<string, string> = {
   paused:    "bg-warning/10 text-warning",
 };
 
+// Match weekly-sales member name to Zoho recruiter name by first word (case-insensitive)
+function matchByFirstName(recruiterName: string, memberName: string) {
+  const a = recruiterName.split(" ")[0].toLowerCase();
+  const b = memberName.split(" ")[0].toLowerCase();
+  return a === b;
+}
+
 const TeamPerformance = () => {
   const { recruiters, campaigns } = useFilteredData();
+  const { data: salesData = [] } = useWeeklySales();
+
   const hasAnyCampaignData = campaigns.some(c => c.doctors > 0 || (c as { spend?: number }).spend > 0);
+
+  // Build a lookup: first name (lowercase) → sales summary
+  const salesByFirst = new Map(
+    salesData.map(s => [s.member_name.split(" ")[0].toLowerCase(), s])
+  );
+
+  // Chart data: all members that have sales data (union of Zoho recruiters + weekly_sales members)
+  const chartData = salesData.map(s => ({
+    name:            s.member_name,
+    "Full Sales Calls": s.full_sales_calls,
+    "Good Calls":    s.good_calls,
+    "Good Call Rate (%)": s.good_call_rate,
+  }));
 
   return (
     <DashboardLayout title="Team Performance" subtitle="See how each recruiter is performing and track active campaigns">
+
+      {/* ── Recruiter table ─────────────────────────────────────────── */}
       <Card className="mb-5 shadow-sm border-border/50">
         <CardHeader className="pb-1 pt-4 px-4">
           <CardTitle className="text-[12px] font-medium text-muted-foreground uppercase tracking-wide">
@@ -33,9 +62,13 @@ const TeamPerformance = () => {
                   <TableHead className="text-[10px] uppercase tracking-wide h-8 w-8">#</TableHead>
                   <TableHead className="text-[10px] uppercase tracking-wide h-8">Name</TableHead>
                   <TableHead className="text-[10px] uppercase tracking-wide h-8 hidden sm:table-cell">Region</TableHead>
-                  <TableHead className="text-[10px] uppercase tracking-wide h-8 text-right">Leads Managed</TableHead>
+                  <TableHead className="text-[10px] uppercase tracking-wide h-8 text-right">Leads</TableHead>
                   <TableHead className="text-[10px] uppercase tracking-wide h-8 text-right">Contacted</TableHead>
                   <TableHead className="text-[10px] uppercase tracking-wide h-8 text-right hidden md:table-cell">Conv. Rate</TableHead>
+                  {/* Weekly sales columns */}
+                  <TableHead className="text-[10px] uppercase tracking-wide h-8 text-right hidden lg:table-cell">Full Calls</TableHead>
+                  <TableHead className="text-[10px] uppercase tracking-wide h-8 text-right hidden lg:table-cell">Good Calls</TableHead>
+                  <TableHead className="text-[10px] uppercase tracking-wide h-8 text-right hidden xl:table-cell">Good Call %</TableHead>
                   <TableHead className="text-[10px] uppercase tracking-wide h-8 text-right hidden lg:table-cell">Performance</TableHead>
                 </TableRow>
               </TableHeader>
@@ -43,6 +76,8 @@ const TeamPerformance = () => {
                 {recruiters.map((m, i) => {
                   const conversionRate = (m as { conversionRate?: number }).conversionRate ?? 0;
                   const contacted      = (m as { contacted?: number }).contacted ?? 0;
+                  const sales = salesByFirst.get(m.name.split(" ")[0].toLowerCase());
+
                   return (
                     <TableRow key={m.name} className="hover:bg-muted/30">
                       <TableCell className="py-2.5">
@@ -75,6 +110,36 @@ const TeamPerformance = () => {
                           {conversionRate}%
                         </span>
                       </TableCell>
+
+                      {/* Weekly sales data */}
+                      <TableCell className="text-[12px] text-right py-2.5 tabular-nums hidden lg:table-cell">
+                        {sales ? (
+                          <span className="flex items-center justify-end gap-1">
+                            <Phone className="h-3 w-3 text-muted-foreground" />
+                            {sales.full_sales_calls}
+                          </span>
+                        ) : <span className="text-muted-foreground/40">—</span>}
+                      </TableCell>
+                      <TableCell className="text-[12px] text-right py-2.5 tabular-nums hidden lg:table-cell">
+                        {sales ? (
+                          <span className="flex items-center justify-end gap-1">
+                            <ThumbsUp className="h-3 w-3 text-muted-foreground" />
+                            {sales.good_calls}
+                          </span>
+                        ) : <span className="text-muted-foreground/40">—</span>}
+                      </TableCell>
+                      <TableCell className="text-right py-2.5 hidden xl:table-cell">
+                        {sales ? (
+                          <span className={`text-[12px] font-semibold tabular-nums ${
+                            sales.good_call_rate >= 50 ? 'text-success' :
+                            sales.good_call_rate >= 30 ? 'text-primary' :
+                            'text-warning'
+                          }`}>
+                            {sales.good_call_rate}%
+                          </span>
+                        ) : <span className="text-muted-foreground/40 text-[12px]">—</span>}
+                      </TableCell>
+
                       <TableCell className="text-right py-2.5 hidden lg:table-cell">
                         <div className="flex items-center justify-end gap-1.5">
                           <div className="w-14 h-1.5 rounded-full bg-muted overflow-hidden">
@@ -86,12 +151,103 @@ const TeamPerformance = () => {
                     </TableRow>
                   );
                 })}
+
+                {/* Show sales-only members not in Zoho recruiters */}
+                {salesData
+                  .filter(s => !recruiters.some(r => matchByFirstName(r.name, s.member_name)))
+                  .map((s, i) => (
+                    <TableRow key={`sales-only-${i}`} className="hover:bg-muted/30 opacity-70">
+                      <TableCell className="py-2.5">
+                        <span className="text-[11px] text-muted-foreground">{recruiters.length + i + 1}</span>
+                      </TableCell>
+                      <TableCell className="py-2.5">
+                        <div className="flex items-center gap-2">
+                          <div className="h-7 w-7 rounded-full bg-muted text-muted-foreground flex items-center justify-center text-[9px] font-bold">
+                            {s.member_name.split(" ").map(n => n[0]).join("")}
+                          </div>
+                          <div>
+                            <p className="text-[12px] font-medium">{s.member_name}</p>
+                            <p className="text-[10px] text-muted-foreground">Sales</p>
+                          </div>
+                        </div>
+                      </TableCell>
+                      <TableCell className="hidden sm:table-cell" />
+                      <TableCell className="text-right py-2.5 text-muted-foreground/40 text-[12px]">—</TableCell>
+                      <TableCell className="text-right py-2.5 text-muted-foreground/40 text-[12px]">—</TableCell>
+                      <TableCell className="text-right py-2.5 hidden md:table-cell text-muted-foreground/40 text-[12px]">—</TableCell>
+                      <TableCell className="text-[12px] text-right py-2.5 tabular-nums hidden lg:table-cell">
+                        <span className="flex items-center justify-end gap-1">
+                          <Phone className="h-3 w-3 text-muted-foreground" />
+                          {s.full_sales_calls}
+                        </span>
+                      </TableCell>
+                      <TableCell className="text-[12px] text-right py-2.5 tabular-nums hidden lg:table-cell">
+                        <span className="flex items-center justify-end gap-1">
+                          <ThumbsUp className="h-3 w-3 text-muted-foreground" />
+                          {s.good_calls}
+                        </span>
+                      </TableCell>
+                      <TableCell className="text-right py-2.5 hidden xl:table-cell">
+                        <span className={`text-[12px] font-semibold tabular-nums ${
+                          s.good_call_rate >= 50 ? 'text-success' :
+                          s.good_call_rate >= 30 ? 'text-primary' :
+                          'text-warning'
+                        }`}>
+                          {s.good_call_rate}%
+                        </span>
+                      </TableCell>
+                      <TableCell className="hidden lg:table-cell" />
+                    </TableRow>
+                  ))}
               </TableBody>
             </Table>
           </div>
         </CardContent>
       </Card>
 
+      {/* ── Call Volume Bar Chart ───────────────────────────────────── */}
+      {chartData.length > 0 && (
+        <Card className="mb-5 shadow-sm border-border/50">
+          <CardHeader className="pb-1 pt-4 px-4">
+            <CardTitle className="text-[12px] font-medium text-muted-foreground uppercase tracking-wide">
+              Call Volume by Team Member
+            </CardTitle>
+          </CardHeader>
+          <CardContent className="px-4 pb-4">
+            <ResponsiveContainer width="100%" height={260}>
+              <BarChart data={chartData} barGap={4} barCategoryGap="30%">
+                <CartesianGrid strokeDasharray="3 3" stroke="hsl(var(--border))" vertical={false} />
+                <XAxis
+                  dataKey="name"
+                  tick={{ fontSize: 11, fill: "hsl(var(--muted-foreground))" }}
+                  axisLine={false}
+                  tickLine={false}
+                />
+                <YAxis
+                  tick={{ fontSize: 11, fill: "hsl(var(--muted-foreground))" }}
+                  axisLine={false}
+                  tickLine={false}
+                  width={30}
+                />
+                <Tooltip
+                  contentStyle={{
+                    fontSize: 11,
+                    borderRadius: 8,
+                    border: "1px solid hsl(var(--border))",
+                    background: "hsl(var(--card))",
+                    color: "hsl(var(--foreground))",
+                  }}
+                />
+                <Legend wrapperStyle={{ fontSize: 11, paddingTop: 8 }} />
+                <Bar dataKey="Full Sales Calls" fill="hsl(var(--primary))" radius={[4, 4, 0, 0]} />
+                <Bar dataKey="Good Calls" fill="hsl(var(--success, 142 76% 36%))" radius={[4, 4, 0, 0]} />
+              </BarChart>
+            </ResponsiveContainer>
+          </CardContent>
+        </Card>
+      )}
+
+      {/* ── Active Campaigns ────────────────────────────────────────── */}
       <Card className="shadow-sm border-border/50">
         <CardHeader className="pb-1 pt-4 px-4">
           <CardTitle className="text-[12px] font-medium text-muted-foreground uppercase tracking-wide">
@@ -136,7 +292,7 @@ const TeamPerformance = () => {
         </CardContent>
       </Card>
 
-      {/* ── Worker Activity ─────────────────────────────────────── */}
+      {/* ── Worker Activity ─────────────────────────────────────────── */}
       <WorkerAnalyticsPanel />
     </DashboardLayout>
   );
