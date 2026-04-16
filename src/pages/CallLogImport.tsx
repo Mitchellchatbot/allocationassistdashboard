@@ -41,7 +41,7 @@ interface MetaLeadRow {
   employed:           string;
   profession:         string;
   speciality:         string;
-  salary_usd:         string;
+  monthly_salary:     string;
   years_experience:   string;
   additional_notes:   string;
   family_medicine:    string;
@@ -300,7 +300,7 @@ function parseMetaLeads(raw: string[][]): MetaLeadRow[] {
       employed:           get(cells, idxEmployed),
       profession:         get(cells, idxProfession),
       speciality:         get(cells, idxSpeciality),
-      salary_usd:         get(cells, idxSalary),
+      monthly_salary:     get(cells, idxSalary),
       years_experience:   get(cells, idxYearsExp),
       additional_notes:   get(cells, idxNotes),
       family_medicine:    get(cells, idxFamilyMed),
