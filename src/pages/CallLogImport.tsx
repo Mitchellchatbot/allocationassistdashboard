@@ -38,7 +38,7 @@ interface MetaLeadRow {
   phone:              string;
   country:            string;
   age:                string;
-  employed:           string;
+  employed:           boolean | null;
   profession:         string;
   speciality:         string;
   monthly_salary:     string;
@@ -297,7 +297,7 @@ function parseMetaLeads(raw: string[][]): MetaLeadRow[] {
       phone:              get(cells, idxPhone),
       country:            get(cells, idxCountry),
       age:                get(cells, idxAge),
-      employed:           get(cells, idxEmployed),
+      employed:           (() => { const v = get(cells, idxEmployed).toLowerCase(); return v === "true" ? true : v === "false" ? false : null; })(),
       profession:         get(cells, idxProfession),
       speciality:         get(cells, idxSpeciality),
       monthly_salary:     get(cells, idxSalary),
