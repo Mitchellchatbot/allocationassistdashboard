@@ -32,10 +32,15 @@ const Marketing = () => {
       return t >= fromMs && t < toMs;
     });
 
-    const leadsByChannel:     Record<string, number> = {};
-    const contactedByChannel: Record<string, number> = {};
-    const convertedByChannel: Record<string, number> = {};
+    const leadsByChannel:        Record<string, number> = {};
+    const activeByChannel:       Record<string, number> = {};
+    const contactedByChannel:    Record<string, number> = {};
+    const convertedByChannel:    Record<string, number> = {};
 
+    const activeStatuses = new Set([
+      'Not Contacted', 'Attempted to Contact', 'Initial Sales Call Completed',
+      'Contact in Future', 'High Priority Follow up',
+    ]);
     const convertedStatuses = new Set([
       'Initial Sales Call Completed',
       'Contact in Future',
@@ -45,8 +50,11 @@ const Marketing = () => {
     for (const l of recentLeads) {
       const ch = displaySource(l.Lead_Source);
       leadsByChannel[ch] = (leadsByChannel[ch] ?? 0) + 1;
-      if (l.Lead_Status !== 'Not Contacted') {
-        contactedByChannel[ch] = (contactedByChannel[ch] ?? 0) + 1;
+      if (activeStatuses.has(l.Lead_Status)) {
+        activeByChannel[ch] = (activeByChannel[ch] ?? 0) + 1;
+        if (l.Lead_Status !== 'Not Contacted') {
+          contactedByChannel[ch] = (contactedByChannel[ch] ?? 0) + 1;
+        }
       }
       if (convertedStatuses.has(l.Lead_Status)) {
         convertedByChannel[ch] = (convertedByChannel[ch] ?? 0) + 1;
@@ -56,10 +64,11 @@ const Marketing = () => {
     return Object.entries(leadsByChannel)
       .sort((a, b) => b[1] - a[1])
       .map(([channel, doctors]) => {
+        const active       = activeByChannel[channel] ?? 0;
         const contacted    = contactedByChannel[channel] ?? 0;
         const converted    = convertedByChannel[channel] ?? 0;
-        const uncontacted  = doctors - contacted;
-        const contactRate    = doctors > 0 ? Math.round((contacted / doctors) * 100) : 0;
+        const uncontacted  = active - contacted;
+        const contactRate    = active > 0 ? Math.round((contacted / active) * 100) : 0;
         const conversionRate = doctors > 0 ? Math.round((converted / doctors) * 100) : 0;
         return { channel, doctors, contacted, uncontacted, contactRate, conversionRate };
       });

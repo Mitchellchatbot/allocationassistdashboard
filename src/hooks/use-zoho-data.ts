@@ -482,7 +482,7 @@ export function aggregateZohoData(
   const stageConversion = [
     {
       stage: 'Applied → Contacted',
-      rate: totalLeads > 0 ? parseFloat(((contacted / totalLeads) * 100).toFixed(1)) : 0,
+      rate: activeLeads.length > 0 ? parseFloat(((contacted / activeLeads.length) * 100).toFixed(1)) : 0,
     },
     {
       stage: 'Contacted → Initial Call',
@@ -537,9 +537,10 @@ export function aggregateZohoData(
   const recruiters = Object.entries(leadsByOwner)
     .filter(([name]) => name !== 'Unknown')
     .map(([name, rLeads]) => {
-      const contacted      = rLeads.filter(l => l.Lead_Status !== 'Not Contacted').length;
+      const rActiveLeads   = rLeads.filter(l => activeStatuses.has(l.Lead_Status));
+      const contacted      = rActiveLeads.filter(l => l.Lead_Status !== 'Not Contacted').length;
       const highPri        = rLeads.filter(l => l.Lead_Status === 'High Priority Follow up').length;
-      const contactRate    = rLeads.length > 0 ? Math.round((contacted / rLeads.length) * 100) : 0;
+      const contactRate    = rActiveLeads.length > 0 ? Math.round((contacted / rActiveLeads.length) * 100) : 0;
       const converted      = rLeads.filter(l => convertedStatuses.has(l.Lead_Status)).length;
       const conversionRate = rLeads.length > 0
         ? parseFloat(((converted / rLeads.length) * 100).toFixed(1))
@@ -604,8 +605,8 @@ export function aggregateZohoData(
     // Metrics relevant to a recruitment outsourcing company
     totalLeadsManaged: leads.length,
     activeInPipeline:  activeLeads.length,
-    contactedRate:     totalLeads > 0
-      ? parseFloat(((contacted / totalLeads) * 100).toFixed(1))
+    contactedRate:     activeLeads.length > 0
+      ? parseFloat(((contacted / activeLeads.length) * 100).toFixed(1))
       : 0,
     outboundCalls:     outboundCalls.length,
     emailsSent:        emailData.total,
