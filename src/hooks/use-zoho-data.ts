@@ -823,16 +823,16 @@ export function useZohoData() {
         }
       }
 
-      // ── Cache is stale or missing — fetch from Zoho ───────────────────────
-      const leads = await zohoFetchAll<ZohoLead>('Leads', LEAD_FIELDS, 200);
-
-      const [deals, calls] = await Promise.all([
-        zohoFetchAll<ZohoDeal>('Deals', DEAL_FIELDS, 5),
-        zohoFetchAll<ZohoCall>('Calls', CALL_FIELDS, 10),
+      // ── Cache is stale or missing — fetch from Zoho (all modules in parallel) ─
+      const [leads, [deals, calls], accounts, campaigns] = await Promise.all([
+        zohoFetchAll<ZohoLead>('Leads', LEAD_FIELDS, 200),
+        Promise.all([
+          zohoFetchAll<ZohoDeal>('Deals', DEAL_FIELDS, 5),
+          zohoFetchAll<ZohoCall>('Calls', CALL_FIELDS, 10),
+        ]),
+        zohoFetchAll<ZohoAccount>('Accounts',  ACCOUNT_FIELDS,  5).catch(() => [] as ZohoAccount[]),
+        zohoFetchAll<ZohoCampaign>('Campaigns', CAMPAIGN_FIELDS, 2).catch(() => [] as ZohoCampaign[]),
       ]);
-
-      const accounts  = await zohoFetchAll<ZohoAccount>('Accounts',  ACCOUNT_FIELDS,  5).catch(() => [] as ZohoAccount[]);
-      const campaigns = await zohoFetchAll<ZohoCampaign>('Campaigns', CAMPAIGN_FIELDS, 2).catch(() => [] as ZohoCampaign[]);
 
       // Persist to cache for next load (fire-and-forget)
       void supabase.from('zoho_cache').upsert({

@@ -76,6 +76,11 @@ export function DashboardLayout({ children, title, subtitle }: DashboardLayoutPr
   const { alerts: rawAlerts, filteredLeads, filteredDeals } = useFilteredData();
   const [readIdxs, setReadIdxs] = useState<number[]>([]);
   const [aiOpen, setAiOpen] = useState(false);
+  // Track whether the AI panel has ever been opened — we defer mounting its
+  // heavy chat UI until first use so it doesn't slow down the initial page render.
+  const aiPanelMounted = useRef(false);
+  if (aiOpen) aiPanelMounted.current = true;
+
   const [indexing, setIndexing] = useState(false);
   const [indexStatus, setIndexStatus] = useState('');
 
@@ -337,12 +342,15 @@ export function DashboardLayout({ children, title, subtitle }: DashboardLayoutPr
           </main>
         </div>
 
-        {/* AI Panel — inline flex child, pushes content left */}
+        {/* AI Panel — inline flex child, pushes content left.
+            Inner content is only mounted after the first open to avoid
+            blocking the initial page render with chat state and embeds. */}
         <div
           className="shrink-0 flex flex-col border-l border-border/40 overflow-hidden"
           style={{ width: aiOpen ? '460px' : '0px', transition: 'width 300ms cubic-bezier(0.4,0,0.2,1)' }}
           aria-hidden={!aiOpen}
         >
+        {aiPanelMounted.current && (
           <div className="w-[460px] flex flex-col h-full bg-card">
 
             {/* Row 1 — blank bar that aligns with the main header (same bg, same border-b) */}
@@ -535,6 +543,7 @@ export function DashboardLayout({ children, title, subtitle }: DashboardLayoutPr
             </div>
 
           </div>
+        )}{/* end deferred AI panel content */}
         </div>{/* end AI panel */}
       </div>{/* end min-h-screen flex */}
 
