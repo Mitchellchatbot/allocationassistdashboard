@@ -36,14 +36,15 @@ interface MetaLeadRow {
   last_name:     string;
   email:         string;
   phone:         string;
-  zoho_id:       string;
   country:       string;
   specialty:     string;
   age:           string;
-  lead_source:   string;
+  employed:      string;
+  salary_usd:    string;
   utm_source:    string;
   utm_medium:    string;
   utm_campaign:  string;
+  utm_content:   string;
 }
 
 interface DoctorSessionRow {
@@ -157,16 +158,21 @@ function parseWeeklySales(raw: string[][]): WeeklySalesRow[] {
     const cells = cols.map(c => (c ?? "").toString().trim());
     if (cells.every(c => c === "")) continue;
 
-    // Detect header row — look for multiple date-like strings (dd-Mon) in the row
+    // Detect header row — look for multiple date-like strings in the row.
+    // Supports: dd/mm/yyyy  |  dd-Mon  |  Mon-dd
+    const isDateLike = (c: string) =>
+      /^\d{1,2}\/\d{1,2}\/\d{4}$/.test(c) ||      // 04/01/2025
+      /^\d{4}-\d{2}-\d{2}$/.test(c) ||             // 2025-01-04
+      /^\d{1,2}[\-][A-Za-z]{3}/.test(c) ||         // 04-Jan
+      /^[A-Za-z]{3}[\-\/]\d{1,2}/.test(c);         // Jan-04
+
     if (!headerFound) {
-      const dateCells = cells.filter(c => /^\d{1,2}[\-\/][A-Za-z]{3}/.test(c) || /^[A-Za-z]{3}[\-\/]\d{1,2}/.test(c));
+      const dateCells = cells.filter(c => isDateLike(c));
       if (dateCells.length >= 2) {
         headerFound = true;
-        // Map column indices of date cells (skip TOTAL-like cols)
+        // Map column indices of date cells; skip TOTAL columns
         cells.forEach((c, i) => {
-          if (/^\d{1,2}[\-\/][A-Za-z]{3}/.test(c) || /^[A-Za-z]{3}[\-\/]\d{1,2}/.test(c)) {
-            dateColumns.push({ index: i, label: c });
-          }
+          if (isDateLike(c)) dateColumns.push({ index: i, label: c });
         });
       }
       continue; // skip header row itself
@@ -211,119 +217,177 @@ function parseWeeklySales(raw: string[][]): WeeklySalesRow[] {
 function parseMetaLeads(raw: string[][]): MetaLeadRow[] {
   if (raw.length < 2) return [];
 
-  // Find header row
+  // Find header row — must have at least a first-name and either email or phone column
   const headerRowIdx = raw.findIndex(row =>
-    row.some(c => /first.?name|last.?name|email|phone|zoho/i.test(c ?? ""))
+    row.some(c => /first.?name/i.test(c ?? "")) &&
+    row.some(c => /email|phone|mobile/i.test(c ?? ""))
   );
   if (headerRowIdx === -1) return [];
 
-  const headers = raw[headerRowIdx].map(h => (h ?? "").toString().toLowerCase().trim());
+  // Strip emoji and extra whitespace for matching, keep original index
+  const headers = raw[headerRowIdx].map(h =>
+    (h ?? "").toString()
+      .replace(/[\u{1F300}-\u{1FFFF}]/gu, "")  // strip emoji
+      .replace(/\*/g, "")                        // strip asterisks
+      .toLowerCase()
+      .trim()
+  );
 
-  const col = (key: string | string[]): number => {
-    const keys = Array.isArray(key) ? key : [key];
-    for (const k of keys) {
-      const idx = headers.findIndex(h => h.includes(k));
+  // Keyword-based column finder — each entry is an ordered list of fragments to try
+  const col = (...keywords: string[]): number => {
+    for (const kw of keywords) {
+      const idx = headers.findIndex(h => h.includes(kw));
       if (idx !== -1) return idx;
     }
     return -1;
   };
 
-  const idxFirst    = col(["first name", "first_name", "firstname"]);
-  const idxLast     = col(["last name", "last_name", "lastname"]);
+  const idxFirst    = col("first name", "first_name", "firstname");
+  const idxLast     = col("last name", "last_name", "lastname");
+  // Email header is long: "👋 Nice to meet you ... What is your* email?"
   const idxEmail    = col("email");
-  const idxPhone    = col(["phone", "mobile"]);
-  const idxZoho     = col(["zoho id", "zoho_id", "zoho"]);
-  const idxCountry  = col("country");
-  const idxSpec     = col(["specialty", "speciality", "specialization"]);
+  // Phone header: "📱 Your *Phone (With country code)*"
+  const idxPhone    = col("phone", "mobile");
+  // Country header: "🌍 What country and city are you currently living in"
+  const idxCountry  = col("country", "living in");
+  // Employed header: "🧑‍⚕️ Are you currently employed?"
+  const idxEmployed = col("employed", "currently employed");
+  // Profession header: "🏥 What is your profession"
+  const idxSpec     = col("profession", "specialty", "speciality");
+  // Age header: "And what is your age?"
   const idxAge      = col("age");
-  const idxSource   = col(["lead source", "source"]);
-  const idxUtmSrc   = col(["utm_source", "utm source"]);
-  const idxUtmMed   = col(["utm_medium", "utm medium"]);
-  const idxUtmCamp  = col(["utm_campaign", "utm campaign"]);
+  // Salary header: "🏦 We also need to know your current monthly salary in USD"
+  const idxSalary   = col("salary", "monthly salary");
+  const idxUtmSrc   = col("utm_source", "utm source");
+  const idxUtmMed   = col("utm_medium", "utm medium");
+  const idxUtmCamp  = col("utm_campaign", "utm campaign");
+  const idxUtmCont  = col("utm_content", "utm content");
 
   const get = (row: string[], idx: number) => (idx === -1 ? "" : (row[idx] ?? "").trim());
 
   return raw.slice(headerRowIdx + 1).flatMap(row => {
     const cells = row.map(c => (c ?? "").toString());
     if (cells.every(c => c.trim() === "")) return [];
+    // Skip rows that look like a second header
+    if (get(cells, idxFirst).toLowerCase().includes("first")) return [];
     return [{
       first_name:   get(cells, idxFirst),
       last_name:    get(cells, idxLast),
       email:        get(cells, idxEmail),
       phone:        get(cells, idxPhone),
-      zoho_id:      get(cells, idxZoho),
       country:      get(cells, idxCountry),
       specialty:    get(cells, idxSpec),
       age:          get(cells, idxAge),
-      lead_source:  get(cells, idxSource),
+      employed:     get(cells, idxEmployed),
+      salary_usd:   get(cells, idxSalary),
       utm_source:   get(cells, idxUtmSrc),
       utm_medium:   get(cells, idxUtmMed),
       utm_campaign: get(cells, idxUtmCamp),
+      utm_content:  get(cells, idxUtmCont),
     }];
   });
 }
 
-const SESSION_STATUSES = new Set([
-  "high priority", "high priority follow up", "declined", "minimal follow up",
-  "contact in future", "contact in the future", "follow up", "no answer",
-  "callback", "placed", "not interested",
-]);
+// Numeric-only date like "11/2" or "13/02"
+const NUMERIC_DATE_RE = /^\d{1,2}\/\d{1,2}(\/\d{2,4})?$/;
 
 function parseDoctorSessions(raw: string[][]): DoctorSessionRow[] {
+  if (raw.length < 2) return [];
+
+  // Find the header row: must have "date" AND "status" AND "name" columns
+  const headerRowIdx = raw.findIndex(row => {
+    const lc = row.map(c => (c ?? "").toString().toLowerCase().trim());
+    return lc.some(c => c === "date") &&
+           lc.some(c => c === "status" || c === "stage") &&
+           lc.some(c => c === "name");
+  });
+
+  if (headerRowIdx === -1) {
+    // Fallback: treat as positional — Date | Status | Name | Specialty | Qualifications | State | Meeting | Country | Notes
+    return parseDoctorSessionsPositional(raw);
+  }
+
+  const headers = raw[headerRowIdx].map(h => (h ?? "").toString().toLowerCase().trim());
+
+  const col = (...keys: string[]): number => {
+    for (const k of keys) {
+      const idx = headers.findIndex(h => h === k || h.startsWith(k));
+      if (idx !== -1) return idx;
+    }
+    return -1;
+  };
+
+  const idxDate    = col("date");
+  const idxStatus  = col("status", "stage");
+  const idxName    = col("name");
+  const idxSpec    = col("speciality", "specialty", "specialisation");
+  const idxQual    = col("qualification");
+  const idxState   = col("state");
+  const idxMeeting = col("meeting");
+  const idxCountry = col("country");
+  const idxNotes   = col("notes", "note");
+
+  const get = (row: string[], idx: number) => (idx === -1 ? "" : (row[idx] ?? "").trim());
+
   const rows: DoctorSessionRow[] = [];
-  let currentDate = "";
+  let lastDate = "";
 
-  for (const cols of raw) {
-    const cells = cols.map(c => (c ?? "").toString().trim());
-    if (cells.every(c => c === "")) continue;
+  for (const rawRow of raw.slice(headerRowIdx + 1)) {
+    const cells = rawRow.map(c => (c ?? "").toString());
+    if (cells.every(c => c.trim() === "")) continue;
 
-    const firstIdx = cells.findIndex(c => c.length > 0);
-    const firstCell = cells[firstIdx];
+    const dateCell = get(cells, idxDate);
+    if (dateCell) lastDate = dateCell;
 
-    let dataOffset = 0;
-    if (DATE_RE.test(firstCell)) {
-      currentDate = firstCell;
-      dataOffset = firstIdx + 1;
-    }
-
-    const dataCells = cells.slice(dataOffset);
-    if (dataCells.every(c => c === "")) continue;
-
-    // Find status cell
-    let statusIdx = -1;
-    let status = "";
-    for (let i = 0; i < Math.min(dataCells.length, 4); i++) {
-      const low = dataCells[i].toLowerCase();
-      if ([...SESSION_STATUSES].some(s => low === s || low.startsWith(s.slice(0, 6)))) {
-        statusIdx = i; status = dataCells[i]; break;
-      }
-    }
-
-    // Fallback: first non-empty cell with more after it
-    if (statusIdx === -1) {
-      for (let i = 0; i < dataCells.length; i++) {
-        if (dataCells[i].length > 0) {
-          const hasMore = dataCells.slice(i + 1).some(c => c.length > 0);
-          if (hasMore) { statusIdx = i; status = dataCells[i]; break; }
-        }
-      }
-    }
-
-    if (statusIdx === -1) continue;
-
-    // Columns after status: Name | Specialty | Qualifications | State | Meeting Type | Country Training | Notes
-    const rest = dataCells.slice(statusIdx + 1);
+    const name = get(cells, idxName);
+    if (!name) continue; // skip rows with no doctor name
 
     rows.push({
-      session_date:     currentDate,
-      status:           status.trim(),
-      doctor_name:      rest[0] ?? "",
-      specialty:        rest[1] ?? "",
-      qualifications:   rest[2] ?? "",
-      call_state:       rest[3] ?? "",
-      meeting_type:     rest[4] ?? "",
-      country_training: rest[5] ?? "",
-      notes:            rest[6] ?? "",
+      session_date:     lastDate,
+      status:           get(cells, idxStatus),
+      doctor_name:      name,
+      specialty:        get(cells, idxSpec),
+      qualifications:   get(cells, idxQual),
+      call_state:       get(cells, idxState),
+      meeting_type:     get(cells, idxMeeting),
+      country_training: get(cells, idxCountry),
+      notes:            get(cells, idxNotes),
+    });
+  }
+
+  return rows;
+}
+
+// Positional fallback: col0=Date, col1=Status, col2=Name, col3=Specialty,
+// col4=Qualifications, col5=State, col6=Meeting, col7=Country, col8=Notes
+function parseDoctorSessionsPositional(raw: string[][]): DoctorSessionRow[] {
+  const rows: DoctorSessionRow[] = [];
+  let lastDate = "";
+
+  for (const rawRow of raw) {
+    const cells = rawRow.map(c => (c ?? "").toString().trim());
+    if (cells.every(c => c === "")) continue;
+
+    const col0 = cells[0] ?? "";
+
+    // Skip header-like rows
+    if (/^date$/i.test(col0)) continue;
+
+    if (col0 && (DATE_RE.test(col0) || NUMERIC_DATE_RE.test(col0))) lastDate = col0;
+
+    const name = cells[2] ?? "";
+    if (!name) continue;
+
+    rows.push({
+      session_date:     lastDate,
+      status:           cells[1] ?? "",
+      doctor_name:      name,
+      specialty:        cells[3] ?? "",
+      qualifications:   cells[4] ?? "",
+      call_state:       cells[5] ?? "",
+      meeting_type:     cells[6] ?? "",
+      country_training: cells[7] ?? "",
+      notes:            cells[8] ?? "",
     });
   }
 
@@ -645,8 +709,9 @@ export default function CallLogImport() {
           {/* ── Meta Leads ────────────────────────────────────────────── */}
           <TabsContent value="meta-leads" className="mt-4 space-y-4">
             <div className="rounded-lg bg-muted/30 border border-border/40 px-3 py-2.5 text-[11px] text-muted-foreground">
-              <strong className="text-foreground">Expected columns:</strong>{" "}
-              First Name · Last Name · Email · Phone · Zoho ID · Country · Specialty · Age · Lead Source · UTM Source · UTM Medium · UTM Campaign
+              <strong className="text-foreground">Expected columns (Typeform export):</strong>{" "}
+              First Name · Last Name · Age · Email · Phone · Country · Employed · Profession · Salary (USD) · UTM Source · UTM Medium · UTM Campaign · UTM Content
+              <span className="block mt-1 text-[10px]">Column headers are matched by keyword — emoji and long descriptions in the header are handled automatically.</span>
             </div>
             <ImportSection
               importer={metaLeadsImporter}
@@ -658,10 +723,10 @@ export default function CallLogImport() {
                 { label: "Last",     key: "last_name",   className: "font-medium" },
                 { label: "Email",    key: "email" },
                 { label: "Phone",    key: "phone" },
-                { label: "Zoho ID", key: "zoho_id" },
                 { label: "Country",  key: "country" },
-                { label: "Specialty", key: "specialty" },
-                { label: "Source",   key: "lead_source" },
+                { label: "Profession", key: "specialty" },
+                { label: "Employed", key: "employed" },
+                { label: "UTM Src",  key: "utm_source" },
               ]}
             />
           </TabsContent>
@@ -691,7 +756,7 @@ export default function CallLogImport() {
               <li><code className="bg-muted px-1 rounded">call_log</code> — existing call log records</li>
               <li><code className="bg-muted px-1 rounded">doctor_sessions</code> — detailed pipeline session notes (date, status, name, specialty, qualifications, call_state, meeting_type, country_training, notes)</li>
               <li><code className="bg-muted px-1 rounded">weekly_sales</code> — recruiter daily activity (member_name, date_col, full_sales_calls, good_calls, sales_count)</li>
-              <li><code className="bg-muted px-1 rounded">meta_leads</code> — Meta ad lead acquisition (first_name, last_name, email, phone, zoho_id, country, specialty, age, lead_source, utm_source, utm_medium, utm_campaign)</li>
+              <li><code className="bg-muted px-1 rounded">meta_leads</code> — Meta/Typeform lead acquisition (first_name, last_name, email, phone, country, specialty, age, employed, salary_usd, utm_source, utm_medium, utm_campaign, utm_content)</li>
             </ul>
           </CardContent>
         </Card>
