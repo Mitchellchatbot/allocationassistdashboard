@@ -38,8 +38,10 @@ export function useFilteredData() {
     const fromMs = dateRange.from.getTime();
     const toMs   = dateRange.to.getTime() + 86_400_000; // exclusive upper bound
 
-    const inWindow = (dateStr: string) => {
+    const inWindow = (dateStr: string | null | undefined) => {
+      if (!dateStr) return false;
       const t = new Date(dateStr).getTime();
+      if (isNaN(t)) return false;
       return t >= fromMs && t < toMs;
     };
 

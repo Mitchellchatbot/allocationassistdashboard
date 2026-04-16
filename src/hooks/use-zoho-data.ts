@@ -183,18 +183,61 @@ function toTitleCase(s: string): string {
   return s.trim().replace(/\s+/g, ' ').replace(/\b\w/g, c => c.toUpperCase());
 }
 
-/** Normalises Lead_Status — handles casing variants and common typos. */
+/** Normalises Lead_Status — handles casing variants and common typos.
+ *  Order matters: more-specific checks come before broad substring checks. */
 function normaliseStatus(raw: string | null | undefined): string {
   if (!raw) return 'Not Contacted';
   const s = raw.trim().toLowerCase();
-  if (s === 'not contacted' || s === 'not_contacted' || s === 'new' || s === 'new lead') return 'Not Contacted';
-  if (s.includes('attempted') || s.includes('attempt to contact') || s === 'attempted contact') return 'Attempted to Contact';
-  if (s.includes('initial sales call') || s.includes('initial call') || s === 'call completed') return 'Initial Sales Call Completed';
-  if (s.includes('contact in future') || s.includes('future') || s === 'follow up') return 'Contact in Future';
-  if (s.includes('high priority') || s === 'hot' || s === 'urgent') return 'High Priority Follow up';
-  if (s.includes('unqualified') || s === 'junk' || s === 'spam' || s === 'test') return 'Unqualified Leads';
-  if (s.includes('not interested') || s === 'rejected' || s === 'declined' || s === 'no') return 'Not Interested';
-  // Return original title-cased if no match
+
+  // ── Not Contacted ─────────────────────────────────────────────────────────
+  if (s === 'not contacted' || s === 'not_contacted' || s === 'new'
+      || s === 'new lead' || s === 'new application' || s === 'open'
+      || s === 'pending' || s === 'untouched')
+    return 'Not Contacted';
+
+  // ── Attempted to Contact (includes "no answer" variants) ──────────────────
+  // Check BEFORE the broad 'not interested' block so 'no answer' ≠ 'not interested'
+  if (s === 'attempted to contact' || s === 'attempted contact'
+      || s === 'no answer'   || s === 'no reply'   || s === 'no response'
+      || s === 'left voicemail' || s === 'voicemail' || s === 'left message'
+      || s === 'busy'        || s === 'ringing'    || s === 'unanswered'
+      || s === 'call back'   || s === 'callback'   || s === 'try again'
+      || (s.includes('attempted') && !s.includes('not'))
+      || s.includes('no answer') || s.includes('no reply')
+      || s.includes('left voicemail') || s.includes('left message'))
+    return 'Attempted to Contact';
+
+  // ── Initial Sales Call Completed ──────────────────────────────────────────
+  if (s.includes('initial sales call') || s.includes('initial call')
+      || s === 'call completed' || s === 'call done' || s === 'connected'
+      || s === 'spoke to'      || s === 'reached')
+    return 'Initial Sales Call Completed';
+
+  // ── Contact in Future ─────────────────────────────────────────────────────
+  // Use exact/prefix checks — avoid broad 'future' substring (can match other statuses)
+  if (s === 'contact in future' || s === 'follow up' || s === 'follow-up'
+      || s === 'scheduled'      || s === 'call scheduled'
+      || s.startsWith('contact in future'))
+    return 'Contact in Future';
+
+  // ── High Priority Follow up ───────────────────────────────────────────────
+  if (s.includes('high priority') || s === 'hot' || s === 'urgent' || s === 'priority')
+    return 'High Priority Follow up';
+
+  // ── Unqualified Leads ─────────────────────────────────────────────────────
+  if (s.includes('unqualified') || s === 'junk' || s === 'spam'
+      || s === 'test' || s === 'duplicate' || s === 'invalid')
+    return 'Unqualified Leads';
+
+  // ── Not Interested ────────────────────────────────────────────────────────
+  // No bare 'no' — too broad and would catch 'no answer', 'no reply' etc.
+  if (s.includes('not interested') || s === 'rejected' || s === 'declined'
+      || s === 'lost'   || s === 'dead'    || s === 'closed lost'
+      || s === 'opt out' || s === 'opted out' || s === 'unsubscribed'
+      || s === 'inactive')
+    return 'Not Interested';
+
+  // Return original title-cased if no match found
   return toTitleCase(raw);
 }
 
@@ -566,7 +609,9 @@ export function aggregateZohoData(
   // ── Leads over time (group by month of Created_Time) ─────────────────────
   const monthBuckets: Record<string, { doctors: number; qualified: number }> = {};
   leads.forEach(l => {
-    const d   = new Date(l.Created_Time);
+    if (!l.Created_Time) return;                   // skip leads with no timestamp
+    const d = new Date(l.Created_Time);
+    if (isNaN(d.getTime())) return;                // skip leads with invalid timestamp
     const key = d.toLocaleString('default', { month: 'short', year: '2-digit' });
     if (!monthBuckets[key]) monthBuckets[key] = { doctors: 0, qualified: 0 };
     monthBuckets[key].doctors++;
