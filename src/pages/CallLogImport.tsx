@@ -426,6 +426,7 @@ function parseDoctorSessionsPositional(raw: string[][]): DoctorSessionRow[] {
 function useImporter<T extends object>(
   parser: (data: string[][]) => T[],
   tableName: string,
+  conflictColumn?: string,
 ) {
   const [rows, setRows]           = useState<T[]>([]);
   const [fileName, setFileName]   = useState("");
@@ -461,7 +462,9 @@ function useImporter<T extends object>(
       const BATCH = 200;
       for (let i = 0; i < rows.length; i += BATCH) {
         const batch = rows.slice(i, i + BATCH);
-        const { error: err } = await supabase.from(tableName).upsert(batch as object[], { ignoreDuplicates: true });
+        const { error: err } = conflictColumn
+          ? await supabase.from(tableName).upsert(batch as object[], { onConflict: conflictColumn, ignoreDuplicates: true })
+          : await supabase.from(tableName).upsert(batch as object[], { ignoreDuplicates: true });
         if (err) throw new Error(err.message);
         inserted += batch.length;
         setDone(inserted);
@@ -641,7 +644,7 @@ function ImportSection<T extends object>({
 export default function CallLogImport() {
   const callLogImporter    = useImporter<CallLogRow>(parseCallLog, "call_log");
   const weeklySalesImporter = useImporter<WeeklySalesRow>(parseWeeklySales, "weekly_sales");
-  const metaLeadsImporter  = useImporter<MetaLeadRow>(parseMetaLeads, "meta_leads");
+  const metaLeadsImporter  = useImporter<MetaLeadRow>(parseMetaLeads, "meta_leads", "phone");
   const doctorSessionImporter = useImporter<DoctorSessionRow>(parseDoctorSessions, "doctor_sessions");
 
   return (
