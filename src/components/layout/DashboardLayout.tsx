@@ -100,14 +100,17 @@ export function DashboardLayout({ children, title, subtitle }: DashboardLayoutPr
   const syncedAt = zoho?.syncedAt;
   const queryClient = useQueryClient();
 
-  // Prefetch weekly sales data as soon as the layout mounts so Team Performance
-  // loads instantly — data is cached and shared across date-range changes.
+  // Prefetch weekly sales after a short delay so it doesn't compete with
+  // the critical Zoho fetch that renders the dashboard on login.
   useEffect(() => {
-    queryClient.prefetchQuery({
-      queryKey:  WEEKLY_SALES_QUERY_KEY,
-      queryFn:   fetchWeeklySalesRaw,
-      staleTime: 10 * 60 * 1000,
-    });
+    const t = setTimeout(() => {
+      queryClient.prefetchQuery({
+        queryKey:  WEEKLY_SALES_QUERY_KEY,
+        queryFn:   fetchWeeklySalesRaw,
+        staleTime: 10 * 60 * 1000,
+      });
+    }, 3000);
+    return () => clearTimeout(t);
   }, [queryClient]);
 
   // Build notification objects from real alerts
