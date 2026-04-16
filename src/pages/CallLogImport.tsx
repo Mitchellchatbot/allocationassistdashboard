@@ -1,4 +1,4 @@
-import { useState, useCallback } from "react";
+import { useState, useCallback, useMemo } from "react";
 import Papa from "papaparse";
 import { DashboardLayout } from "@/components/layout/DashboardLayout";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
@@ -6,9 +6,13 @@ import { Button } from "@/components/ui/button";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import {
   Upload, FileText, CheckCircle, AlertTriangle,
-  Loader2, X, Phone, Users, BarChart2,
+  Loader2, X, Phone, Users, BarChart2, Wand2, Database,
 } from "lucide-react";
 import { supabase } from "@/lib/supabase";
+import {
+  normalizeCallStatus, summarizeStatuses, STATUS_COLORS,
+  CONTACTED_STATUSES, type StandardStatus,
+} from "@/lib/call-status-normalizer";
 
 // ─── Types ───────────────────────────────────────────────────────────────────
 
@@ -427,6 +431,7 @@ function useImporter<T extends object>(
   parser: (data: string[][]) => T[],
   tableName: string,
   conflictColumn?: string,
+  transform?: (rows: T[]) => T[],
 ) {
   const [rows, setRows]           = useState<T[]>([]);
   const [fileName, setFileName]   = useState("");
@@ -458,10 +463,12 @@ function useImporter<T extends object>(
     setImporting(true);
     setError("");
     let inserted = 0;
+    // Apply optional transform (e.g. status normalization) before inserting
+    const rowsToInsert = transform ? transform(rows) : rows;
     try {
       const BATCH = 200;
-      for (let i = 0; i < rows.length; i += BATCH) {
-        const batch = rows.slice(i, i + BATCH);
+      for (let i = 0; i < rowsToInsert.length; i += BATCH) {
+        const batch = rowsToInsert.slice(i, i + BATCH);
         const { error: err } = conflictColumn
           ? await supabase.from(tableName).upsert(batch as object[], { onConflict: conflictColumn, ignoreDuplicates: true })
           : await supabase.from(tableName).upsert(batch as object[], { ignoreDuplicates: true });
@@ -641,8 +648,214 @@ function ImportSection<T extends object>({
 
 // ─── Main page ────────────────────────────────────────────────────────────────
 
+// ─── Call Log Normalization Panel ─────────────────────────────────────────────
+
+const STATUS_ORDER: StandardStatus[] = [
+  "Contacted", "Follow Up", "High Potential", "Converted",
+  "Voicemail", "Attempted", "Declined", "In Progress", "Unknown",
+];
+
+function NormalizationPanel({
+  rows,
+  normalizeOn,
+  onToggle,
+}: {
+  rows: CallLogRow[];
+  normalizeOn: boolean;
+  onToggle: () => void;
+}) {
+  const [fixing, setFixing]   = useState(false);
+  const [fixDone, setFixDone] = useState<number | null>(null);
+  const [fixErr, setFixErr]   = useState("");
+
+  const summary = useMemo(() => summarizeStatuses(rows.map(r => r.status)), [rows]);
+  const total   = rows.length;
+  const unknownCount = summary["Unknown"] ?? 0;
+
+  // Unique raw values that map to "Unknown"
+  const unknownRaw = useMemo(() => {
+    const seen = new Set<string>();
+    for (const r of rows) {
+      if (normalizeCallStatus(r.status) === "Unknown") seen.add(r.status || "(blank)");
+    }
+    return [...seen].slice(0, 8);
+  }, [rows]);
+
+  // Fix existing call_log records in Supabase
+  const handleFixExisting = async () => {
+    setFixing(true);
+    setFixErr("");
+    setFixDone(null);
+    let updated = 0;
+    try {
+      const PAGE = 1000;
+      let from = 0;
+      while (true) {
+        const { data, error } = await supabase
+          .from("call_log")
+          .select("id, status")
+          .range(from, from + PAGE - 1);
+        if (error) throw new Error(error.message);
+        const records = data ?? [];
+        if (records.length === 0) break;
+
+        // Only update rows whose status isn't already a standard value
+        const standardSet = new Set<string>(STATUS_ORDER);
+        const toUpdate = records
+          .filter(r => !standardSet.has(r.status ?? ""))
+          .map(r => ({ id: r.id, status: normalizeCallStatus(r.status ?? "") }));
+
+        if (toUpdate.length > 0) {
+          const BATCH = 100;
+          for (let i = 0; i < toUpdate.length; i += BATCH) {
+            const batch = toUpdate.slice(i, i + BATCH);
+            const { error: upErr } = await supabase.from("call_log").upsert(batch);
+            if (upErr) throw new Error(upErr.message);
+            updated += batch.length;
+          }
+        }
+
+        if (records.length < PAGE) break;
+        from += PAGE;
+        if (from > 100_000) break;
+      }
+      setFixDone(updated);
+    } catch (e) {
+      setFixErr(String(e));
+    } finally {
+      setFixing(false);
+    }
+  };
+
+  if (rows.length === 0) return null;
+
+  return (
+    <Card className="shadow-sm border-border/50">
+      <CardHeader className="pb-2 pt-4 px-4">
+        <div className="flex items-center justify-between">
+          <CardTitle className="text-[12px] font-medium text-muted-foreground uppercase tracking-wide flex items-center gap-2">
+            <Wand2 className="h-3.5 w-3.5" /> Status Normalization
+          </CardTitle>
+          {/* Normalize on import toggle */}
+          <label className="flex items-center gap-2 cursor-pointer select-none">
+            <span className="text-[11px] text-muted-foreground">Normalize on import</span>
+            <div
+              onClick={onToggle}
+              className={`relative h-5 w-9 rounded-full transition-colors ${normalizeOn ? "bg-primary" : "bg-muted-foreground/30"}`}
+            >
+              <div className={`absolute top-0.5 h-4 w-4 rounded-full bg-white shadow transition-transform ${normalizeOn ? "translate-x-4" : "translate-x-0.5"}`} />
+            </div>
+          </label>
+        </div>
+        <p className="text-[10px] text-muted-foreground mt-0.5">
+          {normalizeOn
+            ? "Statuses will be rewritten to standard categories before saving to Supabase."
+            : "Preview only — statuses will be saved as-is. Toggle on to standardize."}
+        </p>
+      </CardHeader>
+      <CardContent className="px-4 pb-4 space-y-3">
+
+        {/* Distribution bars */}
+        <div className="space-y-1.5">
+          {STATUS_ORDER.filter(s => (summary[s] ?? 0) > 0).map(status => {
+            const count = summary[status] ?? 0;
+            const pct   = total > 0 ? Math.round((count / total) * 100) : 0;
+            const isContacted = CONTACTED_STATUSES.has(status);
+            return (
+              <div key={status} className="flex items-center gap-2">
+                <span className={`inline-flex items-center rounded-full border px-1.5 py-0.5 text-[9px] font-medium shrink-0 w-[88px] justify-center ${STATUS_COLORS[status]}`}>
+                  {status}
+                </span>
+                <div className="flex-1 h-1.5 bg-muted rounded-full overflow-hidden">
+                  <div
+                    className={`h-full rounded-full transition-all ${isContacted ? "bg-success" : status === "Unknown" ? "bg-destructive/50" : "bg-primary/40"}`}
+                    style={{ width: `${pct}%` }}
+                  />
+                </div>
+                <span className="text-[10px] tabular-nums text-muted-foreground w-6 text-right shrink-0">{pct}%</span>
+                <span className="text-[10px] tabular-nums font-medium w-8 text-right shrink-0">{count.toLocaleString()}</span>
+              </div>
+            );
+          })}
+        </div>
+
+        {/* Contact rate from this import */}
+        {total > 0 && (() => {
+          const contactedCount = STATUS_ORDER
+            .filter(s => CONTACTED_STATUSES.has(s))
+            .reduce((sum, s) => sum + (summary[s] ?? 0), 0);
+          return (
+            <div className="rounded-lg bg-primary/5 border border-primary/20 px-3 py-2 text-[11px]">
+              <span className="font-medium text-foreground">Derived contact rate: </span>
+              <span className="text-primary font-semibold tabular-nums">
+                {total > 0 ? Math.round((contactedCount / total) * 100) : 0}%
+              </span>
+              <span className="text-muted-foreground ml-1">({contactedCount} of {total} records count as contacted)</span>
+            </div>
+          );
+        })()}
+
+        {/* Unknown values warning */}
+        {unknownCount > 0 && (
+          <div className="rounded-lg bg-warning/5 border border-warning/20 px-3 py-2">
+            <p className="text-[11px] text-warning font-medium mb-1">
+              {unknownCount} row{unknownCount !== 1 ? "s" : ""} could not be categorized
+            </p>
+            <p className="text-[10px] text-muted-foreground mb-1">Unrecognized values:</p>
+            <div className="flex flex-wrap gap-1">
+              {unknownRaw.map(v => (
+                <span key={v} className="text-[9px] font-mono bg-muted px-1.5 py-0.5 rounded">{v}</span>
+              ))}
+            </div>
+          </div>
+        )}
+
+        {/* Fix existing data in Supabase */}
+        <div className="border-t border-border/40 pt-3 flex items-center justify-between gap-3">
+          <div>
+            <p className="text-[11px] font-medium text-foreground">Fix existing call_log data</p>
+            <p className="text-[10px] text-muted-foreground">Rewrite non-standard statuses already in Supabase to standard categories.</p>
+          </div>
+          <Button
+            variant="outline" size="sm"
+            onClick={handleFixExisting}
+            disabled={fixing}
+            className="text-[11px] h-7 shrink-0 gap-1.5"
+          >
+            {fixing
+              ? <><Loader2 className="h-3 w-3 animate-spin" />Fixing…</>
+              : <><Database className="h-3 w-3" />Fix existing</>}
+          </Button>
+        </div>
+
+        {fixDone !== null && (
+          <div className="flex items-center gap-2 text-[11px] text-success">
+            <CheckCircle className="h-3.5 w-3.5 shrink-0" />
+            Updated {fixDone.toLocaleString()} existing record{fixDone !== 1 ? "s" : ""}
+          </div>
+        )}
+        {fixErr && (
+          <div className="flex items-center gap-2 text-[11px] text-destructive">
+            <AlertTriangle className="h-3.5 w-3.5 shrink-0" />
+            {fixErr}
+          </div>
+        )}
+      </CardContent>
+    </Card>
+  );
+}
+
+// ─── Main page ────────────────────────────────────────────────────────────────
+
 export default function CallLogImport() {
-  const callLogImporter    = useImporter<CallLogRow>(parseCallLog, "call_log");
+  const [normalizeCallLog, setNormalizeCallLog] = useState(true);
+
+  const callLogTransform = useCallback((rows: CallLogRow[]): CallLogRow[] => {
+    if (!normalizeCallLog) return rows;
+    return rows.map(r => ({ ...r, status: normalizeCallStatus(r.status) }));
+  }, [normalizeCallLog]);
+
+  const callLogImporter    = useImporter<CallLogRow>(parseCallLog, "call_log", undefined, callLogTransform);
   const weeklySalesImporter = useImporter<WeeklySalesRow>(parseWeeklySales, "weekly_sales");
   const metaLeadsImporter  = useImporter<MetaLeadRow>(parseMetaLeads, "meta_leads", "phone");
   const doctorSessionImporter = useImporter<DoctorSessionRow>(parseDoctorSessions, "doctor_sessions");
@@ -687,6 +900,11 @@ export default function CallLogImport() {
                 { label: "Yrs",       key: "years_experience" },
                 { label: "Notes",     key: "notes" },
               ]}
+            />
+            <NormalizationPanel
+              rows={callLogImporter.rows}
+              normalizeOn={normalizeCallLog}
+              onToggle={() => setNormalizeCallLog(v => !v)}
             />
           </TabsContent>
 
