@@ -11,6 +11,7 @@ import {
   Image,
   LogOut,
   Upload,
+  FileSignature,
 } from "lucide-react";
 import logo from "@/assets/logo.png";
 import { NavLink } from "@/components/NavLink";
@@ -42,6 +43,7 @@ const mainNav = [
 ];
 
 const bottomNav = [
+  { title: "Contract Builder", url: "/contracts", icon: FileSignature },
   { title: "Import Data", url: "/import", icon: Upload },
   { title: "Settings", url: "/settings", icon: Settings },
 ];
