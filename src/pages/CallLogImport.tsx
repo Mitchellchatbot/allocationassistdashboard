@@ -32,19 +32,26 @@ interface WeeklySalesRow {
 }
 
 interface MetaLeadRow {
-  first_name:    string;
-  last_name:     string;
-  email:         string;
-  phone:         string;
-  country:       string;
-  specialty:     string;
-  age:           string;
-  employed:      string;
-  salary_usd:    string;
-  utm_source:    string;
-  utm_medium:    string;
-  utm_campaign:  string;
-  utm_content:   string;
+  first_name:         string;
+  last_name:          string;
+  email:              string;
+  phone:              string;
+  country:            string;
+  age:                string;
+  employed:           string;
+  profession:         string;
+  speciality:         string;
+  salary_usd:         string;
+  years_experience:   string;
+  additional_notes:   string;
+  family_medicine:    string;
+  training_countries: string;
+  submitted_at:       string;
+  channel:            string;
+  utm_source:         string;
+  utm_medium:         string;
+  utm_campaign:       string;
+  utm_content:        string;
 }
 
 interface DoctorSessionRow {
@@ -217,23 +224,25 @@ function parseWeeklySales(raw: string[][]): WeeklySalesRow[] {
 function parseMetaLeads(raw: string[][]): MetaLeadRow[] {
   if (raw.length < 2) return [];
 
-  // Find header row — must have at least a first-name and either email or phone column
   const headerRowIdx = raw.findIndex(row =>
     row.some(c => /first.?name/i.test(c ?? "")) &&
     row.some(c => /email|phone|mobile/i.test(c ?? ""))
   );
   if (headerRowIdx === -1) return [];
 
-  // Strip emoji and extra whitespace for matching, keep original index
-  const headers = raw[headerRowIdx].map(h =>
+  // Clean headers: strip {{field:...}} template vars, emoji, asterisks, normalize spaces
+  const clean = (h: string) =>
     (h ?? "").toString()
-      .replace(/[\u{1F300}-\u{1FFFF}]/gu, "")  // strip emoji
-      .replace(/\*/g, "")                        // strip asterisks
+      .replace(/\{\{[^}]+\}\}/g, "")              // strip {{field:e02ed2d6-...}}
+      .replace(/[\u{1F000}-\u{1FFFF}]/gu, "")     // strip emoji
+      .replace(/[*]/g, "")
+      .replace(/\s+/g, " ")
       .toLowerCase()
-      .trim()
-  );
+      .trim();
 
-  // Keyword-based column finder — each entry is an ordered list of fragments to try
+  const headers = raw[headerRowIdx].map(clean);
+
+  // Find column index by keywords (first match wins)
   const col = (...keywords: string[]): number => {
     for (const kw of keywords) {
       const idx = headers.findIndex(h => h.includes(kw));
@@ -242,48 +251,66 @@ function parseMetaLeads(raw: string[][]): MetaLeadRow[] {
     return -1;
   };
 
-  const idxFirst    = col("first name", "first_name", "firstname");
-  const idxLast     = col("last name", "last_name", "lastname");
-  // Email header is long: "👋 Nice to meet you ... What is your* email?"
-  const idxEmail    = col("email");
-  // Phone header: "📱 Your *Phone (With country code)*"
-  const idxPhone    = col("phone", "mobile");
-  // Country header: "🌍 What country and city are you currently living in"
-  const idxCountry  = col("country", "living in");
-  // Employed header: "🧑‍⚕️ Are you currently employed?"
-  const idxEmployed = col("employed", "currently employed");
-  // Profession header: "🏥 What is your profession"
-  const idxSpec     = col("profession", "specialty", "speciality");
-  // Age header: "And what is your age?"
-  const idxAge      = col("age");
-  // Salary header: "🏦 We also need to know your current monthly salary in USD"
-  const idxSalary   = col("salary", "monthly salary");
-  const idxUtmSrc   = col("utm_source", "utm source");
-  const idxUtmMed   = col("utm_medium", "utm medium");
-  const idxUtmCamp  = col("utm_campaign", "utm campaign");
-  const idxUtmCont  = col("utm_content", "utm content");
+  // Find Nth occurrence of a keyword (for duplicate headers)
+  const colNth = (n: number, ...keywords: string[]): number => {
+    let count = 0;
+    for (let i = 0; i < headers.length; i++) {
+      if (keywords.some(kw => headers[i].includes(kw))) {
+        if (count === n) return i;
+        count++;
+      }
+    }
+    return -1;
+  };
+
+  const idxFirst       = col("first name", "first_name");
+  const idxLast        = col("last name", "last_name");
+  const idxEmail       = col("email");
+  const idxPhone       = col("phone", "mobile");
+  const idxCountry     = col("living in", "country");
+  const idxEmployed    = col("currently employed", "employed");
+  const idxProfession  = colNth(0, "profession");   // first "profession" col
+  const idxSpeciality  = col("speciality", "specialty"); // "what is your speciality"
+  const idxAge         = col("what is your age", "age");
+  const idxSalary      = col("salary");
+  const idxYearsExp    = col("years of experience", "post specialty");
+  const idxNotes       = col("anything else", "would like us to know");
+  const idxFamilyMed   = col("family medicine");
+  const idxTraining    = col("training in your speciality", "uk, eu, usa", "uk,");
+  const idxSubmittedAt = col("submitted at");
+  const idxChannel     = col("channel");
+  const idxUtmSrc      = col("utm_source");
+  const idxUtmMed      = col("utm_medium");
+  const idxUtmCamp     = col("utm_campaign");
+  const idxUtmCont     = col("utm_content");
 
   const get = (row: string[], idx: number) => (idx === -1 ? "" : (row[idx] ?? "").trim());
 
   return raw.slice(headerRowIdx + 1).flatMap(row => {
     const cells = row.map(c => (c ?? "").toString());
     if (cells.every(c => c.trim() === "")) return [];
-    // Skip rows that look like a second header
-    if (get(cells, idxFirst).toLowerCase().includes("first")) return [];
+    if (get(cells, idxFirst).toLowerCase().startsWith("first")) return [];
     return [{
-      first_name:   get(cells, idxFirst),
-      last_name:    get(cells, idxLast),
-      email:        get(cells, idxEmail),
-      phone:        get(cells, idxPhone),
-      country:      get(cells, idxCountry),
-      specialty:    get(cells, idxSpec),
-      age:          get(cells, idxAge),
-      employed:     get(cells, idxEmployed),
-      salary_usd:   get(cells, idxSalary),
-      utm_source:   get(cells, idxUtmSrc),
-      utm_medium:   get(cells, idxUtmMed),
-      utm_campaign: get(cells, idxUtmCamp),
-      utm_content:  get(cells, idxUtmCont),
+      first_name:         get(cells, idxFirst),
+      last_name:          get(cells, idxLast),
+      email:              get(cells, idxEmail),
+      phone:              get(cells, idxPhone),
+      country:            get(cells, idxCountry),
+      age:                get(cells, idxAge),
+      employed:           get(cells, idxEmployed),
+      profession:         get(cells, idxProfession),
+      speciality:         get(cells, idxSpeciality),
+      salary_usd:         get(cells, idxSalary),
+      years_experience:   get(cells, idxYearsExp),
+      additional_notes:   get(cells, idxNotes),
+      family_medicine:    get(cells, idxFamilyMed),
+      training_countries: get(cells, idxTraining),
+      submitted_at:       get(cells, idxSubmittedAt),
+      channel:            get(cells, idxChannel),
+      utm_source:         get(cells, idxUtmSrc),
+      utm_medium:         get(cells, idxUtmMed),
+      utm_campaign:       get(cells, idxUtmCamp),
+      utm_content:        get(cells, idxUtmCont),
     }];
   });
 }
@@ -719,14 +746,14 @@ export default function CallLogImport() {
               inputId="input-meta-leads"
               emptyHint='Export your Meta Leads sheet as CSV. The first row must be column headers (First Name, Last Name, Email, Phone, Zoho ID, …).'
               previewCols={[
-                { label: "First",    key: "first_name",  className: "font-medium" },
-                { label: "Last",     key: "last_name",   className: "font-medium" },
-                { label: "Email",    key: "email" },
-                { label: "Phone",    key: "phone" },
-                { label: "Country",  key: "country" },
-                { label: "Profession", key: "specialty" },
-                { label: "Employed", key: "employed" },
-                { label: "UTM Src",  key: "utm_source" },
+                { label: "First",      key: "first_name",  className: "font-medium" },
+                { label: "Last",       key: "last_name",   className: "font-medium" },
+                { label: "Email",      key: "email" },
+                { label: "Phone",      key: "phone" },
+                { label: "Country",    key: "country" },
+                { label: "Profession", key: "profession" },
+                { label: "Speciality", key: "speciality" },
+                { label: "Submitted",  key: "submitted_at" },
               ]}
             />
           </TabsContent>
