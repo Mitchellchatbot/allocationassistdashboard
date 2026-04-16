@@ -27,7 +27,7 @@ function matchByFirstName(recruiterName: string, memberName: string) {
 
 const TeamPerformance = () => {
   const { recruiters, campaigns } = useFilteredData();
-  const { data: salesData = [] } = useWeeklySales();
+  const { data: salesData = [], isLoading: salesLoading } = useWeeklySales();
 
   const hasAnyCampaignData = campaigns.some(c => c.doctors > 0 || (c as { spend?: number }).spend > 0);
 
@@ -113,7 +113,9 @@ const TeamPerformance = () => {
 
                       {/* Weekly sales data */}
                       <TableCell className="text-[12px] text-right py-2.5 tabular-nums hidden lg:table-cell">
-                        {sales ? (
+                        {salesLoading ? (
+                          <div className="h-3 w-8 rounded bg-muted animate-pulse ml-auto" />
+                        ) : sales ? (
                           <span className="flex items-center justify-end gap-1">
                             <Phone className="h-3 w-3 text-muted-foreground" />
                             {sales.full_sales_calls}
@@ -121,7 +123,9 @@ const TeamPerformance = () => {
                         ) : <span className="text-muted-foreground/40">—</span>}
                       </TableCell>
                       <TableCell className="text-[12px] text-right py-2.5 tabular-nums hidden lg:table-cell">
-                        {sales ? (
+                        {salesLoading ? (
+                          <div className="h-3 w-8 rounded bg-muted animate-pulse ml-auto" />
+                        ) : sales ? (
                           <span className="flex items-center justify-end gap-1">
                             <ThumbsUp className="h-3 w-3 text-muted-foreground" />
                             {sales.good_calls}
@@ -129,7 +133,9 @@ const TeamPerformance = () => {
                         ) : <span className="text-muted-foreground/40">—</span>}
                       </TableCell>
                       <TableCell className="text-right py-2.5 hidden xl:table-cell">
-                        {sales ? (
+                        {salesLoading ? (
+                          <div className="h-3 w-10 rounded bg-muted animate-pulse ml-auto" />
+                        ) : sales ? (
                           <span className={`text-[12px] font-semibold tabular-nums ${
                             sales.good_call_rate >= 50 ? 'text-success' :
                             sales.good_call_rate >= 30 ? 'text-primary' :
@@ -206,7 +212,19 @@ const TeamPerformance = () => {
       </Card>
 
       {/* ── Call Volume Bar Chart ───────────────────────────────────── */}
-      {chartData.length > 0 && (
+      {salesLoading && (
+        <Card className="mb-5 shadow-sm border-border/50">
+          <CardHeader className="pb-1 pt-4 px-4">
+            <CardTitle className="text-[12px] font-medium text-muted-foreground uppercase tracking-wide">
+              Call Volume by Team Member
+            </CardTitle>
+          </CardHeader>
+          <CardContent className="px-4 pb-4">
+            <div className="h-[260px] rounded-lg bg-muted/40 animate-pulse" />
+          </CardContent>
+        </Card>
+      )}
+      {!salesLoading && chartData.length > 0 && (
         <Card className="mb-5 shadow-sm border-border/50">
           <CardHeader className="pb-1 pt-4 px-4">
             <CardTitle className="text-[12px] font-medium text-muted-foreground uppercase tracking-wide">

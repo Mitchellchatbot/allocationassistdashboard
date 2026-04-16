@@ -15,6 +15,7 @@ import { Link, useLocation } from "react-router-dom";
 import { useZohoData } from "@/hooks/use-zoho-data";
 import { useMutation, useQueryClient } from "@tanstack/react-query";
 import { zohoSync } from "@/lib/zoho";
+import { WEEKLY_SALES_QUERY_KEY, fetchWeeklySalesRaw } from "@/hooks/use-weekly-sales";
 
 const SUPABASE_URL      = import.meta.env.VITE_SUPABASE_URL as string;
 const SUPABASE_ANON_KEY = import.meta.env.VITE_SUPABASE_ANON_KEY as string;
@@ -98,6 +99,16 @@ export function DashboardLayout({ children, title, subtitle }: DashboardLayoutPr
   const { data: zoho } = useZohoData();
   const syncedAt = zoho?.syncedAt;
   const queryClient = useQueryClient();
+
+  // Prefetch weekly sales data as soon as the layout mounts so Team Performance
+  // loads instantly — data is cached and shared across date-range changes.
+  useEffect(() => {
+    queryClient.prefetchQuery({
+      queryKey:  WEEKLY_SALES_QUERY_KEY,
+      queryFn:   fetchWeeklySalesRaw,
+      staleTime: 10 * 60 * 1000,
+    });
+  }, [queryClient]);
 
   // Build notification objects from real alerts
   const notifications = useMemo(() => {
