@@ -5,12 +5,13 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@
 import { useFilteredData } from "@/hooks/use-filtered-data";
 import { useZohoLeads, useDebounce, type LeadsFilters } from "@/hooks/use-zoho-leads";
 import { useZohoData } from "@/hooks/use-zoho-data";
-import { ArrowRight, AlertTriangle, CheckCircle, Clock, Search, Loader2, Check, X, ChevronDown, Phone, Calendar } from "lucide-react";
+import { ArrowRight, AlertTriangle, CheckCircle, Clock, Search, Loader2, Check, X, ChevronDown, Phone, Calendar, MessageSquare } from "lucide-react";
 import { Input } from "@/components/ui/input";
 import { useState, useRef, useEffect, useMemo, Fragment } from "react";
 import { useMutation, useQueryClient } from "@tanstack/react-query";
 import { zohoPut } from "@/lib/zoho";
 import { supabase } from "@/lib/supabase";
+import { useLastContact } from "@/hooks/use-last-contact";
 
 // ── Call log types ────────────────────────────────────────────────────────────
 
@@ -170,6 +171,7 @@ const statusConfig = {
 const LeadsPipeline = () => {
   const { workflow } = useFilteredData();
   const { data: zoho } = useZohoData();
+  const { data: lastContactMap } = useLastContact();
   const [search, setSearch] = useState("");
   const debouncedSearch = useDebounce(search, 300);
   const [filters, setFilters] = useState<LeadsFilters>({});
@@ -419,6 +421,7 @@ const LeadsPipeline = () => {
                       <TableHead className="text-[10px] uppercase tracking-wide h-8 hidden md:table-cell">From → To</TableHead>
                       <TableHead className="text-[10px] uppercase tracking-wide h-8 hidden lg:table-cell">License Type</TableHead>
                       <TableHead className="text-[10px] uppercase tracking-wide h-8 hidden lg:table-cell">Recruiter</TableHead>
+                      <TableHead className="text-[10px] uppercase tracking-wide h-8 hidden xl:table-cell">Last Contact</TableHead>
                       <TableHead className="text-[10px] uppercase tracking-wide h-8 text-right">Days in Step</TableHead>
                       <TableHead className="text-[10px] uppercase tracking-wide h-8">Status</TableHead>
                     </TableRow>
@@ -476,6 +479,24 @@ const LeadsPipeline = () => {
                             <TableCell className="text-[10px] text-muted-foreground py-2.5 hidden md:table-cell">{doc.origin} → {doc.destination}</TableCell>
                             <TableCell className="text-[10px] font-medium py-2.5 hidden lg:table-cell">{doc.license}</TableCell>
                             <TableCell className="text-[11px] text-muted-foreground py-2.5 hidden lg:table-cell">{doc.assignedTo}</TableCell>
+                            <TableCell className="py-2.5 hidden xl:table-cell">
+                              {(() => {
+                                const normKey = doc.name.replace(/^(dr\.?|prof\.?)\s*/i, "").toLowerCase().trim();
+                                const info = lastContactMap?.get(normKey);
+                                if (!info) return <span className="text-[10px] text-muted-foreground/40">—</span>;
+                                const days = info.daysSince;
+                                const colour = days === null ? "text-muted-foreground"
+                                  : days <= 7  ? "text-success"
+                                  : days <= 30 ? "text-warning"
+                                  : "text-destructive";
+                                return (
+                                  <span className={`flex items-center gap-1 text-[10px] font-medium ${colour}`}>
+                                    <MessageSquare className="h-2.5 w-2.5 shrink-0" />
+                                    {info.dateLabel}
+                                  </span>
+                                );
+                              })()}
+                            </TableCell>
                             <TableCell className="text-[12px] text-right font-medium py-2.5 tabular-nums">{doc.daysInStage}</TableCell>
                             <TableCell className="py-2.5">
                               <div className={`inline-flex items-center gap-0.5 rounded-full border px-1.5 py-0.5 text-[9px] font-medium ${st.className}`}>
@@ -485,7 +506,7 @@ const LeadsPipeline = () => {
                           </TableRow>
                           {expandedId === doc.id && (
                             <TableRow className="hover:bg-transparent">
-                              <TableCell colSpan={9} className="p-0 border-b border-border/30">
+                              <TableCell colSpan={10} className="p-0 border-b border-border/30">
                                 <CallLogPanel doctorName={doc.name} />
                               </TableCell>
                             </TableRow>
