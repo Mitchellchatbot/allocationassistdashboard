@@ -461,7 +461,7 @@ function useImporter<T extends object>(
       const BATCH = 200;
       for (let i = 0; i < rows.length; i += BATCH) {
         const batch = rows.slice(i, i + BATCH);
-        const { error: err } = await supabase.from(tableName).insert(batch as object[]);
+        const { error: err } = await supabase.from(tableName).upsert(batch as object[], { ignoreDuplicates: true });
         if (err) throw new Error(err.message);
         inserted += batch.length;
         setDone(inserted);
