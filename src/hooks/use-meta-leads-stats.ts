@@ -88,6 +88,49 @@ function getDateFilter(preset: string): string | null {
   return dt.toISOString();
 }
 
+// ── Individual lead rows for the table ───────────────────────────────────────
+
+export interface MetaLeadRecord {
+  id:             string;
+  first_name:     string;
+  last_name:      string;
+  profession:     string;
+  speciality:     string;
+  country:        string;
+  location:       string;
+  monthly_salary: string;
+  submitted_at:   string;
+  utm_campaign:   string;
+  utm_source:     string;
+  employed:       boolean | null;
+}
+
+export function useMetaLeadsRecent(preset = "last_30d", page = 0) {
+  const PAGE_SIZE = 25;
+  return useQuery<{ rows: MetaLeadRecord[]; hasMore: boolean }>({
+    queryKey: ["meta-leads-recent", preset, page],
+    queryFn: async () => {
+      const since = getDateFilter(preset);
+      const from  = page * PAGE_SIZE;
+
+      let q = supabase
+        .from("meta_leads")
+        .select("id, first_name, last_name, profession, speciality, country, location, monthly_salary, submitted_at, utm_campaign, utm_source, employed")
+        .order("submitted_at", { ascending: false })
+        .range(from, from + PAGE_SIZE);
+
+      if (since) q = (q as any).gte("created_at", since);
+
+      const { data, error } = await q;
+      if (error) throw error;
+      const rows = (data ?? []) as MetaLeadRecord[];
+      return { rows, hasMore: rows.length === PAGE_SIZE + 1 };
+    },
+    staleTime: 5 * 60 * 1000,
+    refetchOnWindowFocus: false,
+  });
+}
+
 export function useMetaLeadsStats(preset = "last_30d") {
   return useQuery<MetaLeadsStats>({
     queryKey: ["meta-leads-stats", preset],

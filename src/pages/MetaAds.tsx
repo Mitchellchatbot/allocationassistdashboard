@@ -1,11 +1,12 @@
 import { DashboardLayout } from "@/components/layout/DashboardLayout";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
-import { useMetaLeadsStats, type GroupedStat } from "@/hooks/use-meta-leads-stats";
+import { useMetaLeadsStats, useMetaLeadsRecent, type GroupedStat } from "@/hooks/use-meta-leads-stats";
 import {
   PieChart, Pie, Cell, Tooltip, Legend, ResponsiveContainer,
   BarChart, Bar, XAxis, YAxis, CartesianGrid,
 } from "recharts";
-import { Users, Megaphone, Globe, Loader2, TrendingUp } from "lucide-react";
+import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
+import { Users, Megaphone, Globe, Loader2, TrendingUp, ChevronDown } from "lucide-react";
 import { useState } from "react";
 
 const COLORS = [
@@ -102,7 +103,9 @@ const PRESETS = [
 
 const MetaAds = () => {
   const [preset, setPreset] = useState("last_30d");
+  const [page, setPage]     = useState(0);
   const { data, isLoading } = useMetaLeadsStats(preset);
+  const { data: recentData, isLoading: recentLoading } = useMetaLeadsRecent(preset, page);
 
   const total       = data?.total        ?? 0;
   const withUtm     = data?.withUtm      ?? 0;
@@ -124,7 +127,7 @@ const MetaAds = () => {
         {PRESETS.map((p) => (
           <button
             key={p.value}
-            onClick={() => setPreset(p.value)}
+            onClick={() => { setPreset(p.value); setPage(0); }}
             className={`px-3 py-1 rounded-md text-[11px] font-medium transition-colors border ${
               preset === p.value
                 ? "bg-primary text-white border-primary"
@@ -200,7 +203,7 @@ const MetaAds = () => {
           </div>
 
           {/* Origin + Specialty */}
-          <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
+          <div className="grid grid-cols-1 lg:grid-cols-2 gap-4 mb-4">
             <Card className="shadow-sm border-border/50">
               <CardHeader className="pb-1 pt-4 px-4">
                 <CardTitle className="text-[12px] font-medium text-muted-foreground uppercase tracking-wide">Leads by Country</CardTitle>
@@ -221,6 +224,86 @@ const MetaAds = () => {
               </CardContent>
             </Card>
           </div>
+
+          {/* Recent Leads Table */}
+          <Card className="shadow-sm border-border/50">
+            <CardHeader className="pb-1 pt-4 px-4">
+              <CardTitle className="text-[12px] font-medium text-muted-foreground uppercase tracking-wide">
+                Recent Lead Submissions
+              </CardTitle>
+            </CardHeader>
+            <CardContent className="px-4 pb-4">
+              {recentLoading ? (
+                <div className="flex items-center justify-center gap-2 py-8 text-muted-foreground">
+                  <Loader2 className="h-3.5 w-3.5 animate-spin" />
+                  <span className="text-[11px]">Loading…</span>
+                </div>
+              ) : !recentData?.rows.length ? (
+                <p className="text-[11px] text-muted-foreground text-center py-8">No submissions in this period</p>
+              ) : (
+                <>
+                  <div className="overflow-x-auto -mx-4 px-4">
+                    <Table>
+                      <TableHeader>
+                        <TableRow className="hover:bg-transparent">
+                          <TableHead className="text-[10px] uppercase tracking-wide h-8">Name</TableHead>
+                          <TableHead className="text-[10px] uppercase tracking-wide h-8 hidden sm:table-cell">Profession</TableHead>
+                          <TableHead className="text-[10px] uppercase tracking-wide h-8 hidden md:table-cell">Speciality</TableHead>
+                          <TableHead className="text-[10px] uppercase tracking-wide h-8 hidden sm:table-cell">Country</TableHead>
+                          <TableHead className="text-[10px] uppercase tracking-wide h-8 text-right hidden lg:table-cell">Salary (USD)</TableHead>
+                          <TableHead className="text-[10px] uppercase tracking-wide h-8 hidden md:table-cell">Campaign</TableHead>
+                          <TableHead className="text-[10px] uppercase tracking-wide h-8 hidden lg:table-cell">Source</TableHead>
+                          <TableHead className="text-[10px] uppercase tracking-wide h-8 text-right">Submitted</TableHead>
+                        </TableRow>
+                      </TableHeader>
+                      <TableBody>
+                        {recentData.rows.map((lead) => {
+                          const name    = [lead.first_name, lead.last_name].filter(Boolean).join(" ") || "—";
+                          const country = lead.country || lead.location || "—";
+                          const date    = lead.submitted_at
+                            ? new Date(lead.submitted_at).toLocaleDateString("en-GB", { day: "numeric", month: "short", year: "2-digit" })
+                            : "—";
+                          return (
+                            <TableRow key={lead.id} className="hover:bg-muted/30">
+                              <TableCell className="py-2">
+                                <div className="flex items-center gap-2">
+                                  <div className="h-6 w-6 shrink-0 rounded-full bg-primary/10 text-primary flex items-center justify-center text-[8px] font-bold">
+                                    {(lead.first_name?.[0] ?? "") + (lead.last_name?.[0] ?? "")}
+                                  </div>
+                                  <span className="text-[12px] font-medium">{name}</span>
+                                </div>
+                              </TableCell>
+                              <TableCell className="text-[11px] py-2 hidden sm:table-cell text-muted-foreground">{lead.profession || "—"}</TableCell>
+                              <TableCell className="text-[11px] py-2 hidden md:table-cell text-muted-foreground">{lead.speciality || "—"}</TableCell>
+                              <TableCell className="text-[11px] py-2 hidden sm:table-cell text-muted-foreground">{country}</TableCell>
+                              <TableCell className="text-[11px] py-2 hidden lg:table-cell text-right tabular-nums">{lead.monthly_salary || "—"}</TableCell>
+                              <TableCell className="text-[11px] py-2 hidden md:table-cell text-muted-foreground max-w-[140px] truncate" title={lead.utm_campaign}>{lead.utm_campaign || "—"}</TableCell>
+                              <TableCell className="text-[11px] py-2 hidden lg:table-cell">
+                                {lead.utm_source ? (
+                                  <span className="rounded-full bg-primary/10 text-primary px-1.5 py-0.5 text-[9px] font-medium capitalize">{lead.utm_source}</span>
+                                ) : "—"}
+                              </TableCell>
+                              <TableCell className="text-[11px] py-2 text-right text-muted-foreground tabular-nums">{date}</TableCell>
+                            </TableRow>
+                          );
+                        })}
+                      </TableBody>
+                    </Table>
+                  </div>
+                  {recentData.hasMore && (
+                    <div className="flex justify-center mt-4">
+                      <button
+                        onClick={() => setPage(p => p + 1)}
+                        className="flex items-center gap-1.5 text-[11px] text-muted-foreground hover:text-foreground transition-colors"
+                      >
+                        <ChevronDown className="h-3.5 w-3.5" /> Load more
+                      </button>
+                    </div>
+                  )}
+                </>
+              )}
+            </CardContent>
+          </Card>
         </>
       )}
     </DashboardLayout>
