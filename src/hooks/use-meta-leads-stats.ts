@@ -4,173 +4,107 @@ import { supabase } from "@/lib/supabase";
 export type GroupedStat = { label: string; count: number };
 
 export type MetaLeadsStats = {
-  total: number;
-  withUtm: number;
-  byCreative:  GroupedStat[];
-  byCampaign:  GroupedStat[];
-  byPlatform:  GroupedStat[];
-  byLocation:  GroupedStat[];
+  total:        number;
+  withUtm:      number;
+  byCreative:   GroupedStat[];
+  byCampaign:   GroupedStat[];
+  byPlatform:   GroupedStat[];
+  byLocation:   GroupedStat[];
   bySpeciality: GroupedStat[];
-  byStage:     GroupedStat[];
+  byStage:      GroupedStat[];
 };
 
 // Normalize utm_source values into clean platform names
 function normalizePlatform(raw: string): string {
   const s = raw.toLowerCase().trim();
   if (s === "meta" || s === "fb" || s.startsWith("facebook")) return "Facebook";
-  if (s === "ig" || s.startsWith("instagram")) return "Instagram";
+  if (s === "ig"   || s.startsWith("instagram")) return "Instagram";
   if (s === "google") return "Google";
   if (s === "youtube") return "YouTube";
   return "Other";
 }
 
-// Fetch all rows for a column from the RAW meta_leads table, paginated
-async function groupBy(
-  column: string,
-  since: string | null,
+function groupByField(
+  rows: Record<string, string>[],
+  field: string,
   opts: { skipNumeric?: boolean; normalize?: (v: string) => string; splitComma?: boolean } = {}
-): Promise<GroupedStat[]> {
-  const PAGE = 1000;
+): GroupedStat[] {
   const map: Record<string, number> = {};
-  let from = 0;
+  for (const row of rows) {
+    let val = (row[field] ?? "").toString().trim();
+    if (!val || val === "xxxxx") continue;
+    if (opts.skipNumeric && /^\d+$/.test(val)) continue;
 
-  while (true) {
-    let q = supabase
-      .from("meta_leads")
-      .select(column)
-      .not(column, "is", null)
-      .neq(column, "")
-      .neq(column, "xxxxx")
-      .range(from, from + PAGE - 1);
+    const values = opts.splitComma
+      ? val.split(",").map(s => s.trim()).filter(Boolean)
+      : [val];
 
-    if (since) q = (q as any).gte("created_at", since);
-
-    const { data, error } = await q;
-    if (error) throw error;
-
-    const rows = (data ?? []) as any[];
-    for (const row of rows) {
-      let val: string = String(row[column]).trim();
-      if (!val) continue;
-      if (opts.skipNumeric && /^\d+$/.test(val)) continue;
-
-      const values = opts.splitComma
-        ? val.split(",").map((s) => s.trim()).filter(Boolean)
-        : [val];
-
-      for (const v of values) {
-        const key = opts.normalize ? opts.normalize(v) : v;
-        if (!key) continue;
-        map[key] = (map[key] ?? 0) + 1;
-      }
+    for (const v of values) {
+      const key = opts.normalize ? opts.normalize(v) : v;
+      if (!key) continue;
+      map[key] = (map[key] ?? 0) + 1;
     }
-
-    if (rows.length < PAGE) break;
-    from += PAGE;
-    if (from > 30_000) break;
   }
-
   return Object.entries(map)
     .map(([label, count]) => ({ label, count }))
     .sort((a, b) => b.count - a.count);
 }
 
-function getDateFilter(preset: string): string | null {
-  if (preset === "this_month") {
-    const now = new Date();
-    return new Date(now.getFullYear(), now.getMonth(), 1).toISOString();
-  }
-  const days: Record<string, number> = { last_7d: 7, last_30d: 30, this_quarter: 90 };
-  const d = days[preset];
-  if (!d) return null;
-  const dt = new Date();
-  dt.setDate(dt.getDate() - d);
-  return dt.toISOString();
+export interface DateRangeInput {
+  from: Date;
+  to:   Date;
 }
 
-// ── Individual lead rows for the table ───────────────────────────────────────
+export function useMetaLeadsStats(dateRange: DateRangeInput) {
+  const fromKey = dateRange.from.toISOString().slice(0, 10);
+  const toKey   = dateRange.to.toISOString().slice(0, 10);
 
-export interface MetaLeadRecord {
-  id:             string;
-  first_name:     string;
-  last_name:      string;
-  profession:     string;
-  speciality:     string;
-  country:        string;
-  location:       string;
-  monthly_salary: string;
-  submitted_at:   string;
-  utm_campaign:   string;
-  utm_source:     string;
-  employed:       boolean | null;
-}
-
-export function useMetaLeadsRecent(preset = "last_30d", page = 0) {
-  const PAGE_SIZE = 25;
-  return useQuery<{ rows: MetaLeadRecord[]; hasMore: boolean }>({
-    queryKey: ["meta-leads-recent", preset, page],
-    queryFn: async () => {
-      const since = getDateFilter(preset);
-      const from  = page * PAGE_SIZE;
-
-      let q = supabase
-        .from("meta_leads")
-        .select("id, first_name, last_name, profession, speciality, country, location, monthly_salary, submitted_at, utm_campaign, utm_source, employed")
-        .order("submitted_at", { ascending: false })
-        .range(from, from + PAGE_SIZE);
-
-      if (since) q = (q as any).gte("created_at", since);
-
-      const { data, error } = await q;
-      if (error) throw error;
-      const rows = (data ?? []) as MetaLeadRecord[];
-      return { rows, hasMore: rows.length === PAGE_SIZE + 1 };
-    },
-    staleTime: 5 * 60 * 1000,
-    refetchOnWindowFocus: false,
-  });
-}
-
-export function useMetaLeadsStats(preset = "last_30d") {
   return useQuery<MetaLeadsStats>({
-    queryKey: ["meta-leads-stats", preset],
+    queryKey: ["meta-leads-stats", fromKey, toKey],
     queryFn: async () => {
-      const since = getDateFilter(preset);
+      const fromISO = dateRange.from.toISOString();
+      // end-of-day for `to`
+      const toISO = new Date(
+        dateRange.to.getFullYear(),
+        dateRange.to.getMonth(),
+        dateRange.to.getDate(),
+        23, 59, 59
+      ).toISOString();
 
-      // Total count
-      let countQ = supabase.from("meta_leads").select("*", { count: "exact", head: true });
-      if (since) countQ = (countQ as any).gte("created_at", since);
-      const { count: total } = await countQ;
+      // ── Fetch all rows in ONE query (much faster than 6 separate column queries)
+      const PAGE = 1000;
+      const allRows: Record<string, string>[] = [];
+      let offset = 0;
 
-      // Count leads that have UTM data (i.e. came via tracked ads)
-      let utmQ = supabase.from("meta_leads")
-        .select("*", { count: "exact", head: true })
-        .not("utm_campaign", "is", null)
-        .neq("utm_campaign", "")
-        .neq("utm_campaign", "xxxxx");
-      if (since) utmQ = (utmQ as any).gte("created_at", since);
-      const { count: withUtm } = await utmQ;
+      while (true) {
+        const { data, error } = await supabase
+          .from("meta_leads")
+          .select("utm_content, utm_campaign, utm_source, location, speciality, stage")
+          .gte("created_at", fromISO)
+          .lte("created_at", toISO)
+          .range(offset, offset + PAGE - 1);
 
-      const [byCreative, byCampaign, byPlatform, byLocation, bySpeciality, byStage] =
-        await Promise.all([
-          groupBy("utm_content",  since, { skipNumeric: true }),
-          groupBy("utm_campaign", since, {}),
-          groupBy("utm_source",   since, { normalize: normalizePlatform }),
-          groupBy("location",     since, {}),
-          groupBy("speciality",   since, { splitComma: true }),
-          groupBy("stage",        since, {}),
-        ]);
+        if (error) throw error;
+        const rows = (data ?? []) as Record<string, string>[];
+        allRows.push(...rows);
+        if (rows.length < PAGE) break;
+        offset += PAGE;
+        if (offset > 50_000) break;
+      }
 
-      return {
-        total:        total    ?? 0,
-        withUtm:      withUtm  ?? 0,
-        byCreative,
-        byCampaign,
-        byPlatform,
-        byLocation,
-        bySpeciality,
-        byStage,
-      };
+      const total   = allRows.length;
+      const withUtm = allRows.filter(
+        r => r.utm_campaign && r.utm_campaign.trim() !== "" && r.utm_campaign !== "xxxxx"
+      ).length;
+
+      const byCreative  = groupByField(allRows, "utm_content",  { skipNumeric: true });
+      const byCampaign  = groupByField(allRows, "utm_campaign", {});
+      const byPlatform  = groupByField(allRows, "utm_source",   { normalize: normalizePlatform });
+      const byLocation  = groupByField(allRows, "location",     {});
+      const bySpeciality = groupByField(allRows, "speciality",  { splitComma: true });
+      const byStage     = groupByField(allRows, "stage",        {});
+
+      return { total, withUtm, byCreative, byCampaign, byPlatform, byLocation, bySpeciality, byStage };
     },
     staleTime: 5 * 60 * 1000,
     refetchOnWindowFocus: false,
