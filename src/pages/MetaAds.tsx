@@ -425,7 +425,7 @@ function AdCreativeModal({
             <div className="flex flex-col items-center justify-center gap-2 py-20 text-muted-foreground">
               <ImageOff className="h-10 w-10 opacity-20" />
               <p className="text-[13px] font-medium">No matching ad found</p>
-              <p className="text-[11px] opacity-60">"{adName}" wasn't found in the Meta account for this period.</p>
+              <p className="text-[11px] opacity-60">"{adName}" wasn't found across any status (active, archived, deleted) in this account.</p>
             </div>
           ) : (
             <div className="space-y-4">

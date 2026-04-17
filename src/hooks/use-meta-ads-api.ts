@@ -689,9 +689,15 @@ function mapAdCreative(ad: {
   };
 }
 
+// Meta only returns ACTIVE/PAUSED by default — must explicitly request all statuses
+// or archived/deleted ads (e.g. old ads that generated lots of leads) won't appear.
+const ALL_STATUSES = JSON.stringify([
+  "ACTIVE", "PAUSED", "ARCHIVED", "DELETED", "IN_PROCESS", "WITH_ISSUES",
+]);
+
 export function useMetaAdsByName(adName: string | null, accountId: string | null) {
   return useQuery<MetaAdRow[]>({
-    queryKey: ["meta-ads-by-name-v2", adName, accountId],
+    queryKey: ["meta-ads-by-name-v3", adName, accountId],
     enabled:  !!adName && !!accountId && !!getMetaToken(),
     staleTime: 10 * 60 * 1000,
     refetchOnWindowFocus: false,
@@ -699,10 +705,11 @@ export function useMetaAdsByName(adName: string | null, accountId: string | null
     queryFn: async () => {
       if (!adName || !accountId) return [];
 
-      // Strategy 1: API-side name filter (fast, but fails with special chars)
+      // Strategy 1: API-side name filter — includes ALL statuses (archived, deleted, etc.)
       const filtered = await gql(`${accountId}/ads`, {
         fields: CREATIVE_FIELDS,
         filtering: JSON.stringify([{ field: "name", operator: "CONTAIN", value: adName }]),
+        effective_status: ALL_STATUSES,
         limit: "20",
       }).catch(() => ({ data: [] })) as { data: unknown[] };
 
@@ -710,9 +717,11 @@ export function useMetaAdsByName(adName: string | null, accountId: string | null
         return (filtered.data as Parameters<typeof mapAdCreative>[0][]).map(mapAdCreative);
       }
 
-      // Strategy 2: fetch all account ads, filter client-side (handles | and other special chars)
+      // Strategy 2: fetch all ads (ALL statuses), filter client-side
+      // Handles special chars like | that may confuse the API-side filter
       const all = await gql(`${accountId}/ads`, {
         fields: CREATIVE_FIELDS,
+        effective_status: ALL_STATUSES,
         limit: "500",
       }).catch(() => ({ data: [] })) as { data: unknown[] };
 
