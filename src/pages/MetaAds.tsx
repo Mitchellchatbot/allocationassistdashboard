@@ -705,11 +705,6 @@ const MetaAds = () => {
   const [previewCreative, setPreviewCreative] = useState<{ name: string; leads: number } | null>(null);
   const [directPreviewAd, setDirectPreviewAd] = useState<MetaTopAd | null>(null);
   const [showAllActions, setShowAllActions] = useState(false);
-  const primaryAccountId = api?.accounts?.[0]?.id ?? null;
-  const allAccountIds    = api?.accounts?.map(a => a.id) ?? [];
-
-  const { data: topAds = [], isLoading: topAdsLoading } = useMetaTopAds(allAccountIds, since, until);
-
   function handleTokenSaved() {
     setTokenSet(true);
     queryClient.invalidateQueries({ queryKey: ["meta-ads-api-v3"] });
@@ -717,8 +712,12 @@ const MetaAds = () => {
 
   const since    = metaDateRange.from.toISOString().slice(0, 10);
   const until    = metaDateRange.to.toISOString().slice(0, 10);
+  const primaryAccountId = api?.accounts?.[0]?.id ?? null;
+  const allAccountIds    = api?.accounts?.map(a => a.id) ?? [];
+
+  const { data: topAds = [], isLoading: topAdsLoading } = useMetaTopAds(allAccountIds, since, until);
   const summary  = api?.summary;
-  const currency = summary?.currency ?? "AED";
+  const currency = summary?.currency ?? "PKR";
   const campaigns    = api?.campaigns    ?? [];
   const dailySeries  = api?.dailySeries  ?? [];
   const byAge        = api?.byAge        ?? [];
