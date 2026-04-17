@@ -14,7 +14,7 @@ import {
   Users, Megaphone, Globe, Loader2, TrendingUp, DollarSign,
   Eye, MousePointer, AlertCircle, X, ImageOff,
   Repeat2, Hash, Target, Zap, Award, KeyRound, CheckCircle2,
-  ChevronDown, ChevronUp, Play,
+  ChevronDown, ChevronUp, Play, ExternalLink,
 } from "lucide-react";
 
 // ── Colours ───────────────────────────────────────────────────────────────────
@@ -32,7 +32,7 @@ const tip = {
 };
 
 // ── Formatters ────────────────────────────────────────────────────────────────
-function fmtC(v: number, currency = "AED") {
+function fmtC(v: number, currency = "PKR") {
   if (v >= 1_000_000) return `${currency} ${(v / 1_000_000).toFixed(2)}M`;
   if (v >= 1_000)     return `${currency} ${(v / 1_000).toFixed(1)}K`;
   return `${currency} ${v.toFixed(0)}`;
@@ -192,17 +192,58 @@ function AdPreviewModal({
                             src={thumb}
                             alt={ad.creative.title || ad.name}
                             className="w-full h-full object-cover"
-                            onError={e => { (e.target as HTMLImageElement).style.display = "none"; }}
+                            onError={e => {
+                              const img = e.target as HTMLImageElement;
+                              img.style.display = "none";
+                              const parent = img.parentElement;
+                              if (parent) {
+                                parent.innerHTML = `<div class="w-full h-full flex items-center justify-center"><svg class="h-8 w-8 opacity-20" xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='currentColor' stroke-width='2'><rect x='3' y='3' width='18' height='18' rx='2'/><circle cx='8.5' cy='8.5' r='1.5'/><polyline points='21 15 16 10 5 21'/></svg></div>`;
+                              }
+                            }}
                           />
+                          {/* Video indicator */}
+                          {(ad.creative as { video_id?: string }).video_id && (
+                            <div className="absolute inset-0 flex items-center justify-center pointer-events-none">
+                              <div className="h-10 w-10 rounded-full bg-black/50 flex items-center justify-center">
+                                <Play className="h-5 w-5 text-white ml-0.5" />
+                              </div>
+                            </div>
+                          )}
                           {ad.qualityRanking && (
                             <span className={`absolute top-2 left-2 text-[8px] font-bold px-1.5 py-0.5 rounded bg-black/60 ${RANK_COLORS[ad.qualityRanking] ?? "text-white"}`}>
                               Quality: {ad.qualityRanking.replace(/_/g, " ")}
                             </span>
                           )}
+                          {/* View on Facebook link */}
+                          {(ad.creative as { effective_object_story_id?: string }).effective_object_story_id && (
+                            <a
+                              href={`https://www.facebook.com/${(ad.creative as { effective_object_story_id?: string }).effective_object_story_id}`}
+                              target="_blank"
+                              rel="noreferrer"
+                              onClick={e => e.stopPropagation()}
+                              className="absolute top-2 right-2 flex items-center gap-1 text-[8px] font-bold px-1.5 py-0.5 rounded bg-black/60 text-white hover:bg-primary transition-colors"
+                            >
+                              <ExternalLink className="h-2.5 w-2.5" />
+                              View Post
+                            </a>
+                          )}
                         </div>
                       ) : (
-                        <div className="w-full flex items-center justify-center bg-muted/40" style={{ aspectRatio: "1.91/1" }}>
+                        <div className="w-full flex flex-col items-center justify-center bg-muted/40 gap-2" style={{ aspectRatio: "1.91/1" }}>
                           <ImageOff className="h-8 w-8 text-muted-foreground/30" />
+                          <span className="text-[9px] text-muted-foreground/40">No preview available</span>
+                          {(ad.creative as { effective_object_story_id?: string }).effective_object_story_id && (
+                            <a
+                              href={`https://www.facebook.com/${(ad.creative as { effective_object_story_id?: string }).effective_object_story_id}`}
+                              target="_blank"
+                              rel="noreferrer"
+                              onClick={e => e.stopPropagation()}
+                              className="flex items-center gap-1 text-[9px] text-primary hover:underline"
+                            >
+                              <ExternalLink className="h-2.5 w-2.5" />
+                              View on Facebook
+                            </a>
+                          )}
                         </div>
                       )}
 

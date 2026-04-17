@@ -118,6 +118,8 @@ export interface MetaAdCreative {
   title?:         string;
   body?:          string;
   call_to_action_type?: string;
+  effective_object_story_id?: string;  // "page_id_post_id" — lets us build a public post URL
+  video_id?:      string;
 }
 
 export interface MetaAdRow {
@@ -259,7 +261,7 @@ export function useMetaAdsApi(dateRange: { from: Date; to: Date }) {
       }) as { data: { id: string; name: string; account_status: number; currency: string; amount_spent: string }[] };
 
       const allAccounts = accountsResp.data ?? [];
-      const currency    = allAccounts[0]?.currency ?? "AED";
+      const currency    = allAccounts[0]?.currency ?? "PKR";
 
       const accountsMapped: MetaAccount[] = allAccounts.map(a => ({
         id:          a.id,
@@ -501,7 +503,7 @@ export function useMetaAdsApi(dateRange: { from: Date; to: Date }) {
 export function useMetaCampaignAds(campaignId: string | null, since: string, until: string) {
   return useQuery<{ ads: MetaAdRow[]; adsets: MetaAdsetRow[] }>({
     queryKey: ["meta-campaign-ads-v2", campaignId, since, until],
-    enabled:  !!TOKEN && !!campaignId,
+    enabled:  !!getMetaToken() && !!campaignId,
     staleTime: 5 * 60 * 1000,
     refetchOnWindowFocus: false,
 
@@ -511,8 +513,13 @@ export function useMetaCampaignAds(campaignId: string | null, since: string, unt
 
       const [adsResp, adsetsResp] = await Promise.all([
         // Ads with creatives + insights + quality rankings
+        // creative.effective_object_story_id gives us the real FB post so we can build a preview URL
         gql(`${campaignId}/ads`, {
-          fields: `id,name,status,creative{thumbnail_url,image_url,title,body,call_to_action_type},insights.time_range(${TIME_RANGE}){spend,impressions,clicks,ctr,actions,quality_ranking,engagement_rate_ranking}`,
+          fields: [
+            "id", "name", "status",
+            "creative{id,thumbnail_url,image_url,title,body,call_to_action_type,object_story_spec{link_data{image_hash,link,description,caption,message,call_to_action{type}},video_data{image_url,video_id,title,message,call_to_action{type}}},asset_feed_spec{images{hash},videos{thumbnail_hash},titles{text},bodies{text}},effective_instagram_story_id,effective_object_story_id}",
+            `insights.time_range(${TIME_RANGE}){spend,impressions,clicks,ctr,actions,quality_ranking,engagement_rate_ranking}`,
+          ].join(","),
           limit: "100",
         }).catch(() => ({ data: [] })),
 
@@ -539,13 +546,63 @@ export function useMetaCampaignAds(campaignId: string | null, since: string, unt
         }[] },
       ];
 
-      const ads: MetaAdRow[] = (adsResp.data ?? []).map(ad => {
+      const ads: MetaAdRow[] = (adsResp.data ?? []).map((ad: {
+        id: string; name: string; status: string;
+        creative?: {
+          thumbnail_url?: string; image_url?: string; title?: string; body?: string;
+          call_to_action_type?: string; effective_object_story_id?: string;
+          object_story_spec?: {
+            link_data?: { image_hash?: string; link?: string; description?: string; message?: string; caption?: string; call_to_action?: { type?: string } };
+            video_data?: { image_url?: string; video_id?: string; title?: string; message?: string; call_to_action?: { type?: string } };
+          };
+          asset_feed_spec?: { titles?: { text: string }[]; bodies?: { text: string }[] };
+        };
+        insights?: { data: (Record<string,string> & { actions?: {action_type:string;value:string}[]; quality_ranking?: string; engagement_rate_ranking?: string })[] };
+      }) => {
         const ins = ad.insights?.data?.[0] ?? {};
+        const cr  = ad.creative ?? {};
+        const oss = cr.object_story_spec;
+
+        // Resolve thumbnail: direct > video_data image > link_data fallback
+        const thumb = cr.thumbnail_url
+          || cr.image_url
+          || oss?.video_data?.image_url
+          || undefined;
+
+        // Resolve title/body from multiple sources
+        const title = cr.title
+          || oss?.link_data?.caption
+          || oss?.link_data?.description
+          || oss?.video_data?.title
+          || cr.asset_feed_spec?.titles?.[0]?.text
+          || undefined;
+
+        const body = (cr as { body?: string }).body
+          || oss?.link_data?.message
+          || oss?.video_data?.message
+          || cr.asset_feed_spec?.bodies?.[0]?.text
+          || undefined;
+
+        const cta = cr.call_to_action_type
+          || oss?.link_data?.call_to_action?.type
+          || oss?.video_data?.call_to_action?.type
+          || undefined;
+
+        const videoId = oss?.video_data?.video_id;
+
         return {
           id:               ad.id,
           name:             ad.name,
           status:           ad.status,
-          creative:         ad.creative ?? {},
+          creative: {
+            thumbnail_url: thumb,
+            image_url:     cr.image_url,
+            title,
+            body,
+            call_to_action_type: cta,
+            effective_object_story_id: cr.effective_object_story_id,
+            video_id: videoId,
+          },
           spend:            n(ins.spend),
           impressions:      n(ins.impressions),
           clicks:           n(ins.clicks),
