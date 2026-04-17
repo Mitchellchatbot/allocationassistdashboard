@@ -3,6 +3,7 @@ import { DashboardLayout } from "@/components/layout/DashboardLayout";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
+import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
 import { useZohoData, type ZohoLead } from "@/hooks/use-zoho-data";
 import {
   Printer, Plus, Trash2, Search, FileText, Save, RotateCcw, Copy, Check,
@@ -382,17 +383,28 @@ const Contracts = () => {
               </CardTitle>
             </CardHeader>
             <CardContent className="px-4 pb-4">
-              <div className="relative">
-                <Search className="absolute left-2.5 top-1/2 -translate-y-1/2 h-3.5 w-3.5 text-muted-foreground pointer-events-none" />
-                <Input
-                  value={search}
-                  onChange={e => { setSearch(e.target.value); setShowDropdown(true); }}
-                  onFocus={() => setShowDropdown(true)}
-                  placeholder="Search doctor by name…"
-                  className="pl-8 h-8 text-[12px]"
-                />
-                {showDropdown && doctorOptions.length > 0 && (
-                  <div className="absolute z-10 mt-1 w-full bg-card border border-border/50 rounded-lg shadow-lg overflow-hidden">
+              <Popover
+                open={showDropdown && doctorOptions.length > 0}
+                onOpenChange={open => { if (!open) setShowDropdown(false); }}
+              >
+                <PopoverTrigger asChild>
+                  <div className="relative">
+                    <Search className="absolute left-2.5 top-1/2 -translate-y-1/2 h-3.5 w-3.5 text-muted-foreground pointer-events-none" />
+                    <Input
+                      value={search}
+                      onChange={e => { setSearch(e.target.value); setShowDropdown(true); }}
+                      onFocus={() => setShowDropdown(true)}
+                      placeholder="Search doctor by name…"
+                      className="pl-8 h-8 text-[12px]"
+                    />
+                  </div>
+                </PopoverTrigger>
+                <PopoverContent
+                  align="start"
+                  sideOffset={4}
+                  className="p-0 w-[var(--radix-popover-trigger-width)] max-h-60 overflow-y-auto"
+                  onOpenAutoFocus={e => e.preventDefault()}
+                >
                     {doctorOptions.map(lead => {
                       const name = lead.Full_Name || `${lead.First_Name ?? ""} ${lead.Last_Name ?? ""}`.trim() || "—";
                       return (
@@ -412,9 +424,8 @@ const Contracts = () => {
                         </button>
                       );
                     })}
-                  </div>
-                )}
-              </div>
+                </PopoverContent>
+              </Popover>
 
               {/* Selected doctor summary */}
               {selectedLead && (

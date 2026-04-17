@@ -702,7 +702,6 @@ const MetaAds = () => {
   const [tokenSet, setTokenSet] = useState(true);
   const { data: api, isLoading: apiLoading, error: apiError } = useMetaAdsApi(metaDateRange);
   const [previewCampaign, setPreviewCampaign] = useState<{ id: string; name: string } | null>(null);
-  const [previewCreative, setPreviewCreative] = useState<{ name: string; leads: number } | null>(null);
   const [directPreviewAd, setDirectPreviewAd] = useState<MetaTopAd | null>(null);
   const [showAllActions, setShowAllActions] = useState(false);
   function handleTokenSaved() {
@@ -1241,28 +1240,6 @@ const MetaAds = () => {
             ))}
           </div>
 
-          <Card className="mb-4 shadow-sm border-border/50">
-            <CardHeader className="pb-1 pt-4 px-4">
-              <CardTitle className="text-[12px] font-medium text-muted-foreground uppercase tracking-wide">
-                Top Ad Creatives by Leads {byCreative.length > 0 && <span className="ml-1 normal-case font-normal text-muted-foreground/40">({byCreative.length})</span>}
-              </CardTitle>
-            </CardHeader>
-            <CardContent className="px-4 pb-4">
-              {allAccountIds.length > 0 && (
-                <p className="text-[10px] text-muted-foreground/50 mb-2 flex items-center gap-1">
-                  <Eye className="h-3 w-3" /> Click any row to preview that ad
-                </p>
-              )}
-              <RankList
-                items={byCreative.slice(0, 15)}
-                onItemClick={allAccountIds.length > 0 ? (label) => {
-                  const stat = byCreative.find(c => c.label === label);
-                  setPreviewCreative({ name: label, leads: stat?.count ?? 0 });
-                } : undefined}
-              />
-            </CardContent>
-          </Card>
-
           <div className="grid grid-cols-1 lg:grid-cols-2 gap-4 mb-4">
             <Card className="shadow-sm border-border/50">
               <CardHeader className="pb-1 pt-4 px-4">
@@ -1334,16 +1311,7 @@ const MetaAds = () => {
         />
       )}
 
-      {/* Creative preview modal — opened from Top Ad Creatives list */}
-      {previewCreative && allAccountIds.length > 0 && (
-        <AdCreativeModal
-          adName={previewCreative.name}
-          accountIds={allAccountIds}
-          leads={previewCreative.leads}
-          currency={currency}
-          onClose={() => setPreviewCreative(null)}
-        />
-      )}
+
     </DashboardLayout>
   );
 };

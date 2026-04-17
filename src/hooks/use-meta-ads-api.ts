@@ -17,7 +17,7 @@
 
 import { useQuery } from "@tanstack/react-query";
 
-const GRAPH = "https://graph.facebook.com/v19.0";
+const GRAPH = "https://graph.facebook.com/v22.0";
 export const META_TOKEN_LS_KEY = "meta_access_token";
 
 // Fallback token — baked into the build so all users get live data without config.
@@ -306,7 +306,7 @@ export function useMetaAdsApi(dateRange: { from: Date; to: Date }) {
       }) as { data: { id: string; name: string; account_status: number; currency: string; amount_spent: string }[] };
 
       const allAccounts = accountsResp.data ?? [];
-      const currency    = allAccounts[0]?.currency ?? "PKR";
+      const currency    = "AED";
 
       const accountsMapped: MetaAccount[] = allAccounts.map(a => ({
         id:          a.id,
@@ -562,7 +562,7 @@ export function useMetaCampaignAds(campaignId: string | null, since: string, unt
         gql(`${campaignId}/ads`, {
           fields: [
             "id", "name", "status",
-            "creative{id,thumbnail_url,image_url,title,body,call_to_action_type,object_story_spec{link_data{image_hash,link,description,caption,message,call_to_action{type}},video_data{image_url,video_id,title,message,call_to_action{type}}},asset_feed_spec{images{hash},videos{thumbnail_hash},titles{text},bodies{text}},effective_instagram_story_id,effective_object_story_id}",
+            "creative{id,thumbnail_url,image_url,title,body,call_to_action_type,object_story_spec{link_data{image_hash,link,description,caption,message,call_to_action{type}},video_data{image_url,video_id,title,message,call_to_action{type}}},effective_object_story_id}",
             `insights.time_range(${TIME_RANGE}){spend,impressions,clicks,ctr,actions,quality_ranking,engagement_rate_ranking}`,
           ].join(","),
           limit: "100",
@@ -701,7 +701,6 @@ const CREATIVE_FIELDS =
       "link_data{description,caption,message,call_to_action{type}}," +
       "video_data{image_url,video_id,title,message,call_to_action{type}}" +
     "}," +
-    "asset_feed_spec{titles{text},bodies{text}}," +
     "effective_object_story_id}";
 
 function mapAdCreative(ad: {
@@ -737,7 +736,7 @@ function mapAdCreative(ad: {
 // Meta only returns ACTIVE/PAUSED by default — must explicitly request all statuses
 // or archived/deleted ads (e.g. old ads that generated lots of leads) won't appear.
 const ALL_STATUSES = JSON.stringify([
-  "ACTIVE", "PAUSED", "ARCHIVED", "DELETED", "IN_PROCESS", "WITH_ISSUES",
+  "ACTIVE", "PAUSED", "ARCHIVED", "DELETED",
 ]);
 
 // Search across ALL ad accounts — ads may live in any of them.

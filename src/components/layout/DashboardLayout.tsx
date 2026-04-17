@@ -55,15 +55,10 @@ function formatSyncedAt(iso: string): string {
   return new Date(iso).toLocaleDateString("en-GB", { day: "numeric", month: "short" });
 }
 
-/** Manages sidebar open state relative to AI panel and navigation. */
+/** Reopens the sidebar after navigation on desktop. */
 function SidebarCloser({ aiOpen }: { aiOpen: boolean }) {
   const { setOpen, isMobile } = useSidebar();
   const location = useLocation();
-
-  // Close sidebar when AI opens; reopen when AI closes (desktop only)
-  useEffect(() => {
-    if (!isMobile) setOpen(!aiOpen);
-  }, [aiOpen, isMobile, setOpen]);
 
   // Reopen sidebar after any navigation (desktop only, AI not open)
   useEffect(() => {
