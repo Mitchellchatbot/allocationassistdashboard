@@ -17,8 +17,17 @@
 
 import { useQuery } from "@tanstack/react-query";
 
-const TOKEN = import.meta.env.VITE_META_ACCESS_TOKEN as string | undefined;
-const GRAPH  = "https://graph.facebook.com/v19.0";
+const GRAPH = "https://graph.facebook.com/v19.0";
+export const META_TOKEN_LS_KEY = "meta_access_token";
+
+/** Returns token from localStorage first (UI-entered), falls back to .env */
+export function getMetaToken(): string {
+  return (
+    localStorage.getItem(META_TOKEN_LS_KEY) ||
+    (import.meta.env.VITE_META_ACCESS_TOKEN as string | undefined) ||
+    ""
+  );
+}
 
 // ── Types ──────────────────────────────────────────────────────────────────────
 
@@ -216,9 +225,10 @@ function fmtDateLabel(iso: string) {
 }
 
 async function gql(path: string, params: Record<string, string>): Promise<unknown> {
-  if (!TOKEN) throw new Error("VITE_META_ACCESS_TOKEN is not set");
+  const token = getMetaToken();
+  if (!token) throw new Error("Meta access token is not set");
   const url = new URL(`${GRAPH}/${path}`);
-  Object.entries({ ...params, access_token: TOKEN }).forEach(([k, v]) => url.searchParams.set(k, v));
+  Object.entries({ ...params, access_token: token }).forEach(([k, v]) => url.searchParams.set(k, v));
   const res = await fetch(url.toString());
   const json = await res.json() as { error?: { message: string }; [k: string]: unknown };
   if (json.error) throw new Error(`Meta API: ${json.error.message}`);
@@ -233,7 +243,7 @@ export function useMetaAdsApi(dateRange: { from: Date; to: Date }) {
 
   return useQuery<MetaAdsApiData>({
     queryKey:            ["meta-ads-api-v3", since, until],
-    enabled:             !!TOKEN,
+    enabled:             !!getMetaToken(),
     staleTime:           5 * 60 * 1000,
     refetchOnWindowFocus: false,
 

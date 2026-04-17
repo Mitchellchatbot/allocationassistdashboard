@@ -2,8 +2,9 @@ import { useState } from "react";
 import { DashboardLayout } from "@/components/layout/DashboardLayout";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { useMetaLeadsStats, type GroupedStat } from "@/hooks/use-meta-leads-stats";
-import { useMetaAdsApi, useMetaCampaignAds } from "@/hooks/use-meta-ads-api";
+import { useMetaAdsApi, useMetaCampaignAds, getMetaToken, META_TOKEN_LS_KEY } from "@/hooks/use-meta-ads-api";
 import { useFilters } from "@/lib/filters";
+import { useQueryClient } from "@tanstack/react-query";
 import {
   AreaChart, Area, BarChart, Bar, PieChart, Pie, Cell,
   XAxis, YAxis, CartesianGrid, Tooltip, Legend, ResponsiveContainer,
@@ -11,7 +12,7 @@ import {
 import {
   Users, Megaphone, Globe, Loader2, TrendingUp, DollarSign,
   Eye, MousePointer, AlertCircle, X, ImageOff, ExternalLink,
-  Repeat2, Hash, Target, Zap, ChevronDown, ChevronUp, Award,
+  Repeat2, Hash, Target, Zap, ChevronDown, ChevronUp, Award, KeyRound, CheckCircle2,
 } from "lucide-react";
 
 // ── Colours ────────────────────────────────────────────────────────────────────
@@ -301,15 +302,71 @@ function AdPreviewDrawer({
   );
 }
 
+// ── Token config panel ────────────────────────────────────────────────────────
+
+function TokenConfigPanel({ onSaved }: { onSaved: () => void }) {
+  const [val, setVal] = useState("");
+  const [saved, setSaved] = useState(false);
+
+  function save() {
+    const t = val.trim();
+    if (!t) return;
+    localStorage.setItem(META_TOKEN_LS_KEY, t);
+    setSaved(true);
+    setTimeout(() => onSaved(), 600);
+  }
+
+  return (
+    <div className="mb-6 rounded-xl border border-warning/30 bg-warning/5 p-5">
+      <div className="flex items-start gap-3">
+        <KeyRound className="h-5 w-5 text-warning shrink-0 mt-0.5" />
+        <div className="flex-1 min-w-0">
+          <p className="text-[13px] font-semibold text-foreground mb-1">Meta Access Token Required</p>
+          <p className="text-[11px] text-muted-foreground mb-3">
+            Enter your Facebook Marketing API token below. It will be saved in your browser and used for all live ad data.
+          </p>
+          <div className="flex gap-2">
+            <input
+              type="password"
+              value={val}
+              onChange={e => setVal(e.target.value)}
+              onKeyDown={e => e.key === "Enter" && save()}
+              placeholder="EAAcQ2n9…"
+              className="flex-1 rounded-lg border border-border/60 bg-background px-3 py-2 text-[12px] font-mono focus:outline-none focus:ring-2 focus:ring-primary/30"
+            />
+            <button
+              onClick={save}
+              disabled={!val.trim() || saved}
+              className="flex items-center gap-1.5 rounded-lg bg-primary px-4 py-2 text-[12px] font-medium text-white hover:bg-primary/90 disabled:opacity-50 transition-colors shrink-0"
+            >
+              {saved ? <CheckCircle2 className="h-3.5 w-3.5" /> : null}
+              {saved ? "Saved!" : "Save Token"}
+            </button>
+          </div>
+        </div>
+      </div>
+    </div>
+  );
+}
+
 // ── Main page ──────────────────────────────────────────────────────────────────
 
 const MetaAds = () => {
   const { dateRange } = useFilters();
   const { data, isLoading: leadsLoading } = useMetaLeadsStats(dateRange);
+  const queryClient = useQueryClient();
+
+  const [tokenSet, setTokenSet]           = useState(() => !!getMetaToken());
   const { data: api, isLoading: apiLoading, error: apiError } = useMetaAdsApi(dateRange);
 
   const [previewCampaign, setPreviewCampaign] = useState<{ id: string; name: string } | null>(null);
   const [showAllActions, setShowAllActions]   = useState(false);
+
+  function handleTokenSaved() {
+    setTokenSet(true);
+    queryClient.invalidateQueries({ queryKey: ["meta-ads-api-v3"] });
+    queryClient.invalidateQueries({ queryKey: ["meta-campaign-ads-v2"] });
+  }
 
   const since    = dateRange.from.toISOString().slice(0, 10);
   const until    = dateRange.to.toISOString().slice(0, 10);
@@ -339,15 +396,38 @@ const MetaAds = () => {
       {/* ══ SECTION 1: LIVE META API DATA ══════════════════════════════════════ */}
       <SectionLabel>Live Ad Performance · Meta Marketing API</SectionLabel>
 
-      {apiError ? (
-        <div className="flex items-center gap-2 mb-5 rounded-xl border border-destructive/20 bg-destructive/5 px-4 py-3 text-[11px] text-destructive">
-          <AlertCircle className="h-4 w-4 shrink-0" />
-          <span>{(apiError as Error).message}</span>
+      {!tokenSet ? (
+        <TokenConfigPanel onSaved={handleTokenSaved} />
+      ) : apiError ? (
+        <div className="mb-5 rounded-xl border border-destructive/20 bg-destructive/5 px-4 py-4 space-y-2">
+          <div className="flex items-center gap-2 text-[11px] text-destructive">
+            <AlertCircle className="h-4 w-4 shrink-0" />
+            <span className="font-semibold">API Error: {(apiError as Error).message}</span>
+          </div>
+          <p className="text-[10px] text-muted-foreground pl-6">
+            Your token may have expired. Enter a new one below.
+          </p>
+          <div className="pl-6">
+            <TokenConfigPanel onSaved={handleTokenSaved} />
+          </div>
         </div>
       ) : apiLoading ? (
         <div className="flex items-center gap-2 mb-6 text-muted-foreground">
           <Loader2 className="h-4 w-4 animate-spin" />
-          <span className="text-[11px]">Fetching live data from Meta…</span>
+          <span className="text-[11px]">Fetching live data from Meta ({since} → {until})…</span>
+        </div>
+      ) : (api?.summary?.spend === 0 && api?.campaigns?.length === 0) ? (
+        <div className="mb-5 rounded-xl border border-border/50 bg-muted/30 px-4 py-4">
+          <p className="text-[12px] font-medium text-foreground mb-1">No ad data found for this period</p>
+          <p className="text-[11px] text-muted-foreground">
+            Queried <span className="font-mono font-medium">{since}</span> → <span className="font-mono font-medium">{until}</span>
+            {(api?.accounts?.length ?? 0) > 0 && (
+              <> · Found {api?.accounts.length} account{api?.accounts.length !== 1 ? "s" : ""}: {api?.accounts.map(a => a.name).join(", ")}</>
+            )}
+          </p>
+          <p className="text-[10px] text-muted-foreground/60 mt-1">
+            Try selecting a broader date range, or check that this token has <code>ads_read</code> permission.
+          </p>
         </div>
       ) : (
         <>
