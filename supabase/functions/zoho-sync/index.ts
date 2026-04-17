@@ -65,7 +65,7 @@ async function fetchAllPages<T>(
   module: string,
   fields: string[],
   maxPages = 200,
-  batchSize = 5,
+  batchSize = 20,
 ): Promise<T[]> {
   const all: T[] = [];
 

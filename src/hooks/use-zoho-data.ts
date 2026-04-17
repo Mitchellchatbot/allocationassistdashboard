@@ -882,61 +882,29 @@ export function useZohoData() {
         return parseCacheRow(cached as { data: unknown; synced_at: string });
       }
 
-      // ── No cache at all: run server-side sync then read result ──────────
-      // zoho-sync fetches directly from Zoho (no per-page proxy hop), then
-      // stores the result in zoho_cache. After it finishes we read once.
-      try {
-        await zohoSync();
-        const { data: fresh } = await supabase
+      // ── No cache at all: fire server-side sync, poll until data arrives ──
+      // This keeps queryFn pending (isLoading: true) so the UI shows a
+      // skeleton instead of a blank page. zoho-sync runs server-to-Zoho
+      // which is ~3-4x faster than routing every page through the proxy.
+      zohoSync().catch(() => {});
+
+      for (let i = 0; i < 20; i++) {
+        await new Promise<void>(r => setTimeout(r, 3000));
+        const { data: poll } = await supabase
           .from('zoho_cache')
           .select('data, synced_at')
           .eq('id', 1)
           .single();
-        if (fresh?.data) return parseCacheRow(fresh as { data: unknown; synced_at: string });
-      } catch {
-        // zoho-sync unavailable — fall back to direct client-side fetch
+        if (poll?.data) return parseCacheRow(poll as { data: unknown; synced_at: string });
       }
 
-      // ── Last-resort fallback: fetch from Zoho directly ──────────────────
-      const [leads, [deals, calls], accounts, campaigns] = await Promise.all([
-        zohoFetchAll<ZohoLead>('Leads', LEAD_FIELDS, 200),
-        Promise.all([
-          zohoFetchAll<ZohoDeal>('Deals', DEAL_FIELDS, 5),
-          zohoFetchAll<ZohoCall>('Calls', CALL_FIELDS, 10),
-        ]),
-        zohoFetchAll<ZohoAccount>('Accounts',  ACCOUNT_FIELDS,  5).catch(() => [] as ZohoAccount[]),
-        zohoFetchAll<ZohoCampaign>('Campaigns', CAMPAIGN_FIELDS, 2).catch(() => [] as ZohoCampaign[]),
-      ]);
-
-      const contactedStatuses = new Set([
-        'Attempted to Contact', 'Initial Sales Call Completed',
-        'Contact in Future', 'High Priority Follow up',
-      ]);
-      const sampleIds = leads
-        .filter(l => contactedStatuses.has(l.Lead_Status))
-        .sort((a, b) => new Date(b.Created_Time).getTime() - new Date(a.Created_Time).getTime())
-        .slice(0, 30)
-        .map(l => l.id);
-      const emailData = sampleIds.length > 0
-        ? await zohoGetEmailCounts(sampleIds).catch(() => ({ total: 0, bySender: {} as Record<string, number>, sampled: 0 }))
-        : { total: 0, bySender: {} as Record<string, number>, sampled: 0 };
-
-      void supabase.from('zoho_cache').upsert({
-        id:        1,
-        data:      { leads, deals, calls, accounts, campaigns, emailData },
-        synced_at: new Date().toISOString(),
-      });
-
-      return {
-        ...aggregateZohoData(leads, deals, calls, accounts, campaigns, emailData),
-        syncedAt: new Date().toISOString(),
-      };
+      throw new Error('Initial Zoho sync timed out — try refreshing');
     },
     staleTime:            90 * 60 * 1000,
     gcTime:               4 * 60 * 60 * 1000,
     placeholderData:      (prev: unknown) => prev,
-    retry:                1,
-    retryDelay:           30_000,
+    retry:                2,
+    retryDelay:           5_000,
     refetchOnWindowFocus: false,
   });
 }
