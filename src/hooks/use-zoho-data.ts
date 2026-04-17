@@ -12,8 +12,8 @@
  *   Emails:   BLOCKED — Zoho token lacks email scope
  */
 
-import { useQuery } from '@tanstack/react-query';
-import { zohoFetchAll, zohoGetEmailCounts } from '@/lib/zoho';
+import { useQuery, useQueryClient } from '@tanstack/react-query';
+import { zohoFetchAll, zohoGetEmailCounts, zohoSync } from '@/lib/zoho';
 import { supabase } from '@/lib/supabase';
 
 const CACHE_MAX_AGE_MS = 60 * 60 * 1000; // 1 hour
@@ -842,11 +842,26 @@ const CAMPAIGN_FIELDS = [
   'Budgeted_Cost', 'Actual_Cost', 'Owner',
 ];
 
+function parseCacheRow(row: { data: unknown; synced_at: string }) {
+  const { leads, deals, calls, accounts, campaigns, emailData } = row.data as {
+    leads: ZohoLead[]; deals: ZohoDeal[]; calls: ZohoCall[];
+    accounts: ZohoAccount[]; campaigns: ZohoCampaign[];
+    emailData?: { total: number; bySender: Record<string, number>; sampled: number };
+  };
+  return {
+    ...aggregateZohoData(leads, deals, calls, accounts, campaigns,
+      emailData ?? { total: 0, bySender: {} as Record<string, number>, sampled: 0 }),
+    syncedAt: row.synced_at,
+  };
+}
+
 export function useZohoData() {
+  const queryClient = useQueryClient();
+
   return useQuery({
     queryKey: ['zoho-data'],
     queryFn: async () => {
-      // ── Try Supabase cache first ─────────────────────────────────────────
+      // ── Always read from Supabase cache first (fast path) ───────────────
       const { data: cached } = await supabase
         .from('zoho_cache')
         .select('data, synced_at')
@@ -854,22 +869,35 @@ export function useZohoData() {
         .single();
 
       if (cached?.data && cached?.synced_at) {
-        const age = Date.now() - new Date(cached.synced_at).getTime();
-        if (age < CACHE_MAX_AGE_MS) {
-          const { leads, deals, calls, accounts, campaigns, emailData } = cached.data as {
-            leads: ZohoLead[]; deals: ZohoDeal[]; calls: ZohoCall[];
-            accounts: ZohoAccount[]; campaigns: ZohoCampaign[];
-            emailData?: { total: number; bySender: Record<string, number>; sampled: number };
-          };
-          return {
-            ...aggregateZohoData(leads, deals, calls, accounts, campaigns,
-              emailData ?? { total: 0, bySender: {} as Record<string, number>, sampled: 0 }),
-            syncedAt: cached.synced_at as string,
-          };
+        const isStale = Date.now() - new Date(cached.synced_at).getTime() > CACHE_MAX_AGE_MS;
+
+        if (isStale) {
+          // Return stale data immediately; refresh in background via server-side sync
+          zohoSync()
+            .then(() => queryClient.invalidateQueries({ queryKey: ['zoho-data'] }))
+            .catch(() => {});
         }
+
+        // Return cached data right away — user sees the dashboard instantly
+        return parseCacheRow(cached as { data: unknown; synced_at: string });
       }
 
-      // ── Cache is stale or missing — fetch from Zoho (all modules in parallel) ─
+      // ── No cache at all: run server-side sync then read result ──────────
+      // zoho-sync fetches directly from Zoho (no per-page proxy hop), then
+      // stores the result in zoho_cache. After it finishes we read once.
+      try {
+        await zohoSync();
+        const { data: fresh } = await supabase
+          .from('zoho_cache')
+          .select('data, synced_at')
+          .eq('id', 1)
+          .single();
+        if (fresh?.data) return parseCacheRow(fresh as { data: unknown; synced_at: string });
+      } catch {
+        // zoho-sync unavailable — fall back to direct client-side fetch
+      }
+
+      // ── Last-resort fallback: fetch from Zoho directly ──────────────────
       const [leads, [deals, calls], accounts, campaigns] = await Promise.all([
         zohoFetchAll<ZohoLead>('Leads', LEAD_FIELDS, 200),
         Promise.all([
@@ -893,7 +921,6 @@ export function useZohoData() {
         ? await zohoGetEmailCounts(sampleIds).catch(() => ({ total: 0, bySender: {} as Record<string, number>, sampled: 0 }))
         : { total: 0, bySender: {} as Record<string, number>, sampled: 0 };
 
-      // Persist to cache for next load — includes emailData so cache hits skip the email fetch
       void supabase.from('zoho_cache').upsert({
         id:        1,
         data:      { leads, deals, calls, accounts, campaigns, emailData },
@@ -905,9 +932,9 @@ export function useZohoData() {
         syncedAt: new Date().toISOString(),
       };
     },
-    staleTime:            90 * 60 * 1000,   // 90 min — serve from memory cache longer
+    staleTime:            90 * 60 * 1000,
     gcTime:               4 * 60 * 60 * 1000,
-    placeholderData:      (prev: unknown) => prev,  // show last data instantly while refetching
+    placeholderData:      (prev: unknown) => prev,
     retry:                1,
     retryDelay:           30_000,
     refetchOnWindowFocus: false,

@@ -134,8 +134,8 @@ export async function zohoFetchAll<T = Record<string, unknown>>(
   if (!first.data?.length) return [];
   if (!first.info?.more_records || maxPages <= 1) return first.data;
 
-  // Fetch remaining pages in parallel batches of 5
-  const BATCH = 5;
+  // Fetch remaining pages in parallel batches of 20
+  const BATCH = 20;
   const all: T[] = [...first.data];
   let batchStart = 2;
 
