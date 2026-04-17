@@ -2,8 +2,7 @@ import {
   BarChart, Bar,
   PieChart, Pie, Cell,
   LineChart, Line,
-  XAxis, YAxis, CartesianGrid, Tooltip, Legend,
-  ResponsiveContainer,
+  XAxis, YAxis, CartesianGrid, Tooltip, Legend, ResponsiveContainer,
 } from "recharts";
 
 export interface ChartSpec {
@@ -80,29 +79,41 @@ function PieChartBlock({ spec }: { spec: ChartSpec }) {
   const data = spec.labels.map((name, i) => ({ name, value: spec.values![i] ?? 0 }));
   const total = data.reduce((s, d) => s + d.value, 0);
   return (
-    <ResponsiveContainer width="100%" height={200}>
-      <PieChart>
-        <Pie
-          data={data}
-          cx="50%"
-          cy="50%"
-          innerRadius={50}
-          outerRadius={80}
-          paddingAngle={2}
-          dataKey="value"
-          label={({ name, value }) => `${name} (${total > 0 ? ((value / total) * 100).toFixed(0) : 0}%)`}
-          labelLine={false}
-        >
-          {data.map((_, i) => (
-            <Cell key={i} fill={COLORS[i % COLORS.length]} />
-          ))}
-        </Pie>
-        <Tooltip
-          formatter={(val: number) => [`${val} (${total > 0 ? ((val / total) * 100).toFixed(1) : 0}%)`, ""]}
-          contentStyle={{ fontSize: 11, backgroundColor: "hsl(var(--card))", border: "1px solid hsl(var(--border))" }}
-        />
-      </PieChart>
-    </ResponsiveContainer>
+    <div>
+      <ResponsiveContainer width="100%" height={180}>
+        <PieChart>
+          <Pie
+            data={data}
+            cx="50%"
+            cy="50%"
+            innerRadius={48}
+            outerRadius={76}
+            paddingAngle={2}
+            dataKey="value"
+          >
+            {data.map((_, i) => (
+              <Cell key={i} fill={COLORS[i % COLORS.length]} />
+            ))}
+          </Pie>
+          <Tooltip
+            formatter={(val: number) => [`${val.toLocaleString()} (${total > 0 ? ((val / total) * 100).toFixed(1) : 0}%)`, ""]}
+            contentStyle={{ fontSize: 11, backgroundColor: "hsl(var(--card))", border: "1px solid hsl(var(--border))" }}
+          />
+        </PieChart>
+      </ResponsiveContainer>
+      {/* Legend rendered outside SVG so labels never clip */}
+      <div className="mt-2 flex flex-col gap-1">
+        {data.map((d, i) => (
+          <div key={d.name} className="flex items-center gap-2 text-[11px] text-foreground/80">
+            <span className="shrink-0 h-2 w-2 rounded-full" style={{ backgroundColor: COLORS[i % COLORS.length] }} />
+            <span className="flex-1 truncate">{d.name}</span>
+            <span className="shrink-0 font-medium tabular-nums">
+              {total > 0 ? ((d.value / total) * 100).toFixed(1) : 0}%
+            </span>
+          </div>
+        ))}
+      </div>
+    </div>
   );
 }
 

@@ -335,6 +335,10 @@ export function aggregateZohoData(
 
   const qualifiedLeads = leads.filter(l => !unqualifiedStatuses.has(l.Lead_Status));
   const activeLeads    = leads.filter(l => activeStatuses.has(l.Lead_Status));
+
+  // Log unique deal stages so we can confirm the exact Zoho stage names
+  console.log('[deals] unique stages:', [...new Set(deals.map(d => d.Stage))]);
+
   const closedWon      = deals.filter(d => d.Stage === 'Closed Won');
   const closedLost     = deals.filter(d => d.Stage === 'Closed Lost');
   const openDeals      = deals.filter(d => d.Stage !== 'Closed Won' && d.Stage !== 'Closed Lost');

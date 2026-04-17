@@ -13,6 +13,8 @@ import { useFilteredData } from "@/hooks/use-filtered-data";
 import { useState, useEffect, useRef, useCallback, useMemo, KeyboardEvent } from "react";
 import { Link, useLocation } from "react-router-dom";
 import { useZohoData } from "@/hooks/use-zoho-data";
+import ReactMarkdown from "react-markdown";
+import remarkGfm from "remark-gfm";
 import { useMutation, useQueryClient } from "@tanstack/react-query";
 import { zohoSync } from "@/lib/zoho";
 import { WEEKLY_SALES_QUERY_KEY, fetchWeeklySalesRaw } from "@/hooks/use-weekly-sales";
@@ -217,7 +219,8 @@ export function DashboardLayout({ children, title, subtitle }: DashboardLayoutPr
       while (!done) {
         const { value, done: d } = await reader.read();
         done = d;
-        if (value) { full += decoder.decode(value, { stream: !d }); setChatStreaming(full); }
+        // Collect silently — no incremental setChatStreaming so we can post-process
+        if (value) full += decoder.decode(value, { stream: !d });
       }
 
       setChatMessages(prev => [...prev, { role: 'assistant', content: full, isInsights: isInsightsRequest }]);
@@ -234,6 +237,12 @@ export function DashboardLayout({ children, title, subtitle }: DashboardLayoutPr
 
   return (
     <SidebarProvider>
+      <style>{`
+        @keyframes msgSlideUp {
+          from { opacity: 0; transform: translateY(10px); }
+          to   { opacity: 1; transform: translateY(0); }
+        }
+      `}</style>
       <SidebarCloser aiOpen={aiOpen} />
       <div className="h-screen flex w-full bg-background overflow-hidden">
         <AppSidebar />
@@ -447,45 +456,72 @@ export function DashboardLayout({ children, title, subtitle }: DashboardLayoutPr
 
               {/* Chat messages */}
               {chatMessages.map((m, i) => m.role === 'user' ? (
-                <div key={i} className="flex justify-end">
+                <div
+                  key={i}
+                  className="flex justify-end"
+                  style={{ animation: 'msgSlideUp 0.28s cubic-bezier(0.22,1,0.36,1) both' }}
+                >
                   <div className="max-w-[78%] rounded-2xl rounded-br-sm bg-primary px-4 py-3">
                     <p className="text-[13px] text-white leading-relaxed">{m.content}</p>
                   </div>
                 </div>
               ) : (
-                <div key={i} className="flex items-start gap-3">
+                <div
+                  key={i}
+                  className="flex items-start gap-3"
+                  style={{ animation: 'msgSlideUp 0.32s cubic-bezier(0.22,1,0.36,1) both' }}
+                >
                   <div className="h-7 w-7 rounded-full bg-primary/10 flex items-center justify-center shrink-0 mt-0.5">
                     <Sparkles className="h-3.5 w-3.5 text-primary" />
                   </div>
                   <div className="flex-1 min-w-0">
-                    {m.isInsights ? (
-                      <div className="space-y-2">
-                        {m.content.split(/\n(?=\d+\.)/).filter(Boolean).map((block, j) => {
-                          const match = block.match(/^(\d+)\.\s*(.*)/s);
-                          if (!match) return null;
-                          return (
-                            <div key={j} className="rounded-xl border border-border/50 bg-card p-4">
-                              <div className="flex items-start gap-3">
-                                <span className="flex h-5 w-5 shrink-0 items-center justify-center rounded-full bg-primary/10 text-[10px] font-bold text-primary mt-0.5">
-                                  {match[1]}
-                                </span>
-                                <p className="text-[13px] text-foreground leading-relaxed">{match[2].trim()}</p>
-                              </div>
-                            </div>
-                          );
-                        })}
-                      </div>
-                    ) : (() => {
+                    {(() => {
                       const { text: cleanText, charts } = parseCharts(m.content);
                       return (
-                        <div>
+                        <div className="space-y-2">
                           {cleanText && (
                             <div className="rounded-2xl rounded-bl-sm bg-card border border-border/50 px-4 py-3">
-                              <p className="text-[13px] text-foreground leading-relaxed whitespace-pre-wrap">{cleanText}</p>
+                              <ReactMarkdown
+                                remarkPlugins={[remarkGfm]}
+                                components={{
+                                  p:      ({ children }) => <p className="text-[13px] text-foreground leading-relaxed mb-2 last:mb-0">{children}</p>,
+                                  strong: ({ children }) => <strong className="font-semibold text-foreground">{children}</strong>,
+                                  em:     ({ children }) => <em className="italic text-foreground/80">{children}</em>,
+                                  h1:     ({ children }) => <h1 className="text-[15px] font-bold text-foreground mt-3 mb-1.5 first:mt-0">{children}</h1>,
+                                  h2:     ({ children }) => <h2 className="text-[14px] font-semibold text-foreground mt-3 mb-1 first:mt-0">{children}</h2>,
+                                  h3:     ({ children }) => <h3 className="text-[13px] font-semibold text-foreground/90 mt-2 mb-1 first:mt-0">{children}</h3>,
+                                  ul:     ({ children }) => <ul className="my-2 space-y-1 pl-1">{children}</ul>,
+                                  ol:     ({ children }) => <ol className="my-2 space-y-1 pl-1 list-none counter-reset-[item]">{children}</ol>,
+                                  li:     ({ children, ...props }) => {
+                                    const isOrdered = (props as { ordered?: boolean }).ordered;
+                                    return (
+                                      <li className="flex items-start gap-2 text-[13px] text-foreground leading-relaxed">
+                                        {isOrdered
+                                          ? <span className="shrink-0 mt-0.5 h-4 w-4 rounded-full bg-primary/10 text-[9px] font-bold text-primary flex items-center justify-center">•</span>
+                                          : <span className="shrink-0 mt-[7px] h-1.5 w-1.5 rounded-full bg-primary/60" />
+                                        }
+                                        <span>{children}</span>
+                                      </li>
+                                    );
+                                  },
+                                  code:   ({ children, className }) => {
+                                    const isBlock = className?.includes('language-');
+                                    return isBlock
+                                      ? <code className="block bg-muted rounded-lg px-3 py-2 text-[12px] font-mono text-foreground my-2 overflow-x-auto">{children}</code>
+                                      : <code className="bg-muted rounded px-1.5 py-0.5 text-[11px] font-mono text-primary">{children}</code>;
+                                  },
+                                  blockquote: ({ children }) => <blockquote className="border-l-2 border-primary/40 pl-3 italic text-foreground/70 my-2">{children}</blockquote>,
+                                  hr: () => <hr className="border-border/40 my-3" />,
+                                }}
+                              >
+                                {cleanText}
+                              </ReactMarkdown>
                             </div>
                           )}
                           {charts.map((spec, ci) => (
-                            <ChatChart key={ci} spec={spec} />
+                            <div key={ci} style={{ animation: `msgSlideUp 0.35s cubic-bezier(0.22,1,0.36,1) ${ci * 80}ms both` }}>
+                              <ChatChart spec={spec} />
+                            </div>
                           ))}
                         </div>
                       );
@@ -493,30 +529,6 @@ export function DashboardLayout({ children, title, subtitle }: DashboardLayoutPr
                   </div>
                 </div>
               ))}
-
-              {/* Streaming — hide any in-progress <chart> tag so raw JSON doesn't flash */}
-              {chatStreaming && (() => {
-                const { text: streamText, charts: streamCharts } = parseCharts(chatStreaming);
-                // Also strip a partial opening tag that hasn't closed yet
-                const displayText = streamText.replace(/<chart[^>]*>[^<]*$/, "").trim();
-                return (
-                  <div className="flex items-start gap-3">
-                    <div className="h-7 w-7 rounded-full bg-primary/10 flex items-center justify-center shrink-0 mt-0.5">
-                      <Sparkles className="h-3.5 w-3.5 text-primary" />
-                    </div>
-                    <div className="flex-1 min-w-0">
-                      {displayText && (
-                        <div className="rounded-2xl rounded-bl-sm bg-card border border-border/50 px-4 py-3">
-                          <p className="text-[13px] text-foreground leading-relaxed whitespace-pre-wrap">{displayText}</p>
-                        </div>
-                      )}
-                      {streamCharts.map((spec, ci) => (
-                        <ChatChart key={ci} spec={spec} />
-                      ))}
-                    </div>
-                  </div>
-                );
-              })()}
 
               {/* Thinking dots */}
               {chatLoading && !chatStreaming && (
