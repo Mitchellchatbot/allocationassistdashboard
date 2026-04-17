@@ -155,21 +155,26 @@ serve(async (req: Request) => {
       let total = 0;
       const bySender: Record<string, number> = {};
 
-      for (const id of ids) {
-        try {
-          const r = await fetch(`${API_DOMAIN}/crm/v2/Leads/${id}/Emails`, {
-            headers: { Authorization: `Zoho-oauthtoken ${token}` },
-          });
-          if (r.ok) {
-            const d = await r.json() as { email_related_list?: Array<{ owner?: { name?: string } }> };
-            const emails = d.email_related_list ?? [];
-            total += emails.length;
-            for (const e of emails) {
-              const name = e.owner?.name ?? 'Unknown';
-              bySender[name] = (bySender[name] ?? 0) + 1;
-            }
-          }
-        } catch { /* skip failed individual lead */ }
+      const results = await Promise.all(
+        ids.map(async (id) => {
+          try {
+            const r = await fetch(`${API_DOMAIN}/crm/v2/Leads/${id}/Emails`, {
+              headers: { Authorization: `Zoho-oauthtoken ${token}` },
+            });
+            if (!r.ok) return null;
+            return await r.json() as { email_related_list?: Array<{ owner?: { name?: string } }> };
+          } catch { return null; }
+        })
+      );
+
+      for (const d of results) {
+        if (!d) continue;
+        const emails = d.email_related_list ?? [];
+        total += emails.length;
+        for (const e of emails) {
+          const name = e.owner?.name ?? 'Unknown';
+          bySender[name] = (bySender[name] ?? 0) + 1;
+        }
       }
 
       return new Response(

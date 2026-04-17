@@ -856,13 +856,14 @@ export function useZohoData() {
       if (cached?.data && cached?.synced_at) {
         const age = Date.now() - new Date(cached.synced_at).getTime();
         if (age < CACHE_MAX_AGE_MS) {
-          const { leads, deals, calls, accounts, campaigns } = cached.data as {
+          const { leads, deals, calls, accounts, campaigns, emailData } = cached.data as {
             leads: ZohoLead[]; deals: ZohoDeal[]; calls: ZohoCall[];
             accounts: ZohoAccount[]; campaigns: ZohoCampaign[];
+            emailData?: { total: number; bySender: Record<string, number>; sampled: number };
           };
           return {
             ...aggregateZohoData(leads, deals, calls, accounts, campaigns,
-              { total: 0, bySender: {} as Record<string, number>, sampled: 0 }),
+              emailData ?? { total: 0, bySender: {} as Record<string, number>, sampled: 0 }),
             syncedAt: cached.synced_at as string,
           };
         }
@@ -879,13 +880,6 @@ export function useZohoData() {
         zohoFetchAll<ZohoCampaign>('Campaigns', CAMPAIGN_FIELDS, 2).catch(() => [] as ZohoCampaign[]),
       ]);
 
-      // Persist to cache for next load (fire-and-forget)
-      void supabase.from('zoho_cache').upsert({
-        id:        1,
-        data:      { leads, deals, calls, accounts, campaigns },
-        synced_at: new Date().toISOString(),
-      });
-
       const contactedStatuses = new Set([
         'Attempted to Contact', 'Initial Sales Call Completed',
         'Contact in Future', 'High Priority Follow up',
@@ -898,6 +892,13 @@ export function useZohoData() {
       const emailData = sampleIds.length > 0
         ? await zohoGetEmailCounts(sampleIds).catch(() => ({ total: 0, bySender: {} as Record<string, number>, sampled: 0 }))
         : { total: 0, bySender: {} as Record<string, number>, sampled: 0 };
+
+      // Persist to cache for next load — includes emailData so cache hits skip the email fetch
+      void supabase.from('zoho_cache').upsert({
+        id:        1,
+        data:      { leads, deals, calls, accounts, campaigns, emailData },
+        synced_at: new Date().toISOString(),
+      });
 
       return {
         ...aggregateZohoData(leads, deals, calls, accounts, campaigns, emailData),
