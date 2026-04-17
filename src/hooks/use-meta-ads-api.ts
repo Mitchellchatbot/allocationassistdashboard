@@ -1,37 +1,65 @@
 /**
- * useMetaAdsApi — fetches real ad performance data from the Facebook Marketing API.
+ * useMetaAdsApi — full Meta Marketing API integration.
  *
- * Calls:
- *   1. GET /me/adaccounts          → get all ad accounts on the token
- *   2. GET /{account}/insights     → spend, impressions, clicks, reach, ctr, cpm, cpp
- *   3. GET /{account}/campaigns    → list of campaigns with their insights
+ * All calls go browser → graph.facebook.com/v19.0 using VITE_META_ACCESS_TOKEN.
  *
- * All requests go directly from the browser to graph.facebook.com.
- * The token is read from VITE_META_ACCESS_TOKEN in .env.
+ * Data fetched per call:
+ *   1. /me/adaccounts                       — accounts, currency, spend totals
+ *   2. /{account}/insights                  — summary KPIs + actions (leads etc.)
+ *   3. /{account}/campaigns                 — list with objective, budget, insights
+ *   4. /{account}/insights (time_increment=1) — daily spend/clicks/impressions
+ *   5. /{account}/insights (breakdown=age,gender)
+ *   6. /{account}/insights (breakdown=publisher_platform)
+ *   7. /{account}/insights (breakdown=publisher_platform,platform_position)
+ *
+ * All breakdown calls run in parallel after account fetch.
  */
 
 import { useQuery } from "@tanstack/react-query";
 
-const TOKEN  = import.meta.env.VITE_META_ACCESS_TOKEN as string | undefined;
+const TOKEN = import.meta.env.VITE_META_ACCESS_TOKEN as string | undefined;
 const GRAPH  = "https://graph.facebook.com/v19.0";
 
 // ── Types ──────────────────────────────────────────────────────────────────────
 
-export interface MetaAccountSummary {
-  spend:       number;   // AED (or account currency)
-  impressions: number;
-  clicks:      number;
-  reach:       number;
-  ctr:         number;   // %
-  cpm:         number;   // cost per 1k impressions
-  cpp:         number;   // cost per purchase (if available)
-  currency:    string;
+export interface MetaAccount {
+  id:           string;
+  name:         string;
+  currency:     string;
+  amountSpent:  number;   // lifetime spend on account
+}
+
+export interface MetaSummary {
+  spend:        number;
+  impressions:  number;
+  clicks:       number;
+  reach:        number;
+  ctr:          number;   // %
+  cpm:          number;   // cost per 1k impressions
+  frequency:    number;   // impressions / reach
+  leads:        number;   // lead form submissions (action)
+  costPerLead:  number;
+  currency:     string;
 }
 
 export interface MetaCampaignRow {
   id:          string;
   name:        string;
   status:      string;
+  objective:   string;
+  dailyBudget: number;
+  spend:       number;
+  impressions: number;
+  clicks:      number;
+  reach:       number;
+  ctr:         number;
+  leads:       number;
+  frequency:   number;
+}
+
+export interface MetaDailyPoint {
+  date:        string;   // "MMM D" display label
+  dateISO:     string;   // YYYY-MM-DD for sorting
   spend:       number;
   impressions: number;
   clicks:      number;
@@ -39,27 +67,36 @@ export interface MetaCampaignRow {
   ctr:         number;
 }
 
-export interface MetaAdsApiData {
-  accounts:  { id: string; name: string }[];
-  summary:   MetaAccountSummary;
-  campaigns: MetaCampaignRow[];
+export interface MetaAgeRow {
+  age:     string;
+  male:    number;   // impressions
+  female:  number;
+  unknown: number;
+  maleSpend:   number;
+  femaleSpend: number;
 }
 
-// ── Helpers ────────────────────────────────────────────────────────────────────
-
-function n(v: unknown): number {
-  const x = parseFloat(String(v ?? 0));
-  return isNaN(x) ? 0 : x;
+export interface MetaPlatformRow {
+  platform:    string;
+  spend:       number;
+  impressions: number;
+  clicks:      number;
+  reach:       number;
+  ctr:         number;
 }
 
-async function gql(path: string, params: Record<string, string>): Promise<unknown> {
-  if (!TOKEN) throw new Error("VITE_META_ACCESS_TOKEN is not set");
-  const url = new URL(`${GRAPH}/${path}`);
-  Object.entries({ ...params, access_token: TOKEN }).forEach(([k, v]) => url.searchParams.set(k, v));
-  const res = await fetch(url.toString());
-  const json = await res.json() as { error?: { message: string }; [k: string]: unknown };
-  if (json.error) throw new Error(json.error.message);
-  return json;
+export interface MetaPlacementRow {
+  placement:   string;
+  spend:       number;
+  impressions: number;
+  clicks:      number;
+}
+
+export interface MetaActionRow {
+  type:         string;   // e.g. "lead", "purchase", "video_view"
+  label:        string;   // human-readable
+  value:        number;
+  costPerAction: number;
 }
 
 export interface MetaAdCreative {
@@ -71,82 +108,275 @@ export interface MetaAdCreative {
 }
 
 export interface MetaAdRow {
-  id:          string;
-  name:        string;
-  status:      string;
-  creative:    MetaAdCreative;
+  id:               string;
+  name:             string;
+  status:           string;
+  creative:         MetaAdCreative;
+  spend:            number;
+  impressions:      number;
+  clicks:           number;
+  ctr:              number;
+  leads:            number;
+  qualityRanking?:  string;
+  engagementRanking?: string;
+}
+
+export interface MetaAdsetRow {
+  id:              string;
+  name:            string;
+  status:          string;
+  dailyBudget:     number;
+  targeting: {
+    ageMin?:       number;
+    ageMax?:       number;
+    genders?:      string[];
+    locations?:    string[];
+    interests?:    string[];
+  };
   spend:       number;
   impressions: number;
   clicks:      number;
-  ctr:         number;
+  reach:       number;
 }
 
-// ── Hook ───────────────────────────────────────────────────────────────────────
+export interface MetaAdsApiData {
+  accounts:   MetaAccount[];
+  summary:    MetaSummary;
+  campaigns:  MetaCampaignRow[];
+  dailySeries: MetaDailyPoint[];
+  byAge:      MetaAgeRow[];
+  byPlatform: MetaPlatformRow[];
+  byPlacement: MetaPlacementRow[];
+  actions:    MetaActionRow[];
+}
+
+// ── Helpers ────────────────────────────────────────────────────────────────────
+
+function n(v: unknown): number {
+  const x = parseFloat(String(v ?? "0"));
+  return isNaN(x) ? 0 : x;
+}
+
+function actionVal(actions: { action_type: string; value: string }[] | undefined, type: string): number {
+  return n(actions?.find(a => a.action_type === type)?.value ?? "0");
+}
+
+// Sums all lead-related actions
+function sumLeads(actions: { action_type: string; value: string }[] | undefined): number {
+  if (!actions) return 0;
+  const LEAD_TYPES = new Set([
+    "lead", "onsite_conversion.lead_grouped",
+    "offsite_conversion.fb_pixel_lead", "leadgen_grouped",
+  ]);
+  return actions
+    .filter(a => LEAD_TYPES.has(a.action_type))
+    .reduce((s, a) => s + n(a.value), 0);
+}
+
+function costPerAction(
+  cpa: { action_type: string; value: string }[] | undefined,
+  type: string
+): number {
+  return n(cpa?.find(a => a.action_type === type)?.value ?? "0");
+}
+
+const ACTION_LABELS: Record<string, string> = {
+  lead:                                  "Leads (form)",
+  "onsite_conversion.lead_grouped":      "Leads (on-site)",
+  "offsite_conversion.fb_pixel_lead":    "Leads (pixel)",
+  landing_page_view:                     "Landing Page Views",
+  link_click:                            "Link Clicks",
+  purchase:                              "Purchases",
+  add_to_cart:                           "Add to Cart",
+  initiate_checkout:                     "Initiate Checkout",
+  video_view:                            "Video Views",
+  "video_p50_watched_actions":           "Video 50% Watched",
+  "video_p75_watched_actions":           "Video 75% Watched",
+  "video_p100_watched_actions":          "Video Completed",
+  post_engagement:                       "Post Engagements",
+  page_engagement:                       "Page Engagements",
+  comment:                               "Comments",
+  like:                                  "Page Likes",
+  share:                                 "Shares",
+  omni_view_content:                     "Content Views",
+};
+
+const PLATFORM_LABELS: Record<string, string> = {
+  facebook:          "Facebook",
+  instagram:         "Instagram",
+  messenger:         "Messenger",
+  audience_network:  "Audience Network",
+  whatsapp:          "WhatsApp",
+};
+
+function fmtDateLabel(iso: string) {
+  const [, m, d] = iso.split("-");
+  const months = ["Jan","Feb","Mar","Apr","May","Jun","Jul","Aug","Sep","Oct","Nov","Dec"];
+  return `${months[parseInt(m) - 1]} ${parseInt(d)}`;
+}
+
+async function gql(path: string, params: Record<string, string>): Promise<unknown> {
+  if (!TOKEN) throw new Error("VITE_META_ACCESS_TOKEN is not set");
+  const url = new URL(`${GRAPH}/${path}`);
+  Object.entries({ ...params, access_token: TOKEN }).forEach(([k, v]) => url.searchParams.set(k, v));
+  const res = await fetch(url.toString());
+  const json = await res.json() as { error?: { message: string }; [k: string]: unknown };
+  if (json.error) throw new Error(`Meta API: ${json.error.message}`);
+  return json;
+}
+
+// ── Main hook ──────────────────────────────────────────────────────────────────
 
 export function useMetaAdsApi(dateRange: { from: Date; to: Date }) {
   const since = dateRange.from.toISOString().slice(0, 10);
   const until = dateRange.to.toISOString().slice(0, 10);
 
   return useQuery<MetaAdsApiData>({
-    queryKey: ["meta-ads-api", since, until],
-    enabled:  !!TOKEN,
-    staleTime: 5 * 60 * 1000,
+    queryKey:            ["meta-ads-api-v2", since, until],
+    enabled:             !!TOKEN,
+    staleTime:           5 * 60 * 1000,
     refetchOnWindowFocus: false,
 
     queryFn: async () => {
-      // 1. Get ad accounts
+      // ── 1. Ad accounts ───────────────────────────────────────────────────────
       const accountsResp = await gql("me/adaccounts", {
-        fields: "id,name,account_status,currency",
+        fields: "id,name,account_status,currency,amount_spent",
         limit:  "50",
-      }) as { data: { id: string; name: string; account_status: number; currency: string }[] };
+      }) as { data: { id: string; name: string; account_status: number; currency: string; amount_spent: string }[] };
 
-      const activeAccounts = (accountsResp.data ?? []).filter(a => a.account_status === 1);
+      const allAccounts   = accountsResp.data ?? [];
+      const activeAccounts = allAccounts.filter(a => a.account_status === 1);
+      const currency       = activeAccounts[0]?.currency ?? allAccounts[0]?.currency ?? "AED";
+
+      const accountsMapped: MetaAccount[] = allAccounts.map(a => ({
+        id:          a.id,
+        name:        a.name,
+        currency:    a.currency,
+        amountSpent: n(a.amount_spent),
+      }));
+
       if (activeAccounts.length === 0) {
         return {
-          accounts:  (accountsResp.data ?? []).map(a => ({ id: a.id, name: a.name })),
-          summary:   { spend: 0, impressions: 0, clicks: 0, reach: 0, ctr: 0, cpm: 0, cpp: 0, currency: "AED" },
-          campaigns: [],
+          accounts: accountsMapped, summary: { spend: 0, impressions: 0, clicks: 0, reach: 0, ctr: 0, cpm: 0, frequency: 0, leads: 0, costPerLead: 0, currency },
+          campaigns: [], dailySeries: [], byAge: [], byPlatform: [], byPlacement: [], actions: [],
         };
       }
 
-      const currency = activeAccounts[0]?.currency ?? "AED";
+      const TIME_RANGE      = JSON.stringify({ since, until });
+      const primaryId       = activeAccounts[0].id;
+      const INSIGHT_FIELDS  = "spend,impressions,clicks,reach,ctr,cpm,frequency,actions,cost_per_action_type";
+      const CAMP_INS_FIELDS = "spend,impressions,clicks,reach,ctr,frequency,actions";
 
-      // 2. Aggregate account-level insights across all active accounts
-      const INSIGHT_FIELDS = "spend,impressions,clicks,reach,ctr,cpm,cpp";
-      const TIME_RANGE = JSON.stringify({ since, until });
+      // ── 2–7. All data fetched in parallel ────────────────────────────────────
+      const [
+        summaryParts,
+        campaignParts,
+        dailyResp,
+        ageResp,
+        platformResp,
+        placementResp,
+      ] = await Promise.all([
 
-      const summaryParts = await Promise.all(
-        activeAccounts.map(acc =>
+        // 2. Summary insights (all accounts)
+        Promise.all(activeAccounts.map(acc =>
           gql(`${acc.id}/insights`, {
-            fields:     INSIGHT_FIELDS,
-            time_range: TIME_RANGE,
-            level:      "account",
+            fields: INSIGHT_FIELDS, time_range: TIME_RANGE, level: "account",
           }).catch(() => ({ data: [] }))
-        )
-      ) as { data: Record<string, string>[] }[];
+        )),
 
+        // 3. Campaigns (all accounts)
+        Promise.all(activeAccounts.map(acc =>
+          gql(`${acc.id}/campaigns`, {
+            fields: `name,status,objective,daily_budget,insights.time_range(${TIME_RANGE}){${CAMP_INS_FIELDS}}`,
+            limit: "200",
+          }).catch(() => ({ data: [] }))
+        )),
+
+        // 4. Daily time series (primary account)
+        gql(`${primaryId}/insights`, {
+          fields:         "spend,impressions,clicks,reach,ctr",
+          time_range:     TIME_RANGE,
+          time_increment: "1",
+          level:          "account",
+          limit:          "400",
+        }).catch(() => ({ data: [] })),
+
+        // 5. Age / gender breakdown (primary account)
+        gql(`${primaryId}/insights`, {
+          fields:    "spend,impressions,clicks,reach",
+          breakdowns: "age,gender",
+          time_range: TIME_RANGE,
+          level:      "account",
+          limit:      "500",
+        }).catch(() => ({ data: [] })),
+
+        // 6. Platform breakdown (primary account)
+        gql(`${primaryId}/insights`, {
+          fields:     "spend,impressions,clicks,reach,ctr",
+          breakdowns: "publisher_platform",
+          time_range: TIME_RANGE,
+          level:      "account",
+          limit:      "50",
+        }).catch(() => ({ data: [] })),
+
+        // 7. Placement breakdown (primary account)
+        gql(`${primaryId}/insights`, {
+          fields:     "spend,impressions,clicks",
+          breakdowns: "publisher_platform,platform_position",
+          time_range: TIME_RANGE,
+          level:      "account",
+          limit:      "200",
+        }).catch(() => ({ data: [] })),
+      ]) as [
+        { data: (Record<string, unknown> & { actions?: {action_type:string;value:string}[]; cost_per_action_type?: {action_type:string;value:string}[] })[] }[],
+        { data: { id: string; name: string; status: string; objective?: string; daily_budget?: string; insights?: { data: (Record<string,string> & { actions?: {action_type:string;value:string}[] })[] } }[] }[],
+        { data: Record<string,string>[] },
+        { data: (Record<string,string>)[] },
+        { data: (Record<string,string>)[] },
+        { data: (Record<string,string>)[] },
+      ];
+
+      // ── Aggregate summary ────────────────────────────────────────────────────
       let totalSpend = 0, totalImpressions = 0, totalClicks = 0, totalReach = 0;
+      let totalLeads = 0;
+      const allActions: Map<string, number> = new Map();
+      const allCpa:     Map<string, number> = new Map();
+
       for (const part of summaryParts) {
         for (const row of part.data ?? []) {
           totalSpend       += n(row.spend);
           totalImpressions += n(row.impressions);
           totalClicks      += n(row.clicks);
           totalReach       += n(row.reach);
+          totalLeads       += sumLeads(row.actions);
+
+          for (const act of row.actions ?? []) {
+            allActions.set(act.action_type, (allActions.get(act.action_type) ?? 0) + n(act.value));
+          }
+          for (const cpa of row.cost_per_action_type ?? []) {
+            if (!allCpa.has(cpa.action_type)) allCpa.set(cpa.action_type, n(cpa.value));
+          }
         }
       }
-      const ctr = totalImpressions > 0 ? (totalClicks / totalImpressions) * 100 : 0;
-      const cpm = totalImpressions > 0 ? (totalSpend / totalImpressions) * 1000 : 0;
 
-      // 3. Campaign insights across all active accounts
-      const campaignParts = await Promise.all(
-        activeAccounts.map(acc =>
-          gql(`${acc.id}/campaigns`, {
-            fields:     `name,status,insights.time_range(${TIME_RANGE}){${INSIGHT_FIELDS}}`,
-            limit:      "100",
-          }).catch(() => ({ data: [] }))
-        )
-      ) as { data: { id: string; name: string; status: string; insights?: { data: Record<string, string>[] } }[] }[];
+      const ctr       = totalImpressions > 0 ? (totalClicks / totalImpressions) * 100 : 0;
+      const cpm       = totalImpressions > 0 ? (totalSpend / totalImpressions) * 1000  : 0;
+      const frequency = totalReach > 0 ? totalImpressions / totalReach : 0;
+      const cpl       = totalLeads > 0 ? totalSpend / totalLeads : 0;
 
+      // ── Actions list (sorted by value, hide tiny/internal ones) ─────────────
+      const HIDDEN_ACTION_PREFIXES = ["offsite_conversion.custom.", "pixel_", "app_custom_event"];
+      const actions: MetaActionRow[] = Array.from(allActions.entries())
+        .filter(([type]) => !HIDDEN_ACTION_PREFIXES.some(p => type.startsWith(p)))
+        .map(([type, value]) => ({
+          type,
+          label:         ACTION_LABELS[type] ?? type.replace(/_/g, " "),
+          value:         Math.round(value),
+          costPerAction: +(allCpa.get(type) ?? 0).toFixed(2),
+        }))
+        .sort((a, b) => b.value - a.value);
+
+      // ── Campaigns ────────────────────────────────────────────────────────────
       const campaigns: MetaCampaignRow[] = [];
       for (const part of campaignParts) {
         for (const c of part.data ?? []) {
@@ -155,78 +385,191 @@ export function useMetaAdsApi(dateRange: { from: Date; to: Date }) {
             id:          c.id,
             name:        c.name,
             status:      c.status,
+            objective:   (c.objective ?? "").replace(/_/g, " "),
+            dailyBudget: n(c.daily_budget) / 100, // Meta returns in cents
             spend:       n(ins.spend),
             impressions: n(ins.impressions),
             clicks:      n(ins.clicks),
             reach:       n(ins.reach),
             ctr:         n(ins.ctr),
+            leads:       sumLeads(ins.actions),
+            frequency:   n(ins.reach) > 0 ? +(n(ins.impressions) / n(ins.reach)).toFixed(2) : 0,
           });
         }
       }
       campaigns.sort((a, b) => b.spend - a.spend);
 
+      // ── Daily series ─────────────────────────────────────────────────────────
+      const dailySeries: MetaDailyPoint[] = (dailyResp.data ?? [])
+        .map(row => ({
+          date:        fmtDateLabel(row.date_start),
+          dateISO:     row.date_start,
+          spend:       n(row.spend),
+          impressions: n(row.impressions),
+          clicks:      n(row.clicks),
+          reach:       n(row.reach),
+          ctr:         n(row.ctr),
+        }))
+        .sort((a, b) => a.dateISO.localeCompare(b.dateISO));
+
+      // ── Age / gender pivot ────────────────────────────────────────────────────
+      const ageMap: Map<string, MetaAgeRow> = new Map();
+      const AGE_ORDER = ["13-17","18-24","25-34","35-44","45-54","55-64","65+"];
+      for (const row of ageResp.data ?? []) {
+        const age    = row.age ?? "Unknown";
+        const gender = (row.gender ?? "unknown").toLowerCase();
+        if (!ageMap.has(age)) ageMap.set(age, { age, male: 0, female: 0, unknown: 0, maleSpend: 0, femaleSpend: 0 });
+        const entry = ageMap.get(age)!;
+        const impr = n(row.impressions);
+        const spnd = n(row.spend);
+        if (gender === "male")   { entry.male   += impr; entry.maleSpend   += spnd; }
+        else if (gender === "female") { entry.female += impr; entry.femaleSpend += spnd; }
+        else { entry.unknown += impr; }
+      }
+      const byAge = AGE_ORDER
+        .map(a => ageMap.get(a))
+        .filter(Boolean)
+        .concat(Array.from(ageMap.values()).filter(r => !AGE_ORDER.includes(r.age))) as MetaAgeRow[];
+
+      // ── Platform ──────────────────────────────────────────────────────────────
+      const byPlatform: MetaPlatformRow[] = (platformResp.data ?? []).map(row => ({
+        platform:    PLATFORM_LABELS[row.publisher_platform] ?? row.publisher_platform,
+        spend:       n(row.spend),
+        impressions: n(row.impressions),
+        clicks:      n(row.clicks),
+        reach:       n(row.reach),
+        ctr:         n(row.ctr),
+      })).sort((a, b) => b.impressions - a.impressions);
+
+      // ── Placement ─────────────────────────────────────────────────────────────
+      const PLACEMENT_LABELS: Record<string, string> = {
+        feed: "Feed", story: "Stories", reels: "Reels",
+        video_feeds: "Video Feeds", search: "Search",
+        instagram_explore: "IG Explore", instagram_profile_feed: "IG Profile",
+        messenger_inbox: "Messenger Inbox",
+        audience_network_interstitial: "Audience Network",
+        right_hand_column: "Right Column",
+        instant_article: "Instant Articles",
+      };
+      const byPlacement: MetaPlacementRow[] = (placementResp.data ?? []).map(row => ({
+        placement:   `${PLATFORM_LABELS[row.publisher_platform] ?? row.publisher_platform} · ${PLACEMENT_LABELS[row.platform_position] ?? row.platform_position}`,
+        spend:       n(row.spend),
+        impressions: n(row.impressions),
+        clicks:      n(row.clicks),
+      })).sort((a, b) => b.impressions - a.impressions).slice(0, 12);
+
       return {
-        accounts:  activeAccounts.map(a => ({ id: a.id, name: a.name })),
-        summary:   {
-          spend:       totalSpend,
+        accounts: accountsMapped,
+        summary:  {
+          spend: +totalSpend.toFixed(2),
           impressions: totalImpressions,
-          clicks:      totalClicks,
-          reach:       totalReach,
-          ctr:         +ctr.toFixed(2),
-          cpm:         +cpm.toFixed(2),
-          cpp:         0,
+          clicks: totalClicks,
+          reach: totalReach,
+          ctr:       +ctr.toFixed(2),
+          cpm:       +cpm.toFixed(2),
+          frequency: +frequency.toFixed(2),
+          leads:     Math.round(totalLeads),
+          costPerLead: +cpl.toFixed(2),
           currency,
         },
         campaigns,
+        dailySeries,
+        byAge,
+        byPlatform,
+        byPlacement,
+        actions,
       };
     },
   });
 }
 
-// ── useMetaCampaignAds — fetches ads + creatives for a single campaign ──────────
+// ── useMetaCampaignAds — ads + creatives + adsets for a single campaign ─────────
 
 export function useMetaCampaignAds(campaignId: string | null, since: string, until: string) {
-  return useQuery<MetaAdRow[]>({
-    queryKey: ["meta-campaign-ads", campaignId, since, until],
+  return useQuery<{ ads: MetaAdRow[]; adsets: MetaAdsetRow[] }>({
+    queryKey: ["meta-campaign-ads-v2", campaignId, since, until],
     enabled:  !!TOKEN && !!campaignId,
     staleTime: 5 * 60 * 1000,
     refetchOnWindowFocus: false,
 
     queryFn: async () => {
-      if (!campaignId) return [];
-
+      if (!campaignId) return { ads: [], adsets: [] };
       const TIME_RANGE = JSON.stringify({ since, until });
 
-      const resp = await gql(`${campaignId}/ads`, {
-        fields: `id,name,status,creative{thumbnail_url,image_url,title,body,call_to_action_type},insights.time_range(${TIME_RANGE}){spend,impressions,clicks,ctr}`,
-        limit: "50",
-      }) as { data: {
-        id: string;
-        name: string;
-        status: string;
-        creative?: {
-          thumbnail_url?: string;
-          image_url?: string;
-          title?: string;
-          body?: string;
-          call_to_action_type?: string;
-        };
-        insights?: { data: Record<string, string>[] };
-      }[] };
+      const [adsResp, adsetsResp] = await Promise.all([
+        // Ads with creatives + insights + quality rankings
+        gql(`${campaignId}/ads`, {
+          fields: `id,name,status,creative{thumbnail_url,image_url,title,body,call_to_action_type},insights.time_range(${TIME_RANGE}){spend,impressions,clicks,ctr,actions,quality_ranking,engagement_rate_ranking}`,
+          limit: "100",
+        }).catch(() => ({ data: [] })),
 
-      return (resp.data ?? []).map(ad => {
+        // Adsets with targeting info + insights
+        gql(`${campaignId}/adsets`, {
+          fields: `id,name,status,daily_budget,targeting,insights.time_range(${TIME_RANGE}){spend,impressions,clicks,reach}`,
+          limit: "50",
+        }).catch(() => ({ data: [] })),
+      ]) as [
+        { data: {
+          id: string; name: string; status: string;
+          creative?: MetaAdCreative;
+          insights?: { data: (Record<string,string> & { actions?: {action_type:string;value:string}[]; quality_ranking?: string; engagement_rate_ranking?: string })[] };
+        }[] },
+        { data: {
+          id: string; name: string; status: string; daily_budget?: string;
+          targeting?: {
+            age_min?: number; age_max?: number;
+            genders?: number[];
+            geo_locations?: { countries?: string[]; cities?: { name: string }[] };
+            flexible_spec?: { interests?: { name: string }[] }[];
+          };
+          insights?: { data: Record<string,string>[] };
+        }[] },
+      ];
+
+      const ads: MetaAdRow[] = (adsResp.data ?? []).map(ad => {
         const ins = ad.insights?.data?.[0] ?? {};
         return {
-          id:          ad.id,
-          name:        ad.name,
-          status:      ad.status,
-          creative:    ad.creative ?? {},
+          id:               ad.id,
+          name:             ad.name,
+          status:           ad.status,
+          creative:         ad.creative ?? {},
+          spend:            n(ins.spend),
+          impressions:      n(ins.impressions),
+          clicks:           n(ins.clicks),
+          ctr:              n(ins.ctr),
+          leads:            sumLeads(ins.actions),
+          qualityRanking:   ins.quality_ranking,
+          engagementRanking: ins.engagement_rate_ranking,
+        };
+      }).sort((a, b) => b.spend - a.spend);
+
+      const GENDER_MAP: Record<number, string> = { 1: "Male", 2: "Female" };
+      const adsets: MetaAdsetRow[] = (adsetsResp.data ?? []).map(s => {
+        const t = s.targeting ?? {};
+        const ins = s.insights?.data?.[0] ?? {};
+        return {
+          id:          s.id,
+          name:        s.name,
+          status:      s.status,
+          dailyBudget: n(s.daily_budget) / 100,
+          targeting: {
+            ageMin:    t.age_min,
+            ageMax:    t.age_max,
+            genders:   (t.genders ?? []).map((g: number) => GENDER_MAP[g] ?? "All"),
+            locations: [
+              ...(t.geo_locations?.countries ?? []),
+              ...(t.geo_locations?.cities?.map((c: { name: string }) => c.name) ?? []),
+            ],
+            interests: t.flexible_spec?.flatMap((s: { interests?: { name: string }[] }) => (s.interests ?? []).map((i: { name: string }) => i.name)) ?? [],
+          },
           spend:       n(ins.spend),
           impressions: n(ins.impressions),
           clicks:      n(ins.clicks),
-          ctr:         n(ins.ctr),
+          reach:       n(ins.reach),
         };
-      }).sort((a, b) => b.spend - a.spend);
+      });
+
+      return { ads, adsets };
     },
   });
 }
