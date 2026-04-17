@@ -165,6 +165,22 @@ export interface MetaAdsApiData {
   actions:    MetaActionRow[];
 }
 
+export interface MetaTopAd {
+  id:          string;
+  name:        string;
+  status:      string;
+  thumbnail:   string | undefined;
+  title:       string | undefined;
+  body:        string | undefined;
+  cta:         string | undefined;
+  postUrl:     string | undefined;
+  isVideo:     boolean;
+  leads:       number;
+  spend:       number;
+  impressions: number;
+  ctr:         number;
+}
+
 // ── Helpers ────────────────────────────────────────────────────────────────────
 
 function n(v: unknown): number {
@@ -772,6 +788,95 @@ export function useMetaAdsByName(adName: string | null, accountIds: string[]) {
         seen.add(a.id);
         return true;
       }).map(mapAdCreative);
+    },
+  });
+}
+
+// ── useMetaTopAds — fetch all ads across all accounts with insights ─────────
+// Returns ads sorted by leads. Each ad already carries its thumbnail so the
+// preview is instant — no secondary search needed.
+
+const TOP_AD_FIELDS =
+  "id,name,status," +
+  "creative{thumbnail_url,image_url,title,body,call_to_action_type," +
+    "object_story_spec{" +
+      "link_data{description,caption,message,call_to_action{type}}," +
+      "video_data{image_url,video_id,title,message,call_to_action{type}}" +
+    "}," +
+    "effective_object_story_id}";
+
+export function useMetaTopAds(accountIds: string[], since: string, until: string) {
+  const key = accountIds.join(",");
+  return useQuery<MetaTopAd[]>({
+    queryKey: ["meta-top-ads-v1", key, since, until],
+    enabled:  accountIds.length > 0 && !!getMetaToken(),
+    staleTime: 5 * 60 * 1000,
+    refetchOnWindowFocus: false,
+
+    queryFn: async () => {
+      if (accountIds.length === 0) return [];
+      const TIME_RANGE = JSON.stringify({ since, until });
+
+      const perAccount = await Promise.all(accountIds.map(accountId =>
+        gql(`${accountId}/ads`, {
+          fields: `${TOP_AD_FIELDS},insights.time_range(${TIME_RANGE}){spend,impressions,clicks,ctr,actions}`,
+          effective_status: ALL_STATUSES,
+          limit: "200",
+        }).catch(() => ({ data: [] }))
+      )) as { data: {
+        id: string; name: string; status: string;
+        creative?: {
+          thumbnail_url?: string; image_url?: string; title?: string; body?: string;
+          call_to_action_type?: string; effective_object_story_id?: string;
+          object_story_spec?: {
+            link_data?: { description?: string; caption?: string; message?: string; call_to_action?: { type?: string } };
+            video_data?: { image_url?: string; video_id?: string; title?: string; message?: string; call_to_action?: { type?: string } };
+          };
+        };
+        insights?: { data: (Record<string,string> & { actions?: {action_type:string;value:string}[] })[] };
+      }[] }[];
+
+      const seen = new Set<string>();
+      const ads: MetaTopAd[] = [];
+
+      for (const resp of perAccount) {
+        for (const ad of resp.data ?? []) {
+          if (seen.has(ad.id)) continue;
+          seen.add(ad.id);
+
+          const ins = ad.insights?.data?.[0] ?? {};
+          const leads  = sumLeads(ins.actions);
+          const spend  = n(ins.spend);
+          // Only include ads that have some activity in the period
+          if (leads === 0 && spend === 0 && n(ins.impressions) === 0) continue;
+
+          const cr  = ad.creative ?? {};
+          const oss = cr.object_story_spec;
+          const thumb = cr.thumbnail_url || cr.image_url || oss?.video_data?.image_url;
+          const title = (cr as { title?: string }).title || oss?.link_data?.caption || oss?.link_data?.description || oss?.video_data?.title;
+          const body  = (cr as { body?: string }).body || oss?.link_data?.message || oss?.video_data?.message;
+          const cta   = (cr as { call_to_action_type?: string }).call_to_action_type || oss?.link_data?.call_to_action?.type || oss?.video_data?.call_to_action?.type;
+          const postId = (cr as { effective_object_story_id?: string }).effective_object_story_id;
+
+          ads.push({
+            id:          ad.id,
+            name:        ad.name,
+            status:      ad.status,
+            thumbnail:   thumb,
+            title,
+            body,
+            cta,
+            postUrl:     postId ? `https://www.facebook.com/${postId}` : undefined,
+            isVideo:     !!oss?.video_data?.video_id,
+            leads,
+            spend,
+            impressions: n(ins.impressions),
+            ctr:         n(ins.ctr),
+          });
+        }
+      }
+
+      return ads.sort((a, b) => b.leads - a.leads || b.spend - a.spend).slice(0, 30);
     },
   });
 }

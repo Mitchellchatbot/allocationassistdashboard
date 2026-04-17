@@ -3,7 +3,7 @@ import { createPortal } from "react-dom";
 import { DashboardLayout } from "@/components/layout/DashboardLayout";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { useMetaLeadsStats, type GroupedStat } from "@/hooks/use-meta-leads-stats";
-import { useMetaAdsApi, useMetaCampaignAds, useMetaAdsByName, getMetaToken, META_TOKEN_LS_KEY } from "@/hooks/use-meta-ads-api";
+import { useMetaAdsApi, useMetaCampaignAds, useMetaAdsByName, useMetaTopAds, type MetaTopAd, getMetaToken, META_TOKEN_LS_KEY } from "@/hooks/use-meta-ads-api";
 import { useFilters } from "@/lib/filters";
 import { useQueryClient } from "@tanstack/react-query";
 import {
@@ -379,6 +379,99 @@ function TokenConfigPanel({ onSaved }: { onSaved: () => void }) {
   );
 }
 
+// ── Direct ad preview modal — data already loaded, instant display ─────────────
+function DirectAdPreviewModal({ ad, currency, onClose }: { ad: MetaTopAd; currency: string; onClose: () => void }) {
+  const modal = (
+    <div className="fixed inset-0 flex items-center justify-center p-4" style={{ zIndex: 99999 }}
+      onMouseDown={e => { if (e.target === e.currentTarget) onClose(); }}>
+      <div className="absolute inset-0 bg-black/60 backdrop-blur-sm" onClick={onClose} />
+      <div className="relative bg-background rounded-2xl border border-border shadow-2xl flex flex-col overflow-hidden"
+        style={{ width: "min(520px, 96vw)", maxHeight: "88vh", zIndex: 1 }}
+        onClick={e => e.stopPropagation()}>
+
+        {/* Header */}
+        <div className="flex items-start justify-between gap-3 px-5 py-4 border-b border-border/50 shrink-0">
+          <div className="min-w-0">
+            <div className="flex items-center gap-2 mb-0.5">
+              <span className={`text-[9px] font-bold px-2 py-0.5 rounded-full ${ad.status === "ACTIVE" ? "bg-success/15 text-success" : "bg-muted text-muted-foreground"}`}>{ad.status}</span>
+              {ad.isVideo && <span className="text-[9px] font-bold px-2 py-0.5 rounded-full bg-primary/10 text-primary">VIDEO</span>}
+            </div>
+            <p className="text-[14px] font-bold leading-tight" title={ad.name}>{ad.name}</p>
+            {ad.leads > 0 && <p className="text-[11px] text-success font-semibold mt-0.5">{ad.leads.toLocaleString()} leads</p>}
+          </div>
+          <button onClick={onClose} className="h-8 w-8 rounded-full flex items-center justify-center text-muted-foreground hover:bg-muted transition-colors shrink-0">
+            <X className="h-4 w-4" />
+          </button>
+        </div>
+
+        {/* Thumbnail */}
+        <div className="flex-1 overflow-y-auto">
+          {ad.thumbnail ? (
+            <div className="relative w-full bg-black" style={{ aspectRatio: "16/9" }}>
+              <img src={ad.thumbnail} alt={ad.title || ad.name}
+                className="w-full h-full object-cover"
+                onError={e => { (e.target as HTMLImageElement).style.display = "none"; }} />
+              {ad.isVideo && (
+                <div className="absolute inset-0 flex items-center justify-center pointer-events-none">
+                  <div className="h-16 w-16 rounded-full bg-black/50 flex items-center justify-center ring-2 ring-white/20">
+                    <Play className="h-7 w-7 text-white ml-1" />
+                  </div>
+                </div>
+              )}
+              {ad.postUrl && (
+                <a href={ad.postUrl} target="_blank" rel="noreferrer"
+                  className="absolute bottom-3 right-3 flex items-center gap-1.5 bg-black/65 hover:bg-primary text-white text-[10px] font-semibold px-3 py-1.5 rounded-full transition-colors">
+                  <ExternalLink className="h-3 w-3" /> View on Facebook
+                </a>
+              )}
+            </div>
+          ) : (
+            <div className="w-full flex flex-col items-center justify-center gap-3 bg-muted/30 py-14">
+              <ImageOff className="h-12 w-12 text-muted-foreground/20" />
+              <p className="text-[12px] text-muted-foreground/50">No thumbnail returned by Meta API</p>
+              {ad.postUrl && (
+                <a href={ad.postUrl} target="_blank" rel="noreferrer"
+                  className="flex items-center gap-1.5 text-[12px] text-primary hover:underline font-medium">
+                  <ExternalLink className="h-3.5 w-3.5" /> View on Facebook
+                </a>
+              )}
+            </div>
+          )}
+
+          {/* Text content */}
+          {(ad.title || ad.body) && (
+            <div className="px-5 pt-4 pb-2">
+              {ad.title && <p className="text-[13px] font-bold mb-1 leading-snug">{ad.title}</p>}
+              {ad.body  && <p className="text-[11px] text-muted-foreground leading-relaxed line-clamp-3">{ad.body}</p>}
+              {ad.cta   && (
+                <span className="inline-block mt-2 text-[9px] uppercase tracking-wide font-bold px-3 py-1 rounded-full bg-primary text-white">
+                  {ad.cta.replace(/_/g, " ")}
+                </span>
+              )}
+            </div>
+          )}
+
+          {/* Stats */}
+          <div className="grid grid-cols-4 divide-x divide-border/40 border-t border-border/30 bg-muted/20 mt-2">
+            {[
+              { l: "Leads",  v: ad.leads > 0 ? ad.leads.toLocaleString() : "—",      c: ad.leads > 0 ? "text-success" : "" },
+              { l: "Spend",  v: fmtC(ad.spend, currency),                              c: "text-primary" },
+              { l: "Impr.",  v: fmtN(ad.impressions) },
+              { l: "CTR",    v: `${ad.ctr.toFixed(2)}%` },
+            ].map(s => (
+              <div key={s.l} className="flex flex-col items-center py-3">
+                <span className={`text-[16px] font-bold tabular-nums ${s.c ?? ""}`}>{s.v}</span>
+                <span className="text-[8px] uppercase tracking-wide text-muted-foreground mt-0.5">{s.l}</span>
+              </div>
+            ))}
+          </div>
+        </div>
+      </div>
+    </div>
+  );
+  return createPortal(modal, document.body);
+}
+
 // ── Ad creative preview modal (opened from the "Top Ad Creatives" list) ──────
 function AdCreativeModal({
   adName, accountIds, leads, currency, onClose,
@@ -610,9 +703,12 @@ const MetaAds = () => {
   const { data: api, isLoading: apiLoading, error: apiError } = useMetaAdsApi(metaDateRange);
   const [previewCampaign, setPreviewCampaign] = useState<{ id: string; name: string } | null>(null);
   const [previewCreative, setPreviewCreative] = useState<{ name: string; leads: number } | null>(null);
+  const [directPreviewAd, setDirectPreviewAd] = useState<MetaTopAd | null>(null);
   const [showAllActions, setShowAllActions] = useState(false);
   const primaryAccountId = api?.accounts?.[0]?.id ?? null;
   const allAccountIds    = api?.accounts?.map(a => a.id) ?? [];
+
+  const { data: topAds = [], isLoading: topAdsLoading } = useMetaTopAds(allAccountIds, since, until);
 
   function handleTokenSaved() {
     setTokenSet(true);
@@ -945,6 +1041,87 @@ const MetaAds = () => {
             </div>
           )}
 
+          {/* ── Top Ads by Leads (from Meta API, instant preview) ── */}
+          {(topAdsLoading || topAds.length > 0) && (
+            <Card className="mb-4 shadow-sm border-border/50">
+              <CardHeader className="pb-1 pt-4 px-4">
+                <CardTitle className="text-[12px] font-medium text-muted-foreground uppercase tracking-wide">
+                  Top Ads by Leads
+                  <span className="ml-2 normal-case font-normal text-muted-foreground/40">· from Meta API · click <Play className="h-2.5 w-2.5 inline" /> to preview</span>
+                </CardTitle>
+              </CardHeader>
+              <CardContent className="px-0 pb-2 overflow-x-auto">
+                {topAdsLoading ? (
+                  <div className="flex items-center gap-2 px-4 py-6 text-muted-foreground">
+                    <Loader2 className="h-4 w-4 animate-spin" />
+                    <span className="text-[11px]">Loading ads from Meta…</span>
+                  </div>
+                ) : (
+                  <table className="w-full text-left">
+                    <thead>
+                      <tr className="border-b border-border/40">
+                        <th className="py-2 px-3 text-[10px] font-medium text-muted-foreground uppercase tracking-wide w-8">#</th>
+                        <th className="py-2 px-3 text-[10px] font-medium text-muted-foreground uppercase tracking-wide w-10">Ad</th>
+                        <th className="py-2 px-3 text-[10px] font-medium text-muted-foreground uppercase tracking-wide">Name</th>
+                        <th className="py-2 px-3 text-[10px] font-medium text-muted-foreground uppercase tracking-wide text-right">Leads</th>
+                        <th className="py-2 px-3 text-[10px] font-medium text-muted-foreground uppercase tracking-wide text-right hidden sm:table-cell">Spend</th>
+                        <th className="py-2 px-3 text-[10px] font-medium text-muted-foreground uppercase tracking-wide text-right hidden md:table-cell">Impr.</th>
+                        <th className="py-2 px-3 text-[10px] font-medium text-muted-foreground uppercase tracking-wide text-right hidden sm:table-cell">CTR</th>
+                        <th className="py-2 px-3 text-[10px] font-medium text-muted-foreground uppercase tracking-wide text-center">Preview</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {topAds.map((ad, i) => (
+                        <tr key={ad.id} className="border-b border-border/30 hover:bg-muted/30 transition-colors">
+                          <td className="py-2.5 px-3 text-[11px] text-muted-foreground">{i + 1}</td>
+                          <td className="py-2.5 px-3">
+                            {ad.thumbnail ? (
+                              <div className="relative h-9 w-14 rounded overflow-hidden bg-muted shrink-0">
+                                <img src={ad.thumbnail} alt="" className="h-full w-full object-cover" />
+                                {ad.isVideo && (
+                                  <div className="absolute inset-0 flex items-center justify-center bg-black/30">
+                                    <Play className="h-3 w-3 text-white" />
+                                  </div>
+                                )}
+                              </div>
+                            ) : (
+                              <div className="h-9 w-14 rounded bg-muted/50 flex items-center justify-center">
+                                <ImageOff className="h-3.5 w-3.5 text-muted-foreground/30" />
+                              </div>
+                            )}
+                          </td>
+                          <td className="py-2.5 px-3">
+                            <div className="flex items-center gap-1.5">
+                              <span className={`h-1.5 w-1.5 rounded-full shrink-0 ${ad.status === "ACTIVE" ? "bg-success" : "bg-muted-foreground/30"}`} />
+                              <span className="text-[11px] font-medium truncate max-w-[180px]" title={ad.name}>{ad.name}</span>
+                            </div>
+                          </td>
+                          <td className="py-2.5 px-3 text-right">
+                            <span className={`text-[12px] font-bold tabular-nums ${ad.leads > 0 ? "text-success" : "text-muted-foreground/40"}`}>
+                              {ad.leads > 0 ? ad.leads.toLocaleString() : "—"}
+                            </span>
+                          </td>
+                          <td className="py-2.5 px-3 text-right text-[11px] font-semibold text-primary tabular-nums hidden sm:table-cell">{fmtC(ad.spend, currency)}</td>
+                          <td className="py-2.5 px-3 text-right text-[11px] text-muted-foreground tabular-nums hidden md:table-cell">{fmtN(ad.impressions)}</td>
+                          <td className="py-2.5 px-3 text-right text-[11px] tabular-nums hidden sm:table-cell">{ad.ctr.toFixed(2)}%</td>
+                          <td className="py-2.5 px-3 text-center">
+                            <button
+                              type="button"
+                              onClick={() => setDirectPreviewAd(ad)}
+                              className="inline-flex items-center gap-1 rounded-lg bg-primary/10 hover:bg-primary hover:text-white text-primary px-2.5 py-1 text-[10px] font-semibold transition-colors"
+                            >
+                              <Play className="h-2.5 w-2.5" /> Preview
+                            </button>
+                          </td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                )}
+              </CardContent>
+            </Card>
+          )}
+
           {/* Campaigns — with big "View Ads" button */}
           {campaigns.length > 0 && (
             <Card className="mb-4 shadow-sm border-border/50">
@@ -1135,6 +1312,15 @@ const MetaAds = () => {
             </Card>
           </div>
         </>
+      )}
+
+      {/* Direct ad preview — data already loaded, instant */}
+      {directPreviewAd && (
+        <DirectAdPreviewModal
+          ad={directPreviewAd}
+          currency={currency}
+          onClose={() => setDirectPreviewAd(null)}
+        />
       )}
 
       {/* Campaign preview modal */}
