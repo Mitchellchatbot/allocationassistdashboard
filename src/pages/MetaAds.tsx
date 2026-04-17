@@ -3,7 +3,7 @@ import { createPortal } from "react-dom";
 import { DashboardLayout } from "@/components/layout/DashboardLayout";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { useMetaLeadsStats, type GroupedStat } from "@/hooks/use-meta-leads-stats";
-import { useMetaAdsApi, useMetaCampaignAds, getMetaToken, META_TOKEN_LS_KEY } from "@/hooks/use-meta-ads-api";
+import { useMetaAdsApi, useMetaCampaignAds, useMetaAdsByName, getMetaToken, META_TOKEN_LS_KEY } from "@/hooks/use-meta-ads-api";
 import { useFilters } from "@/lib/filters";
 import { useQueryClient } from "@tanstack/react-query";
 import {
@@ -379,24 +379,181 @@ function TokenConfigPanel({ onSaved }: { onSaved: () => void }) {
   );
 }
 
+// ── Ad creative preview modal (opened from the "Top Ad Creatives" list) ──────
+function AdCreativeModal({
+  adName, accountId, since, until, currency, onClose,
+}: {
+  adName: string; accountId: string; since: string; until: string;
+  currency: string; onClose: () => void;
+}) {
+  const { data: ads = [], isLoading } = useMetaAdsByName(adName, accountId, since, until);
+
+  const modal = (
+    <div
+      className="fixed inset-0 flex items-center justify-center p-4"
+      style={{ zIndex: 99999 }}
+      onMouseDown={e => { if (e.target === e.currentTarget) onClose(); }}
+    >
+      <div className="absolute inset-0 bg-black/60 backdrop-blur-sm" onClick={onClose} />
+      <div
+        className="relative bg-background rounded-2xl border border-border shadow-2xl flex flex-col overflow-hidden"
+        style={{ width: "min(560px, 96vw)", maxHeight: "88vh", zIndex: 1 }}
+        onClick={e => e.stopPropagation()}
+      >
+        {/* Header */}
+        <div className="flex items-center justify-between gap-3 px-5 py-4 border-b border-border/50 shrink-0">
+          <div className="min-w-0">
+            <p className="text-[9px] uppercase tracking-widest text-muted-foreground font-medium mb-0.5">Ad Creative</p>
+            <p className="text-[14px] font-bold leading-tight truncate" title={adName}>{adName}</p>
+          </div>
+          <button onClick={onClose} className="h-8 w-8 rounded-full flex items-center justify-center text-muted-foreground hover:bg-muted hover:text-foreground transition-colors shrink-0">
+            <X className="h-4 w-4" />
+          </button>
+        </div>
+
+        {/* Body */}
+        <div className="flex-1 overflow-y-auto p-4">
+          {isLoading ? (
+            <div className="flex flex-col items-center justify-center gap-3 py-20 text-muted-foreground">
+              <Loader2 className="h-6 w-6 animate-spin text-primary" />
+              <span className="text-[12px]">Loading ad from Meta…</span>
+            </div>
+          ) : ads.length === 0 ? (
+            <div className="flex flex-col items-center justify-center gap-2 py-20 text-muted-foreground">
+              <ImageOff className="h-10 w-10 opacity-20" />
+              <p className="text-[13px] font-medium">No matching ad found</p>
+              <p className="text-[11px] opacity-60">"{adName}" wasn't found in the Meta account for this period.</p>
+            </div>
+          ) : (
+            <div className="space-y-4">
+              {ads.map((ad, idx) => {
+                const thumb = ad.creative.thumbnail_url;
+                const postUrl = (ad.creative as { effective_object_story_id?: string }).effective_object_story_id
+                  ? `https://www.facebook.com/${(ad.creative as { effective_object_story_id?: string }).effective_object_story_id}`
+                  : null;
+                const isVideo = !!(ad.creative as { video_id?: string }).video_id;
+                return (
+                  <div key={ad.id} className="rounded-2xl border border-border/50 overflow-hidden bg-card shadow-sm">
+                    {/* Thumbnail — prominent */}
+                    {thumb ? (
+                      <div className="relative w-full bg-black" style={{ aspectRatio: "16/9" }}>
+                        <img
+                          src={thumb}
+                          alt={ad.creative.title || ad.name}
+                          className="w-full h-full object-cover opacity-95"
+                          onError={e => { (e.target as HTMLImageElement).style.display = "none"; }}
+                        />
+                        {isVideo && (
+                          <div className="absolute inset-0 flex items-center justify-center pointer-events-none">
+                            <div className="h-14 w-14 rounded-full bg-black/50 flex items-center justify-center ring-2 ring-white/20">
+                              <Play className="h-6 w-6 text-white ml-1" />
+                            </div>
+                          </div>
+                        )}
+                        {postUrl && (
+                          <a href={postUrl} target="_blank" rel="noreferrer"
+                            className="absolute bottom-2 right-2 flex items-center gap-1 bg-black/60 hover:bg-primary text-white text-[10px] font-semibold px-2.5 py-1 rounded-full transition-colors">
+                            <ExternalLink className="h-3 w-3" />
+                            View on Facebook
+                          </a>
+                        )}
+                        <div className={`absolute top-2 left-2 text-[9px] font-bold px-2 py-0.5 rounded-full ${ad.status === "ACTIVE" ? "bg-success/90 text-white" : "bg-black/60 text-white"}`}>
+                          {ad.status}
+                        </div>
+                        {idx === 0 && ads.length > 1 && (
+                          <div className="absolute top-2 right-2 text-[9px] bg-primary/90 text-white px-2 py-0.5 rounded-full font-bold">Top performer</div>
+                        )}
+                      </div>
+                    ) : (
+                      <div className="w-full flex flex-col items-center justify-center gap-3 bg-muted/30 py-10">
+                        <ImageOff className="h-10 w-10 text-muted-foreground/20" />
+                        <p className="text-[11px] text-muted-foreground/50">No thumbnail available</p>
+                        {postUrl && (
+                          <a href={postUrl} target="_blank" rel="noreferrer"
+                            className="flex items-center gap-1.5 text-[11px] text-primary hover:underline font-medium">
+                            <ExternalLink className="h-3 w-3" />
+                            View on Facebook
+                          </a>
+                        )}
+                      </div>
+                    )}
+
+                    {/* Text content */}
+                    <div className="px-4 pt-3 pb-2">
+                      {ad.creative.title && (
+                        <p className="text-[13px] font-bold leading-snug mb-1">{ad.creative.title}</p>
+                      )}
+                      {ad.creative.body && (
+                        <p className="text-[11px] text-muted-foreground leading-relaxed line-clamp-3">{ad.creative.body}</p>
+                      )}
+                      {ad.creative.call_to_action_type && (
+                        <span className="inline-block mt-2 text-[9px] uppercase tracking-wide font-bold px-3 py-1 rounded-full bg-primary text-white">
+                          {ad.creative.call_to_action_type.replace(/_/g, " ")}
+                        </span>
+                      )}
+                    </div>
+
+                    {/* Stats */}
+                    <div className="grid grid-cols-4 divide-x divide-border/40 border-t border-border/40 bg-muted/20">
+                      {[
+                        { l: "Spend",  v: fmtC(ad.spend, currency),      c: "text-primary" },
+                        { l: "Impr.",  v: fmtN(ad.impressions) },
+                        { l: "CTR",    v: `${ad.ctr.toFixed(2)}%` },
+                        { l: "Leads",  v: ad.leads > 0 ? String(ad.leads) : "—", c: ad.leads > 0 ? "text-success" : "" },
+                      ].map(s => (
+                        <div key={s.l} className="flex flex-col items-center py-2.5">
+                          <span className={`text-[14px] font-bold tabular-nums ${s.c ?? ""}`}>{s.v}</span>
+                          <span className="text-[8px] uppercase tracking-wide text-muted-foreground mt-0.5">{s.l}</span>
+                        </div>
+                      ))}
+                    </div>
+
+                    {ads.length > 1 && (
+                      <div className="px-4 pb-2.5">
+                        <p className="text-[9px] text-muted-foreground/40 truncate">Ad #{idx + 1} · {ad.name}</p>
+                      </div>
+                    )}
+                  </div>
+                );
+              })}
+            </div>
+          )}
+        </div>
+      </div>
+    </div>
+  );
+
+  return createPortal(modal, document.body);
+}
+
 // ── Shared small components ───────────────────────────────────────────────────
 function SectionLabel({ children }: { children: React.ReactNode }) {
   return <p className="text-[10px] uppercase tracking-widest font-semibold text-muted-foreground/50 mb-3 mt-2 px-0.5">{children}</p>;
 }
 
-function RankList({ items, useOwnTotal = false }: { items: GroupedStat[]; useOwnTotal?: boolean }) {
+function RankList({ items, useOwnTotal = false, onItemClick }: { items: GroupedStat[]; useOwnTotal?: boolean; onItemClick?: (label: string) => void }) {
   if (items.length === 0) return <p className="text-[11px] text-muted-foreground py-6 text-center">No data</p>;
   const maxCount = items[0]?.count ?? 1;
   const sumCount = useOwnTotal ? items.reduce((a, r) => a + r.count, 0) : maxCount;
   return (
-    <div className="space-y-2.5">
+    <div className="space-y-1.5">
       {items.map((r, i) => {
         const barPct   = maxCount > 0 ? Math.round((r.count / maxCount) * 100) : 0;
         const labelPct = sumCount > 0 ? Math.round((r.count / sumCount) * 100) : 0;
+        const clickable = !!onItemClick;
         return (
-          <div key={r.label} className="flex items-center gap-3">
+          <div
+            key={r.label}
+            onClick={() => onItemClick?.(r.label)}
+            className={`flex items-center gap-3 rounded-lg px-2 py-1.5 transition-colors ${clickable ? "cursor-pointer hover:bg-primary/5 group" : ""}`}
+          >
             <span className="text-[10px] text-muted-foreground w-4 tabular-nums shrink-0">{i + 1}</span>
-            <span className="text-[11px] font-medium flex-1 truncate" title={r.label}>{r.label}</span>
+            <span className={`text-[11px] font-medium flex-1 truncate ${clickable ? "group-hover:text-primary" : ""}`} title={r.label}>
+              {r.label}
+            </span>
+            {clickable && (
+              <Eye className="h-3 w-3 text-muted-foreground/30 group-hover:text-primary shrink-0 transition-colors" />
+            )}
             <div className="w-28 h-1.5 bg-secondary rounded-full overflow-hidden shrink-0">
               <div className="h-full rounded-full bg-primary" style={{ width: `${barPct}%` }} />
             </div>
@@ -450,7 +607,9 @@ const MetaAds = () => {
   const [tokenSet, setTokenSet] = useState(true);
   const { data: api, isLoading: apiLoading, error: apiError } = useMetaAdsApi(metaDateRange);
   const [previewCampaign, setPreviewCampaign] = useState<{ id: string; name: string } | null>(null);
+  const [previewCreative, setPreviewCreative] = useState<string | null>(null);
   const [showAllActions, setShowAllActions] = useState(false);
+  const primaryAccountId = api?.accounts?.[0]?.id ?? null;
 
   function handleTokenSaved() {
     setTokenSet(true);
@@ -909,7 +1068,17 @@ const MetaAds = () => {
                 Top Ad Creatives by Leads {byCreative.length > 0 && <span className="ml-1 normal-case font-normal text-muted-foreground/40">({byCreative.length})</span>}
               </CardTitle>
             </CardHeader>
-            <CardContent className="px-4 pb-4"><RankList items={byCreative.slice(0, 15)} /></CardContent>
+            <CardContent className="px-4 pb-4">
+              {primaryAccountId && (
+                <p className="text-[10px] text-muted-foreground/50 mb-2 flex items-center gap-1">
+                  <Eye className="h-3 w-3" /> Click any row to preview that ad
+                </p>
+              )}
+              <RankList
+                items={byCreative.slice(0, 15)}
+                onItemClick={primaryAccountId ? (label) => setPreviewCreative(label) : undefined}
+              />
+            </CardContent>
           </Card>
 
           <div className="grid grid-cols-1 lg:grid-cols-2 gap-4 mb-4">
@@ -962,7 +1131,7 @@ const MetaAds = () => {
         </>
       )}
 
-      {/* Preview modal — renders outside all layout containers via portal */}
+      {/* Campaign preview modal */}
       {previewCampaign && (
         <AdPreviewModal
           campaignId={previewCampaign.id}
@@ -971,6 +1140,18 @@ const MetaAds = () => {
           until={until}
           currency={currency}
           onClose={() => setPreviewCampaign(null)}
+        />
+      )}
+
+      {/* Creative preview modal — opened from Top Ad Creatives list */}
+      {previewCreative && primaryAccountId && (
+        <AdCreativeModal
+          adName={previewCreative}
+          accountId={primaryAccountId}
+          since={since}
+          until={until}
+          currency={currency}
+          onClose={() => setPreviewCreative(null)}
         />
       )}
     </DashboardLayout>
