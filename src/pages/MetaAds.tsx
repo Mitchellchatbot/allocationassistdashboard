@@ -356,7 +356,7 @@ const MetaAds = () => {
   const { data, isLoading: leadsLoading } = useMetaLeadsStats(dateRange);
   const queryClient = useQueryClient();
 
-  const [tokenSet, setTokenSet]           = useState(() => !!getMetaToken());
+  const [tokenSet, setTokenSet] = useState(true); // always true — DEFAULT_TOKEN is hardcoded
   const { data: api, isLoading: apiLoading, error: apiError } = useMetaAdsApi(dateRange);
 
   const [previewCampaign, setPreviewCampaign] = useState<{ id: string; name: string } | null>(null);

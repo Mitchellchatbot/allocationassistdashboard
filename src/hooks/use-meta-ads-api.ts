@@ -20,12 +20,16 @@ import { useQuery } from "@tanstack/react-query";
 const GRAPH = "https://graph.facebook.com/v19.0";
 export const META_TOKEN_LS_KEY = "meta_access_token";
 
-/** Returns token from localStorage first (UI-entered), falls back to .env */
+// Fallback token — baked into the build so all users get live data without config.
+// Update this when the token expires (every ~60 days for user tokens).
+const DEFAULT_TOKEN = "EAAcQ2n9N75oBRGIjTf40yqBQZAXIuSDtAU3YhgZBwiBGHGSNsGHclgM3pkZCv9kLMsZA8SZA4AHEZCuEZCed6Dp69mGlrkZAMfzUe068YD1tL0c4pLtZADPjCvuzoZCt2B8xX4XI8rmWDr3yjI9xnU4PkiDrUa8bAZC56ydqYAqsoUvabEUqCucMvEi4IESyGjpyiMSOCpTOWU33nhI";
+
+/** Priority: localStorage (admin override) → .env → hardcoded fallback */
 export function getMetaToken(): string {
   return (
     localStorage.getItem(META_TOKEN_LS_KEY) ||
     (import.meta.env.VITE_META_ACCESS_TOKEN as string | undefined) ||
-    ""
+    DEFAULT_TOKEN
   );
 }
 
