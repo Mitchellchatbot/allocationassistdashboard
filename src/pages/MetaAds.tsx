@@ -1,13 +1,14 @@
 import { DashboardLayout } from "@/components/layout/DashboardLayout";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { useMetaLeadsStats, type GroupedStat } from "@/hooks/use-meta-leads-stats";
-import { useMetaAdsApi } from "@/hooks/use-meta-ads-api";
+import { useMetaAdsApi, useMetaCampaignAds } from "@/hooks/use-meta-ads-api";
 import { useFilters } from "@/lib/filters";
 import {
   PieChart, Pie, Cell, Tooltip, Legend, ResponsiveContainer,
   BarChart, Bar, XAxis, YAxis, CartesianGrid,
 } from "recharts";
-import { Users, Megaphone, Globe, Loader2, TrendingUp, DollarSign, Eye, MousePointer, AlertCircle } from "lucide-react";
+import { Users, Megaphone, Globe, Loader2, TrendingUp, DollarSign, Eye, MousePointer, AlertCircle, X, ImageOff, ExternalLink } from "lucide-react";
+import { useState } from "react";
 
 const COLORS = [
   "hsl(170,55%,45%)",
@@ -109,16 +110,25 @@ function fmtNum(v: number) {
   return v.toLocaleString();
 }
 
-// Campaign table row
-function CampaignRow({ c, currency }: { c: { id: string; name: string; status: string; spend: number; impressions: number; clicks: number; reach: number; ctr: number }; currency: string }) {
+// Campaign table row — clicking the name opens the preview drawer
+function CampaignRow({ c, currency, onSelect }: {
+  c: { id: string; name: string; status: string; spend: number; impressions: number; clicks: number; reach: number; ctr: number };
+  currency: string;
+  onSelect: (id: string, name: string) => void;
+}) {
   const isActive = c.status === "ACTIVE";
   return (
-    <tr className="border-b border-border/30 hover:bg-muted/30 transition-colors">
+    <tr className="border-b border-border/30 hover:bg-muted/30 transition-colors group">
       <td className="py-2.5 px-3">
-        <div className="flex items-center gap-2">
+        <button
+          onClick={() => onSelect(c.id, c.name)}
+          className="flex items-center gap-2 text-left hover:text-primary transition-colors group/btn"
+          title="Click to preview ads in this campaign"
+        >
           <span className={`h-1.5 w-1.5 rounded-full shrink-0 ${isActive ? "bg-success" : "bg-muted-foreground/40"}`} />
-          <span className="text-[11px] font-medium truncate max-w-[220px]" title={c.name}>{c.name}</span>
-        </div>
+          <span className="text-[11px] font-medium truncate max-w-[220px] group-hover/btn:underline underline-offset-2">{c.name}</span>
+          <ExternalLink className="h-3 w-3 opacity-0 group-hover/btn:opacity-50 shrink-0 transition-opacity" />
+        </button>
       </td>
       <td className="py-2.5 px-3 text-right text-[11px] font-semibold tabular-nums text-primary">
         {fmtCurrency(c.spend, currency)}
@@ -141,10 +151,134 @@ function CampaignRow({ c, currency }: { c: { id: string; name: string; status: s
   );
 }
 
+// ── Ad preview drawer ─────────────────────────────────────────────────────────
+
+function AdPreviewDrawer({
+  campaignId, campaignName, since, until, currency, onClose,
+}: {
+  campaignId: string; campaignName: string; since: string; until: string; currency: string; onClose: () => void;
+}) {
+  const { data: ads, isLoading } = useMetaCampaignAds(campaignId, since, until);
+
+  return (
+    <>
+      {/* Backdrop */}
+      <div
+        className="fixed inset-0 z-40 bg-black/30 backdrop-blur-[2px]"
+        onClick={onClose}
+      />
+
+      {/* Drawer */}
+      <div className="fixed right-0 top-0 z-50 h-full w-[420px] max-w-[95vw] bg-background border-l border-border shadow-2xl flex flex-col">
+        {/* Header */}
+        <div className="flex items-start justify-between gap-3 px-5 py-4 border-b border-border/60 shrink-0">
+          <div className="min-w-0">
+            <p className="text-[11px] text-muted-foreground uppercase tracking-wide mb-0.5">Campaign Ads</p>
+            <p className="text-[13px] font-semibold text-foreground leading-tight truncate" title={campaignName}>{campaignName}</p>
+          </div>
+          <button
+            onClick={onClose}
+            className="mt-0.5 rounded-md p-1 text-muted-foreground hover:bg-muted hover:text-foreground transition-colors shrink-0"
+          >
+            <X className="h-4 w-4" />
+          </button>
+        </div>
+
+        {/* Scrollable ad list */}
+        <div className="flex-1 overflow-y-auto px-4 py-4 space-y-4">
+          {isLoading ? (
+            <div className="flex items-center justify-center gap-2 py-16 text-muted-foreground">
+              <Loader2 className="h-4 w-4 animate-spin" />
+              <span className="text-[11px]">Loading ads…</span>
+            </div>
+          ) : !ads || ads.length === 0 ? (
+            <p className="text-[11px] text-muted-foreground text-center py-16">No ads found for this campaign in the selected period.</p>
+          ) : (
+            ads.map((ad, i) => {
+              const thumb = ad.creative.thumbnail_url || ad.creative.image_url;
+              const isActive = ad.status === "ACTIVE";
+              return (
+                <div key={ad.id} className="rounded-xl border border-border/50 overflow-hidden bg-card shadow-sm hover:shadow-md transition-shadow">
+                  {/* Ad image / thumbnail */}
+                  {thumb ? (
+                    <div className="relative w-full bg-muted" style={{ aspectRatio: "1.91/1" }}>
+                      <img
+                        src={thumb}
+                        alt={ad.creative.title || ad.name}
+                        className="w-full h-full object-cover"
+                        onError={e => { (e.target as HTMLImageElement).style.display = "none"; }}
+                      />
+                    </div>
+                  ) : (
+                    <div className="w-full flex items-center justify-center bg-muted/40" style={{ aspectRatio: "1.91/1" }}>
+                      <ImageOff className="h-8 w-8 text-muted-foreground/30" />
+                    </div>
+                  )}
+
+                  {/* Ad copy */}
+                  <div className="px-3 pt-2.5 pb-3">
+                    {ad.creative.title && (
+                      <p className="text-[12px] font-semibold text-foreground leading-tight mb-1">{ad.creative.title}</p>
+                    )}
+                    {ad.creative.body && (
+                      <p className="text-[11px] text-muted-foreground leading-relaxed line-clamp-3">{ad.creative.body}</p>
+                    )}
+                    {ad.creative.call_to_action_type && (
+                      <span className="inline-block mt-1.5 text-[9px] uppercase tracking-wide font-medium px-2 py-0.5 rounded bg-primary/10 text-primary">
+                        {ad.creative.call_to_action_type.replace(/_/g, " ")}
+                      </span>
+                    )}
+                  </div>
+
+                  {/* Stats footer */}
+                  <div className="flex items-center justify-between px-3 py-2 border-t border-border/40 bg-muted/20">
+                    <div className="flex items-center gap-3">
+                      <span className="flex flex-col items-center">
+                        <span className="text-[13px] font-bold tabular-nums text-primary">{fmtCurrency(ad.spend, currency)}</span>
+                        <span className="text-[8px] text-muted-foreground uppercase tracking-wide">spend</span>
+                      </span>
+                      <span className="flex flex-col items-center">
+                        <span className="text-[13px] font-bold tabular-nums">{fmtNum(ad.impressions)}</span>
+                        <span className="text-[8px] text-muted-foreground uppercase tracking-wide">impr.</span>
+                      </span>
+                      <span className="flex flex-col items-center">
+                        <span className="text-[13px] font-bold tabular-nums">{fmtNum(ad.clicks)}</span>
+                        <span className="text-[8px] text-muted-foreground uppercase tracking-wide">clicks</span>
+                      </span>
+                      <span className="flex flex-col items-center">
+                        <span className="text-[13px] font-bold tabular-nums">{ad.ctr.toFixed(2)}%</span>
+                        <span className="text-[8px] text-muted-foreground uppercase tracking-wide">CTR</span>
+                      </span>
+                    </div>
+                    <span className={`text-[9px] px-1.5 py-0.5 rounded-full font-medium ${isActive ? "bg-success/10 text-success" : "bg-muted text-muted-foreground"}`}>
+                      {ad.status}
+                    </span>
+                  </div>
+
+                  {/* Ad name */}
+                  <div className="px-3 pb-2.5">
+                    <p className="text-[9px] text-muted-foreground/50 truncate" title={ad.name}>
+                      #{i + 1} · {ad.name}
+                    </p>
+                  </div>
+                </div>
+              );
+            })
+          )}
+        </div>
+      </div>
+    </>
+  );
+}
+
 const MetaAds = () => {
   const { dateRange } = useFilters();
   const { data, isLoading }         = useMetaLeadsStats(dateRange);
   const { data: adsData, isLoading: adsLoading, error: adsError } = useMetaAdsApi(dateRange);
+
+  const [previewCampaign, setPreviewCampaign] = useState<{ id: string; name: string } | null>(null);
+  const since = dateRange.from.toISOString().slice(0, 10);
+  const until = dateRange.to.toISOString().slice(0, 10);
 
   const total        = data?.total        ?? 0;
   const withUtm      = data?.withUtm      ?? 0;
@@ -231,7 +365,12 @@ const MetaAds = () => {
                   </thead>
                   <tbody>
                     {campaigns.slice(0, 15).map(c => (
-                      <CampaignRow key={c.id} c={c} currency={currency} />
+                      <CampaignRow
+                        key={c.id}
+                        c={c}
+                        currency={currency}
+                        onSelect={(id, name) => setPreviewCampaign({ id, name })}
+                      />
                     ))}
                   </tbody>
                 </table>
@@ -332,6 +471,17 @@ const MetaAds = () => {
             </Card>
           </div>
         </>
+      )}
+      {/* ── Ad preview drawer (portal-style, renders over everything) ── */}
+      {previewCampaign && (
+        <AdPreviewDrawer
+          campaignId={previewCampaign.id}
+          campaignName={previewCampaign.name}
+          since={since}
+          until={until}
+          currency={currency}
+          onClose={() => setPreviewCampaign(null)}
+        />
       )}
     </DashboardLayout>
   );

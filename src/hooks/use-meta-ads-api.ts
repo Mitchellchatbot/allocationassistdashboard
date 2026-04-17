@@ -62,6 +62,25 @@ async function gql(path: string, params: Record<string, string>): Promise<unknow
   return json;
 }
 
+export interface MetaAdCreative {
+  thumbnail_url?: string;
+  image_url?:     string;
+  title?:         string;
+  body?:          string;
+  call_to_action_type?: string;
+}
+
+export interface MetaAdRow {
+  id:          string;
+  name:        string;
+  status:      string;
+  creative:    MetaAdCreative;
+  spend:       number;
+  impressions: number;
+  clicks:      number;
+  ctr:         number;
+}
+
 // ── Hook ───────────────────────────────────────────────────────────────────────
 
 export function useMetaAdsApi(dateRange: { from: Date; to: Date }) {
@@ -160,6 +179,54 @@ export function useMetaAdsApi(dateRange: { from: Date; to: Date }) {
         },
         campaigns,
       };
+    },
+  });
+}
+
+// ── useMetaCampaignAds — fetches ads + creatives for a single campaign ──────────
+
+export function useMetaCampaignAds(campaignId: string | null, since: string, until: string) {
+  return useQuery<MetaAdRow[]>({
+    queryKey: ["meta-campaign-ads", campaignId, since, until],
+    enabled:  !!TOKEN && !!campaignId,
+    staleTime: 5 * 60 * 1000,
+    refetchOnWindowFocus: false,
+
+    queryFn: async () => {
+      if (!campaignId) return [];
+
+      const TIME_RANGE = JSON.stringify({ since, until });
+
+      const resp = await gql(`${campaignId}/ads`, {
+        fields: `id,name,status,creative{thumbnail_url,image_url,title,body,call_to_action_type},insights.time_range(${TIME_RANGE}){spend,impressions,clicks,ctr}`,
+        limit: "50",
+      }) as { data: {
+        id: string;
+        name: string;
+        status: string;
+        creative?: {
+          thumbnail_url?: string;
+          image_url?: string;
+          title?: string;
+          body?: string;
+          call_to_action_type?: string;
+        };
+        insights?: { data: Record<string, string>[] };
+      }[] };
+
+      return (resp.data ?? []).map(ad => {
+        const ins = ad.insights?.data?.[0] ?? {};
+        return {
+          id:          ad.id,
+          name:        ad.name,
+          status:      ad.status,
+          creative:    ad.creative ?? {},
+          spend:       n(ins.spend),
+          impressions: n(ins.impressions),
+          clicks:      n(ins.clicks),
+          ctr:         n(ins.ctr),
+        };
+      }).sort((a, b) => b.spend - a.spend);
     },
   });
 }
