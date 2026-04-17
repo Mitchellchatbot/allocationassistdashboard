@@ -724,43 +724,54 @@ const ALL_STATUSES = JSON.stringify([
   "ACTIVE", "PAUSED", "ARCHIVED", "DELETED", "IN_PROCESS", "WITH_ISSUES",
 ]);
 
-export function useMetaAdsByName(adName: string | null, accountId: string | null) {
+// Search across ALL ad accounts — ads may live in any of them.
+export function useMetaAdsByName(adName: string | null, accountIds: string[]) {
+  const key = accountIds.join(",");
   return useQuery<MetaAdRow[]>({
-    queryKey: ["meta-ads-by-name-v3", adName, accountId],
-    enabled:  !!adName && !!accountId && !!getMetaToken(),
+    queryKey: ["meta-ads-by-name-v4", adName, key],
+    enabled:  !!adName && accountIds.length > 0 && !!getMetaToken(),
     staleTime: 10 * 60 * 1000,
     refetchOnWindowFocus: false,
 
     queryFn: async () => {
-      if (!adName || !accountId) return [];
-
-      // Strategy 1: API-side name filter — includes ALL statuses (archived, deleted, etc.)
-      const filtered = await gql(`${accountId}/ads`, {
-        fields: CREATIVE_FIELDS,
-        filtering: JSON.stringify([{ field: "name", operator: "CONTAIN", value: adName }]),
-        effective_status: ALL_STATUSES,
-        limit: "20",
-      }).catch(() => ({ data: [] })) as { data: unknown[] };
-
-      if ((filtered.data ?? []).length > 0) {
-        return (filtered.data as Parameters<typeof mapAdCreative>[0][]).map(mapAdCreative);
-      }
-
-      // Strategy 2: fetch all ads (ALL statuses), filter client-side
-      // Handles special chars like | that may confuse the API-side filter
-      const all = await gql(`${accountId}/ads`, {
-        fields: CREATIVE_FIELDS,
-        effective_status: ALL_STATUSES,
-        limit: "500",
-      }).catch(() => ({ data: [] })) as { data: unknown[] };
-
+      if (!adName || accountIds.length === 0) return [];
       const term = adName.toLowerCase();
-      const matched = (all.data ?? [] as unknown[]).filter(
-        (a) => typeof (a as { name?: string }).name === "string" &&
-               (a as { name: string }).name.toLowerCase().includes(term)
-      ) as Parameters<typeof mapAdCreative>[0][];
 
-      return matched.map(mapAdCreative);
+      // For each account: try API-side filter first, then client-side fallback.
+      // All accounts searched in parallel.
+      const perAccount = await Promise.all(accountIds.map(async (accountId) => {
+        // Strategy 1: API-side CONTAIN filter (fast)
+        const filtered = await gql(`${accountId}/ads`, {
+          fields: CREATIVE_FIELDS,
+          filtering: JSON.stringify([{ field: "name", operator: "CONTAIN", value: adName }]),
+          effective_status: ALL_STATUSES,
+          limit: "20",
+        }).catch(() => ({ data: [] })) as { data: unknown[] };
+
+        if ((filtered.data ?? []).length > 0) {
+          return filtered.data as Parameters<typeof mapAdCreative>[0][];
+        }
+
+        // Strategy 2: client-side filter — handles special chars like |
+        const all = await gql(`${accountId}/ads`, {
+          fields: CREATIVE_FIELDS,
+          effective_status: ALL_STATUSES,
+          limit: "500",
+        }).catch(() => ({ data: [] })) as { data: unknown[] };
+
+        return (all.data ?? []).filter(
+          (a) => typeof (a as { name?: string }).name === "string" &&
+                 (a as { name: string }).name.toLowerCase().includes(term)
+        ) as Parameters<typeof mapAdCreative>[0][];
+      }));
+
+      // Flatten results from all accounts, dedupe by id
+      const seen = new Set<string>();
+      return perAccount.flat().filter(a => {
+        if (seen.has(a.id)) return false;
+        seen.add(a.id);
+        return true;
+      }).map(mapAdCreative);
     },
   });
 }

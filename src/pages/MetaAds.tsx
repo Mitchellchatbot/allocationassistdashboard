@@ -381,12 +381,12 @@ function TokenConfigPanel({ onSaved }: { onSaved: () => void }) {
 
 // ── Ad creative preview modal (opened from the "Top Ad Creatives" list) ──────
 function AdCreativeModal({
-  adName, accountId, leads, currency, onClose,
+  adName, accountIds, leads, currency, onClose,
 }: {
-  adName: string; accountId: string; leads: number;
+  adName: string; accountIds: string[]; leads: number;
   currency: string; onClose: () => void;
 }) {
-  const { data: ads = [], isLoading } = useMetaAdsByName(adName, accountId);
+  const { data: ads = [], isLoading } = useMetaAdsByName(adName, accountIds);
 
   const modal = (
     <div
@@ -612,6 +612,7 @@ const MetaAds = () => {
   const [previewCreative, setPreviewCreative] = useState<{ name: string; leads: number } | null>(null);
   const [showAllActions, setShowAllActions] = useState(false);
   const primaryAccountId = api?.accounts?.[0]?.id ?? null;
+  const allAccountIds    = api?.accounts?.map(a => a.id) ?? [];
 
   function handleTokenSaved() {
     setTokenSet(true);
@@ -1071,14 +1072,14 @@ const MetaAds = () => {
               </CardTitle>
             </CardHeader>
             <CardContent className="px-4 pb-4">
-              {primaryAccountId && (
+              {allAccountIds.length > 0 && (
                 <p className="text-[10px] text-muted-foreground/50 mb-2 flex items-center gap-1">
                   <Eye className="h-3 w-3" /> Click any row to preview that ad
                 </p>
               )}
               <RankList
                 items={byCreative.slice(0, 15)}
-                onItemClick={primaryAccountId ? (label) => {
+                onItemClick={allAccountIds.length > 0 ? (label) => {
                   const stat = byCreative.find(c => c.label === label);
                   setPreviewCreative({ name: label, leads: stat?.count ?? 0 });
                 } : undefined}
@@ -1149,10 +1150,10 @@ const MetaAds = () => {
       )}
 
       {/* Creative preview modal — opened from Top Ad Creatives list */}
-      {previewCreative && primaryAccountId && (
+      {previewCreative && allAccountIds.length > 0 && (
         <AdCreativeModal
           adName={previewCreative.name}
-          accountId={primaryAccountId}
+          accountIds={allAccountIds}
           leads={previewCreative.leads}
           currency={currency}
           onClose={() => setPreviewCreative(null)}
