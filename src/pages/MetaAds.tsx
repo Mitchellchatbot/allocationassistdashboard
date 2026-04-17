@@ -1,4 +1,5 @@
-import { useState } from "react";
+import { useState, useMemo } from "react";
+import { createPortal } from "react-dom";
 import { DashboardLayout } from "@/components/layout/DashboardLayout";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { useMetaLeadsStats, type GroupedStat } from "@/hooks/use-meta-leads-stats";
@@ -11,8 +12,8 @@ import {
 } from "recharts";
 import {
   Users, Megaphone, Globe, Loader2, TrendingUp, DollarSign,
-  Eye, MousePointer, AlertCircle, X, ImageOff, ExternalLink,
-  Repeat2, Hash, Target, Zap, ChevronDown, ChevronUp, Award, KeyRound, CheckCircle2,
+  Eye, MousePointer, AlertCircle, X, ImageOff,
+  Repeat2, Hash, Target, Zap, ChevronDown, ChevronUp, Award, KeyRound, CheckCircle2, Search,
 } from "lucide-react";
 
 // ── Colours ────────────────────────────────────────────────────────────────────
@@ -129,10 +130,10 @@ function AdPreviewDrawer({
   const adsets = data?.adsets ?? [];
   const [tab, setTab] = useState<"ads" | "targeting">("ads");
 
-  return (
+  const drawer = (
     <>
-      <div className="fixed inset-0 z-40 bg-black/30 backdrop-blur-[2px]" onClick={onClose} />
-      <div className="fixed right-0 top-0 z-50 h-full w-[460px] max-w-[95vw] bg-background border-l border-border shadow-2xl flex flex-col">
+      <div className="fixed inset-0 z-[9998] bg-black/40 backdrop-blur-[2px]" onClick={onClose} />
+      <div className="fixed right-0 top-0 z-[9999] h-full w-[480px] max-w-[95vw] bg-background border-l border-border shadow-2xl flex flex-col">
         {/* Header */}
         <div className="flex items-start justify-between gap-3 px-5 py-4 border-b border-border/60 shrink-0">
           <div className="min-w-0">
@@ -300,6 +301,8 @@ function AdPreviewDrawer({
       </div>
     </>
   );
+
+  return createPortal(drawer, document.body);
 }
 
 // ── Token config panel ────────────────────────────────────────────────────────
@@ -351,13 +354,31 @@ function TokenConfigPanel({ onSaved }: { onSaved: () => void }) {
 
 // ── Main page ──────────────────────────────────────────────────────────────────
 
+// Quick-select presets for the Meta API date range
+const META_PRESETS = [
+  { label: "30D",  days: 30 },
+  { label: "90D",  days: 90 },
+  { label: "180D", days: 180 },
+  { label: "1Y",   days: 365 },
+  { label: "All",  days: 730 },
+] as const;
+
 const MetaAds = () => {
   const { dateRange } = useFilters();
   const { data, isLoading: leadsLoading } = useMetaLeadsStats(dateRange);
   const queryClient = useQueryClient();
 
+  // Meta API uses its own date range (independent of global filter) — defaults to last 365 days
+  const [metaDays, setMetaDays] = useState(365);
+  const metaDateRange = useMemo(() => {
+    const to   = new Date();
+    const from = new Date();
+    from.setDate(from.getDate() - metaDays);
+    return { from, to };
+  }, [metaDays]);
+
   const [tokenSet, setTokenSet] = useState(true); // always true — DEFAULT_TOKEN is hardcoded
-  const { data: api, isLoading: apiLoading, error: apiError } = useMetaAdsApi(dateRange);
+  const { data: api, isLoading: apiLoading, error: apiError } = useMetaAdsApi(metaDateRange);
 
   const [previewCampaign, setPreviewCampaign] = useState<{ id: string; name: string } | null>(null);
   const [showAllActions, setShowAllActions]   = useState(false);
@@ -368,8 +389,8 @@ const MetaAds = () => {
     queryClient.invalidateQueries({ queryKey: ["meta-campaign-ads-v2"] });
   }
 
-  const since    = dateRange.from.toISOString().slice(0, 10);
-  const until    = dateRange.to.toISOString().slice(0, 10);
+  const since = metaDateRange.from.toISOString().slice(0, 10);
+  const until = metaDateRange.to.toISOString().slice(0, 10);
   const summary  = api?.summary;
   const currency = summary?.currency ?? "AED";
   const campaigns   = api?.campaigns    ?? [];
@@ -394,7 +415,27 @@ const MetaAds = () => {
     <DashboardLayout title="Meta Ads" subtitle="Live performance from Facebook Marketing API · Lead form data from Supabase">
 
       {/* ══ SECTION 1: LIVE META API DATA ══════════════════════════════════════ */}
-      <SectionLabel>Live Ad Performance · Meta Marketing API</SectionLabel>
+      {/* Meta section header with its own date range */}
+      <div className="flex items-center justify-between mb-3 mt-2">
+        <p className="text-[10px] uppercase tracking-widest font-semibold text-muted-foreground/50">
+          Live Ad Performance · Meta Marketing API
+        </p>
+        <div className="flex gap-0.5">
+          {META_PRESETS.map(p => (
+            <button
+              key={p.label}
+              onClick={() => setMetaDays(p.days)}
+              className={`px-2 py-0.5 rounded text-[9px] font-medium transition-colors ${
+                metaDays === p.days
+                  ? "bg-primary text-white"
+                  : "text-muted-foreground hover:bg-secondary"
+              }`}
+            >
+              {p.label}
+            </button>
+          ))}
+        </div>
+      </div>
 
       {!tokenSet ? (
         <TokenConfigPanel onSaved={handleTokenSaved} />
@@ -600,11 +641,15 @@ const MetaAds = () => {
                     {campaigns.map(c => (
                       <tr key={c.id} className="border-b border-border/30 hover:bg-muted/30 transition-colors">
                         <td className="py-2.5 px-3">
-                          <button onClick={() => setPreviewCampaign({ id: c.id, name: c.name })}
-                            className="flex items-center gap-1.5 text-left hover:text-primary transition-colors group/b">
+                          <button
+                            type="button"
+                            onClick={() => setPreviewCampaign({ id: c.id, name: c.name })}
+                            className="flex items-center gap-1.5 text-left hover:text-primary transition-colors group/b"
+                            title="Click to preview ads"
+                          >
                             <span className={`h-1.5 w-1.5 rounded-full shrink-0 ${c.status === "ACTIVE" ? "bg-success" : "bg-muted-foreground/40"}`} />
                             <span className="text-[11px] font-medium truncate max-w-[180px] group-hover/b:underline underline-offset-2">{c.name}</span>
-                            <ExternalLink className="h-3 w-3 opacity-0 group-hover/b:opacity-40 shrink-0" />
+                            <Search className="h-3 w-3 opacity-0 group-hover/b:opacity-50 shrink-0" />
                           </button>
                         </td>
                         <td className="py-2.5 px-3 text-[10px] text-muted-foreground capitalize">{c.objective.toLowerCase()}</td>
