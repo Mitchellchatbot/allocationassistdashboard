@@ -176,15 +176,36 @@ function actionVal(actions: { action_type: string; value: string }[] | undefined
   return n(actions?.find(a => a.action_type === type)?.value ?? "0");
 }
 
-// Sums all lead-related actions
+// Sums all lead-related actions.
+// Meta uses many different action_type strings depending on ad type and pixel setup.
+// We use a broad match: known exact types + any type containing "lead".
 function sumLeads(actions: { action_type: string; value: string }[] | undefined): number {
   if (!actions) return 0;
-  const LEAD_TYPES = new Set([
-    "lead", "onsite_conversion.lead_grouped",
-    "offsite_conversion.fb_pixel_lead", "leadgen_grouped",
+
+  // Known exact types across all Meta lead ad formats
+  const LEAD_EXACT = new Set([
+    "lead",
+    "leadgen_grouped",
+    "onsite_conversion.lead_grouped",
+    "offsite_conversion.fb_pixel_lead",
+    "omni_lead",
+    "contact",
+    "schedule",
+    "submit_application",
+    "complete_registration",
+    "omni_complete_registration",
+    "onsite_conversion.messaging_conversation_started_7d",
   ]);
+
+  // Phase 1: exact known types
+  const exact = actions
+    .filter(a => LEAD_EXACT.has(a.action_type))
+    .reduce((s, a) => s + n(a.value), 0);
+  if (exact > 0) return exact;
+
+  // Phase 2: any action_type that contains "lead" (catches custom conversions)
   return actions
-    .filter(a => LEAD_TYPES.has(a.action_type))
+    .filter(a => a.action_type.toLowerCase().includes("lead"))
     .reduce((s, a) => s + n(a.value), 0);
 }
 
@@ -197,8 +218,15 @@ function costPerAction(
 
 const ACTION_LABELS: Record<string, string> = {
   lead:                                  "Leads (form)",
-  "onsite_conversion.lead_grouped":      "Leads (on-site)",
+  leadgen_grouped:                       "Leads (lead gen form)",
+  "onsite_conversion.lead_grouped":      "Leads (on-site form)",
   "offsite_conversion.fb_pixel_lead":    "Leads (pixel)",
+  omni_lead:                             "Leads (omni)",
+  contact:                               "Contact",
+  schedule:                              "Appointment Scheduled",
+  submit_application:                    "Applications",
+  complete_registration:                 "Registrations",
+  omni_complete_registration:            "Registrations (omni)",
   landing_page_view:                     "Landing Page Views",
   link_click:                            "Link Clicks",
   purchase:                              "Purchases",
@@ -214,6 +242,7 @@ const ACTION_LABELS: Record<string, string> = {
   like:                                  "Page Likes",
   share:                                 "Shares",
   omni_view_content:                     "Content Views",
+  "onsite_conversion.messaging_conversation_started_7d": "Messaging Conversations",
 };
 
 const PLATFORM_LABELS: Record<string, string> = {
