@@ -116,27 +116,47 @@ export async function zohoPut<T = unknown>(
   return res.json() as Promise<T>;
 }
 
-/** Fetch every page of a Zoho module and return all records. */
+/** Fetch every page of a Zoho module and return all records.
+ *  Pages are fetched in parallel (batches of 5) instead of sequentially,
+ *  cutting load time from ~N×500ms down to ~ceil(N/5)×500ms.
+ */
 export async function zohoFetchAll<T = Record<string, unknown>>(
   module: string,
   fields: string[],
   maxPages = 15
 ): Promise<T[]> {
-  const all: T[] = [];
-  let page = 1;
-  let more = true;
+  const PARAMS = { fields: fields.join(','), per_page: '200' };
 
-  while (more && page <= maxPages) {
-    const data = await zohoGet<{ data?: T[]; info?: { more_records: boolean } }>(
-      module,
-      { fields: fields.join(','), per_page: '200', page: String(page) }
+  // Page 1 first — tells us whether there are more records at all
+  const first = await zohoGet<{ data?: T[]; info?: { more_records: boolean } }>(
+    module, { ...PARAMS, page: '1' }
+  );
+  if (!first.data?.length) return [];
+  if (!first.info?.more_records || maxPages <= 1) return first.data;
+
+  // Fetch remaining pages in parallel batches of 5
+  const BATCH = 5;
+  const all: T[] = [...first.data];
+  let batchStart = 2;
+
+  while (batchStart <= maxPages) {
+    const batchEnd = Math.min(batchStart + BATCH - 1, maxPages);
+    const pages = Array.from({ length: batchEnd - batchStart + 1 }, (_, i) => batchStart + i);
+
+    const results = await Promise.all(
+      pages.map(p =>
+        zohoGet<{ data?: T[]; info?: { more_records: boolean } }>(
+          module, { ...PARAMS, page: String(p) }
+        ).catch(() => ({ data: [] as T[], info: { more_records: false } }))
+      )
     );
 
-    if (!data.data?.length) break;
-
-    all.push(...data.data);
-    more = data.info?.more_records ?? false;
-    page++;
+    let hasMore = false;
+    for (const r of results) {
+      if (r.data?.length) { all.push(...r.data); hasMore = r.info?.more_records ?? false; }
+    }
+    if (!hasMore) break;
+    batchStart += BATCH;
   }
 
   return all;

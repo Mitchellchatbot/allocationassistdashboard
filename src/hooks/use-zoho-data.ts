@@ -904,8 +904,9 @@ export function useZohoData() {
         syncedAt: new Date().toISOString(),
       };
     },
-    staleTime:            55 * 60 * 1000,   // React Query cache matches Supabase cache (1 hr)
-    gcTime:               2 * 60 * 60 * 1000,
+    staleTime:            90 * 60 * 1000,   // 90 min — serve from memory cache longer
+    gcTime:               4 * 60 * 60 * 1000,
+    placeholderData:      (prev: unknown) => prev,  // show last data instantly while refetching
     retry:                1,
     retryDelay:           30_000,
     refetchOnWindowFocus: false,
