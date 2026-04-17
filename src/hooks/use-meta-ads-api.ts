@@ -646,67 +646,83 @@ export function useMetaCampaignAds(campaignId: string | null, since: string, unt
 
 // ── useMetaAdsByName — search ads by name across an account ──────────────────
 // Used when clicking a creative name in the "Top Ad Creatives" list.
+// Does NOT pass a date range — searches all-time so the ad is always found
+// regardless of when it ran.  Stats (leads) come from Supabase instead.
 
-export function useMetaAdsByName(
-  adName: string | null,
-  accountId: string | null,
-  since: string,
-  until: string,
-) {
+const CREATIVE_FIELDS =
+  "id,name,status," +
+  "creative{id,thumbnail_url,image_url,title,body,call_to_action_type," +
+    "object_story_spec{" +
+      "link_data{description,caption,message,call_to_action{type}}," +
+      "video_data{image_url,video_id,title,message,call_to_action{type}}" +
+    "}," +
+    "asset_feed_spec{titles{text},bodies{text}}," +
+    "effective_object_story_id}";
+
+function mapAdCreative(ad: {
+  id: string; name: string; status: string;
+  creative?: {
+    thumbnail_url?: string; image_url?: string; title?: string; body?: string;
+    call_to_action_type?: string; effective_object_story_id?: string;
+    object_story_spec?: {
+      link_data?: { description?: string; message?: string; caption?: string; call_to_action?: { type?: string } };
+      video_data?: { image_url?: string; video_id?: string; title?: string; message?: string; call_to_action?: { type?: string } };
+    };
+    asset_feed_spec?: { titles?: { text: string }[]; bodies?: { text: string }[] };
+  };
+}): MetaAdRow {
+  const cr  = ad.creative ?? {};
+  const oss = cr.object_story_spec;
+  const thumb = cr.thumbnail_url || cr.image_url || oss?.video_data?.image_url;
+  const title = (cr as { title?: string }).title || oss?.link_data?.caption || oss?.link_data?.description || oss?.video_data?.title || cr.asset_feed_spec?.titles?.[0]?.text;
+  const body  = (cr as { body?: string }).body || oss?.link_data?.message || oss?.video_data?.message || cr.asset_feed_spec?.bodies?.[0]?.text;
+  const cta   = (cr as { call_to_action_type?: string }).call_to_action_type || oss?.link_data?.call_to_action?.type || oss?.video_data?.call_to_action?.type;
+  return {
+    id: ad.id, name: ad.name, status: ad.status,
+    creative: {
+      thumbnail_url: thumb, image_url: (cr as { image_url?: string }).image_url,
+      title, body, call_to_action_type: cta,
+      effective_object_story_id: (cr as { effective_object_story_id?: string }).effective_object_story_id,
+      video_id: oss?.video_data?.video_id,
+    },
+    spend: 0, impressions: 0, clicks: 0, ctr: 0, leads: 0,
+  };
+}
+
+export function useMetaAdsByName(adName: string | null, accountId: string | null) {
   return useQuery<MetaAdRow[]>({
-    queryKey: ["meta-ads-by-name", adName, accountId, since, until],
+    queryKey: ["meta-ads-by-name-v2", adName, accountId],
     enabled:  !!adName && !!accountId && !!getMetaToken(),
-    staleTime: 5 * 60 * 1000,
+    staleTime: 10 * 60 * 1000,
     refetchOnWindowFocus: false,
 
     queryFn: async () => {
       if (!adName || !accountId) return [];
-      const TIME_RANGE = JSON.stringify({ since, until });
 
-      const resp = await gql(`${accountId}/ads`, {
-        fields: [
-          "id,name,status",
-          "creative{id,thumbnail_url,image_url,title,body,call_to_action_type," +
-            "object_story_spec{" +
-              "link_data{image_hash,link,description,caption,message,call_to_action{type}}," +
-              "video_data{image_url,video_id,title,message,call_to_action{type}}" +
-            "}," +
-            "asset_feed_spec{titles{text},bodies{text}}," +
-            "effective_object_story_id}",
-          `insights.time_range(${TIME_RANGE}){spend,impressions,clicks,ctr,actions}`,
-        ].join(","),
+      // Strategy 1: API-side name filter (fast, but fails with special chars)
+      const filtered = await gql(`${accountId}/ads`, {
+        fields: CREATIVE_FIELDS,
         filtering: JSON.stringify([{ field: "name", operator: "CONTAIN", value: adName }]),
         limit: "20",
-      }) as { data: {
-        id: string; name: string; status: string;
-        creative?: {
-          thumbnail_url?: string; image_url?: string; title?: string; body?: string;
-          call_to_action_type?: string; effective_object_story_id?: string;
-          object_story_spec?: {
-            link_data?: { description?: string; message?: string; caption?: string; call_to_action?: { type?: string } };
-            video_data?: { image_url?: string; video_id?: string; title?: string; message?: string; call_to_action?: { type?: string } };
-          };
-          asset_feed_spec?: { titles?: { text: string }[]; bodies?: { text: string }[] };
-        };
-        insights?: { data: (Record<string,string> & { actions?: {action_type:string;value:string}[] })[] };
-      }[] };
+      }).catch(() => ({ data: [] })) as { data: unknown[] };
 
-      return (resp.data ?? []).map(ad => {
-        const ins = ad.insights?.data?.[0] ?? {};
-        const cr  = ad.creative ?? {};
-        const oss = cr.object_story_spec;
-        const thumb = cr.thumbnail_url || cr.image_url || oss?.video_data?.image_url;
-        const title = cr.title || oss?.link_data?.caption || oss?.link_data?.description || oss?.video_data?.title || cr.asset_feed_spec?.titles?.[0]?.text;
-        const body  = (cr as { body?: string }).body || oss?.link_data?.message || oss?.video_data?.message || cr.asset_feed_spec?.bodies?.[0]?.text;
-        const cta   = cr.call_to_action_type || oss?.link_data?.call_to_action?.type || oss?.video_data?.call_to_action?.type;
-        const videoId = oss?.video_data?.video_id;
-        return {
-          id: ad.id, name: ad.name, status: ad.status,
-          creative: { thumbnail_url: thumb, image_url: cr.image_url, title, body, call_to_action_type: cta, effective_object_story_id: cr.effective_object_story_id, video_id: videoId },
-          spend: n(ins.spend), impressions: n(ins.impressions), clicks: n(ins.clicks), ctr: n(ins.ctr),
-          leads: sumLeads(ins.actions),
-        };
-      }).sort((a, b) => b.spend - a.spend);
+      if ((filtered.data ?? []).length > 0) {
+        return (filtered.data as Parameters<typeof mapAdCreative>[0][]).map(mapAdCreative);
+      }
+
+      // Strategy 2: fetch all account ads, filter client-side (handles | and other special chars)
+      const all = await gql(`${accountId}/ads`, {
+        fields: CREATIVE_FIELDS,
+        limit: "500",
+      }).catch(() => ({ data: [] })) as { data: unknown[] };
+
+      const term = adName.toLowerCase();
+      const matched = (all.data ?? [] as unknown[]).filter(
+        (a) => typeof (a as { name?: string }).name === "string" &&
+               (a as { name: string }).name.toLowerCase().includes(term)
+      ) as Parameters<typeof mapAdCreative>[0][];
+
+      return matched.map(mapAdCreative);
     },
   });
 }

@@ -381,12 +381,12 @@ function TokenConfigPanel({ onSaved }: { onSaved: () => void }) {
 
 // ── Ad creative preview modal (opened from the "Top Ad Creatives" list) ──────
 function AdCreativeModal({
-  adName, accountId, since, until, currency, onClose,
+  adName, accountId, leads, currency, onClose,
 }: {
-  adName: string; accountId: string; since: string; until: string;
+  adName: string; accountId: string; leads: number;
   currency: string; onClose: () => void;
 }) {
-  const { data: ads = [], isLoading } = useMetaAdsByName(adName, accountId, since, until);
+  const { data: ads = [], isLoading } = useMetaAdsByName(adName, accountId);
 
   const modal = (
     <div
@@ -405,6 +405,9 @@ function AdCreativeModal({
           <div className="min-w-0">
             <p className="text-[9px] uppercase tracking-widest text-muted-foreground font-medium mb-0.5">Ad Creative</p>
             <p className="text-[14px] font-bold leading-tight truncate" title={adName}>{adName}</p>
+            {leads > 0 && (
+              <p className="text-[11px] text-success font-semibold mt-0.5">{leads.toLocaleString()} leads generated</p>
+            )}
           </div>
           <button onClick={onClose} className="h-8 w-8 rounded-full flex items-center justify-center text-muted-foreground hover:bg-muted hover:text-foreground transition-colors shrink-0">
             <X className="h-4 w-4" />
@@ -493,17 +496,16 @@ function AdCreativeModal({
                       )}
                     </div>
 
-                    {/* Stats */}
-                    <div className="grid grid-cols-4 divide-x divide-border/40 border-t border-border/40 bg-muted/20">
+                    {/* Stats — leads count from Supabase (reliable), other stats from Meta */}
+                    <div className="grid grid-cols-2 divide-x divide-border/40 border-t border-border/40 bg-muted/20">
                       {[
-                        { l: "Spend",  v: fmtC(ad.spend, currency),      c: "text-primary" },
-                        { l: "Impr.",  v: fmtN(ad.impressions) },
-                        { l: "CTR",    v: `${ad.ctr.toFixed(2)}%` },
-                        { l: "Leads",  v: ad.leads > 0 ? String(ad.leads) : "—", c: ad.leads > 0 ? "text-success" : "" },
+                        { l: "Leads (form)", v: leads > 0 ? leads.toLocaleString() : "—", c: leads > 0 ? "text-success" : "", note: "from Supabase" },
+                        { l: "Status",       v: ad.status, c: ad.status === "ACTIVE" ? "text-success" : "text-muted-foreground" },
                       ].map(s => (
-                        <div key={s.l} className="flex flex-col items-center py-2.5">
-                          <span className={`text-[14px] font-bold tabular-nums ${s.c ?? ""}`}>{s.v}</span>
+                        <div key={s.l} className="flex flex-col items-center py-3">
+                          <span className={`text-[18px] font-bold tabular-nums ${s.c ?? ""}`}>{s.v}</span>
                           <span className="text-[8px] uppercase tracking-wide text-muted-foreground mt-0.5">{s.l}</span>
+                          {(s as { note?: string }).note && <span className="text-[7px] text-muted-foreground/40 mt-0.5">{(s as { note?: string }).note}</span>}
                         </div>
                       ))}
                     </div>
@@ -607,7 +609,7 @@ const MetaAds = () => {
   const [tokenSet, setTokenSet] = useState(true);
   const { data: api, isLoading: apiLoading, error: apiError } = useMetaAdsApi(metaDateRange);
   const [previewCampaign, setPreviewCampaign] = useState<{ id: string; name: string } | null>(null);
-  const [previewCreative, setPreviewCreative] = useState<string | null>(null);
+  const [previewCreative, setPreviewCreative] = useState<{ name: string; leads: number } | null>(null);
   const [showAllActions, setShowAllActions] = useState(false);
   const primaryAccountId = api?.accounts?.[0]?.id ?? null;
 
@@ -1076,7 +1078,10 @@ const MetaAds = () => {
               )}
               <RankList
                 items={byCreative.slice(0, 15)}
-                onItemClick={primaryAccountId ? (label) => setPreviewCreative(label) : undefined}
+                onItemClick={primaryAccountId ? (label) => {
+                  const stat = byCreative.find(c => c.label === label);
+                  setPreviewCreative({ name: label, leads: stat?.count ?? 0 });
+                } : undefined}
               />
             </CardContent>
           </Card>
@@ -1146,10 +1151,9 @@ const MetaAds = () => {
       {/* Creative preview modal — opened from Top Ad Creatives list */}
       {previewCreative && primaryAccountId && (
         <AdCreativeModal
-          adName={previewCreative}
+          adName={previewCreative.name}
           accountId={primaryAccountId}
-          since={since}
-          until={until}
+          leads={previewCreative.leads}
           currency={currency}
           onClose={() => setPreviewCreative(null)}
         />
