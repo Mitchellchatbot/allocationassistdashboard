@@ -232,7 +232,7 @@ export function useMetaAdsApi(dateRange: { from: Date; to: Date }) {
   const until = dateRange.to.toISOString().slice(0, 10);
 
   return useQuery<MetaAdsApiData>({
-    queryKey:            ["meta-ads-api-v2", since, until],
+    queryKey:            ["meta-ads-api-v3", since, until],
     enabled:             !!TOKEN,
     staleTime:           5 * 60 * 1000,
     refetchOnWindowFocus: false,
@@ -244,9 +244,8 @@ export function useMetaAdsApi(dateRange: { from: Date; to: Date }) {
         limit:  "50",
       }) as { data: { id: string; name: string; account_status: number; currency: string; amount_spent: string }[] };
 
-      const allAccounts   = accountsResp.data ?? [];
-      const activeAccounts = allAccounts.filter(a => a.account_status === 1);
-      const currency       = activeAccounts[0]?.currency ?? allAccounts[0]?.currency ?? "AED";
+      const allAccounts = accountsResp.data ?? [];
+      const currency    = allAccounts[0]?.currency ?? "AED";
 
       const accountsMapped: MetaAccount[] = allAccounts.map(a => ({
         id:          a.id,
@@ -255,7 +254,7 @@ export function useMetaAdsApi(dateRange: { from: Date; to: Date }) {
         amountSpent: n(a.amount_spent),
       }));
 
-      if (activeAccounts.length === 0) {
+      if (allAccounts.length === 0) {
         return {
           accounts: accountsMapped, summary: { spend: 0, impressions: 0, clicks: 0, reach: 0, ctr: 0, cpm: 0, frequency: 0, leads: 0, costPerLead: 0, currency },
           campaigns: [], dailySeries: [], byAge: [], byPlatform: [], byPlacement: [], actions: [],
@@ -263,7 +262,7 @@ export function useMetaAdsApi(dateRange: { from: Date; to: Date }) {
       }
 
       const TIME_RANGE      = JSON.stringify({ since, until });
-      const primaryId       = activeAccounts[0].id;
+      const primaryId       = allAccounts[0].id;
       const INSIGHT_FIELDS  = "spend,impressions,clicks,reach,ctr,cpm,frequency,actions,cost_per_action_type";
       const CAMP_INS_FIELDS = "spend,impressions,clicks,reach,ctr,frequency,actions";
 
@@ -278,14 +277,14 @@ export function useMetaAdsApi(dateRange: { from: Date; to: Date }) {
       ] = await Promise.all([
 
         // 2. Summary insights (all accounts)
-        Promise.all(activeAccounts.map(acc =>
+        Promise.all(allAccounts.map(acc =>
           gql(`${acc.id}/insights`, {
             fields: INSIGHT_FIELDS, time_range: TIME_RANGE, level: "account",
           }).catch(() => ({ data: [] }))
         )),
 
         // 3. Campaigns (all accounts)
-        Promise.all(activeAccounts.map(acc =>
+        Promise.all(allAccounts.map(acc =>
           gql(`${acc.id}/campaigns`, {
             fields: `name,status,objective,daily_budget,insights.time_range(${TIME_RANGE}){${CAMP_INS_FIELDS}}`,
             limit: "200",
