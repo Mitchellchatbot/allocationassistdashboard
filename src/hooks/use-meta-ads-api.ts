@@ -301,7 +301,7 @@ export function useMetaAdsApi(dateRange: { from: Date; to: Date }) {
       }) as { data: { id: string; name: string; account_status: number; currency: string; amount_spent: string }[] };
 
       const allAccounts = accountsResp.data ?? [];
-      const currency    = allAccounts[0]?.currency ?? "AED";
+      const currency    = "AED";
 
       const accountsMapped: MetaAccount[] = allAccounts.map(a => ({
         id:          a.id,
