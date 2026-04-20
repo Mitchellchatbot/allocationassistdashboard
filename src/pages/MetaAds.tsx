@@ -712,8 +712,7 @@ const MetaAds = () => {
 
   const since    = metaDateRange.from.toISOString().slice(0, 10);
   const until    = metaDateRange.to.toISOString().slice(0, 10);
-  const primaryAccountId = api?.accounts?.[0]?.id ?? null;
-  const allAccountIds    = api?.accounts?.map(a => a.id) ?? [];
+  const allAccountIds = api?.accounts?.map(a => a.id) ?? [];
 
   const { data: topAds = [], isLoading: topAdsLoading } = useMetaTopAds(allAccountIds, since, until);
   const summary  = api?.summary;

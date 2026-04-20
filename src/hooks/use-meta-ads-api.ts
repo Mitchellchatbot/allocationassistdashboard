@@ -198,19 +198,14 @@ function actionVal(actions: { action_type: string; value: string }[] | undefined
 function sumLeads(actions: { action_type: string; value: string }[] | undefined): number {
   if (!actions) return 0;
 
-  // Known exact types across all Meta lead ad formats
+  // Only count actual lead form submissions — not messaging, contact, or registration events
+  // which inflate the lead count and deflate CPL incorrectly.
   const LEAD_EXACT = new Set([
     "lead",
     "leadgen_grouped",
     "onsite_conversion.lead_grouped",
     "offsite_conversion.fb_pixel_lead",
     "omni_lead",
-    "contact",
-    "schedule",
-    "submit_application",
-    "complete_registration",
-    "omni_complete_registration",
-    "onsite_conversion.messaging_conversation_started_7d",
   ]);
 
   // Phase 1: exact known types
@@ -306,7 +301,7 @@ export function useMetaAdsApi(dateRange: { from: Date; to: Date }) {
       }) as { data: { id: string; name: string; account_status: number; currency: string; amount_spent: string }[] };
 
       const allAccounts = accountsResp.data ?? [];
-      const currency    = "AED";
+      const currency    = allAccounts[0]?.currency ?? "AED";
 
       const accountsMapped: MetaAccount[] = allAccounts.map(a => ({
         id:          a.id,
