@@ -16,10 +16,34 @@ function clientName(lead: ZohoLead | null) {
   return lead.Full_Name || `${lead.First_Name ?? ""} ${lead.Last_Name ?? ""}`.trim() || "—";
 }
 
+export interface ContractFields {
+  agreementDate:   string;
+  totalFee:        string;
+  stage1Pct:       string;
+  stage1Amount:    string;
+  stage2Pct:       string;
+  stage2Amount:    string;
+  stage2Days:      string;
+  changeOfMindFee: string;
+  changeOfMindVat: string;
+}
+
+export const DEFAULT_FIELDS: ContractFields = {
+  agreementDate:   today(),
+  totalFee:        "42,000",
+  stage1Pct:       "50",
+  stage1Amount:    "21,000",
+  stage2Pct:       "50",
+  stage2Amount:    "21,000",
+  stage2Days:      "45",
+  changeOfMindFee: "10,000",
+  changeOfMindVat: "5",
+};
+
 // ── Rendered contract (matches the PDF exactly) ───────────────────────────────
-function ContractBody({ lead }: { lead: ZohoLead | null }) {
+function ContractBody({ lead, f }: { lead: ZohoLead | null; f: ContractFields }) {
   const name = clientName(lead);
-  const date = today();
+  const date = f.agreementDate || today();
 
   return (
     <div className="contract-body" style={{ fontFamily: "Georgia, 'Times New Roman', serif", fontSize: "11pt", lineHeight: 1.75, color: "#111" }}>
@@ -146,13 +170,13 @@ function ContractBody({ lead }: { lead: ZohoLead | null }) {
         <h2 style={{ fontWeight: "bold", fontSize: "13pt", textDecoration: "underline", margin: "0 0 12px" }}>SCHEDULE 2: FEES AND PAYMENT TERMS</h2>
 
         <h3 style={{ fontWeight: "bold", marginBottom: "6px" }}>1. Fees</h3>
-        <p style={{ marginBottom: "14px" }}>Total charges for the Service: <strong>AED 42,000 (VAT included)</strong></p>
+        <p style={{ marginBottom: "14px" }}>Total charges for the Service: <strong>AED {f.totalFee} (VAT included)</strong></p>
 
         <h3 style={{ fontWeight: "bold", marginBottom: "8px" }}>2. Payment Terms</h3>
         <p style={{ marginBottom: "8px" }}>2.1 The Client shall be invoiced for the Services in 2 stages:</p>
         <ol type="a" style={{ paddingLeft: "32px", marginBottom: "14px" }}>
-          <li style={{ marginBottom: "8px", textAlign: "justify" }}>First 50% payable upon the date of this Agreement. The Client is expected to remit <strong>AED 21,000 (VAT included)</strong>. This is non-refundable as it is for immediate utilisation for the Consultant's internal costs and Client's registration and licensing process with the licensing authorities.</li>
-          <li style={{ marginBottom: "8px", textAlign: "justify" }}>Remaining 50% payable 45 days upon receipt of invoice once the Client sign an employment contract with the prospective hospital. The Client is expected to remit <strong>AED 21,000 (VAT included)</strong>.</li>
+          <li style={{ marginBottom: "8px", textAlign: "justify" }}>First {f.stage1Pct}% payable upon the date of this Agreement. The Client is expected to remit <strong>AED {f.stage1Amount} (VAT included)</strong>. This is non-refundable as it is for immediate utilisation for the Consultant's internal costs and Client's registration and licensing process with the licensing authorities.</li>
+          <li style={{ marginBottom: "8px", textAlign: "justify" }}>Remaining {f.stage2Pct}% payable {f.stage2Days} days upon receipt of invoice once the Client sign an employment contract with the prospective hospital. The Client is expected to remit <strong>AED {f.stage2Amount} (VAT included)</strong>.</li>
         </ol>
 
         <h3 style={{ fontWeight: "bold", marginBottom: "8px" }}>3. Payment Method</h3>
@@ -171,7 +195,7 @@ function ContractBody({ lead }: { lead: ZohoLead | null }) {
         </div>
 
         <h3 style={{ fontWeight: "bold", marginBottom: "8px" }}>4. Change of Mind</h3>
-        <p style={{ marginBottom: "24px", textAlign: "justify" }}>If you change your mind about relocating but do not inform us beforehand, and we have already arranged secured a job offer for you, you will be responsible for paying Allocation Assist 50% of the remaining fee which is 10,000 AED plus 5% VAT.</p>
+        <p style={{ marginBottom: "24px", textAlign: "justify" }}>If you change your mind about relocating but do not inform us beforehand, and we have already arranged secured a job offer for you, you will be responsible for paying Allocation Assist 50% of the remaining fee which is {f.changeOfMindFee} AED plus {f.changeOfMindVat}% VAT.</p>
 
         {/* ── Signatures ── */}
         <p style={{ marginBottom: "14px", fontWeight: "bold" }}>Signed by:</p>
@@ -199,10 +223,15 @@ function ContractBody({ lead }: { lead: ZohoLead | null }) {
 // ── Page ──────────────────────────────────────────────────────────────────────
 const Contracts = () => {
   const { data: zoho } = useZohoData();
-  const [search, setSearch]           = useState("");
+  const [search, setSearch]             = useState("");
   const [selectedLead, setSelectedLead] = useState<ZohoLead | null>(null);
   const [showDropdown, setShowDropdown] = useState(false);
+  const [fields, setFields]             = useState<ContractFields>(DEFAULT_FIELDS);
   const previewRef = useRef<HTMLDivElement>(null);
+
+  function setF(key: keyof ContractFields, val: string) {
+    setFields(f => ({ ...f, [key]: val }));
+  }
 
   const doctorOptions = useMemo(() => {
     if (!zoho?.rawLeads || search.trim().length < 2) return [];
@@ -245,7 +274,32 @@ const Contracts = () => {
   };
 
   return (
-    <DashboardLayout title="Contract Builder" subtitle="Search a doctor to fill in the client details, then print">
+    <DashboardLayout title="Contract Builder" subtitle="Search a doctor, edit fees and dates, then print">
+
+      {/* ── Editable fields strip ── */}
+      <div className="rounded-xl border border-border/50 bg-muted/30 px-4 py-3 mb-5 grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-5 gap-x-4 gap-y-3">
+        {[
+          { label: "Agreement Date",      key: "agreementDate"   as const, type: "text" },
+          { label: "Total Fee (AED)",      key: "totalFee"        as const, type: "text" },
+          { label: "Stage 1 %",           key: "stage1Pct"       as const, type: "text" },
+          { label: "Stage 1 Amount (AED)", key: "stage1Amount"    as const, type: "text" },
+          { label: "Stage 2 %",           key: "stage2Pct"       as const, type: "text" },
+          { label: "Stage 2 Amount (AED)", key: "stage2Amount"    as const, type: "text" },
+          { label: "Stage 2 Days",        key: "stage2Days"      as const, type: "text" },
+          { label: "Change of Mind (AED)", key: "changeOfMindFee" as const, type: "text" },
+          { label: "Change of Mind VAT %", key: "changeOfMindVat" as const, type: "text" },
+        ].map(({ label, key, type }) => (
+          <div key={key}>
+            <p className="text-[9px] uppercase tracking-wide text-muted-foreground font-medium mb-1">{label}</p>
+            <input
+              type={type}
+              value={fields[key]}
+              onChange={e => setF(key, e.target.value)}
+              className="w-full h-7 text-[11px] bg-background border border-border/50 rounded px-2 focus:outline-none focus:ring-1 focus:ring-primary"
+            />
+          </div>
+        ))}
+      </div>
 
       {/* ── Top bar: search + print ── */}
       <div className="flex flex-col sm:flex-row gap-3 items-start sm:items-center mb-5">
@@ -314,7 +368,7 @@ const Contracts = () => {
         style={{ maxWidth: "860px", margin: "0 auto" }}
       >
         <div ref={previewRef}>
-          <ContractBody lead={selectedLead} />
+          <ContractBody lead={selectedLead} f={fields} />
         </div>
       </div>
 
