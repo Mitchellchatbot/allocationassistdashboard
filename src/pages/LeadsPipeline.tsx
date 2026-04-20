@@ -383,6 +383,26 @@ const LeadsPipeline = () => {
                 );
               })}
 
+              {/* Stage shortcut pills */}
+              {([
+                { status: "High Priority Follow up", label: "High Priority", className: "border-destructive/30 text-destructive bg-destructive/10", icon: AlertTriangle },
+                { status: "Contact in Future",       label: "Contact in Future", className: "border-info/30 text-info bg-info/10",               icon: Clock },
+              ] as const).map(({ status, label, className, icon: Icon }) => {
+                const active = filters.stage === status;
+                return (
+                  <button
+                    key={status}
+                    onClick={() => setFilter("stage", active ? "" : status)}
+                    className={`h-7 inline-flex items-center gap-1 rounded-md border px-2 text-[10px] font-medium transition-colors ${
+                      active ? className : "border-border/50 text-muted-foreground bg-secondary/50 hover:bg-secondary"
+                    }`}
+                  >
+                    <Icon className="h-3 w-3" />
+                    {label}
+                  </button>
+                );
+              })}
+
               {/* Clear all */}
               {hasActiveFilters && (
                 <button
