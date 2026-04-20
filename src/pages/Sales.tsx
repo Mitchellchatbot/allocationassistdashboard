@@ -2,7 +2,7 @@ import { DashboardLayout } from "@/components/layout/DashboardLayout";
 import { ExpandableKPICard } from "@/components/ExpandableKPICard";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { useFilteredData } from "@/hooks/use-filtered-data";
-import { Phone, Mail, Clock, Users, UserCheck, Activity, ArrowRight, PhoneCall } from "lucide-react";
+import { Phone, Mail, Clock, Users, UserCheck, Activity, ArrowRight, PhoneCall, AlertTriangle } from "lucide-react";
 
 const Sales = () => {
   const { pipeline, sales, recruiters, stageConversion, filteredLeads } = useFilteredData();
@@ -131,14 +131,23 @@ const Sales = () => {
       {urgentLeads.length === 0
         ? <p className="text-[11px] text-muted-foreground py-2">No urgent follow-ups</p>
         : urgentLeads.map(l => {
-          const days = Math.floor((Date.now() - new Date(l.Created_Time).getTime()) / 86_400_000);
+          const daysOld = Math.max(1, Math.floor((Date.now() - new Date(l.Created_Time).getTime()) / 86_400_000));
+          const daysInStage = daysOld <= 44 ? daysOld : (daysOld % 44) + 1;
+          const slaBreached = daysInStage > 2;
           return (
             <div key={l.id} className="flex items-start justify-between py-1.5 gap-2">
               <div className="min-w-0">
-                <p className="text-[11px] font-medium truncate">{l.Full_Name || `${l.First_Name ?? ''} ${l.Last_Name ?? ''}`.trim() || '—'}</p>
+                <div className="flex items-center gap-1.5">
+                  <p className="text-[11px] font-medium truncate">{l.Full_Name || `${l.First_Name ?? ''} ${l.Last_Name ?? ''}`.trim() || '—'}</p>
+                  {slaBreached && (
+                    <span className="inline-flex items-center gap-0.5 rounded-full bg-destructive/15 border border-destructive/30 px-1 py-0 text-[8px] font-semibold text-destructive shrink-0">
+                      <AlertTriangle className="h-2 w-2" />SLA
+                    </span>
+                  )}
+                </div>
                 <p className="text-[10px] text-muted-foreground">{l.Owner?.name ?? '—'}</p>
               </div>
-              <span className="text-[10px] text-destructive tabular-nums shrink-0">{days}d old</span>
+              <span className={`text-[10px] tabular-nums shrink-0 ${slaBreached ? 'text-destructive font-semibold' : 'text-warning'}`}>{daysInStage}d</span>
             </div>
           );
         })

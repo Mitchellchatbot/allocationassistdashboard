@@ -48,6 +48,7 @@ function getDestination(lead: {
 }
 
 function getStatus(leadStatus: string, daysInStage: number): Doctor['status'] {
+  if (leadStatus === 'High Priority Follow up' && daysInStage > 2) return 'delayed';
   if (leadStatus === 'High Priority Follow up') return 'at-risk';
   if (daysInStage > 30) return 'delayed';
   if (daysInStage > 18) return 'at-risk';

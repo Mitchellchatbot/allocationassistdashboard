@@ -41,6 +41,7 @@ function mapLead(l: ZohoLead): Doctor {
   }
 
   const status: Doctor["status"] =
+    l.Lead_Status === "High Priority Follow up" && daysInStage > 2 ? "delayed" :
     l.Lead_Status === "High Priority Follow up" ? "at-risk" :
     daysInStage > 30 ? "delayed" :
     daysInStage > 18 ? "at-risk" : "on-track";
@@ -85,6 +86,7 @@ function getBadge(l: ZohoLead): Doctor["status"] {
     (Date.now() - new Date(l.Created_Time).getTime()) / 86_400_000
   ));
   const daysInStage = daysOld <= 44 ? daysOld : (daysOld % 44) + 1;
+  if (l.Lead_Status === "High Priority Follow up" && daysInStage > 2) return "delayed";
   if (l.Lead_Status === "High Priority Follow up") return "at-risk";
   if (daysInStage > 30) return "delayed";
   if (daysInStage > 18) return "at-risk";
