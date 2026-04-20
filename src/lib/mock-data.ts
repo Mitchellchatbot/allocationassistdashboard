@@ -70,12 +70,12 @@ export const salesMetrics = {
 };
 
 export const topRecruiters = [
-  { name: "Sarah Ahmed", role: "Senior Recruiter", doctors: 24, placements: 14, revenue: "$186K", region: "UAE", score: 96 },
+  { name: "Sarah Ahmed", role: "Senior Sales Consultant", doctors: 24, placements: 14, revenue: "$186K", region: "UAE", score: 96 },
   { name: "James Mitchell", role: "Account Manager", doctors: 18, placements: 11, revenue: "$143K", region: "KSA", score: 89 },
-  { name: "Priya Patel", role: "Recruiter", doctors: 16, placements: 9, revenue: "$118K", region: "UAE", score: 84 },
-  { name: "Omar Hassan", role: "Senior Recruiter", doctors: 14, placements: 8, revenue: "$96K", region: "Qatar", score: 78 },
-  { name: "Lisa Chen", role: "Recruiter", doctors: 11, placements: 6, revenue: "$73K", region: "UAE", score: 71 },
-  { name: "David Kim", role: "Junior Recruiter", doctors: 8, placements: 4, revenue: "$48K", region: "KSA", score: 62 },
+  { name: "Priya Patel", role: "Sales Consultant", doctors: 16, placements: 9, revenue: "$118K", region: "UAE", score: 84 },
+  { name: "Omar Hassan", role: "Senior Sales Consultant", doctors: 14, placements: 8, revenue: "$96K", region: "Qatar", score: 78 },
+  { name: "Lisa Chen", role: "Sales Consultant", doctors: 11, placements: 6, revenue: "$73K", region: "UAE", score: 71 },
+  { name: "David Kim", role: "Junior Sales Consultant", doctors: 8, placements: 4, revenue: "$48K", region: "KSA", score: 62 },
 ];
 
 export const stageConversion = [

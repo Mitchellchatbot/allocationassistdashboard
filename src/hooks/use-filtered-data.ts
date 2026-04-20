@@ -75,7 +75,7 @@ export function useFilteredData() {
 
     const kpis      = agg.kpis.map(k => ({ ...k, period: k.period ?? timeLabel }));
     const finance   = agg.financeMetrics.map(f => ({ ...f, period: f.period ?? timeLabel }));
-    const recruiters = agg.recruiters.map(r => ({ ...r, role: 'Recruiter' }));
+    const recruiters = agg.recruiters.map(r => ({ ...r, role: 'Sales Consultant' }));
 
     const regions:          Array<{ region: string; doctors: number; placements: number; hospitals: number }> = [];
     const costVsConv:       Array<{ month: string; cost: number; placements: number }> = [];

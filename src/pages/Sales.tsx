@@ -23,7 +23,7 @@ const Sales = () => {
   const totalLeadsContent = (
     <div className="space-y-2">
       {topRecruiters.length === 0
-        ? <p className="text-[11px] text-muted-foreground py-2">No recruiter data</p>
+        ? <p className="text-[11px] text-muted-foreground py-2">No sales consultant data</p>
         : topRecruiters.map((r, i) => (
           <div key={r.name}>
             <div className="flex items-center justify-between mb-1">
@@ -69,7 +69,7 @@ const Sales = () => {
   const conversionRateContent = (
     <div className="space-y-2">
       {recruiters.length === 0
-        ? <p className="text-[11px] text-muted-foreground py-2">No recruiter data</p>
+        ? <p className="text-[11px] text-muted-foreground py-2">No sales consultant data</p>
         : recruiters.slice(0, 5).map(r => {
           const rate = (r as { conversionRate?: number }).conversionRate ?? 0;
           const barColor = rate >= 40 ? 'bg-success' : rate >= 20 ? 'bg-primary' : 'bg-warning';
@@ -101,7 +101,7 @@ const Sales = () => {
   const contactRateContent = (
     <div className="space-y-2">
       {recruiters.length === 0
-        ? <p className="text-[11px] text-muted-foreground py-2">No recruiter data</p>
+        ? <p className="text-[11px] text-muted-foreground py-2">No sales consultant data</p>
         : recruiters.slice(0, 5).map(r => {
           const rate = (r as { contactRate?: number }).contactRate ?? 0;
           const barColor = rate >= 70 ? 'bg-success' : rate >= 40 ? 'bg-primary' : 'bg-warning';
@@ -298,7 +298,7 @@ const Sales = () => {
       <Card className="shadow-sm border-border/50">
         <CardHeader className="pb-2 pt-4 px-5">
           <div className="flex items-center justify-between">
-            <CardTitle className="text-[13px] font-semibold text-foreground">Recruiter Performance</CardTitle>
+            <CardTitle className="text-[13px] font-semibold text-foreground">Sales Consultant Performance</CardTitle>
             <div className="flex items-center gap-1 text-[10px] text-muted-foreground">
               <Users className="h-3 w-3" />
               {recruiters.length} active
@@ -309,7 +309,7 @@ const Sales = () => {
           <div className="space-y-2">
             {/* Header */}
             <div className="grid grid-cols-[1fr_70px_60px_65px_65px] gap-3 px-3 pb-1 border-b border-border/40">
-              <span className="text-[10px] font-medium text-muted-foreground uppercase tracking-wide">Recruiter</span>
+              <span className="text-[10px] font-medium text-muted-foreground uppercase tracking-wide">Sales Consultant</span>
               <span className="text-[10px] font-medium text-muted-foreground uppercase tracking-wide text-right">Leads</span>
               <span className="text-[10px] font-medium text-muted-foreground uppercase tracking-wide text-right">Contacted</span>
               <span className="text-[10px] font-medium text-muted-foreground uppercase tracking-wide text-right hidden md:block">Contact %</span>

@@ -45,13 +45,13 @@ const TeamPerformance = () => {
   }));
 
   return (
-    <DashboardLayout title="Team Performance" subtitle="See how each recruiter is performing and track active campaigns">
+    <DashboardLayout title="Team Performance" subtitle="See how each sales consultant is performing and track active campaigns">
 
       {/* ── Recruiter table ─────────────────────────────────────────── */}
       <Card className="mb-5 shadow-sm border-border/50">
         <CardHeader className="pb-1 pt-4 px-4">
           <CardTitle className="text-[12px] font-medium text-muted-foreground uppercase tracking-wide">
-            Top Performing Recruiters
+            Top Performing Sales Consultants
           </CardTitle>
         </CardHeader>
         <CardContent className="px-4 pb-4">

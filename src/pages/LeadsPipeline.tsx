@@ -419,7 +419,7 @@ const LeadsPipeline = () => {
                       <TableHead className="text-[10px] uppercase tracking-wide h-8">Current Step (click to change)</TableHead>
                       <TableHead className="text-[10px] uppercase tracking-wide h-8 hidden md:table-cell">From → To</TableHead>
                       <TableHead className="text-[10px] uppercase tracking-wide h-8 hidden lg:table-cell">License Type</TableHead>
-                      <TableHead className="text-[10px] uppercase tracking-wide h-8 hidden lg:table-cell">Recruiter</TableHead>
+                      <TableHead className="text-[10px] uppercase tracking-wide h-8 hidden lg:table-cell">Sales Consultant</TableHead>
                       <TableHead className="text-[10px] uppercase tracking-wide h-8 text-right">Days in Step</TableHead>
                       <TableHead className="text-[10px] uppercase tracking-wide h-8">Status</TableHead>
                     </TableRow>
