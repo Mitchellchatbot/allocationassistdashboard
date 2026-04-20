@@ -35,16 +35,12 @@ const Marketing = () => {
     const leadsByChannel:        Record<string, number> = {};
     const activeByChannel:       Record<string, number> = {};
     const contactedByChannel:    Record<string, number> = {};
+    const qualifiedByChannel:    Record<string, number> = {};
     const convertedByChannel:    Record<string, number> = {};
 
     const activeStatuses = new Set([
       'Not Contacted', 'Attempted to Contact', 'Initial Sales Call Completed',
       'Contact in Future', 'High Priority Follow up',
-    ]);
-    const convertedStatuses = new Set([
-      'Initial Sales Call Completed',
-      'Contact in Future',
-      'High Priority Follow up',
     ]);
 
     for (const l of recentLeads) {
@@ -56,7 +52,10 @@ const Marketing = () => {
           contactedByChannel[ch] = (contactedByChannel[ch] ?? 0) + 1;
         }
       }
-      if (convertedStatuses.has(l.Lead_Status)) {
+      if (l.Lead_Status === 'Initial Sales Call Completed') {
+        qualifiedByChannel[ch] = (qualifiedByChannel[ch] ?? 0) + 1;
+      }
+      if (l.Lead_Status === 'Contact in Future' || l.Lead_Status === 'High Priority Follow up') {
         convertedByChannel[ch] = (convertedByChannel[ch] ?? 0) + 1;
       }
     }
@@ -64,13 +63,15 @@ const Marketing = () => {
     return Object.entries(leadsByChannel)
       .sort((a, b) => b[1] - a[1])
       .map(([channel, doctors]) => {
-        const active       = activeByChannel[channel] ?? 0;
-        const contacted    = contactedByChannel[channel] ?? 0;
-        const converted    = convertedByChannel[channel] ?? 0;
-        const uncontacted  = active - contacted;
+        const active         = activeByChannel[channel] ?? 0;
+        const contacted      = contactedByChannel[channel] ?? 0;
+        const qualified      = qualifiedByChannel[channel] ?? 0;
+        const converted      = convertedByChannel[channel] ?? 0;
+        const uncontacted    = active - contacted;
         const contactRate    = active > 0 ? Math.round((contacted / active) * 100) : 0;
+        const qualifiedRate  = doctors > 0 ? Math.round((qualified / doctors) * 100) : 0;
         const conversionRate = doctors > 0 ? Math.round((converted / doctors) * 100) : 0;
-        return { channel, doctors, contacted, uncontacted, contactRate, conversionRate };
+        return { channel, doctors, contacted, uncontacted, qualified, converted, contactRate, qualifiedRate, conversionRate };
       });
   }, [zoho?.rawLeads, dateRange]);
 
@@ -157,8 +158,9 @@ const Marketing = () => {
                 {isSelected && <X className="h-3 w-3 text-primary ml-auto shrink-0" />}
               </div>
               <p className="text-lg font-semibold tabular-nums">{ch.doctors}</p>
-              <p className="text-[10px] text-muted-foreground">{ch.contactRate}% contacted</p>
-              <p className="text-[10px] text-primary/70">{ch.converted} converted ({ch.conversionRate}%)</p>
+              <p className="text-[10px] text-muted-foreground">{ch.contacted} contacted ({ch.contactRate}%)</p>
+              <p className="text-[10px] text-primary/60">{ch.qualified} qualified ({ch.qualifiedRate}%)</p>
+              <p className="text-[10px] text-primary/90">{ch.converted} converted ({ch.conversionRate}%)</p>
             </button>
           );
         })}
@@ -381,8 +383,8 @@ const Marketing = () => {
                   <TableHead className="text-[10px] uppercase tracking-wide h-8">Channel</TableHead>
                   <TableHead className="text-[10px] uppercase tracking-wide h-8 text-right">Doctors</TableHead>
                   <TableHead className="text-[10px] uppercase tracking-wide h-8 text-right">Contacted</TableHead>
-                  <TableHead className="text-[10px] uppercase tracking-wide h-8 text-right">Contact Rate</TableHead>
-                  <TableHead className="text-[10px] uppercase tracking-wide h-8 text-right">Conv. Rate</TableHead>
+                  <TableHead className="text-[10px] uppercase tracking-wide h-8 text-right">Qualified</TableHead>
+                  <TableHead className="text-[10px] uppercase tracking-wide h-8 text-right">Converted</TableHead>
                 </TableRow>
               </TableHeader>
               <TableBody>
@@ -395,23 +397,30 @@ const Marketing = () => {
                       </div>
                     </TableCell>
                     <TableCell className="text-[12px] text-right py-2.5 tabular-nums">{ch.doctors}</TableCell>
-                    <TableCell className="text-[12px] text-right py-2.5 tabular-nums">{ch.contacted}</TableCell>
                     <TableCell className="text-right py-2.5">
-                      <span className={`text-[12px] font-semibold tabular-nums ${
+                      <span className={`text-[12px] tabular-nums ${
                         ch.contactRate >= 70 ? 'text-success' :
                         ch.contactRate >= 40 ? 'text-primary' :
                         'text-warning'
                       }`}>
-                        {ch.contactRate}%
+                        <span className="font-semibold">{ch.contacted}</span>
+                        <span className="text-[10px] font-normal ml-1 opacity-70">({ch.contactRate}%)</span>
                       </span>
                     </TableCell>
                     <TableCell className="text-right py-2.5">
-                      <span className={`text-[12px] font-semibold tabular-nums ${
+                      <span className="text-[12px] tabular-nums text-primary/80">
+                        <span className="font-semibold">{ch.qualified}</span>
+                        <span className="text-[10px] font-normal ml-1 opacity-70">({ch.qualifiedRate}%)</span>
+                      </span>
+                    </TableCell>
+                    <TableCell className="text-right py-2.5">
+                      <span className={`text-[12px] tabular-nums ${
                         ch.conversionRate >= 40 ? 'text-success' :
                         ch.conversionRate >= 20 ? 'text-primary' :
                         'text-warning'
                       }`}>
-                        {ch.conversionRate}%
+                        <span className="font-semibold">{ch.converted}</span>
+                        <span className="text-[10px] font-normal ml-1 opacity-70">({ch.conversionRate}%)</span>
                       </span>
                     </TableCell>
                   </TableRow>
