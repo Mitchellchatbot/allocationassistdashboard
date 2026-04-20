@@ -6,6 +6,7 @@ import { Toaster } from "@/components/ui/toaster";
 import { TooltipProvider } from "@/components/ui/tooltip";
 import { FilterProvider } from "@/lib/FilterProvider";
 import { ProtectedRoute } from "@/components/ProtectedRoute";
+import { AIPageContextProvider } from "@/lib/ai-page-context";
 
 // Login stays eagerly loaded — it's the first thing unauthenticated users see
 import Login from "./pages/Login";
@@ -40,6 +41,7 @@ function PageSkeleton() {
 const App = () => (
   <QueryClientProvider client={queryClient}>
     <TooltipProvider>
+      <AIPageContextProvider>
       <FilterProvider>
         <Toaster />
         <Sonner />
@@ -68,6 +70,7 @@ const App = () => (
           </Suspense>
         </BrowserRouter>
       </FilterProvider>
+      </AIPageContextProvider>
     </TooltipProvider>
   </QueryClientProvider>
 );

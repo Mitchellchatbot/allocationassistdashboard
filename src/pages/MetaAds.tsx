@@ -1,4 +1,5 @@
-import { useState, useMemo } from "react";
+import { useState, useMemo, useEffect } from "react";
+import { useSetAIPageContext } from "@/lib/ai-page-context";
 import { createPortal } from "react-dom";
 import { DashboardLayout } from "@/components/layout/DashboardLayout";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
@@ -716,7 +717,7 @@ const MetaAds = () => {
 
   const { data: topAds = [], isLoading: topAdsLoading } = useMetaTopAds(allAccountIds, since, until);
   const summary  = api?.summary;
-  const currency = summary?.currency ?? "PKR";
+  const currency = summary?.currency ?? "AED";
   const campaigns    = api?.campaigns    ?? [];
   const dailySeries  = api?.dailySeries  ?? [];
   const byAge        = api?.byAge        ?? [];
@@ -724,6 +725,38 @@ const MetaAds = () => {
   const byPlacement  = api?.byPlacement  ?? [];
   const actions      = api?.actions      ?? [];
   const visibleActions = showAllActions ? actions : actions.slice(0, 8);
+
+  // Register live Meta Ads data for the AI assistant
+  useSetAIPageContext("Meta Ads", summary ? {
+    spend:       summary.spend,
+    impressions: summary.impressions,
+    clicks:      summary.clicks,
+    reach:       summary.reach,
+    leads:       summary.leads,
+    costPerLead: summary.costPerLead,
+    ctr:         summary.ctr,
+    frequency:   summary.frequency,
+    cpm:         summary.cpm,
+    currency:    "AED",
+    dateRange:   `${since} → ${until}`,
+    campaigns: campaigns.slice(0, 10).map(c => ({
+      name: c.name, status: c.status, spend: c.spend,
+      leads: c.leads, impressions: c.impressions, ctr: c.ctr,
+    })),
+    topAds: topAds.slice(0, 8).map(a => ({
+      name: a.name, status: a.status, leads: a.leads,
+      spend: a.spend, impressions: a.impressions, ctr: a.ctr,
+    })),
+    byPlatform: byPlatform.slice(0, 5).map(p => ({
+      platform: p.platform, spend: p.spend, impressions: p.impressions,
+    })),
+    byAge: byAge.slice(0, 8),
+    supabaseLeads: {
+      total:      data?.total   ?? 0,
+      withUtm:    data?.withUtm ?? 0,
+      trackedPct: data?.total ? Math.round(((data?.withUtm ?? 0) / data.total) * 100) : 0,
+    },
+  } : undefined);
 
   // Supabase
   const total        = data?.total        ?? 0;

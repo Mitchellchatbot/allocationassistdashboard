@@ -9,6 +9,7 @@ import { DateRangePicker } from "@/components/DateRangePicker";
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
 import { useFilters } from "@/lib/filters";
+import { useAIPageContext } from "@/lib/ai-page-context";
 import { useFilteredData } from "@/hooks/use-filtered-data";
 import { useState, useEffect, useRef, useCallback, useMemo, KeyboardEvent } from "react";
 import { Link, useLocation } from "react-router-dom";
@@ -92,6 +93,7 @@ export function DashboardLayout({ children, title, subtitle }: DashboardLayoutPr
   const inputRef = useRef<HTMLInputElement>(null);
   const location = useLocation();
   const currentPath = location.pathname;
+  const { pageData } = useAIPageContext();
   const breadcrumbLabel = breadcrumbMap[currentPath] || title;
   const { data: zoho } = useZohoData();
   const syncedAt = zoho?.syncedAt;
@@ -203,7 +205,11 @@ export function DashboardLayout({ children, title, subtitle }: DashboardLayoutPr
           'Authorization': `Bearer ${SUPABASE_ANON_KEY}`,
           'Content-Type':  'application/json',
         },
-        body: JSON.stringify({ messages: apiMessages }),
+        body: JSON.stringify({
+          messages:    apiMessages,
+          currentPage: currentPath,
+          pageData:    pageData?.data ?? null,
+        }),
       });
 
       if (!res.ok || !res.body) throw new Error('Request failed');
@@ -356,7 +362,9 @@ export function DashboardLayout({ children, title, subtitle }: DashboardLayoutPr
           </div>
 
           <main className="flex-1 overflow-auto px-4 lg:px-6 pb-6 pt-5">
-            <PageTransition>{children}</PageTransition>
+            <div className="max-w-[1400px] mx-auto">
+              <PageTransition>{children}</PageTransition>
+            </div>
           </main>
         </div>
 
@@ -505,6 +513,12 @@ export function DashboardLayout({ children, title, subtitle }: DashboardLayoutPr
                                       ? <code className="block bg-muted rounded-lg px-3 py-2 text-[12px] font-mono text-foreground my-2 overflow-x-auto">{children}</code>
                                       : <code className="bg-muted rounded px-1.5 py-0.5 text-[11px] font-mono text-primary">{children}</code>;
                                   },
+                                  table:   ({ children }) => <div className="overflow-x-auto my-2"><table className="w-full border-collapse text-[11px]">{children}</table></div>,
+                                  thead:   ({ children }) => <thead className="bg-muted/50">{children}</thead>,
+                                  tbody:   ({ children }) => <tbody>{children}</tbody>,
+                                  tr:      ({ children }) => <tr className="border-b border-border/40 last:border-0">{children}</tr>,
+                                  th:      ({ children }) => <th className="text-left px-2 py-1.5 text-[10px] font-semibold text-muted-foreground uppercase tracking-wide whitespace-nowrap">{children}</th>,
+                                  td:      ({ children }) => <td className="px-2 py-1.5 text-[11px] text-foreground">{children}</td>,
                                   blockquote: ({ children }) => <blockquote className="border-l-2 border-primary/40 pl-3 italic text-foreground/70 my-2">{children}</blockquote>,
                                   hr: () => <hr className="border-border/40 my-3" />,
                                 }}
