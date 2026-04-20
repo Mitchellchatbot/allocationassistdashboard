@@ -6,6 +6,8 @@ import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover
 import { useZohoData, type ZohoLead } from "@/hooks/use-zoho-data";
 import { Printer, Search, FileText } from "lucide-react";
 import logoSrc from "@/assets/logo.png";
+import signatureSrc from "@/assets/signature-emilie.png";
+import stampSrc from "@/assets/stamp-allocation.png";
 
 function today() {
   return new Date().toLocaleDateString("en-GB", { day: "numeric", month: "long", year: "numeric" });
@@ -203,7 +205,11 @@ function ContractBody({ lead, f }: { lead: ZohoLead | null; f: ContractFields })
           {/* Consultant */}
           <div style={{ flex: 1 }}>
             <p style={{ fontWeight: "bold", marginBottom: "8px" }}>THE CONSULTANT</p>
-            <div style={{ borderBottom: "1px solid #333", marginBottom: "6px", height: "48px" }} />
+            <div style={{ position: "relative", height: "72px", marginBottom: "6px" }}>
+              <img src={signatureSrc} alt="Signature" style={{ position: "absolute", bottom: "4px", left: "0", height: "56px", objectFit: "contain" }} />
+              <img src={stampSrc} alt="Company Stamp" style={{ position: "absolute", bottom: "0", right: "0", height: "68px", objectFit: "contain", opacity: 0.85 }} />
+              <div style={{ position: "absolute", bottom: "0", left: "0", right: "0", borderBottom: "1px solid #333" }} />
+            </div>
             <p style={{ fontWeight: "bold", marginBottom: "2px" }}>Emilie Davies</p>
             <p style={{ color: "#555" }}>Allocation Assist DMCC CEO</p>
           </div>
