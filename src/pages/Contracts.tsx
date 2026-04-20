@@ -1,168 +1,209 @@
-import { useState, useMemo, useEffect, useRef } from "react";
+import { useState, useMemo, useRef } from "react";
 import { DashboardLayout } from "@/components/layout/DashboardLayout";
-import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
 import { useZohoData, type ZohoLead } from "@/hooks/use-zoho-data";
-import {
-  Printer, Plus, Trash2, Search, FileText, Save, RotateCcw, Copy, Check,
-} from "lucide-react";
+import { Printer, Search, FileText } from "lucide-react";
+import logoSrc from "@/assets/logo.png";
 
-// ── Available Zoho fields for mapping ────────────────────────────────────────
-
-const ZOHO_FIELD_OPTIONS = [
-  { value: "_today",                           label: "Today's Date" },
-  { value: "Full_Name",                        label: "Full Name" },
-  { value: "First_Name",                       label: "First Name" },
-  { value: "Last_Name",                        label: "Last Name" },
-  { value: "Specialty",                        label: "Specialty" },
-  { value: "Country_of_Specialty_training",    label: "Country of Training" },
-  { value: "Has_DHA",                          label: "DHA License" },
-  { value: "Has_DOH",                          label: "DOH License" },
-  { value: "Has_MOH",                          label: "MOH License" },
-  { value: "License",                          label: "License" },
-  { value: "Recruiter",                        label: "Sales Consultant" },
-  { value: "Owner.name",                       label: "Owner / Assigned Sales Consultant" },
-  { value: "Lead_Status",                      label: "Lead Status" },
-  { value: "Lead_Source",                      label: "Lead Source" },
-  { value: "Prime_Classification",             label: "Classification" },
-  { value: "Age",                              label: "Age" },
-];
-
-// ── Types ─────────────────────────────────────────────────────────────────────
-
-interface FieldMapping {
-  id:          string;
-  placeholder: string;  // e.g. {{doctor_name}}
-  zohoField:   string;  // e.g. Full_Name
-  staticValue: string;  // used only when zohoField === "_static"
+function today() {
+  return new Date().toLocaleDateString("en-GB", { day: "numeric", month: "long", year: "numeric" });
 }
 
-// ── Defaults ──────────────────────────────────────────────────────────────────
-
-const DEFAULT_TEMPLATE = `EMPLOYMENT AGREEMENT
-
-This Employment Agreement ("Agreement") is entered into on {{date}} between Allocation Assist ("Company") and {{doctor_name}} ("Doctor").
-
-────────────────────────────────────────
-POSITION DETAILS
-────────────────────────────────────────
-Specialty:              {{specialty}}
-Classification:         {{classification}}
-Country of Training:    {{training_country}}
-
-────────────────────────────────────────
-LICENSING
-────────────────────────────────────────
-DHA License:   {{dha_status}}
-DOH License:   {{doh_status}}
-MOH License:   {{moh_status}}
-
-────────────────────────────────────────
-ASSIGNED RECRUITER
-────────────────────────────────────────
-{{recruiter}}
-
-────────────────────────────────────────
-TERMS
-────────────────────────────────────────
-This agreement is subject to all applicable laws and regulations governing employment in the UAE. Both parties agree to the terms and conditions outlined herein.
-
-────────────────────────────────────────
-SIGNATURES
-────────────────────────────────────────
-
-Doctor:                                    Date: ___________
-{{doctor_name}}
-
-Company Representative:                    Date: ___________
-Allocation Assist`;
-
-const DEFAULT_MAPPINGS: FieldMapping[] = [
-  { id: "1", placeholder: "{{date}}",            zohoField: "_today",                        staticValue: "" },
-  { id: "2", placeholder: "{{doctor_name}}",     zohoField: "Full_Name",                     staticValue: "" },
-  { id: "3", placeholder: "{{specialty}}",       zohoField: "Specialty",                     staticValue: "" },
-  { id: "4", placeholder: "{{classification}}", zohoField: "Prime_Classification",           staticValue: "" },
-  { id: "5", placeholder: "{{training_country}}",zohoField: "Country_of_Specialty_training", staticValue: "" },
-  { id: "6", placeholder: "{{dha_status}}",      zohoField: "Has_DHA",                       staticValue: "" },
-  { id: "7", placeholder: "{{doh_status}}",      zohoField: "Has_DOH",                       staticValue: "" },
-  { id: "8", placeholder: "{{moh_status}}",      zohoField: "Has_MOH",                       staticValue: "" },
-  { id: "9", placeholder: "{{recruiter}}",       zohoField: "Recruiter",                     staticValue: "" },
-];
-
-const STORAGE_KEY = "contract-builder-v1";
-
-// ── Helpers ───────────────────────────────────────────────────────────────────
-
-function getLeadField(lead: ZohoLead, fieldPath: string, staticValue: string): string {
-  if (fieldPath === "_today") {
-    return new Date().toLocaleDateString("en-GB", { day: "numeric", month: "long", year: "numeric" });
-  }
-  if (fieldPath === "_static") return staticValue || "—";
-
-  // Nested path support: "Owner.name"
-  const parts = fieldPath.split(".");
-  let val: unknown = lead;
-  for (const part of parts) {
-    if (val == null || typeof val !== "object") return "—";
-    val = (val as Record<string, unknown>)[part];
-  }
-  if (val == null || val === "" || val === "No") return "—";
-  return String(val);
+function clientName(lead: ZohoLead | null) {
+  if (!lead) return "___________________________";
+  return lead.Full_Name || `${lead.First_Name ?? ""} ${lead.Last_Name ?? ""}`.trim() || "—";
 }
 
-function escapeRegex(s: string) {
-  return s.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
-}
+// ── Rendered contract (matches the PDF exactly) ───────────────────────────────
+function ContractBody({ lead }: { lead: ZohoLead | null }) {
+  const name = clientName(lead);
+  const date = today();
 
-function fillTemplate(template: string, mappings: FieldMapping[], lead: ZohoLead | null): string {
-  if (!lead) return template;
-  let out = template;
-  for (const m of mappings) {
-    if (!m.placeholder.trim()) continue;
-    const value = getLeadField(lead, m.zohoField, m.staticValue);
-    out = out.replace(new RegExp(escapeRegex(m.placeholder), "g"), value);
-  }
-  return out;
-}
+  return (
+    <div className="contract-body" style={{ fontFamily: "Georgia, 'Times New Roman', serif", fontSize: "11pt", lineHeight: 1.75, color: "#111" }}>
 
-// Detect all {{...}} placeholders in the template
-function detectPlaceholders(template: string): string[] {
-  const matches = template.match(/\{\{[^}]+\}\}/g) ?? [];
-  return [...new Set(matches)];
+      {/* ── Letterhead ── */}
+      <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start", marginBottom: "24px", borderBottom: "2px solid #c0392b", paddingBottom: "16px" }}>
+        <img src={logoSrc} alt="Allocation Assist" style={{ height: "72px", width: "auto" }} />
+        <div style={{ textAlign: "right" }}>
+          <div style={{ fontSize: "22pt", fontWeight: "bold", color: "#c0392b", letterSpacing: "-0.3px" }}>Allocation Assist DMCC</div>
+          <div style={{ fontSize: "13pt", color: "#555", marginBottom: "6px" }}>ألوكيشن أسيست د.م.س.س</div>
+          <div style={{ fontSize: "8.5pt", color: "#777", lineHeight: 1.6 }}>
+            Business License: &nbsp;<span style={{ color: "#c0392b" }}>DMCC-859956</span><br />
+            Address: &nbsp;2604, Reef Tower, Cluster O,<br />
+            Jumeirah Lakes Towers, Dubai,<br />
+            United Arab Emirates
+          </div>
+        </div>
+      </div>
+
+      {/* ── Title ── */}
+      <h1 style={{ textAlign: "center", fontSize: "16pt", fontWeight: "bold", textDecoration: "underline", margin: "24px 0 20px" }}>
+        SERVICE AGREEMENT
+      </h1>
+
+      {/* ── Opening ── */}
+      <p style={{ marginBottom: "16px", textAlign: "justify" }}>
+        <strong>Allocation Assist DMCC</strong>, a limited liability company incorporated and registered in Dubai Multi Commodities Centre (DMCC), United Arab Emirates, under commercial license number DMCC-859956 and registered office is at Unit No: 2604, Reef Tower, Plot No: JLT-PH2-O1A, Jumeirah Lakes Towers, Dubai, United Arab Emirates (the "Consultant");
+      </p>
+
+      {/* ── Background ── */}
+      <h2 style={{ fontWeight: "bold", fontSize: "11pt", margin: "20px 0 10px" }}>BACKGROUND</h2>
+      <ol type="A" style={{ paddingLeft: "24px", marginBottom: "16px" }}>
+        <li style={{ marginBottom: "8px" }}>The Client wishes to engage the services of the Consultant to provide the services as listed in Schedule 1 (the "Services").</li>
+        <li style={{ marginBottom: "8px" }}>The Client agrees to pay the Consultant based on the fees and terms as listed in Schedule 2 for the Services provided.</li>
+        <li style={{ marginBottom: "8px" }}>This Agreement sets out the terms and conditions upon which the Consultant will provide the Services to the Client.</li>
+      </ol>
+
+      {/* ── Agreed Terms ── */}
+      <h2 style={{ fontWeight: "bold", fontSize: "13pt", textDecoration: "underline", margin: "24px 0 12px" }}>AGREED TERMS</h2>
+
+      <h3 style={{ fontWeight: "bold", fontSize: "11pt", margin: "16px 0 6px" }}>1. APPOINTMENT</h3>
+      <p style={{ marginBottom: "14px", textAlign: "justify" }}>The Client hereby appoints the Consultant, and Consultant agrees to act as a consultant to the Client, to provide the Services set out in Schedule 1 on the terms and conditions contained in this Agreement.</p>
+
+      <h3 style={{ fontWeight: "bold", fontSize: "11pt", margin: "16px 0 6px" }}>2. COMMENCEMENT AND DURATION</h3>
+      <p style={{ marginBottom: "8px", textAlign: "justify" }}>2.1. This agreement shall commence on the date when it has been signed by the Parties and shall continue, unless terminated, OR until completion of the Services.</p>
+      <p style={{ marginBottom: "14px", textAlign: "justify" }}>2.2. The Consultant shall provide the Services to the Client in accordance with this agreement from the date upon which this agreement has been signed by both of the Parties.</p>
+
+      <h3 style={{ fontWeight: "bold", fontSize: "11pt", margin: "16px 0 6px" }}>3. RELATIONSHIP BETWEEN PARTIES</h3>
+      <p style={{ marginBottom: "8px", textAlign: "justify" }}>3.1. The Parties agree and acknowledge that this agreement does not create any other relationship between the Parties. Each party confirms it is acting on its own behalf and not for the benefit of any other person.</p>
+      <p style={{ marginBottom: "8px", textAlign: "justify" }}>3.2. The Parties agree and acknowledge that the Consultant is an independent contractor and provides the Services as an independent contractor.</p>
+      <p style={{ marginBottom: "14px", textAlign: "justify" }}>3.3. This agreement is not based on exclusivity and the Parties acknowledge that they are entitled to enter into other agreements with third Parties in the ordinary course of their respective business.</p>
+
+      <h3 style={{ fontWeight: "bold", fontSize: "11pt", margin: "16px 0 6px" }}>4. CONSULTANT'S OBLIGATIONS</h3>
+      <p style={{ marginBottom: "6px", fontWeight: "bold" }}>4.1 Service Delivery</p>
+      <p style={{ marginBottom: "10px", paddingLeft: "16px", textAlign: "justify" }}>The Consultant shall render and perform the Services in Schedule 1 faithfully, competently and to the best of its skill and ability.</p>
+      <p style={{ marginBottom: "6px", fontWeight: "bold" }}>4.2 Client Data</p>
+      <p style={{ marginBottom: "6px", paddingLeft: "16px" }}>The Consultant shall:</p>
+      <ol type="a" style={{ paddingLeft: "40px", marginBottom: "14px" }}>
+        <li style={{ marginBottom: "6px", textAlign: "justify" }}>Collect Client data solely for the purpose of delivering the Services, managing internal risk and compliance, and improving the Consultant's service offering;</li>
+        <li style={{ marginBottom: "6px", textAlign: "justify" }}>Take utmost care when sharing the relevant Client data with the hospitals in the normal course of delivering the Service for the Client. The Consultant will not sell or make profit from sharing Client's data with other external parties;</li>
+        <li style={{ marginBottom: "6px", textAlign: "justify" }}>Take reasonable measures including necessary infrastructure and processes to protect Client data from unauthorised access, disclosure, alteration, or destruction.</li>
+      </ol>
+
+      <h3 style={{ fontWeight: "bold", fontSize: "11pt", margin: "16px 0 6px" }}>5. CLIENT'S OBLIGATIONS</h3>
+      <p style={{ marginBottom: "6px" }}>The Client shall:</p>
+      <ol type="a" style={{ paddingLeft: "40px", marginBottom: "14px" }}>
+        <li style={{ marginBottom: "6px", textAlign: "justify" }}>Co-operate with the Consultant in all matters relating to the Services and maintain professional conduct when working with the Consultant;</li>
+        <li style={{ marginBottom: "6px", textAlign: "justify" }}>provide to the Consultant in a timely manner all documents, information, items and materials in any form (whether owned by the Client or third party) required under Schedule 1 or otherwise reasonably required by the Consultant in connection with the Services and ensure that they are truthful, accurate and complete in all material respects;</li>
+        <li style={{ marginBottom: "6px", textAlign: "justify" }}>obtain and maintain all necessary licences and consents and comply with all relevant legislation as required to enable the Consultant to provide the Services.</li>
+      </ol>
+
+      <h3 style={{ fontWeight: "bold", fontSize: "11pt", margin: "16px 0 6px" }}>6. CONFIDENTIALITY</h3>
+      <p style={{ marginBottom: "8px", textAlign: "justify" }}>6.1 Both Parties acknowledges that in the ordinary course of providing and being provided the Services pursuant to this agreement they may be exposed to information about the other Party which is confidential and which may not be available to the general public.</p>
+      <p style={{ marginBottom: "14px", textAlign: "justify" }}>6.2 Both Parties shall keep secret and shall not at any time either during this agreement or after its termination, for whatever reason, use, communicate or disclose to any person any secret or confidential information concerning the either Party and shall use its best endeavours to prevent the publication or disclosure of such information.</p>
+
+      <h3 style={{ fontWeight: "bold", fontSize: "11pt", margin: "16px 0 6px" }}>7. TERMINATION</h3>
+      <p style={{ marginBottom: "14px", textAlign: "justify" }}>7.1 This Agreement will terminate upon completion of the Services and payments of all Consultant fees and invoices. Completion of the Services is upon Client signing of employment contract with prospective hospital.</p>
+
+      <h3 style={{ fontWeight: "bold", fontSize: "11pt", margin: "16px 0 6px" }}>8. WAIVER</h3>
+      <p style={{ marginBottom: "14px", textAlign: "justify" }}>The failure of either Party to enforce at any time any of the provisions hereof or any right with respect thereto shall not be construed to be a waiver of such provisions of a waiver of the right of such Party thereafter to enforce any such provision or right.</p>
+
+      <h3 style={{ fontWeight: "bold", fontSize: "11pt", margin: "16px 0 6px" }}>9. ENTIRE AGREEMENT AND AMENDMENTS</h3>
+      <p style={{ marginBottom: "14px", textAlign: "justify" }}>This Agreement constitutes the entire agreement between the Parties relating to the subject matter of this Agreement and supersedes all previous verbal or written agreements and negotiations between the Parties and this Agreement, including this clause, may only be modified or amended if mutually agreed in writing and signed by the duly authorised representatives of the Parties.</p>
+
+      <h3 style={{ fontWeight: "bold", fontSize: "11pt", margin: "16px 0 6px" }}>10. REPRESENTATION</h3>
+      <p style={{ marginBottom: "14px", textAlign: "justify" }}>The Parties represent that they are legally entitled and empowered to perform all aspects of this Agreement and that they will take steps necessary to comply with the law and the diligent performance of all aspects of this Agreement the performance of their obligations hereunder to the other Party. The failure of any Party to comply with any legal requirements for any cause shall not discharge it from any of its obligation under the terms of this Agreement.</p>
+
+      <h3 style={{ fontWeight: "bold", fontSize: "11pt", margin: "16px 0 6px" }}>12. GOVERNING LAW AND DISPUTE RESOLUTION</h3>
+      <p style={{ marginBottom: "8px", textAlign: "justify" }}>12.1. This agreement shall be governed and construed in accordance with the laws of the United Arab Emirates.</p>
+      <p style={{ marginBottom: "8px", textAlign: "justify" }}>12.2. The Parties shall endeavour to resolve all disputes or differences in relation to this agreement through good faith negotiations.</p>
+      <p style={{ marginBottom: "24px", textAlign: "justify" }}>The Parties hereby agree to the terms and conditions set forth in this Agreement.</p>
+
+      {/* ── Schedule 1 ── */}
+      <div style={{ pageBreakBefore: "always" }}>
+        <h2 style={{ fontWeight: "bold", fontSize: "13pt", textDecoration: "underline", margin: "24px 0 12px" }}>SCHEDULE 1: THE SERVICES</h2>
+        <p style={{ marginBottom: "12px" }}>The following Services will be provided by the Consultant under this agreement:</p>
+        <ol style={{ paddingLeft: "24px" }}>
+          <li style={{ marginBottom: "10px", textAlign: "justify" }}>Provision of public and proprietary know-how and advice with respect to:
+            <ol type="a" style={{ paddingLeft: "24px", marginTop: "6px" }}>
+              <li style={{ marginBottom: "4px" }}>the different types of hospitals and institutions operating in the UAE, Saudi Arabia and Qatar;</li>
+              <li style={{ marginBottom: "4px" }}>appropriate hospitals and/or institutions that are best suited to the skills, expertise and qualifications of the Client; and</li>
+              <li style={{ marginBottom: "4px" }}>guidance on working conditions, customary practices and expectations in the medical field in the UAE, Saudi Arabia and Qatar.</li>
+            </ol>
+          </li>
+          <li style={{ marginBottom: "10px", textAlign: "justify" }}>General support with comprehending terms and conditions of employment as relevant to the Client.</li>
+          <li style={{ marginBottom: "10px", textAlign: "justify" }}>Assistance with updating and refining the Client's curriculum vitae (CV) and profile, including having a presence on the Consultant's website.</li>
+          <li style={{ marginBottom: "10px", textAlign: "justify" }}>Introduction (where appropriate) to professionals and/or businesses that can assist the Client with ancillary support or related services beyond this Service (i.e., for recruitment/human resources purposes).</li>
+          <li style={{ marginBottom: "10px", textAlign: "justify" }}>Exclusive access to the Consultant's network of professionals and contact personnel across the UAE, Saudi Arabia and Qatar.</li>
+          <li style={{ marginBottom: "10px", textAlign: "justify" }}>General advice on relocation including relocation options suitable to Client's budget and needs, and education, schools and childcare as required.</li>
+          <li style={{ marginBottom: "10px", textAlign: "justify" }}>Support and guidance for medical licensing application and registration with licensing authorities of the UAE, Saudi Arabia and Qatar.
+            <ol type="a" style={{ paddingLeft: "24px", marginTop: "6px" }}>
+              <li style={{ marginBottom: "4px" }}>Submission of application;</li>
+              <li style={{ marginBottom: "4px" }}>Close monitoring of applications.</li>
+              <li style={{ marginBottom: "4px" }}>Payment of standard application and verification fees as required. Any charges for additional exams required by the licensing authorities in the event of failing the first attempt will be borne by the Client.</li>
+              <li style={{ marginBottom: "4px" }}>Full case management assistance, including handling any challenges and complications that may arise.</li>
+            </ol>
+          </li>
+          <li style={{ marginBottom: "10px", textAlign: "justify" }}>For the avoidance of doubt the Consultant does not and will not provide recruitment, human resources services and/or negotiating salary and employment terms on behalf of the Client.</li>
+        </ol>
+      </div>
+
+      {/* ── Schedule 2 ── */}
+      <div style={{ pageBreakBefore: "always", marginTop: "32px" }}>
+        <h2 style={{ fontWeight: "bold", fontSize: "13pt", textDecoration: "underline", margin: "0 0 12px" }}>SCHEDULE 2: FEES AND PAYMENT TERMS</h2>
+
+        <h3 style={{ fontWeight: "bold", marginBottom: "6px" }}>1. Fees</h3>
+        <p style={{ marginBottom: "14px" }}>Total charges for the Service: <strong>AED 42,000 (VAT included)</strong></p>
+
+        <h3 style={{ fontWeight: "bold", marginBottom: "8px" }}>2. Payment Terms</h3>
+        <p style={{ marginBottom: "8px" }}>2.1 The Client shall be invoiced for the Services in 2 stages:</p>
+        <ol type="a" style={{ paddingLeft: "32px", marginBottom: "14px" }}>
+          <li style={{ marginBottom: "8px", textAlign: "justify" }}>First 50% payable upon the date of this Agreement. The Client is expected to remit <strong>AED 21,000 (VAT included)</strong>. This is non-refundable as it is for immediate utilisation for the Consultant's internal costs and Client's registration and licensing process with the licensing authorities.</li>
+          <li style={{ marginBottom: "8px", textAlign: "justify" }}>Remaining 50% payable 45 days upon receipt of invoice once the Client sign an employment contract with the prospective hospital. The Client is expected to remit <strong>AED 21,000 (VAT included)</strong>.</li>
+        </ol>
+
+        <h3 style={{ fontWeight: "bold", marginBottom: "8px" }}>3. Payment Method</h3>
+        <p style={{ marginBottom: "6px" }}>The Client may make payment via:</p>
+        <ol type="a" style={{ paddingLeft: "32px", marginBottom: "10px" }}>
+          <li style={{ marginBottom: "4px" }}>online payment gateway (by credit or debit card)</li>
+          <li style={{ marginBottom: "4px" }}>bank transfer/ cheque to the Consultant's bank account (details provided below)</li>
+        </ol>
+        <div style={{ paddingLeft: "32px", marginBottom: "16px", lineHeight: 1.9 }}>
+          <div>Name: ALLOCATION ASSIST DMCC</div>
+          <div>Account Number: 019101098278</div>
+          <div>IBAN Number: AE520330000019101098278</div>
+          <div>Branch: ABU DHABI MAIN</div>
+          <div>SWIFT Code / BIC: BOMLAEAD</div>
+          <div>POP Code: PMS</div>
+        </div>
+
+        <h3 style={{ fontWeight: "bold", marginBottom: "8px" }}>4. Change of Mind</h3>
+        <p style={{ marginBottom: "24px", textAlign: "justify" }}>If you change your mind about relocating but do not inform us beforehand, and we have already arranged secured a job offer for you, you will be responsible for paying Allocation Assist 50% of the remaining fee which is 10,000 AED plus 5% VAT.</p>
+
+        {/* ── Signatures ── */}
+        <p style={{ marginBottom: "14px", fontWeight: "bold" }}>Signed by:</p>
+        <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start", gap: "40px" }}>
+          {/* Consultant */}
+          <div style={{ flex: 1 }}>
+            <p style={{ fontWeight: "bold", marginBottom: "8px" }}>THE CONSULTANT</p>
+            <div style={{ borderBottom: "1px solid #333", marginBottom: "6px", height: "48px" }} />
+            <p style={{ fontWeight: "bold", marginBottom: "2px" }}>Emilie Davies</p>
+            <p style={{ color: "#555" }}>Allocation Assist DMCC CEO</p>
+          </div>
+          {/* Client */}
+          <div style={{ flex: 1 }}>
+            <p style={{ fontWeight: "bold", marginBottom: "8px" }}>THE CLIENT</p>
+            <div style={{ borderBottom: "1px solid #333", marginBottom: "6px", height: "48px" }} />
+            <p style={{ color: "#555" }}>{name}</p>
+            <p style={{ color: "#888", fontSize: "9pt", marginTop: "4px" }}>Date: {date}</p>
+          </div>
+        </div>
+      </div>
+    </div>
+  );
 }
 
 // ── Page ──────────────────────────────────────────────────────────────────────
-
 const Contracts = () => {
   const { data: zoho } = useZohoData();
-
-  // Persist template + mappings in localStorage
-  const [template, setTemplate] = useState<string>(() => {
-    try {
-      const saved = localStorage.getItem(STORAGE_KEY);
-      if (saved) return JSON.parse(saved).template ?? DEFAULT_TEMPLATE;
-    } catch {}
-    return DEFAULT_TEMPLATE;
-  });
-
-  const [mappings, setMappings] = useState<FieldMapping[]>(() => {
-    try {
-      const saved = localStorage.getItem(STORAGE_KEY);
-      if (saved) return JSON.parse(saved).mappings ?? DEFAULT_MAPPINGS;
-    } catch {}
-    return DEFAULT_MAPPINGS;
-  });
-
-  const [search, setSearch] = useState("");
+  const [search, setSearch]           = useState("");
   const [selectedLead, setSelectedLead] = useState<ZohoLead | null>(null);
   const [showDropdown, setShowDropdown] = useState(false);
-  const [saved, setSaved] = useState(false);
-  const [copied, setCopied] = useState(false);
   const previewRef = useRef<HTMLDivElement>(null);
 
-  // ── Doctor search ─────────────────────────────────────────────────────────
   const doctorOptions = useMemo(() => {
     if (!zoho?.rawLeads || search.trim().length < 2) return [];
     const q = search.toLowerCase();
@@ -174,326 +215,114 @@ const Contracts = () => {
       .slice(0, 10);
   }, [zoho?.rawLeads, search]);
 
-  // ── Unmapped placeholders warning ─────────────────────────────────────────
-  const detected    = useMemo(() => detectPlaceholders(template), [template]);
-  const mappedSet   = new Set(mappings.map(m => m.placeholder.trim()));
-  const unmapped    = detected.filter(p => !mappedSet.has(p));
-
-  // ── Filled preview ────────────────────────────────────────────────────────
-  const preview = useMemo(
-    () => fillTemplate(template, mappings, selectedLead),
-    [template, mappings, selectedLead]
-  );
-
-  // ── Save to localStorage ──────────────────────────────────────────────────
-  const handleSave = () => {
-    localStorage.setItem(STORAGE_KEY, JSON.stringify({ template, mappings }));
-    setSaved(true);
-    setTimeout(() => setSaved(false), 2000);
-  };
-
-  const handleReset = () => {
-    setTemplate(DEFAULT_TEMPLATE);
-    setMappings(DEFAULT_MAPPINGS);
-    localStorage.removeItem(STORAGE_KEY);
-  };
-
-  // ── Mapping CRUD ──────────────────────────────────────────────────────────
-  const addMapping = () => {
-    setMappings(prev => [
-      ...prev,
-      { id: Date.now().toString(), placeholder: "{{new_field}}", zohoField: "Full_Name", staticValue: "" },
-    ]);
-  };
-
-  const removeMapping = (id: string) => setMappings(prev => prev.filter(m => m.id !== id));
-
-  const updateMapping = (id: string, field: Partial<FieldMapping>) =>
-    setMappings(prev => prev.map(m => m.id === id ? { ...m, ...field } : m));
-
-  // ── Print ─────────────────────────────────────────────────────────────────
   const handlePrint = () => {
     const win = window.open("", "_blank");
     if (!win) return;
-    win.document.write(`
-      <!DOCTYPE html>
-      <html>
-      <head>
-        <title>Contract — ${selectedLead?.Full_Name ?? "Preview"}</title>
-        <style>
-          body { font-family: 'Times New Roman', serif; font-size: 12pt; line-height: 1.7;
-                 margin: 2.5cm 3cm; color: #000; white-space: pre-wrap; word-wrap: break-word; }
-          @page { margin: 2.5cm 3cm; }
-        </style>
-      </head>
-      <body>${preview.replace(/</g, "&lt;").replace(/>/g, "&gt;")}</body>
-      </html>
-    `);
+    const html = previewRef.current?.innerHTML ?? "";
+    win.document.write(`<!DOCTYPE html>
+<html>
+<head>
+  <title>Service Agreement${selectedLead ? ` — ${clientName(selectedLead)}` : ""}</title>
+  <style>
+    * { box-sizing: border-box; margin: 0; padding: 0; }
+    body { font-family: Georgia, 'Times New Roman', serif; font-size: 11pt; line-height: 1.75;
+           color: #111; padding: 2.2cm 2.8cm; }
+    h1 { text-align: center; font-size: 16pt; text-decoration: underline; margin: 24px 0 20px; }
+    h2 { font-size: 13pt; font-weight: bold; text-decoration: underline; margin: 24px 0 12px; }
+    h3 { font-size: 11pt; font-weight: bold; margin: 16px 0 6px; }
+    p  { margin-bottom: 10px; text-align: justify; }
+    ol { padding-left: 28px; }
+    li { margin-bottom: 6px; }
+    @page { margin: 2.2cm 2.8cm; }
+    @media print { .no-print { display: none !important; } }
+  </style>
+</head>
+<body>${html}</body>
+</html>`);
     win.document.close();
     win.focus();
-    win.print();
+    setTimeout(() => { win.print(); }, 400);
   };
-
-  // ── Copy to clipboard ─────────────────────────────────────────────────────
-  const handleCopy = async () => {
-    await navigator.clipboard.writeText(preview);
-    setCopied(true);
-    setTimeout(() => setCopied(false), 2000);
-  };
-
-  // Auto-add mapping when a new placeholder is detected in the template
-  useEffect(() => {
-    const newOnes = detected.filter(p => !mappedSet.has(p));
-    if (newOnes.length === 0) return;
-    setMappings(prev => [
-      ...prev,
-      ...newOnes.map(p => ({
-        id:          Date.now().toString() + p,
-        placeholder: p,
-        zohoField:   "Full_Name",
-        staticValue: "",
-      })),
-    ]);
-  // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [detected.join(",")]);
 
   return (
-    <DashboardLayout title="Contract Builder" subtitle="Map Zoho fields to contract placeholders and auto-fill for any doctor">
-      <div className="grid grid-cols-1 xl:grid-cols-2 gap-5">
+    <DashboardLayout title="Contract Builder" subtitle="Search a doctor to fill in the client details, then print">
 
-        {/* ── LEFT: Template + Mappings ────────────────────────────────── */}
-        <div className="space-y-4">
-
-          {/* Template editor */}
-          <Card className="shadow-sm border-border/50">
-            <CardHeader className="pb-2 pt-4 px-4">
-              <div className="flex items-center justify-between">
-                <CardTitle className="text-[12px] font-medium text-muted-foreground uppercase tracking-wide">
-                  Contract Template
-                </CardTitle>
-                <div className="flex gap-1.5">
-                  <Button variant="ghost" size="sm" onClick={handleReset} className="h-7 px-2 text-[11px] text-muted-foreground hover:text-foreground gap-1">
-                    <RotateCcw className="h-3 w-3" /> Reset
-                  </Button>
-                  <Button variant="ghost" size="sm" onClick={handleSave} className="h-7 px-2 text-[11px] gap-1 text-primary">
-                    {saved ? <><Check className="h-3 w-3" /> Saved</> : <><Save className="h-3 w-3" /> Save</>}
-                  </Button>
-                </div>
+      {/* ── Top bar: search + print ── */}
+      <div className="flex flex-col sm:flex-row gap-3 items-start sm:items-center mb-5">
+        <div className="flex-1 max-w-sm">
+          <Popover
+            open={showDropdown && doctorOptions.length > 0}
+            onOpenChange={open => { if (!open) setShowDropdown(false); }}
+          >
+            <PopoverTrigger asChild>
+              <div className="relative">
+                <Search className="absolute left-2.5 top-1/2 -translate-y-1/2 h-3.5 w-3.5 text-muted-foreground pointer-events-none" />
+                <Input
+                  value={search}
+                  onChange={e => { setSearch(e.target.value); setShowDropdown(true); }}
+                  onFocus={() => setShowDropdown(true)}
+                  placeholder="Search doctor by name…"
+                  className="pl-8 h-9 text-[12px]"
+                />
               </div>
-              <p className="text-[10px] text-muted-foreground mt-0.5">
-                Use <code className="bg-muted px-1 rounded text-[9px]">{"{{placeholder}}"}</code> syntax — any new placeholder is auto-added to the mapping table below.
-              </p>
-            </CardHeader>
-            <CardContent className="px-4 pb-4">
-              <textarea
-                value={template}
-                onChange={e => setTemplate(e.target.value)}
-                className="w-full h-64 text-[11px] font-mono bg-muted/30 border border-border/40 rounded-lg p-3 resize-y focus:outline-none focus:ring-1 focus:ring-primary leading-relaxed"
-                spellCheck={false}
-              />
-              {unmapped.length > 0 && (
-                <div className="mt-2 flex flex-wrap gap-1.5">
-                  <span className="text-[10px] text-warning font-medium">Unmapped:</span>
-                  {unmapped.map(p => (
-                    <span key={p} className="text-[10px] bg-warning/10 text-warning px-1.5 py-0.5 rounded font-mono">{p}</span>
-                  ))}
-                </div>
-              )}
-            </CardContent>
-          </Card>
-
-          {/* Field mappings */}
-          <Card className="shadow-sm border-border/50">
-            <CardHeader className="pb-2 pt-4 px-4">
-              <div className="flex items-center justify-between">
-                <CardTitle className="text-[12px] font-medium text-muted-foreground uppercase tracking-wide">
-                  Field Mapping
-                </CardTitle>
-                <Button variant="ghost" size="sm" onClick={addMapping} className="h-7 px-2 text-[11px] gap-1 text-primary">
-                  <Plus className="h-3 w-3" /> Add row
-                </Button>
-              </div>
-            </CardHeader>
-            <CardContent className="px-4 pb-4">
-              <div className="space-y-2">
-                {/* Header */}
-                <div className="grid grid-cols-[1fr_1fr_auto] gap-2 px-1">
-                  <span className="text-[9px] uppercase tracking-wide text-muted-foreground font-medium">Placeholder</span>
-                  <span className="text-[9px] uppercase tracking-wide text-muted-foreground font-medium">Maps to</span>
-                  <span className="w-6" />
-                </div>
-
-                {mappings.map(m => (
-                  <div key={m.id} className="grid grid-cols-[1fr_1fr_auto] gap-2 items-center">
-                    {/* Placeholder input */}
-                    <input
-                      value={m.placeholder}
-                      onChange={e => updateMapping(m.id, { placeholder: e.target.value })}
-                      className="h-7 text-[11px] font-mono bg-muted/40 border border-border/40 rounded px-2 focus:outline-none focus:ring-1 focus:ring-primary w-full"
-                      placeholder="{{field}}"
-                    />
-
-                    {/* Zoho field select */}
-                    {m.zohoField === "_static" ? (
-                      <input
-                        value={m.staticValue}
-                        onChange={e => updateMapping(m.id, { staticValue: e.target.value })}
-                        className="h-7 text-[11px] bg-muted/40 border border-border/40 rounded px-2 focus:outline-none focus:ring-1 focus:ring-primary w-full"
-                        placeholder="Static text..."
-                      />
-                    ) : (
-                      <select
-                        value={m.zohoField}
-                        onChange={e => updateMapping(m.id, { zohoField: e.target.value })}
-                        className="h-7 text-[11px] bg-muted/40 border border-border/40 rounded px-2 focus:outline-none focus:ring-1 focus:ring-primary w-full"
-                      >
-                        {ZOHO_FIELD_OPTIONS.map(opt => (
-                          <option key={opt.value} value={opt.value}>{opt.label}</option>
-                        ))}
-                        <option value="_static">— Static value —</option>
-                      </select>
-                    )}
-
-                    {/* Remove */}
-                    <button
-                      onClick={() => removeMapping(m.id)}
-                      className="h-6 w-6 flex items-center justify-center text-muted-foreground hover:text-destructive transition-colors rounded"
-                    >
-                      <Trash2 className="h-3 w-3" />
-                    </button>
-                  </div>
-                ))}
-
-                {mappings.length === 0 && (
-                  <p className="text-[11px] text-muted-foreground text-center py-4">No mappings — click "Add row" to start</p>
-                )}
-              </div>
-            </CardContent>
-          </Card>
+            </PopoverTrigger>
+            <PopoverContent
+              align="start" sideOffset={4}
+              className="p-0 w-[var(--radix-popover-trigger-width)] max-h-60 overflow-y-auto"
+              onOpenAutoFocus={e => e.preventDefault()}
+            >
+              {doctorOptions.map(lead => {
+                const name = lead.Full_Name || `${lead.First_Name ?? ""} ${lead.Last_Name ?? ""}`.trim() || "—";
+                return (
+                  <button
+                    key={lead.id}
+                    className="w-full text-left px-3 py-2 hover:bg-muted/50 transition-colors border-b border-border/30 last:border-0"
+                    onMouseDown={() => { setSelectedLead(lead); setSearch(name); setShowDropdown(false); }}
+                  >
+                    <p className="text-[12px] font-medium">{name}</p>
+                    <p className="text-[10px] text-muted-foreground">
+                      {lead.Specialty ?? lead.Specialty_New ?? "—"} · {lead.Lead_Status ?? "—"}
+                    </p>
+                  </button>
+                );
+              })}
+            </PopoverContent>
+          </Popover>
         </div>
 
-        {/* ── RIGHT: Doctor selector + Preview ────────────────────────────── */}
-        <div className="space-y-4">
+        {selectedLead && (
+          <div className="flex items-center gap-2 text-[11px] bg-primary/5 border border-primary/20 rounded-lg px-3 py-1.5">
+            <FileText className="h-3.5 w-3.5 text-primary" />
+            <span className="font-medium">{clientName(selectedLead)}</span>
+            <span className="text-muted-foreground">· {selectedLead.Specialty ?? selectedLead.Specialty_New ?? "—"}</span>
+          </div>
+        )}
 
-          {/* Doctor search */}
-          <Card className="shadow-sm border-border/50">
-            <CardHeader className="pb-2 pt-4 px-4">
-              <CardTitle className="text-[12px] font-medium text-muted-foreground uppercase tracking-wide">
-                Select Doctor
-              </CardTitle>
-            </CardHeader>
-            <CardContent className="px-4 pb-4">
-              <Popover
-                open={showDropdown && doctorOptions.length > 0}
-                onOpenChange={open => { if (!open) setShowDropdown(false); }}
-              >
-                <PopoverTrigger asChild>
-                  <div className="relative">
-                    <Search className="absolute left-2.5 top-1/2 -translate-y-1/2 h-3.5 w-3.5 text-muted-foreground pointer-events-none" />
-                    <Input
-                      value={search}
-                      onChange={e => { setSearch(e.target.value); setShowDropdown(true); }}
-                      onFocus={() => setShowDropdown(true)}
-                      placeholder="Search doctor by name…"
-                      className="pl-8 h-8 text-[12px]"
-                    />
-                  </div>
-                </PopoverTrigger>
-                <PopoverContent
-                  align="start"
-                  sideOffset={4}
-                  className="p-0 w-[var(--radix-popover-trigger-width)] max-h-60 overflow-y-auto"
-                  onOpenAutoFocus={e => e.preventDefault()}
-                >
-                    {doctorOptions.map(lead => {
-                      const name = lead.Full_Name || `${lead.First_Name ?? ""} ${lead.Last_Name ?? ""}`.trim() || "—";
-                      return (
-                        <button
-                          key={lead.id}
-                          className="w-full text-left px-3 py-2 hover:bg-muted/50 transition-colors border-b border-border/30 last:border-0"
-                          onMouseDown={() => {
-                            setSelectedLead(lead);
-                            setSearch(name);
-                            setShowDropdown(false);
-                          }}
-                        >
-                          <p className="text-[12px] font-medium">{name}</p>
-                          <p className="text-[10px] text-muted-foreground">
-                            {lead.Specialty ?? lead.Specialty_New ?? "—"} · {lead.Lead_Status ?? "—"}
-                          </p>
-                        </button>
-                      );
-                    })}
-                </PopoverContent>
-              </Popover>
+        <Button
+          onClick={handlePrint}
+          className="h-9 gap-1.5 text-[12px] shrink-0"
+          disabled={!selectedLead}
+        >
+          <Printer className="h-3.5 w-3.5" />
+          Print / Save PDF
+        </Button>
+      </div>
 
-              {/* Selected doctor summary */}
-              {selectedLead && (
-                <div className="mt-3 p-3 rounded-lg bg-primary/5 border border-primary/20 text-[11px] space-y-0.5">
-                  <p className="font-semibold text-foreground">
-                    {selectedLead.Full_Name || `${selectedLead.First_Name ?? ""} ${selectedLead.Last_Name ?? ""}`.trim()}
-                  </p>
-                  <p className="text-muted-foreground">{selectedLead.Specialty ?? selectedLead.Specialty_New ?? "—"} · {selectedLead.Lead_Status}</p>
-                  <p className="text-muted-foreground">{selectedLead.Country_of_Specialty_training ?? "—"}</p>
-                  {(selectedLead.Has_DHA && selectedLead.Has_DHA !== "No") && <span className="inline-block bg-success/10 text-success text-[9px] font-medium rounded px-1.5 py-0.5 mr-1">DHA</span>}
-                  {(selectedLead.Has_DOH && selectedLead.Has_DOH !== "No") && <span className="inline-block bg-success/10 text-success text-[9px] font-medium rounded px-1.5 py-0.5 mr-1">DOH</span>}
-                  {(selectedLead.Has_MOH && selectedLead.Has_MOH !== "No") && <span className="inline-block bg-success/10 text-success text-[9px] font-medium rounded px-1.5 py-0.5">MOH</span>}
-                </div>
-              )}
-            </CardContent>
-          </Card>
-
-          {/* Preview */}
-          <Card className="shadow-sm border-border/50">
-            <CardHeader className="pb-2 pt-4 px-4">
-              <div className="flex items-center justify-between">
-                <CardTitle className="text-[12px] font-medium text-muted-foreground uppercase tracking-wide flex items-center gap-2">
-                  <FileText className="h-3.5 w-3.5" />
-                  {selectedLead
-                    ? `Contract — ${selectedLead.Full_Name || `${selectedLead.First_Name ?? ""} ${selectedLead.Last_Name ?? ""}`.trim()}`
-                    : "Preview (select a doctor)"}
-                </CardTitle>
-                <div className="flex gap-1.5">
-                  <Button
-                    variant="ghost" size="sm"
-                    onClick={handleCopy}
-                    disabled={!selectedLead}
-                    className="h-7 px-2 text-[11px] gap-1 text-muted-foreground hover:text-foreground"
-                  >
-                    {copied ? <><Check className="h-3 w-3" /> Copied</> : <><Copy className="h-3 w-3" /> Copy</>}
-                  </Button>
-                  <Button
-                    variant="ghost" size="sm"
-                    onClick={handlePrint}
-                    disabled={!selectedLead}
-                    className="h-7 px-2 text-[11px] gap-1 text-primary"
-                  >
-                    <Printer className="h-3 w-3" /> Print
-                  </Button>
-                </div>
-              </div>
-            </CardHeader>
-            <CardContent className="px-4 pb-4">
-              <div
-                ref={previewRef}
-                className={`rounded-lg border border-border/30 p-5 bg-white min-h-[400px] ${!selectedLead ? "opacity-40" : ""}`}
-              >
-                <pre
-                  className="text-[11.5px] font-mono leading-relaxed whitespace-pre-wrap text-gray-800 break-words"
-                  style={{ fontFamily: "'Times New Roman', Georgia, serif", fontSize: "11.5px" }}
-                >
-                  {preview}
-                </pre>
-              </div>
-              {!selectedLead && (
-                <p className="text-center text-[11px] text-muted-foreground mt-3">
-                  Search for a doctor above to see the filled contract
-                </p>
-              )}
-            </CardContent>
-          </Card>
+      {/* ── Contract preview ── */}
+      <div
+        className={`rounded-xl border border-border/40 bg-white shadow-sm p-10 transition-opacity ${!selectedLead ? "opacity-50" : ""}`}
+        style={{ maxWidth: "860px", margin: "0 auto" }}
+      >
+        <div ref={previewRef}>
+          <ContractBody lead={selectedLead} />
         </div>
       </div>
+
+      {!selectedLead && (
+        <p className="text-center text-[11px] text-muted-foreground mt-4">
+          Search for a doctor above — their name will appear in the client signature section
+        </p>
+      )}
     </DashboardLayout>
   );
 };
