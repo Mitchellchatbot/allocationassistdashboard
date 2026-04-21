@@ -880,11 +880,12 @@ const MetaAds = () => {
 
   const topCampByLeads = campaigns.filter(c => c.leads > 0).sort((a, b) => b.leads - a.leads).slice(0, 5);
   const maxLeads = topCampByLeads[0]?.leads ?? 1;
+  const zohoMetaChannels = (zoho?.channels ?? []).filter(c => c.channel === 'Facebook' || c.channel === 'Instagram');
+  const maxZohoLeads = Math.max(...zohoMetaChannels.map(c => c.doctors), 1);
   const leadsBack = (
     <div className="space-y-2">
-      {topCampByLeads.length === 0
-        ? <p className="text-[10px] text-muted-foreground">No lead data</p>
-        : topCampByLeads.map(c => (
+      {topCampByLeads.length > 0
+        ? topCampByLeads.map(c => (
           <div key={c.id}>
             <div className="flex items-center justify-between mb-0.5">
               <span className="text-[10px] truncate max-w-[140px]">{c.name}</span>
@@ -894,7 +895,24 @@ const MetaAds = () => {
               <div className="h-full bg-success rounded-full" style={{ width: `${(c.leads / maxLeads) * 100}%` }} />
             </div>
           </div>
-        ))}
+        ))
+        : zohoMetaChannels.length > 0
+        ? <>
+            <p className="text-[9px] text-muted-foreground uppercase tracking-wide mb-1">From Zoho CRM</p>
+            {zohoMetaChannels.map(c => (
+              <div key={c.channel}>
+                <div className="flex items-center justify-between mb-0.5">
+                  <span className="text-[10px]">{c.channel}</span>
+                  <span className="text-[10px] font-semibold text-success tabular-nums">{c.doctors} leads</span>
+                </div>
+                <div className="h-1.5 bg-muted rounded-full overflow-hidden">
+                  <div className="h-full bg-success rounded-full" style={{ width: `${(c.doctors / maxZohoLeads) * 100}%` }} />
+                </div>
+              </div>
+            ))}
+          </>
+        : <p className="text-[10px] text-muted-foreground">No lead data</p>
+      }
     </div>
   );
 
