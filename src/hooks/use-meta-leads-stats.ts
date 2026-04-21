@@ -79,9 +79,7 @@ export function useMetaLeadsStats(dateRange: DateRangeInput) {
       while (true) {
         const { data, error } = await supabase
           .from("meta_leads")
-          .select("utm_content, utm_campaign, utm_source, location, speciality, stage")
-          .gte("created_at", fromISO)
-          .lte("created_at", toISO)
+          .select("utm_content, utm_campaign, utm_source, location, speciality, stage, submitted_at, created_at")
           .range(offset, offset + PAGE - 1);
 
         if (error) throw error;
@@ -92,17 +90,29 @@ export function useMetaLeadsStats(dateRange: DateRangeInput) {
         if (offset > 50_000) break;
       }
 
-      const total   = allRows.length;
-      const withUtm = allRows.filter(
+      // Filter by date using submitted_at (actual lead date) falling back to created_at
+      const fromMs = dateRange.from.getTime();
+      const toMs   = new Date(
+        dateRange.to.getFullYear(), dateRange.to.getMonth(), dateRange.to.getDate(), 23, 59, 59
+      ).getTime();
+      const filtered = allRows.filter(r => {
+        const raw = r.submitted_at || r.created_at;
+        if (!raw) return true;
+        const t = new Date(raw).getTime();
+        return t >= fromMs && t <= toMs;
+      });
+
+      const total   = filtered.length;
+      const withUtm = filtered.filter(
         r => r.utm_campaign && r.utm_campaign.trim() !== "" && r.utm_campaign !== "xxxxx"
       ).length;
 
-      const byCreative  = groupByField(allRows, "utm_content",  { skipNumeric: true });
-      const byCampaign  = groupByField(allRows, "utm_campaign", {});
-      const byPlatform  = groupByField(allRows, "utm_source",   { normalize: normalizePlatform });
-      const byLocation  = groupByField(allRows, "location",     {});
-      const bySpeciality = groupByField(allRows, "speciality",  { splitComma: true });
-      const byStage     = groupByField(allRows, "stage",        {});
+      const byCreative  = groupByField(filtered, "utm_content",  { skipNumeric: true });
+      const byCampaign  = groupByField(filtered, "utm_campaign", {});
+      const byPlatform  = groupByField(filtered, "utm_source",   { normalize: normalizePlatform });
+      const byLocation  = groupByField(filtered, "location",     {});
+      const bySpeciality = groupByField(filtered, "speciality",  { splitComma: true });
+      const byStage     = groupByField(filtered, "stage",        {});
 
       return { total, withUtm, byCreative, byCampaign, byPlatform, byLocation, bySpeciality, byStage };
     },
