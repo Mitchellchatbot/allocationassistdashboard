@@ -16,7 +16,7 @@ import {
   Users, Megaphone, Globe, Loader2, TrendingUp, DollarSign,
   Eye, MousePointer, AlertCircle, X, ImageOff,
   Repeat2, Hash, Target, Zap, Award, KeyRound, CheckCircle2,
-  ChevronDown, ChevronUp, Play, ExternalLink,
+  ChevronDown, ChevronUp, Play, ExternalLink, ClipboardList,
 } from "lucide-react";
 
 // ── Colours ───────────────────────────────────────────────────────────────────
@@ -934,6 +934,42 @@ const MetaAds = () => {
     .map(c => ({ ...c, cpc: c.spend / c.clicks }))
     .sort((a, b) => a.cpc - b.cpc)
     .slice(0, 5);
+  const formLeadsBack = (
+    <div className="space-y-2">
+      {(data?.byCampaign ?? []).length > 0 ? (
+        <>
+          <p className="text-[9px] text-muted-foreground uppercase tracking-wide mb-1">By campaign</p>
+          {(data?.byCampaign ?? []).slice(0, 5).map(c => {
+            const maxC = data!.byCampaign[0]?.count ?? 1;
+            return (
+              <div key={c.label}>
+                <div className="flex items-center justify-between mb-0.5">
+                  <span className="text-[10px] truncate max-w-[140px]">{c.label || "Unknown"}</span>
+                  <span className="text-[10px] font-semibold text-orange-500 tabular-nums">{c.count}</span>
+                </div>
+                <div className="h-1.5 bg-muted rounded-full overflow-hidden">
+                  <div className="h-full bg-orange-400 rounded-full" style={{ width: `${(c.count / maxC) * 100}%` }} />
+                </div>
+              </div>
+            );
+          })}
+        </>
+      ) : (data?.bySpeciality ?? []).length > 0 ? (
+        <>
+          <p className="text-[9px] text-muted-foreground uppercase tracking-wide mb-1">By speciality</p>
+          {(data?.bySpeciality ?? []).slice(0, 5).map(c => (
+            <div key={c.label} className="flex items-center justify-between">
+              <span className="text-[10px] truncate max-w-[150px]">{c.label}</span>
+              <span className="text-[10px] font-semibold text-orange-500 tabular-nums">{c.count}</span>
+            </div>
+          ))}
+        </>
+      ) : (
+        <p className="text-[10px] text-muted-foreground">No form data in Supabase yet</p>
+      )}
+    </div>
+  );
+
   const cplBack = (
     <div className="space-y-2">
       <p className="text-[9px] text-muted-foreground uppercase tracking-wide">Best cost-per-click by campaign</p>
@@ -1008,10 +1044,14 @@ const MetaAds = () => {
               value={(summary?.frequency ?? 0).toFixed(2)}    sub="avg per person"                back={freqBack}   backHeight={180} />
             <MetaKpiCard icon={Hash}         label="CPM"            color="text-muted-foreground" bg="bg-muted"
               value={fmtC(summary?.cpm ?? 0, currency)}       sub="per 1,000 impressions"         back={cpmBack}    backHeight={230} />
-            <MetaKpiCard icon={Zap}          label="Leads from Ads" color="text-success"     bg="bg-success/10"
+            <MetaKpiCard icon={Zap}           label="Leads from Ads"   color="text-success"     bg="bg-success/10"
               value={fmtN((summary?.leads ?? 0) > 0 ? (summary?.leads ?? 0) : zohoMetaLeads)}
               sub={(summary?.leads ?? 0) > 0 ? "form submissions" : "via Zoho (Facebook + Instagram)"}
               back={leadsBack}  backHeight={220} />
+            <MetaKpiCard icon={ClipboardList} label="Leads from Forms" color="text-orange-500" bg="bg-orange-50"
+              value={fmtN(data?.total ?? 0)}
+              sub={leadsLoading ? "loading…" : `${data?.withUtm ?? 0} tracked`}
+              back={formLeadsBack} backHeight={220} />
             <MetaKpiCard icon={Award}        label="Cost Per Lead"  color="text-primary"     bg="bg-primary/10"
               value={(summary?.leads ?? 0) > 0 ? fmtC(summary?.costPerLead ?? 0, currency) : "—"}
               sub="per form lead"                                                                   back={cplBack}    backHeight={220} />
