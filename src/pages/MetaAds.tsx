@@ -5,6 +5,7 @@ import { DashboardLayout } from "@/components/layout/DashboardLayout";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { useMetaLeadsStats, type GroupedStat } from "@/hooks/use-meta-leads-stats";
 import { useMetaAdsApi, useMetaCampaignAds, useMetaAdsByName, useMetaTopAds, type MetaTopAd, getMetaToken, META_TOKEN_LS_KEY } from "@/hooks/use-meta-ads-api";
+import { useZohoData } from "@/hooks/use-zoho-data";
 import { useFilters } from "@/lib/filters";
 import { useQueryClient } from "@tanstack/react-query";
 import {
@@ -702,6 +703,14 @@ const MetaAds = () => {
 
   const [tokenSet, setTokenSet] = useState(true);
   const { data: api, isLoading: apiLoading, error: apiError } = useMetaAdsApi(metaDateRange);
+  const { data: zoho } = useZohoData();
+  // Count Zoho leads sourced from Facebook or Instagram (form submissions via Meta ads)
+  const zohoMetaLeads = useMemo(() => {
+    if (!zoho?.channels) return 0;
+    return zoho.channels
+      .filter(c => c.channel === 'Facebook' || c.channel === 'Instagram')
+      .reduce((sum, c) => sum + c.doctors, 0);
+  }, [zoho?.channels]);
   const [previewCampaign, setPreviewCampaign] = useState<{ id: string; name: string } | null>(null);
   const [directPreviewAd, setDirectPreviewAd] = useState<MetaTopAd | null>(null);
   const [showAllActions, setShowAllActions] = useState(false);
@@ -966,7 +975,9 @@ const MetaAds = () => {
             <MetaKpiCard icon={Hash}         label="CPM"            color="text-muted-foreground" bg="bg-muted"
               value={fmtC(summary?.cpm ?? 0, currency)}       sub="per 1,000 impressions"         back={cpmBack}    backHeight={230} />
             <MetaKpiCard icon={Zap}          label="Leads from Ads" color="text-success"     bg="bg-success/10"
-              value={fmtN(summary?.leads ?? 0)}               sub="form submissions"              back={leadsBack}  backHeight={220} />
+              value={fmtN((summary?.leads ?? 0) > 0 ? (summary?.leads ?? 0) : zohoMetaLeads)}
+              sub={(summary?.leads ?? 0) > 0 ? "form submissions" : "via Zoho (Facebook + Instagram)"}
+              back={leadsBack}  backHeight={220} />
             <MetaKpiCard icon={Award}        label="Cost Per Lead"  color="text-primary"     bg="bg-primary/10"
               value={(summary?.leads ?? 0) > 0 ? fmtC(summary?.costPerLead ?? 0, currency) : "—"}
               sub="per form lead"                                                                   back={cplBack}    backHeight={220} />

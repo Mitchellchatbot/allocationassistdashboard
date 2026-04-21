@@ -549,6 +549,12 @@ export function aggregateZohoData(
     },
   ];
 
+  // Debug: log all lead sources from Zoho so we can verify Facebook/Meta coverage
+  const rawSources = leads.map(l => l.Lead_Source).filter(Boolean);
+  console.log('[ZohoData] raw Lead_Source values (sample 20):', [...new Set(rawSources)].slice(0, 20));
+  const fbLeads = leads.filter(l => displaySource(l.Lead_Source) === 'Facebook');
+  console.log('[ZohoData] leads with Facebook source:', fbLeads.length);
+
   // ── Source / channel performance ─────────────────────────────────────────
   const sourceGroups = countBy(leads, l => displaySource(l.Lead_Source));
   const channels = Object.entries(sourceGroups)

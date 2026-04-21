@@ -414,6 +414,10 @@ export function useMetaAdsApi(dateRange: { from: Date; to: Date }) {
         }
       }
 
+      // Debug: log all action types returned by Meta so we can verify lead action coverage
+      console.log('[MetaAds] action types from API:', Object.fromEntries(allActions));
+      console.log('[MetaAds] totalLeads counted:', totalLeads);
+
       const ctr       = totalImpressions > 0 ? (totalClicks / totalImpressions) * 100 : 0;
       const cpm       = totalImpressions > 0 ? (totalSpend / totalImpressions) * 1000  : 0;
       const frequency = totalReach > 0 ? totalImpressions / totalReach : 0;
