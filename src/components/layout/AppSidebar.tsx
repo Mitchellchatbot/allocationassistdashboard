@@ -12,6 +12,7 @@ import {
   LogOut,
   Upload,
   FileSignature,
+  BellRing,
 } from "lucide-react";
 import logo from "@/assets/logo.png";
 import { NavLink } from "@/components/NavLink";
@@ -40,6 +41,7 @@ const mainNav = [
   { title: "Finance", url: "/finance", icon: DollarSign },
   { title: "Operations & Roadmap", url: "/operations", icon: ClipboardList },
   { title: "Meta Ads", url: "/meta-ads", icon: Image },
+  { title: "Follow-ups", url: "/follow-ups", icon: BellRing },
 ];
 
 const bottomNav = [

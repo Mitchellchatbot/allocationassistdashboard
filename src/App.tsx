@@ -25,6 +25,7 @@ const MetaAds         = lazy(() => import("./pages/MetaAds"));
 const WorkerDashboard = lazy(() => import("./pages/WorkerDashboard"));
 const CallLogImport   = lazy(() => import("./pages/CallLogImport"));
 const Contracts       = lazy(() => import("./pages/Contracts"));
+const FollowUps       = lazy(() => import("./pages/FollowUps"));
 const NotFound        = lazy(() => import("./pages/NotFound"));
 
 const queryClient = new QueryClient();
@@ -64,6 +65,7 @@ const App = () => (
               <Route path="/worker"         element={<ProtectedRoute requiredPage="/worker"><WorkerDashboard /></ProtectedRoute>} />
               <Route path="/import"         element={<ProtectedRoute requiredPage="/"><CallLogImport /></ProtectedRoute>} />
               <Route path="/contracts"      element={<ProtectedRoute requiredPage="/"><Contracts /></ProtectedRoute>} />
+              <Route path="/follow-ups"     element={<ProtectedRoute requiredPage="/follow-ups"><FollowUps /></ProtectedRoute>} />
 
               <Route path="*" element={<NotFound />} />
             </Routes>
