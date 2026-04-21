@@ -691,7 +691,6 @@ const META_PRESETS = [
 // ── Main page ─────────────────────────────────────────────────────────────────
 const MetaAds = () => {
   const { dateRange } = useFilters();
-  const { data, isLoading: leadsLoading } = useMetaLeadsStats(dateRange);
   const queryClient = useQueryClient();
 
   const [metaDays, setMetaDays] = useState(365);
@@ -701,16 +700,23 @@ const MetaAds = () => {
     return { from, to };
   }, [metaDays]);
 
+  // Both leads cards use metaDateRange so they respond to the 30D/90D/1Y buttons
+  const { data, isLoading: leadsLoading } = useMetaLeadsStats(metaDateRange);
+
   const [tokenSet, setTokenSet] = useState(true);
   const { data: api, isLoading: apiLoading, error: apiError } = useMetaAdsApi(metaDateRange);
   const { data: zoho } = useZohoData();
-  // Count Zoho leads sourced from Facebook or Instagram (form submissions via Meta ads)
+  // Count Zoho leads sourced from Facebook or Instagram, filtered by the selected date range
   const zohoMetaLeads = useMemo(() => {
-    if (!zoho?.channels) return 0;
-    return zoho.channels
-      .filter(c => c.channel === 'Facebook' || c.channel === 'Instagram')
-      .reduce((sum, c) => sum + c.doctors, 0);
-  }, [zoho?.channels]);
+    if (!zoho?.rawLeads) return 0;
+    const from = metaDateRange.from.getTime();
+    const to   = metaDateRange.to.getTime();
+    return zoho.rawLeads.filter(l => {
+      const t = new Date(l.Created_Time).getTime();
+      const src = (l.Lead_Source ?? '').toLowerCase();
+      return t >= from && t <= to && (src.includes('facebook') || src.includes('instagram') || src.includes('meta'));
+    }).length;
+  }, [zoho?.rawLeads, metaDateRange]);
   const [previewCampaign, setPreviewCampaign] = useState<{ id: string; name: string } | null>(null);
   const [directPreviewAd, setDirectPreviewAd] = useState<MetaTopAd | null>(null);
   const [showAllActions, setShowAllActions] = useState(false);
@@ -893,7 +899,23 @@ const MetaAds = () => {
 
   const topCampByLeads = campaigns.filter(c => c.leads > 0).sort((a, b) => b.leads - a.leads).slice(0, 5);
   const maxLeads = topCampByLeads[0]?.leads ?? 1;
-  const zohoMetaChannels = (zoho?.channels ?? []).filter(c => c.channel === 'Facebook' || c.channel === 'Instagram');
+  const zohoMetaChannels = useMemo(() => {
+    if (!zoho?.rawLeads) return [] as { channel: string; doctors: number }[];
+    const from = metaDateRange.from.getTime();
+    const to   = metaDateRange.to.getTime();
+    const filtered = zoho.rawLeads.filter(l => {
+      const t = new Date(l.Created_Time).getTime();
+      const src = (l.Lead_Source ?? '').toLowerCase();
+      return t >= from && t <= to && (src.includes('facebook') || src.includes('instagram') || src.includes('meta'));
+    });
+    const counts: Record<string, number> = {};
+    for (const l of filtered) {
+      const src = (l.Lead_Source ?? '').toLowerCase();
+      const ch = src.includes('instagram') ? 'Instagram' : 'Facebook';
+      counts[ch] = (counts[ch] ?? 0) + 1;
+    }
+    return Object.entries(counts).map(([channel, doctors]) => ({ channel, doctors }));
+  }, [zoho?.rawLeads, metaDateRange]);
   const maxZohoLeads = Math.max(...zohoMetaChannels.map(c => c.doctors), 1);
   const leadsBack = (
     <div className="space-y-2">
