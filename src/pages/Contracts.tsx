@@ -51,13 +51,13 @@ function ContractBody({ lead, f }: { lead: ZohoLead | null; f: ContractFields })
     <div className="contract-body" style={{ fontFamily: "Georgia, 'Times New Roman', serif", fontSize: "11pt", lineHeight: 1.75, color: "#111" }}>
 
       {/* ── Letterhead ── */}
-      <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start", marginBottom: "24px", borderBottom: "2px solid #c0392b", paddingBottom: "16px" }}>
+      <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start", marginBottom: "24px", borderBottom: "2px solid #1abc9c", paddingBottom: "16px" }}>
         <img src={logoSrc} alt="Allocation Assist" style={{ height: "72px", width: "auto" }} />
         <div style={{ textAlign: "right" }}>
-          <div style={{ fontSize: "22pt", fontWeight: "bold", color: "#c0392b", letterSpacing: "-0.3px" }}>Allocation Assist DMCC</div>
+          <div style={{ fontSize: "22pt", fontWeight: "bold", color: "#1abc9c", letterSpacing: "-0.3px" }}>Allocation Assist DMCC</div>
           <div style={{ fontSize: "13pt", color: "#555", marginBottom: "6px" }}>ألوكيشن أسيست د.م.س.س</div>
           <div style={{ fontSize: "8.5pt", color: "#777", lineHeight: 1.6 }}>
-            Business License: &nbsp;<span style={{ color: "#c0392b" }}>DMCC-859956</span><br />
+            Business License: &nbsp;<span style={{ color: "#1abc9c" }}>DMCC-859956</span><br />
             Address: &nbsp;2604, Reef Tower, Cluster O,<br />
             Jumeirah Lakes Towers, Dubai,<br />
             United Arab Emirates

@@ -904,7 +904,7 @@ export function useZohoData() {
 
       throw new Error('Initial Zoho sync timed out — try refreshing');
     },
-    staleTime:            90 * 60 * 1000,
+    staleTime:            55 * 60 * 1000,
     gcTime:               4 * 60 * 60 * 1000,
     placeholderData:      (prev: unknown) => prev,
     retry:                2,

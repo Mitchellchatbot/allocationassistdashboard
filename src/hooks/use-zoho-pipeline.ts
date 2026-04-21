@@ -24,15 +24,19 @@ const STATUS_TO_STAGE: Record<string, string> = {
   'Not Interested':              'Not Interested',
 };
 
+function isYes(val: string | null): boolean {
+  return !!val && val.toLowerCase() !== 'no';
+}
+
 function getLicense(lead: {
   Has_DHA: string | null;
   Has_DOH: string | null;
   Has_MOH: string | null;
   License: string | null;
 }): string {
-  if (lead.Has_DHA && lead.Has_DHA !== 'No') return `DHA (${lead.Has_DHA})`;
-  if (lead.Has_DOH && lead.Has_DOH !== 'No') return `DOH (${lead.Has_DOH})`;
-  if (lead.Has_MOH && lead.Has_MOH !== 'No') return `MOH (${lead.Has_MOH})`;
+  if (isYes(lead.Has_DHA)) return `DHA (${lead.Has_DHA})`;
+  if (isYes(lead.Has_DOH)) return `DOH (${lead.Has_DOH})`;
+  if (isYes(lead.Has_MOH)) return `MOH (${lead.Has_MOH})`;
   return lead.License ?? '—';
 }
 
@@ -41,9 +45,9 @@ function getDestination(lead: {
   Has_DOH: string | null;
   Has_MOH: string | null;
 }): string {
-  if (lead.Has_DHA && lead.Has_DHA !== 'No') return 'UAE (Dubai)';
-  if (lead.Has_DOH && lead.Has_DOH !== 'No') return 'UAE (Abu Dhabi)';
-  if (lead.Has_MOH && lead.Has_MOH !== 'No') return 'UAE / GCC';
+  if (isYes(lead.Has_DHA)) return 'UAE (Dubai)';
+  if (isYes(lead.Has_DOH)) return 'UAE (Abu Dhabi)';
+  if (isYes(lead.Has_MOH)) return 'UAE / GCC';
   return '—';
 }
 
@@ -64,6 +68,7 @@ export function useZohoPipeline(page: number, search: string) {
 
     // If Zoho data failed or isn't available yet, fall back to mock pipeline doctors
     if (!zoho?.rawLeads || zoho.rawLeads.length === 0) {
+      console.warn('[useZohoPipeline] No live Zoho data — showing mock doctors. Check Zoho sync.');
       let doctors: Doctor[] = mock.pipelineDoctors as Doctor[];
       if (search.trim()) {
         const q = search.toLowerCase();
