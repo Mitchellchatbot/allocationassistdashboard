@@ -795,37 +795,43 @@ const MetaAds = () => {
     </div>
   );
 
+  const topCampByImpr = campaigns.slice().sort((a, b) => b.impressions - a.impressions).slice(0, 5);
+  const maxImprCamp = topCampByImpr[0]?.impressions ?? 1;
   const imprBack = (
-    <div className="space-y-1.5">
-      {byPlatform.slice(0, 5).map(p => (
-        <div key={p.platform} className="flex items-center justify-between">
-          <span className="text-[10px]">{p.platform}</span>
-          <span className="text-[10px] font-semibold tabular-nums">{fmtN(p.impressions)}</span>
-        </div>
-      ))}
-      {byPlatform.length === 0 && <p className="text-[10px] text-muted-foreground">No platform data</p>}
+    <div className="space-y-2">
+      {topCampByImpr.length === 0
+        ? <p className="text-[10px] text-muted-foreground">No data</p>
+        : topCampByImpr.map(c => (
+          <div key={c.id}>
+            <div className="flex items-center justify-between mb-0.5">
+              <span className="text-[10px] truncate max-w-[140px]">{c.name}</span>
+              <span className="text-[10px] font-semibold text-info tabular-nums">{fmtN(c.impressions)}</span>
+            </div>
+            <div className="h-1.5 bg-muted rounded-full overflow-hidden">
+              <div className="h-full bg-info rounded-full" style={{ width: `${(c.impressions / maxImprCamp) * 100}%` }} />
+            </div>
+          </div>
+        ))}
     </div>
   );
 
+  const topCampByReach = campaigns.slice().sort((a, b) => b.reach - a.reach).slice(0, 5);
+  const maxReachCamp = topCampByReach[0]?.reach ?? 1;
   const reachBack = (
-    <div className="space-y-1.5">
-      {byAge.slice(0, 6).map(a => {
-        const total = a.male + a.female + a.unknown;
-        const malePct  = total > 0 ? Math.round((a.male   / total) * 100) : 0;
-        const femPct   = total > 0 ? Math.round((a.female / total) * 100) : 0;
-        return (
-          <div key={a.age}>
+    <div className="space-y-2">
+      {topCampByReach.length === 0
+        ? <p className="text-[10px] text-muted-foreground">No data</p>
+        : topCampByReach.map(c => (
+          <div key={c.id}>
             <div className="flex items-center justify-between mb-0.5">
-              <span className="text-[10px]">{a.age}</span>
-              <span className="text-[9px] text-muted-foreground">{malePct}% M · {femPct}% F</span>
+              <span className="text-[10px] truncate max-w-[140px]">{c.name}</span>
+              <span className="text-[10px] font-semibold text-success tabular-nums">{fmtN(c.reach)}</span>
             </div>
-            <div className="h-1.5 bg-muted rounded-full overflow-hidden flex">
-              <div className="h-full bg-blue-400" style={{ width: `${malePct}%` }} />
-              <div className="h-full bg-pink-400" style={{ width: `${femPct}%` }} />
+            <div className="h-1.5 bg-muted rounded-full overflow-hidden">
+              <div className="h-full bg-success rounded-full" style={{ width: `${(c.reach / maxReachCamp) * 100}%` }} />
             </div>
           </div>
-        );
-      })}
+        ))}
     </div>
   );
 
@@ -859,22 +865,29 @@ const MetaAds = () => {
     </div>
   );
 
+  const topCampByCpm = campaigns
+    .filter(c => c.impressions > 0)
+    .map(c => ({ ...c, cpm: (c.spend / c.impressions) * 1000 }))
+    .sort((a, b) => b.spend - a.spend)
+    .slice(0, 5);
+  const maxCpmSpend = topCampByCpm[0]?.spend ?? 1;
   const cpmBack = (
-    <div className="space-y-1.5">
-      {byPlacement.slice(0, 6).map(p => {
-        const maxImpr = byPlacement[0]?.impressions ?? 1;
-        return (
-          <div key={p.placement}>
+    <div className="space-y-2">
+      {topCampByCpm.length === 0
+        ? <p className="text-[10px] text-muted-foreground">No data</p>
+        : topCampByCpm.map(c => (
+          <div key={c.id}>
             <div className="flex items-center justify-between mb-0.5">
-              <span className="text-[10px] truncate max-w-[150px]">{p.placement}</span>
-              <span className="text-[10px] font-semibold tabular-nums text-primary">{fmtC(p.spend, currency)}</span>
+              <span className="text-[10px] truncate max-w-[130px]">{c.name}</span>
+              <span className="text-[10px] font-semibold tabular-nums text-muted-foreground">
+                {fmtC(c.cpm, currency)} CPM
+              </span>
             </div>
             <div className="h-1.5 bg-muted rounded-full overflow-hidden">
-              <div className="h-full bg-primary/60 rounded-full" style={{ width: `${(p.impressions / maxImpr) * 100}%` }} />
+              <div className="h-full bg-muted-foreground/50 rounded-full" style={{ width: `${(c.spend / maxCpmSpend) * 100}%` }} />
             </div>
           </div>
-        );
-      })}
+        ))}
     </div>
   );
 
@@ -916,19 +929,22 @@ const MetaAds = () => {
     </div>
   );
 
+  const topCampByCpc = campaigns
+    .filter(c => c.clicks > 0 && c.spend > 0)
+    .map(c => ({ ...c, cpc: c.spend / c.clicks }))
+    .sort((a, b) => a.cpc - b.cpc)
+    .slice(0, 5);
   const cplBack = (
-    <div className="space-y-1.5">
-      {actions.slice(0, 6).map(a => (
-        <div key={a.type} className="flex items-center justify-between">
-          <span className="text-[10px] truncate max-w-[140px]">{a.label}</span>
-          <div className="flex items-center gap-2">
-            <span className="text-[10px] font-semibold tabular-nums">{fmtN(a.value)}</span>
-            {a.costPerAction > 0 && (
-              <span className="text-[9px] text-muted-foreground">{fmtC(a.costPerAction, currency)}</span>
-            )}
+    <div className="space-y-2">
+      <p className="text-[9px] text-muted-foreground uppercase tracking-wide">Best cost-per-click by campaign</p>
+      {topCampByCpc.length === 0
+        ? <p className="text-[10px] text-muted-foreground">No data</p>
+        : topCampByCpc.map(c => (
+          <div key={c.id} className="flex items-center justify-between">
+            <span className="text-[10px] truncate max-w-[150px]">{c.name}</span>
+            <span className="text-[10px] font-semibold text-primary tabular-nums">{fmtC(c.cpc, currency)}</span>
           </div>
-        </div>
-      ))}
+        ))}
     </div>
   );
 
