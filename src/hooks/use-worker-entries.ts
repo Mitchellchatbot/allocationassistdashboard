@@ -4,6 +4,7 @@ import { supabase } from "@/lib/supabase";
 export type WorkerEntry = {
   id?: string;
   call_date: string;
+  call_type: string;   // "Sales Call" | "Good Call" | "Sale Closed" — drives the Performance KPIs
   status: string;
   name: string;
   specialty: string;
@@ -16,6 +17,9 @@ export type WorkerEntry = {
   created_by?: string;
   created_at?: string;
 };
+
+export const CALL_TYPES = ["Sales Call", "Good Call", "Sale Closed"] as const;
+export type CallType = typeof CALL_TYPES[number];
 
 type DateFilter = "today" | "week" | "month" | "all";
 
@@ -81,6 +85,22 @@ export function useSaveEntries() {
         created_by:   user?.id   ?? null,
       }));
       const { error } = await supabase.from("worker_entries").insert(rows);
+      if (error) throw error;
+    },
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ["worker-entries"] });
+    },
+  });
+}
+
+export function useUpdateEntry() {
+  const qc = useQueryClient();
+
+  return useMutation({
+    mutationFn: async ({ id, patch }: { id: string; patch: Partial<WorkerEntry> }) => {
+      // Strip read-only fields the client shouldn't be writing back
+      const { id: _id, created_at: _ca, created_by: _cb, worker_email: _we, ...fields } = patch;
+      const { error } = await supabase.from("worker_entries").update(fields).eq("id", id);
       if (error) throw error;
     },
     onSuccess: () => {

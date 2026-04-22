@@ -4,6 +4,9 @@ import { Badge } from "@/components/ui/badge";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import { useFilteredData } from "@/hooks/use-filtered-data";
 import { useWeeklySales } from "@/hooks/use-weekly-sales";
+import { useWorkerEntries } from "@/hooks/use-worker-entries";
+import { useFilters } from "@/lib/filters";
+import { useMemo } from "react";
 import { Trophy, Phone, ThumbsUp } from "lucide-react";
 import { ChannelIcon } from "@/components/ChannelIcon";
 import { WorkerAnalyticsPanel } from "@/components/WorkerAnalyticsPanel";
@@ -28,13 +31,60 @@ function matchByFirstName(recruiterName: string, memberName: string) {
 const TeamPerformance = () => {
   const { recruiters, campaigns } = useFilteredData();
   const { data: salesData = [], isLoading: salesLoading } = useWeeklySales();
+  const { data: allWorkerEntries = [] } = useWorkerEntries("all");
+  const { dateRange } = useFilters();
+
+  // Aggregate worker self-logged entries by worker email username, in the same period
+  const workerLoggedByName = useMemo(() => {
+    const fromISO = dateRange.from.toISOString().split("T")[0];
+    const toISO   = dateRange.to.toISOString().split("T")[0];
+    const map = new Map<string, { sales: number; good: number; closed: number }>();
+    for (const e of allWorkerEntries) {
+      if (!e.worker_email) continue;
+      const d = e.call_date ?? "";
+      if (d < fromISO || d > toISO) continue;
+      const key = e.worker_email.split("@")[0].toLowerCase();
+      const cur = map.get(key) ?? { sales: 0, good: 0, closed: 0 };
+      if (e.call_type === "Sales Call") cur.sales++;
+      if (e.call_type === "Good Call")  cur.good++;
+      if (e.call_type === "Sale Closed") cur.closed++;
+      map.set(key, cur);
+    }
+    return map;
+  }, [allWorkerEntries, dateRange]);
 
   const hasAnyCampaignData = campaigns.some(c => c.doctors > 0 || (c as { spend?: number }).spend > 0);
 
-  // Build a lookup: first name (lowercase) → sales summary
-  const salesByFirst = new Map(
-    salesData.map(s => [s.member_name.split(" ")[0].toLowerCase(), s])
-  );
+  // Build a lookup: first name (lowercase) → sales summary, augmented with worker self-logged entries
+  const salesByFirst = useMemo(() => {
+    const map = new Map<string, typeof salesData[number]>();
+    // Seed with weekly_sales rows
+    for (const s of salesData) {
+      const key = s.member_name.split(" ")[0].toLowerCase();
+      map.set(key, { ...s });
+    }
+    // Add worker self-logged calls on top
+    for (const [key, counts] of workerLoggedByName.entries()) {
+      const existing = map.get(key);
+      if (existing) {
+        existing.full_sales_calls += counts.sales;
+        existing.good_calls       += counts.good;
+        existing.sales_count      += counts.closed;
+        existing.good_call_rate   = existing.full_sales_calls > 0
+          ? Math.round((existing.good_calls / existing.full_sales_calls) * 100)
+          : 0;
+      } else if (counts.sales + counts.good + counts.closed > 0) {
+        map.set(key, {
+          member_name:      key,
+          full_sales_calls: counts.sales,
+          good_calls:       counts.good,
+          sales_count:      counts.closed,
+          good_call_rate:   counts.sales > 0 ? Math.round((counts.good / counts.sales) * 100) : 0,
+        });
+      }
+    }
+    return map;
+  }, [salesData, workerLoggedByName]);
 
   // Chart data: all members that have sales data (union of Zoho recruiters + weekly_sales members)
   const chartData = salesData.map(s => ({

@@ -3,7 +3,7 @@ import { createPortal } from "react-dom";
 import { useNavigate } from "react-router-dom";
 import logo from "@/assets/logo.png";
 import { useAuth } from "@/hooks/use-auth";
-import { useWorkerEntries, useSaveEntries, useDeleteEntry, type WorkerEntry } from "@/hooks/use-worker-entries";
+import { useWorkerEntries, useSaveEntries, useUpdateEntry, useDeleteEntry, CALL_TYPES, type WorkerEntry } from "@/hooks/use-worker-entries";
 import { fetchWeeklySalesRaw } from "@/hooks/use-weekly-sales";
 import { useZohoData } from "@/hooks/use-zoho-data";
 import { useQuery } from "@tanstack/react-query";
@@ -173,6 +173,7 @@ function emptyRow(): WorkerEntry & { _key: string } {
   return {
     _key: String(Math.random()),
     call_date: new Date().toISOString().split("T")[0],
+    call_type: "Sales Call",
     status: "", name: "", specialty: "", qualifications: "",
     state: "", meeting_type: "", country_of_training: "", notes: "",
   };
@@ -444,11 +445,14 @@ function parseDDMMYYYY(s: string): number {
 }
 
 function PerformanceTab({ memberName }: { memberName: string }) {
+  const { user } = useAuth();
   const { data: rows = [], isLoading } = useQuery({
     queryKey: ["weekly-sales-raw"],
     queryFn:  fetchWeeklySalesRaw,
     staleTime: 10 * 60 * 1000,
   });
+  // Pull this worker's call entries so they get credit for self-logged calls
+  const { data: workerEntries = [] } = useWorkerEntries("all", user?.id ?? undefined);
   const { data: zoho } = useZohoData();
   const [preset, setPreset] = useState<TimeRangePreset | "all">("month");
 
@@ -517,6 +521,23 @@ function PerformanceTab({ memberName }: { memberName: string }) {
     });
   }, [myRows, preset]);
 
+  // Worker self-logged entries that fall in the same period
+  const myEntryCounts = useMemo(() => {
+    const range  = preset === "all" ? null : getPresetRange(preset);
+    const fromISO = range ? range.from.toISOString().split("T")[0] : "";
+    const toISO   = range ? range.to.toISOString().split("T")[0]   : "";
+    const inPeriod = workerEntries.filter(e => {
+      if (!range) return true;
+      const d = e.call_date ?? "";
+      return d >= fromISO && d <= toISO;
+    });
+    return {
+      sales:    inPeriod.filter(e => e.call_type === "Sales Call").length,
+      good:     inPeriod.filter(e => e.call_type === "Good Call").length,
+      closed:   inPeriod.filter(e => e.call_type === "Sale Closed").length,
+    };
+  }, [workerEntries, preset]);
+
   const totals = useMemo(() => {
     const t = { full_sales_calls: 0, good_calls: 0, sales_count: 0 };
     for (const r of filtered) {
@@ -524,8 +545,12 @@ function PerformanceTab({ memberName }: { memberName: string }) {
       t.good_calls       += r.good_calls       ?? 0;
       t.sales_count      += r.sales_count      ?? 0;
     }
+    // Add what the worker self-logged in the worker portal
+    t.full_sales_calls += myEntryCounts.sales;
+    t.good_calls       += myEntryCounts.good;
+    t.sales_count      += myEntryCounts.closed;
     return t;
-  }, [filtered]);
+  }, [filtered, myEntryCounts]);
 
   const goodCallRate = totals.full_sales_calls > 0
     ? Math.round((totals.good_calls / totals.full_sales_calls) * 100)
@@ -1086,6 +1111,7 @@ function AddEntryTab() {
 
   const COLS = [
     { key: "call_date",           label: "Date",                width: "w-28" },
+    { key: "call_type",           label: "Call Type",           width: "w-32" },
     { key: "status",              label: "Status",              width: "w-36" },
     { key: "name",                label: "Name",                width: "w-36" },
     { key: "specialty",           label: "Specialty",           width: "w-32" },
@@ -1156,6 +1182,11 @@ function AddEntryTab() {
                     <input type="date" value={row.call_date} onChange={e => update(row._key, "call_date", e.target.value)} className={inputCls} />
                   </td>
                   <td className="px-2 py-1.5 border-r border-border/30">
+                    <select value={row.call_type} onChange={e => update(row._key, "call_type", e.target.value)} className={inputCls + " cursor-pointer"}>
+                      {CALL_TYPES.map(t => <option key={t} value={t}>{t}</option>)}
+                    </select>
+                  </td>
+                  <td className="px-2 py-1.5 border-r border-border/30">
                     <StatusSelect value={row.status} onChange={v => update(row._key, "status", v)} />
                   </td>
                   <td className="px-2 py-1.5 border-r border-border/30">
@@ -1215,9 +1246,58 @@ function AddEntryTab() {
 
 type DateFilter = "today" | "week" | "month" | "all";
 
+// ── Editable cell — click to edit, blur/Enter to save ─────────────────────────
+function EditableTextCell({
+  value, placeholder, onSave, className,
+}: { value: string; placeholder?: string; onSave: (v: string) => void; className?: string }) {
+  const [editing, setEditing] = useState(false);
+  const [draft, setDraft] = useState(value);
+  useEffect(() => { setDraft(value); }, [value]);
+  if (!editing) {
+    return (
+      <span
+        onClick={() => setEditing(true)}
+        className={`cursor-pointer hover:bg-primary/5 rounded px-1 py-0.5 -mx-1 -my-0.5 block min-h-[20px] ${className ?? ""}`}
+        title="Click to edit"
+      >
+        {value || <span className="text-muted-foreground/50">{placeholder ?? "—"}</span>}
+      </span>
+    );
+  }
+  return (
+    <input
+      autoFocus
+      value={draft}
+      onChange={e => setDraft(e.target.value)}
+      onBlur={() => { setEditing(false); if (draft !== value) onSave(draft); }}
+      onKeyDown={e => {
+        if (e.key === "Enter") (e.target as HTMLInputElement).blur();
+        if (e.key === "Escape") { setDraft(value); setEditing(false); }
+      }}
+      className="w-full bg-primary/5 border border-primary/30 rounded px-1.5 py-0.5 text-[11px] outline-none"
+    />
+  );
+}
+
+function EditableSelectCell({
+  value, options, onSave,
+}: { value: string; options: readonly string[]; onSave: (v: string) => void }) {
+  return (
+    <select
+      value={value}
+      onChange={e => onSave(e.target.value)}
+      className="bg-transparent text-[11px] outline-none cursor-pointer hover:bg-primary/5 rounded px-1 py-0.5 -mx-1"
+    >
+      <option value="">—</option>
+      {options.map(o => <option key={o} value={o}>{o}</option>)}
+    </select>
+  );
+}
+
 function RecordsTab({ filter, isAdmin, userId }: { filter: DateFilter; isAdmin: boolean; userId?: string }) {
   const { data: entries = [], isLoading } = useWorkerEntries(filter, userId);
   const { mutate: del } = useDeleteEntry();
+  const { mutate: updateEntry } = useUpdateEntry();
   const [statusFilter, setStatusFilter] = useState("");
   const [workerFilter, setWorkerFilter] = useState("all");
 
@@ -1282,7 +1362,7 @@ function RecordsTab({ filter, isAdmin, userId }: { filter: DateFilter; isAdmin: 
               <thead>
                 <tr style={{ backgroundColor: "hsl(170, 45%, 28%)" }}>
                   {isAdmin && <th className="px-3 py-2.5 text-[10px] font-semibold text-white/90 uppercase tracking-wide border-r border-white/10 whitespace-nowrap">Worker</th>}
-                  {["Date","Status","Name","Specialty","Qualifications","State","Meeting","Country","Notes",""].map(h => (
+                  {["Date","Call Type","Status","Name","Specialty","Qualifications","State","Meeting","Country","Notes",""].map(h => (
                     <th key={h} className="px-3 py-2.5 text-[10px] font-semibold text-white/90 uppercase tracking-wide border-r border-white/10 last:border-r-0 whitespace-nowrap">{h}</th>
                   ))}
                 </tr>
@@ -1291,6 +1371,7 @@ function RecordsTab({ filter, isAdmin, userId }: { filter: DateFilter; isAdmin: 
                 {filtered.map((e, i) => {
                   const wIdx  = workerEmails.indexOf(e.worker_email ?? "");
                   const wColor = WORKER_COLORS[wIdx >= 0 ? wIdx % WORKER_COLORS.length : 0];
+                  const save = (patch: Partial<WorkerEntry>) => e.id && updateEntry({ id: e.id, patch });
                   return (
                     <tr key={e.id}
                       className={`border-t border-border/40 hover:bg-primary/[0.03] transition-colors ${i % 2 === 0 ? "bg-white" : "bg-muted/10"}`}>
@@ -1303,19 +1384,35 @@ function RecordsTab({ filter, isAdmin, userId }: { filter: DateFilter; isAdmin: 
                         </td>
                       )}
                       <td className="px-3 py-2 text-[11px] text-foreground border-r border-border/30 whitespace-nowrap">
-                        {e.call_date ? new Date(e.call_date + "T00:00:00").toLocaleDateString("en-GB", { day: "numeric", month: "short", year: "2-digit" }) : "—"}
+                        <input type="date" value={e.call_date ?? ""} onChange={ev => save({ call_date: ev.target.value })}
+                          className="bg-transparent text-[11px] outline-none cursor-pointer hover:bg-primary/5 rounded px-1 py-0.5 -mx-1" />
                       </td>
                       <td className="px-3 py-2 border-r border-border/30">
-                        {e.status ? <StatusBadge status={e.status} /> : <span className="text-[10px] text-muted-foreground">—</span>}
+                        <EditableSelectCell value={e.call_type ?? ""} options={CALL_TYPES} onSave={v => save({ call_type: v })} />
                       </td>
-                      <td className="px-3 py-2 text-[11px] font-medium text-foreground border-r border-border/30">{e.name || "—"}</td>
-                      <td className="px-3 py-2 text-[11px] text-foreground border-r border-border/30">{e.specialty || "—"}</td>
-                      <td className="px-3 py-2 text-[11px] text-muted-foreground border-r border-border/30 max-w-[160px] truncate">{e.qualifications || "—"}</td>
-                      <td className="px-3 py-2 text-[11px] text-foreground border-r border-border/30">{e.state || "—"}</td>
-                      <td className="px-3 py-2 text-[11px] text-foreground border-r border-border/30">{e.meeting_type || "—"}</td>
-                      <td className="px-3 py-2 text-[11px] text-foreground border-r border-border/30">{e.country_of_training || "—"}</td>
+                      <td className="px-3 py-2 border-r border-border/30">
+                        <StatusSelect value={e.status ?? ""} onChange={v => save({ status: v })} />
+                      </td>
+                      <td className="px-3 py-2 text-[11px] font-medium text-foreground border-r border-border/30">
+                        <EditableTextCell value={e.name} placeholder="Name" onSave={v => save({ name: v })} />
+                      </td>
+                      <td className="px-3 py-2 text-[11px] text-foreground border-r border-border/30">
+                        <EditableTextCell value={e.specialty} placeholder="Specialty" onSave={v => save({ specialty: v })} />
+                      </td>
+                      <td className="px-3 py-2 text-[11px] text-muted-foreground border-r border-border/30 max-w-[160px]">
+                        <EditableTextCell value={e.qualifications} placeholder="Qualifications" onSave={v => save({ qualifications: v })} />
+                      </td>
+                      <td className="px-3 py-2 text-[11px] text-foreground border-r border-border/30">
+                        <EditableTextCell value={e.state} placeholder="State" onSave={v => save({ state: v })} />
+                      </td>
+                      <td className="px-3 py-2 text-[11px] text-foreground border-r border-border/30">
+                        <EditableSelectCell value={e.meeting_type} options={MEETING_TYPES} onSave={v => save({ meeting_type: v })} />
+                      </td>
+                      <td className="px-3 py-2 text-[11px] text-foreground border-r border-border/30">
+                        <EditableTextCell value={e.country_of_training} placeholder="Country" onSave={v => save({ country_of_training: v })} />
+                      </td>
                       <td className="px-3 py-2 text-[11px] text-muted-foreground border-r border-border/30 max-w-[200px]">
-                        <span title={e.notes} className="line-clamp-2">{e.notes || "—"}</span>
+                        <EditableTextCell value={e.notes} placeholder="Notes" onSave={v => save({ notes: v })} />
                       </td>
                       <td className="px-3 py-2 text-center">
                         {e.id && (
