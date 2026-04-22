@@ -41,6 +41,7 @@ function mapLead(l: ZohoLead): Doctor {
   }
 
   const status: Doctor["status"] =
+    (l.Lead_Status === "Unqualified Leads" || l.Lead_Status === "Not Interested") ? "closed" :
     l.Lead_Status === "High Priority Follow up" && daysInStage > 2 ? "delayed" :
     l.Lead_Status === "High Priority Follow up" ? "at-risk" :
     daysInStage > 30 ? "delayed" :
@@ -82,6 +83,8 @@ export interface LeadsFilters {
 
 /** Compute the status badge from raw lead fields (mirrors mapLead logic). */
 function getBadge(l: ZohoLead): Doctor["status"] {
+  // Terminal statuses — these are not "on track", they're done
+  if (l.Lead_Status === "Unqualified Leads" || l.Lead_Status === "Not Interested") return "closed";
   const daysOld = Math.max(1, Math.floor(
     (Date.now() - new Date(l.Created_Time).getTime()) / 86_400_000
   ));
@@ -123,6 +126,10 @@ export function useZohoLeads(search: string, filters: LeadsFilters = {}) {
           (l.License ?? '')
         ).toLowerCase();
 
+        // Handle "AA-96001" style IDs — strip prefix and compare to last 5 of Zoho ID
+        const idTerm = term.replace(/^aa-?/i, "");
+        const last5  = l.id?.slice(-5).toLowerCase() ?? "";
+
         const match =
           l.Full_Name?.toLowerCase().includes(term) ||
           l.First_Name?.toLowerCase().includes(term) ||
@@ -133,6 +140,8 @@ export function useZohoLeads(search: string, filters: LeadsFilters = {}) {
           l.Lead_Status?.toLowerCase().includes(term) ||
           l.Country_of_Specialty_training?.toLowerCase().includes(term) ||
           l.Lead_Source?.toLowerCase().includes(term) ||
+          l.id?.toLowerCase().includes(term) ||
+          last5.includes(idTerm) ||
           dest.includes(term) ||
           lic.includes(term);
 

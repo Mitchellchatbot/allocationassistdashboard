@@ -14,7 +14,7 @@ export type Doctor = {
   destination: string;
   assignedTo: string;
   daysInStage: number;
-  status: "on-track" | "delayed" | "at-risk";
+  status: "on-track" | "delayed" | "at-risk" | "closed";
   license: string;
 };
 

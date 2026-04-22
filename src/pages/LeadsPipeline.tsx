@@ -166,6 +166,7 @@ const statusConfig = {
   "on-track": { label: "On Track", className: "bg-success/10 text-success border-success/20", icon: CheckCircle },
   "at-risk": { label: "Needs Attention", className: "bg-warning/10 text-warning border-warning/20", icon: Clock },
   "delayed": { label: "Delayed", className: "bg-destructive/10 text-destructive border-destructive/20", icon: AlertTriangle },
+  "closed":  { label: "Closed", className: "bg-muted text-muted-foreground border-border/50", icon: X },
 };
 
 const LeadsPipeline = () => {
