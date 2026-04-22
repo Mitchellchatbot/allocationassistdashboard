@@ -290,12 +290,15 @@ const FollowUps = () => {
             className="pl-8 h-8 text-[12px] w-48"
           />
         </div>
-        <Select value={recruiterFilter} onValueChange={setRecruiterFilter}>
+        <Select
+          value={recruiterFilter || "__all__"}
+          onValueChange={v => setRecruiterFilter(v === "__all__" ? "" : v)}
+        >
           <SelectTrigger className="h-8 text-[12px] w-44">
             <SelectValue placeholder="All consultants" />
           </SelectTrigger>
           <SelectContent>
-            <SelectItem value="">All consultants</SelectItem>
+            <SelectItem value="__all__">All consultants</SelectItem>
             {recruiters.map(r => <SelectItem key={r} value={r}>{r}</SelectItem>)}
           </SelectContent>
         </Select>
