@@ -458,11 +458,19 @@ function PerformanceTab({ memberName }: { memberName: string }) {
   }, [rows, memberName]);
 
   const filtered = useMemo(() => {
-    if (days >= 99999) return myRows;
-    const cutoff = Date.now() - days * 86_400_000;
+    if (days >= 99999) {
+      // "All" — still drop rows we can't parse so the chart doesn't lie
+      return myRows.filter(r => !isNaN(parseDDMMYYYY(r.date_col)));
+    }
+    const now    = Date.now();
+    const cutoff = now - days * 86_400_000;
     return myRows.filter(r => {
       const t = parseDDMMYYYY(r.date_col);
-      return isNaN(t) ? true : t >= cutoff;
+      // Strict: drop rows with unparseable dates, drop future-dated rows,
+      // keep only rows within the selected window
+      if (isNaN(t)) return false;
+      if (t > now) return false;
+      return t >= cutoff;
     });
   }, [myRows, days]);
 
@@ -486,13 +494,23 @@ function PerformanceTab({ memberName }: { memberName: string }) {
   // Chart data: one point per day, sorted chronologically. Aggregate if same date appears twice.
   const chartData = useMemo(() => {
     const byDate = new Map<string, { date: string; ts: number; calls: number; good: number; sales: number }>();
+    const years = new Set<number>();
+    for (const r of filtered) {
+      const ts = parseDDMMYYYY(r.date_col);
+      if (isNaN(ts)) continue;
+      years.add(new Date(ts).getFullYear());
+    }
+    const showYear = years.size > 1;
     for (const r of filtered) {
       const ts = parseDDMMYYYY(r.date_col);
       if (isNaN(ts)) continue;
       const key = r.date_col;
       if (!byDate.has(key)) {
+        const d = new Date(ts);
         byDate.set(key, {
-          date: new Date(ts).toLocaleDateString("en-GB", { day: "numeric", month: "short" }),
+          date: showYear
+            ? d.toLocaleDateString("en-GB", { day: "numeric", month: "short", year: "2-digit" })
+            : d.toLocaleDateString("en-GB", { day: "numeric", month: "short" }),
           ts,
           calls: 0, good: 0, sales: 0,
         });
