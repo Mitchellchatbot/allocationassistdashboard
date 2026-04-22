@@ -716,6 +716,10 @@ function MyDoctorsTab({ memberName }: { memberName: string }) {
   const { data: zoho, isLoading } = useZohoData();
   const [search, setSearch] = useState("");
   const [statusFilter, setStatusFilter] = useState<string>("__all__");
+  const [specialtyFilter, setSpecialtyFilter] = useState<string>("__all__");
+  const [countryFilter, setCountryFilter] = useState<string>("__all__");
+  const [licenseFilter, setLicenseFilter] = useState<string>("__all__"); // all | DHA | DOH | MOH | none
+  const [ageFilter, setAgeFilter] = useState<string>("__all__"); // all | new (<7d) | recent (7-30) | old (30-90) | stale (90+)
 
   const myLeads = useMemo(() => {
     if (!zoho?.rawLeads) return [];
@@ -738,9 +742,44 @@ function MyDoctorsTab({ memberName }: { memberName: string }) {
     return Array.from(set).sort();
   }, [myLeads]);
 
+  const specialties = useMemo(() => {
+    const set = new Set<string>();
+    for (const l of myLeads) {
+      const s = l.Specialty_New || l.Specialty;
+      if (s) set.add(s);
+    }
+    return Array.from(set).sort();
+  }, [myLeads]);
+
+  const countries = useMemo(() => {
+    const set = new Set<string>();
+    for (const l of myLeads) if (l.Country_of_Specialty_training) set.add(l.Country_of_Specialty_training);
+    return Array.from(set).sort();
+  }, [myLeads]);
+
+  function licenseOf(l: { Has_DHA: string | null; Has_DOH: string | null; Has_MOH: string | null }): string {
+    if (l.Has_DHA && l.Has_DHA.toLowerCase() !== "no") return "DHA";
+    if (l.Has_DOH && l.Has_DOH.toLowerCase() !== "no") return "DOH";
+    if (l.Has_MOH && l.Has_MOH.toLowerCase() !== "no") return "MOH";
+    return "none";
+  }
+
+  function ageOf(created: string): string {
+    if (!created) return "unknown";
+    const days = Math.floor((Date.now() - new Date(created).getTime()) / 86_400_000);
+    if (days < 7)  return "new";
+    if (days < 30) return "recent";
+    if (days < 90) return "old";
+    return "stale";
+  }
+
   const filtered = useMemo(() => {
     let r = myLeads;
-    if (statusFilter !== "__all__") r = r.filter(l => l.Lead_Status === statusFilter);
+    if (statusFilter    !== "__all__") r = r.filter(l => l.Lead_Status === statusFilter);
+    if (specialtyFilter !== "__all__") r = r.filter(l => (l.Specialty_New || l.Specialty || "") === specialtyFilter);
+    if (countryFilter   !== "__all__") r = r.filter(l => l.Country_of_Specialty_training === countryFilter);
+    if (licenseFilter   !== "__all__") r = r.filter(l => licenseOf(l) === licenseFilter);
+    if (ageFilter       !== "__all__") r = r.filter(l => ageOf(l.Created_Time) === ageFilter);
     if (search.trim()) {
       const q = search.toLowerCase();
       r = r.filter(l =>
@@ -750,7 +789,23 @@ function MyDoctorsTab({ memberName }: { memberName: string }) {
       );
     }
     return r;
-  }, [myLeads, statusFilter, search]);
+  }, [myLeads, statusFilter, specialtyFilter, countryFilter, licenseFilter, ageFilter, search]);
+
+  const hasActiveFilters = search
+    || statusFilter    !== "__all__"
+    || specialtyFilter !== "__all__"
+    || countryFilter   !== "__all__"
+    || licenseFilter   !== "__all__"
+    || ageFilter       !== "__all__";
+
+  function clearFilters() {
+    setSearch("");
+    setStatusFilter("__all__");
+    setSpecialtyFilter("__all__");
+    setCountryFilter("__all__");
+    setLicenseFilter("__all__");
+    setAgeFilter("__all__");
+  }
 
   const counts = useMemo(() => {
     const c = { total: myLeads.length, highPri: 0, contactFuture: 0, attempted: 0 };
@@ -784,18 +839,55 @@ function MyDoctorsTab({ memberName }: { memberName: string }) {
         <KpiTile label="Attempted"         value={counts.attempted}     sub="reached out" accent="text-amber-600" />
       </div>
 
-      <div className="flex items-center gap-2 flex-wrap">
-        <div className="relative">
-          <Search className="absolute left-2.5 top-1/2 -translate-y-1/2 h-3 w-3 text-muted-foreground pointer-events-none" />
-          <input type="text" placeholder="Search by name, specialty, country…"
-            value={search} onChange={e => setSearch(e.target.value)}
-            className="h-8 w-72 pl-7 rounded-lg border border-border bg-card px-3 text-[11px] outline-none focus:border-primary transition-colors" />
+      <div className="rounded-xl border border-border/60 bg-card p-3 space-y-2">
+        <div className="flex items-center gap-2 flex-wrap">
+          <div className="relative">
+            <Search className="absolute left-2.5 top-1/2 -translate-y-1/2 h-3 w-3 text-muted-foreground pointer-events-none" />
+            <input type="text" placeholder="Search name, specialty, country…"
+              value={search} onChange={e => setSearch(e.target.value)}
+              className="h-8 w-64 pl-7 rounded-lg border border-border bg-background px-3 text-[11px] outline-none focus:border-primary transition-colors" />
+          </div>
+          <select value={statusFilter} onChange={e => setStatusFilter(e.target.value)}
+            className="h-8 rounded-lg border border-border bg-background px-2 text-[11px] outline-none focus:border-primary transition-colors">
+            <option value="__all__">All statuses</option>
+            {statuses.map(s => <option key={s} value={s}>{s}</option>)}
+          </select>
+          <select value={specialtyFilter} onChange={e => setSpecialtyFilter(e.target.value)}
+            className="h-8 rounded-lg border border-border bg-background px-2 text-[11px] outline-none focus:border-primary transition-colors">
+            <option value="__all__">All specialties</option>
+            {specialties.map(s => <option key={s} value={s}>{s}</option>)}
+          </select>
+          <select value={countryFilter} onChange={e => setCountryFilter(e.target.value)}
+            className="h-8 rounded-lg border border-border bg-background px-2 text-[11px] outline-none focus:border-primary transition-colors">
+            <option value="__all__">All countries</option>
+            {countries.map(c => <option key={c} value={c}>{c}</option>)}
+          </select>
+          <select value={licenseFilter} onChange={e => setLicenseFilter(e.target.value)}
+            className="h-8 rounded-lg border border-border bg-background px-2 text-[11px] outline-none focus:border-primary transition-colors">
+            <option value="__all__">Any license</option>
+            <option value="DHA">DHA only</option>
+            <option value="DOH">DOH only</option>
+            <option value="MOH">MOH only</option>
+            <option value="none">No license</option>
+          </select>
+          <select value={ageFilter} onChange={e => setAgeFilter(e.target.value)}
+            className="h-8 rounded-lg border border-border bg-background px-2 text-[11px] outline-none focus:border-primary transition-colors">
+            <option value="__all__">Any age</option>
+            <option value="new">New (&lt;7 days)</option>
+            <option value="recent">Recent (7–30d)</option>
+            <option value="old">Older (30–90d)</option>
+            <option value="stale">Stale (90d+)</option>
+          </select>
+          {hasActiveFilters && (
+            <button onClick={clearFilters}
+              className="h-8 inline-flex items-center gap-1 rounded-md px-2 text-[11px] text-muted-foreground hover:text-foreground hover:bg-secondary transition-colors">
+              <X className="h-3 w-3" /> Clear
+            </button>
+          )}
         </div>
-        <select value={statusFilter} onChange={e => setStatusFilter(e.target.value)}
-          className="h-8 rounded-lg border border-border bg-card px-3 text-[11px] outline-none focus:border-primary transition-colors">
-          <option value="__all__">All statuses</option>
-          {statuses.map(s => <option key={s} value={s}>{s}</option>)}
-        </select>
+        <p className="text-[10px] text-muted-foreground">
+          Showing {filtered.length.toLocaleString()} of {myLeads.length.toLocaleString()} doctors
+        </p>
       </div>
 
       {filtered.length === 0 ? (
