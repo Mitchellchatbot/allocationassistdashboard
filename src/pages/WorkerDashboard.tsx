@@ -7,6 +7,7 @@ import { useWorkerEntries, useSaveEntries, useDeleteEntry, type WorkerEntry } fr
 import { fetchWeeklySalesRaw } from "@/hooks/use-weekly-sales";
 import { useZohoData } from "@/hooks/use-zoho-data";
 import { useQuery } from "@tanstack/react-query";
+import { getPresetRange, type TimeRangePreset } from "@/lib/filters";
 import {
   AreaChart, Area, BarChart, Bar, PieChart, Pie, Cell,
   XAxis, YAxis, CartesianGrid, Tooltip, Legend, ResponsiveContainer,
@@ -310,7 +311,7 @@ function WorkerBarChart({ entries, workerEmails }: { entries: WorkerEntry[]; wor
 function OverviewTab({ isAdmin, userId }: { isAdmin: boolean; userId?: string }) {
   const { data: allEntries = [], isLoading } = useWorkerEntries("all", userId);
   const [selectedWorker, setSelectedWorker] = useState("all");
-  const [days, setDays] = useState(30);
+  const [preset, setPreset] = useState<TimeRangePreset | "all">("month");
 
   const workerEmails = useMemo(
     () => [...new Set(allEntries.map(e => e.worker_email).filter(Boolean))] as string[],
@@ -318,10 +319,15 @@ function OverviewTab({ isAdmin, userId }: { isAdmin: boolean; userId?: string })
   );
 
   const dateScopedEntries = useMemo(() => {
-    if (days >= 99999) return allEntries;
-    const cutoff = new Date(Date.now() - days * 86_400_000).toISOString().split("T")[0];
-    return allEntries.filter(e => (e.call_date ?? "") >= cutoff);
-  }, [allEntries, days]);
+    if (preset === "all") return allEntries;
+    const range = getPresetRange(preset);
+    const fromISO = range.from.toISOString().split("T")[0];
+    const toISO   = range.to.toISOString().split("T")[0];
+    return allEntries.filter(e => {
+      const d = e.call_date ?? "";
+      return d >= fromISO && d <= toISO;
+    });
+  }, [allEntries, preset]);
 
   const displayEntries = useMemo(
     () => selectedWorker === "all" ? dateScopedEntries : dateScopedEntries.filter(e => e.worker_email === selectedWorker),
@@ -356,11 +362,11 @@ function OverviewTab({ isAdmin, userId }: { isAdmin: boolean; userId?: string })
         </div>
 
         <div className="flex items-center gap-2 flex-wrap">
-          <div className="flex gap-1 rounded-lg border border-border/60 bg-card p-0.5">
+          <div className="flex gap-1 rounded-lg border border-border/60 bg-card p-0.5 flex-wrap">
             {PERF_PRESETS.map(p => (
-              <button key={p.label} type="button" onClick={() => setDays(p.days)}
-                className={`px-3 py-1 rounded-md text-[10px] font-medium transition-colors ${
-                  days === p.days ? "bg-primary text-white" : "text-muted-foreground hover:bg-secondary"
+              <button key={p.label} type="button" onClick={() => setPreset(p.preset)}
+                className={`px-3 py-1 rounded-md text-[10px] font-medium transition-colors whitespace-nowrap ${
+                  preset === p.preset ? "bg-primary text-white" : "text-muted-foreground hover:bg-secondary"
                 }`}>
                 {p.label}
               </button>
@@ -418,13 +424,16 @@ function OverviewTab({ isAdmin, userId }: { isAdmin: boolean; userId?: string })
 }
 
 // ── Performance tab — pulls weekly_sales filtered to the logged-in worker ─────
+// Uses the same date presets as the admin global filter so numbers line up
+// 1:1 with Team Performance for the same period.
 
-const PERF_PRESETS = [
-  { label: "7D",  days: 7 },
-  { label: "30D", days: 30 },
-  { label: "90D", days: 90 },
-  { label: "1Y",  days: 365 },
-  { label: "All", days: 99999 },
+const PERF_PRESETS: { label: string; preset: TimeRangePreset | "all" }[] = [
+  { label: "Today",        preset: "today"   },
+  { label: "This Week",    preset: "week"    },
+  { label: "This Month",   preset: "month"   },
+  { label: "This Quarter", preset: "quarter" },
+  { label: "This Year",    preset: "year"    },
+  { label: "All Time",     preset: "all"     },
 ];
 
 function parseDDMMYYYY(s: string): number {
@@ -440,7 +449,7 @@ function PerformanceTab({ memberName }: { memberName: string }) {
     queryFn:  fetchWeeklySalesRaw,
     staleTime: 10 * 60 * 1000,
   });
-  const [days, setDays] = useState(30);
+  const [preset, setPreset] = useState<TimeRangePreset | "all">("month");
 
   const myRows = useMemo(() => {
     const target = memberName.trim().toLowerCase();
@@ -449,7 +458,6 @@ function PerformanceTab({ memberName }: { memberName: string }) {
     return rows.filter(r => {
       const m = (r.member_name ?? "").trim().toLowerCase();
       if (!m) return false;
-      // Exact match, or partial match either direction (handles "Mohamed" vs "Mohamed Othaman")
       return m === target
         || m.includes(target)
         || target.includes(m)
@@ -457,22 +465,20 @@ function PerformanceTab({ memberName }: { memberName: string }) {
     });
   }, [rows, memberName]);
 
+  // Same date filter math as useWeeklySales (admin Team Performance)
   const filtered = useMemo(() => {
-    if (days >= 99999) {
-      // "All" — still drop rows we can't parse so the chart doesn't lie
+    if (preset === "all") {
       return myRows.filter(r => !isNaN(parseDDMMYYYY(r.date_col)));
     }
-    const now    = Date.now();
-    const cutoff = now - days * 86_400_000;
+    const range  = getPresetRange(preset);
+    const fromMs = range.from.getTime();
+    const toMs   = range.to.getTime() + 86_400_000;
     return myRows.filter(r => {
       const t = parseDDMMYYYY(r.date_col);
-      // Strict: drop rows with unparseable dates, drop future-dated rows,
-      // keep only rows within the selected window
       if (isNaN(t)) return false;
-      if (t > now) return false;
-      return t >= cutoff;
+      return t >= fromMs && t < toMs;
     });
-  }, [myRows, days]);
+  }, [myRows, preset]);
 
   const totals = useMemo(() => {
     const t = { full_sales_calls: 0, good_calls: 0, sales_count: 0 };
@@ -538,11 +544,11 @@ function PerformanceTab({ memberName }: { memberName: string }) {
             {memberName ? `Sales activity for ${memberName}` : "Set your full_name in user_profiles to see stats"}
           </p>
         </div>
-        <div className="flex gap-1 rounded-lg border border-border/60 bg-card p-0.5">
+        <div className="flex gap-1 rounded-lg border border-border/60 bg-card p-0.5 flex-wrap">
           {PERF_PRESETS.map(p => (
-            <button key={p.label} type="button" onClick={() => setDays(p.days)}
-              className={`px-3 py-1 rounded-md text-[10px] font-medium transition-colors ${
-                days === p.days ? "bg-primary text-white" : "text-muted-foreground hover:bg-secondary"
+            <button key={p.label} type="button" onClick={() => setPreset(p.preset)}
+              className={`px-3 py-1 rounded-md text-[10px] font-medium transition-colors whitespace-nowrap ${
+                preset === p.preset ? "bg-primary text-white" : "text-muted-foreground hover:bg-secondary"
               }`}>
               {p.label}
             </button>
