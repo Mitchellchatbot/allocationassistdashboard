@@ -450,15 +450,18 @@ const LeadsPipeline = () => {
                       const st = statusConfig[doc.status];
                       const StIcon = st.icon;
                       return (
-                        <Fragment key={doc.id}>
+                        <Fragment key={doc.zohoId ?? doc.id}>
                           <TableRow className="hover:bg-muted/30">
                             <TableCell className="text-[10px] font-mono text-muted-foreground py-2.5">{doc.id}</TableCell>
                             <TableCell className="text-[12px] font-medium py-2.5">
                               <div
                                 className="flex items-center gap-1 cursor-pointer select-none"
-                                onClick={() => setExpandedId(prev => prev === doc.id ? null : doc.id)}
+                                onClick={() => {
+                                  const key = doc.zohoId ?? doc.id;
+                                  setExpandedId(prev => prev === key ? null : key);
+                                }}
                               >
-                                <ChevronDown className={`h-3 w-3 text-muted-foreground transition-transform duration-200 ${expandedId === doc.id ? "rotate-180" : ""}`} />
+                                <ChevronDown className={`h-3 w-3 text-muted-foreground transition-transform duration-200 ${expandedId === (doc.zohoId ?? doc.id) ? "rotate-180" : ""}`} />
                                 {doc.name}
                               </div>
                             </TableCell>
@@ -505,7 +508,7 @@ const LeadsPipeline = () => {
                               </div>
                             </TableCell>
                           </TableRow>
-                          {expandedId === doc.id && (
+                          {expandedId === (doc.zohoId ?? doc.id) && (
                             <TableRow className="hover:bg-transparent">
                               <TableCell colSpan={9} className="p-0 border-b border-border/30">
                                 <CallLogPanel doctorName={doc.name} />

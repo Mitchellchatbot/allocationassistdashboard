@@ -107,7 +107,14 @@ export function useZohoLeads(search: string, filters: LeadsFilters = {}) {
 
   // Client-side filtering across search + all filter dimensions — no network calls
   const filtered = useMemo(() => {
-    const leads = zoho?.rawLeads ?? [];
+    const raw = zoho?.rawLeads ?? [];
+    // Dedupe by Zoho ID — zoho_cache can have duplicates from repeated syncs
+    const seen = new Set<string>();
+    const leads = raw.filter(l => {
+      if (!l.id || seen.has(l.id)) return false;
+      seen.add(l.id);
+      return true;
+    });
     const term = search.trim().toLowerCase();
 
     return leads.filter(l => {
