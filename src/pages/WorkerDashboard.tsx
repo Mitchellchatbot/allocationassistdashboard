@@ -442,10 +442,20 @@ function PerformanceTab({ memberName }: { memberName: string }) {
   });
   const [days, setDays] = useState(30);
 
-  const myRows = useMemo(
-    () => rows.filter(r => (r.member_name ?? "").trim().toLowerCase() === memberName.trim().toLowerCase()),
-    [rows, memberName]
-  );
+  const myRows = useMemo(() => {
+    const target = memberName.trim().toLowerCase();
+    if (!target) return [];
+    const firstWord = target.split(/\s+/)[0];
+    return rows.filter(r => {
+      const m = (r.member_name ?? "").trim().toLowerCase();
+      if (!m) return false;
+      // Exact match, or partial match either direction (handles "Mohamed" vs "Mohamed Othaman")
+      return m === target
+        || m.includes(target)
+        || target.includes(m)
+        || m.split(/\s+/)[0] === firstWord;
+    });
+  }, [rows, memberName]);
 
   const filtered = useMemo(() => {
     if (days >= 99999) return myRows;

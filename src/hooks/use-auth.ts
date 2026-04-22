@@ -9,6 +9,19 @@ export const USERNAME_MAP: Record<string, string> = {
   worker2: "worker2@allocationassist.com",
 };
 
+// Worker email → full name as it appears in weekly_sales.member_name.
+// Used as a fallback so the worker portal can still match performance rows
+// when the user_profiles fetch times out or fails.
+export const WORKER_EMAIL_TO_NAME: Record<string, string> = {
+  "abraham@sales.com": "Abraham",
+  "ahmed@sales.com":   "Ahmed",
+  "asser@sales.com":   "Asser",
+  "mohamed@sales.com": "Mohamed Othaman",
+  "peter@sales.com":   "Peter",
+  "sohaila@sales.com": "Sohaila",
+  "sumia@sales.com":   "Sumia",
+};
+
 // All pages that exist in the app (used for admin fallback)
 export const ALL_PAGES = ["/", "/sales", "/marketing", "/leads-pipeline", "/team", "/finance", "/operations", "/meta-ads", "/settings", "/worker"];
 
@@ -50,7 +63,8 @@ export function useAuth() {
       const email = (u.email ?? "").toLowerCase();
       // Sales workers always default to /worker only — never admin
       if (email.endsWith("@sales.com")) {
-        applyProfile({ role: "worker", allowedPages: ["/worker"], fullName: email.split("@")[0] });
+        const name = WORKER_EMAIL_TO_NAME[email] ?? email.split("@")[0];
+        applyProfile({ role: "worker", allowedPages: ["/worker"], fullName: name });
       } else {
         applyProfile({ role: "admin", allowedPages: ALL_PAGES, fullName: null });
       }
