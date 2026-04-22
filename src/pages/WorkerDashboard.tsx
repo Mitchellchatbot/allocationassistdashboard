@@ -1,9 +1,12 @@
-import { useState, useCallback, useRef, useMemo } from "react";
+import { useState, useCallback, useRef, useMemo, useEffect } from "react";
 import { createPortal } from "react-dom";
 import { useNavigate } from "react-router-dom";
 import logo from "@/assets/logo.png";
 import { useAuth } from "@/hooks/use-auth";
 import { useWorkerEntries, useSaveEntries, useDeleteEntry, type WorkerEntry } from "@/hooks/use-worker-entries";
+import { fetchWeeklySalesRaw } from "@/hooks/use-weekly-sales";
+import { useZohoData } from "@/hooks/use-zoho-data";
+import { useQuery } from "@tanstack/react-query";
 import {
   AreaChart, Area, BarChart, Bar, PieChart, Pie, Cell,
   XAxis, YAxis, CartesianGrid, Tooltip, Legend, ResponsiveContainer,
@@ -11,7 +14,7 @@ import {
 import {
   ClipboardList, PlusCircle, LogOut, Loader2, Save, Trash2,
   CalendarDays, Clock, BarChart2, ChevronDown, Check, X,
-  Users, TrendingUp, LayoutDashboard,
+  Users, TrendingUp, LayoutDashboard, Search, Award, Phone,
 } from "lucide-react";
 
 // ── Constants ──────────────────────────────────────────────────────────────────
@@ -395,9 +398,177 @@ function OverviewTab({ isAdmin, userId }: { isAdmin: boolean; userId?: string })
   );
 }
 
+// ── Performance tab — pulls weekly_sales filtered to the logged-in worker ─────
+
+function PerformanceTab({ memberName }: { memberName: string }) {
+  const { data: rows = [], isLoading } = useQuery({
+    queryKey: ["weekly-sales-raw"],
+    queryFn:  fetchWeeklySalesRaw,
+    staleTime: 10 * 60 * 1000,
+  });
+
+  const myRows = useMemo(
+    () => rows.filter(r => (r.member_name ?? "").trim().toLowerCase() === memberName.trim().toLowerCase()),
+    [rows, memberName]
+  );
+
+  const totals = useMemo(() => {
+    const t = { full_sales_calls: 0, good_calls: 0, sales_count: 0 };
+    for (const r of myRows) {
+      t.full_sales_calls += r.full_sales_calls ?? 0;
+      t.good_calls       += r.good_calls       ?? 0;
+      t.sales_count      += r.sales_count      ?? 0;
+    }
+    return t;
+  }, [myRows]);
+
+  const goodCallRate = totals.full_sales_calls > 0
+    ? Math.round((totals.good_calls / totals.full_sales_calls) * 100)
+    : 0;
+  const conversionRate = totals.good_calls > 0
+    ? Math.round((totals.sales_count / totals.good_calls) * 100)
+    : 0;
+
+  if (isLoading) return (
+    <div className="flex items-center justify-center py-20 gap-2 text-muted-foreground">
+      <Loader2 className="h-4 w-4 animate-spin" /> Loading…
+    </div>
+  );
+
+  return (
+    <div className="p-6 space-y-5">
+      <div>
+        <h1 className="text-[18px] font-semibold text-foreground">My Performance</h1>
+        <p className="text-[12px] text-muted-foreground mt-0.5">
+          {memberName ? `Sales activity for ${memberName}` : "Set your full_name in user_profiles to see stats"}
+        </p>
+      </div>
+
+      <div className="flex gap-3 flex-wrap">
+        <KpiTile label="Sales Calls"   value={totals.full_sales_calls} sub="all time" />
+        <KpiTile label="Good Calls"    value={totals.good_calls}       sub={`${goodCallRate}% rate`} accent="text-sky-600" />
+        <KpiTile label="Sales Closed"  value={totals.sales_count}      sub={`${conversionRate}% conv.`} accent="text-emerald-600" />
+        <KpiTile label="Conversion"    value={`${conversionRate}%`}    sub="closed / good calls" accent="text-rose-600" />
+      </div>
+
+      {myRows.length === 0 ? (
+        <div className="rounded-xl border border-border/50 bg-muted/20 flex flex-col items-center justify-center py-16 gap-3">
+          <Award className="h-10 w-10 text-muted-foreground/30" />
+          <p className="text-[13px] text-muted-foreground">No sales data yet</p>
+          <p className="text-[11px] text-muted-foreground/60">Your daily totals will appear here once synced</p>
+        </div>
+      ) : (
+        <div className="rounded-xl border border-border/60 overflow-hidden shadow-sm">
+          <table className="w-full text-left border-collapse">
+            <thead>
+              <tr style={{ backgroundColor: "hsl(170, 45%, 28%)" }}>
+                {["Date", "Sales Calls", "Good Calls", "Sales Closed"].map(h => (
+                  <th key={h} className="px-3 py-2.5 text-[10px] font-semibold text-white/90 uppercase tracking-wide border-r border-white/10 last:border-r-0">{h}</th>
+                ))}
+              </tr>
+            </thead>
+            <tbody>
+              {myRows.slice().sort((a,b) => (b.date_col ?? "").localeCompare(a.date_col ?? "")).map((r, i) => (
+                <tr key={`${r.date_col}-${i}`} className={`border-t border-border/40 ${i % 2 === 0 ? "bg-white" : "bg-muted/10"}`}>
+                  <td className="px-3 py-2 text-[11px] text-foreground border-r border-border/30">{r.date_col || "—"}</td>
+                  <td className="px-3 py-2 text-[11px] text-foreground border-r border-border/30 tabular-nums">{r.full_sales_calls ?? 0}</td>
+                  <td className="px-3 py-2 text-[11px] text-sky-600 font-medium border-r border-border/30 tabular-nums">{r.good_calls ?? 0}</td>
+                  <td className="px-3 py-2 text-[11px] text-emerald-600 font-medium border-r border-border/30 tabular-nums">{r.sales_count ?? 0}</td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+      )}
+    </div>
+  );
+}
+
+// ── Doctor search dropdown — searches Zoho leads, used inline in AddEntryTab ──
+
+type DoctorMatch = {
+  name: string;
+  specialty: string;
+  country: string;
+};
+
+function DoctorSearchInput({
+  value, onPick, onChangeText,
+}: { value: string; onPick: (d: DoctorMatch) => void; onChangeText: (v: string) => void }) {
+  const { data: zoho } = useZohoData();
+  const [open, setOpen] = useState(false);
+  const inputRef = useRef<HTMLInputElement>(null);
+
+  const matches = useMemo<DoctorMatch[]>(() => {
+    const q = value.trim().toLowerCase();
+    if (q.length < 2 || !zoho?.rawLeads) return [];
+    const seen = new Set<string>();
+    const out: DoctorMatch[] = [];
+    for (const l of zoho.rawLeads) {
+      if (out.length >= 8) break;
+      const name = l.Full_Name ?? "";
+      if (!name || seen.has(name.toLowerCase())) continue;
+      if (name.toLowerCase().includes(q)) {
+        seen.add(name.toLowerCase());
+        out.push({
+          name,
+          specialty: l.Specialty_New || l.Specialty || "",
+          country:   l.Country_of_Specialty_training ?? "",
+        });
+      }
+    }
+    return out;
+  }, [value, zoho?.rawLeads]);
+
+  // Close on outside click
+  useEffect(() => {
+    if (!open) return;
+    const handler = (e: MouseEvent) => {
+      if (!inputRef.current?.parentElement?.contains(e.target as Node)) setOpen(false);
+    };
+    document.addEventListener("mousedown", handler);
+    return () => document.removeEventListener("mousedown", handler);
+  }, [open]);
+
+  return (
+    <div className="relative">
+      <input
+        ref={inputRef}
+        placeholder="Search doctor or type a new name…"
+        value={value}
+        onChange={e => { onChangeText(e.target.value); setOpen(true); }}
+        onFocus={() => setOpen(true)}
+        className="w-full h-7 bg-transparent text-[11px] text-foreground placeholder:text-muted-foreground/40 outline-none focus:bg-primary/5 rounded px-1.5 border border-transparent focus:border-primary/30 transition-all"
+      />
+      {open && matches.length > 0 && (
+        <div className="absolute z-50 top-full left-0 mt-1 w-72 max-h-64 overflow-auto rounded-lg border border-border bg-card shadow-xl">
+          {matches.map(d => (
+            <button
+              key={d.name}
+              type="button"
+              onMouseDown={e => { e.preventDefault(); onPick(d); setOpen(false); }}
+              className="w-full text-left px-3 py-2 hover:bg-primary/5 border-b border-border/30 last:border-b-0"
+            >
+              <p className="text-[11px] font-medium text-foreground truncate">{d.name}</p>
+              <p className="text-[9px] text-muted-foreground truncate">
+                {d.specialty || "—"}{d.country ? ` · ${d.country}` : ""}
+              </p>
+            </button>
+          ))}
+        </div>
+      )}
+      {open && value.trim().length >= 2 && matches.length === 0 && (
+        <div className="absolute z-50 top-full left-0 mt-1 w-72 rounded-lg border border-border bg-card shadow-xl px-3 py-2">
+          <p className="text-[11px] text-muted-foreground">No match — typing will create a new doctor</p>
+        </div>
+      )}
+    </div>
+  );
+}
+
 // ── Sidebar ────────────────────────────────────────────────────────────────────
 
-type Tab = "overview" | "daily" | "week" | "month" | "all";
+type Tab = "overview" | "performance" | "daily" | "week" | "month" | "all";
 
 function WorkerSidebar({ tab, setTab, isAdmin }: { tab: Tab; setTab: (t: Tab) => void; isAdmin: boolean }) {
   const { signOut, user } = useAuth();
@@ -405,11 +576,12 @@ function WorkerSidebar({ tab, setTab, isAdmin }: { tab: Tab; setTab: (t: Tab) =>
   const handleSignOut = async () => { await signOut(); navigate("/login", { replace: true }); };
 
   const workerNav: { id: Tab; icon: React.ElementType; label: string }[] = [
-    { id: "overview", icon: LayoutDashboard, label: "Overview"    },
-    { id: "daily",    icon: PlusCircle,      label: "Daily Log"   },
-    { id: "week",     icon: CalendarDays,    label: "This Week"   },
-    { id: "month",    icon: Clock,           label: "This Month"  },
-    { id: "all",      icon: BarChart2,       label: "All Records" },
+    { id: "overview",    icon: LayoutDashboard, label: "Overview"       },
+    { id: "performance", icon: Award,           label: "My Performance" },
+    { id: "daily",       icon: PlusCircle,      label: "Log Calls"      },
+    { id: "week",        icon: CalendarDays,    label: "This Week"      },
+    { id: "month",       icon: Clock,           label: "This Month"     },
+    { id: "all",         icon: BarChart2,       label: "All Records"    },
   ];
 
   const adminNav: { id: Tab; icon: React.ElementType; label: string }[] = [
@@ -511,8 +683,10 @@ function AddEntryTab() {
     <div className="p-6">
       <div className="flex items-center justify-between mb-5">
         <div>
-          <h1 className="text-[18px] font-semibold text-foreground">Add Entry</h1>
-          <p className="text-[12px] text-muted-foreground mt-0.5">Log your daily call activity</p>
+          <h1 className="text-[18px] font-semibold text-foreground">Log a Call</h1>
+          <p className="text-[12px] text-muted-foreground mt-0.5">
+            Search for a doctor in the Name column. If they're not in the list, just type the name and it'll be added.
+          </p>
         </div>
         <div className="flex items-center gap-2">
           {saved && (
@@ -566,7 +740,15 @@ function AddEntryTab() {
                     <StatusSelect value={row.status} onChange={v => update(row._key, "status", v)} />
                   </td>
                   <td className="px-2 py-1.5 border-r border-border/30">
-                    <input placeholder="Full name" value={row.name} onChange={e => update(row._key, "name", e.target.value)} className={inputCls} />
+                    <DoctorSearchInput
+                      value={row.name}
+                      onChangeText={v => update(row._key, "name", v)}
+                      onPick={d => {
+                        update(row._key, "name", d.name);
+                        if (d.specialty && !row.specialty) update(row._key, "specialty", d.specialty);
+                        if (d.country   && !row.country_of_training) update(row._key, "country_of_training", d.country);
+                      }}
+                    />
                   </td>
                   <td className="px-2 py-1.5 border-r border-border/30">
                     <input placeholder="e.g. Cardiology" value={row.specialty} onChange={e => update(row._key, "specialty", e.target.value)} className={inputCls} />
@@ -820,20 +1002,23 @@ function DailyTab({ userId }: { userId?: string }) {
 // ── Main ───────────────────────────────────────────────────────────────────────
 
 const WorkerDashboard = () => {
-  const { role, user } = useAuth();
+  const { role, user, profile } = useAuth();
   const isAdmin = role === "admin";
   const userId  = isAdmin ? undefined : (user?.id ?? undefined);
+  // Worker's display name from user_profiles (used to match weekly_sales rows)
+  const memberName = profile?.fullName ?? (user?.email?.split("@")[0] ?? "");
   const [tab, setTab] = useState<Tab>("overview");
 
   return (
     <div className="flex min-h-screen bg-background">
       <WorkerSidebar tab={tab} setTab={setTab} isAdmin={isAdmin} />
       <main className="flex-1 overflow-auto">
-        {tab === "overview" &&             <OverviewTab isAdmin={isAdmin} userId={userId} />}
-        {tab === "daily"    && !isAdmin && <DailyTab userId={userId} />}
-        {tab === "week"     && !isAdmin && <RecordsTab filter="week"  isAdmin={false} userId={userId} />}
-        {tab === "month"    && !isAdmin && <RecordsTab filter="month" isAdmin={false} userId={userId} />}
-        {tab === "all"      &&             <RecordsTab filter="all"   isAdmin={isAdmin} userId={userId} />}
+        {tab === "overview"    &&             <OverviewTab isAdmin={isAdmin} userId={userId} />}
+        {tab === "performance" && !isAdmin && <PerformanceTab memberName={memberName} />}
+        {tab === "daily"       && !isAdmin && <DailyTab userId={userId} />}
+        {tab === "week"        && !isAdmin && <RecordsTab filter="week"  isAdmin={false} userId={userId} />}
+        {tab === "month"       && !isAdmin && <RecordsTab filter="month" isAdmin={false} userId={userId} />}
+        {tab === "all"         &&             <RecordsTab filter="all"   isAdmin={isAdmin} userId={userId} />}
       </main>
     </div>
   );
