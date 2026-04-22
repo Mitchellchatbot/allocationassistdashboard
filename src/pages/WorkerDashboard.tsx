@@ -310,15 +310,22 @@ function WorkerBarChart({ entries, workerEmails }: { entries: WorkerEntry[]; wor
 function OverviewTab({ isAdmin, userId }: { isAdmin: boolean; userId?: string }) {
   const { data: allEntries = [], isLoading } = useWorkerEntries("all", userId);
   const [selectedWorker, setSelectedWorker] = useState("all");
+  const [days, setDays] = useState(30);
 
   const workerEmails = useMemo(
     () => [...new Set(allEntries.map(e => e.worker_email).filter(Boolean))] as string[],
     [allEntries]
   );
 
+  const dateScopedEntries = useMemo(() => {
+    if (days >= 99999) return allEntries;
+    const cutoff = new Date(Date.now() - days * 86_400_000).toISOString().split("T")[0];
+    return allEntries.filter(e => (e.call_date ?? "") >= cutoff);
+  }, [allEntries, days]);
+
   const displayEntries = useMemo(
-    () => selectedWorker === "all" ? allEntries : allEntries.filter(e => e.worker_email === selectedWorker),
-    [allEntries, selectedWorker]
+    () => selectedWorker === "all" ? dateScopedEntries : dateScopedEntries.filter(e => e.worker_email === selectedWorker),
+    [dateScopedEntries, selectedWorker]
   );
 
   const t = todayISO();
@@ -348,18 +355,30 @@ function OverviewTab({ isAdmin, userId }: { isAdmin: boolean; userId?: string })
           </p>
         </div>
 
-        {isAdmin && workerEmails.length > 0 && (
-          <select
-            value={selectedWorker}
-            onChange={e => setSelectedWorker(e.target.value)}
-            className="h-8 rounded-lg border border-border bg-secondary/40 px-3 text-[11px] text-foreground outline-none focus:border-primary transition-all"
-          >
-            <option value="all">All workers</option>
-            {workerEmails.map(email => (
-              <option key={email} value={email}>{email.split("@")[0]}</option>
+        <div className="flex items-center gap-2 flex-wrap">
+          <div className="flex gap-1 rounded-lg border border-border/60 bg-card p-0.5">
+            {PERF_PRESETS.map(p => (
+              <button key={p.label} type="button" onClick={() => setDays(p.days)}
+                className={`px-3 py-1 rounded-md text-[10px] font-medium transition-colors ${
+                  days === p.days ? "bg-primary text-white" : "text-muted-foreground hover:bg-secondary"
+                }`}>
+                {p.label}
+              </button>
             ))}
-          </select>
-        )}
+          </div>
+          {isAdmin && workerEmails.length > 0 && (
+            <select
+              value={selectedWorker}
+              onChange={e => setSelectedWorker(e.target.value)}
+              className="h-8 rounded-lg border border-border bg-secondary/40 px-3 text-[11px] text-foreground outline-none focus:border-primary transition-all"
+            >
+              <option value="all">All workers</option>
+              {workerEmails.map(email => (
+                <option key={email} value={email}>{email.split("@")[0]}</option>
+              ))}
+            </select>
+          )}
+        </div>
       </div>
 
       {/* KPIs */}
@@ -385,8 +404,8 @@ function OverviewTab({ isAdmin, userId }: { isAdmin: boolean; userId?: string })
       <ActivityChart
         entries={displayEntries}
         workerEmails={isAdmin ? chartWorkers : []}
-        title={isAdmin ? "Worker Activity — Last 30 Days" : "My Activity — Last 30 Days"}
-        subtitle={isAdmin ? "Daily entries logged across all workers" : "Your entries over the past 30 days"}
+        title={isAdmin ? "Worker Activity" : "My Activity"}
+        subtitle={isAdmin ? "Daily entries logged across all workers" : "Your entries over the selected period"}
       />
 
       {/* Bottom charts */}
@@ -400,27 +419,52 @@ function OverviewTab({ isAdmin, userId }: { isAdmin: boolean; userId?: string })
 
 // ── Performance tab — pulls weekly_sales filtered to the logged-in worker ─────
 
+const PERF_PRESETS = [
+  { label: "7D",  days: 7 },
+  { label: "30D", days: 30 },
+  { label: "90D", days: 90 },
+  { label: "1Y",  days: 365 },
+  { label: "All", days: 99999 },
+];
+
+function parseDDMMYYYY(s: string): number {
+  const parts = s?.split("/");
+  if (!parts || parts.length < 3) return NaN;
+  const [d, m, y] = parts;
+  return new Date(Number(y), Number(m) - 1, Number(d)).getTime();
+}
+
 function PerformanceTab({ memberName }: { memberName: string }) {
   const { data: rows = [], isLoading } = useQuery({
     queryKey: ["weekly-sales-raw"],
     queryFn:  fetchWeeklySalesRaw,
     staleTime: 10 * 60 * 1000,
   });
+  const [days, setDays] = useState(30);
 
   const myRows = useMemo(
     () => rows.filter(r => (r.member_name ?? "").trim().toLowerCase() === memberName.trim().toLowerCase()),
     [rows, memberName]
   );
 
+  const filtered = useMemo(() => {
+    if (days >= 99999) return myRows;
+    const cutoff = Date.now() - days * 86_400_000;
+    return myRows.filter(r => {
+      const t = parseDDMMYYYY(r.date_col);
+      return isNaN(t) ? true : t >= cutoff;
+    });
+  }, [myRows, days]);
+
   const totals = useMemo(() => {
     const t = { full_sales_calls: 0, good_calls: 0, sales_count: 0 };
-    for (const r of myRows) {
+    for (const r of filtered) {
       t.full_sales_calls += r.full_sales_calls ?? 0;
       t.good_calls       += r.good_calls       ?? 0;
       t.sales_count      += r.sales_count      ?? 0;
     }
     return t;
-  }, [myRows]);
+  }, [filtered]);
 
   const goodCallRate = totals.full_sales_calls > 0
     ? Math.round((totals.good_calls / totals.full_sales_calls) * 100)
@@ -428,6 +472,28 @@ function PerformanceTab({ memberName }: { memberName: string }) {
   const conversionRate = totals.good_calls > 0
     ? Math.round((totals.sales_count / totals.good_calls) * 100)
     : 0;
+
+  // Chart data: one point per day, sorted chronologically. Aggregate if same date appears twice.
+  const chartData = useMemo(() => {
+    const byDate = new Map<string, { date: string; ts: number; calls: number; good: number; sales: number }>();
+    for (const r of filtered) {
+      const ts = parseDDMMYYYY(r.date_col);
+      if (isNaN(ts)) continue;
+      const key = r.date_col;
+      if (!byDate.has(key)) {
+        byDate.set(key, {
+          date: new Date(ts).toLocaleDateString("en-GB", { day: "numeric", month: "short" }),
+          ts,
+          calls: 0, good: 0, sales: 0,
+        });
+      }
+      const d = byDate.get(key)!;
+      d.calls += r.full_sales_calls ?? 0;
+      d.good  += r.good_calls       ?? 0;
+      d.sales += r.sales_count      ?? 0;
+    }
+    return Array.from(byDate.values()).sort((a, b) => a.ts - b.ts);
+  }, [filtered]);
 
   if (isLoading) return (
     <div className="flex items-center justify-center py-20 gap-2 text-muted-foreground">
@@ -437,48 +503,92 @@ function PerformanceTab({ memberName }: { memberName: string }) {
 
   return (
     <div className="p-6 space-y-5">
-      <div>
-        <h1 className="text-[18px] font-semibold text-foreground">My Performance</h1>
-        <p className="text-[12px] text-muted-foreground mt-0.5">
-          {memberName ? `Sales activity for ${memberName}` : "Set your full_name in user_profiles to see stats"}
-        </p>
+      <div className="flex items-start justify-between flex-wrap gap-3">
+        <div>
+          <h1 className="text-[18px] font-semibold text-foreground">My Performance</h1>
+          <p className="text-[12px] text-muted-foreground mt-0.5">
+            {memberName ? `Sales activity for ${memberName}` : "Set your full_name in user_profiles to see stats"}
+          </p>
+        </div>
+        <div className="flex gap-1 rounded-lg border border-border/60 bg-card p-0.5">
+          {PERF_PRESETS.map(p => (
+            <button key={p.label} type="button" onClick={() => setDays(p.days)}
+              className={`px-3 py-1 rounded-md text-[10px] font-medium transition-colors ${
+                days === p.days ? "bg-primary text-white" : "text-muted-foreground hover:bg-secondary"
+              }`}>
+              {p.label}
+            </button>
+          ))}
+        </div>
       </div>
 
       <div className="flex gap-3 flex-wrap">
-        <KpiTile label="Sales Calls"   value={totals.full_sales_calls} sub="all time" />
+        <KpiTile label="Sales Calls"   value={totals.full_sales_calls} sub="in period" />
         <KpiTile label="Good Calls"    value={totals.good_calls}       sub={`${goodCallRate}% rate`} accent="text-sky-600" />
         <KpiTile label="Sales Closed"  value={totals.sales_count}      sub={`${conversionRate}% conv.`} accent="text-emerald-600" />
         <KpiTile label="Conversion"    value={`${conversionRate}%`}    sub="closed / good calls" accent="text-rose-600" />
       </div>
 
-      {myRows.length === 0 ? (
+      {chartData.length === 0 ? (
         <div className="rounded-xl border border-border/50 bg-muted/20 flex flex-col items-center justify-center py-16 gap-3">
           <Award className="h-10 w-10 text-muted-foreground/30" />
-          <p className="text-[13px] text-muted-foreground">No sales data yet</p>
-          <p className="text-[11px] text-muted-foreground/60">Your daily totals will appear here once synced</p>
+          <p className="text-[13px] text-muted-foreground">No sales data in this period</p>
+          <p className="text-[11px] text-muted-foreground/60">Try a wider date range</p>
         </div>
       ) : (
-        <div className="rounded-xl border border-border/60 overflow-hidden shadow-sm">
-          <table className="w-full text-left border-collapse">
-            <thead>
-              <tr style={{ backgroundColor: "hsl(170, 45%, 28%)" }}>
-                {["Date", "Sales Calls", "Good Calls", "Sales Closed"].map(h => (
-                  <th key={h} className="px-3 py-2.5 text-[10px] font-semibold text-white/90 uppercase tracking-wide border-r border-white/10 last:border-r-0">{h}</th>
-                ))}
-              </tr>
-            </thead>
-            <tbody>
-              {myRows.slice().sort((a,b) => (b.date_col ?? "").localeCompare(a.date_col ?? "")).map((r, i) => (
-                <tr key={`${r.date_col}-${i}`} className={`border-t border-border/40 ${i % 2 === 0 ? "bg-white" : "bg-muted/10"}`}>
-                  <td className="px-3 py-2 text-[11px] text-foreground border-r border-border/30">{r.date_col || "—"}</td>
-                  <td className="px-3 py-2 text-[11px] text-foreground border-r border-border/30 tabular-nums">{r.full_sales_calls ?? 0}</td>
-                  <td className="px-3 py-2 text-[11px] text-sky-600 font-medium border-r border-border/30 tabular-nums">{r.good_calls ?? 0}</td>
-                  <td className="px-3 py-2 text-[11px] text-emerald-600 font-medium border-r border-border/30 tabular-nums">{r.sales_count ?? 0}</td>
-                </tr>
-              ))}
-            </tbody>
-          </table>
-        </div>
+        <>
+          {/* Trends area chart */}
+          <div className="rounded-xl border border-border/60 bg-card p-5">
+            <p className="text-[13px] font-semibold text-foreground mb-1 flex items-center gap-1.5">
+              <TrendingUp className="h-3.5 w-3.5 text-primary" />
+              Daily Trends
+            </p>
+            <p className="text-[11px] text-muted-foreground mb-4">Calls and conversions over time</p>
+            <ResponsiveContainer width="100%" height={260}>
+              <AreaChart data={chartData} margin={{ top: 4, right: 8, left: -20, bottom: 0 }}>
+                <defs>
+                  <linearGradient id="perfCalls" x1="0" y1="0" x2="0" y2="1">
+                    <stop offset="5%"  stopColor="hsl(170, 45%, 35%)" stopOpacity={0.7} />
+                    <stop offset="95%" stopColor="hsl(170, 45%, 35%)" stopOpacity={0.1} />
+                  </linearGradient>
+                  <linearGradient id="perfGood" x1="0" y1="0" x2="0" y2="1">
+                    <stop offset="5%"  stopColor="#0ea5e9" stopOpacity={0.7} />
+                    <stop offset="95%" stopColor="#0ea5e9" stopOpacity={0.1} />
+                  </linearGradient>
+                  <linearGradient id="perfSales" x1="0" y1="0" x2="0" y2="1">
+                    <stop offset="5%"  stopColor="#10b981" stopOpacity={0.7} />
+                    <stop offset="95%" stopColor="#10b981" stopOpacity={0.1} />
+                  </linearGradient>
+                </defs>
+                <CartesianGrid strokeDasharray="3 3" stroke="hsl(var(--border))" vertical={false} />
+                <XAxis dataKey="date" tick={{ fontSize: 9, fill: "hsl(var(--muted-foreground))" }} tickLine={false} interval="preserveStartEnd" />
+                <YAxis tick={{ fontSize: 9, fill: "hsl(var(--muted-foreground))" }} tickLine={false} allowDecimals={false} />
+                <Tooltip contentStyle={{ fontSize: 11, borderRadius: 8, border: "1px solid hsl(var(--border))" }} />
+                <Legend wrapperStyle={{ fontSize: 10 }} />
+                <Area type="monotone" dataKey="calls" name="Sales Calls" stroke="hsl(170, 45%, 35%)" fill="url(#perfCalls)" strokeWidth={2} dot={false} activeDot={{ r: 4 }} />
+                <Area type="monotone" dataKey="good"  name="Good Calls"  stroke="#0ea5e9" fill="url(#perfGood)"  strokeWidth={2} dot={false} activeDot={{ r: 4 }} />
+                <Area type="monotone" dataKey="sales" name="Sales Closed" stroke="#10b981" fill="url(#perfSales)" strokeWidth={2} dot={false} activeDot={{ r: 4 }} />
+              </AreaChart>
+            </ResponsiveContainer>
+          </div>
+
+          {/* Bar chart — top days */}
+          <div className="rounded-xl border border-border/60 bg-card p-5">
+            <p className="text-[13px] font-semibold text-foreground mb-1">Top Days by Sales Calls</p>
+            <p className="text-[11px] text-muted-foreground mb-4">Your highest-volume days in this period</p>
+            <ResponsiveContainer width="100%" height={220}>
+              <BarChart data={chartData.slice().sort((a, b) => b.calls - a.calls).slice(0, 10).reverse()} margin={{ top: 4, right: 8, left: -20, bottom: 0 }}>
+                <CartesianGrid strokeDasharray="3 3" stroke="hsl(var(--border))" vertical={false} />
+                <XAxis dataKey="date" tick={{ fontSize: 9, fill: "hsl(var(--muted-foreground))" }} tickLine={false} />
+                <YAxis tick={{ fontSize: 9, fill: "hsl(var(--muted-foreground))" }} tickLine={false} allowDecimals={false} />
+                <Tooltip contentStyle={{ fontSize: 11, borderRadius: 8, border: "1px solid hsl(var(--border))" }} />
+                <Legend wrapperStyle={{ fontSize: 10 }} />
+                <Bar dataKey="calls" name="Sales Calls" fill="hsl(170, 45%, 35%)" radius={[4, 4, 0, 0]} />
+                <Bar dataKey="good"  name="Good Calls"  fill="#0ea5e9" radius={[4, 4, 0, 0]} />
+              </BarChart>
+            </ResponsiveContainer>
+          </div>
+        </>
       )}
     </div>
   );
