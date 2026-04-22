@@ -452,31 +452,41 @@ function PerformanceTab({ memberName }: { memberName: string }) {
   const { data: zoho } = useZohoData();
   const [preset, setPreset] = useState<TimeRangePreset | "all">("month");
 
-  // Zoho Closed Won deals owned by this worker, filtered to the same period
-  const closedDealsInPeriod = useMemo(() => {
-    const deals = zoho?.rawDeals ?? [];
+  // Zoho leads owned by this worker that reached a "converted" status
+  // (Initial Sales Call Completed, Contact in Future, High Priority Follow up).
+  // Same definition used on the admin Team Performance page.
+  const CONVERTED_STATUSES = new Set([
+    "Initial Sales Call Completed",
+    "Contact in Future",
+    "High Priority Follow up",
+  ]);
+  const { qualifiedLeads, totalLeads } = useMemo(() => {
+    const leads = zoho?.rawLeads ?? [];
     const target    = memberName.trim().toLowerCase();
-    if (!target || deals.length === 0) return 0;
+    if (!target || leads.length === 0) return { qualifiedLeads: 0, totalLeads: 0 };
     const firstWord = target.split(/\s+/)[0];
 
     const range   = preset === "all" ? null : getPresetRange(preset);
     const fromMs  = range ? range.from.getTime() : -Infinity;
     const toMs    = range ? range.to.getTime() + 86_400_000 : Infinity;
 
-    return deals.filter(d => {
-      if (d.Stage !== "Closed Won") return false;
-      const owner = (d.Owner?.name ?? "").trim().toLowerCase();
+    const mine = leads.filter(l => {
+      const owner = (l.Owner?.name ?? "").trim().toLowerCase();
       if (!owner) return false;
       const matches = owner === target
         || owner.includes(target)
         || target.includes(owner)
         || owner.split(/\s+/)[0] === firstWord;
       if (!matches) return false;
-      if (!d.Closing_Date) return false;
-      const t = new Date(d.Closing_Date).getTime();
+      const t = l.Created_Time ? new Date(l.Created_Time).getTime() : NaN;
+      if (isNaN(t)) return true; // keep if no date info
       return t >= fromMs && t < toMs;
-    }).length;
-  }, [zoho?.rawDeals, memberName, preset]);
+    });
+    return {
+      qualifiedLeads: mine.filter(l => CONVERTED_STATUSES.has(l.Lead_Status)).length,
+      totalLeads:     mine.length,
+    };
+  }, [zoho?.rawLeads, memberName, preset]);
 
   const myRows = useMemo(() => {
     const target = memberName.trim().toLowerCase();
@@ -517,15 +527,12 @@ function PerformanceTab({ memberName }: { memberName: string }) {
     return t;
   }, [filtered]);
 
-  // Use the larger of: sheet's sales_count OR Zoho's Closed Won deals count.
-  // weekly_sales.sales_count is often 0 in the source sheet; Zoho is authoritative.
-  const salesClosed = Math.max(totals.sales_count, closedDealsInPeriod);
-
   const goodCallRate = totals.full_sales_calls > 0
     ? Math.round((totals.good_calls / totals.full_sales_calls) * 100)
     : 0;
-  const conversionRate = totals.good_calls > 0
-    ? Math.round((salesClosed / totals.good_calls) * 100)
+  // Conversion = qualified leads / total assigned leads (same formula as Team Performance)
+  const conversionRate = totalLeads > 0
+    ? parseFloat(((qualifiedLeads / totalLeads) * 100).toFixed(1))
     : 0;
 
   // Chart data: one point per day, sorted chronologically. Aggregate if same date appears twice.
@@ -588,10 +595,10 @@ function PerformanceTab({ memberName }: { memberName: string }) {
       </div>
 
       <div className="flex gap-3 flex-wrap">
-        <KpiTile label="Sales Calls"   value={totals.full_sales_calls} sub="in period" />
-        <KpiTile label="Good Calls"    value={totals.good_calls}       sub={`${goodCallRate}% rate`} accent="text-sky-600" />
-        <KpiTile label="Sales Closed"  value={salesClosed}             sub="closed won in Zoho" accent="text-emerald-600" />
-        <KpiTile label="Conversion"    value={`${conversionRate}%`}    sub="closed / good calls" accent="text-rose-600" />
+        <KpiTile label="Sales Calls"     value={totals.full_sales_calls} sub="in period" />
+        <KpiTile label="Good Calls"      value={totals.good_calls}       sub={`${goodCallRate}% rate`} accent="text-sky-600" />
+        <KpiTile label="Qualified Leads" value={qualifiedLeads}          sub={`of ${totalLeads} assigned`} accent="text-emerald-600" />
+        <KpiTile label="Conversion"      value={`${conversionRate}%`}    sub="qualified / assigned" accent="text-rose-600" />
       </div>
 
       {chartData.length === 0 ? (
