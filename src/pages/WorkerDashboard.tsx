@@ -710,9 +710,153 @@ function DoctorSearchInput({
   );
 }
 
+// ── My Doctors tab — Zoho leads where Owner.name matches the worker ───────────
+
+function MyDoctorsTab({ memberName }: { memberName: string }) {
+  const { data: zoho, isLoading } = useZohoData();
+  const [search, setSearch] = useState("");
+  const [statusFilter, setStatusFilter] = useState<string>("__all__");
+
+  const myLeads = useMemo(() => {
+    if (!zoho?.rawLeads) return [];
+    const target    = memberName.trim().toLowerCase();
+    if (!target) return [];
+    const firstWord = target.split(/\s+/)[0];
+    return zoho.rawLeads.filter(l => {
+      const owner = (l.Owner?.name ?? "").trim().toLowerCase();
+      if (!owner) return false;
+      return owner === target
+        || owner.includes(target)
+        || target.includes(owner)
+        || owner.split(/\s+/)[0] === firstWord;
+    });
+  }, [zoho?.rawLeads, memberName]);
+
+  const statuses = useMemo(() => {
+    const set = new Set<string>();
+    for (const l of myLeads) if (l.Lead_Status) set.add(l.Lead_Status);
+    return Array.from(set).sort();
+  }, [myLeads]);
+
+  const filtered = useMemo(() => {
+    let r = myLeads;
+    if (statusFilter !== "__all__") r = r.filter(l => l.Lead_Status === statusFilter);
+    if (search.trim()) {
+      const q = search.toLowerCase();
+      r = r.filter(l =>
+        (l.Full_Name ?? "").toLowerCase().includes(q)
+        || (l.Specialty_New ?? l.Specialty ?? "").toLowerCase().includes(q)
+        || (l.Country_of_Specialty_training ?? "").toLowerCase().includes(q)
+      );
+    }
+    return r;
+  }, [myLeads, statusFilter, search]);
+
+  const counts = useMemo(() => {
+    const c = { total: myLeads.length, highPri: 0, contactFuture: 0, attempted: 0 };
+    for (const l of myLeads) {
+      if (l.Lead_Status === "High Priority Follow up") c.highPri++;
+      else if (l.Lead_Status === "Contact in Future")  c.contactFuture++;
+      else if (l.Lead_Status === "Attempted to Contact") c.attempted++;
+    }
+    return c;
+  }, [myLeads]);
+
+  if (isLoading) return (
+    <div className="flex items-center justify-center py-20 gap-2 text-muted-foreground">
+      <Loader2 className="h-4 w-4 animate-spin" /> Loading doctors…
+    </div>
+  );
+
+  return (
+    <div className="p-6 space-y-5">
+      <div>
+        <h1 className="text-[18px] font-semibold text-foreground">My Doctors</h1>
+        <p className="text-[12px] text-muted-foreground mt-0.5">
+          {memberName ? `Doctors assigned to ${memberName} in Zoho CRM` : "—"}
+        </p>
+      </div>
+
+      <div className="flex gap-3 flex-wrap">
+        <KpiTile label="Total Doctors"     value={counts.total}         sub="assigned to you" />
+        <KpiTile label="High Priority"     value={counts.highPri}       sub="follow up urgently" accent="text-rose-600" />
+        <KpiTile label="Contact in Future" value={counts.contactFuture} sub="scheduled" accent="text-sky-600" />
+        <KpiTile label="Attempted"         value={counts.attempted}     sub="reached out" accent="text-amber-600" />
+      </div>
+
+      <div className="flex items-center gap-2 flex-wrap">
+        <div className="relative">
+          <Search className="absolute left-2.5 top-1/2 -translate-y-1/2 h-3 w-3 text-muted-foreground pointer-events-none" />
+          <input type="text" placeholder="Search by name, specialty, country…"
+            value={search} onChange={e => setSearch(e.target.value)}
+            className="h-8 w-72 pl-7 rounded-lg border border-border bg-card px-3 text-[11px] outline-none focus:border-primary transition-colors" />
+        </div>
+        <select value={statusFilter} onChange={e => setStatusFilter(e.target.value)}
+          className="h-8 rounded-lg border border-border bg-card px-3 text-[11px] outline-none focus:border-primary transition-colors">
+          <option value="__all__">All statuses</option>
+          {statuses.map(s => <option key={s} value={s}>{s}</option>)}
+        </select>
+      </div>
+
+      {filtered.length === 0 ? (
+        <div className="rounded-xl border border-border/50 bg-muted/20 flex flex-col items-center justify-center py-16 gap-3">
+          <Users className="h-10 w-10 text-muted-foreground/30" />
+          <p className="text-[13px] text-muted-foreground">
+            {myLeads.length === 0 ? "No doctors assigned to you in Zoho yet" : "No doctors match your filters"}
+          </p>
+        </div>
+      ) : (
+        <div className="rounded-xl border border-border/60 overflow-hidden shadow-sm">
+          <div className="overflow-x-auto">
+            <table className="w-full text-left border-collapse">
+              <thead>
+                <tr style={{ backgroundColor: "hsl(170, 45%, 28%)" }}>
+                  {["Doctor", "Specialty", "Country of Training", "Stage", "License", "Created"].map(h => (
+                    <th key={h} className="px-3 py-2.5 text-[10px] font-semibold text-white/90 uppercase tracking-wide border-r border-white/10 last:border-r-0 whitespace-nowrap">{h}</th>
+                  ))}
+                </tr>
+              </thead>
+              <tbody>
+                {filtered.slice(0, 200).map((l, i) => {
+                  const license =
+                    (l.Has_DHA && l.Has_DHA !== "No") ? `DHA (${l.Has_DHA})` :
+                    (l.Has_DOH && l.Has_DOH !== "No") ? `DOH (${l.Has_DOH})` :
+                    (l.Has_MOH && l.Has_MOH !== "No") ? `MOH (${l.Has_MOH})` :
+                    (l.License ?? "—");
+                  return (
+                    <tr key={l.id} className={`border-t border-border/40 hover:bg-primary/[0.03] ${i % 2 === 0 ? "bg-white" : "bg-muted/10"}`}>
+                      <td className="px-3 py-2 text-[11px] font-medium text-foreground border-r border-border/30">{l.Full_Name || "—"}</td>
+                      <td className="px-3 py-2 text-[11px] text-foreground border-r border-border/30">{l.Specialty_New || l.Specialty || "—"}</td>
+                      <td className="px-3 py-2 text-[11px] text-foreground border-r border-border/30">{l.Country_of_Specialty_training || "—"}</td>
+                      <td className="px-3 py-2 text-[11px] border-r border-border/30">
+                        <span className="inline-flex px-2 py-0.5 rounded-full text-[10px] font-medium bg-primary/10 text-primary">
+                          {l.Lead_Status || "—"}
+                        </span>
+                      </td>
+                      <td className="px-3 py-2 text-[10px] text-muted-foreground border-r border-border/30">{license}</td>
+                      <td className="px-3 py-2 text-[10px] text-muted-foreground">
+                        {l.Created_Time ? new Date(l.Created_Time).toLocaleDateString("en-GB", { day: "numeric", month: "short", year: "2-digit" }) : "—"}
+                      </td>
+                    </tr>
+                  );
+                })}
+              </tbody>
+            </table>
+          </div>
+          {filtered.length > 200 && (
+            <p className="text-[10px] text-muted-foreground text-center py-2 border-t border-border/40">
+              Showing first 200 of {filtered.length.toLocaleString()} — use search to narrow down
+            </p>
+          )}
+        </div>
+      )}
+    </div>
+  );
+}
+
 // ── Sidebar ────────────────────────────────────────────────────────────────────
 
-type Tab = "overview" | "performance" | "daily" | "week" | "month" | "all";
+type Tab = "overview" | "performance" | "doctors" | "daily" | "week" | "month" | "all";
 
 function WorkerSidebar({ tab, setTab, isAdmin }: { tab: Tab; setTab: (t: Tab) => void; isAdmin: boolean }) {
   const { signOut, user } = useAuth();
@@ -722,6 +866,7 @@ function WorkerSidebar({ tab, setTab, isAdmin }: { tab: Tab; setTab: (t: Tab) =>
   const workerNav: { id: Tab; icon: React.ElementType; label: string }[] = [
     { id: "overview",    icon: LayoutDashboard, label: "Overview"       },
     { id: "performance", icon: Award,           label: "My Performance" },
+    { id: "doctors",     icon: Users,           label: "My Doctors"     },
     { id: "daily",       icon: PlusCircle,      label: "Log Calls"      },
     { id: "week",        icon: CalendarDays,    label: "This Week"      },
     { id: "month",       icon: Clock,           label: "This Month"     },
@@ -1159,6 +1304,7 @@ const WorkerDashboard = () => {
       <main className="flex-1 overflow-auto">
         {tab === "overview"    &&             <OverviewTab isAdmin={isAdmin} userId={userId} />}
         {tab === "performance" && !isAdmin && <PerformanceTab memberName={memberName} />}
+        {tab === "doctors"     && !isAdmin && <MyDoctorsTab memberName={memberName} />}
         {tab === "daily"       && !isAdmin && <DailyTab userId={userId} />}
         {tab === "week"        && !isAdmin && <RecordsTab filter="week"  isAdmin={false} userId={userId} />}
         {tab === "month"       && !isAdmin && <RecordsTab filter="month" isAdmin={false} userId={userId} />}
