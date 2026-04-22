@@ -40,12 +40,21 @@ export function useAuth() {
     setProfile(p);
   }
 
-  // Fetch DB profile for a user; fall back to admin if no row exists or on any error.
-  // Has a 5-second timeout so a hung DB connection never blocks the app indefinitely.
+  // Fetch DB profile for a user. If the row exists, use it. If not / timeout,
+  // fall back based on email pattern: @sales.com → worker, anything else → admin.
   async function fetchProfile(u: User) {
     const timeout = new Promise<{ data: null }>(resolve =>
-      setTimeout(() => resolve({ data: null }), 5000)
+      setTimeout(() => resolve({ data: null }), 8000)
     );
+    function fallbackByEmail() {
+      const email = (u.email ?? "").toLowerCase();
+      // Sales workers always default to /worker only — never admin
+      if (email.endsWith("@sales.com")) {
+        applyProfile({ role: "worker", allowedPages: ["/worker"], fullName: email.split("@")[0] });
+      } else {
+        applyProfile({ role: "admin", allowedPages: ALL_PAGES, fullName: null });
+      }
+    }
     try {
       const { data } = await Promise.race([
         supabase
@@ -63,12 +72,10 @@ export function useAuth() {
           fullName:     data.full_name ?? null,
         });
       } else {
-        // No profile row (or timeout) → legacy admin account
-        applyProfile({ role: "admin", allowedPages: ALL_PAGES, fullName: null });
+        fallbackByEmail();
       }
     } catch {
-      // Any DB error → fail open as admin so the app doesn't hang
-      applyProfile({ role: "admin", allowedPages: ALL_PAGES, fullName: null });
+      fallbackByEmail();
     }
   }
 
@@ -110,8 +117,12 @@ export function useAuth() {
 
   // Use cached profile if current profile is null (prevents nav flashing empty during re-fetches)
   const effectiveProfile = profile ?? profileCache.current;
-  const role         = effectiveProfile?.role         ?? "admin";
-  const allowedPages = effectiveProfile?.allowedPages ?? ALL_PAGES;
+  // Default to worker for @sales.com emails so they don't briefly see admin nav
+  const emailBasedDefault = (user?.email ?? "").toLowerCase().endsWith("@sales.com")
+    ? { role: "worker", pages: ["/worker"] }
+    : { role: "admin",  pages: ALL_PAGES };
+  const role         = effectiveProfile?.role         ?? emailBasedDefault.role;
+  const allowedPages = effectiveProfile?.allowedPages ?? emailBasedDefault.pages;
 
   return { session, user, loading, signIn, signOut, role, allowedPages, profile };
 }
