@@ -449,7 +449,34 @@ function PerformanceTab({ memberName }: { memberName: string }) {
     queryFn:  fetchWeeklySalesRaw,
     staleTime: 10 * 60 * 1000,
   });
+  const { data: zoho } = useZohoData();
   const [preset, setPreset] = useState<TimeRangePreset | "all">("month");
+
+  // Zoho Closed Won deals owned by this worker, filtered to the same period
+  const closedDealsInPeriod = useMemo(() => {
+    const deals = zoho?.rawDeals ?? [];
+    const target    = memberName.trim().toLowerCase();
+    if (!target || deals.length === 0) return 0;
+    const firstWord = target.split(/\s+/)[0];
+
+    const range   = preset === "all" ? null : getPresetRange(preset);
+    const fromMs  = range ? range.from.getTime() : -Infinity;
+    const toMs    = range ? range.to.getTime() + 86_400_000 : Infinity;
+
+    return deals.filter(d => {
+      if (d.Stage !== "Closed Won") return false;
+      const owner = (d.Owner?.name ?? "").trim().toLowerCase();
+      if (!owner) return false;
+      const matches = owner === target
+        || owner.includes(target)
+        || target.includes(owner)
+        || owner.split(/\s+/)[0] === firstWord;
+      if (!matches) return false;
+      if (!d.Closing_Date) return false;
+      const t = new Date(d.Closing_Date).getTime();
+      return t >= fromMs && t < toMs;
+    }).length;
+  }, [zoho?.rawDeals, memberName, preset]);
 
   const myRows = useMemo(() => {
     const target = memberName.trim().toLowerCase();
@@ -490,11 +517,15 @@ function PerformanceTab({ memberName }: { memberName: string }) {
     return t;
   }, [filtered]);
 
+  // Use the larger of: sheet's sales_count OR Zoho's Closed Won deals count.
+  // weekly_sales.sales_count is often 0 in the source sheet; Zoho is authoritative.
+  const salesClosed = Math.max(totals.sales_count, closedDealsInPeriod);
+
   const goodCallRate = totals.full_sales_calls > 0
     ? Math.round((totals.good_calls / totals.full_sales_calls) * 100)
     : 0;
   const conversionRate = totals.good_calls > 0
-    ? Math.round((totals.sales_count / totals.good_calls) * 100)
+    ? Math.round((salesClosed / totals.good_calls) * 100)
     : 0;
 
   // Chart data: one point per day, sorted chronologically. Aggregate if same date appears twice.
@@ -559,7 +590,7 @@ function PerformanceTab({ memberName }: { memberName: string }) {
       <div className="flex gap-3 flex-wrap">
         <KpiTile label="Sales Calls"   value={totals.full_sales_calls} sub="in period" />
         <KpiTile label="Good Calls"    value={totals.good_calls}       sub={`${goodCallRate}% rate`} accent="text-sky-600" />
-        <KpiTile label="Sales Closed"  value={totals.sales_count}      sub={`${conversionRate}% conv.`} accent="text-emerald-600" />
+        <KpiTile label="Sales Closed"  value={salesClosed}             sub="closed won in Zoho" accent="text-emerald-600" />
         <KpiTile label="Conversion"    value={`${conversionRate}%`}    sub="closed / good calls" accent="text-rose-600" />
       </div>
 
