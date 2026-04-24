@@ -1,14 +1,17 @@
-import { useState } from "react";
+import { useState, useEffect, useMemo, useRef } from "react";
 import { DashboardLayout } from "@/components/layout/DashboardLayout";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { useFilteredData } from "@/hooks/use-filtered-data";
 import { useMarketingExpenses, type CategorySpend, type MonthlyPoint, type TopTransaction } from "@/hooks/use-marketing-expenses";
+import { useZohoData } from "@/hooks/use-zoho-data";
+import { useFilters } from "@/lib/filters";
 import {
   BarChart, Bar, XAxis, YAxis, Tooltip, ResponsiveContainer, CartesianGrid, Cell,
-  AreaChart, Area, PieChart, Pie, Legend,
+  AreaChart, Area, PieChart, Pie, Legend, LineChart, Line, ComposedChart,
 } from "recharts";
 import {
   DollarSign, TrendingUp, TrendingDown, Crown, Receipt, Award, CalendarDays, ArrowUpRight,
+  Wallet, Target, Zap, Users,
 } from "lucide-react";
 
 // ── Formatting ────────────────────────────────────────────────────────────────
@@ -283,50 +286,237 @@ function AvgMonthlyBack({ monthly, avg }: { monthly: MonthlyPoint[]; avg: number
   );
 }
 
+// Back panel: Revenue breakdown by source channel (from Zoho deals)
+function RevenueBack({ bySource, total }: { bySource: { source: string; amount: number; count: number }[]; total: number }) {
+  if (bySource.length === 0) return <p className="text-muted-foreground">No closed deals in this period</p>;
+  const max = bySource[0]?.amount ?? 1;
+  return (
+    <div className="space-y-2">
+      <p className="text-[9px] text-muted-foreground uppercase tracking-wide mb-1">By lead source</p>
+      {bySource.slice(0, 6).map((s, i) => (
+        <div key={s.source}>
+          <div className="flex items-center justify-between mb-0.5">
+            <span className="truncate max-w-[140px]">{s.source}</span>
+            <span className="font-semibold text-emerald-600 tabular-nums">{fmtAED(s.amount)}</span>
+          </div>
+          <div className="h-1.5 bg-muted rounded-full overflow-hidden">
+            <div className="h-full rounded-full" style={{
+              width: `${(s.amount / max) * 100}%`,
+              backgroundColor: CAT_COLORS[i % CAT_COLORS.length],
+            }} />
+          </div>
+          <p className="text-[9px] text-muted-foreground mt-0.5">{s.count} deal{s.count === 1 ? "" : "s"} · {((s.amount / total) * 100).toFixed(1)}%</p>
+        </div>
+      ))}
+    </div>
+  );
+}
+
+function ProfitBack({ revenue, spend, profit }: { revenue: number; spend: number; profit: number }) {
+  const margin = revenue > 0 ? (profit / revenue) * 100 : 0;
+  return (
+    <div className="space-y-2">
+      <div className="flex justify-between"><span className="text-muted-foreground">Revenue</span><span className="font-semibold tabular-nums">{fmtAED(revenue)}</span></div>
+      <div className="flex justify-between"><span className="text-muted-foreground">Marketing spend</span><span className="font-semibold tabular-nums">-{fmtAED(spend)}</span></div>
+      <div className="pt-2 border-t border-border/40 flex justify-between">
+        <span className="font-semibold">Net</span>
+        <span className={`font-bold tabular-nums ${profit >= 0 ? "text-emerald-600" : "text-rose-600"}`}>{fmtAED(profit)}</span>
+      </div>
+      <p className="text-[10px] text-muted-foreground pt-1">
+        Net margin: <span className="font-semibold text-foreground">{margin.toFixed(1)}%</span>
+        {profit < 0 && <span className="block mt-0.5">⚠ Spending more than closing. Check ROAS or reduce spend on low-performing channels.</span>}
+      </p>
+    </div>
+  );
+}
+
+function RoasBack({ roas, revenue, spend }: { roas: number; revenue: number; spend: number }) {
+  const rating = roas >= 4 ? "Excellent" : roas >= 2 ? "Healthy" : roas >= 1 ? "Break-even" : "Losing money";
+  const ratingColor = roas >= 4 ? "text-emerald-600" : roas >= 2 ? "text-sky-600" : roas >= 1 ? "text-amber-600" : "text-rose-600";
+  return (
+    <div className="space-y-2">
+      <p className="text-[9px] text-muted-foreground uppercase tracking-wide">Formula</p>
+      <p className="text-[11px]">Revenue ÷ Marketing Spend</p>
+      <p className="text-[11px] font-mono">{fmtAED(revenue)} ÷ {fmtAED(spend)} = <span className="font-bold">{roas.toFixed(2)}x</span></p>
+      <div className="pt-2 border-t border-border/40">
+        <p className="text-[9px] text-muted-foreground uppercase tracking-wide">Rating</p>
+        <p className={`text-[14px] font-bold ${ratingColor}`}>{rating}</p>
+        <p className="text-[10px] text-muted-foreground mt-1">
+          {roas >= 4 && "Every AED 1 spent returns AED 4+. Scale the winning channels."}
+          {roas >= 2 && roas < 4 && "Profitable. Keep optimising top-performing channels."}
+          {roas >= 1 && roas < 2 && "Barely breaking even. Review cost-per-lead by channel."}
+          {roas < 1 && "Spending more than earning. Cut low-performing channels."}
+        </p>
+      </div>
+    </div>
+  );
+}
+
+function CostPerPlacementBack({ cpp, spend, placements }: { cpp: number; spend: number; placements: number }) {
+  return (
+    <div className="space-y-2">
+      <div className="flex justify-between"><span className="text-muted-foreground">Total spend</span><span className="font-semibold tabular-nums">{fmtAED(spend)}</span></div>
+      <div className="flex justify-between"><span className="text-muted-foreground">Placements (Closed Won)</span><span className="font-semibold tabular-nums">{placements}</span></div>
+      <div className="pt-2 border-t border-border/40 flex justify-between">
+        <span className="font-semibold">Cost per placement</span>
+        <span className="font-bold text-orange-600 tabular-nums">{fmtAED(cpp)}</span>
+      </div>
+      <p className="text-[10px] text-muted-foreground pt-1">
+        {placements === 0
+          ? "No placements recorded in this period. Check if deals are being marked Closed Won in Zoho."
+          : `For every AED 1 of revenue, you're spending AED ${(cpp / (cpp || 1)).toFixed(2)} to acquire. Lower is better.`}
+      </p>
+    </div>
+  );
+}
+
 // ── Main page ─────────────────────────────────────────────────────────────────
 
 const Finance = () => {
   const { roiData } = useFilteredData();
+  const { preset, setPreset, dateRange } = useFilters();
+  const { data: zoho } = useZohoData();
   const {
-    total, prevTotal, growthPct, avgMonthly, byCategory, monthly,
+    total: spend, prevTotal: prevSpend, growthPct, avgMonthly, byCategory, monthly,
     topTransactions, biggest, topCategory, transactionCount,
   } = useMarketingExpenses();
 
-  const hasData = transactionCount > 0;
+  // Auto-switch to "This Year" the first time Finance page mounts,
+  // since the imported data is mostly historical (2025 + early 2026).
+  const didAutoSetRef = useRef(false);
+  useEffect(() => {
+    if (!didAutoSetRef.current && preset !== "year" && preset !== "custom") {
+      didAutoSetRef.current = true;
+      setPreset("year");
+    }
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
+  // Zoho revenue — Closed Won deals in the selected period (by Closing_Date)
+  const revenue = useMemo(() => {
+    const deals = zoho?.rawDeals ?? [];
+    const fromMs = dateRange.from.getTime();
+    const toMs   = dateRange.to.getTime() + 86_400_000;
+    let total = 0;
+    for (const d of deals) {
+      if (d.Stage !== "Closed Won" || !d.Closing_Date) continue;
+      const t = new Date(d.Closing_Date).getTime();
+      if (t >= fromMs && t < toMs) total += d.Amount ?? 0;
+    }
+    return total;
+  }, [zoho?.rawDeals, dateRange]);
+
+  const placements = useMemo(() => {
+    const deals = zoho?.rawDeals ?? [];
+    const fromMs = dateRange.from.getTime();
+    const toMs   = dateRange.to.getTime() + 86_400_000;
+    return deals.filter(d => {
+      if (d.Stage !== "Closed Won" || !d.Closing_Date) return false;
+      const t = new Date(d.Closing_Date).getTime();
+      return t >= fromMs && t < toMs;
+    }).length;
+  }, [zoho?.rawDeals, dateRange]);
+
+  const revenueBySource = useMemo(() => {
+    const deals = zoho?.rawDeals ?? [];
+    const fromMs = dateRange.from.getTime();
+    const toMs   = dateRange.to.getTime() + 86_400_000;
+    const map = new Map<string, { amount: number; count: number }>();
+    for (const d of deals) {
+      if (d.Stage !== "Closed Won" || !d.Closing_Date) continue;
+      const t = new Date(d.Closing_Date).getTime();
+      if (t < fromMs || t >= toMs) continue;
+      const src = d.Lead_Source || "Unknown";
+      const cur = map.get(src) ?? { amount: 0, count: 0 };
+      cur.amount += d.Amount ?? 0;
+      cur.count  += 1;
+      map.set(src, cur);
+    }
+    return Array.from(map.entries())
+      .map(([source, v]) => ({ source, ...v }))
+      .sort((a, b) => b.amount - a.amount);
+  }, [zoho?.rawDeals, dateRange]);
+
+  const profit = revenue - spend;
+  const roas   = spend > 0 ? revenue / spend : 0;
+  const cpp    = placements > 0 ? spend / placements : 0;
+
+  // Monthly revenue vs spend for the combined chart
+  const monthlyRevenueSpend = useMemo(() => {
+    const map = new Map<string, { month: string; monthKey: string; spend: number; revenue: number }>();
+    for (const m of monthly) {
+      map.set(m.monthKey, { month: m.month, monthKey: m.monthKey, spend: m.amount, revenue: 0 });
+    }
+    const deals = zoho?.rawDeals ?? [];
+    const fromMs = dateRange.from.getTime();
+    const toMs   = dateRange.to.getTime() + 86_400_000;
+    for (const d of deals) {
+      if (d.Stage !== "Closed Won" || !d.Closing_Date) continue;
+      const t = new Date(d.Closing_Date).getTime();
+      if (t < fromMs || t >= toMs) continue;
+      const key = d.Closing_Date.slice(0, 7);
+      const label = new Date(key + "-01").toLocaleDateString("en-GB", { month: "short", year: "2-digit" });
+      const cur = map.get(key) ?? { month: label, monthKey: key, spend: 0, revenue: 0 };
+      cur.revenue += d.Amount ?? 0;
+      map.set(key, cur);
+    }
+    return Array.from(map.values()).sort((a, b) => a.monthKey.localeCompare(b.monthKey));
+  }, [monthly, zoho?.rawDeals, dateRange]);
+
+  const hasData = transactionCount > 0 || placements > 0;
 
   return (
-    <DashboardLayout title="Finance" subtitle="Track revenue, spending, and how much return you're getting on investment">
+    <DashboardLayout title="Finance" subtitle="Revenue, spend, profit, and ROI across all channels">
       {!hasData && (
         <div className="mb-5 rounded-xl border border-border/50 bg-muted/30 px-4 py-3">
-          <p className="text-[12px] font-medium mb-1">No expense data in this period</p>
+          <p className="text-[12px] font-medium mb-1">No financial activity in this period</p>
           <p className="text-[11px] text-muted-foreground">
-            Try a wider date range (top-right), or import your Digital Marketing sheet via the <strong>Import Data</strong> page → Marketing Spend tab.
+            This period has no Closed Won deals and no imported marketing expenses. Try a wider date range (top-right), or import the Digital Marketing sheet via <strong>Import Data → Marketing Spend</strong>.
           </p>
         </div>
       )}
 
-      {/* ── Flippable KPI row ── */}
+      {/* ── Row 1: Revenue / Spend / Profit / ROAS ── */}
+      <div className="grid grid-cols-2 lg:grid-cols-4 gap-3 mb-3">
+        <FlipKpiCard
+          icon={Wallet} label="Revenue" color="text-emerald-600" bg="bg-emerald-50"
+          value={fmtAED(revenue)}
+          sub={`${placements} placement${placements === 1 ? "" : "s"} closed`}
+          back={<RevenueBack bySource={revenueBySource} total={revenue} />}
+        />
+        <FlipKpiCard
+          icon={DollarSign} label="Marketing Spend" color="text-primary" bg="bg-primary/10"
+          value={fmtAED(spend)}
+          sub={`${transactionCount} transactions · ${byCategory.length} channels`}
+          back={<TotalSpendBack byCategory={byCategory} total={spend} />}
+        />
+        <FlipKpiCard
+          icon={profit >= 0 ? TrendingUp : TrendingDown}
+          label="Net Profit"
+          color={profit >= 0 ? "text-emerald-600" : "text-rose-600"}
+          bg={profit >= 0 ? "bg-emerald-50" : "bg-rose-50"}
+          value={fmtAED(profit)}
+          sub={revenue > 0 ? `${((profit / revenue) * 100).toFixed(0)}% net margin` : "Import revenue"}
+          back={<ProfitBack revenue={revenue} spend={spend} profit={profit} />}
+        />
+        <FlipKpiCard
+          icon={Zap}
+          label="ROAS"
+          color={roas >= 2 ? "text-emerald-600" : roas >= 1 ? "text-amber-600" : "text-rose-600"}
+          bg={roas >= 2 ? "bg-emerald-50" : roas >= 1 ? "bg-amber-50" : "bg-rose-50"}
+          value={spend > 0 ? `${roas.toFixed(2)}x` : "—"}
+          sub={spend > 0 ? (roas >= 4 ? "Excellent" : roas >= 2 ? "Healthy" : roas >= 1 ? "Break-even" : "Losing money") : ""}
+          back={<RoasBack roas={roas} revenue={revenue} spend={spend} />}
+        />
+      </div>
+
+      {/* ── Row 2: Cost per Placement / Top Channel / Biggest Expense / vs Previous / Avg Monthly / Transactions ── */}
       <div className="grid grid-cols-2 lg:grid-cols-3 xl:grid-cols-6 gap-3 mb-5">
         <FlipKpiCard
-          icon={DollarSign} label="Total Spend" color="text-primary" bg="bg-primary/10"
-          value={fmtAED(total)}
-          sub={`${transactionCount} transactions`}
-          back={<TotalSpendBack byCategory={byCategory} total={total} />}
-        />
-        <FlipKpiCard
-          icon={growthPct >= 0 ? TrendingUp : TrendingDown}
-          label="vs Previous Period"
-          color={growthPct >= 0 ? "text-rose-600" : "text-emerald-600"}
-          bg={growthPct >= 0 ? "bg-rose-50" : "bg-emerald-50"}
-          value={fmtPct(growthPct)}
-          sub={`vs ${fmtAED(prevTotal)}`}
-          back={<GrowthBack growthPct={growthPct} total={total} prevTotal={prevTotal} />}
-        />
-        <FlipKpiCard
-          icon={CalendarDays} label="Avg Monthly" color="text-sky-600" bg="bg-sky-50"
-          value={fmtAED(avgMonthly)}
-          sub={`across ${monthly.length} month${monthly.length === 1 ? "" : "s"}`}
-          back={<AvgMonthlyBack monthly={monthly} avg={avgMonthly} />}
+          icon={Target} label="Cost / Placement" color="text-orange-600" bg="bg-orange-50"
+          value={placements > 0 ? fmtAED(cpp) : "—"}
+          sub={placements === 0 ? "No placements yet" : `${placements} closed deal${placements === 1 ? "" : "s"}`}
+          back={<CostPerPlacementBack cpp={cpp} spend={spend} placements={placements} />}
         />
         <FlipKpiCard
           icon={Crown} label="Top Channel" color="text-amber-600" bg="bg-amber-50"
@@ -341,12 +531,59 @@ const Finance = () => {
           back={<BiggestBack biggest={biggest} />}
         />
         <FlipKpiCard
+          icon={growthPct >= 0 ? TrendingUp : TrendingDown}
+          label="Spend vs Prior"
+          color={growthPct >= 0 ? "text-rose-600" : "text-emerald-600"}
+          bg={growthPct >= 0 ? "bg-rose-50" : "bg-emerald-50"}
+          value={fmtPct(growthPct)}
+          sub={`vs ${fmtAED(prevSpend)}`}
+          back={<GrowthBack growthPct={growthPct} total={spend} prevTotal={prevSpend} />}
+        />
+        <FlipKpiCard
+          icon={CalendarDays} label="Avg Monthly" color="text-sky-600" bg="bg-sky-50"
+          value={fmtAED(avgMonthly)}
+          sub={`across ${monthly.length} month${monthly.length === 1 ? "" : "s"}`}
+          back={<AvgMonthlyBack monthly={monthly} avg={avgMonthly} />}
+        />
+        <FlipKpiCard
           icon={Receipt} label="Transactions" color="text-violet-600" bg="bg-violet-50"
           value={fmtN(transactionCount)}
           sub={byCategory.length > 0 ? `across ${byCategory.length} channels` : ""}
           back={<TransactionsBack txns={topTransactions} />}
         />
       </div>
+
+      {/* ── Revenue vs Spend combined chart ── */}
+      {monthlyRevenueSpend.length > 0 && (
+        <Card className="shadow-sm border-border/50 mb-5">
+          <CardHeader className="pb-1 pt-4 px-4">
+            <div className="flex items-center justify-between">
+              <CardTitle className="text-[12px] font-medium text-muted-foreground uppercase tracking-wide">Revenue vs Marketing Spend</CardTitle>
+              <div className="flex items-center gap-3 text-[10px] text-muted-foreground">
+                <span className="flex items-center gap-1"><span className="h-2 w-2 rounded-full bg-emerald-500" />Revenue</span>
+                <span className="flex items-center gap-1"><span className="h-2 w-2 rounded-full bg-primary" />Spend</span>
+                <span className="flex items-center gap-1"><span className="h-2 w-2 rounded-full bg-orange-400" />Profit line</span>
+              </div>
+            </div>
+          </CardHeader>
+          <CardContent className="px-4 pb-4">
+            <ResponsiveContainer width="100%" height={300}>
+              <ComposedChart data={monthlyRevenueSpend} margin={{ top: 4, right: 8, left: -10, bottom: 0 }}>
+                <CartesianGrid strokeDasharray="3 3" stroke="hsl(220,14%,92%)" vertical={false} />
+                <XAxis dataKey="month" fontSize={10} tickLine={false} axisLine={false} stroke="hsl(220,10%,55%)" />
+                <YAxis fontSize={10} tickLine={false} axisLine={false} stroke="hsl(220,10%,55%)"
+                  tickFormatter={v => v >= 1000 ? `${(v / 1000).toFixed(0)}K` : `${v}`} />
+                <Tooltip contentStyle={tip}
+                  formatter={(v: number, name: string) => [fmtAED(v), name]} />
+                <Bar dataKey="revenue" name="Revenue" fill="hsl(142,70%,45%)" radius={[4, 4, 0, 0]} />
+                <Bar dataKey="spend"   name="Spend"   fill="hsl(170,55%,45%)" radius={[4, 4, 0, 0]} />
+                <Line type="monotone" dataKey={(d: { revenue: number; spend: number }) => (d.revenue ?? 0) - (d.spend ?? 0)}
+                  name="Profit" stroke="hsl(30,90%,55%)" strokeWidth={2} dot={{ r: 4 }} activeDot={{ r: 6 }} />
+              </ComposedChart>
+            </ResponsiveContainer>
+          </CardContent>
+        </Card>
+      )}
 
       {/* ── Monthly trend ── */}
       {monthly.length > 0 && (
@@ -506,6 +743,33 @@ const Finance = () => {
                 </tbody>
               </table>
             </div>
+          </CardContent>
+        </Card>
+      )}
+
+      {/* ── Revenue by Lead Source (from Zoho deals) ── */}
+      {revenueBySource.length > 0 && (
+        <Card className="shadow-sm border-border/50 mb-5">
+          <CardHeader className="pb-1 pt-4 px-4">
+            <div className="flex items-center gap-1.5">
+              <Users className="h-3.5 w-3.5 text-emerald-600" />
+              <CardTitle className="text-[12px] font-medium text-muted-foreground uppercase tracking-wide">Revenue by Lead Source</CardTitle>
+            </div>
+          </CardHeader>
+          <CardContent className="px-4 pb-4">
+            <ResponsiveContainer width="100%" height={Math.max(280, revenueBySource.length * 32)}>
+              <BarChart data={revenueBySource} layout="vertical" barCategoryGap="20%">
+                <CartesianGrid strokeDasharray="3 3" stroke="hsl(220,14%,92%)" />
+                <XAxis type="number" fontSize={10} tickLine={false} axisLine={false} stroke="hsl(220,10%,55%)"
+                  tickFormatter={v => v >= 1000 ? `${(v / 1000).toFixed(0)}K` : `${v}`} />
+                <YAxis dataKey="source" type="category" fontSize={10} tickLine={false} axisLine={false} width={120} stroke="hsl(220,10%,55%)" />
+                <Tooltip contentStyle={tip}
+                  formatter={(v: number, _n, p) => [fmtAED(v), `${p.payload.count} deal${p.payload.count === 1 ? "" : "s"}`]} />
+                <Bar dataKey="amount" radius={[0, 4, 4, 0]}>
+                  {revenueBySource.map((_, i) => <Cell key={i} fill={CAT_COLORS[i % CAT_COLORS.length]} />)}
+                </Bar>
+              </BarChart>
+            </ResponsiveContainer>
           </CardContent>
         </Card>
       )}
