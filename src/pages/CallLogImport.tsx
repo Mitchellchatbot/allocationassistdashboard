@@ -330,6 +330,7 @@ function parseMetaLeads(raw: string[][]): MetaLeadRow[] {
 
 function normalizeCategory(raw: string): string {
   const s = (raw ?? "").toLowerCase();
+  if (s.includes("google"))                            return "Google";
   if (s.includes("facebook") || s.includes("meta"))    return "Meta";
   if (s.includes("linkedin"))                          return "LinkedIn";
   if (s.includes("gohire"))                            return "GoHire";
@@ -343,8 +344,17 @@ function normalizeCategory(raw: string): string {
   if (s.includes("capcut") || s.includes("cupcat"))    return "CapCut";
   if (s.includes("claude"))                            return "Claude AI";
   if (s.includes("frame"))                             return "Frame.io";
+  if (s.includes("hootsuite"))                         return "Hootsuite";
+  if (s.includes("fanbasis") || s.includes("scalingacade")) return "Fanbasis";
+  if (s.includes("semrush"))                           return "SEMrush";
+  if (s.includes("yoast"))                             return "Yoast";
   return raw.trim() || "Other";
 }
+
+const MONTH_MAP: Record<string, string> = {
+  jan: "01", feb: "02", mar: "03", apr: "04", may: "05", jun: "06",
+  jul: "07", aug: "08", sep: "09", sept: "09", oct: "10", nov: "11", dec: "12",
+};
 
 function parseExpenseDate(raw: string): string | null {
   if (!raw) return null;
@@ -357,6 +367,12 @@ function parseExpenseDate(raw: string): string | null {
   if (dmy) {
     const y = dmy[3].length === 2 ? `20${dmy[3]}` : dmy[3];
     return `${y}-${dmy[2].padStart(2, "0")}-${dmy[1].padStart(2, "0")}`;
+  }
+  // DD MMM YYYY (e.g. "16 Oct 2025", "01 Nov 2025")
+  const dmmy = /^(\d{1,2})\s+([A-Za-z]{3,4})\s+(\d{4})$/.exec(s);
+  if (dmmy) {
+    const mm = MONTH_MAP[dmmy[2].toLowerCase()];
+    if (mm) return `${dmmy[3]}-${mm}-${dmmy[1].padStart(2, "0")}`;
   }
   return null;
 }
@@ -390,10 +406,20 @@ function parseMarketingExpenses(raw: string[][]): MarketingExpenseRow[] {
       if (seen.has(c)) continue;
       if ((row[c] ?? "").toString().trim().toLowerCase() !== "date") continue;
 
-      // Sanity: the two cells after Date should look like Description / Amount
-      const next1 = (row[c + 1] ?? "").toString().trim().toLowerCase();
-      const next2 = (row[c + 2] ?? "").toString().trim().toLowerCase();
-      if (!next1.includes("description") || !/amount/.test(next2)) continue;
+      // The layout is usually Date / Description / Amount in consecutive cells,
+      // but some categories (e.g. "GOOGLE" in 2025 sheet) insert a blank column
+      // between Date and Description. Try c+1 first, fall back to c+2.
+      let descCol = -1, amtCol = -1;
+      for (const offset of [1, 2]) {
+        const d = (row[c + offset] ?? "").toString().trim().toLowerCase();
+        const a = (row[c + offset + 1] ?? "").toString().trim().toLowerCase();
+        if (d.includes("description") && /amount/.test(a)) {
+          descCol = c + offset;
+          amtCol  = c + offset + 1;
+          break;
+        }
+      }
+      if (descCol === -1) continue;
 
       // Find the category label — nearest non-empty cell above (columns c, c-1, c-2)
       let label = "";
@@ -410,8 +436,8 @@ function parseMarketingExpenses(raw: string[][]): MarketingExpenseRow[] {
       seen.add(c);
       groups.push({
         dateCol:  c,
-        descCol:  c + 1,
-        amtCol:   c + 2,
+        descCol,
+        amtCol,
         category: normalizeCategory(label),
         startRow: r + 1,
       });
