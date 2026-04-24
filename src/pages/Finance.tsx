@@ -595,11 +595,11 @@ const Finance = () => {
         />
         <FlipKpiCard
           icon={growthPct >= 0 ? TrendingUp : TrendingDown}
-          label="Spend vs Prior"
+          label={growthPct >= 0 ? "Spend Increased" : "Spend Reduced"}
           color={growthPct >= 0 ? "text-rose-600" : "text-emerald-600"}
           bg={growthPct >= 0 ? "bg-rose-50" : "bg-emerald-50"}
-          value={fmtPct(growthPct)}
-          sub={`vs ${fmtAED(prevSpend)}`}
+          value={`${growthPct >= 0 ? "↑" : "↓"} ${Math.abs(growthPct).toFixed(1)}%`}
+          sub={`vs ${fmtAED(prevSpend)} prior`}
           back={<GrowthBack growthPct={growthPct} total={spend} prevTotal={prevSpend} />}
         />
         <FlipKpiCard
