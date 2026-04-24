@@ -485,89 +485,99 @@ const Finance = () => {
         </div>
       )}
 
-      {/* ── Row 1: Spend + Lead Economics (the real metrics that matter) ── */}
-      <div className="grid grid-cols-2 lg:grid-cols-4 gap-3 mb-3">
+      {/* ── Row 1: Spend + Lead Economics ── */}
+      {/* Only render lead KPIs when we actually have leads in the period — otherwise just show spend */}
+      <div className={`grid grid-cols-2 ${leadStats.totalLeads > 0 ? "lg:grid-cols-4" : "lg:grid-cols-2"} gap-3 mb-3`}>
         <FlipKpiCard
           icon={DollarSign} label="Marketing Spend" color="text-primary" bg="bg-primary/10"
           value={fmtAED(spend)}
           sub={`${transactionCount} transactions · ${byCategory.length} channels`}
           back={<TotalSpendBack byCategory={byCategory} total={spend} />}
         />
-        <FlipKpiCard
-          icon={Users} label="Leads Generated" color="text-emerald-600" bg="bg-emerald-50"
-          value={fmtN(leadStats.totalLeads)}
-          sub={leadStats.prevTotalLeads > 0
-            ? `${fmtPct(leadStats.leadGrowth)} vs prior`
-            : "Zoho CRM · created in period"}
-          back={
-            <div className="space-y-2">
-              <p className="text-[9px] text-muted-foreground uppercase tracking-wide">Top sources</p>
-              {leadStats.leadsBySource.slice(0, 6).map((s, i) => {
-                const max = leadStats.leadsBySource[0]?.leads ?? 1;
-                return (
-                  <div key={s.source}>
-                    <div className="flex items-center justify-between mb-0.5">
-                      <span className="truncate max-w-[140px]">{s.source}</span>
-                      <span className="font-semibold tabular-nums">{s.leads}</span>
+        {leadStats.totalLeads > 0 && (
+          <FlipKpiCard
+            icon={Users} label="Leads Generated" color="text-emerald-600" bg="bg-emerald-50"
+            value={fmtN(leadStats.totalLeads)}
+            sub={leadStats.prevTotalLeads > 0
+              ? `${fmtPct(leadStats.leadGrowth)} vs prior`
+              : "Zoho CRM · created in period"}
+            back={
+              <div className="space-y-2">
+                <p className="text-[9px] text-muted-foreground uppercase tracking-wide">Top sources</p>
+                {leadStats.leadsBySource.slice(0, 6).map((s, i) => {
+                  const max = leadStats.leadsBySource[0]?.leads ?? 1;
+                  return (
+                    <div key={s.source}>
+                      <div className="flex items-center justify-between mb-0.5">
+                        <span className="truncate max-w-[140px]">{s.source}</span>
+                        <span className="font-semibold tabular-nums">{s.leads}</span>
+                      </div>
+                      <div className="h-1.5 bg-muted rounded-full overflow-hidden">
+                        <div className="h-full rounded-full" style={{
+                          width: `${(s.leads / max) * 100}%`,
+                          backgroundColor: CAT_COLORS[i % CAT_COLORS.length],
+                        }} />
+                      </div>
+                      <p className="text-[9px] text-muted-foreground mt-0.5">
+                        {s.qualified} qualified · {s.qualRate.toFixed(0)}% rate
+                      </p>
                     </div>
-                    <div className="h-1.5 bg-muted rounded-full overflow-hidden">
-                      <div className="h-full rounded-full" style={{
-                        width: `${(s.leads / max) * 100}%`,
-                        backgroundColor: CAT_COLORS[i % CAT_COLORS.length],
-                      }} />
-                    </div>
-                    <p className="text-[9px] text-muted-foreground mt-0.5">
-                      {s.qualified} qualified · {s.qualRate.toFixed(0)}% rate
-                    </p>
-                  </div>
-                );
-              })}
-            </div>
-          }
-        />
-        <FlipKpiCard
-          icon={Target} label="Cost Per Lead" color="text-orange-600" bg="bg-orange-50"
-          value={leadStats.totalLeads > 0 ? fmtAED(costPerLead) : "—"}
-          sub={leadStats.totalLeads > 0
-            ? `${fmtAED(spend)} / ${fmtN(leadStats.totalLeads)}`
-            : "No leads in period"}
-          back={
-            <div className="space-y-2">
-              <div className="flex justify-between"><span className="text-muted-foreground">Marketing spend</span><span className="font-semibold tabular-nums">{fmtAED(spend)}</span></div>
-              <div className="flex justify-between"><span className="text-muted-foreground">Leads generated</span><span className="font-semibold tabular-nums">{fmtN(leadStats.totalLeads)}</span></div>
-              <div className="pt-2 border-t border-border/40 flex justify-between">
-                <span className="font-semibold">Cost per lead</span>
-                <span className="font-bold text-orange-600 tabular-nums">{fmtAED(costPerLead)}</span>
+                  );
+                })}
               </div>
-              <p className="text-[10px] text-muted-foreground pt-1">
-                Includes all leads regardless of quality. See Cost Per Qualified for the more meaningful figure.
-              </p>
-            </div>
-          }
-        />
-        <FlipKpiCard
-          icon={Zap} label="Cost Per Qualified"
-          color={costPerQualified < 500 ? "text-emerald-600" : costPerQualified < 2000 ? "text-amber-600" : "text-rose-600"}
-          bg={costPerQualified < 500 ? "bg-emerald-50" : costPerQualified < 2000 ? "bg-amber-50" : "bg-rose-50"}
-          value={leadStats.qualified > 0 ? fmtAED(costPerQualified) : "—"}
-          sub={leadStats.qualified > 0
-            ? `${fmtN(leadStats.qualified)} qualified · ${leadStats.qualRate.toFixed(0)}% rate`
-            : "No qualified leads"}
-          back={
-            <div className="space-y-2">
-              <p className="text-[10px]">Qualified = reached <strong>Initial Sales Call Completed</strong>, <strong>Contact in Future</strong>, or <strong>High Priority Follow up</strong>.</p>
-              <div className="pt-2 border-t border-border/40 space-y-1">
-                <div className="flex justify-between"><span className="text-muted-foreground">Total leads</span><span className="font-semibold tabular-nums">{fmtN(leadStats.totalLeads)}</span></div>
-                <div className="flex justify-between"><span className="text-muted-foreground">Qualified</span><span className="font-semibold tabular-nums">{fmtN(leadStats.qualified)}</span></div>
-                <div className="flex justify-between"><span className="text-muted-foreground">Rate</span><span className="font-semibold tabular-nums">{leadStats.qualRate.toFixed(1)}%</span></div>
+            }
+          />
+        )}
+        {leadStats.totalLeads > 0 && spend > 0 && (
+          <FlipKpiCard
+            icon={Target} label="Cost Per Lead" color="text-orange-600" bg="bg-orange-50"
+            value={fmtAED(costPerLead)}
+            sub={`${fmtAED(spend)} / ${fmtN(leadStats.totalLeads)}`}
+            back={
+              <div className="space-y-2">
+                <div className="flex justify-between"><span className="text-muted-foreground">Marketing spend</span><span className="font-semibold tabular-nums">{fmtAED(spend)}</span></div>
+                <div className="flex justify-between"><span className="text-muted-foreground">Leads generated</span><span className="font-semibold tabular-nums">{fmtN(leadStats.totalLeads)}</span></div>
+                <div className="pt-2 border-t border-border/40 flex justify-between">
+                  <span className="font-semibold">Cost per lead</span>
+                  <span className="font-bold text-orange-600 tabular-nums">{fmtAED(costPerLead)}</span>
+                </div>
+                <p className="text-[10px] text-muted-foreground pt-1">
+                  Includes all leads regardless of quality. See Cost Per Qualified for the more meaningful figure.
+                </p>
               </div>
-              <p className="text-[10px] text-muted-foreground pt-1">
-                Lower is better. Compare channels on the <strong>Cost Per Lead by Channel</strong> chart below.
-              </p>
-            </div>
-          }
-        />
+            }
+          />
+        )}
+        {leadStats.qualified > 0 && spend > 0 && (
+          <FlipKpiCard
+            icon={Zap} label="Cost Per Qualified"
+            color={costPerQualified < 500 ? "text-emerald-600" : costPerQualified < 2000 ? "text-amber-600" : "text-rose-600"}
+            bg={costPerQualified < 500 ? "bg-emerald-50" : costPerQualified < 2000 ? "bg-amber-50" : "bg-rose-50"}
+            value={fmtAED(costPerQualified)}
+            sub={`${fmtN(leadStats.qualified)} qualified · ${leadStats.qualRate.toFixed(0)}% rate`}
+            back={
+              <div className="space-y-2">
+                <p className="text-[10px]">Qualified = reached <strong>Initial Sales Call Completed</strong>, <strong>Contact in Future</strong>, or <strong>High Priority Follow up</strong>.</p>
+                <div className="pt-2 border-t border-border/40 space-y-1">
+                  <div className="flex justify-between"><span className="text-muted-foreground">Total leads</span><span className="font-semibold tabular-nums">{fmtN(leadStats.totalLeads)}</span></div>
+                  <div className="flex justify-between"><span className="text-muted-foreground">Qualified</span><span className="font-semibold tabular-nums">{fmtN(leadStats.qualified)}</span></div>
+                  <div className="flex justify-between"><span className="text-muted-foreground">Rate</span><span className="font-semibold tabular-nums">{leadStats.qualRate.toFixed(1)}%</span></div>
+                </div>
+                <p className="text-[10px] text-muted-foreground pt-1">
+                  Lower is better. Compare channels on the Leads by Source chart below.
+                </p>
+              </div>
+            }
+          />
+        )}
       </div>
+
+      {/* Helpful note when we have spend but no leads (so users know why the lead KPIs are missing) */}
+      {spend > 0 && leadStats.totalLeads === 0 && (
+        <div className="mb-3 rounded-lg border border-amber-200 bg-amber-50/50 px-3 py-2 text-[11px] text-amber-900">
+          <strong>No Zoho leads created in this period.</strong> Cost Per Lead / Cost Per Qualified cards are hidden because they'd divide by zero. If you expect leads here, check whether your lead capture forms are creating records in Zoho (not just in Meta / a landing page).
+        </div>
+      )}
 
       {/* ── Row 2: Top channel / Biggest expense / Spend growth / Avg monthly / Txns ── */}
       <div className="grid grid-cols-2 lg:grid-cols-3 xl:grid-cols-5 gap-3 mb-5">
