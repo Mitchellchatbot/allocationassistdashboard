@@ -776,7 +776,11 @@ export default function CallLogImport() {
   const weeklySalesImporter = useImporter<WeeklySalesRow>(parseWeeklySales, "weekly_sales");
   const metaLeadsImporter  = useImporter<MetaLeadRow>(parseMetaLeads, "meta_leads", "phone");
   const doctorSessionImporter = useImporter<DoctorSessionRow>(parseDoctorSessions, "doctor_sessions");
-  const marketingExpenseImporter = useImporter<MarketingExpenseRow>(parseMarketingExpenses, "marketing_expenses");
+  const marketingExpenseImporter = useImporter<MarketingExpenseRow>(
+    parseMarketingExpenses,
+    "marketing_expenses",
+    "expense_date,category,amount,description",
+  );
 
   return (
     <DashboardLayout title="Import Data" subtitle="Upload CSV files to sync data into the dashboard">
