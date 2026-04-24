@@ -39,6 +39,15 @@ function fmtMonth(key: string): string {
   return new Date(key + "-01").toLocaleDateString("en-GB", { month: "short", year: "2-digit" });
 }
 
+// Format a Date as YYYY-MM-DD using LOCAL timezone parts (not toISOString(),
+// which converts to UTC and can shift the day by ±1 in non-UTC timezones).
+function localISODate(d: Date): string {
+  const y  = d.getFullYear();
+  const m  = String(d.getMonth() + 1).padStart(2, "0");
+  const dd = String(d.getDate()).padStart(2, "0");
+  return `${y}-${m}-${dd}`;
+}
+
 export function useMarketingExpenses() {
   const { dateRange } = useFilters();
 
@@ -56,8 +65,8 @@ export function useMarketingExpenses() {
   });
 
   return useMemo(() => {
-    const fromISO = dateRange.from.toISOString().split("T")[0];
-    const toISO   = dateRange.to.toISOString().split("T")[0];
+    const fromISO = localISODate(dateRange.from);
+    const toISO   = localISODate(dateRange.to);
     const rows = allRows.filter(r => {
       const d = r.expense_date ?? "";
       return d >= fromISO && d <= toISO;
@@ -67,8 +76,8 @@ export function useMarketingExpenses() {
     const spanMs    = dateRange.to.getTime() - dateRange.from.getTime();
     const prevFrom  = new Date(dateRange.from.getTime() - spanMs - 86_400_000);
     const prevTo    = new Date(dateRange.from.getTime() - 86_400_000);
-    const prevFromISO = prevFrom.toISOString().split("T")[0];
-    const prevToISO   = prevTo.toISOString().split("T")[0];
+    const prevFromISO = localISODate(prevFrom);
+    const prevToISO   = localISODate(prevTo);
     const prevRows = allRows.filter(r => {
       const d = r.expense_date ?? "";
       return d >= prevFromISO && d <= prevToISO;

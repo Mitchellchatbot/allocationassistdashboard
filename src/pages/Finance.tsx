@@ -557,14 +557,19 @@ const Finance = () => {
       {monthlyRevenueSpend.length > 0 && (
         <Card className="shadow-sm border-border/50 mb-5">
           <CardHeader className="pb-1 pt-4 px-4">
-            <div className="flex items-center justify-between">
+            <div className="flex items-center justify-between flex-wrap gap-2">
               <CardTitle className="text-[12px] font-medium text-muted-foreground uppercase tracking-wide">Revenue vs Marketing Spend</CardTitle>
               <div className="flex items-center gap-3 text-[10px] text-muted-foreground">
                 <span className="flex items-center gap-1"><span className="h-2 w-2 rounded-full bg-emerald-500" />Revenue</span>
                 <span className="flex items-center gap-1"><span className="h-2 w-2 rounded-full bg-primary" />Spend</span>
-                <span className="flex items-center gap-1"><span className="h-2 w-2 rounded-full bg-orange-400" />Profit line</span>
+                {revenue > 0 && <span className="flex items-center gap-1"><span className="h-2 w-2 rounded-full bg-orange-400" />Profit</span>}
               </div>
             </div>
+            {revenue === 0 && spend > 0 && (
+              <p className="text-[10px] text-amber-600 mt-1">
+                No Closed Won deals in this period. Revenue pulls from Zoho Deals where Stage = "Closed Won" with a Closing_Date in range.
+              </p>
+            )}
           </CardHeader>
           <CardContent className="px-4 pb-4">
             <ResponsiveContainer width="100%" height={300}>
@@ -577,8 +582,11 @@ const Finance = () => {
                   formatter={(v: number, name: string) => [fmtAED(v), name]} />
                 <Bar dataKey="revenue" name="Revenue" fill="hsl(142,70%,45%)" radius={[4, 4, 0, 0]} />
                 <Bar dataKey="spend"   name="Spend"   fill="hsl(170,55%,45%)" radius={[4, 4, 0, 0]} />
-                <Line type="monotone" dataKey={(d: { revenue: number; spend: number }) => (d.revenue ?? 0) - (d.spend ?? 0)}
-                  name="Profit" stroke="hsl(30,90%,55%)" strokeWidth={2} dot={{ r: 4 }} activeDot={{ r: 6 }} />
+                {/* Hide the profit line when revenue is 0 — otherwise it just plots -spend and looks broken */}
+                {revenue > 0 && (
+                  <Line type="monotone" dataKey={(d: { revenue: number; spend: number }) => (d.revenue ?? 0) - (d.spend ?? 0)}
+                    name="Profit" stroke="hsl(30,90%,55%)" strokeWidth={2} dot={{ r: 4 }} activeDot={{ r: 6 }} />
+                )}
               </ComposedChart>
             </ResponsiveContainer>
           </CardContent>
