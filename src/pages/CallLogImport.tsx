@@ -373,41 +373,59 @@ function parseAmount(raw: string): number | null {
 function parseMarketingExpenses(raw: string[][]): MarketingExpenseRow[] {
   if (raw.length < 3) return [];
 
-  // Find the "Date" header row — it's the one that has the word "Date" repeated
-  // across multiple columns (one per category group).
-  let headerIdx = -1;
-  for (let i = 0; i < Math.min(raw.length, 10); i++) {
-    const dateCols = raw[i].filter(c => (c ?? "").toString().trim().toLowerCase() === "date").length;
-    if (dateCols >= 2) { headerIdx = i; break; }
-  }
-  if (headerIdx === -1) return [];
+  // The Digital Marketing sheet puts different category groups at DIFFERENT
+  // header rows (some categories labelled in row 4, others row 5, etc.).
+  // So we scan the first ~12 rows for ANY "Date" cell and treat each one as
+  // the start of a 3-column group (Date, Description, Amount).
+  const SCAN_ROWS = Math.min(raw.length, 12);
 
-  // Each "Date" column begins a 3-column group (Date, Description, Amount).
-  // Categories are labelled in some row above headerIdx — find the most
-  // recent non-empty cell above each Date column.
-  const headerRow = raw[headerIdx];
-  const groups: { dateCol: number; descCol: number; amtCol: number; category: string }[] = [];
-  for (let c = 0; c < headerRow.length; c++) {
-    if ((headerRow[c] ?? "").toString().trim().toLowerCase() !== "date") continue;
-    // Pull the category label from the nearest non-empty cell above this column
-    let label = "";
-    for (let r = headerIdx - 1; r >= 0 && !label; r--) {
-      for (let col = c; col >= Math.max(0, c - 3) && !label; col--) {
-        const v = (raw[r]?.[col] ?? "").toString().trim();
-        if (v && v.toLowerCase() !== "date" && v.toLowerCase() !== "description" && !/amount/i.test(v)) {
+  type Group = { dateCol: number; descCol: number; amtCol: number; category: string; startRow: number };
+  const seen = new Set<number>();   // de-dupe by column index
+  const groups: Group[] = [];
+
+  for (let r = 0; r < SCAN_ROWS; r++) {
+    const row = raw[r];
+    if (!row) continue;
+    for (let c = 0; c < row.length; c++) {
+      if (seen.has(c)) continue;
+      if ((row[c] ?? "").toString().trim().toLowerCase() !== "date") continue;
+
+      // Sanity: the two cells after Date should look like Description / Amount
+      const next1 = (row[c + 1] ?? "").toString().trim().toLowerCase();
+      const next2 = (row[c + 2] ?? "").toString().trim().toLowerCase();
+      if (!next1.includes("description") || !/amount/.test(next2)) continue;
+
+      // Find the category label — nearest non-empty cell above (columns c, c-1, c-2)
+      let label = "";
+      for (let rr = r - 1; rr >= 0 && !label; rr--) {
+        for (let cc = c; cc >= Math.max(0, c - 2) && !label; cc--) {
+          const v = (raw[rr]?.[cc] ?? "").toString().trim();
+          if (!v) continue;
+          if (/^(date|description)$/i.test(v)) continue;
+          if (/amount/i.test(v)) continue;
           label = v;
         }
       }
+
+      seen.add(c);
+      groups.push({
+        dateCol:  c,
+        descCol:  c + 1,
+        amtCol:   c + 2,
+        category: normalizeCategory(label),
+        startRow: r + 1,
+      });
     }
-    groups.push({ dateCol: c, descCol: c + 1, amtCol: c + 2, category: normalizeCategory(label) });
   }
+
   if (!groups.length) return [];
 
+  // Each group reads data starting from its own header row + 1
   const out: MarketingExpenseRow[] = [];
-  for (let r = headerIdx + 1; r < raw.length; r++) {
-    const row = raw[r];
-    if (!row) continue;
-    for (const g of groups) {
+  for (const g of groups) {
+    for (let r = g.startRow; r < raw.length; r++) {
+      const row = raw[r];
+      if (!row) continue;
       const dateCell = (row[g.dateCol] ?? "").toString();
       const descCell = (row[g.descCol] ?? "").toString();
       const amtCell  = (row[g.amtCol]  ?? "").toString();
