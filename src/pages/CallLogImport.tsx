@@ -6,7 +6,7 @@ import { Button } from "@/components/ui/button";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import {
   Upload, FileText, CheckCircle, AlertTriangle,
-  Loader2, X, Phone, Users, BarChart2,
+  Loader2, X, Phone, Users, BarChart2, DollarSign,
 } from "lucide-react";
 import { supabase } from "@/lib/supabase";
 
@@ -52,6 +52,14 @@ interface MetaLeadRow {
   utm_medium:         string;
   utm_campaign:       string;
   utm_content:        string;
+}
+
+interface MarketingExpenseRow {
+  expense_date: string;   // YYYY-MM-DD
+  category:     string;
+  description:  string;
+  amount:       number;
+  currency:     string;
 }
 
 interface DoctorSessionRow {
@@ -313,6 +321,110 @@ function parseMetaLeads(raw: string[][]): MetaLeadRow[] {
       utm_content:        get(cells, idxUtmCont),
     }];
   });
+}
+
+// ─── Marketing expenses parser ────────────────────────────────────────────────
+// Handles the wide "Digital Marketing" sheet where each category occupies
+// 3 columns (Date / Description / Amount) with a blank spacer column between
+// groups. Category names live in a separate header row above "Date".
+
+function normalizeCategory(raw: string): string {
+  const s = (raw ?? "").toLowerCase();
+  if (s.includes("facebook") || s.includes("meta"))    return "Meta";
+  if (s.includes("linkedin"))                          return "LinkedIn";
+  if (s.includes("gohire"))                            return "GoHire";
+  if (s.includes("seo") || s.includes("mitchel"))      return "SEO";
+  if (s.includes("zappier") || s.includes("zapier"))   return "Zapier";
+  if (s.includes("magna"))                             return "Magna";
+  if (s.includes("dilo") || s.includes("david kumar")) return "DILO";
+  if (s.includes("pabbly"))                            return "Pabbly";
+  if (s.includes("jobsoid"))                           return "Jobsoid";
+  if (s.includes("canva"))                             return "Canva";
+  if (s.includes("capcut") || s.includes("cupcat"))    return "CapCut";
+  if (s.includes("claude"))                            return "Claude AI";
+  if (s.includes("frame"))                             return "Frame.io";
+  return raw.trim() || "Other";
+}
+
+function parseExpenseDate(raw: string): string | null {
+  if (!raw) return null;
+  const s = raw.trim();
+  // YYYY-MM-DD
+  const iso = /^(\d{4})-(\d{1,2})-(\d{1,2})$/.exec(s);
+  if (iso) return `${iso[1]}-${iso[2].padStart(2, "0")}-${iso[3].padStart(2, "0")}`;
+  // DD/MM/YYYY or DD-MM-YYYY
+  const dmy = /^(\d{1,2})[\/\-](\d{1,2})[\/\-](\d{2,4})$/.exec(s);
+  if (dmy) {
+    const y = dmy[3].length === 2 ? `20${dmy[3]}` : dmy[3];
+    return `${y}-${dmy[2].padStart(2, "0")}-${dmy[1].padStart(2, "0")}`;
+  }
+  return null;
+}
+
+function parseAmount(raw: string): number | null {
+  if (!raw) return null;
+  // Strip "AED", currency symbols, commas, spaces
+  const cleaned = raw.replace(/[^\d.\-]/g, "");
+  if (!cleaned) return null;
+  const n = parseFloat(cleaned);
+  return isNaN(n) ? null : n;
+}
+
+function parseMarketingExpenses(raw: string[][]): MarketingExpenseRow[] {
+  if (raw.length < 3) return [];
+
+  // Find the "Date" header row — it's the one that has the word "Date" repeated
+  // across multiple columns (one per category group).
+  let headerIdx = -1;
+  for (let i = 0; i < Math.min(raw.length, 10); i++) {
+    const dateCols = raw[i].filter(c => (c ?? "").toString().trim().toLowerCase() === "date").length;
+    if (dateCols >= 2) { headerIdx = i; break; }
+  }
+  if (headerIdx === -1) return [];
+
+  // Each "Date" column begins a 3-column group (Date, Description, Amount).
+  // Categories are labelled in some row above headerIdx — find the most
+  // recent non-empty cell above each Date column.
+  const headerRow = raw[headerIdx];
+  const groups: { dateCol: number; descCol: number; amtCol: number; category: string }[] = [];
+  for (let c = 0; c < headerRow.length; c++) {
+    if ((headerRow[c] ?? "").toString().trim().toLowerCase() !== "date") continue;
+    // Pull the category label from the nearest non-empty cell above this column
+    let label = "";
+    for (let r = headerIdx - 1; r >= 0 && !label; r--) {
+      for (let col = c; col >= Math.max(0, c - 3) && !label; col--) {
+        const v = (raw[r]?.[col] ?? "").toString().trim();
+        if (v && v.toLowerCase() !== "date" && v.toLowerCase() !== "description" && !/amount/i.test(v)) {
+          label = v;
+        }
+      }
+    }
+    groups.push({ dateCol: c, descCol: c + 1, amtCol: c + 2, category: normalizeCategory(label) });
+  }
+  if (!groups.length) return [];
+
+  const out: MarketingExpenseRow[] = [];
+  for (let r = headerIdx + 1; r < raw.length; r++) {
+    const row = raw[r];
+    if (!row) continue;
+    for (const g of groups) {
+      const dateCell = (row[g.dateCol] ?? "").toString();
+      const descCell = (row[g.descCol] ?? "").toString();
+      const amtCell  = (row[g.amtCol]  ?? "").toString();
+      const date   = parseExpenseDate(dateCell);
+      const amount = parseAmount(amtCell);
+      // Skip subtotal/empty rows — require BOTH a valid date and a parseable amount
+      if (!date || amount === null) continue;
+      out.push({
+        expense_date: date,
+        category:     g.category,
+        description:  descCell.trim(),
+        amount,
+        currency:     "AED",
+      });
+    }
+  }
+  return out;
 }
 
 // Numeric-only date like "11/2" or "13/02"
@@ -646,6 +758,7 @@ export default function CallLogImport() {
   const weeklySalesImporter = useImporter<WeeklySalesRow>(parseWeeklySales, "weekly_sales");
   const metaLeadsImporter  = useImporter<MetaLeadRow>(parseMetaLeads, "meta_leads", "phone");
   const doctorSessionImporter = useImporter<DoctorSessionRow>(parseDoctorSessions, "doctor_sessions");
+  const marketingExpenseImporter = useImporter<MarketingExpenseRow>(parseMarketingExpenses, "marketing_expenses");
 
   return (
     <DashboardLayout title="Import Data" subtitle="Upload CSV files to sync data into the dashboard">
@@ -664,6 +777,9 @@ export default function CallLogImport() {
             </TabsTrigger>
             <TabsTrigger value="meta-leads" className="text-[12px] gap-1.5">
               <Users className="h-3.5 w-3.5" /> Meta Leads
+            </TabsTrigger>
+            <TabsTrigger value="marketing-expenses" className="text-[12px] gap-1.5">
+              <DollarSign className="h-3.5 w-3.5" /> Marketing Spend
             </TabsTrigger>
           </TabsList>
 
@@ -760,6 +876,26 @@ export default function CallLogImport() {
               ]}
             />
           </TabsContent>
+
+          {/* ── Marketing Spend ───────────────────────────────────────── */}
+          <TabsContent value="marketing-expenses" className="mt-4 space-y-4">
+            <div className="rounded-lg bg-muted/30 border border-border/40 px-3 py-2.5 text-[11px] text-muted-foreground">
+              <strong className="text-foreground">Expected format:</strong>{" "}
+              The "Digital Marketing" sheet in wide layout. Each category (Meta, LinkedIn, GoHire, SEO, Zapier, Magna, DILO, Pabbly, Jobsoid, Canva, CapCut, Claude AI, Frame.io…) occupies 3 columns: Date · Description · Amount. The parser finds the header row that has multiple "Date" cells and reads each group. Subtotal rows (green "January Meta Expense" rows) are ignored.
+            </div>
+            <ImportSection
+              importer={marketingExpenseImporter}
+              tableName="marketing_expenses"
+              inputId="input-marketing-expenses"
+              emptyHint='Export your Digital Marketing sheet as CSV. All category columns will be parsed in one shot.'
+              previewCols={[
+                { label: "Date",        key: "expense_date" },
+                { label: "Category",    key: "category",    className: "font-medium" },
+                { label: "Description", key: "description" },
+                { label: "Amount (AED)", key: "amount",     className: "text-right tabular-nums" },
+              ]}
+            />
+          </TabsContent>
         </Tabs>
 
         {/* Instructions */}
@@ -787,6 +923,7 @@ export default function CallLogImport() {
               <li><code className="bg-muted px-1 rounded">doctor_sessions</code> — detailed pipeline session notes (date, status, name, specialty, qualifications, call_state, meeting_type, country_training, notes)</li>
               <li><code className="bg-muted px-1 rounded">weekly_sales</code> — recruiter daily activity (member_name, date_col, full_sales_calls, good_calls, sales_count)</li>
               <li><code className="bg-muted px-1 rounded">meta_leads</code> — Meta/Typeform lead acquisition (first_name, last_name, email, phone, country, specialty, age, employed, salary_usd, utm_source, utm_medium, utm_campaign, utm_content)</li>
+              <li><code className="bg-muted px-1 rounded">marketing_expenses</code> — expense line items (expense_date, category, description, amount, currency) — see <code className="bg-muted px-1 rounded">supabase/marketing_expenses.sql</code></li>
             </ul>
           </CardContent>
         </Card>
