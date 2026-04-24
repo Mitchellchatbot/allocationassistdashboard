@@ -737,7 +737,7 @@ const Finance = () => {
                     <td className="py-2 text-[12px]">Total</td>
                     <td className="py-2 text-[12px] text-right tabular-nums">{byCategory.reduce((s, c) => s + c.count, 0)}</td>
                     <td className="py-2 text-[12px] text-right tabular-nums">—</td>
-                    <td className="py-2 text-[12px] text-right tabular-nums">{fmtAED(total)}</td>
+                    <td className="py-2 text-[12px] text-right tabular-nums">{fmtAED(spend)}</td>
                     <td className="py-2 text-[12px] text-right tabular-nums">100%</td>
                   </tr>
                 </tbody>
