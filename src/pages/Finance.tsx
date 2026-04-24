@@ -392,98 +392,101 @@ const Finance = () => {
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
-  // Zoho revenue — Closed Won deals in the selected period (by Closing_Date)
-  const revenue = useMemo(() => {
-    const deals = zoho?.rawDeals ?? [];
+  // Zoho leads created in the selected period — the real signal of marketing working.
+  // Revenue is not used here because Zoho Deals module has almost no data
+  // (only ~4 Closed Won deals ever); using spend/leads is far more accurate.
+  const QUALIFIED_STATUSES = new Set([
+    "Initial Sales Call Completed",
+    "Contact in Future",
+    "High Priority Follow up",
+  ]);
+
+  const leadStats = useMemo(() => {
+    const leads = zoho?.rawLeads ?? [];
     const fromMs = dateRange.from.getTime();
     const toMs   = dateRange.to.getTime() + 86_400_000;
-    let total = 0;
-    for (const d of deals) {
-      if (d.Stage !== "Closed Won" || !d.Closing_Date) continue;
-      const t = new Date(d.Closing_Date).getTime();
-      if (t >= fromMs && t < toMs) total += d.Amount ?? 0;
+    const inPeriod = leads.filter(l => {
+      const t = l.Created_Time ? new Date(l.Created_Time).getTime() : NaN;
+      return !isNaN(t) && t >= fromMs && t < toMs;
+    });
+
+    // Prior period (equal length, immediately before)
+    const spanMs   = dateRange.to.getTime() - dateRange.from.getTime();
+    const prevFromMs = dateRange.from.getTime() - spanMs - 86_400_000;
+    const prevToMs   = dateRange.from.getTime() - 86_400_000;
+    const prevInPeriod = leads.filter(l => {
+      const t = l.Created_Time ? new Date(l.Created_Time).getTime() : NaN;
+      return !isNaN(t) && t >= prevFromMs && t < prevToMs;
+    });
+
+    const totalLeads     = inPeriod.length;
+    const prevTotalLeads = prevInPeriod.length;
+    const qualified      = inPeriod.filter(l => QUALIFIED_STATUSES.has(l.Lead_Status)).length;
+    const qualRate       = totalLeads > 0 ? (qualified / totalLeads) * 100 : 0;
+    const leadGrowth     = prevTotalLeads > 0 ? ((totalLeads - prevTotalLeads) / prevTotalLeads) * 100 : 0;
+
+    // By source — use displaySource-like normalisation
+    const sourceCounts = new Map<string, { total: number; qualified: number }>();
+    for (const l of inPeriod) {
+      const src = (l.Lead_Source ?? "").trim() || "Unknown";
+      const cur = sourceCounts.get(src) ?? { total: 0, qualified: 0 };
+      cur.total++;
+      if (QUALIFIED_STATUSES.has(l.Lead_Status)) cur.qualified++;
+      sourceCounts.set(src, cur);
     }
-    return total;
-  }, [zoho?.rawDeals, dateRange]);
+    const leadsBySource = Array.from(sourceCounts.entries())
+      .map(([source, v]) => ({
+        source,
+        leads: v.total,
+        qualified: v.qualified,
+        qualRate: v.total > 0 ? (v.qualified / v.total) * 100 : 0,
+      }))
+      .sort((a, b) => b.leads - a.leads)
+      .slice(0, 12);
 
-  const placements = useMemo(() => {
-    const deals = zoho?.rawDeals ?? [];
-    const fromMs = dateRange.from.getTime();
-    const toMs   = dateRange.to.getTime() + 86_400_000;
-    return deals.filter(d => {
-      if (d.Stage !== "Closed Won" || !d.Closing_Date) return false;
-      const t = new Date(d.Closing_Date).getTime();
-      return t >= fromMs && t < toMs;
-    }).length;
-  }, [zoho?.rawDeals, dateRange]);
+    return { totalLeads, prevTotalLeads, qualified, qualRate, leadGrowth, leadsBySource };
+  }, [zoho?.rawLeads, dateRange]);
 
-  const revenueBySource = useMemo(() => {
-    const deals = zoho?.rawDeals ?? [];
-    const fromMs = dateRange.from.getTime();
-    const toMs   = dateRange.to.getTime() + 86_400_000;
-    const map = new Map<string, { amount: number; count: number }>();
-    for (const d of deals) {
-      if (d.Stage !== "Closed Won" || !d.Closing_Date) continue;
-      const t = new Date(d.Closing_Date).getTime();
-      if (t < fromMs || t >= toMs) continue;
-      const src = d.Lead_Source || "Unknown";
-      const cur = map.get(src) ?? { amount: 0, count: 0 };
-      cur.amount += d.Amount ?? 0;
-      cur.count  += 1;
-      map.set(src, cur);
-    }
-    return Array.from(map.entries())
-      .map(([source, v]) => ({ source, ...v }))
-      .sort((a, b) => b.amount - a.amount);
-  }, [zoho?.rawDeals, dateRange]);
+  const costPerLead   = leadStats.totalLeads     > 0 ? spend / leadStats.totalLeads     : 0;
+  const costPerQualified = leadStats.qualified   > 0 ? spend / leadStats.qualified     : 0;
 
-  const profit = revenue - spend;
-  const roas   = spend > 0 ? revenue / spend : 0;
-  const cpp    = placements > 0 ? spend / placements : 0;
-
-  // Monthly revenue vs spend for the combined chart
-  const monthlyRevenueSpend = useMemo(() => {
-    const map = new Map<string, { month: string; monthKey: string; spend: number; revenue: number }>();
+  // Monthly spend + leads generated — what the team should actually watch
+  const monthlySpendLeads = useMemo(() => {
+    const map = new Map<string, { month: string; monthKey: string; spend: number; leads: number }>();
     for (const m of monthly) {
-      map.set(m.monthKey, { month: m.month, monthKey: m.monthKey, spend: m.amount, revenue: 0 });
+      map.set(m.monthKey, { month: m.month, monthKey: m.monthKey, spend: m.amount, leads: 0 });
     }
-    const deals = zoho?.rawDeals ?? [];
+    const leads = zoho?.rawLeads ?? [];
     const fromMs = dateRange.from.getTime();
     const toMs   = dateRange.to.getTime() + 86_400_000;
-    for (const d of deals) {
-      if (d.Stage !== "Closed Won" || !d.Closing_Date) continue;
-      const t = new Date(d.Closing_Date).getTime();
-      if (t < fromMs || t >= toMs) continue;
-      const key = d.Closing_Date.slice(0, 7);
+    for (const l of leads) {
+      const t = l.Created_Time ? new Date(l.Created_Time).getTime() : NaN;
+      if (isNaN(t) || t < fromMs || t >= toMs) continue;
+      const key = (l.Created_Time ?? "").slice(0, 7);
+      if (!key) continue;
       const label = new Date(key + "-01").toLocaleDateString("en-GB", { month: "short", year: "2-digit" });
-      const cur = map.get(key) ?? { month: label, monthKey: key, spend: 0, revenue: 0 };
-      cur.revenue += d.Amount ?? 0;
+      const cur = map.get(key) ?? { month: label, monthKey: key, spend: 0, leads: 0 };
+      cur.leads += 1;
       map.set(key, cur);
     }
     return Array.from(map.values()).sort((a, b) => a.monthKey.localeCompare(b.monthKey));
-  }, [monthly, zoho?.rawDeals, dateRange]);
+  }, [monthly, zoho?.rawLeads, dateRange]);
 
-  const hasData = transactionCount > 0 || placements > 0;
+  const hasData = transactionCount > 0 || leadStats.totalLeads > 0;
 
   return (
     <DashboardLayout title="Finance" subtitle="Revenue, spend, profit, and ROI across all channels">
       {!hasData && (
         <div className="mb-5 rounded-xl border border-border/50 bg-muted/30 px-4 py-3">
-          <p className="text-[12px] font-medium mb-1">No financial activity in this period</p>
+          <p className="text-[12px] font-medium mb-1">No activity in this period</p>
           <p className="text-[11px] text-muted-foreground">
-            This period has no Closed Won deals and no imported marketing expenses. Try a wider date range (top-right), or import the Digital Marketing sheet via <strong>Import Data → Marketing Spend</strong>.
+            This period has no marketing expenses and no Zoho leads. Try a wider date range (top-right), or import the Digital Marketing sheet via <strong>Import Data → Marketing Spend</strong>.
           </p>
         </div>
       )}
 
-      {/* ── Row 1: Revenue / Spend / Profit / ROAS ── */}
+      {/* ── Row 1: Spend + Lead Economics (the real metrics that matter) ── */}
       <div className="grid grid-cols-2 lg:grid-cols-4 gap-3 mb-3">
-        <FlipKpiCard
-          icon={Wallet} label="Revenue" color="text-emerald-600" bg="bg-emerald-50"
-          value={fmtAED(revenue)}
-          sub={`${placements} placement${placements === 1 ? "" : "s"} closed`}
-          back={<RevenueBack bySource={revenueBySource} total={revenue} />}
-        />
         <FlipKpiCard
           icon={DollarSign} label="Marketing Spend" color="text-primary" bg="bg-primary/10"
           value={fmtAED(spend)}
@@ -491,33 +494,83 @@ const Finance = () => {
           back={<TotalSpendBack byCategory={byCategory} total={spend} />}
         />
         <FlipKpiCard
-          icon={profit >= 0 ? TrendingUp : TrendingDown}
-          label="Net Profit"
-          color={profit >= 0 ? "text-emerald-600" : "text-rose-600"}
-          bg={profit >= 0 ? "bg-emerald-50" : "bg-rose-50"}
-          value={fmtAED(profit)}
-          sub={revenue > 0 ? `${((profit / revenue) * 100).toFixed(0)}% net margin` : "Import revenue"}
-          back={<ProfitBack revenue={revenue} spend={spend} profit={profit} />}
+          icon={Users} label="Leads Generated" color="text-emerald-600" bg="bg-emerald-50"
+          value={fmtN(leadStats.totalLeads)}
+          sub={leadStats.prevTotalLeads > 0
+            ? `${fmtPct(leadStats.leadGrowth)} vs prior`
+            : "Zoho CRM · created in period"}
+          back={
+            <div className="space-y-2">
+              <p className="text-[9px] text-muted-foreground uppercase tracking-wide">Top sources</p>
+              {leadStats.leadsBySource.slice(0, 6).map((s, i) => {
+                const max = leadStats.leadsBySource[0]?.leads ?? 1;
+                return (
+                  <div key={s.source}>
+                    <div className="flex items-center justify-between mb-0.5">
+                      <span className="truncate max-w-[140px]">{s.source}</span>
+                      <span className="font-semibold tabular-nums">{s.leads}</span>
+                    </div>
+                    <div className="h-1.5 bg-muted rounded-full overflow-hidden">
+                      <div className="h-full rounded-full" style={{
+                        width: `${(s.leads / max) * 100}%`,
+                        backgroundColor: CAT_COLORS[i % CAT_COLORS.length],
+                      }} />
+                    </div>
+                    <p className="text-[9px] text-muted-foreground mt-0.5">
+                      {s.qualified} qualified · {s.qualRate.toFixed(0)}% rate
+                    </p>
+                  </div>
+                );
+              })}
+            </div>
+          }
         />
         <FlipKpiCard
-          icon={Zap}
-          label="ROAS"
-          color={roas >= 2 ? "text-emerald-600" : roas >= 1 ? "text-amber-600" : "text-rose-600"}
-          bg={roas >= 2 ? "bg-emerald-50" : roas >= 1 ? "bg-amber-50" : "bg-rose-50"}
-          value={spend > 0 ? `${roas.toFixed(2)}x` : "—"}
-          sub={spend > 0 ? (roas >= 4 ? "Excellent" : roas >= 2 ? "Healthy" : roas >= 1 ? "Break-even" : "Losing money") : ""}
-          back={<RoasBack roas={roas} revenue={revenue} spend={spend} />}
+          icon={Target} label="Cost Per Lead" color="text-orange-600" bg="bg-orange-50"
+          value={leadStats.totalLeads > 0 ? fmtAED(costPerLead) : "—"}
+          sub={leadStats.totalLeads > 0
+            ? `${fmtAED(spend)} / ${fmtN(leadStats.totalLeads)}`
+            : "No leads in period"}
+          back={
+            <div className="space-y-2">
+              <div className="flex justify-between"><span className="text-muted-foreground">Marketing spend</span><span className="font-semibold tabular-nums">{fmtAED(spend)}</span></div>
+              <div className="flex justify-between"><span className="text-muted-foreground">Leads generated</span><span className="font-semibold tabular-nums">{fmtN(leadStats.totalLeads)}</span></div>
+              <div className="pt-2 border-t border-border/40 flex justify-between">
+                <span className="font-semibold">Cost per lead</span>
+                <span className="font-bold text-orange-600 tabular-nums">{fmtAED(costPerLead)}</span>
+              </div>
+              <p className="text-[10px] text-muted-foreground pt-1">
+                Includes all leads regardless of quality. See Cost Per Qualified for the more meaningful figure.
+              </p>
+            </div>
+          }
+        />
+        <FlipKpiCard
+          icon={Zap} label="Cost Per Qualified"
+          color={costPerQualified < 500 ? "text-emerald-600" : costPerQualified < 2000 ? "text-amber-600" : "text-rose-600"}
+          bg={costPerQualified < 500 ? "bg-emerald-50" : costPerQualified < 2000 ? "bg-amber-50" : "bg-rose-50"}
+          value={leadStats.qualified > 0 ? fmtAED(costPerQualified) : "—"}
+          sub={leadStats.qualified > 0
+            ? `${fmtN(leadStats.qualified)} qualified · ${leadStats.qualRate.toFixed(0)}% rate`
+            : "No qualified leads"}
+          back={
+            <div className="space-y-2">
+              <p className="text-[10px]">Qualified = reached <strong>Initial Sales Call Completed</strong>, <strong>Contact in Future</strong>, or <strong>High Priority Follow up</strong>.</p>
+              <div className="pt-2 border-t border-border/40 space-y-1">
+                <div className="flex justify-between"><span className="text-muted-foreground">Total leads</span><span className="font-semibold tabular-nums">{fmtN(leadStats.totalLeads)}</span></div>
+                <div className="flex justify-between"><span className="text-muted-foreground">Qualified</span><span className="font-semibold tabular-nums">{fmtN(leadStats.qualified)}</span></div>
+                <div className="flex justify-between"><span className="text-muted-foreground">Rate</span><span className="font-semibold tabular-nums">{leadStats.qualRate.toFixed(1)}%</span></div>
+              </div>
+              <p className="text-[10px] text-muted-foreground pt-1">
+                Lower is better. Compare channels on the <strong>Cost Per Lead by Channel</strong> chart below.
+              </p>
+            </div>
+          }
         />
       </div>
 
-      {/* ── Row 2: Cost per Placement / Top Channel / Biggest Expense / vs Previous / Avg Monthly / Transactions ── */}
-      <div className="grid grid-cols-2 lg:grid-cols-3 xl:grid-cols-6 gap-3 mb-5">
-        <FlipKpiCard
-          icon={Target} label="Cost / Placement" color="text-orange-600" bg="bg-orange-50"
-          value={placements > 0 ? fmtAED(cpp) : "—"}
-          sub={placements === 0 ? "No placements yet" : `${placements} closed deal${placements === 1 ? "" : "s"}`}
-          back={<CostPerPlacementBack cpp={cpp} spend={spend} placements={placements} />}
-        />
+      {/* ── Row 2: Top channel / Biggest expense / Spend growth / Avg monthly / Txns ── */}
+      <div className="grid grid-cols-2 lg:grid-cols-3 xl:grid-cols-5 gap-3 mb-5">
         <FlipKpiCard
           icon={Crown} label="Top Channel" color="text-amber-600" bg="bg-amber-50"
           value={topCategory?.category ?? "—"}
@@ -553,40 +606,34 @@ const Finance = () => {
         />
       </div>
 
-      {/* ── Revenue vs Spend combined chart ── */}
-      {monthlyRevenueSpend.length > 0 && (
+      {/* ── Monthly: Spend + Leads combined ── */}
+      {monthlySpendLeads.length > 0 && (
         <Card className="shadow-sm border-border/50 mb-5">
           <CardHeader className="pb-1 pt-4 px-4">
             <div className="flex items-center justify-between flex-wrap gap-2">
-              <CardTitle className="text-[12px] font-medium text-muted-foreground uppercase tracking-wide">Revenue vs Marketing Spend</CardTitle>
+              <CardTitle className="text-[12px] font-medium text-muted-foreground uppercase tracking-wide">Spend vs Leads Generated</CardTitle>
               <div className="flex items-center gap-3 text-[10px] text-muted-foreground">
-                <span className="flex items-center gap-1"><span className="h-2 w-2 rounded-full bg-emerald-500" />Revenue</span>
-                <span className="flex items-center gap-1"><span className="h-2 w-2 rounded-full bg-primary" />Spend</span>
-                {revenue > 0 && <span className="flex items-center gap-1"><span className="h-2 w-2 rounded-full bg-orange-400" />Profit</span>}
+                <span className="flex items-center gap-1"><span className="h-2 w-2 rounded-full bg-primary" />Spend (AED)</span>
+                <span className="flex items-center gap-1"><span className="h-2 w-2 rounded-full bg-emerald-500" />Leads</span>
               </div>
             </div>
-            {revenue === 0 && spend > 0 && (
-              <p className="text-[10px] text-amber-600 mt-1">
-                No Closed Won deals in this period. Revenue pulls from Zoho Deals where Stage = "Closed Won" with a Closing_Date in range.
-              </p>
-            )}
           </CardHeader>
           <CardContent className="px-4 pb-4">
             <ResponsiveContainer width="100%" height={300}>
-              <ComposedChart data={monthlyRevenueSpend} margin={{ top: 4, right: 8, left: -10, bottom: 0 }}>
+              <ComposedChart data={monthlySpendLeads} margin={{ top: 4, right: 40, left: -10, bottom: 0 }}>
                 <CartesianGrid strokeDasharray="3 3" stroke="hsl(220,14%,92%)" vertical={false} />
                 <XAxis dataKey="month" fontSize={10} tickLine={false} axisLine={false} stroke="hsl(220,10%,55%)" />
-                <YAxis fontSize={10} tickLine={false} axisLine={false} stroke="hsl(220,10%,55%)"
+                <YAxis yAxisId="spend" fontSize={10} tickLine={false} axisLine={false} stroke="hsl(170,55%,45%)"
                   tickFormatter={v => v >= 1000 ? `${(v / 1000).toFixed(0)}K` : `${v}`} />
+                <YAxis yAxisId="leads" orientation="right" fontSize={10} tickLine={false} axisLine={false} stroke="hsl(142,70%,45%)" />
                 <Tooltip contentStyle={tip}
-                  formatter={(v: number, name: string) => [fmtAED(v), name]} />
-                <Bar dataKey="revenue" name="Revenue" fill="hsl(142,70%,45%)" radius={[4, 4, 0, 0]} />
-                <Bar dataKey="spend"   name="Spend"   fill="hsl(170,55%,45%)" radius={[4, 4, 0, 0]} />
-                {/* Hide the profit line when revenue is 0 — otherwise it just plots -spend and looks broken */}
-                {revenue > 0 && (
-                  <Line type="monotone" dataKey={(d: { revenue: number; spend: number }) => (d.revenue ?? 0) - (d.spend ?? 0)}
-                    name="Profit" stroke="hsl(30,90%,55%)" strokeWidth={2} dot={{ r: 4 }} activeDot={{ r: 6 }} />
-                )}
+                  formatter={(v: number, name: string) => [
+                    name === "Spend" ? fmtAED(v) : `${v} leads`,
+                    name,
+                  ]} />
+                <Bar yAxisId="spend" dataKey="spend" name="Spend" fill="hsl(170,55%,45%)" radius={[4, 4, 0, 0]} />
+                <Line yAxisId="leads" type="monotone" dataKey="leads" name="Leads"
+                  stroke="hsl(142,70%,45%)" strokeWidth={2} dot={{ r: 4 }} activeDot={{ r: 6 }} />
               </ComposedChart>
             </ResponsiveContainer>
           </CardContent>
@@ -755,27 +802,29 @@ const Finance = () => {
         </Card>
       )}
 
-      {/* ── Revenue by Lead Source (from Zoho deals) ── */}
-      {revenueBySource.length > 0 && (
+      {/* ── Leads by source (from Zoho), with qualification rate ── */}
+      {leadStats.leadsBySource.length > 0 && (
         <Card className="shadow-sm border-border/50 mb-5">
           <CardHeader className="pb-1 pt-4 px-4">
             <div className="flex items-center gap-1.5">
               <Users className="h-3.5 w-3.5 text-emerald-600" />
-              <CardTitle className="text-[12px] font-medium text-muted-foreground uppercase tracking-wide">Revenue by Lead Source</CardTitle>
+              <CardTitle className="text-[12px] font-medium text-muted-foreground uppercase tracking-wide">Leads by Source (with Qualification Rate)</CardTitle>
             </div>
+            <p className="text-[10px] text-muted-foreground mt-0.5">Total bar = all leads · Green overlay = qualified (reached call completed / follow-up)</p>
           </CardHeader>
           <CardContent className="px-4 pb-4">
-            <ResponsiveContainer width="100%" height={Math.max(280, revenueBySource.length * 32)}>
-              <BarChart data={revenueBySource} layout="vertical" barCategoryGap="20%">
+            <ResponsiveContainer width="100%" height={Math.max(280, leadStats.leadsBySource.length * 32)}>
+              <BarChart data={leadStats.leadsBySource} layout="vertical" barCategoryGap="20%">
                 <CartesianGrid strokeDasharray="3 3" stroke="hsl(220,14%,92%)" />
-                <XAxis type="number" fontSize={10} tickLine={false} axisLine={false} stroke="hsl(220,10%,55%)"
-                  tickFormatter={v => v >= 1000 ? `${(v / 1000).toFixed(0)}K` : `${v}`} />
-                <YAxis dataKey="source" type="category" fontSize={10} tickLine={false} axisLine={false} width={120} stroke="hsl(220,10%,55%)" />
+                <XAxis type="number" fontSize={10} tickLine={false} axisLine={false} stroke="hsl(220,10%,55%)" />
+                <YAxis dataKey="source" type="category" fontSize={10} tickLine={false} axisLine={false} width={130} stroke="hsl(220,10%,55%)" />
                 <Tooltip contentStyle={tip}
-                  formatter={(v: number, _n, p) => [fmtAED(v), `${p.payload.count} deal${p.payload.count === 1 ? "" : "s"}`]} />
-                <Bar dataKey="amount" radius={[0, 4, 4, 0]}>
-                  {revenueBySource.map((_, i) => <Cell key={i} fill={CAT_COLORS[i % CAT_COLORS.length]} />)}
-                </Bar>
+                  formatter={(v: number, name: string, p) => [
+                    `${v} ${name.toLowerCase()}`,
+                    name === "leads" ? `${p.payload.qualRate.toFixed(0)}% qualified` : "qualified",
+                  ]} />
+                <Bar dataKey="leads"     name="leads"     fill="hsl(210,75%,52%)" radius={[0, 4, 4, 0]} />
+                <Bar dataKey="qualified" name="qualified" fill="hsl(142,70%,45%)" radius={[0, 4, 4, 0]} />
               </BarChart>
             </ResponsiveContainer>
           </CardContent>
