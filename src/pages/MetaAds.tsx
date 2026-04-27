@@ -39,6 +39,14 @@ function fmtC(v: number, currency = "PKR") {
   if (v >= 1_000)     return `${currency} ${(v / 1_000).toFixed(1)}K`;
   return `${currency} ${v.toFixed(0)}`;
 }
+
+// Convert an AED-base amount into the display currency using the AED-USD peg.
+// Use this in modals/components that receive `currency` as a prop and need to
+// honour the AED ↔ USD toggle from the main page.
+const AED_PER_USD_PEG = 3.6725;
+function aedTo(v: number, displayCurrency: string): number {
+  return displayCurrency === "USD" ? v / AED_PER_USD_PEG : v;
+}
 function fmtN(v: number) {
   if (v >= 1_000_000) return `${(v / 1_000_000).toFixed(1)}M`;
   if (v >= 1_000)     return `${(v / 1_000).toFixed(1)}K`;
@@ -266,7 +274,7 @@ function AdPreviewModal({
                       <div className="flex items-center justify-between px-3 py-2 border-t border-border/40 bg-muted/20">
                         <div className="flex items-center gap-3">
                           {[
-                            { l: "spend",  v: fmtC(ad.spend, currency), c: "text-primary" },
+                            { l: "spend",  v: fmtC(aedTo(ad.spend, currency), currency), c: "text-primary" },
                             { l: "impr.",  v: fmtN(ad.impressions) },
                             { l: "CTR",    v: `${ad.ctr.toFixed(2)}%` },
                             ...(ad.leads > 0 ? [{ l: "leads", v: String(ad.leads), c: "text-success" }] : []),
@@ -320,11 +328,11 @@ function AdPreviewModal({
                           ))}
                         </div>
                       )}
-                      {s.dailyBudget > 0 && <p><DollarSign className="h-3 w-3 inline mr-1" />Daily budget: {fmtC(s.dailyBudget, currency)}</p>}
+                      {s.dailyBudget > 0 && <p><DollarSign className="h-3 w-3 inline mr-1" />Daily budget: {fmtC(aedTo(s.dailyBudget, currency), currency)}</p>}
                     </div>
                     <div className="flex gap-4 pt-2 border-t border-border/40">
                       {[
-                        { l: "Spend",  v: fmtC(s.spend, currency), c: "text-primary" },
+                        { l: "Spend",  v: fmtC(aedTo(s.spend, currency), currency), c: "text-primary" },
                         { l: "Impr.",  v: fmtN(s.impressions) },
                         { l: "Clicks", v: fmtN(s.clicks) },
                         { l: "Reach",  v: fmtN(s.reach) },
@@ -457,7 +465,7 @@ function DirectAdPreviewModal({ ad, currency, onClose }: { ad: MetaTopAd; curren
           <div className="grid grid-cols-4 divide-x divide-border/40 border-t border-border/30 bg-muted/20 mt-2">
             {[
               { l: "Leads",  v: ad.leads > 0 ? ad.leads.toLocaleString() : "—",      c: ad.leads > 0 ? "text-success" : "" },
-              { l: "Spend",  v: fmtC(ad.spend, currency),                              c: "text-primary" },
+              { l: "Spend",  v: fmtC(aedTo(ad.spend, currency), currency),                              c: "text-primary" },
               { l: "Impr.",  v: fmtN(ad.impressions) },
               { l: "CTR",    v: `${ad.ctr.toFixed(2)}%` },
             ].map(s => (
@@ -694,6 +702,11 @@ const MetaAds = () => {
   const queryClient = useQueryClient();
 
   const [metaDays, setMetaDays] = useState(365);
+  // Display currency toggle — Meta reports in AED for UAE accounts; the toggle
+  // re-renders every monetary value at the user's preferred unit. We use a fixed
+  // peg (AED is pegged to USD at ~3.6725) since the AED-USD rate is stable.
+  const [displayCurrency, setDisplayCurrency] = useState<"AED" | "USD">("AED");
+  const toDisplay = (aed: number) => aedTo(aed, displayCurrency);
   const metaDateRange = useMemo(() => {
     const to = new Date(); const from = new Date();
     from.setDate(from.getDate() - metaDays);
@@ -731,7 +744,8 @@ const MetaAds = () => {
 
   const { data: topAds = [], isLoading: topAdsLoading } = useMetaTopAds(allAccountIds, since, until);
   const summary  = api?.summary;
-  const currency = summary?.currency ?? "AED";
+  // Meta returns AED amounts; we display in the user-selected currency.
+  const currency = displayCurrency;
   const campaigns    = api?.campaigns    ?? [];
   const dailySeries  = api?.dailySeries  ?? [];
   const byAge        = api?.byAge        ?? [];
@@ -791,7 +805,7 @@ const MetaAds = () => {
         <div key={c.id}>
           <div className="flex items-center justify-between mb-0.5">
             <span className="text-[10px] truncate max-w-[140px]">{c.name}</span>
-            <span className="text-[10px] font-semibold text-primary tabular-nums">{fmtC(c.spend, currency)}</span>
+            <span className="text-[10px] font-semibold text-primary tabular-nums">{fmtC(toDisplay(c.spend), currency)}</span>
           </div>
           <div className="h-1.5 bg-muted rounded-full overflow-hidden">
             <div className="h-full bg-primary rounded-full" style={{ width: `${(c.spend / maxSpendCamp) * 100}%` }} />
@@ -886,7 +900,7 @@ const MetaAds = () => {
             <div className="flex items-center justify-between mb-0.5">
               <span className="text-[10px] truncate max-w-[130px]">{c.name}</span>
               <span className="text-[10px] font-semibold tabular-nums text-muted-foreground">
-                {fmtC(c.cpm, currency)} CPM
+                {fmtC(toDisplay(c.cpm), currency)} CPM
               </span>
             </div>
             <div className="h-1.5 bg-muted rounded-full overflow-hidden">
@@ -1000,7 +1014,7 @@ const MetaAds = () => {
         : topCampByCpc.map(c => (
           <div key={c.id} className="flex items-center justify-between">
             <span className="text-[10px] truncate max-w-[150px]">{c.name}</span>
-            <span className="text-[10px] font-semibold text-primary tabular-nums">{fmtC(c.cpc, currency)}</span>
+            <span className="text-[10px] font-semibold text-primary tabular-nums">{fmtC(toDisplay(c.cpc), currency)}</span>
           </div>
         ))}
     </div>
@@ -1010,19 +1024,33 @@ const MetaAds = () => {
     <DashboardLayout title="Meta Ads" subtitle="Live performance from Facebook Marketing API · Lead form data from Supabase">
 
       {/* ══ Meta API section ══════════════════════════════════════════════════ */}
-      <div className="flex items-center justify-between mb-3 mt-2">
+      <div className="flex items-center justify-between mb-3 mt-2 gap-3 flex-wrap">
         <p className="text-[10px] uppercase tracking-widest font-semibold text-muted-foreground/50">
           Live Ad Performance · Meta Marketing API
         </p>
-        <div className="flex gap-0.5">
-          {META_PRESETS.map(p => (
-            <button key={p.label} type="button" onClick={() => setMetaDays(p.days)}
-              className={`px-2 py-0.5 rounded text-[9px] font-medium transition-colors ${
-                metaDays === p.days ? "bg-primary text-white" : "text-muted-foreground hover:bg-secondary"
-              }`}>
-              {p.label}
-            </button>
-          ))}
+        <div className="flex items-center gap-3">
+          {/* Currency toggle (AED ↔ USD) — pegged at 3.6725 AED per USD */}
+          <div className="inline-flex rounded-md border border-border/60 bg-secondary/40 p-0.5">
+            {(["AED", "USD"] as const).map(c => (
+              <button key={c} type="button" onClick={() => setDisplayCurrency(c)}
+                className={`px-2 py-0.5 rounded text-[10px] font-semibold transition-colors ${
+                  displayCurrency === c ? "bg-primary text-white" : "text-muted-foreground hover:text-foreground"
+                }`}>
+                {c}
+              </button>
+            ))}
+          </div>
+          {/* Date range presets */}
+          <div className="flex gap-0.5">
+            {META_PRESETS.map(p => (
+              <button key={p.label} type="button" onClick={() => setMetaDays(p.days)}
+                className={`px-2 py-0.5 rounded text-[9px] font-medium transition-colors ${
+                  metaDays === p.days ? "bg-primary text-white" : "text-muted-foreground hover:bg-secondary"
+                }`}>
+                {p.label}
+              </button>
+            ))}
+          </div>
         </div>
       </div>
 
@@ -1055,7 +1083,7 @@ const MetaAds = () => {
           {/* ── 8 Flip KPI cards ── */}
           <div className="grid grid-cols-2 lg:grid-cols-4 gap-3 mb-4">
             <MetaKpiCard icon={DollarSign}   label="Total Spend"    color="text-primary"     bg="bg-primary/10"
-              value={fmtC(summary?.spend ?? 0, currency)}     sub={currency}                      back={spendBack}  backHeight={230} />
+              value={fmtC(toDisplay(summary?.spend ?? 0), currency)}     sub={currency}                      back={spendBack}  backHeight={230} />
             <MetaKpiCard icon={Eye}          label="Impressions"    color="text-info"        bg="bg-info/10"
               value={fmtN(summary?.impressions ?? 0)}         sub="times ads were shown"          back={imprBack}   backHeight={200} />
             <MetaKpiCard icon={Users}        label="Reach"          color="text-success"     bg="bg-success/10"
@@ -1065,7 +1093,7 @@ const MetaAds = () => {
             <MetaKpiCard icon={Repeat2}      label="Frequency"      color="text-warning"     bg="bg-warning/10"
               value={(summary?.frequency ?? 0).toFixed(2)}    sub="avg per person"                back={freqBack}   backHeight={180} />
             <MetaKpiCard icon={Hash}         label="CPM"            color="text-muted-foreground" bg="bg-muted"
-              value={fmtC(summary?.cpm ?? 0, currency)}       sub="per 1,000 impressions"         back={cpmBack}    backHeight={230} />
+              value={fmtC(toDisplay(summary?.cpm ?? 0), currency)}       sub="per 1,000 impressions"         back={cpmBack}    backHeight={230} />
             <MetaKpiCard icon={Zap}           label="Leads from Ads"   color="text-success"     bg="bg-success/10"
               value={fmtN((summary?.leads ?? 0) > 0 ? (summary?.leads ?? 0) : zohoMetaLeads)}
               sub={(summary?.leads ?? 0) > 0 ? "form submissions" : "via Zoho (Facebook + Instagram)"}
@@ -1075,8 +1103,70 @@ const MetaAds = () => {
               sub={leadsLoading ? "loading…" : `${data?.withUtm ?? 0} tracked`}
               back={formLeadsBack} backHeight={220} />
             <MetaKpiCard icon={Award}        label="Cost Per Lead"  color="text-primary"     bg="bg-primary/10"
-              value={(summary?.leads ?? 0) > 0 ? fmtC(summary?.costPerLead ?? 0, currency) : "—"}
+              value={(summary?.leads ?? 0) > 0 ? fmtC(toDisplay(summary?.costPerLead ?? 0), currency) : "—"}
               sub="per form lead"                                                                   back={cplBack}    backHeight={220} />
+          </div>
+
+          {/* Cost-per-funnel KPIs — spend joined with meta_leads stage progression */}
+          <div className="grid grid-cols-1 md:grid-cols-3 gap-3 mb-4">
+            {(() => {
+              const adSpend          = summary?.spend ?? 0;
+              const totalLeads       = data?.total          ?? 0;
+              const qualifiedLeads   = data?.qualifiedCount ?? 0;
+              const placedLeads      = data?.placedCount    ?? 0;
+              const cpl = totalLeads     > 0 ? adSpend / totalLeads     : 0;
+              const cpq = qualifiedLeads > 0 ? adSpend / qualifiedLeads : 0;
+              const cpp = placedLeads    > 0 ? adSpend / placedLeads    : 0;
+              return (
+                <>
+                  <MetaKpiCard
+                    icon={Target} label="Cost Per Lead (forms)" color="text-orange-600" bg="bg-orange-50"
+                    value={cpl > 0 ? fmtC(toDisplay(cpl), currency) : "—"}
+                    sub={cpl > 0 ? `${fmtC(toDisplay(adSpend), currency)} / ${fmtN(totalLeads)} leads` : "no form leads in period"}
+                    back={
+                      <div className="space-y-2 text-[11px]">
+                        <div className="flex justify-between"><span className="text-muted-foreground">Ad spend</span><span className="font-semibold tabular-nums">{fmtC(toDisplay(adSpend), currency)}</span></div>
+                        <div className="flex justify-between"><span className="text-muted-foreground">Form leads</span><span className="font-semibold tabular-nums">{fmtN(totalLeads)}</span></div>
+                        <div className="pt-2 border-t border-border/40 flex justify-between">
+                          <span className="font-semibold">Cost / lead</span>
+                          <span className="font-bold tabular-nums text-orange-600">{cpl > 0 ? fmtC(toDisplay(cpl), currency) : "—"}</span>
+                        </div>
+                      </div>
+                    } backHeight={170}
+                  />
+                  <MetaKpiCard
+                    icon={Zap} label="Cost Per Qualified" color="text-emerald-600" bg="bg-emerald-50"
+                    value={cpq > 0 ? fmtC(toDisplay(cpq), currency) : "—"}
+                    sub={cpq > 0 ? `${fmtN(qualifiedLeads)} qualified · ${totalLeads > 0 ? Math.round((qualifiedLeads / totalLeads) * 100) : 0}% rate` : "no qualified leads in period"}
+                    back={
+                      <div className="space-y-2 text-[11px]">
+                        <p className="text-muted-foreground">Qualified = lead's <strong>stage</strong> is "Initial Sales Call Completed", "Contact in Future" or "High Priority Follow up".</p>
+                        <div className="pt-2 border-t border-border/40 space-y-1">
+                          <div className="flex justify-between"><span className="text-muted-foreground">Ad spend</span><span className="font-semibold tabular-nums">{fmtC(toDisplay(adSpend), currency)}</span></div>
+                          <div className="flex justify-between"><span className="text-muted-foreground">Qualified</span><span className="font-semibold tabular-nums">{fmtN(qualifiedLeads)}</span></div>
+                          <div className="flex justify-between"><span className="font-semibold">Cost / qualified</span><span className="font-bold tabular-nums text-emerald-600">{cpq > 0 ? fmtC(toDisplay(cpq), currency) : "—"}</span></div>
+                        </div>
+                      </div>
+                    } backHeight={220}
+                  />
+                  <MetaKpiCard
+                    icon={Award} label="Cost Per Placement" color="text-violet-600" bg="bg-violet-50"
+                    value={cpp > 0 ? fmtC(toDisplay(cpp), currency) : "—"}
+                    sub={cpp > 0 ? `${fmtN(placedLeads)} placed (Closed Won)` : "no placements in period"}
+                    back={
+                      <div className="space-y-2 text-[11px]">
+                        <p className="text-muted-foreground">Placement = lead's <strong>stage</strong> is "Closed Won", "Won", "Converted" or "Placed".</p>
+                        <div className="pt-2 border-t border-border/40 space-y-1">
+                          <div className="flex justify-between"><span className="text-muted-foreground">Ad spend</span><span className="font-semibold tabular-nums">{fmtC(toDisplay(adSpend), currency)}</span></div>
+                          <div className="flex justify-between"><span className="text-muted-foreground">Placements</span><span className="font-semibold tabular-nums">{fmtN(placedLeads)}</span></div>
+                          <div className="flex justify-between"><span className="font-semibold">Cost / placement</span><span className="font-bold tabular-nums text-violet-600">{cpp > 0 ? fmtC(toDisplay(cpp), currency) : "—"}</span></div>
+                        </div>
+                      </div>
+                    } backHeight={220}
+                  />
+                </>
+              );
+            })()}
           </div>
 
           {/* Account chips */}
@@ -1086,7 +1176,7 @@ const MetaAds = () => {
                 <div key={acc.id} className="flex items-center gap-2 rounded-lg border border-border/50 bg-muted/40 px-3 py-1.5 text-[10px]">
                   <span className="h-1.5 w-1.5 rounded-full bg-success shrink-0" />
                   <span className="font-medium">{acc.name}</span>
-                  {acc.amountSpent > 0 && <span className="text-muted-foreground">· {fmtC(acc.amountSpent, currency)} lifetime</span>}
+                  {acc.amountSpent > 0 && <span className="text-muted-foreground">· {fmtC(toDisplay(acc.amountSpent), currency)} lifetime</span>}
                 </div>
               ))}
             </div>
@@ -1114,9 +1204,9 @@ const MetaAds = () => {
                     <CartesianGrid strokeDasharray="3 3" stroke="hsl(220,14%,93%)" />
                     <XAxis dataKey="date" fontSize={9} tickLine={false} axisLine={false}
                       interval={Math.max(0, Math.floor(dailySeries.length / 10) - 1)} />
-                    <YAxis yAxisId="s" orientation="left"  fontSize={9} tickLine={false} axisLine={false} tickFormatter={v => fmtC(v, currency)} width={65} />
+                    <YAxis yAxisId="s" orientation="left"  fontSize={9} tickLine={false} axisLine={false} tickFormatter={v => fmtC(toDisplay(v), currency)} width={65} />
                     <YAxis yAxisId="c" orientation="right" fontSize={9} tickLine={false} axisLine={false} tickFormatter={v => fmtN(v)} width={42} />
-                    <Tooltip contentStyle={tip} formatter={(v: number, name: string) => name === "Spend" ? [fmtC(v, currency), name] : [fmtN(v), name]} />
+                    <Tooltip contentStyle={tip} formatter={(v: number, name: string) => name === "Spend" ? [fmtC(toDisplay(v), currency), name] : [fmtN(v), name]} />
                     <Legend iconSize={8} iconType="circle" formatter={v => <span style={{ fontSize: 10 }}>{v}</span>} />
                     <Area yAxisId="s" type="monotone" dataKey="spend"  stroke="hsl(170,55%,45%)" strokeWidth={2} fill="url(#spG)" name="Spend" />
                     <Area yAxisId="c" type="monotone" dataKey="clicks" stroke="hsl(210,75%,52%)" strokeWidth={2} fill="url(#clG)" name="Clicks" />
@@ -1143,7 +1233,7 @@ const MetaAds = () => {
                             <span className="text-[11px] font-medium">{p.platform}</span>
                             <div className="flex gap-3 text-[10px] text-muted-foreground tabular-nums">
                               <span>{fmtN(p.impressions)} impr.</span>
-                              <span className="font-semibold text-foreground">{fmtC(p.spend, currency)}</span>
+                              <span className="font-semibold text-foreground">{fmtC(toDisplay(p.spend), currency)}</span>
                             </div>
                           </div>
                           <div className="h-1.5 rounded-full bg-muted overflow-hidden">
@@ -1238,7 +1328,7 @@ const MetaAds = () => {
                               {ad.leads > 0 ? ad.leads.toLocaleString() : "—"}
                             </span>
                           </td>
-                          <td className="py-2.5 px-3 text-right text-[11px] font-semibold text-primary tabular-nums hidden sm:table-cell">{fmtC(ad.spend, currency)}</td>
+                          <td className="py-2.5 px-3 text-right text-[11px] font-semibold text-primary tabular-nums hidden sm:table-cell">{fmtC(toDisplay(ad.spend), currency)}</td>
                           <td className="py-2.5 px-3 text-right text-[11px] text-muted-foreground tabular-nums hidden md:table-cell">{fmtN(ad.impressions)}</td>
                           <td className="py-2.5 px-3 text-right text-[11px] tabular-nums hidden sm:table-cell">{ad.ctr.toFixed(2)}%</td>
                           <td className="py-2.5 px-3 text-center">
@@ -1293,7 +1383,7 @@ const MetaAds = () => {
                           </div>
                         </td>
                         <td className="py-2.5 px-3 text-[10px] text-muted-foreground capitalize">{c.objective.toLowerCase()}</td>
-                        <td className="py-2.5 px-3 text-right text-[11px] font-semibold tabular-nums text-primary">{fmtC(c.spend, currency)}</td>
+                        <td className="py-2.5 px-3 text-right text-[11px] font-semibold tabular-nums text-primary">{fmtC(toDisplay(c.spend), currency)}</td>
                         <td className="py-2.5 px-3 text-right text-[11px] tabular-nums text-muted-foreground">{fmtN(c.impressions)}</td>
                         <td className="py-2.5 px-3 text-right text-[11px] tabular-nums">{c.ctr.toFixed(2)}%</td>
                         <td className="py-2.5 px-3 text-right text-[11px] tabular-nums font-semibold text-success">{c.leads > 0 ? c.leads : "—"}</td>
@@ -1333,7 +1423,7 @@ const MetaAds = () => {
                         </div>
                         <span className="text-[12px] font-semibold tabular-nums w-14 text-right shrink-0">{fmtN(a.value)}</span>
                         {a.costPerAction > 0 && (
-                          <span className="text-[10px] text-muted-foreground tabular-nums w-20 text-right shrink-0">{fmtC(a.costPerAction, currency)} / action</span>
+                          <span className="text-[10px] text-muted-foreground tabular-nums w-20 text-right shrink-0">{fmtC(toDisplay(a.costPerAction), currency)} / action</span>
                         )}
                       </div>
                     );

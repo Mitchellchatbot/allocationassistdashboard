@@ -13,6 +13,8 @@ export type CampaignFunnel = {
 export type MetaLeadsStats = {
   total:           number;
   withUtm:         number;
+  qualifiedCount:  number;  // meta_leads in qualified stages
+  placedCount:     number;  // meta_leads in converted/placed stages
   byCreative:      GroupedStat[];
   byCampaign:      GroupedStat[];
   byPlatform:      GroupedStat[];
@@ -139,12 +141,16 @@ export function useMetaLeadsStats(dateRange: DateRangeInput) {
       const bySpeciality = groupByField(filtered, "speciality",  { splitComma: true });
       const byStage     = groupByField(filtered, "stage",        {});
 
-      // Build per-campaign funnel: total vs qualified vs converted, classifying by stage.
+      // Build per-campaign funnel + global qualified/placed totals in one pass.
       const funnelMap = new Map<string, CampaignFunnel>();
+      let qualifiedCount = 0;
+      let placedCount    = 0;
       for (const r of filtered) {
+        const stage = (r.stage ?? "").trim().toLowerCase();
+        if (QUALIFIED_STAGES.has(stage)) qualifiedCount++;
+        if (CONVERTED_STAGES.has(stage)) placedCount++;
         const camp = (r.utm_campaign ?? "").trim();
         if (!camp || camp === "xxxxx") continue;
-        const stage = (r.stage ?? "").trim().toLowerCase();
         const cur = funnelMap.get(camp) ?? { campaign: camp, total: 0, qualified: 0, converted: 0 };
         cur.total++;
         if (QUALIFIED_STAGES.has(stage)) cur.qualified++;
@@ -153,7 +159,10 @@ export function useMetaLeadsStats(dateRange: DateRangeInput) {
       }
       const campaignFunnels = Array.from(funnelMap.values()).sort((a, b) => b.total - a.total);
 
-      return { total, withUtm, byCreative, byCampaign, byPlatform, byLocation, bySpeciality, byStage, campaignFunnels };
+      return {
+        total, withUtm, qualifiedCount, placedCount,
+        byCreative, byCampaign, byPlatform, byLocation, bySpeciality, byStage, campaignFunnels,
+      };
     },
     staleTime: 5 * 60 * 1000,
     refetchOnWindowFocus: false,
