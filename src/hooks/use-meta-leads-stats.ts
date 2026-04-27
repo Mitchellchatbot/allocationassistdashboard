@@ -3,16 +3,41 @@ import { supabase } from "@/lib/supabase";
 
 export type GroupedStat = { label: string; count: number };
 
-export type MetaLeadsStats = {
-  total:        number;
-  withUtm:      number;
-  byCreative:   GroupedStat[];
-  byCampaign:   GroupedStat[];
-  byPlatform:   GroupedStat[];
-  byLocation:   GroupedStat[];
-  bySpeciality: GroupedStat[];
-  byStage:      GroupedStat[];
+export type CampaignFunnel = {
+  campaign:  string;
+  total:     number;
+  qualified: number;
+  converted: number;
 };
+
+export type MetaLeadsStats = {
+  total:           number;
+  withUtm:         number;
+  byCreative:      GroupedStat[];
+  byCampaign:      GroupedStat[];
+  byPlatform:      GroupedStat[];
+  byLocation:      GroupedStat[];
+  bySpeciality:    GroupedStat[];
+  byStage:         GroupedStat[];
+  campaignFunnels: CampaignFunnel[];
+};
+
+// Stage classification mirrors how Zoho Lead_Status is treated elsewhere in the app.
+// Kept in lower-case so we match regardless of casing variations across imports.
+const QUALIFIED_STAGES = new Set([
+  "initial sales call completed",
+  "contact in future",
+  "high priority follow up",
+  "high priority follow-up",
+  "qualified",
+]);
+const CONVERTED_STAGES = new Set([
+  "closed won",
+  "won",
+  "converted",
+  "placed",
+  "placement",
+]);
 
 // Normalize utm_source values into clean platform names
 function normalizePlatform(raw: string): string {
@@ -114,7 +139,21 @@ export function useMetaLeadsStats(dateRange: DateRangeInput) {
       const bySpeciality = groupByField(filtered, "speciality",  { splitComma: true });
       const byStage     = groupByField(filtered, "stage",        {});
 
-      return { total, withUtm, byCreative, byCampaign, byPlatform, byLocation, bySpeciality, byStage };
+      // Build per-campaign funnel: total vs qualified vs converted, classifying by stage.
+      const funnelMap = new Map<string, CampaignFunnel>();
+      for (const r of filtered) {
+        const camp = (r.utm_campaign ?? "").trim();
+        if (!camp || camp === "xxxxx") continue;
+        const stage = (r.stage ?? "").trim().toLowerCase();
+        const cur = funnelMap.get(camp) ?? { campaign: camp, total: 0, qualified: 0, converted: 0 };
+        cur.total++;
+        if (QUALIFIED_STAGES.has(stage)) cur.qualified++;
+        if (CONVERTED_STAGES.has(stage)) cur.converted++;
+        funnelMap.set(camp, cur);
+      }
+      const campaignFunnels = Array.from(funnelMap.values()).sort((a, b) => b.total - a.total);
+
+      return { total, withUtm, byCreative, byCampaign, byPlatform, byLocation, bySpeciality, byStage, campaignFunnels };
     },
     staleTime: 5 * 60 * 1000,
     refetchOnWindowFocus: false,

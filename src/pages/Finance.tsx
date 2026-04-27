@@ -5,6 +5,7 @@ import { useFilteredData } from "@/hooks/use-filtered-data";
 import { useMarketingExpenses, type CategorySpend, type MonthlyPoint, type TopTransaction } from "@/hooks/use-marketing-expenses";
 import { useZohoData } from "@/hooks/use-zoho-data";
 import { useFilters } from "@/lib/filters";
+import { ChannelWinnerCards, ChannelEconomicsTable } from "@/components/ChannelEconomics";
 import {
   BarChart, Bar, XAxis, YAxis, Tooltip, ResponsiveContainer, CartesianGrid, Cell,
   AreaChart, Area, PieChart, Pie, Legend, LineChart, Line, ComposedChart,
@@ -485,6 +486,9 @@ const Finance = () => {
         </div>
       )}
 
+      {/* Channel winner KPIs (best volume / lowest CPL / lowest CPQ / highest conversion) */}
+      <ChannelWinnerCards />
+
       {/* ── Row 1: Spend + Lead Economics ── */}
       {/* Only render lead KPIs when we actually have leads in the period — otherwise just show spend */}
       <div className={`grid grid-cols-2 ${leadStats.totalLeads > 0 ? "lg:grid-cols-4" : "lg:grid-cols-2"} gap-3 mb-3`}>
@@ -867,6 +871,9 @@ const Finance = () => {
           </CardContent>
         </Card>
       )}
+
+      {/* Per-channel economics: spend joined with Zoho lead funnel */}
+      <ChannelEconomicsTable />
     </DashboardLayout>
   );
 };

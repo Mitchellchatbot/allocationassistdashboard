@@ -6,6 +6,7 @@ import {
 } from "recharts";
 import { Star, User, ArrowLeft, X } from "lucide-react";
 import { ChannelIcon } from "@/components/ChannelIcon";
+import { ChannelWinnerCards, ChannelEconomicsTable } from "@/components/ChannelEconomics";
 import { useZohoData, displaySource } from "@/hooks/use-zoho-data";
 import { useFilters } from "@/lib/filters";
 import { useMemo, useState } from "react";
@@ -133,6 +134,9 @@ const Marketing = () => {
 
   return (
     <DashboardLayout title="Marketing" subtitle="See which channels bring in the most doctors and how well they convert">
+      {/* Channel winner KPIs (best volume / lowest CPL / lowest CPQ / highest conversion) */}
+      <ChannelWinnerCards />
+
       {/* Channel KPI cards */}
       <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-5 gap-3">
         {marketing.map(ch => {
@@ -369,6 +373,9 @@ const Marketing = () => {
           </div>
         </div>
       </div>
+
+      {/* Channel economics: spend joined with leads */}
+      <ChannelEconomicsTable />
 
       {/* Channel summary table */}
       <Card className="shadow-sm border-border/50">
