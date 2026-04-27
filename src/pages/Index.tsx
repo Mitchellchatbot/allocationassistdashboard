@@ -140,26 +140,30 @@ const Index = () => {
     </div>
   );
 
-  // 4. Closed Revenue → closed won deals
-  const closedWonDeals = filteredDeals
-    .filter(d => d.Stage === 'Closed Won')
-    .sort((a, b) => b.Amount - a.Amount)
+  // 4. Qualified Leads → top recently-qualified leads in the selected date range
+  const unqualStatusesForCard = new Set(['Unqualified Leads', 'Not Interested', 'Not Contacted']);
+  const qualifiedLeadsList = filteredLeads
+    .filter(l => !unqualStatusesForCard.has(l.Lead_Status))
+    .sort((a, b) => new Date(b.Created_Time).getTime() - new Date(a.Created_Time).getTime())
     .slice(0, 5);
-  const revenueContent = (
+  const qualifiedLeadsContent = (
     <div className="divide-y divide-border/30">
-      {closedWonDeals.length === 0
-        ? <p className="text-[11px] text-muted-foreground py-2">No closed deals in this period</p>
-        : closedWonDeals.map(d => (
-          <div key={d.id} className="flex items-start justify-between py-1.5 gap-2">
-            <div className="min-w-0">
-              <p className="text-[11px] font-medium truncate">{d.Deal_Name}</p>
-              <p className="text-[10px] text-muted-foreground">
-                {d.Closing_Date ? new Date(d.Closing_Date).toLocaleDateString('en-GB', { day: 'numeric', month: 'short' }) : '—'}
-              </p>
+      {qualifiedLeadsList.length === 0
+        ? <p className="text-[11px] text-muted-foreground py-2">No qualified leads in this period</p>
+        : qualifiedLeadsList.map(l => {
+          const name = l.Full_Name || `${l.First_Name ?? ''} ${l.Last_Name ?? ''}`.trim() || '—';
+          return (
+            <div key={l.id} className="flex items-start justify-between py-1.5 gap-2">
+              <div className="min-w-0">
+                <p className="text-[11px] font-medium truncate">{name}</p>
+                <p className="text-[10px] text-muted-foreground truncate">{l.Lead_Status ?? '—'} · {l.Specialty ?? l.Specialty_New ?? '—'}</p>
+              </div>
+              <span className="text-[10px] text-muted-foreground tabular-nums shrink-0">
+                {l.Created_Time ? new Date(l.Created_Time).toLocaleDateString('en-GB', { day: 'numeric', month: 'short' }) : '—'}
+              </span>
             </div>
-            <span className="text-[11px] font-semibold text-success tabular-nums shrink-0">{fmtAED(d.Amount)}</span>
-          </div>
-        ))
+          );
+        })
       }
     </div>
   );
@@ -244,11 +248,11 @@ const Index = () => {
       expandedHeight: 250,
     },
     {
-      title: kpis[3]?.label ?? 'Closed Revenue',
+      title: kpis[3]?.label ?? 'Qualified Leads',
       value: kpis[3]?.value ?? '—',
-      icon: Award, color: 'text-success', bg: 'bg-success/10',
+      icon: CheckCircle, color: 'text-success', bg: 'bg-success/10',
       frontExtra: kpis[3]?.period,
-      expandedContent: revenueContent,
+      expandedContent: qualifiedLeadsContent,
       expandedHeight: 250,
     },
     {

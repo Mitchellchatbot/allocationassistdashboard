@@ -462,11 +462,11 @@ export function aggregateZohoData(
       icon:   'dollar' as const,
     },
     {
-      label:  'Closed Revenue',
-      value:  fmtAED(totalRevenue),
-      change: pctDelta(revenueCurrent, revenuePrev),
-      period: 'last 30 days vs prior',
-      icon:   'dollar' as const,
+      label:  'Qualified Leads',
+      value:  qualifiedLeads.length.toLocaleString(),
+      change: pctDelta(qualifiedCurrent, qualifiedPrev),
+      period: `${qualifiedLeads.length.toLocaleString()} of ${leads.length.toLocaleString()} leads in period`,
+      icon:   'check' as const,
     },
     {
       label:  'Avg. Time to Place',

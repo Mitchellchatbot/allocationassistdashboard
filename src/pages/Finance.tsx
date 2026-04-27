@@ -816,35 +816,6 @@ const Finance = () => {
         </Card>
       )}
 
-      {/* ── Leads by source (from Zoho), with qualification rate ── */}
-      {leadStats.leadsBySource.length > 0 && (
-        <Card className="shadow-sm border-border/50 mb-5">
-          <CardHeader className="pb-1 pt-4 px-4">
-            <div className="flex items-center gap-1.5">
-              <Users className="h-3.5 w-3.5 text-emerald-600" />
-              <CardTitle className="text-[12px] font-medium text-muted-foreground uppercase tracking-wide">Leads by Source (with Qualification Rate)</CardTitle>
-            </div>
-            <p className="text-[10px] text-muted-foreground mt-0.5">Total bar = all leads · Green overlay = qualified (reached call completed / follow-up)</p>
-          </CardHeader>
-          <CardContent className="px-4 pb-4">
-            <ResponsiveContainer width="100%" height={Math.max(280, leadStats.leadsBySource.length * 32)}>
-              <BarChart data={leadStats.leadsBySource} layout="vertical" barCategoryGap="20%">
-                <CartesianGrid strokeDasharray="3 3" stroke="hsl(220,14%,92%)" />
-                <XAxis type="number" fontSize={10} tickLine={false} axisLine={false} stroke="hsl(220,10%,55%)" />
-                <YAxis dataKey="source" type="category" fontSize={10} tickLine={false} axisLine={false} width={130} stroke="hsl(220,10%,55%)" />
-                <Tooltip contentStyle={tip}
-                  formatter={(v: number, name: string, p) => [
-                    `${v} ${name.toLowerCase()}`,
-                    name === "leads" ? `${p.payload.qualRate.toFixed(0)}% qualified` : "qualified",
-                  ]} />
-                <Bar dataKey="leads"     name="leads"     fill="hsl(210,75%,52%)" radius={[0, 4, 4, 0]} />
-                <Bar dataKey="qualified" name="qualified" fill="hsl(142,70%,45%)" radius={[0, 4, 4, 0]} />
-              </BarChart>
-            </ResponsiveContainer>
-          </CardContent>
-        </Card>
-      )}
-
       {/* ── Zoho ROI chart (kept) ── */}
       {roiData?.length > 0 && (
         <Card className="shadow-sm border-border/50">

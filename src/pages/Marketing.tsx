@@ -8,6 +8,7 @@ import { Star, User, ArrowLeft, X } from "lucide-react";
 import { ChannelIcon } from "@/components/ChannelIcon";
 import { ChannelWinnerCards, ChannelEconomicsTable } from "@/components/ChannelEconomics";
 import { CampaignWinnerCards } from "@/components/CampaignWinners";
+import { LeadsBySourceChart } from "@/components/LeadsBySourceChart";
 import { useZohoData, displaySource } from "@/hooks/use-zoho-data";
 import { useFilters } from "@/lib/filters";
 import { useMemo, useState } from "react";
@@ -377,6 +378,9 @@ const Marketing = () => {
           </div>
         </div>
       </div>
+
+      {/* Leads by source — qualification rate + spend overlay */}
+      <LeadsBySourceChart />
 
       {/* Channel economics: spend joined with leads */}
       <ChannelEconomicsTable />
