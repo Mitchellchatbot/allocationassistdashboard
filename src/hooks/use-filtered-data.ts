@@ -1,12 +1,14 @@
 import { useMemo } from "react";
 import { useFilters, getTimeLabel } from "@/lib/filters";
 import { useZohoData, aggregateZohoData, type ZohoLead, type ZohoDeal } from "@/hooks/use-zoho-data";
+import { useCurrency } from "@/lib/CurrencyProvider";
 
 const EMPTY_EMAIL = { total: 0, bySender: {} as Record<string, number>, sampled: 0 };
 
 export function useFilteredData() {
   const { preset, dateRange } = useFilters();
   const { data: zoho, isLoading: zohoLoading, error: zohoError } = useZohoData();
+  const { fmt: fmtMoney, currency } = useCurrency();
 
   return useMemo(() => {
     const timeLabel = getTimeLabel(preset, dateRange);
@@ -73,8 +75,26 @@ export function useFilteredData() {
     // ── Time-series chart: slice to the number of months in the range ────
     const timeData = zoho.leadsOverTime.slice(-monthSlice);
 
-    const kpis      = agg.kpis.map(k => ({ ...k, period: k.period ?? timeLabel }));
-    const finance   = agg.financeMetrics.map(f => ({ ...f, period: f.period ?? timeLabel }));
+    // Reformat money KPIs in the active currency. Other KPIs (counts, %, dur)
+    // are unaffected.
+    const kpis = agg.kpis.map(k => {
+      const period = k.period ?? timeLabel;
+      if (k.label === "Pipeline Value") {
+        return {
+          ...k,
+          value:  fmtMoney(agg.openPipelineValue),
+          period: `weighted ${fmtMoney(agg.weightedPipelineValue)} · ${agg.openDeals} open deals`,
+        };
+      }
+      return { ...k, period };
+    });
+    const finance = agg.financeMetrics.map(f => {
+      const period = f.period ?? timeLabel;
+      if (f.label === "Placement Revenue") {
+        return { ...f, value: fmtMoney(agg.totalRevenue), period };
+      }
+      return { ...f, period };
+    });
     const recruiters = agg.recruiters.map(r => ({ ...r, role: 'Sales Consultant' }));
 
     const regions:          Array<{ region: string; doctors: number; placements: number; hospitals: number }> = [];
@@ -139,5 +159,5 @@ export function useFilteredData() {
       zohoError,
       isLive: true,
     };
-  }, [preset, dateRange, zoho, zohoLoading, zohoError]);
+  }, [preset, dateRange, zoho, zohoLoading, zohoError, currency, fmtMoney]);
 }

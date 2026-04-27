@@ -7,6 +7,7 @@ import { TooltipProvider } from "@/components/ui/tooltip";
 import { FilterProvider } from "@/lib/FilterProvider";
 import { ProtectedRoute } from "@/components/ProtectedRoute";
 import { AIPageContextProvider } from "@/lib/ai-page-context";
+import { CurrencyProvider } from "@/lib/CurrencyProvider";
 
 // Login stays eagerly loaded — it's the first thing unauthenticated users see
 import Login from "./pages/Login";
@@ -42,6 +43,7 @@ const App = () => (
   <QueryClientProvider client={queryClient}>
     <TooltipProvider>
       <AIPageContextProvider>
+      <CurrencyProvider>
       <FilterProvider>
         <Toaster />
         <Sonner />
@@ -70,6 +72,7 @@ const App = () => (
           </Suspense>
         </BrowserRouter>
       </FilterProvider>
+      </CurrencyProvider>
       </AIPageContextProvider>
     </TooltipProvider>
   </QueryClientProvider>

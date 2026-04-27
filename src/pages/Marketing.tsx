@@ -23,6 +23,7 @@ const tip = {
   padding: "8px 12px",
 };
 
+
 const Marketing = () => {
   const { data: zoho } = useZohoData();
   const { dateRange } = useFilters();
@@ -42,9 +43,18 @@ const Marketing = () => {
     const qualifiedByChannel:    Record<string, number> = {};
     const convertedByChannel:    Record<string, number> = {};
 
+    // A lead has been "contacted" if its status is anything past Not Contacted.
+    // "Qualified" includes converted statuses (a converted lead must first be qualified).
+    // "Converted" is a strict subset of qualified.
     const activeStatuses = new Set([
       'Not Contacted', 'Attempted to Contact', 'Initial Sales Call Completed',
       'Contact in Future', 'High Priority Follow up',
+    ]);
+    const qualifiedStatuses = new Set([
+      'Initial Sales Call Completed', 'Contact in Future', 'High Priority Follow up', 'Closed Won',
+    ]);
+    const convertedStatuses = new Set([
+      'Contact in Future', 'High Priority Follow up', 'Closed Won',
     ]);
 
     for (const l of recentLeads) {
@@ -52,14 +62,14 @@ const Marketing = () => {
       leadsByChannel[ch] = (leadsByChannel[ch] ?? 0) + 1;
       if (activeStatuses.has(l.Lead_Status)) {
         activeByChannel[ch] = (activeByChannel[ch] ?? 0) + 1;
-        if (l.Lead_Status !== 'Not Contacted') {
-          contactedByChannel[ch] = (contactedByChannel[ch] ?? 0) + 1;
-        }
       }
-      if (l.Lead_Status === 'Initial Sales Call Completed') {
+      if (l.Lead_Status && l.Lead_Status !== 'Not Contacted') {
+        contactedByChannel[ch] = (contactedByChannel[ch] ?? 0) + 1;
+      }
+      if (qualifiedStatuses.has(l.Lead_Status)) {
         qualifiedByChannel[ch] = (qualifiedByChannel[ch] ?? 0) + 1;
       }
-      if (l.Lead_Status === 'Contact in Future' || l.Lead_Status === 'High Priority Follow up') {
+      if (convertedStatuses.has(l.Lead_Status)) {
         convertedByChannel[ch] = (convertedByChannel[ch] ?? 0) + 1;
       }
     }
@@ -71,10 +81,11 @@ const Marketing = () => {
         const contacted      = contactedByChannel[channel] ?? 0;
         const qualified      = qualifiedByChannel[channel] ?? 0;
         const converted      = convertedByChannel[channel] ?? 0;
-        const uncontacted    = active - contacted;
-        const contactRate    = active > 0 ? Math.round((contacted / active) * 100) : 0;
-        const qualifiedRate  = doctors > 0 ? Math.round((qualified / doctors) * 100) : 0;
-        const conversionRate = doctors > 0 ? Math.round((converted / doctors) * 100) : 0;
+        const uncontacted    = (active > 0 ? active : doctors) - contacted;
+        // All percentages use TOTAL leads as denominator so they're comparable.
+        const contactRate    = doctors > 0 ? Math.round((contacted  / doctors) * 100) : 0;
+        const qualifiedRate  = doctors > 0 ? Math.round((qualified  / doctors) * 100) : 0;
+        const conversionRate = doctors > 0 ? Math.round((converted  / doctors) * 100) : 0;
         return { channel, doctors, contacted, uncontacted, qualified, converted, contactRate, qualifiedRate, conversionRate };
       });
   }, [zoho?.rawLeads, dateRange]);
@@ -82,6 +93,15 @@ const Marketing = () => {
   const bestChannel = marketing.length > 0
     ? marketing.reduce((a, b) => (a.doctors > b.doctors ? a : b))
     : null;
+
+  // Hide low-volume channels (< 10 leads) behind a "Show all" toggle so the grid stays scannable
+  const MIN_LEADS_THRESHOLD = 10;
+  const [showAllChannels, setShowAllChannels] = useState(false);
+  const visibleMarketing = useMemo(() => {
+    if (showAllChannels) return marketing;
+    return marketing.filter(c => c.doctors >= MIN_LEADS_THRESHOLD);
+  }, [marketing, showAllChannels]);
+  const hiddenChannelCount = marketing.length - visibleMarketing.length;
 
   // KPI card expand panel
   const [selectedKpiChannel, setSelectedKpiChannel] = useState<string | null>(null);
@@ -144,8 +164,21 @@ const Marketing = () => {
       <ChannelWinnerCards />
 
       {/* Channel KPI cards */}
-      <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-5 gap-3">
-        {marketing.map(ch => {
+      <div className="flex items-center justify-between mb-2">
+        <p className="text-[10px] uppercase tracking-widest font-semibold text-muted-foreground/70">
+          Channels {visibleMarketing.length > 0 && <span className="opacity-60">· {visibleMarketing.length} of {marketing.length}</span>}
+        </p>
+        {hiddenChannelCount > 0 && (
+          <button
+            onClick={() => setShowAllChannels(s => !s)}
+            className="text-[10px] text-primary hover:text-primary/80 font-medium transition-colors"
+          >
+            {showAllChannels ? `Hide ${hiddenChannelCount} smaller channels` : `Show ${hiddenChannelCount} smaller channels`}
+          </button>
+        )}
+      </div>
+      <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-4 xl:grid-cols-5 gap-3 mb-6">
+        {visibleMarketing.map(ch => {
           const isSelected = selectedKpiChannel === ch.channel;
           const isBest = bestChannel?.channel === ch.channel;
           return (
@@ -168,9 +201,9 @@ const Marketing = () => {
                 {isSelected && <X className="h-3 w-3 text-primary ml-auto shrink-0" />}
               </div>
               <p className="text-lg font-semibold tabular-nums">{ch.doctors}</p>
-              <p className="text-[10px] text-muted-foreground">{ch.contacted} contacted ({ch.contactRate}%)</p>
-              <p className="text-[10px] text-primary/60">{ch.qualified} qualified ({ch.qualifiedRate}%)</p>
-              <p className="text-[10px] text-primary/90">{ch.converted} converted ({ch.conversionRate}%)</p>
+              <p className="text-[10px] text-muted-foreground">{ch.contacted} contacted <span className="opacity-60">({ch.contactRate}% of total)</span></p>
+              <p className="text-[10px] text-primary/70">{ch.qualified} qualified <span className="opacity-60">({ch.qualifiedRate}%)</span></p>
+              <p className="text-[10px] text-primary">{ch.converted} converted <span className="opacity-60">({ch.conversionRate}%)</span></p>
             </button>
           );
         })}
@@ -349,8 +382,10 @@ const Marketing = () => {
                       contentStyle={tip}
                       formatter={(v: number, name: string) => [v.toLocaleString(), name]}
                     />
-                    <Bar dataKey="contacted"   stackId="a" fill="hsl(210,75%,52%)" radius={[0, 0, 0, 0]} name="Contacted" />
-                    <Bar dataKey="uncontacted" stackId="a" fill="hsl(220,14%,85%)" radius={[0, 4, 4, 0]} name="Uncontacted" cursor="pointer" onClick={(data) => setUncontactedChannel(data.channel)} />
+                    {/* Flat-ended stacked bars — radius arrays render incorrectly
+                        on stacked horizontal bars in Recharts 2.x. */}
+                    <Bar dataKey="contacted"   stackId="a" fill="hsl(210,75%,52%)" name="Contacted" />
+                    <Bar dataKey="uncontacted" stackId="a" fill="hsl(220,14%,85%)" name="Uncontacted" cursor="pointer" onClick={(data) => setUncontactedChannel(data.channel)} />
                   </BarChart>
                 </ResponsiveContainer>
                 <p className="text-center text-[10px] text-muted-foreground mt-1">Click a bar to see uncontacted doctors</p>

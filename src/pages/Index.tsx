@@ -3,6 +3,7 @@ import { ExpandableKPICard } from "@/components/ExpandableKPICard";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { useFilteredData } from "@/hooks/use-filtered-data";
 import { useZohoData, displaySource } from "@/hooks/use-zoho-data";
+import { useCurrency } from "@/lib/CurrencyProvider";
 import {
   AreaChart, Area, XAxis, YAxis, Tooltip, ResponsiveContainer,
   CartesianGrid, Line,
@@ -42,14 +43,10 @@ const CHANNEL_RANGES = [
   { label: "1Y", days: 365 },
 ] as const;
 
-const fmtAED = (v: number) =>
-  v >= 1_000_000 ? `AED ${(v / 1_000_000).toFixed(2)}M`
-  : v >= 1000    ? `AED ${(v / 1000).toFixed(0)}K`
-  : v > 0        ? `AED ${Math.round(v)}`
-  : 'AED 0';
-
 const Index = () => {
+  // fmtAED comes from the global currency context (AED/USD toggle in header).
   const { kpis, timeData, funnel, stageConversion, filteredLeads, filteredDeals, zohoLoading } = useFilteredData();
+  const { fmt: fmtAED } = useCurrency();
   const { data: zoho } = useZohoData();
   const [channelDays, setChannelDays] = useState<number>(30);
 

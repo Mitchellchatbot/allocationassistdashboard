@@ -17,17 +17,17 @@ export interface ChannelEconomicsRow {
   conversionRate: number;   // 0..100 (lead → "converted" status)
 }
 
-const QUALIFIED_STATUSES = new Set([
-  "Initial Sales Call Completed",
-  "Contact in Future",
-  "High Priority Follow up",
-]);
-// "Converted" = lead progressed to a state that looks like a sale.
-// We treat anything that signals genuine traction as a conversion.
+// QUALIFIED is a SUPERSET of CONVERTED. A lead that converted ("Closed Won")
+// must first have been qualified. Keeping these as nested cohorts means
+// converted ≤ qualified always — anything else is a counting bug.
 const CONVERTED_STATUSES = new Set([
   "Contact in Future",
   "High Priority Follow up",
   "Closed Won",
+]);
+const QUALIFIED_STATUSES = new Set([
+  "Initial Sales Call Completed",
+  ...CONVERTED_STATUSES,
 ]);
 
 /**

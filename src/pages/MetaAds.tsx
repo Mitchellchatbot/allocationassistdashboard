@@ -1,8 +1,10 @@
 import { useState, useMemo, useEffect } from "react";
 import { useSetAIPageContext } from "@/lib/ai-page-context";
+import { useCurrency } from "@/lib/CurrencyProvider";
 import { createPortal } from "react-dom";
 import { DashboardLayout } from "@/components/layout/DashboardLayout";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
+import { CampaignWinnerCards } from "@/components/CampaignWinners";
 import { useMetaLeadsStats, type GroupedStat } from "@/hooks/use-meta-leads-stats";
 import { useMetaAdsApi, useMetaCampaignAds, useMetaAdsByName, useMetaTopAds, type MetaTopAd, getMetaToken, META_TOKEN_LS_KEY } from "@/hooks/use-meta-ads-api";
 import { useZohoData } from "@/hooks/use-zoho-data";
@@ -702,11 +704,8 @@ const MetaAds = () => {
   const queryClient = useQueryClient();
 
   const [metaDays, setMetaDays] = useState(365);
-  // Display currency toggle — Meta reports in AED for UAE accounts; the toggle
-  // re-renders every monetary value at the user's preferred unit. We use a fixed
-  // peg (AED is pegged to USD at ~3.6725) since the AED-USD rate is stable.
-  const [displayCurrency, setDisplayCurrency] = useState<"AED" | "USD">("AED");
-  const toDisplay = (aed: number) => aedTo(aed, displayCurrency);
+  // Display currency comes from the global toggle in the dashboard header.
+  const { currency: displayCurrency, fromAED: toDisplay } = useCurrency();
   const metaDateRange = useMemo(() => {
     const to = new Date(); const from = new Date();
     from.setDate(from.getDate() - metaDays);
@@ -1029,17 +1028,7 @@ const MetaAds = () => {
           Live Ad Performance · Meta Marketing API
         </p>
         <div className="flex items-center gap-3">
-          {/* Currency toggle (AED ↔ USD) — pegged at 3.6725 AED per USD */}
-          <div className="inline-flex rounded-md border border-border/60 bg-secondary/40 p-0.5">
-            {(["AED", "USD"] as const).map(c => (
-              <button key={c} type="button" onClick={() => setDisplayCurrency(c)}
-                className={`px-2 py-0.5 rounded text-[10px] font-semibold transition-colors ${
-                  displayCurrency === c ? "bg-primary text-white" : "text-muted-foreground hover:text-foreground"
-                }`}>
-                {c}
-              </button>
-            ))}
-          </div>
+          {/* Currency toggle moved to dashboard header (applies to all pages). */}
           {/* Date range presets */}
           <div className="flex gap-0.5">
             {META_PRESETS.map(p => (
@@ -1102,9 +1091,7 @@ const MetaAds = () => {
               value={fmtN(data?.total ?? 0)}
               sub={leadsLoading ? "loading…" : `${data?.withUtm ?? 0} tracked`}
               back={formLeadsBack} backHeight={220} />
-            <MetaKpiCard icon={Award}        label="Cost Per Lead"  color="text-primary"     bg="bg-primary/10"
-              value={(summary?.leads ?? 0) > 0 ? fmtC(toDisplay(summary?.costPerLead ?? 0), currency) : "—"}
-              sub="per form lead"                                                                   back={cplBack}    backHeight={220} />
+            {/* Cost Per Lead lives in the cost-per-funnel section below alongside CPQL and CPP */}
           </div>
 
           {/* Cost-per-funnel KPIs — spend joined with meta_leads stage progression */}
@@ -1168,6 +1155,9 @@ const MetaAds = () => {
               );
             })()}
           </div>
+
+          {/* Top Campaigns — most qualified / lowest CPQL / lowest cost per conversion */}
+          <CampaignWinnerCards />
 
           {/* Account chips */}
           {(api?.accounts?.length ?? 0) > 0 && (

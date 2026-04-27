@@ -1,12 +1,12 @@
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import { ChannelIcon } from "@/components/ChannelIcon";
-import { Trophy, TrendingDown, Target, Zap } from "lucide-react";
+import { Trophy, TrendingDown, Target, Zap, ChevronRight } from "lucide-react";
+import { Link, useNavigate } from "react-router-dom";
 import { useChannelEconomics, useChannelWinners } from "@/hooks/use-channel-economics";
 import { useFilters } from "@/lib/filters";
+import { useCurrency } from "@/lib/CurrencyProvider";
 
-const fmtAED = (v: number) =>
-  v >= 1000 ? `AED ${(v / 1000).toFixed(1)}K` : `AED ${Math.round(v).toLocaleString()}`;
 const fmtN = (v: number) => v.toLocaleString();
 
 interface WinnerCardProps {
@@ -52,6 +52,7 @@ function WinnerCard({ icon: Icon, label, iconColor, iconBg, channel, value, sub 
 export function ChannelWinnerCards() {
   const winners = useChannelWinners();
   const { dateRange } = useFilters();
+  const { fmt: fmtAED } = useCurrency();
 
   const dateLabel = `${dateRange.from.toLocaleDateString("en-GB", { day: "numeric", month: "short" })} – ${dateRange.to.toLocaleDateString("en-GB", { day: "numeric", month: "short", year: "numeric" })}`;
 
@@ -111,6 +112,8 @@ export function ChannelWinnerCards() {
 
 export function ChannelEconomicsTable() {
   const rows = useChannelEconomics();
+  const navigate = useNavigate();
+  const { fmt: fmtAED } = useCurrency();
 
   if (rows.length === 0) {
     return null;
@@ -120,7 +123,7 @@ export function ChannelEconomicsTable() {
     <Card className="shadow-sm border-border/50 mb-5">
       <CardHeader className="pb-1 pt-4 px-4">
         <CardTitle className="text-[12px] font-medium text-muted-foreground uppercase tracking-wide">Channel Economics</CardTitle>
-        <p className="text-[10px] text-muted-foreground mt-0.5">Spend joined with Zoho leads on a normalised channel name. "—" means no spend recorded for that channel.</p>
+        <p className="text-[10px] text-muted-foreground mt-0.5">Spend joined with Zoho leads on a normalised channel name. "—" means no spend recorded for that channel. Click a row to see that channel's leads.</p>
       </CardHeader>
       <CardContent className="px-4 pb-4">
         <div className="overflow-x-auto -mx-4 px-4">
@@ -135,11 +138,14 @@ export function ChannelEconomicsTable() {
                 <TableHead className="text-[10px] uppercase tracking-wide h-8 text-right">Cost / Qual.</TableHead>
                 <TableHead className="text-[10px] uppercase tracking-wide h-8 text-right">Cost / Conv.</TableHead>
                 <TableHead className="text-[10px] uppercase tracking-wide h-8 text-right">Conv. Rate</TableHead>
+                <TableHead className="text-[10px] uppercase tracking-wide h-8 text-right w-[80px]">Drill in</TableHead>
               </TableRow>
             </TableHeader>
             <TableBody>
               {rows.map(r => (
-                <TableRow key={r.channel} className="hover:bg-muted/30">
+                <TableRow key={r.channel} className="hover:bg-muted/30 cursor-pointer group" onClick={() => {
+                  navigate(`/leads-pipeline?source=${encodeURIComponent(r.channel)}`);
+                }}>
                   <TableCell className="text-[12px] font-medium py-2.5">
                     <div className="flex items-center gap-2">
                       <ChannelIcon channel={r.channel} size={13} />
@@ -171,6 +177,16 @@ export function ChannelEconomicsTable() {
                     }`}>
                       {r.conversionRate.toFixed(1)}%
                     </span>
+                  </TableCell>
+                  <TableCell className="text-right py-2.5">
+                    <Link
+                      to={`/leads-pipeline?source=${encodeURIComponent(r.channel)}&stage=Not%20Contacted`}
+                      onClick={(e) => e.stopPropagation()}
+                      className="inline-flex items-center gap-0.5 text-[10px] text-warning hover:text-warning/80 font-medium transition-colors opacity-0 group-hover:opacity-100"
+                    >
+                      Uncontacted
+                      <ChevronRight className="h-3 w-3" />
+                    </Link>
                   </TableCell>
                 </TableRow>
               ))}

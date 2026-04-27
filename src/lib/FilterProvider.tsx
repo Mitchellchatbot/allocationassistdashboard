@@ -2,7 +2,7 @@ import { useState, ReactNode } from "react";
 import { FilterContext, type TimeRangePreset, type DateRange, getPresetRange } from "./filters";
 
 export function FilterProvider({ children }: { children: ReactNode }) {
-  const [preset, setPresetState] = useState<TimeRangePreset>("quarter");
+  const [preset, setPresetState] = useState<TimeRangePreset>("year");
   const [customRange, setCustomRangeState] = useState<DateRange | null>(null);
 
   const dateRange: DateRange =

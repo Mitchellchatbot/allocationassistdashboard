@@ -1,11 +1,13 @@
 import { SidebarProvider, SidebarTrigger, useSidebar } from "@/components/ui/sidebar";
 import { AppSidebar } from "./AppSidebar";
 import { PageTransition } from "./PageTransition";
-import { Bell, Download, AlertTriangle, ChevronRight, Home, Sparkles, RefreshCw, Info, CheckCircle2, Send, RotateCcw, X } from "lucide-react";
+import { Bell, Download, AlertTriangle, ChevronRight, Home, Sparkles, RefreshCw, Info, CheckCircle2, Send, RotateCcw, X, Search } from "lucide-react";
 import { ChatChart, parseCharts } from "@/components/ChatChart";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { DateRangePicker } from "@/components/DateRangePicker";
+import { CurrencyToggle } from "@/components/CurrencyToggle";
+import { UniversalSearch } from "@/components/UniversalSearch";
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
 import { useFilters } from "@/lib/filters";
@@ -82,6 +84,19 @@ export function DashboardLayout({ children, title, subtitle }: DashboardLayoutPr
 
   const [indexing, setIndexing] = useState(false);
   const [indexStatus, setIndexStatus] = useState('');
+
+  // Universal search dialog
+  const [searchOpen, setSearchOpen] = useState(false);
+  useEffect(() => {
+    const handler = (e: globalThis.KeyboardEvent) => {
+      if ((e.metaKey || e.ctrlKey) && e.key.toLowerCase() === 'k') {
+        e.preventDefault();
+        setSearchOpen(o => !o);
+      }
+    };
+    window.addEventListener('keydown', handler);
+    return () => window.removeEventListener('keydown', handler);
+  }, []);
 
   // Chat state
   type ChatMsg = { role: 'user' | 'assistant'; content: string; isInsights?: boolean };
@@ -289,7 +304,23 @@ export function DashboardLayout({ children, title, subtitle }: DashboardLayoutPr
                   }
                 </TooltipContent>
               </Tooltip>
+              <Tooltip>
+                <TooltipTrigger asChild>
+                  <button
+                    onClick={() => setSearchOpen(true)}
+                    className="hidden sm:flex items-center gap-1.5 h-7 px-2.5 text-[11px] font-medium rounded-md border border-border/60 bg-card text-muted-foreground hover:text-foreground hover:border-border hover:bg-muted/50 transition-all duration-150 shadow-sm"
+                  >
+                    <Search className="h-3 w-3 shrink-0" />
+                    Search
+                    <kbd className="ml-1 hidden md:inline-flex items-center gap-0.5 rounded bg-muted/60 px-1 py-0.5 text-[9px] font-mono text-muted-foreground">
+                      ⌘K
+                    </kbd>
+                  </button>
+                </TooltipTrigger>
+                <TooltipContent side="bottom" className="text-[10px]">Search anything · ⌘K</TooltipContent>
+              </Tooltip>
               <DateRangePicker />
+              <CurrencyToggle />
 <Tooltip>
                 <TooltipTrigger asChild>
                   <Button variant="ghost" size="sm" className="h-7 text-[11px] text-muted-foreground hidden sm:flex px-2">
@@ -592,6 +623,9 @@ export function DashboardLayout({ children, title, subtitle }: DashboardLayoutPr
           AI Assistant
         </button>
       )}
+
+      {/* Universal search (Cmd+K) — fuzzy-matches across leads, deals, channels, recruiters, pages */}
+      <UniversalSearch open={searchOpen} onOpenChange={setSearchOpen} />
     </SidebarProvider>
   );
 }

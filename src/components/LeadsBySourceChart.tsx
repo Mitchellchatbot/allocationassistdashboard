@@ -5,6 +5,7 @@ import {
   CartesianGrid, LabelList,
 } from "recharts";
 import { useChannelEconomics } from "@/hooks/use-channel-economics";
+import { useCurrency } from "@/lib/CurrencyProvider";
 
 const tip = {
   backgroundColor: "#fff",
@@ -15,9 +16,6 @@ const tip = {
   padding: "8px 12px",
 };
 
-const fmtAED = (v: number) =>
-  v >= 1000 ? `AED ${(v / 1000).toFixed(1)}K` : `AED ${Math.round(v).toLocaleString()}`;
-
 /**
  * Channel-level "Leads by Source" with qualification rate AND spend per source.
  * Filters out junk labels ("Other", "Uncategorized", placeholder strings) so
@@ -25,6 +23,7 @@ const fmtAED = (v: number) =>
  */
 export function LeadsBySourceChart() {
   const rows = useChannelEconomics();
+  const { fmt: fmtAED } = useCurrency();
 
   // Drop "Other" rows and anything with neither leads nor spend so the chart isn't
   // cluttered with junk like "xxxxx" or unmapped sources.

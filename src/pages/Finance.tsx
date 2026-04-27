@@ -6,25 +6,18 @@ import { useMarketingExpenses, type CategorySpend, type MonthlyPoint, type TopTr
 import { useZohoData } from "@/hooks/use-zoho-data";
 import { useFilters } from "@/lib/filters";
 import { ChannelWinnerCards, ChannelEconomicsTable } from "@/components/ChannelEconomics";
+import { useCurrency } from "@/lib/CurrencyProvider";
 import {
   BarChart, Bar, XAxis, YAxis, Tooltip, ResponsiveContainer, CartesianGrid, Cell,
   AreaChart, Area, PieChart, Pie, Legend, LineChart, Line, ComposedChart,
 } from "recharts";
 import {
   DollarSign, TrendingUp, TrendingDown, Crown, Receipt, Award, CalendarDays, ArrowUpRight,
-  Wallet, Target, Zap, Users,
+  Wallet, Target, Zap, Users, Search, ArrowUpDown, ArrowUp, ArrowDown,
 } from "lucide-react";
 
 // ── Formatting ────────────────────────────────────────────────────────────────
-
-function fmtAED(n: number): string {
-  if (!Number.isFinite(n)) return "AED 0";
-  const sign = n < 0 ? "-" : "";
-  const abs  = Math.abs(n);
-  if (abs >= 1_000_000) return `${sign}AED ${(abs / 1_000_000).toFixed(2)}M`;
-  if (abs >= 1_000)     return `${sign}AED ${(abs / 1_000).toFixed(1)}K`;
-  return `${sign}AED ${abs.toLocaleString(undefined, { maximumFractionDigits: 0 })}`;
-}
+// fmtAED is provided by useCurrency() inside each component that needs it.
 function fmtN(n: number): string {
   return Number(n ?? 0).toLocaleString();
 }
@@ -118,6 +111,7 @@ function FlipKpiCard({
 // ── Back-panel builders ───────────────────────────────────────────────────────
 
 function TotalSpendBack({ byCategory, total }: { byCategory: CategorySpend[]; total: number }) {
+  const { fmt: fmtAED } = useCurrency();
   const top5 = byCategory.slice(0, 5);
   const max  = top5[0]?.amount ?? 1;
   if (top5.length === 0) return <p className="text-muted-foreground">No data in this period</p>;
@@ -144,6 +138,7 @@ function TotalSpendBack({ byCategory, total }: { byCategory: CategorySpend[]; to
 }
 
 function MonthlyBack({ monthly }: { monthly: MonthlyPoint[] }) {
+  const { fmt: fmtAED } = useCurrency();
   if (monthly.length === 0) return <p className="text-muted-foreground">No data in this period</p>;
   const max = Math.max(...monthly.map(m => m.amount), 1);
   return (
@@ -165,6 +160,7 @@ function MonthlyBack({ monthly }: { monthly: MonthlyPoint[] }) {
 }
 
 function TopCategoryBack({ top }: { top?: CategorySpend }) {
+  const { fmt: fmtAED } = useCurrency();
   if (!top) return <p className="text-muted-foreground">No data in this period</p>;
   return (
     <div className="space-y-2">
@@ -190,6 +186,7 @@ function TopCategoryBack({ top }: { top?: CategorySpend }) {
 }
 
 function GrowthBack({ growthPct, total, prevTotal }: { growthPct: number; total: number; prevTotal: number }) {
+  const { fmt: fmtAED } = useCurrency();
   const up = growthPct >= 0;
   return (
     <div className="space-y-2">
@@ -215,6 +212,7 @@ function GrowthBack({ growthPct, total, prevTotal }: { growthPct: number; total:
 }
 
 function TransactionsBack({ txns }: { txns: TopTransaction[] }) {
+  const { fmt: fmtAED } = useCurrency();
   if (txns.length === 0) return <p className="text-muted-foreground">No data in this period</p>;
   return (
     <div className="space-y-1.5">
@@ -233,6 +231,7 @@ function TransactionsBack({ txns }: { txns: TopTransaction[] }) {
 }
 
 function BiggestBack({ biggest }: { biggest?: TopTransaction }) {
+  const { fmt: fmtAED } = useCurrency();
   if (!biggest) return <p className="text-muted-foreground">No data in this period</p>;
   return (
     <div className="space-y-2">
@@ -257,6 +256,7 @@ function BiggestBack({ biggest }: { biggest?: TopTransaction }) {
 }
 
 function AvgMonthlyBack({ monthly, avg }: { monthly: MonthlyPoint[]; avg: number }) {
+  const { fmt: fmtAED } = useCurrency();
   if (monthly.length === 0) return <p className="text-muted-foreground">No data in this period</p>;
   return (
     <div className="space-y-2">
@@ -289,6 +289,7 @@ function AvgMonthlyBack({ monthly, avg }: { monthly: MonthlyPoint[]; avg: number
 
 // Back panel: Revenue breakdown by source channel (from Zoho deals)
 function RevenueBack({ bySource, total }: { bySource: { source: string; amount: number; count: number }[]; total: number }) {
+  const { fmt: fmtAED } = useCurrency();
   if (bySource.length === 0) return <p className="text-muted-foreground">No closed deals in this period</p>;
   const max = bySource[0]?.amount ?? 1;
   return (
@@ -314,6 +315,7 @@ function RevenueBack({ bySource, total }: { bySource: { source: string; amount: 
 }
 
 function ProfitBack({ revenue, spend, profit }: { revenue: number; spend: number; profit: number }) {
+  const { fmt: fmtAED } = useCurrency();
   const margin = revenue > 0 ? (profit / revenue) * 100 : 0;
   return (
     <div className="space-y-2">
@@ -332,6 +334,7 @@ function ProfitBack({ revenue, spend, profit }: { revenue: number; spend: number
 }
 
 function RoasBack({ roas, revenue, spend }: { roas: number; revenue: number; spend: number }) {
+  const { fmt: fmtAED } = useCurrency();
   const rating = roas >= 4 ? "Excellent" : roas >= 2 ? "Healthy" : roas >= 1 ? "Break-even" : "Losing money";
   const ratingColor = roas >= 4 ? "text-emerald-600" : roas >= 2 ? "text-sky-600" : roas >= 1 ? "text-amber-600" : "text-rose-600";
   return (
@@ -354,6 +357,7 @@ function RoasBack({ roas, revenue, spend }: { roas: number; revenue: number; spe
 }
 
 function CostPerPlacementBack({ cpp, spend, placements }: { cpp: number; spend: number; placements: number }) {
+  const { fmt: fmtAED } = useCurrency();
   return (
     <div className="space-y-2">
       <div className="flex justify-between"><span className="text-muted-foreground">Total spend</span><span className="font-semibold tabular-nums">{fmtAED(spend)}</span></div>
@@ -377,7 +381,9 @@ const Finance = () => {
   const { roiData } = useFilteredData();
   const { preset, setPreset, dateRange } = useFilters();
   const { data: zoho } = useZohoData();
+  const { fmt: fmtAED } = useCurrency();
   const {
+    rows: allTransactions,
     total: spend, prevTotal: prevSpend, growthPct, avgMonthly, byCategory, monthly,
     topTransactions, biggest, topCategory, transactionCount,
   } = useMarketingExpenses();
@@ -392,6 +398,43 @@ const Finance = () => {
     }
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
+
+  // Transactions table — sort + search state
+  const [txnSortKey, setTxnSortKey] = useState<"date" | "amount" | "category">("date");
+  const [txnSortDir, setTxnSortDir] = useState<"asc" | "desc">("desc");
+  const [txnSearch, setTxnSearch] = useState("");
+  const sortedTransactions = useMemo(() => {
+    const q = txnSearch.trim().toLowerCase();
+    const filtered = q
+      ? allTransactions.filter(t =>
+          (t.description ?? "").toLowerCase().includes(q) ||
+          (t.category ?? "").toLowerCase().includes(q)
+        )
+      : allTransactions;
+    return filtered.slice().sort((a, b) => {
+      let cmp = 0;
+      if (txnSortKey === "date")     cmp = (a.expense_date ?? "").localeCompare(b.expense_date ?? "");
+      else if (txnSortKey === "amount") cmp = (a.amount ?? 0) - (b.amount ?? 0);
+      else if (txnSortKey === "category") cmp = (a.category ?? "").localeCompare(b.category ?? "");
+      return txnSortDir === "asc" ? cmp : -cmp;
+    });
+  }, [allTransactions, txnSortKey, txnSortDir, txnSearch]);
+
+  function toggleTxnSort(key: "date" | "amount" | "category") {
+    if (txnSortKey === key) {
+      setTxnSortDir(d => (d === "asc" ? "desc" : "asc"));
+    } else {
+      setTxnSortKey(key);
+      setTxnSortDir(key === "amount" || key === "date" ? "desc" : "asc");
+    }
+  }
+
+  function SortIcon({ active, dir }: { active: boolean; dir: "asc" | "desc" }) {
+    if (!active) return <ArrowUpDown className="h-3 w-3 opacity-40 shrink-0" />;
+    return dir === "asc"
+      ? <ArrowUp className="h-3 w-3 text-primary shrink-0" />
+      : <ArrowDown className="h-3 w-3 text-primary shrink-0" />;
+  }
 
   // Zoho leads created in the selected period — the real signal of marketing working.
   // Revenue is not used here because Zoho Deals module has almost no data
@@ -737,28 +780,63 @@ const Finance = () => {
       )}
 
       {/* ── Top transactions table ── */}
-      {topTransactions.length > 0 && (
+      {allTransactions.length > 0 && (
         <Card className="shadow-sm border-border/50 mb-5">
           <CardHeader className="pb-1 pt-4 px-4">
-            <CardTitle className="text-[12px] font-medium text-muted-foreground uppercase tracking-wide">Top 10 Largest Transactions</CardTitle>
+            <div className="flex items-center justify-between gap-3 flex-wrap">
+              <div>
+                <CardTitle className="text-[12px] font-medium text-muted-foreground uppercase tracking-wide">All Transactions</CardTitle>
+                <p className="text-[10px] text-muted-foreground mt-0.5">
+                  {sortedTransactions.length.toLocaleString()} of {allTransactions.length.toLocaleString()} · click column headers to sort
+                </p>
+              </div>
+              <div className="relative">
+                <Search className="absolute left-2.5 top-1/2 -translate-y-1/2 h-3 w-3 text-muted-foreground" />
+                <input
+                  type="text"
+                  placeholder="Search description or channel…"
+                  value={txnSearch}
+                  onChange={e => setTxnSearch(e.target.value)}
+                  className="w-[260px] rounded-md border border-border/60 bg-background pl-7 pr-3 py-1.5 text-[11px] focus:outline-none focus:ring-1 focus:ring-primary/40 focus:border-primary/50"
+                />
+              </div>
+            </div>
           </CardHeader>
           <CardContent className="px-4 pb-4">
-            <div className="overflow-x-auto">
+            <div className="overflow-x-auto" style={{ maxHeight: 480 }}>
               <table className="w-full text-left border-collapse">
-                <thead>
+                <thead className="sticky top-0 bg-card z-10">
                   <tr className="border-b border-border/60">
-                    <th className="text-[10px] uppercase tracking-wide text-muted-foreground py-2">Date</th>
-                    <th className="text-[10px] uppercase tracking-wide text-muted-foreground py-2">Channel</th>
-                    <th className="text-[10px] uppercase tracking-wide text-muted-foreground py-2">Description</th>
-                    <th className="text-[10px] uppercase tracking-wide text-muted-foreground py-2 text-right">Amount</th>
+                    <th className="py-2">
+                      <button onClick={() => toggleTxnSort("date")} className="flex items-center gap-1 text-[10px] uppercase tracking-wide text-muted-foreground hover:text-foreground transition-colors">
+                        Date <SortIcon active={txnSortKey === "date"} dir={txnSortDir} />
+                      </button>
+                    </th>
+                    <th className="py-2">
+                      <button onClick={() => toggleTxnSort("category")} className="flex items-center gap-1 text-[10px] uppercase tracking-wide text-muted-foreground hover:text-foreground transition-colors">
+                        Channel <SortIcon active={txnSortKey === "category"} dir={txnSortDir} />
+                      </button>
+                    </th>
+                    <th className="py-2 text-[10px] uppercase tracking-wide text-muted-foreground">Description</th>
+                    <th className="py-2 text-right">
+                      <button onClick={() => toggleTxnSort("amount")} className="ml-auto flex items-center gap-1 text-[10px] uppercase tracking-wide text-muted-foreground hover:text-foreground transition-colors">
+                        Amount <SortIcon active={txnSortKey === "amount"} dir={txnSortDir} />
+                      </button>
+                    </th>
                   </tr>
                 </thead>
                 <tbody>
-                  {topTransactions.map(t => (
+                  {sortedTransactions.length === 0 ? (
+                    <tr>
+                      <td colSpan={4} className="py-8 text-center text-[11px] text-muted-foreground">
+                        No transactions match "{txnSearch}"
+                      </td>
+                    </tr>
+                  ) : sortedTransactions.map(t => (
                     <tr key={t.id} className="border-b border-border/30 hover:bg-muted/20">
-                      <td className="py-2 text-[11px] font-mono text-muted-foreground whitespace-nowrap">{t.date}</td>
+                      <td className="py-2 text-[11px] font-mono text-muted-foreground whitespace-nowrap">{t.expense_date}</td>
                       <td className="py-2 text-[12px] font-medium">{t.category}</td>
-                      <td className="py-2 text-[11px] text-muted-foreground max-w-[400px] truncate" title={t.description}>
+                      <td className="py-2 text-[11px] text-muted-foreground max-w-[400px] truncate" title={t.description ?? ""}>
                         {t.description || "—"}
                       </td>
                       <td className="py-2 text-[12px] text-right tabular-nums font-semibold">{fmtAED(t.amount)}</td>
