@@ -8,6 +8,7 @@ import { useZohoData } from "@/hooks/use-zoho-data";
 import { ArrowRight, AlertTriangle, CheckCircle, Clock, Search, Loader2, Check, X, ChevronDown, Phone, Calendar } from "lucide-react";
 import { Input } from "@/components/ui/input";
 import { useState, useRef, useEffect, useMemo, Fragment } from "react";
+import { useSearchParams } from "react-router-dom";
 import { useMutation, useQueryClient } from "@tanstack/react-query";
 import { zohoPut } from "@/lib/zoho";
 import { supabase } from "@/lib/supabase";
@@ -172,9 +173,15 @@ const statusConfig = {
 const LeadsPipeline = () => {
   const { workflow } = useFilteredData();
   const { data: zoho } = useZohoData();
-  const [search, setSearch] = useState("");
+  // Read deep-link params (e.g. /leads-pipeline?stage=Not%20Contacted) so other
+  // pages can link straight to a filtered view of the leads list.
+  const [searchParams] = useSearchParams();
+  const [search, setSearch] = useState(searchParams.get("q") ?? "");
   const debouncedSearch = useDebounce(search, 300);
-  const [filters, setFilters] = useState<LeadsFilters>({});
+  const [filters, setFilters] = useState<LeadsFilters>({
+    stage:     searchParams.get("stage")     ?? undefined,
+    recruiter: searchParams.get("recruiter") ?? undefined,
+  });
   const sentinelRef = useRef<HTMLDivElement>(null);
   const queryClient = useQueryClient();
   const [updatedIds, setUpdatedIds] = useState<Set<string>>(new Set());

@@ -12,6 +12,7 @@ import {
   UserPlus, Phone, Loader2, Users, TrendingUp, DollarSign, Clock, CheckCircle,
 } from "lucide-react";
 import { ChannelIcon } from "@/components/ChannelIcon";
+import { Link } from "react-router-dom";
 import { useState, useMemo } from "react";
 
 const activityIcons: Record<string, React.ReactNode> = {
@@ -146,25 +147,37 @@ const Index = () => {
     .filter(l => !unqualStatusesForCard.has(l.Lead_Status))
     .sort((a, b) => new Date(b.Created_Time).getTime() - new Date(a.Created_Time).getTime())
     .slice(0, 5);
+  const notContactedCount = filteredLeads.filter(l => l.Lead_Status === 'Not Contacted').length;
   const qualifiedLeadsContent = (
-    <div className="divide-y divide-border/30">
-      {qualifiedLeadsList.length === 0
-        ? <p className="text-[11px] text-muted-foreground py-2">No qualified leads in this period</p>
-        : qualifiedLeadsList.map(l => {
-          const name = l.Full_Name || `${l.First_Name ?? ''} ${l.Last_Name ?? ''}`.trim() || '—';
-          return (
-            <div key={l.id} className="flex items-start justify-between py-1.5 gap-2">
-              <div className="min-w-0">
-                <p className="text-[11px] font-medium truncate">{name}</p>
-                <p className="text-[10px] text-muted-foreground truncate">{l.Lead_Status ?? '—'} · {l.Specialty ?? l.Specialty_New ?? '—'}</p>
+    <div className="space-y-2">
+      <div className="divide-y divide-border/30">
+        {qualifiedLeadsList.length === 0
+          ? <p className="text-[11px] text-muted-foreground py-2">No qualified leads in this period</p>
+          : qualifiedLeadsList.map(l => {
+            const name = l.Full_Name || `${l.First_Name ?? ''} ${l.Last_Name ?? ''}`.trim() || '—';
+            return (
+              <div key={l.id} className="flex items-start justify-between py-1.5 gap-2">
+                <div className="min-w-0">
+                  <p className="text-[11px] font-medium truncate">{name}</p>
+                  <p className="text-[10px] text-muted-foreground truncate">{l.Lead_Status ?? '—'} · {l.Specialty ?? l.Specialty_New ?? '—'}</p>
+                </div>
+                <span className="text-[10px] text-muted-foreground tabular-nums shrink-0">
+                  {l.Created_Time ? new Date(l.Created_Time).toLocaleDateString('en-GB', { day: 'numeric', month: 'short' }) : '—'}
+                </span>
               </div>
-              <span className="text-[10px] text-muted-foreground tabular-nums shrink-0">
-                {l.Created_Time ? new Date(l.Created_Time).toLocaleDateString('en-GB', { day: 'numeric', month: 'short' }) : '—'}
-              </span>
-            </div>
-          );
-        })
-      }
+            );
+          })
+        }
+      </div>
+      {notContactedCount > 0 && (
+        <Link
+          to="/leads-pipeline?stage=Not%20Contacted"
+          className="flex items-center justify-between rounded-md bg-warning/10 hover:bg-warning/20 px-2.5 py-1.5 text-[11px] text-warning font-medium transition-colors"
+        >
+          <span>{notContactedCount.toLocaleString()} qualified but not contacted</span>
+          <span className="text-[10px]">View list →</span>
+        </Link>
+      )}
     </div>
   );
 
