@@ -7,6 +7,7 @@ import {
 import { Star, User, ArrowLeft, X } from "lucide-react";
 import { ChannelIcon } from "@/components/ChannelIcon";
 import { ChannelWinnerCards, ChannelEconomicsTable } from "@/components/ChannelEconomics";
+import { CampaignWinnerCards } from "@/components/CampaignWinners";
 import { useZohoData, displaySource } from "@/hooks/use-zoho-data";
 import { useFilters } from "@/lib/filters";
 import { useMemo, useState } from "react";
@@ -134,6 +135,9 @@ const Marketing = () => {
 
   return (
     <DashboardLayout title="Marketing" subtitle="See which channels bring in the most doctors and how well they convert">
+      {/* Campaign-level winners (most qualified / lowest cost-per-qualified / lowest cost-per-conversion) */}
+      <CampaignWinnerCards />
+
       {/* Channel winner KPIs (best volume / lowest CPL / lowest CPQ / highest conversion) */}
       <ChannelWinnerCards />
 
