@@ -10,8 +10,9 @@ export interface ChannelEconomicsRow {
   qualified:      number;
   converted:      number;
   spend:          number;
-  costPerLead:    number;   // 0 when leads = 0
+  costPerLead:      number; // 0 when leads = 0
   costPerQualified: number; // 0 when qualified = 0
+  costPerConversion: number; // 0 when converted = 0 or no spend
   qualifiedRate: number;    // 0..100
   conversionRate: number;   // 0..100 (lead → "converted" status)
 }
@@ -47,7 +48,7 @@ export function useChannelEconomics() {
       if (!cur) {
         cur = {
           channel: k, leads: 0, qualified: 0, converted: 0,
-          spend: 0, costPerLead: 0, costPerQualified: 0,
+          spend: 0, costPerLead: 0, costPerQualified: 0, costPerConversion: 0,
           qualifiedRate: 0, conversionRate: 0,
         };
         map.set(k, cur);
@@ -72,10 +73,11 @@ export function useChannelEconomics() {
 
     const rows = Array.from(map.values());
     for (const r of rows) {
-      r.costPerLead      = r.leads     > 0 ? r.spend / r.leads     : 0;
-      r.costPerQualified = r.qualified > 0 ? r.spend / r.qualified : 0;
-      r.qualifiedRate    = r.leads     > 0 ? (r.qualified / r.leads)   * 100 : 0;
-      r.conversionRate   = r.leads     > 0 ? (r.converted / r.leads)   * 100 : 0;
+      r.costPerLead       = r.leads     > 0 ? r.spend / r.leads     : 0;
+      r.costPerQualified  = r.qualified > 0 ? r.spend / r.qualified : 0;
+      r.costPerConversion = r.converted > 0 ? r.spend / r.converted : 0;
+      r.qualifiedRate     = r.leads     > 0 ? (r.qualified / r.leads)   * 100 : 0;
+      r.conversionRate    = r.leads     > 0 ? (r.converted / r.leads)   * 100 : 0;
     }
 
     return rows
@@ -106,13 +108,18 @@ export function useChannelWinners() {
       ? [...cpqCandidates].sort((a, b) => a.costPerQualified - b.costPerQualified)[0]
       : null;
 
-    // Highest conversion rate — only meaningful if the channel has enough leads.
-    // Require >= 5 leads so a single converted lead from a tiny channel doesn't win.
-    const convCandidates = rows.filter(r => r.leads >= 5);
+    // Lowest cost per conversion — only channels with spend AND converted leads.
+    // Falls back to highest conversion rate (>= 5 leads) when no channel has both
+    // spend and a converted lead, so the card always has something to show.
+    const cpcCandidates = rows.filter(r => r.spend > 0 && r.converted > 0);
+    const lowestCPC = cpcCandidates.length
+      ? [...cpcCandidates].sort((a, b) => a.costPerConversion - b.costPerConversion)[0]
+      : null;
+    const convCandidates = rows.filter(r => r.leads >= 5 && r.converted > 0);
     const bestConversion = convCandidates.length
       ? [...convCandidates].sort((a, b) => b.conversionRate - a.conversionRate)[0]
       : null;
 
-    return { mostLeads, lowestCPL, lowestCPQ, bestConversion };
+    return { mostLeads, lowestCPL, lowestCPQ, lowestCPC, bestConversion };
   }, [rows]);
 }

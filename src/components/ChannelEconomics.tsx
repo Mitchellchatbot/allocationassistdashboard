@@ -83,14 +83,27 @@ export function ChannelWinnerCards() {
           value={winners?.lowestCPQ ? fmtAED(winners.lowestCPQ.costPerQualified) : ""}
           sub={winners?.lowestCPQ ? `${fmtN(winners.lowestCPQ.qualified)} qualified leads` : undefined}
         />
-        <WinnerCard
-          icon={Zap}
-          label="Best Conversion Rate"
-          iconColor="text-violet-600" iconBg="bg-violet-50"
-          channel={winners?.bestConversion?.channel ?? null}
-          value={winners?.bestConversion ? `${winners.bestConversion.conversionRate.toFixed(1)}%` : ""}
-          sub={winners?.bestConversion ? `${fmtN(winners.bestConversion.converted)} of ${fmtN(winners.bestConversion.leads)} leads` : undefined}
-        />
+        {/* Prefer Cost / Conversion when we have spend + a converted lead; otherwise show
+            the rate-based winner so the card never reads as empty. */}
+        {winners?.lowestCPC ? (
+          <WinnerCard
+            icon={Zap}
+            label="Lowest Cost / Conversion"
+            iconColor="text-violet-600" iconBg="bg-violet-50"
+            channel={winners.lowestCPC.channel}
+            value={fmtAED(winners.lowestCPC.costPerConversion)}
+            sub={`${fmtAED(winners.lowestCPC.spend)} / ${fmtN(winners.lowestCPC.converted)} converted`}
+          />
+        ) : (
+          <WinnerCard
+            icon={Zap}
+            label="Best Conversion Rate"
+            iconColor="text-violet-600" iconBg="bg-violet-50"
+            channel={winners?.bestConversion?.channel ?? null}
+            value={winners?.bestConversion ? `${winners.bestConversion.conversionRate.toFixed(1)}%` : ""}
+            sub={winners?.bestConversion ? `${fmtN(winners.bestConversion.converted)} of ${fmtN(winners.bestConversion.leads)} leads` : undefined}
+          />
+        )}
       </div>
     </div>
   );
@@ -120,6 +133,7 @@ export function ChannelEconomicsTable() {
                 <TableHead className="text-[10px] uppercase tracking-wide h-8 text-right">Cost / Lead</TableHead>
                 <TableHead className="text-[10px] uppercase tracking-wide h-8 text-right">Qualified</TableHead>
                 <TableHead className="text-[10px] uppercase tracking-wide h-8 text-right">Cost / Qual.</TableHead>
+                <TableHead className="text-[10px] uppercase tracking-wide h-8 text-right">Cost / Conv.</TableHead>
                 <TableHead className="text-[10px] uppercase tracking-wide h-8 text-right">Conv. Rate</TableHead>
               </TableRow>
             </TableHeader>
@@ -145,6 +159,9 @@ export function ChannelEconomicsTable() {
                   </TableCell>
                   <TableCell className="text-[12px] text-right py-2.5 tabular-nums">
                     {r.costPerQualified > 0 ? fmtAED(r.costPerQualified) : <span className="text-muted-foreground">—</span>}
+                  </TableCell>
+                  <TableCell className="text-[12px] text-right py-2.5 tabular-nums">
+                    {r.costPerConversion > 0 ? fmtAED(r.costPerConversion) : <span className="text-muted-foreground">—</span>}
                   </TableCell>
                   <TableCell className="text-right py-2.5">
                     <span className={`text-[12px] tabular-nums ${

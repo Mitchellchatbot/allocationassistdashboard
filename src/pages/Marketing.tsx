@@ -11,6 +11,7 @@ import { CampaignWinnerCards } from "@/components/CampaignWinners";
 import { LeadsBySourceChart } from "@/components/LeadsBySourceChart";
 import { useZohoData, displaySource } from "@/hooks/use-zoho-data";
 import { useFilters } from "@/lib/filters";
+import { Link } from "react-router-dom";
 import { useMemo, useState } from "react";
 
 const tip = {
@@ -182,13 +183,27 @@ const Marketing = () => {
       >
         {selectedKpiChannel && (
           <div className="rounded-xl border border-border/50 bg-card shadow-sm p-4">
-            <div className="flex items-center gap-2 mb-3">
+            <div className="flex flex-wrap items-center gap-2 mb-3">
               <ChannelIcon channel={selectedKpiChannel} size={14} />
               <span className="text-[12px] font-semibold uppercase tracking-wide">{selectedKpiChannel}</span>
-              <span className="text-[11px] text-muted-foreground ml-1">· {kpiPanelDoctors.length} doctor{kpiPanelDoctors.length !== 1 ? 's' : ''}</span>
-              <div className="ml-auto flex items-center gap-3 text-[10px] text-muted-foreground">
+              <span className="text-[11px] text-muted-foreground">· {kpiPanelDoctors.length} doctor{kpiPanelDoctors.length !== 1 ? 's' : ''}</span>
+              <div className="flex items-center gap-3 text-[10px] text-muted-foreground">
                 <span className="flex items-center gap-1"><span className="h-2 w-2 rounded-full bg-primary/70 inline-block" />{kpiPanelDoctors.filter(d => d.contacted).length} contacted</span>
                 <span className="flex items-center gap-1"><span className="h-2 w-2 rounded-full bg-muted-foreground/30 inline-block" />{kpiPanelDoctors.filter(d => !d.contacted).length} to reach</span>
+              </div>
+              <div className="ml-auto flex items-center gap-2">
+                <Link
+                  to={`/leads-pipeline?source=${encodeURIComponent(selectedKpiChannel)}&stage=Not%20Contacted`}
+                  className="h-7 inline-flex items-center gap-1 rounded-md bg-warning/10 hover:bg-warning/20 text-warning px-2 text-[10px] font-medium transition-colors"
+                >
+                  Pull uncontacted →
+                </Link>
+                <Link
+                  to={`/leads-pipeline?source=${encodeURIComponent(selectedKpiChannel)}`}
+                  className="h-7 inline-flex items-center gap-1 rounded-md bg-primary/10 hover:bg-primary/20 text-primary px-2 text-[10px] font-medium transition-colors"
+                >
+                  All leads →
+                </Link>
               </div>
             </div>
             <div className="overflow-y-auto" style={{ maxHeight: '240px' }}>

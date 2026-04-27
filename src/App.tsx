@@ -19,7 +19,6 @@ const Marketing       = lazy(() => import("./pages/Marketing"));
 const LeadsPipeline   = lazy(() => import("./pages/LeadsPipeline"));
 const TeamPerformance = lazy(() => import("./pages/TeamPerformance"));
 const Finance         = lazy(() => import("./pages/Finance"));
-const Operations      = lazy(() => import("./pages/Operations"));
 const Settings        = lazy(() => import("./pages/Settings"));
 const MetaAds         = lazy(() => import("./pages/MetaAds"));
 const WorkerDashboard = lazy(() => import("./pages/WorkerDashboard"));
@@ -59,7 +58,6 @@ const App = () => (
               <Route path="/leads-pipeline" element={<ProtectedRoute requiredPage="/leads-pipeline"><LeadsPipeline /></ProtectedRoute>} />
               <Route path="/team"           element={<ProtectedRoute requiredPage="/team"><TeamPerformance /></ProtectedRoute>} />
               <Route path="/finance"        element={<ProtectedRoute requiredPage="/finance"><Finance /></ProtectedRoute>} />
-              <Route path="/operations"     element={<ProtectedRoute requiredPage="/operations"><Operations /></ProtectedRoute>} />
               <Route path="/settings"       element={<ProtectedRoute requiredPage="/settings"><Settings /></ProtectedRoute>} />
               <Route path="/meta-ads"       element={<ProtectedRoute requiredPage="/meta-ads"><MetaAds /></ProtectedRoute>} />
               <Route path="/worker"         element={<ProtectedRoute requiredPage="/worker"><WorkerDashboard /></ProtectedRoute>} />

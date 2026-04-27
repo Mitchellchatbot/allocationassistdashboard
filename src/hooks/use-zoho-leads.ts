@@ -7,7 +7,7 @@
  */
 
 import { useMemo, useState, useEffect } from "react";
-import { useZohoData } from "@/hooks/use-zoho-data";
+import { useZohoData, displaySource } from "@/hooks/use-zoho-data";
 import type { ZohoLead } from "@/hooks/use-zoho-data";
 import type { Doctor } from "./use-meta-leads";
 
@@ -79,6 +79,7 @@ export interface LeadsFilters {
   stage?:     string; // Lead_Status value, e.g. "Not Contacted"
   recruiter?: string; // Owner.name
   badge?:     string; // "on-track" | "delayed" | "at-risk"
+  source?:    string; // Normalised channel name from displaySource(), e.g. "Facebook"
 }
 
 /** Compute the status badge from raw lead fields (mirrors mapLead logic). */
@@ -103,7 +104,7 @@ export function useZohoLeads(search: string, filters: LeadsFilters = {}) {
   // Reset to first page whenever search or filters change
   useEffect(() => {
     setShownCount(PAGE_SIZE);
-  }, [search, filters.stage, filters.recruiter, filters.badge]);
+  }, [search, filters.stage, filters.recruiter, filters.badge, filters.source]);
 
   // Client-side filtering across search + all filter dimensions — no network calls
   const filtered = useMemo(() => {
@@ -164,9 +165,12 @@ export function useZohoLeads(search: string, filters: LeadsFilters = {}) {
       // Badge filter (computed from raw fields to avoid double-pass)
       if (filters.badge && getBadge(l) !== filters.badge) return false;
 
+      // Source filter — compare against normalised channel name from displaySource
+      if (filters.source && displaySource(l.Lead_Source) !== filters.source) return false;
+
       return true;
     });
-  }, [zoho?.rawLeads, search, filters.stage, filters.recruiter, filters.badge]);
+  }, [zoho?.rawLeads, search, filters.stage, filters.recruiter, filters.badge, filters.source]);
 
   const doctors = useMemo(
     () => filtered.slice(0, shownCount).map(mapLead),

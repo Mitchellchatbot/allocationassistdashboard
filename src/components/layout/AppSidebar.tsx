@@ -39,7 +39,6 @@ const mainNav = [
   { title: "Doctor Progress", url: "/leads-pipeline", icon: GitBranch },
   { title: "Team Performance", url: "/team", icon: UsersIcon },
   { title: "Finance", url: "/finance", icon: DollarSign },
-  { title: "Operations & Roadmap", url: "/operations", icon: ClipboardList },
   { title: "Meta Ads", url: "/meta-ads", icon: Image },
   { title: "Follow-ups", url: "/follow-ups", icon: BellRing },
 ];

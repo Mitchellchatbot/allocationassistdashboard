@@ -20,7 +20,6 @@ const PAGE_LABELS: Record<string, string> = {
   "/leads-pipeline": "Doctor Progress",
   "/team":           "Team Performance",
   "/finance":        "Finance",
-  "/operations":     "Operations",
   "/meta-ads":       "Meta Ads",
   "/settings":       "Settings",
   "/worker":         "Worker Portal (upload & view records)",

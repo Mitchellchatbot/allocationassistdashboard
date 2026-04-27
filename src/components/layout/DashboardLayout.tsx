@@ -36,7 +36,6 @@ const breadcrumbMap: Record<string, string> = {
   "/leads-pipeline": "Doctor Progress",
   "/team": "Team Performance",
   "/finance": "Finance",
-  "/operations": "Operations & Roadmap",
   "/settings": "Settings",
   "/follow-ups": "Follow-ups",
 };

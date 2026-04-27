@@ -181,6 +181,7 @@ const LeadsPipeline = () => {
   const [filters, setFilters] = useState<LeadsFilters>({
     stage:     searchParams.get("stage")     ?? undefined,
     recruiter: searchParams.get("recruiter") ?? undefined,
+    source:    searchParams.get("source")    ?? undefined,
   });
   const sentinelRef = useRef<HTMLDivElement>(null);
   const queryClient = useQueryClient();
@@ -193,7 +194,7 @@ const LeadsPipeline = () => {
     setFilters(prev => ({ ...prev, [key]: value || undefined }));
 
   const clearFilters = () => { setFilters({}); setSearch(""); };
-  const hasActiveFilters = search || filters.stage || filters.recruiter || filters.badge;
+  const hasActiveFilters = search || filters.stage || filters.recruiter || filters.badge || filters.source;
 
   // Build option lists from actual Zoho data — no hardcoding
   const leadStatuses = useMemo(() => {
@@ -410,6 +411,18 @@ const LeadsPipeline = () => {
                   </button>
                 );
               })}
+
+              {/* Active source pill (shown only when set, e.g. from a Marketing deep-link) */}
+              {filters.source && (
+                <button
+                  onClick={() => setFilter("source", "")}
+                  className="h-7 inline-flex items-center gap-1 rounded-md border border-emerald-300 bg-emerald-50 text-emerald-700 px-2 text-[10px] font-medium hover:bg-emerald-100 transition-colors"
+                  title="Clear source filter"
+                >
+                  Source: {filters.source}
+                  <X className="h-3 w-3" />
+                </button>
+              )}
 
               {/* Clear all */}
               {hasActiveFilters && (
