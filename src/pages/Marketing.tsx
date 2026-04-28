@@ -214,11 +214,11 @@ const Marketing = () => {
               <TooltipContent side="bottom" className="text-[11px] max-w-[280px] leading-snug">
                 <strong>{ch.channel}</strong> — {ch.doctors} doctors in this period.
                 <div className="mt-1 space-y-0.5 text-[10px]">
-                  <div><strong>Contacted:</strong> any status past Not Contacted ({ch.contactRate}% of leads).</div>
+                  <div><strong>Contacted:</strong> unique leads engaged (Lead_Status past Not Contacted), {ch.contactRate}% of leads — counts leads, not call attempts.</div>
                   <div><strong>Qualified:</strong> reached Initial Sales Call Completed or High Priority Follow up ({ch.qualifiedRate}%).</div>
                   <div><strong>Converted:</strong> reached High Priority Follow up or Closed Won ({ch.conversionRate}%).</div>
                 </div>
-                <div className="text-[10px] text-muted-foreground mt-1">{isBest ? "Top channel by volume." : "Click to filter the dashboard to this channel."}</div>
+                <div className="text-[10px] text-muted-foreground mt-1">{isBest ? "Top channel by volume." : "Click to filter the dashboard to this channel."} Source: Zoho CRM (Lead_Source, Lead_Status).</div>
               </TooltipContent>
             </UiTooltip>
           );

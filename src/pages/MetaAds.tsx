@@ -24,17 +24,17 @@ import {
 
 // Hover hints for MetaKpiCard fronts. Click still flips to the detailed back.
 const META_KPI_HINTS: Record<string, string> = {
-  "Total Spend":             "Total Meta Ads spend in the selected period (live from the Meta Marketing API).",
-  "Impressions":             "How many times your ads were shown. One person seeing the ad three times = 3 impressions.",
-  "Reach":                   "Unique people who saw your ads at least once. Reach × Frequency ≈ Impressions.",
-  "Link Clicks":             "Clicks on the ad's destination link (not just any click on the ad). The action that drives leads.",
-  "Frequency":               "Average times each person saw your ad (Impressions ÷ Reach). 2–3 is healthy; >5 means audience is saturating.",
-  "CPM":                     "Cost per 1,000 impressions. Brand-awareness efficiency. Lower = cheaper exposure.",
-  "Leads from Ads":          "Leads attributed by the Meta API as ad-driven conversions in the period.",
-  "Leads from Forms":        'Lead form submissions imported from your "meta_leads" Supabase table — independent of Meta API attribution.',
-  "Cost Per Lead (forms)":   "Total Meta spend ÷ form-lead submissions. The honest CPL, since form-leads come straight from your forms (not Meta's attributed conversion count).",
-  "Cost Per Qualified":      'Meta spend ÷ qualified form-leads. Qualified = lead reached Initial Sales Call Completed or High Priority Follow up in Zoho. "Contact in Future" is excluded.',
-  "Cost Per Placement":      "Meta spend ÷ placed leads (Closed Won). The ultimate efficiency metric — what does it cost Meta Ads to produce one paying customer.",
+  "Total Spend":             "Total Meta Ads spend in the selected period. Source: Meta Marketing API (live).",
+  "Impressions":             "How many times your ads were shown. One person seeing the ad three times = 3 impressions. Source: Meta Marketing API.",
+  "Reach":                   "Unique people who saw your ads at least once. Reach × Frequency ≈ Impressions. Source: Meta Marketing API.",
+  "Link Clicks":             "Clicks on the ad's destination link (not just any click on the ad). The action that drives leads. Source: Meta Marketing API.",
+  "Frequency":               "Average times each person saw your ad (Impressions ÷ Reach). 2–3 is healthy; >5 means audience is saturating. Source: Meta Marketing API.",
+  "CPM":                     "Cost per 1,000 impressions. Brand-awareness efficiency. Lower = cheaper exposure. Source: Meta Marketing API.",
+  "Leads from Ads":          "Leads attributed by the Meta API as ad-driven conversions in the period. Source: Meta Marketing API (lead-form actions).",
+  "Leads from Forms":        'Lead form submissions imported from your "meta_leads" table — independent of Meta API attribution. Source: Supabase (meta_leads table).',
+  "Cost Per Lead (forms)":   "Total Meta spend ÷ form-lead submissions. The honest CPL, since form-leads come straight from your forms (not Meta's attributed conversion count). Source: Meta API (spend) + Supabase meta_leads.",
+  "Cost Per Qualified":      'Meta spend ÷ qualified form-leads. Qualified = lead reached Initial Sales Call Completed or High Priority Follow up in Zoho. "Contact in Future" is excluded. Source: Meta API (spend) + Supabase meta_leads × Zoho Lead_Status.',
+  "Cost Per Placement":      "Meta spend ÷ placed leads (Closed Won). The ultimate efficiency metric — what does it cost Meta Ads to produce one paying customer. Source: Meta API (spend) + Zoho Deals (Closed Won).",
 };
 
 // ── Colours ───────────────────────────────────────────────────────────────────

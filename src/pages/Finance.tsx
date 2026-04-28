@@ -21,14 +21,14 @@ import {
 // hover just gives a one-liner so users know what the metric means without
 // having to discover the flip interaction.
 const FINANCE_KPI_HINTS: Record<string, string> = {
-  "Marketing Spend":     "Total marketing spend in the selected period (sum of all logged expense rows). Click to see the breakdown by channel.",
-  "Leads Generated":     "Zoho leads created in the selected period. Includes every Lead_Source. Click to see the top sources ranked.",
-  "Cost Per Lead":       "Marketing spend ÷ leads generated. Lower is better. Includes ALL leads regardless of quality — see Cost Per Qualified for the more meaningful figure.",
-  "Cost Per Qualified":  'Marketing spend ÷ qualified leads. Qualified = Initial Sales Call Completed or High Priority Follow up. "Contact in Future" is excluded.',
-  "Top Channel":         "Channel that generated the most leads in this period (by Lead_Source).",
-  "Biggest Expense":     "Largest single expense category in the period.",
-  "Avg Monthly":         "Average monthly marketing spend over the months covered by the selected range.",
-  "Transactions":        "Number of expense rows recorded in the period.",
+  "Marketing Spend":     "Total marketing spend in the selected period (sum of all logged expense rows). Click to see the breakdown by channel. Source: marketing-spend imports (uploaded Digital Marketing sheet).",
+  "Leads Generated":     "Zoho leads created in the selected period — counted by Created_Time. Includes every Lead_Source. Click to see top sources ranked. Source: Zoho CRM (Leads module).",
+  "Cost Per Lead":       "Marketing spend ÷ leads generated. Lower is better. Includes ALL leads regardless of quality — see Cost Per Qualified for the more meaningful figure. Source: marketing-spend imports + Zoho CRM.",
+  "Cost Per Qualified":  'Marketing spend ÷ qualified leads. Qualified = Initial Sales Call Completed or High Priority Follow up. "Contact in Future" is excluded. Source: marketing-spend imports + Zoho CRM (Lead_Status).',
+  "Top Channel":         "Channel that generated the most leads in this period (by Lead_Source). Source: Zoho CRM (Lead_Source).",
+  "Biggest Expense":     "Largest single expense category in the period. Source: marketing-spend imports.",
+  "Avg Monthly":         "Average monthly marketing spend over the months covered by the selected range. Source: marketing-spend imports.",
+  "Transactions":        "Number of expense rows recorded in the period. Source: marketing-spend imports.",
 };
 
 // ── Formatting ────────────────────────────────────────────────────────────────

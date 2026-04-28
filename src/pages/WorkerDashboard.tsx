@@ -22,19 +22,19 @@ import {
 // Hover hints for the KPI tiles on the Worker dashboard. Centralised so every
 // tile gets the same explanation regardless of which section renders it.
 const KPI_TILE_HINTS: Record<string, string> = {
-  "Total Entries":    "Total worker call-log entries logged across all time.",
-  "Workers Active":   "Distinct workers who have logged at least one entry.",
-  "Today":            "Entries logged today (your local timezone).",
-  "High Priority":    "Entries flagged as High Priority — leads that need urgent follow-up.",
-  "All Time":         "Total entries this worker has ever logged.",
-  "This Week":        "Entries logged since the start of this week (Monday).",
-  "Sales Calls":      "Total full sales calls in the selected period.",
-  "Good Calls":       "Calls marked as good outcomes. Good Call Rate = Good ÷ Sales Calls.",
-  "Qualified Leads":  'Zoho leads owned by this worker that reached a qualified status (Initial Sales Call Completed or High Priority Follow up). "Contact in Future" is excluded.',
-  "Conversion":       "Qualified ÷ assigned. The worker's hit rate on the leads they own.",
-  "Total Doctors":    "Zoho leads currently assigned to this worker.",
-  "Contact in Future":"Leads scheduled for a future contact attempt — deferred conversations, not yet qualified.",
-  "Attempted":        'Leads where the worker has reached out at least once but the lead is still "Attempted to Contact".',
+  "Total Entries":    "Total worker call-log entries logged across all time. Source: worker_entries (Supabase, manually logged by recruiters).",
+  "Workers Active":   "Distinct workers who have logged at least one entry. Source: worker_entries.",
+  "Today":            "Entries logged today (your local timezone). Source: worker_entries.",
+  "High Priority":    "Entries flagged as High Priority — leads that need urgent follow-up. Source: worker_entries (status field).",
+  "All Time":         "Total entries this worker has ever logged. Source: worker_entries.",
+  "This Week":        "Entries logged since the start of this week (Monday). Source: worker_entries.",
+  "Sales Calls":      "Total full sales calls in the selected period. This is a CALL count (raw call attempts), not a lead count. Source: weekly_sales (Supabase, imported from spreadsheet).",
+  "Good Calls":       "Calls marked as good outcomes. Good Call Rate = Good ÷ Sales Calls. Source: weekly_sales.",
+  "Qualified Leads":  'Zoho leads owned by this worker that reached a qualified status (Initial Sales Call Completed or High Priority Follow up). Counts UNIQUE LEADS, not call attempts. "Contact in Future" is excluded. Source: Zoho CRM (Lead_Status, Owner.name).',
+  "Conversion":       "Qualified ÷ assigned. The worker's hit rate on the leads they own. Source: Zoho CRM.",
+  "Total Doctors":    "Zoho leads currently assigned to this worker (by Owner.name). Source: Zoho CRM (Owner field).",
+  "Contact in Future":"Leads scheduled for a future contact attempt — deferred conversations, NOT counted as qualified. Source: Zoho CRM (Lead_Status).",
+  "Attempted":        'Leads where the worker has reached out at least once but the lead is still "Attempted to Contact" (didn\'t pick up / connect yet). Source: Zoho CRM (Lead_Status).',
 };
 
 // ── Constants ──────────────────────────────────────────────────────────────────

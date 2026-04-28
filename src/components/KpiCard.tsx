@@ -13,25 +13,25 @@ const iconMap: Record<string, LucideIcon> = {
 
 const tooltipMap: Record<string, string> = {
   // Current dashboard KPIs
-  "Qualified Active":    "Leads that passed initial qualification (Initial Sales Call Completed or High Priority Follow up) and are still active in the pipeline. Excludes Closed Won, Contact in Future, and unqualified leads.",
-  "Qualified Leads":     "All leads that reached a qualified status (Initial Sales Call Completed, High Priority Follow up, or Closed Won) within the selected date range. \"Contact in Future\" is excluded — that's a deferred conversation, not a qualification.",
-  "Qualification Rate":  "Percentage of leads in the period that reached a qualified status. Higher means leads are coming in better-fit.",
-  "Lead → Placement":    "Share of leads that progressed to a real engagement (Initial Sales Call Completed or High Priority Follow up). Captures genuine traction since Closed Won deals are sparse.",
-  "Pipeline Value":      "Total dollar value of all open deals in Zoho. The weighted figure applies stage-probability to each deal.",
-  "Avg. Time to Place":  "Average days from lead creation to a Closed Won deal. Falls back to average age of active leads when no Closed Won deals exist in the period.",
+  "Qualified Active":    "Leads that passed initial qualification (Initial Sales Call Completed or High Priority Follow up) and are still active in the pipeline. Excludes Closed Won, Contact in Future, and unqualified leads. Source: Zoho CRM (Lead_Status).",
+  "Qualified Leads":     "All leads that reached a qualified status (Initial Sales Call Completed, High Priority Follow up, or Closed Won) within the selected date range. \"Contact in Future\" is excluded — that's a deferred conversation, not a qualification. Source: Zoho CRM (Lead_Status, Created_Time).",
+  "Qualification Rate":  "Percentage of leads in the period that reached a qualified status. Higher means leads are coming in better-fit. Source: Zoho CRM (Lead_Status).",
+  "Lead → Placement":    "Share of leads that progressed to a real engagement (Initial Sales Call Completed or High Priority Follow up). Captures genuine traction since Closed Won deals are sparse. Source: Zoho CRM (Lead_Status).",
+  "Pipeline Value":      "Total dollar value of all open deals in Zoho. The weighted figure applies stage-probability to each deal. Source: Zoho CRM (Deals module — Amount × Stage probability).",
+  "Avg. Time to Place":  "Average days from lead creation to a Closed Won deal. Falls back to average age of active leads when no Closed Won deals exist in the period. Source: Zoho CRM (Created_Time → Closing_Date on Closed Won deals).",
 
   // Legacy / placement-funnel labels (kept for backward compat where they still render)
-  "Active Doctors":         "Doctors currently going through the placement process.",
-  "Doctors Placed":         "Doctors successfully placed at hospitals this period.",
-  "Awaiting License":       "Doctors waiting for their medical license to be approved.",
-  "Partner Hospitals":      "Hospitals we work with across all regions.",
-  "Revenue":                "Total income earned from placements.",
-  "Placement Rate":         "Percentage of doctors successfully placed.",
-  "Marketing Spend":        "Total money spent on advertising and marketing in the selected period.",
-  "Placement Revenue":      "Total income from Closed Won deals (placements) in Zoho.",
-  "Cost per Doctor Placed": "Average cost to place one doctor (marketing spend ÷ placements).",
-  "Cost per Placement":     "Average cost to place one doctor (marketing spend ÷ placements).",
-  "Return on Investment":   "How much revenue we earn for every dirham spent.",
+  "Active Doctors":         "Doctors currently going through the placement process. Source: Zoho CRM (Lead_Status).",
+  "Doctors Placed":         "Doctors successfully placed at hospitals this period. Source: Zoho CRM (Closed Won deals).",
+  "Awaiting License":       "Doctors waiting for their medical license to be approved. Source: Zoho CRM (license fields).",
+  "Partner Hospitals":      "Hospitals we work with across all regions. Source: Zoho CRM (Accounts module).",
+  "Revenue":                "Total income earned from placements. Source: Zoho CRM (Closed Won deals — Amount).",
+  "Placement Rate":         "Percentage of doctors successfully placed. Source: Zoho CRM.",
+  "Marketing Spend":        "Total money spent on advertising and marketing in the selected period. Source: marketing-spend imports (uploaded sheets).",
+  "Placement Revenue":      "Total income from Closed Won deals (placements) in Zoho. Source: Zoho CRM (Deals — Amount on Closed Won).",
+  "Cost per Doctor Placed": "Average cost to place one doctor (marketing spend ÷ placements). Source: marketing-spend imports + Zoho CRM.",
+  "Cost per Placement":     "Average cost to place one doctor (marketing spend ÷ placements). Source: marketing-spend imports + Zoho CRM.",
+  "Return on Investment":   "How much revenue we earn for every dirham spent. Source: marketing-spend imports + Zoho CRM (Deals).",
 };
 
 interface KpiCardProps {

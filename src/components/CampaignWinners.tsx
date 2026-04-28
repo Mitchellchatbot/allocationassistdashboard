@@ -217,7 +217,7 @@ export function CampaignWinnerCards() {
           icon={Trophy}
           iconColor="text-amber-600" iconBg="bg-amber-50"
           label="Most Qualified Leads"
-          hint='Campaign that produced the most qualified leads (count, not rate). Qualified = Initial Sales Call Completed, High Priority Follow up, or Closed Won. "Contact in Future" excluded. Click for the full breakdown.'
+          hint='Campaign that produced the most qualified leads (count, not rate). Qualified = Initial Sales Call Completed, High Priority Follow up, or Closed Won. "Contact in Future" excluded. Source: Supabase meta_leads (utm_campaign) cross-referenced with Zoho Lead_Status. Click for the full breakdown.'
           campaign={mostQualified}
           primaryValue={mostQualified ? `${fmtN(mostQualified.qualified)} qualified` : ""}
           sub={mostQualified
@@ -230,8 +230,8 @@ export function CampaignWinnerCards() {
           iconColor="text-orange-600" iconBg="bg-orange-50"
           label={qualifiedLabel}
           hint={hasSpendData
-            ? "Cheapest campaign per qualified lead — Meta ad spend ÷ qualified count. Only campaigns with both spend and qualified leads are eligible."
-            : "No Meta spend matched — ranked by qualification rate (qualified ÷ total leads). Campaigns need ≥ 5 leads to be eligible."}
+            ? "Cheapest campaign per qualified lead — Meta ad spend ÷ qualified count. Only campaigns with both spend and qualified leads are eligible. Source: Meta Marketing API (spend) + Supabase meta_leads × Zoho Lead_Status."
+            : "No Meta spend matched — ranked by qualification rate (qualified ÷ total leads). Campaigns need ≥ 5 leads to be eligible. Source: Supabase meta_leads × Zoho Lead_Status."}
           campaign={bestQualifiedKpi}
           primaryValue={
             bestQualifiedKpi
@@ -252,8 +252,8 @@ export function CampaignWinnerCards() {
           iconColor="text-violet-600" iconBg="bg-violet-50"
           label={conversionLabel}
           hint={hasSpendData
-            ? "Cheapest campaign per converted lead — Meta ad spend ÷ converted count. Converted = High Priority Follow up or Closed Won."
-            : "No Meta spend matched — ranked by conversion rate (converted ÷ total leads). Campaigns need ≥ 5 leads to be eligible."}
+            ? "Cheapest campaign per converted lead — Meta ad spend ÷ converted count. Converted = High Priority Follow up or Closed Won. Source: Meta Marketing API (spend) + Supabase meta_leads × Zoho Lead_Status."
+            : "No Meta spend matched — ranked by conversion rate (converted ÷ total leads). Campaigns need ≥ 5 leads to be eligible. Source: Supabase meta_leads × Zoho Lead_Status."}
           campaign={bestConversionKpi}
           primaryValue={
             bestConversionKpi

@@ -16,10 +16,10 @@ import { useWorkerEntries, useDeleteEntry, type WorkerEntry } from "@/hooks/use-
 // panel. Same labels also live in src/pages/WorkerDashboard.tsx — kept in sync
 // manually so admin and worker views explain metrics the same way.
 const KPI_TILE_HINTS: Record<string, string> = {
-  "Total Entries":    "Total worker call-log entries logged across all workers and time.",
-  "Workers Active":   "Distinct workers who have logged at least one entry.",
-  "Today":            "Entries logged today across all workers.",
-  "High Priority":    "Entries flagged High Priority — leads needing urgent follow-up.",
+  "Total Entries":    "Total worker call-log entries logged across all workers and time. Source: worker_entries (Supabase, manually logged by recruiters).",
+  "Workers Active":   "Distinct workers who have logged at least one entry. Source: worker_entries.",
+  "Today":            "Entries logged today across all workers. Source: worker_entries.",
+  "High Priority":    "Entries flagged High Priority — leads needing urgent follow-up. Source: worker_entries (status field).",
 };
 
 // ── Constants ──────────────────────────────────────────────────────────────────

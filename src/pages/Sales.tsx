@@ -173,7 +173,7 @@ const Sales = () => {
           icon={Users}
           color="text-primary"
           bg="bg-primary/10"
-          hint="All Zoho leads created in the selected date range — every lead the sales team owns this period regardless of status."
+          hint="All Zoho leads created in the selected date range — every lead the sales team owns this period regardless of status. Source: Zoho CRM (Lead_Status, Created_Time)."
           expandedContent={totalLeadsContent}
           expandedHeight={260}
         />
@@ -183,7 +183,7 @@ const Sales = () => {
           icon={Activity}
           color="text-success"
           bg="bg-success/10"
-          hint="Leads whose status is one of: Not Contacted, Attempted to Contact, Initial Sales Call Completed, Contact in Future, or High Priority Follow up. Excludes Unqualified and Not Interested."
+          hint="Leads whose status is one of: Not Contacted, Attempted to Contact, Initial Sales Call Completed, Contact in Future, or High Priority Follow up. Excludes Unqualified and Not Interested. Source: Zoho CRM (Lead_Status)."
           expandedContent={activePipelineContent}
           expandedHeight={260}
         />
@@ -193,7 +193,7 @@ const Sales = () => {
           icon={UserCheck}
           color="text-info"
           bg="bg-info/10"
-          hint="Share of leads that progressed past initial contact (reached Initial Sales Call Completed or High Priority Follow up). Same definition used elsewhere on the dashboard for true qualified leads."
+          hint="Share of leads that progressed past initial contact (reached Initial Sales Call Completed or High Priority Follow up). Same definition used elsewhere on the dashboard for true qualified leads. Source: Zoho CRM (Lead_Status)."
           expandedContent={conversionRateContent}
           expandedHeight={240}
         />
@@ -203,7 +203,7 @@ const Sales = () => {
           icon={PhoneCall}
           color="text-warning"
           bg="bg-warning/10"
-          hint="Share of pipeline leads the team has actually contacted (anything beyond Not Contacted). Measures recruiter responsiveness — high means leads aren't sitting untouched."
+          hint='Share of pipeline leads the team has engaged with — meaning their Lead_Status moved past "Not Contacted". Counts UNIQUE LEADS, not call attempts: a lead with 5 missed calls still counts as 1. Source: Zoho CRM (Lead_Status).'
           expandedContent={contactRateContent}
           expandedHeight={240}
         />
@@ -213,7 +213,7 @@ const Sales = () => {
           icon={Clock}
           color="text-destructive"
           bg="bg-destructive/10"
-          hint="Leads currently flagged High Priority Follow up — recruiters owe these a callback. Higher = more work piling up."
+          hint="Leads currently flagged High Priority Follow up — recruiters owe these a callback. Higher = more work piling up. Source: Zoho CRM (Lead_Status)."
           expandedContent={urgentContent}
           expandedHeight={280}
         />
@@ -251,11 +251,11 @@ const Sales = () => {
           <CardContent className="px-5 pb-5 space-y-3">
             {[
               { icon: Phone, label: "Calls Made",        val: sales.outboundCalls.toLocaleString(), sub: "outbound from Zoho Calls", color: "bg-primary/10 text-primary",
-                hint: "Total outbound calls logged in the Zoho Calls module for the selected period." },
+                hint: "Total outbound CALLS logged for the selected period. This is a call count (raw call attempts), not a count of leads. Source: Zoho CRM (Calls module)." },
               { icon: Mail,  label: "Emails Sent",       val: sales.emailsSent.toLocaleString(),    sub: "sampled from contacted leads",  color: "bg-info/10 text-info",
-                hint: "Email volume sampled from contacted leads. Approximate — Zoho's Email module isn't fully synced." },
+                hint: "Email volume sampled from contacted leads. Approximate — Zoho's Email module isn't fully synced. Source: Zoho CRM (Emails sample)." },
               { icon: Clock, label: "Follow-ups Needed", val: sales.followUpsPending.toString(),    sub: "High Priority Follow up status", color: "bg-warning/10 text-warning",
-                hint: "Leads currently flagged High Priority Follow up — these need a recruiter callback." },
+                hint: "Leads currently flagged High Priority Follow up — these need a recruiter callback. Source: Zoho CRM (Lead_Status)." },
             ].map(m => {
               const Icon = m.icon;
               const tile = (
@@ -326,10 +326,45 @@ const Sales = () => {
             {/* Header */}
             <div className="grid grid-cols-[1fr_70px_60px_65px_65px] gap-3 px-3 pb-1 border-b border-border/40">
               <span className="text-[10px] font-medium text-muted-foreground uppercase tracking-wide">Sales Consultant</span>
-              <span className="text-[10px] font-medium text-muted-foreground uppercase tracking-wide text-right">Leads</span>
-              <span className="text-[10px] font-medium text-muted-foreground uppercase tracking-wide text-right">Contacted</span>
-              <span className="text-[10px] font-medium text-muted-foreground uppercase tracking-wide text-right hidden md:block">Contact %</span>
-              <span className="text-[10px] font-medium text-muted-foreground uppercase tracking-wide text-right hidden md:block">Conv. %</span>
+              <Tooltip>
+                <TooltipTrigger asChild>
+                  <span className="text-[10px] font-medium text-muted-foreground uppercase tracking-wide text-right cursor-help">Leads</span>
+                </TooltipTrigger>
+                <TooltipContent side="top" className="text-[11px] max-w-[280px] leading-snug">
+                  Total leads currently owned by this consultant in the selected period.
+                  <div className="text-[10px] text-muted-foreground mt-1">Source: Zoho CRM (Lead Owner field).</div>
+                </TooltipContent>
+              </Tooltip>
+              <Tooltip>
+                <TooltipTrigger asChild>
+                  <span className="text-[10px] font-medium text-muted-foreground uppercase tracking-wide text-right cursor-help">Contacted</span>
+                </TooltipTrigger>
+                <TooltipContent side="top" className="text-[11px] max-w-[300px] leading-snug">
+                  <strong>Unique leads</strong> the recruiter has actually engaged with — meaning their <em>Lead_Status</em> moved past "Not Contacted" (e.g. picked up the phone, replied, or had a sales call).
+                  <div className="text-[10px] mt-1">
+                    e.g. <strong>84 / 270</strong> means <strong>84 of 270 leads engaged</strong>, NOT "84 calls made". A lead counts once regardless of how many call attempts.
+                  </div>
+                  <div className="text-[10px] text-muted-foreground mt-1">Source: Zoho CRM (Lead_Status field).</div>
+                </TooltipContent>
+              </Tooltip>
+              <Tooltip>
+                <TooltipTrigger asChild>
+                  <span className="text-[10px] font-medium text-muted-foreground uppercase tracking-wide text-right hidden md:block cursor-help">Contact %</span>
+                </TooltipTrigger>
+                <TooltipContent side="top" className="text-[11px] max-w-[280px] leading-snug">
+                  Contacted ÷ Leads, expressed as a percentage. Measures how diligently this consultant works through their assigned leads.
+                  <div className="text-[10px] text-muted-foreground mt-1">≥ 70% green · ≥ 40% blue · below amber.</div>
+                </TooltipContent>
+              </Tooltip>
+              <Tooltip>
+                <TooltipTrigger asChild>
+                  <span className="text-[10px] font-medium text-muted-foreground uppercase tracking-wide text-right hidden md:block cursor-help">Conv. %</span>
+                </TooltipTrigger>
+                <TooltipContent side="top" className="text-[11px] max-w-[280px] leading-snug">
+                  Share of this consultant's leads that progressed past initial contact (Initial Sales Call Completed or High Priority Follow up).
+                  <div className="text-[10px] text-muted-foreground mt-1">"Contact in Future" is excluded — that's a deferred conversation, not real progress.</div>
+                </TooltipContent>
+              </Tooltip>
             </div>
 
             {recruiters.map((rep, i) => (
