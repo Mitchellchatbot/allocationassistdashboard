@@ -12,17 +12,26 @@ const iconMap: Record<string, LucideIcon> = {
 };
 
 const tooltipMap: Record<string, string> = {
-  "Active Doctors": "Doctors currently going through the placement process",
-  "Doctors Placed": "Doctors who have been successfully placed at hospitals this period",
-  "Awaiting License": "Doctors waiting for their medical license to be approved",
-  "Partner Hospitals": "Hospitals we work with across all regions",
-  "Avg. Time to Place": "Average number of days it takes to place a doctor from start to finish",
-  "Revenue": "Total income earned from placements",
-  "Placement Rate": "Percentage of doctors who are successfully placed",
-  "Marketing Spend": "Total money spent on advertising and marketing",
-  "Placement Revenue": "Total income earned from placing doctors",
-  "Cost per Doctor Placed": "How much it costs on average to place one doctor",
-  "Return on Investment": "How much revenue we earn for every dollar spent",
+  // Current dashboard KPIs
+  "Qualified Active":    "Leads that passed initial qualification (Initial Sales Call Completed or High Priority Follow up) and are still active in the pipeline. Excludes Closed Won, Contact in Future, and unqualified leads.",
+  "Qualified Leads":     "All leads that reached a qualified status (Initial Sales Call Completed, High Priority Follow up, or Closed Won) within the selected date range. \"Contact in Future\" is excluded — that's a deferred conversation, not a qualification.",
+  "Qualification Rate":  "Percentage of leads in the period that reached a qualified status. Higher means leads are coming in better-fit.",
+  "Lead → Placement":    "Share of leads that progressed to a real engagement (Initial Sales Call Completed or High Priority Follow up). Captures genuine traction since Closed Won deals are sparse.",
+  "Pipeline Value":      "Total dollar value of all open deals in Zoho. The weighted figure applies stage-probability to each deal.",
+  "Avg. Time to Place":  "Average days from lead creation to a Closed Won deal. Falls back to average age of active leads when no Closed Won deals exist in the period.",
+
+  // Legacy / placement-funnel labels (kept for backward compat where they still render)
+  "Active Doctors":         "Doctors currently going through the placement process.",
+  "Doctors Placed":         "Doctors successfully placed at hospitals this period.",
+  "Awaiting License":       "Doctors waiting for their medical license to be approved.",
+  "Partner Hospitals":      "Hospitals we work with across all regions.",
+  "Revenue":                "Total income earned from placements.",
+  "Placement Rate":         "Percentage of doctors successfully placed.",
+  "Marketing Spend":        "Total money spent on advertising and marketing in the selected period.",
+  "Placement Revenue":      "Total income from Closed Won deals (placements) in Zoho.",
+  "Cost per Doctor Placed": "Average cost to place one doctor (marketing spend ÷ placements).",
+  "Cost per Placement":     "Average cost to place one doctor (marketing spend ÷ placements).",
+  "Return on Investment":   "How much revenue we earn for every dirham spent.",
 };
 
 interface KpiCardProps {
@@ -70,7 +79,7 @@ const KpiCard = ({ label, value, change, period, icon }: KpiCardProps) => {
     return (
       <Tooltip>
         <TooltipTrigger asChild>{cardContent}</TooltipTrigger>
-        <TooltipContent side="bottom" className="text-[10px] max-w-[200px]">{tooltipText}</TooltipContent>
+        <TooltipContent side="bottom" className="text-[11px] max-w-[260px] leading-snug">{tooltipText}</TooltipContent>
       </Tooltip>
     );
   }
