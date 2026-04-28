@@ -19,7 +19,7 @@ import {
 
 // Short {meaning, source} pair for every Finance KPI label.
 const FINANCE_KPI_HINTS: Record<string, { meaning: string; source: string }> = {
-  "Marketing Spend":     { meaning: "Total marketing spend in the period.",                                                     source: "Marketing-spend imports." },
+  "Marketing Spend":     { meaning: "Total spend across the SELECTED date range — not a monthly figure. Multi-month windows show the avg/mo in the sub-line.", source: "Marketing-spend imports." },
   "Leads Generated":     { meaning: "Zoho leads created in the period across every source.",                                    source: "Zoho CRM (Leads — Created_Time)." },
   "Cost Per Lead":       { meaning: "Marketing spend ÷ leads generated. Includes every lead regardless of quality.",            source: "Marketing-spend imports + Zoho CRM." },
   "Cost Per Qualified":  { meaning: 'Marketing spend ÷ qualified leads. "Contact in Future" excluded.',                          source: "Marketing-spend imports + Zoho CRM (Lead_Status)." },
@@ -385,7 +385,7 @@ function CostPerPlacementBack({ cpp, spend, placements }: { cpp: number; spend: 
       <p className="text-[10px] text-muted-foreground pt-1">
         {placements === 0
           ? "No placements recorded in this period. Check if deals are being marked Closed Won in Zoho."
-          : `For every AED 1 of revenue, you're spending AED ${(cpp / (cpp || 1)).toFixed(2)} to acquire. Lower is better.`}
+          : "Lower is better."}
       </p>
     </div>
   );
@@ -397,7 +397,7 @@ const Finance = () => {
   const { roiData } = useFilteredData();
   const { preset, setPreset, dateRange } = useFilters();
   const { data: zoho } = useZohoData();
-  const { fmt: fmtAED } = useCurrency();
+  const { fmt: fmtAED, currency } = useCurrency();
   const {
     rows: allTransactions,
     total: spend, prevTotal: prevSpend, growthPct, avgMonthly, byCategory, monthly,
@@ -554,7 +554,9 @@ const Finance = () => {
         <FlipKpiCard
           icon={DollarSign} label="Marketing Spend" color="text-primary" bg="bg-primary/10"
           value={fmtAED(spend)}
-          sub={`${transactionCount} transactions · ${byCategory.length} channels`}
+          sub={monthly.length > 1
+            ? `${monthly.length}-month total · ${fmtAED(avgMonthly)}/mo avg`
+            : `${transactionCount} transactions · ${byCategory.length} channels`}
           back={<TotalSpendBack byCategory={byCategory} total={spend} />}
         />
         {leadStats.totalLeads > 0 && (
@@ -686,7 +688,7 @@ const Finance = () => {
             <div className="flex items-center justify-between flex-wrap gap-2">
               <CardTitle className="text-[12px] font-medium text-muted-foreground uppercase tracking-wide">Spend vs Leads Generated</CardTitle>
               <div className="flex items-center gap-3 text-[10px] text-muted-foreground">
-                <span className="flex items-center gap-1"><span className="h-2 w-2 rounded-full bg-primary" />Spend (AED)</span>
+                <span className="flex items-center gap-1"><span className="h-2 w-2 rounded-full bg-primary" />Spend ({currency})</span>
                 <span className="flex items-center gap-1"><span className="h-2 w-2 rounded-full bg-emerald-500" />Leads</span>
               </div>
             </div>

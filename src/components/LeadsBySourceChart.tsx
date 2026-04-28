@@ -23,7 +23,7 @@ const tip = {
  */
 export function LeadsBySourceChart() {
   const rows = useChannelEconomics();
-  const { fmt: fmtAED } = useCurrency();
+  const { fmt: fmtAED, currency } = useCurrency();
 
   // Drop "Other" rows and anything with neither leads nor spend so the chart isn't
   // cluttered with junk like "xxxxx" or unmapped sources.
@@ -47,7 +47,7 @@ export function LeadsBySourceChart() {
           {" · "}
           <span className="inline-flex items-center gap-1"><span className="h-2 w-2 rounded-full bg-emerald-500" />Qualified (reached call completed / follow-up)</span>
           {" · "}
-          Spend (right) shows AED spent on that channel in the date range.
+          Spend (right) shows {currency} spent on that channel in the date range.
         </p>
       </CardHeader>
       <CardContent className="px-4 pb-4">
