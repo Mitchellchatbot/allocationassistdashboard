@@ -209,7 +209,7 @@ const Marketing = () => {
               </button>
               <span className="absolute top-2.5 right-2.5">
                 <InfoIcon
-                  meaning={`${ch.channel}: ${ch.doctors} leads. Contacted = unique leads engaged (NOT call attempts). Qualified = Initial Sales Call Completed or High Priority Follow up. Converted = HPF or Closed Won. ${isBest ? "Top channel by volume." : "Click card to filter dashboard."}`}
+                  meaning={`Leads from ${ch.channel} in this period. Click card to filter the dashboard to this channel.`}
                   source="Zoho CRM (Lead_Source, Lead_Status)."
                   side="bottom"
                 />
