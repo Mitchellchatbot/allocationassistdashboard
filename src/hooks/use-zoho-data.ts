@@ -427,11 +427,11 @@ export function aggregateZohoData(
     return t >= period2Start && t < period1Start;
   }).length;
   const qualifiedCurrent = leads.filter(l => {
-    return new Date(l.Created_Time).getTime() >= period1Start && !unqualifiedStatuses.has(l.Lead_Status);
+    return new Date(l.Created_Time).getTime() >= period1Start && qualifiedStatusSet.has(l.Lead_Status);
   }).length;
   const qualifiedPrev = leads.filter(l => {
     const t = new Date(l.Created_Time).getTime();
-    return t >= period2Start && t < period1Start && !unqualifiedStatuses.has(l.Lead_Status);
+    return t >= period2Start && t < period1Start && qualifiedStatusSet.has(l.Lead_Status);
   }).length;
 
   const revenueCurrent = sumBy(closedWon.filter(d => new Date(d.Closing_Date).getTime() >= period1Start), d => d.Amount);

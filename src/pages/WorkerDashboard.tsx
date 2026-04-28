@@ -456,12 +456,11 @@ function PerformanceTab({ memberName }: { memberName: string }) {
   const { data: zoho } = useZohoData();
   const [preset, setPreset] = useState<TimeRangePreset | "all">("month");
 
-  // Zoho leads owned by this worker that reached a "converted" status
-  // (Initial Sales Call Completed, Contact in Future, High Priority Follow up).
-  // Same definition used on the admin Team Performance page.
+  // Zoho leads owned by this worker that reached a qualified status
+  // (Initial Sales Call Completed, High Priority Follow up).
+  // "Contact in Future" is excluded — that's a deferred conversation, not a qualification.
   const CONVERTED_STATUSES = new Set([
     "Initial Sales Call Completed",
-    "Contact in Future",
     "High Priority Follow up",
   ]);
   const { qualifiedLeads, totalLeads } = useMemo(() => {

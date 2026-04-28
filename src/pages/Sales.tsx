@@ -92,7 +92,7 @@ const Sales = () => {
   );
 
   // 4. Qualified Contact Rate → contact rate per recruiter (qualified leads only)
-  const qualifiedStatuses = new Set(['Not Contacted', 'Attempted to Contact', 'Initial Sales Call Completed', 'Contact in Future', 'High Priority Follow up']);
+  const qualifiedStatuses = new Set(['Not Contacted', 'Attempted to Contact', 'Initial Sales Call Completed', 'High Priority Follow up']);
   const qualifiedLeads = filteredLeads.filter(l => qualifiedStatuses.has(l.Lead_Status));
   const qualifiedContacted = qualifiedLeads.filter(l => l.Lead_Status !== 'Not Contacted');
   const qualifiedContactRate = qualifiedLeads.length > 0

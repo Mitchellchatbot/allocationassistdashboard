@@ -139,9 +139,9 @@ const Index = () => {
   );
 
   // 4. Qualified Leads → top recently-qualified leads in the selected date range
-  const unqualStatusesForCard = new Set(['Unqualified Leads', 'Not Interested', 'Not Contacted']);
+  const qualStatusesForCard = new Set(['Initial Sales Call Completed', 'High Priority Follow up', 'Closed Won']);
   const qualifiedLeadsList = filteredLeads
-    .filter(l => !unqualStatusesForCard.has(l.Lead_Status))
+    .filter(l => qualStatusesForCard.has(l.Lead_Status))
     .sort((a, b) => new Date(b.Created_Time).getTime() - new Date(a.Created_Time).getTime())
     .slice(0, 5);
   const notContactedCount = filteredLeads.filter(l => l.Lead_Status === 'Not Contacted').length;
