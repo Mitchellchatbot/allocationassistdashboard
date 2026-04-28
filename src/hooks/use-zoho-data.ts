@@ -145,16 +145,15 @@ export function displaySource(src: string | null): string {
     return 'Uncategorized';
   }
 
-  // Instagram variants
-  if (s.includes('instagram') || s === 'ig') return 'Instagram';
+  // Meta = Facebook + Instagram (single channel; both owned by Meta)
+  if (s.includes('instagram') || s === 'ig')   return 'Meta';
+  if (s.includes('facebook') || s === 'fb' || s === 'meta') return 'Meta';
 
-  // Facebook variants
-  if (s.includes('facebook')) return 'Facebook';
-
-  // Website / SEO
-  if (s.includes('website') && s.includes('seo')) return 'SEO / Organic';
-  if (s.includes('landing page')) return 'Landing Page';
-  if (s.includes('website')) return 'Website';
+  // Website / SEO / ChatGPT — all rolled into one organic-web channel
+  if (s.includes('landing page'))              return 'Landing Page';
+  if (s.includes('website') || s.includes('seo') || s === 'organic'
+      || s.includes('chatgpt') || s.includes('gpt') || s.includes('openai'))
+    return 'Website / SEO';
 
   // Paid ads
   if (s.includes('google') && s.includes('ad')) return 'Google Ads';
@@ -169,7 +168,6 @@ export function displaySource(src: string | null): string {
 
   // Agencies / external
   if (s.includes('go hire') || s.includes('gohire')) return 'Go Hire';
-  if (s.includes('chatgpt') || s.includes('gpt') || s.includes('openai')) return 'ChatGPT';
 
   // Fallback: Title Case the raw value
   return src.replace(/_/g, ' ').replace(/\b\w/g, c => c.toUpperCase()).trim();
@@ -333,11 +331,28 @@ export function aggregateZohoData(
   ]);
   const unqualifiedStatuses = new Set(['Unqualified Leads', 'Not Interested']);
 
-  const qualifiedLeads = leads.filter(l => !unqualifiedStatuses.has(l.Lead_Status));
+  // True qualification: lead passed the initial screening. "Contact in Future"
+  // is NOT qualified (recruiter deferred). Not Contacted / Attempted are also
+  // not qualified — they're earlier funnel stages.
+  const qualifiedStatusSet = new Set([
+    'Initial Sales Call Completed',
+    'High Priority Follow up',
+    'Closed Won',
+  ]);
+  const qualifiedLeads = leads.filter(l => qualifiedStatusSet.has(l.Lead_Status));
   const activeLeads    = leads.filter(l => activeStatuses.has(l.Lead_Status));
 
   // Log unique deal stages so we can confirm the exact Zoho stage names
   console.log('[deals] unique stages:', [...new Set(deals.map(d => d.Stage))]);
+  // Log unique lead statuses with counts so we can see every Lead_Status in use
+  const leadStatusCounts = leads.reduce<Record<string, number>>((acc, l) => {
+    const s = l.Lead_Status ?? '(empty)';
+    acc[s] = (acc[s] ?? 0) + 1;
+    return acc;
+  }, {});
+  console.log('[leads] unique statuses:',
+    Object.entries(leadStatusCounts).sort((a, b) => b[1] - a[1])
+  );
 
   const closedWon      = deals.filter(d => d.Stage === 'Closed Won');
   const closedLost     = deals.filter(d => d.Stage === 'Closed Lost');
@@ -362,10 +377,10 @@ export function aggregateZohoData(
   }, 0);
 
   // ── Conversion rates ─────────────────────────────────────────────────────
-  // Statuses that represent a real engagement (beyond just attempting to call)
+  // Statuses that represent a real engagement past initial qualification.
+  // "Contact in Future" excluded — that's a deferred conversation, not progress.
   const convertedStatuses = new Set([
     'Initial Sales Call Completed',
-    'Contact in Future',
     'High Priority Follow up',
   ]);
   const convertedLeads = leads.filter(l => convertedStatuses.has(l.Lead_Status));
@@ -521,7 +536,6 @@ export function aggregateZohoData(
     && l.Lead_Status !== 'Not Interested').length;
   const callCompleted  = leads.filter(l =>
     l.Lead_Status === 'Initial Sales Call Completed'
-    || l.Lead_Status === 'Contact in Future'
     || l.Lead_Status === 'High Priority Follow up').length;
 
   const highPriority = leads.filter(l => l.Lead_Status === 'High Priority Follow up').length;

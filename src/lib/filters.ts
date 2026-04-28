@@ -1,6 +1,6 @@
 import { createContext, useContext } from "react";
 
-export type TimeRangePreset = "today" | "week" | "month" | "quarter" | "year" | "custom";
+export type TimeRangePreset = "today" | "week" | "month" | "quarter" | "year" | "all" | "custom";
 
 /** Backward-compat alias used in older code */
 export type TimeRange = TimeRangePreset;
@@ -62,6 +62,11 @@ export function getPresetRange(preset: TimeRangePreset): DateRange {
     case "year":
       return { from: new Date(now.getFullYear(), 0, 1), to: today };
 
+    case "all":
+      // Far enough back to include every record in Zoho / Supabase, including
+      // historical imports. Year 2000 is safe — the company didn't exist then.
+      return { from: new Date(2000, 0, 1), to: today };
+
     default:
       return { from: new Date(now.getFullYear(), now.getMonth(), 1), to: today };
   }
@@ -75,6 +80,7 @@ const PRESET_LABELS: Record<TimeRangePreset, string> = {
   month:   "This Month",
   quarter: "This Quarter",
   year:    "This Year",
+  all:     "All Time",
   custom:  "Custom",
 };
 
@@ -107,6 +113,7 @@ export function getTimeLabel(preset: TimeRangePreset, range?: DateRange): string
       month:   "this month",
       quarter: "this quarter",
       year:    "this year",
+      all:     "all time",
       custom:  "selected period",
     };
     return map[preset];

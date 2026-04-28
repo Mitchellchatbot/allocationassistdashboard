@@ -8,15 +8,15 @@
  */
 
 export type ChannelKey =
-  | "Facebook" | "Instagram" | "LinkedIn" | "Google Ads" | "TikTok"
-  | "YouTube"  | "Snapchat"  | "Twitter"  | "WhatsApp"   | "Website"
-  | "SEO"      | "Landing Page" | "Referrals" | "Email"  | "Influencer"
-  | "Print"    | "Outdoor"   | "Radio"    | "TV"         | "Events"
-  | "Go Hire"  | "ChatGPT"   | "Other";
+  | "Meta"     | "LinkedIn" | "Google Ads" | "TikTok"
+  | "YouTube"  | "Snapchat" | "Twitter"  | "WhatsApp"
+  | "Website / SEO" | "Landing Page" | "Referrals" | "Email" | "Influencer"
+  | "Print"    | "Outdoor"  | "Radio"    | "TV"     | "Events"
+  | "Go Hire"  | "Other";
 
 const RULES: { match: RegExp; key: ChannelKey }[] = [
-  { match: /facebook|^fb$|meta\s*ads?|^meta$/i,            key: "Facebook" },
-  { match: /instagram|^ig$/i,                              key: "Instagram" },
+  // Meta = Facebook + Instagram (single channel; both owned by Meta)
+  { match: /facebook|instagram|^fb$|^ig$|meta\s*ads?|^meta$/i, key: "Meta" },
   { match: /linkedin/i,                                    key: "LinkedIn" },
   { match: /google\s*ad|adwords|sem|paid\s*search/i,       key: "Google Ads" },
   { match: /tiktok/i,                                      key: "TikTok" },
@@ -24,9 +24,9 @@ const RULES: { match: RegExp; key: ChannelKey }[] = [
   { match: /snapchat/i,                                    key: "Snapchat" },
   { match: /twitter|^x$|x\.com/i,                          key: "Twitter" },
   { match: /whatsapp/i,                                    key: "WhatsApp" },
-  { match: /^seo$|seo\s*\/\s*organic|organic|search\s*engine\s*opt/i, key: "SEO" },
+  // Website / SEO = website + SEO + ChatGPT (single organic-web channel)
+  { match: /^seo$|seo\s*\/\s*organic|organic|search\s*engine\s*opt|website|web\s*direct|chatgpt|openai|^gpt$/i, key: "Website / SEO" },
   { match: /landing\s*page/i,                              key: "Landing Page" },
-  { match: /website|web\s*direct/i,                        key: "Website" },
   { match: /referr|word\s*of\s*mouth/i,                    key: "Referrals" },
   { match: /email|newsletter|mailchimp/i,                  key: "Email" },
   { match: /influencer/i,                                  key: "Influencer" },
@@ -36,7 +36,6 @@ const RULES: { match: RegExp; key: ChannelKey }[] = [
   { match: /^tv$|television/i,                             key: "TV" },
   { match: /event|conference|expo/i,                       key: "Events" },
   { match: /go\s*hire|gohire/i,                            key: "Go Hire" },
-  { match: /chatgpt|openai|gpt/i,                          key: "ChatGPT" },
 ];
 
 export function normalizeChannelKey(raw: string | null | undefined): ChannelKey {

@@ -1127,7 +1127,7 @@ const MetaAds = () => {
                     sub={cpq > 0 ? `${fmtN(qualifiedLeads)} qualified · ${totalLeads > 0 ? Math.round((qualifiedLeads / totalLeads) * 100) : 0}% rate` : "no qualified leads in period"}
                     back={
                       <div className="space-y-2 text-[11px]">
-                        <p className="text-muted-foreground">Qualified = lead's <strong>stage</strong> is "Initial Sales Call Completed", "Contact in Future" or "High Priority Follow up".</p>
+                        <p className="text-muted-foreground">Qualified = lead's <strong>stage</strong> is "Initial Sales Call Completed" or "High Priority Follow up". "Contact in Future" is excluded — that's a deferred conversation, not a qualification.</p>
                         <div className="pt-2 border-t border-border/40 space-y-1">
                           <div className="flex justify-between"><span className="text-muted-foreground">Ad spend</span><span className="font-semibold tabular-nums">{fmtC(toDisplay(adSpend), currency)}</span></div>
                           <div className="flex justify-between"><span className="text-muted-foreground">Qualified</span><span className="font-semibold tabular-nums">{fmtN(qualifiedLeads)}</span></div>

@@ -11,6 +11,7 @@ const PRESETS: { label: string; value: TimeRangePreset }[] = [
   { label: "This Month",   value: "month"   },
   { label: "This Quarter", value: "quarter" },
   { label: "This Year",    value: "year"    },
+  { label: "All Time",     value: "all"     },
 ];
 
 export function DateRangePicker() {

@@ -41,23 +41,34 @@ export function useCampaignWinners(): CampaignWinners {
     const funnels = leadsStats?.campaignFunnels ?? [];
     const tokenAvailable = !!getMetaToken();
 
-    // Build a lookup from normalised campaign name → spend (only if token is set)
-    const spendByCampaign = new Map<string, number>();
+    // Build THREE lookups against Meta API campaigns:
+    //  - id    → name (so a numeric utm_campaign can be translated to a readable name)
+    //  - id    → spend
+    //  - name  → spend (fallback: utm_campaign already contains a readable slug)
+    const nameById  = new Map<string, string>();
+    const spendById = new Map<string, number>();
+    const spendByNameKey = new Map<string, number>();
     if (tokenAvailable && metaApi?.campaigns) {
       for (const c of metaApi.campaigns) {
-        const key = normaliseCampaignName(c.name);
-        if (!key) continue;
-        spendByCampaign.set(key, (spendByCampaign.get(key) ?? 0) + c.spend);
+        if (c.id)   {
+          nameById.set(c.id, c.name);
+          spendById.set(c.id, (spendById.get(c.id) ?? 0) + c.spend);
+        }
+        const nameKey = normaliseCampaignName(c.name);
+        if (nameKey) spendByNameKey.set(nameKey, (spendByNameKey.get(nameKey) ?? 0) + c.spend);
       }
     }
 
     let hasSpendData = false;
     const rows: CampaignRow[] = funnels.map(f => {
-      const key   = normaliseCampaignName(f.campaign);
-      const spend = spendByCampaign.get(key) ?? 0;
+      const raw     = f.campaign.trim();
+      // If utm_campaign IS a Meta campaign ID, swap to the human-readable name.
+      const display = nameById.get(raw) ?? f.campaign;
+      // Spend: prefer ID match (exact), fall back to normalised-name match.
+      const spend   = spendById.get(raw) ?? spendByNameKey.get(normaliseCampaignName(raw)) ?? 0;
       if (spend > 0) hasSpendData = true;
       return {
-        campaign:          f.campaign,
+        campaign:          display,
         total:             f.total,
         qualified:         f.qualified,
         converted:         f.converted,

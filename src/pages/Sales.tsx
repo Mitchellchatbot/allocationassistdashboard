@@ -9,8 +9,9 @@ const Sales = () => {
 
   const maxLeads = Math.max(...recruiters.map(r => r.doctors), 1);
 
-  // Overall conversion rate using the same lead-status metric as per-recruiter breakdown
-  const convertedStatuses = new Set(['Initial Sales Call Completed', 'Contact in Future', 'High Priority Follow up']);
+  // Overall conversion rate using the same lead-status metric as per-recruiter breakdown.
+  // "Contact in Future" is excluded — it's unqualified (recruiter deferred).
+  const convertedStatuses = new Set(['Initial Sales Call Completed', 'High Priority Follow up']);
   const overallConversionRate = filteredLeads.length > 0
     ? parseFloat(((filteredLeads.filter(l => convertedStatuses.has(l.Lead_Status)).length / filteredLeads.length) * 100).toFixed(1))
     : 0;

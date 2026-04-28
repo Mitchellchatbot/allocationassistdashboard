@@ -20,8 +20,10 @@ export interface ChannelEconomicsRow {
 // QUALIFIED is a SUPERSET of CONVERTED. A lead that converted ("Closed Won")
 // must first have been qualified. Keeping these as nested cohorts means
 // converted ≤ qualified always — anything else is a counting bug.
+//
+// "Contact in Future" is NOT qualified — it means the recruiter deferred the
+// conversation, not that the lead passed qualification.
 const CONVERTED_STATUSES = new Set([
-  "Contact in Future",
   "High Priority Follow up",
   "Closed Won",
 ]);

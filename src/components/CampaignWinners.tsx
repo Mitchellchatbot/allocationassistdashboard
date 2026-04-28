@@ -29,7 +29,7 @@ function CampaignCard({ icon: Icon, iconColor, iconBg, label, campaign, primaryV
       className={empty ? "select-none" : "cursor-pointer select-none"}
       style={{
         perspective: "1200px",
-        height: flipped ? "200px" : "128px",
+        height: flipped ? "220px" : "150px",
         transition: "height 0.45s cubic-bezier(0.4,0,0.2,1)",
       }}
       onClick={() => !empty && setFlipped(f => !f)}
@@ -110,7 +110,8 @@ export function CampaignWinnerCards() {
     <div className="space-y-2">
       <p className="text-foreground/80">
         We rank every campaign by raw <strong>qualified lead count</strong>. A lead is "qualified"
-        if its Zoho status is one of: Initial Sales Call Completed, Contact in Future, High Priority Follow up, or Closed Won.
+        if its Zoho status is one of: Initial Sales Call Completed, High Priority Follow up, or Closed Won.
+        "Contact in Future" is excluded — that's a deferred conversation, not a qualification.
       </p>
       <div className="space-y-1 pt-2 border-t border-border/40">
         <div className="flex justify-between"><span className="text-muted-foreground">Total leads</span><span className="font-semibold tabular-nums">{fmtN(mostQualified.total)}</span></div>
@@ -162,7 +163,7 @@ export function CampaignWinnerCards() {
       <div className="space-y-2">
         <p className="text-foreground/80">
           <strong>Cost / Conversion</strong> = Meta ad spend on this campaign ÷ converted lead count.
-          A lead is "converted" if its Zoho status is Contact in Future, High Priority Follow up, or Closed Won.
+          A lead is "converted" if its Zoho status is High Priority Follow up or Closed Won.
         </p>
         <div className="space-y-1 pt-2 border-t border-border/40">
           <div className="flex justify-between"><span className="text-muted-foreground">Ad spend</span><span className="font-semibold tabular-nums">{fmtAED(bestConversionKpi.spend)}</span></div>

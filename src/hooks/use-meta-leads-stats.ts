@@ -31,13 +31,13 @@ export type MetaLeadsStats = {
 // Stage classification mirrors how Zoho Lead_Status is treated elsewhere in the app.
 // Kept in lower-case so we match regardless of casing variations across imports.
 // QUALIFIED is a superset of CONVERTED — a converted lead must first be qualified.
+// "Contact in Future" is NOT qualified — it's a deferred conversation, not a pass.
 const CONVERTED_STAGES = new Set([
   "closed won",
   "won",
   "converted",
   "placed",
   "placement",
-  "contact in future",
   "high priority follow up",
   "high priority follow-up",
 ]);

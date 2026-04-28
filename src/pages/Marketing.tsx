@@ -50,11 +50,12 @@ const Marketing = () => {
       'Not Contacted', 'Attempted to Contact', 'Initial Sales Call Completed',
       'Contact in Future', 'High Priority Follow up',
     ]);
+    // "Contact in Future" is NOT qualified — recruiter deferred, not a pass.
     const qualifiedStatuses = new Set([
-      'Initial Sales Call Completed', 'Contact in Future', 'High Priority Follow up', 'Closed Won',
+      'Initial Sales Call Completed', 'High Priority Follow up', 'Closed Won',
     ]);
     const convertedStatuses = new Set([
-      'Contact in Future', 'High Priority Follow up', 'Closed Won',
+      'High Priority Follow up', 'Closed Won',
     ]);
 
     for (const l of recentLeads) {
