@@ -154,8 +154,10 @@ const Index = () => {
     </div>
   );
 
-  // 4. Qualified Leads → top recently-qualified leads in the selected date range
-  const qualStatusesForCard = new Set(['Initial Sales Call Completed', 'High Priority Follow up', 'Closed Won']);
+  // 4. Qualified Leads → top recently-qualified leads in the selected date range.
+  // Strict qualified definition: Initial Sales Call Completed + High Priority Follow up.
+  // Closed Won is a placement, tracked separately via Deals.
+  const qualStatusesForCard = new Set(['Initial Sales Call Completed', 'High Priority Follow up']);
   const qualifiedLeadsList = filteredLeads
     .filter(l => qualStatusesForCard.has(l.Lead_Status))
     .sort((a, b) => new Date(b.Created_Time).getTime() - new Date(a.Created_Time).getTime())
@@ -217,14 +219,17 @@ const Index = () => {
     </div>
   );
 
-  // 6. Qualification Rate → qualified vs unqualified breakdown
-  const unqualStatuses = new Set(['Unqualified Leads', 'Not Interested']);
-  const qualCount      = filteredLeads.filter(l => !unqualStatuses.has(l.Lead_Status)).length;
+  // 6. Qualification Rate → qualified vs unqualified breakdown.
+  // Strict qualified definition: Initial Sales Call Completed + High Priority Follow up.
+  // Previous version used !unqualStatuses (a blocklist) which inflated the count by
+  // also counting Not Contacted / Attempted / Contact in Future as qualified.
+  const qualStatusesForRate = new Set(['Initial Sales Call Completed', 'High Priority Follow up']);
+  const qualCount      = filteredLeads.filter(l => qualStatusesForRate.has(l.Lead_Status)).length;
   const unqualCount    = filteredLeads.filter(l => l.Lead_Status === 'Unqualified Leads').length;
   const notIntCount    = filteredLeads.filter(l => l.Lead_Status === 'Not Interested').length;
   const total          = filteredLeads.length;
   const qualCats = [
-    { label: 'Qualified / Active',  count: qualCount,   color: 'bg-success'       },
+    { label: 'Qualified',           count: qualCount,   color: 'bg-success'       },
     { label: 'Unqualified',         count: unqualCount, color: 'bg-warning'        },
     { label: 'Not Interested',      count: notIntCount, color: 'bg-destructive/70' },
   ];
@@ -284,7 +289,7 @@ const Index = () => {
       value: kpis[3]?.value ?? '—',
       icon: CheckCircle, color: 'text-success', bg: 'bg-success/10',
       frontExtra: kpis[3]?.period,
-      hintMeaning: 'Leads at Initial Sales Call Completed, High Priority Follow up, or Closed Won. "Contact in Future" excluded.',
+      hintMeaning: "Leads at Initial Sales Call Completed or High Priority Follow up. Closed Won is tracked separately as a placement.",
       hintSource:  "Zoho CRM (Lead_Status).",
       expandedContent: qualifiedLeadsContent,
       expandedHeight: 250,

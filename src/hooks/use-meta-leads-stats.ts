@@ -38,21 +38,24 @@ export type MetaLeadsStats = {
 
 // Stage classification mirrors how Zoho Lead_Status is treated elsewhere in the app.
 // Kept in lower-case so we match regardless of casing variations across imports.
-// QUALIFIED is a superset of CONVERTED — a converted lead must first be qualified.
-// "Contact in Future" is NOT qualified — it's a deferred conversation, not a pass.
-const CONVERTED_STAGES = new Set([
-  "closed won",
-  "won",
-  "converted",
-  "placed",
-  "placement",
+//
+// CRITICAL: Qualified = Initial Sales Call Completed + High Priority Follow up ONLY.
+// Closed Won / "qualified" / "converted" / "placed" etc. are NOT qualified here —
+// they're tracked as placements via Zoho Deals. "Contact in Future" is also NOT
+// qualified (deferred conversation). This matches how Ammar tallies Meta leads
+// manually, so dashboard CPQL numbers line up with reality.
+const QUALIFIED_STAGES = new Set([
+  "initial sales call completed",
   "high priority follow up",
   "high priority follow-up",
 ]);
-const QUALIFIED_STAGES = new Set([
-  "initial sales call completed",
-  "qualified",
-  ...CONVERTED_STAGES,
+// Converted = Qualified leads that progressed to a placement signal. Used for
+// "cost per placement" and conversion-rate cards. Kept narrower than the old
+// definition for the same reason as above.
+const CONVERTED_STAGES = new Set([
+  "high priority follow up",
+  "high priority follow-up",
+  "closed won",
 ]);
 
 // Normalize utm_source values into clean platform names

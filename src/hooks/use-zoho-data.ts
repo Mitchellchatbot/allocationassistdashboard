@@ -331,13 +331,14 @@ export function aggregateZohoData(
   ]);
   const unqualifiedStatuses = new Set(['Unqualified Leads', 'Not Interested']);
 
-  // True qualification: lead passed the initial screening. "Contact in Future"
-  // is NOT qualified (recruiter deferred). Not Contacted / Attempted are also
-  // not qualified — they're earlier funnel stages.
+  // CRITICAL: Qualified = Initial Sales Call Completed + High Priority Follow up
+  // ONLY. Closed Won is tracked separately as a placement (Deals.Closed Won),
+  // not a "qualified lead" stage. Contact in Future / Not Contacted / Attempted
+  // are earlier funnel stages and not qualified. This matches Ammar's manual
+  // tally so cost-per-qualified numbers reflect reality.
   const qualifiedStatusSet = new Set([
     'Initial Sales Call Completed',
     'High Priority Follow up',
-    'Closed Won',
   ]);
   const qualifiedLeads = leads.filter(l => qualifiedStatusSet.has(l.Lead_Status));
   const activeLeads    = leads.filter(l => activeStatuses.has(l.Lead_Status));

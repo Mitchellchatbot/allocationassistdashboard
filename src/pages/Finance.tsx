@@ -622,7 +622,7 @@ const Finance = () => {
             sub={`${fmtN(leadStats.qualified)} qualified · ${leadStats.qualRate.toFixed(0)}% rate`}
             back={
               <div className="space-y-2">
-                <p className="text-[10px]">Qualified = reached <strong>Initial Sales Call Completed</strong> or <strong>High Priority Follow up</strong>. "Contact in Future" is excluded — that's a deferred conversation, not a qualification.</p>
+                <p className="text-[10px]">Qualified = reached <strong>Initial Sales Call Completed</strong> or <strong>High Priority Follow up</strong>. Closed Won is tracked separately as a placement; "Contact in Future" is a deferred conversation, not a qualification.</p>
                 <div className="pt-2 border-t border-border/40 space-y-1">
                   <div className="flex justify-between"><span className="text-muted-foreground">Total leads</span><span className="font-semibold tabular-nums">{fmtN(leadStats.totalLeads)}</span></div>
                   <div className="flex justify-between"><span className="text-muted-foreground">Qualified</span><span className="font-semibold tabular-nums">{fmtN(leadStats.qualified)}</span></div>

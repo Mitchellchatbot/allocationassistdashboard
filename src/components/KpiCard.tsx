@@ -17,7 +17,7 @@ const iconMap: Record<string, LucideIcon> = {
 const HINTS: Record<string, { meaning: string; source: string }> = {
   // Current dashboard KPIs
   "Qualified Active":     { meaning: "Qualified leads still active in the pipeline. Excludes Closed Won, Contact in Future, and unqualified leads.",                                  source: "Zoho CRM (Lead_Status)." },
-  "Qualified Leads":      { meaning: 'Leads that reached Initial Sales Call Completed, High Priority Follow up, or Closed Won. "Contact in Future" excluded.',                       source: "Zoho CRM (Lead_Status)." },
+  "Qualified Leads":      { meaning: "Leads that reached Initial Sales Call Completed or High Priority Follow up. Closed Won is tracked separately as a placement.",                  source: "Zoho CRM (Lead_Status)." },
   "Qualification Rate":   { meaning: "Qualified leads ÷ total leads in the period.",                                                                                                  source: "Zoho CRM (Lead_Status)." },
   "Lead → Placement":     { meaning: "Share of leads that reached Initial Sales Call Completed or High Priority Follow up.",                                                          source: "Zoho CRM (Lead_Status)." },
   "Pipeline Value":       { meaning: "Total $ value of open deals. Weighted figure applies stage probability.",                                                                       source: "Zoho CRM (Deals — Amount)." },

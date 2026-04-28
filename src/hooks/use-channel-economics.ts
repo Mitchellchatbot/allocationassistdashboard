@@ -17,19 +17,19 @@ export interface ChannelEconomicsRow {
   conversionRate: number;   // 0..100 (lead → "converted" status)
 }
 
-// QUALIFIED is a SUPERSET of CONVERTED. A lead that converted ("Closed Won")
-// must first have been qualified. Keeping these as nested cohorts means
-// converted ≤ qualified always — anything else is a counting bug.
-//
-// "Contact in Future" is NOT qualified — it means the recruiter deferred the
-// conversation, not that the lead passed qualification.
+// CRITICAL: Qualified = Initial Sales Call Completed + High Priority Follow up
+// ONLY. Closed Won is a separate "converted/placement" signal, not a qualified
+// status. Contact in Future is also excluded (deferred conversation).
+// This matches Ammar's manual tally so cost-per-qualified numbers reflect
+// reality.
+const QUALIFIED_STATUSES = new Set([
+  "Initial Sales Call Completed",
+  "High Priority Follow up",
+]);
+// Converted = qualified leads that progressed to a placement signal.
 const CONVERTED_STATUSES = new Set([
   "High Priority Follow up",
   "Closed Won",
-]);
-const QUALIFIED_STATUSES = new Set([
-  "Initial Sales Call Completed",
-  ...CONVERTED_STATUSES,
 ]);
 
 /**

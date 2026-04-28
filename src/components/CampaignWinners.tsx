@@ -116,8 +116,9 @@ export function CampaignWinnerCards() {
     <div className="space-y-2">
       <p className="text-foreground/80">
         We rank every campaign by raw <strong>qualified lead count</strong>. A lead is "qualified"
-        if its Zoho status is one of: Initial Sales Call Completed, High Priority Follow up, or Closed Won.
-        "Contact in Future" is excluded — that's a deferred conversation, not a qualification.
+        if its Zoho status is Initial Sales Call Completed or High Priority Follow up. Closed Won
+        is tracked separately as a placement; "Contact in Future" is a deferred conversation, not
+        a qualification.
       </p>
       <div className="space-y-1 pt-2 border-t border-border/40">
         <div className="flex justify-between"><span className="text-muted-foreground">Total leads</span><span className="font-semibold tabular-nums">{fmtN(mostQualified.total)}</span></div>

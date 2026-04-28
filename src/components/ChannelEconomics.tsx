@@ -228,7 +228,7 @@ export function ChannelEconomicsTable() {
                   <HeaderHint label="Cost / Lead" meaning="Spend ÷ leads. Lower is better." source="Marketing-spend imports + Zoho CRM." className="justify-end" />
                 </TableHead>
                 <TableHead className="text-[10px] uppercase tracking-wide h-8 text-right">
-                  <HeaderHint label="Qualified" meaning='Leads at Initial Sales Call Completed, High Priority Follow up, or Closed Won. "Contact in Future" excluded.' source="Zoho CRM (Lead_Status)." className="justify-end" />
+                  <HeaderHint label="Qualified" meaning="Leads at Initial Sales Call Completed or High Priority Follow up." source="Zoho CRM (Lead_Status)." className="justify-end" />
                 </TableHead>
                 <TableHead className="text-[10px] uppercase tracking-wide h-8 text-right">
                   <HeaderHint label="Cost / Qual." meaning="Spend ÷ qualified leads." source="Marketing-spend imports + Zoho CRM." className="justify-end" />

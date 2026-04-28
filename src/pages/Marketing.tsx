@@ -51,9 +51,10 @@ const Marketing = () => {
       'Not Contacted', 'Attempted to Contact', 'Initial Sales Call Completed',
       'Contact in Future', 'High Priority Follow up',
     ]);
-    // "Contact in Future" is NOT qualified — recruiter deferred, not a pass.
+    // CRITICAL: Qualified = ICS Completed + High Priority Follow up only.
+    // Closed Won is a placement signal, tracked separately via convertedStatuses.
     const qualifiedStatuses = new Set([
-      'Initial Sales Call Completed', 'High Priority Follow up', 'Closed Won',
+      'Initial Sales Call Completed', 'High Priority Follow up',
     ]);
     const convertedStatuses = new Set([
       'High Priority Follow up', 'Closed Won',
