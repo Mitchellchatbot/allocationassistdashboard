@@ -144,7 +144,7 @@ export function ChannelWinnerCards() {
         <WinnerCard
           icon={Target}
           label="Lowest Cost / Qualified"
-          hint="Cheapest channel per qualified lead. Spend ÷ qualified leads. Qualified = Initial Sales Call Completed, High Priority Follow up, or Closed Won. \"Contact in Future\" excluded."
+          hint={`Cheapest channel per qualified lead. Spend ÷ qualified leads. Qualified = Initial Sales Call Completed, High Priority Follow up, or Closed Won. "Contact in Future" excluded.`}
           iconColor="text-orange-600" iconBg="bg-orange-50"
           channel={winners?.lowestCPQ?.channel ?? null}
           value={winners?.lowestCPQ ? fmtAED(winners.lowestCPQ.costPerQualified) : ""}
