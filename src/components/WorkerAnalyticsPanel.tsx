@@ -9,17 +9,16 @@ import {
   XAxis, YAxis, CartesianGrid, Tooltip, Legend, ResponsiveContainer,
 } from "recharts";
 import { Loader2, TrendingUp, Trash2, ClipboardList } from "lucide-react";
-import { Tooltip as UiTooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
+import { InfoIcon } from "@/components/InfoIcon";
 import { useWorkerEntries, useDeleteEntry, type WorkerEntry } from "@/hooks/use-worker-entries";
 
-// Hover hints for KpiTile labels on the Team Performance / Worker Analytics
-// panel. Same labels also live in src/pages/WorkerDashboard.tsx — kept in sync
-// manually so admin and worker views explain metrics the same way.
-const KPI_TILE_HINTS: Record<string, string> = {
-  "Total Entries":    "Total worker call-log entries logged across all workers and time. Source: worker_entries (Supabase, manually logged by recruiters).",
-  "Workers Active":   "Distinct workers who have logged at least one entry. Source: worker_entries.",
-  "Today":            "Entries logged today across all workers. Source: worker_entries.",
-  "High Priority":    "Entries flagged High Priority — leads needing urgent follow-up. Source: worker_entries (status field).",
+// Same labels as WorkerDashboard's tile hints — kept in sync manually so
+// admin and worker views explain metrics the same way.
+const KPI_TILE_HINTS: Record<string, { meaning: string; source: string }> = {
+  "Total Entries":  { meaning: "All worker call-log entries logged across all workers.", source: "Supabase (worker_entries)." },
+  "Workers Active": { meaning: "Distinct workers with at least one logged entry.",       source: "Supabase (worker_entries)." },
+  "Today":          { meaning: "Entries logged today across all workers.",               source: "Supabase (worker_entries)." },
+  "High Priority":  { meaning: "Entries flagged High Priority.",                         source: "Supabase (worker_entries)." },
 };
 
 // ── Constants ──────────────────────────────────────────────────────────────────
@@ -107,19 +106,15 @@ function StatusBadge({ status }: { status: string }) {
 
 function KpiTile({ label, value, sub, accent }: { label: string; value: string | number; sub?: string; accent?: string }) {
   const hint = KPI_TILE_HINTS[label];
-  const tile = (
-    <div className="flex-1 rounded-xl border border-border/60 bg-card px-4 py-3 hover:shadow-sm transition-shadow min-w-0 cursor-default">
-      <p className="text-[9px] font-medium text-muted-foreground uppercase tracking-wide mb-1">{label}</p>
+  return (
+    <div className="flex-1 rounded-xl border border-border/60 bg-card px-4 py-3 hover:shadow-sm transition-shadow min-w-0">
+      <div className="flex items-center gap-1 mb-1">
+        <p className="text-[9px] font-medium text-muted-foreground uppercase tracking-wide">{label}</p>
+        {hint && <InfoIcon meaning={hint.meaning} source={hint.source} side="bottom" />}
+      </div>
       <p className={`text-[22px] font-semibold tabular-nums leading-none ${accent ?? "text-foreground"}`}>{value}</p>
       {sub && <p className="text-[9px] text-muted-foreground mt-0.5">{sub}</p>}
     </div>
-  );
-  if (!hint) return tile;
-  return (
-    <UiTooltip>
-      <TooltipTrigger asChild>{tile}</TooltipTrigger>
-      <TooltipContent side="bottom" className="text-[11px] max-w-[260px] leading-snug">{hint}</TooltipContent>
-    </UiTooltip>
   );
 }
 

@@ -14,7 +14,7 @@ import {
   AreaChart, Area, BarChart, Bar, PieChart, Pie, Cell,
   XAxis, YAxis, CartesianGrid, Tooltip, Legend, ResponsiveContainer,
 } from "recharts";
-import { Tooltip as UiTooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
+import { InfoIcon } from "@/components/InfoIcon";
 import {
   Users, Megaphone, Globe, Loader2, TrendingUp, DollarSign,
   Eye, MousePointer, AlertCircle, X, ImageOff,
@@ -22,19 +22,19 @@ import {
   ChevronDown, ChevronUp, Play, ExternalLink, ClipboardList,
 } from "lucide-react";
 
-// Hover hints for MetaKpiCard fronts. Click still flips to the detailed back.
-const META_KPI_HINTS: Record<string, string> = {
-  "Total Spend":             "Total Meta Ads spend in the selected period. Source: Meta Marketing API (live).",
-  "Impressions":             "How many times your ads were shown. One person seeing the ad three times = 3 impressions. Source: Meta Marketing API.",
-  "Reach":                   "Unique people who saw your ads at least once. Reach × Frequency ≈ Impressions. Source: Meta Marketing API.",
-  "Link Clicks":             "Clicks on the ad's destination link (not just any click on the ad). The action that drives leads. Source: Meta Marketing API.",
-  "Frequency":               "Average times each person saw your ad (Impressions ÷ Reach). 2–3 is healthy; >5 means audience is saturating. Source: Meta Marketing API.",
-  "CPM":                     "Cost per 1,000 impressions. Brand-awareness efficiency. Lower = cheaper exposure. Source: Meta Marketing API.",
-  "Leads from Ads":          "Leads attributed by the Meta API as ad-driven conversions in the period. Source: Meta Marketing API (lead-form actions).",
-  "Leads from Forms":        'Lead form submissions imported from your "meta_leads" table — independent of Meta API attribution. Source: Supabase (meta_leads table).',
-  "Cost Per Lead (forms)":   "Total Meta spend ÷ form-lead submissions. The honest CPL, since form-leads come straight from your forms (not Meta's attributed conversion count). Source: Meta API (spend) + Supabase meta_leads.",
-  "Cost Per Qualified":      'Meta spend ÷ qualified form-leads. Qualified = lead reached Initial Sales Call Completed or High Priority Follow up in Zoho. "Contact in Future" is excluded. Source: Meta API (spend) + Supabase meta_leads × Zoho Lead_Status.',
-  "Cost Per Placement":      "Meta spend ÷ placed leads (Closed Won). The ultimate efficiency metric — what does it cost Meta Ads to produce one paying customer. Source: Meta API (spend) + Zoho Deals (Closed Won).",
+// Short {meaning, source} pair shown in the (i) popover on each card.
+const META_KPI_HINTS: Record<string, { meaning: string; source: string }> = {
+  "Total Spend":             { meaning: "Meta Ads spend in the period.",                                                source: "Meta Marketing API." },
+  "Impressions":             { meaning: "Total times your ads were shown (a person seeing it 3× = 3).",                  source: "Meta Marketing API." },
+  "Reach":                   { meaning: "Unique people who saw your ads at least once.",                                 source: "Meta Marketing API." },
+  "Link Clicks":             { meaning: "Clicks on the ad's destination link.",                                          source: "Meta Marketing API." },
+  "Frequency":               { meaning: "Avg times each person saw your ad (impressions ÷ reach).",                      source: "Meta Marketing API." },
+  "CPM":                     { meaning: "Cost per 1,000 impressions.",                                                   source: "Meta Marketing API." },
+  "Leads from Ads":          { meaning: "Leads Meta attributes to your ads in the period.",                              source: "Meta Marketing API (lead actions)." },
+  "Leads from Forms":        { meaning: "Form submissions tagged as Meta — independent of Meta's attribution.",          source: "Supabase (meta_leads table)." },
+  "Cost Per Lead (forms)":   { meaning: "Meta spend ÷ form-lead submissions. The honest CPL.",                           source: "Meta API + Supabase meta_leads." },
+  "Cost Per Qualified":      { meaning: 'Meta spend ÷ qualified form-leads. "Contact in Future" excluded.',              source: "Meta API + meta_leads × Zoho Lead_Status." },
+  "Cost Per Placement":      { meaning: "Meta spend ÷ placed leads (Closed Won).",                                       source: "Meta API + Zoho Deals." },
 };
 
 // ── Colours ───────────────────────────────────────────────────────────────────
@@ -80,21 +80,6 @@ function MetaKpiCard({
 }) {
   const [flipped, setFlipped] = useState(false);
   const hint = META_KPI_HINTS[label];
-  const front = (
-    <div
-      style={{ backfaceVisibility: "hidden", WebkitBackfaceVisibility: "hidden" }}
-      className="absolute inset-0 rounded-xl border border-kpi/60 bg-kpi px-4 py-3 flex items-start justify-between shadow-sm hover:shadow-md hover:scale-[1.01] transition-all"
-    >
-      <div className="min-w-0">
-        <p className="text-[11px] font-medium text-muted-foreground mb-1">{label}</p>
-        <p className={`text-[24px] font-bold tabular-nums leading-none ${color}`}>{value}</p>
-        {sub && <p className="text-[10px] text-muted-foreground mt-1">{sub}</p>}
-      </div>
-      <div className={`h-7 w-7 rounded-lg ${bg} flex items-center justify-center shrink-0 ml-2`}>
-        <Icon className={`h-3.5 w-3.5 ${color}`} />
-      </div>
-    </div>
-  );
   return (
     <div
       className="cursor-pointer select-none"
@@ -111,15 +96,22 @@ function MetaKpiCard({
         transform: flipped ? "rotateX(-180deg)" : "rotateX(0deg)",
         position: "relative", height: "100%",
       }}>
-        {hint && !flipped ? (
-          <UiTooltip>
-            <TooltipTrigger asChild>{front}</TooltipTrigger>
-            <TooltipContent side="bottom" className="text-[11px] max-w-[260px] leading-snug">
-              {hint}
-              <div className="text-[10px] text-muted-foreground mt-1">Click for details.</div>
-            </TooltipContent>
-          </UiTooltip>
-        ) : front}
+        <div
+          style={{ backfaceVisibility: "hidden", WebkitBackfaceVisibility: "hidden" }}
+          className="absolute inset-0 rounded-xl border border-kpi/60 bg-kpi px-4 py-3 flex items-start justify-between shadow-sm hover:shadow-md hover:scale-[1.01] transition-all"
+        >
+          <div className="min-w-0">
+            <div className="flex items-center gap-1 mb-1">
+              <p className="text-[11px] font-medium text-muted-foreground">{label}</p>
+              {hint && <InfoIcon meaning={hint.meaning} source={hint.source} side="bottom" />}
+            </div>
+            <p className={`text-[24px] font-bold tabular-nums leading-none ${color}`}>{value}</p>
+            {sub && <p className="text-[10px] text-muted-foreground mt-1">{sub}</p>}
+          </div>
+          <div className={`h-7 w-7 rounded-lg ${bg} flex items-center justify-center shrink-0 ml-2`}>
+            <Icon className={`h-3.5 w-3.5 ${color}`} />
+          </div>
+        </div>
         {/* Back */}
         <div
           style={{
@@ -1435,51 +1427,36 @@ const MetaAds = () => {
                       <th className="py-2 px-3 text-[10px] font-medium text-muted-foreground uppercase tracking-wide w-8">#</th>
                       <th className="py-2 px-3 text-[10px] font-medium text-muted-foreground uppercase tracking-wide w-12">Video</th>
                       <th className="py-2 px-3 text-[10px] font-medium text-muted-foreground uppercase tracking-wide">Name</th>
-                      <UiTooltip>
-                        <TooltipTrigger asChild>
-                          <th className="py-2 px-3 text-[10px] font-medium text-muted-foreground uppercase tracking-wide text-right cursor-help">Spend</th>
-                        </TooltipTrigger>
-                        <TooltipContent side="top" className="text-[11px] max-w-[260px] leading-snug">
-                          Meta Ads spend on this specific video in the selected period.
-                          <div className="text-[10px] text-muted-foreground mt-1">Source: Meta Marketing API.</div>
-                        </TooltipContent>
-                      </UiTooltip>
-                      <UiTooltip>
-                        <TooltipTrigger asChild>
-                          <th className="py-2 px-3 text-[10px] font-medium text-muted-foreground uppercase tracking-wide text-right cursor-help">Leads</th>
-                        </TooltipTrigger>
-                        <TooltipContent side="top" className="text-[11px] max-w-[280px] leading-snug">
-                          Form leads attributed to this video by matching ad name to <code>utm_content</code>. Counts unique form submissions.
-                          <div className="text-[10px] text-muted-foreground mt-1">Source: Supabase meta_leads (utm_content).</div>
-                        </TooltipContent>
-                      </UiTooltip>
-                      <UiTooltip>
-                        <TooltipTrigger asChild>
-                          <th className="py-2 px-3 text-[10px] font-medium text-muted-foreground uppercase tracking-wide text-right cursor-help">Qualified</th>
-                        </TooltipTrigger>
-                        <TooltipContent side="top" className="text-[11px] max-w-[280px] leading-snug">
-                          Of those form leads, how many reached a qualified Lead_Status in Zoho (Initial Sales Call Completed, High Priority Follow up, or Closed Won). "Contact in Future" excluded.
-                          <div className="text-[10px] text-muted-foreground mt-1">Source: Supabase meta_leads × Zoho Lead_Status.</div>
-                        </TooltipContent>
-                      </UiTooltip>
-                      <UiTooltip>
-                        <TooltipTrigger asChild>
-                          <th className="py-2 px-3 text-[10px] font-medium text-muted-foreground uppercase tracking-wide text-right cursor-help">CPQL</th>
-                        </TooltipTrigger>
-                        <TooltipContent side="top" className="text-[11px] max-w-[280px] leading-snug">
-                          Cost per Qualified Lead — Meta spend ÷ qualified leads for this video. Lower = cheaper to source a qualified prospect. "—" when there are no qualified leads (or no spend) yet.
-                          <div className="text-[10px] text-muted-foreground mt-1">Source: Meta API spend ÷ Zoho-qualified meta_leads.</div>
-                        </TooltipContent>
-                      </UiTooltip>
-                      <UiTooltip>
-                        <TooltipTrigger asChild>
-                          <th className="py-2 px-3 text-[10px] font-medium text-muted-foreground uppercase tracking-wide text-right cursor-help">Cost / Placement</th>
-                        </TooltipTrigger>
-                        <TooltipContent side="top" className="text-[11px] max-w-[280px] leading-snug">
-                          Meta spend ÷ placements (leads that reached High Priority Follow up or Closed Won). The ultimate efficiency metric — what does this video cost us per placed doctor.
-                          <div className="text-[10px] text-muted-foreground mt-1">Source: Meta API spend ÷ Zoho converted/placed meta_leads.</div>
-                        </TooltipContent>
-                      </UiTooltip>
+                      <th className="py-2 px-3 text-[10px] font-medium text-muted-foreground uppercase tracking-wide text-right">
+                        <span className="inline-flex items-center justify-end gap-1">
+                          Spend
+                          <InfoIcon meaning="Meta Ads spend on this video in the period." source="Meta Marketing API." side="top" />
+                        </span>
+                      </th>
+                      <th className="py-2 px-3 text-[10px] font-medium text-muted-foreground uppercase tracking-wide text-right">
+                        <span className="inline-flex items-center justify-end gap-1">
+                          Leads
+                          <InfoIcon meaning="Form leads matched to this video by ad-name ↔ utm_content." source="Supabase meta_leads." side="top" />
+                        </span>
+                      </th>
+                      <th className="py-2 px-3 text-[10px] font-medium text-muted-foreground uppercase tracking-wide text-right">
+                        <span className="inline-flex items-center justify-end gap-1">
+                          Qualified
+                          <InfoIcon meaning='How many of those leads reached qualified status. "Contact in Future" excluded.' source="meta_leads × Zoho Lead_Status." side="top" />
+                        </span>
+                      </th>
+                      <th className="py-2 px-3 text-[10px] font-medium text-muted-foreground uppercase tracking-wide text-right">
+                        <span className="inline-flex items-center justify-end gap-1">
+                          CPQL
+                          <InfoIcon meaning="Cost per Qualified Lead = Meta spend ÷ qualified leads for this video." source="Meta API + Zoho." side="top" />
+                        </span>
+                      </th>
+                      <th className="py-2 px-3 text-[10px] font-medium text-muted-foreground uppercase tracking-wide text-right">
+                        <span className="inline-flex items-center justify-end gap-1">
+                          Cost / Placement
+                          <InfoIcon meaning="Meta spend ÷ placements (HPF or Closed Won) for this video." source="Meta API + Zoho." side="top" />
+                        </span>
+                      </th>
                       <th className="py-2 px-3 text-[10px] font-medium text-muted-foreground uppercase tracking-wide text-center">Preview</th>
                     </tr>
                   </thead>

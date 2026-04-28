@@ -11,24 +11,22 @@ import {
   BarChart, Bar, XAxis, YAxis, Tooltip, ResponsiveContainer, CartesianGrid, Cell,
   AreaChart, Area, PieChart, Pie, Legend, LineChart, Line, ComposedChart,
 } from "recharts";
-import { Tooltip as UiTooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
+import { InfoIcon } from "@/components/InfoIcon";
 import {
   DollarSign, TrendingUp, TrendingDown, Crown, Receipt, Award, CalendarDays, ArrowUpRight,
   Wallet, Target, Zap, Users, Search, ArrowUpDown, ArrowUp, ArrowDown,
 } from "lucide-react";
 
-// Hover hints for FlipKpiCard fronts. Click still flips to the detailed back —
-// hover just gives a one-liner so users know what the metric means without
-// having to discover the flip interaction.
-const FINANCE_KPI_HINTS: Record<string, string> = {
-  "Marketing Spend":     "Total marketing spend in the selected period (sum of all logged expense rows). Click to see the breakdown by channel. Source: marketing-spend imports (uploaded Digital Marketing sheet).",
-  "Leads Generated":     "Zoho leads created in the selected period — counted by Created_Time. Includes every Lead_Source. Click to see top sources ranked. Source: Zoho CRM (Leads module).",
-  "Cost Per Lead":       "Marketing spend ÷ leads generated. Lower is better. Includes ALL leads regardless of quality — see Cost Per Qualified for the more meaningful figure. Source: marketing-spend imports + Zoho CRM.",
-  "Cost Per Qualified":  'Marketing spend ÷ qualified leads. Qualified = Initial Sales Call Completed or High Priority Follow up. "Contact in Future" is excluded. Source: marketing-spend imports + Zoho CRM (Lead_Status).',
-  "Top Channel":         "Channel that generated the most leads in this period (by Lead_Source). Source: Zoho CRM (Lead_Source).",
-  "Biggest Expense":     "Largest single expense category in the period. Source: marketing-spend imports.",
-  "Avg Monthly":         "Average monthly marketing spend over the months covered by the selected range. Source: marketing-spend imports.",
-  "Transactions":        "Number of expense rows recorded in the period. Source: marketing-spend imports.",
+// Short {meaning, source} pair for every Finance KPI label.
+const FINANCE_KPI_HINTS: Record<string, { meaning: string; source: string }> = {
+  "Marketing Spend":     { meaning: "Total marketing spend in the period.",                                                     source: "Marketing-spend imports." },
+  "Leads Generated":     { meaning: "Zoho leads created in the period across every source.",                                    source: "Zoho CRM (Leads — Created_Time)." },
+  "Cost Per Lead":       { meaning: "Marketing spend ÷ leads generated. Includes every lead regardless of quality.",            source: "Marketing-spend imports + Zoho CRM." },
+  "Cost Per Qualified":  { meaning: 'Marketing spend ÷ qualified leads. "Contact in Future" excluded.',                          source: "Marketing-spend imports + Zoho CRM (Lead_Status)." },
+  "Top Channel":         { meaning: "Channel that generated the most leads this period.",                                       source: "Zoho CRM (Lead_Source)." },
+  "Biggest Expense":     { meaning: "Largest single expense category in the period.",                                           source: "Marketing-spend imports." },
+  "Avg Monthly":         { meaning: "Average monthly marketing spend across the selected range.",                               source: "Marketing-spend imports." },
+  "Transactions":        { meaning: "Expense rows recorded in the period.",                                                     source: "Marketing-spend imports." },
 };
 
 // ── Formatting ────────────────────────────────────────────────────────────────
@@ -72,21 +70,6 @@ function FlipKpiCard({
 }) {
   const [flipped, setFlipped] = useState(false);
   const hint = FINANCE_KPI_HINTS[label];
-  const front = (
-    <div
-      style={{ backfaceVisibility: "hidden", WebkitBackfaceVisibility: "hidden" }}
-      className="absolute inset-0 rounded-xl border border-kpi/60 bg-kpi px-4 py-3 flex items-start justify-between shadow-sm hover:shadow-md hover:scale-[1.01] transition-all"
-    >
-      <div className="min-w-0">
-        <p className="text-[11px] font-medium text-muted-foreground mb-1">{label}</p>
-        <p className={`text-[22px] font-bold tabular-nums leading-none ${color}`}>{value}</p>
-        {sub && <p className="text-[10px] text-muted-foreground mt-1.5">{sub}</p>}
-      </div>
-      <div className={`h-8 w-8 rounded-lg ${bg} flex items-center justify-center shrink-0 ml-2`}>
-        <Icon className={`h-4 w-4 ${color}`} />
-      </div>
-    </div>
-  );
   return (
     <div
       className="cursor-pointer select-none"
@@ -103,15 +86,22 @@ function FlipKpiCard({
         transform: flipped ? "rotateX(-180deg)" : "rotateX(0deg)",
         position: "relative", height: "100%",
       }}>
-        {hint && !flipped ? (
-          <UiTooltip>
-            <TooltipTrigger asChild>{front}</TooltipTrigger>
-            <TooltipContent side="bottom" className="text-[11px] max-w-[260px] leading-snug">
-              {hint}
-              <div className="text-[10px] text-muted-foreground mt-1">Click for details.</div>
-            </TooltipContent>
-          </UiTooltip>
-        ) : front}
+        <div
+          style={{ backfaceVisibility: "hidden", WebkitBackfaceVisibility: "hidden" }}
+          className="absolute inset-0 rounded-xl border border-kpi/60 bg-kpi px-4 py-3 flex items-start justify-between shadow-sm hover:shadow-md hover:scale-[1.01] transition-all"
+        >
+          <div className="min-w-0">
+            <div className="flex items-center gap-1 mb-1">
+              <p className="text-[11px] font-medium text-muted-foreground">{label}</p>
+              {hint && <InfoIcon meaning={hint.meaning} source={hint.source} side="bottom" />}
+            </div>
+            <p className={`text-[22px] font-bold tabular-nums leading-none ${color}`}>{value}</p>
+            {sub && <p className="text-[10px] text-muted-foreground mt-1.5">{sub}</p>}
+          </div>
+          <div className={`h-8 w-8 rounded-lg ${bg} flex items-center justify-center shrink-0 ml-2`}>
+            <Icon className={`h-4 w-4 ${color}`} />
+          </div>
+        </div>
         {/* Back */}
         <div
           style={{

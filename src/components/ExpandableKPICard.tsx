@@ -1,5 +1,5 @@
 import { useState } from "react";
-import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
+import { InfoIcon } from "@/components/InfoIcon";
 
 interface ExpandableKPICardProps {
   title: string;
@@ -8,7 +8,9 @@ interface ExpandableKPICardProps {
   color: string;           // e.g. "text-primary"
   bg: string;              // e.g. "bg-primary/10"
   frontExtra?: string;     // optional subtitle shown on front
-  hint?: string;           // hover tooltip explaining the metric
+  hint?: string;           // (kept for backward compat; merged into hintMeaning if hintSource not given)
+  hintMeaning?: string;    // what the metric means (1 short sentence)
+  hintSource?: string;     // where the data is pulled from
   expandedContent: React.ReactNode;
   expandedHeight?: number; // px, default 220
 }
@@ -21,28 +23,13 @@ export function ExpandableKPICard({
   bg,
   frontExtra,
   hint,
+  hintMeaning,
+  hintSource,
   expandedContent,
   expandedHeight = 220,
 }: ExpandableKPICardProps) {
   const [flipped, setFlipped] = useState(false);
-
-  const front = (
-    <div
-      style={{ backfaceVisibility: "hidden", WebkitBackfaceVisibility: "hidden" }}
-      className="absolute inset-0 rounded-xl border border-kpi/60 bg-kpi px-4 py-3 flex items-start justify-between shadow-sm transition-all duration-200 hover:shadow-md hover:scale-[1.01]"
-    >
-      <div className="min-w-0">
-        <p className="text-[11px] font-medium text-muted-foreground mb-1 truncate">{title}</p>
-        <p className={`text-[24px] font-bold tabular-nums leading-none ${color}`}>{value}</p>
-        {frontExtra && (
-          <p className="text-[10px] text-muted-foreground mt-1 truncate">{frontExtra}</p>
-        )}
-      </div>
-      <div className={`h-7 w-7 rounded-lg ${bg} flex items-center justify-center shrink-0 ml-2`}>
-        <Icon className={`h-3.5 w-3.5 ${color}`} />
-      </div>
-    </div>
-  );
+  const meaning = hintMeaning ?? hint;
 
   return (
     <div
@@ -64,15 +51,24 @@ export function ExpandableKPICard({
         }}
       >
         {/* ── Front ── */}
-        {hint && !flipped ? (
-          <Tooltip>
-            <TooltipTrigger asChild>{front}</TooltipTrigger>
-            <TooltipContent side="bottom" className="text-[11px] max-w-[260px] leading-snug">
-              {hint}
-              <div className="text-[10px] text-muted-foreground mt-1">Click for details.</div>
-            </TooltipContent>
-          </Tooltip>
-        ) : front}
+        <div
+          style={{ backfaceVisibility: "hidden", WebkitBackfaceVisibility: "hidden" }}
+          className="absolute inset-0 rounded-xl border border-kpi/60 bg-kpi px-4 py-3 flex items-start justify-between shadow-sm transition-all duration-200 hover:shadow-md hover:scale-[1.01]"
+        >
+          <div className="min-w-0">
+            <div className="flex items-center gap-1 mb-1">
+              <p className="text-[11px] font-medium text-muted-foreground truncate">{title}</p>
+              {meaning && <InfoIcon meaning={meaning} source={hintSource} side="bottom" />}
+            </div>
+            <p className={`text-[24px] font-bold tabular-nums leading-none ${color}`}>{value}</p>
+            {frontExtra && (
+              <p className="text-[10px] text-muted-foreground mt-1 truncate">{frontExtra}</p>
+            )}
+          </div>
+          <div className={`h-7 w-7 rounded-lg ${bg} flex items-center justify-center shrink-0 ml-2`}>
+            <Icon className={`h-3.5 w-3.5 ${color}`} />
+          </div>
+        </div>
 
         {/* ── Back ── */}
         <div

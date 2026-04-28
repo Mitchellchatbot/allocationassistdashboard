@@ -1,7 +1,7 @@
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
-import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
 import { ChannelIcon } from "@/components/ChannelIcon";
+import { InfoIcon } from "@/components/InfoIcon";
 import { Trophy, TrendingDown, Target, Zap, ChevronRight } from "lucide-react";
 import { Link, useNavigate } from "react-router-dom";
 import { useChannelEconomics, useChannelWinners, type ChannelEconomicsRow } from "@/hooks/use-channel-economics";
@@ -11,19 +11,13 @@ import type { ChannelKey } from "@/lib/channel-mapping";
 
 const fmtN = (v: number) => v.toLocaleString();
 
-// Lightweight helper: a label with a hover-tooltip explaining the metric.
-// No visible info icon — hover anywhere on the label reveals the tooltip,
-// matching the rest of the dashboard's hover-only KPI tooltip pattern.
-function HeaderHint({ label, hint, className = "" }: { label: string; hint: string; className?: string }) {
+// Header label paired with a click-popover (i) icon.
+function HeaderHint({ label, meaning, source, className = "" }: { label: string; meaning: string; source: string; className?: string }) {
   return (
-    <Tooltip>
-      <TooltipTrigger asChild>
-        <span className={`cursor-help ${className}`}>{label}</span>
-      </TooltipTrigger>
-      <TooltipContent side="top" className="text-[11px] max-w-[260px] leading-snug">
-        {hint}
-      </TooltipContent>
-    </Tooltip>
+    <span className={`inline-flex items-center gap-1 ${className}`}>
+      {label}
+      <InfoIcon meaning={meaning} source={source} side="top" />
+    </span>
   );
 }
 
@@ -67,7 +61,8 @@ const GROUP_DESCRIPTION: Record<ChannelGroup, string> = {
 interface WinnerCardProps {
   icon: React.ComponentType<{ className?: string }>;
   label: string;
-  hint?: string;
+  meaning?: string;
+  source?: string;
   iconColor: string;
   iconBg: string;
   channel: string | null;
@@ -75,16 +70,15 @@ interface WinnerCardProps {
   sub?: string;
 }
 
-function WinnerCard({ icon: Icon, label, hint, iconColor, iconBg, channel, value, sub }: WinnerCardProps) {
+function WinnerCard({ icon: Icon, label, meaning, source, iconColor, iconBg, channel, value, sub }: WinnerCardProps) {
   return (
     <Card className="shadow-sm border-border/50">
       <CardContent className="p-4">
         <div className="flex items-start justify-between mb-2">
-          {hint ? (
-            <HeaderHint label={label} hint={hint} className="text-[10px] font-medium text-muted-foreground uppercase tracking-wide" />
-          ) : (
-            <p className="text-[10px] font-medium text-muted-foreground uppercase tracking-wide">{label}</p>
-          )}
+          <p className="inline-flex items-center gap-1 text-[10px] font-medium text-muted-foreground uppercase tracking-wide">
+            {label}
+            {meaning && <InfoIcon meaning={meaning} source={source} side="top" />}
+          </p>
           <div className={`h-7 w-7 rounded-lg flex items-center justify-center ${iconBg}`}>
             <Icon className={`h-3.5 w-3.5 ${iconColor}`} />
           </div>
@@ -123,7 +117,8 @@ export function ChannelWinnerCards() {
         <WinnerCard
           icon={Trophy}
           label="Best Channel (Volume)"
-          hint="Channel that produced the most leads in this period — pure volume, ignoring cost. Source: Zoho CRM (Lead_Source) joined to marketing-spend imports."
+          meaning="Channel with the most leads this period (volume only, ignores cost)."
+          source="Zoho CRM (Lead_Source)."
           iconColor="text-amber-600" iconBg="bg-amber-50"
           channel={winners?.mostLeads?.channel ?? null}
           value={winners?.mostLeads ? `${fmtN(winners.mostLeads.leads)} leads` : ""}
@@ -132,7 +127,8 @@ export function ChannelWinnerCards() {
         <WinnerCard
           icon={TrendingDown}
           label="Lowest Cost Per Lead"
-          hint="Cheapest channel per lead generated. Spend ÷ leads. Only channels with both spend and leads are considered. Source: marketing-spend imports + Zoho CRM (Lead_Source)."
+          meaning="Cheapest channel per lead. Spend ÷ leads."
+          source="Marketing-spend imports + Zoho CRM."
           iconColor="text-emerald-600" iconBg="bg-emerald-50"
           channel={winners?.lowestCPL?.channel ?? null}
           value={winners?.lowestCPL ? fmtAED(winners.lowestCPL.costPerLead) : ""}
@@ -141,7 +137,8 @@ export function ChannelWinnerCards() {
         <WinnerCard
           icon={Target}
           label="Lowest Cost / Qualified"
-          hint={`Cheapest channel per qualified lead. Spend ÷ qualified leads. Qualified = Initial Sales Call Completed, High Priority Follow up, or Closed Won. "Contact in Future" excluded. Source: marketing-spend imports + Zoho CRM (Lead_Source, Lead_Status).`}
+          meaning='Cheapest channel per qualified lead. "Contact in Future" excluded.'
+          source="Marketing-spend imports + Zoho CRM (Lead_Status)."
           iconColor="text-orange-600" iconBg="bg-orange-50"
           channel={winners?.lowestCPQ?.channel ?? null}
           value={winners?.lowestCPQ ? fmtAED(winners.lowestCPQ.costPerQualified) : ""}
@@ -153,7 +150,8 @@ export function ChannelWinnerCards() {
           <WinnerCard
             icon={Zap}
             label="Lowest Cost / Conversion"
-            hint="Cheapest channel per converted lead. Spend ÷ converted leads. Converted = High Priority Follow up or Closed Won (genuine traction). Source: marketing-spend imports + Zoho CRM."
+            meaning="Cheapest channel per converted lead (High Priority Follow up or Closed Won)."
+            source="Marketing-spend imports + Zoho CRM."
             iconColor="text-violet-600" iconBg="bg-violet-50"
             channel={winners.lowestCPC.channel}
             value={fmtAED(winners.lowestCPC.costPerConversion)}
@@ -163,7 +161,8 @@ export function ChannelWinnerCards() {
           <WinnerCard
             icon={Zap}
             label="Best Conversion Rate"
-            hint="Channel with the highest share of leads that converted (≥ 5 leads required to avoid tiny-sample winners). Shown when no spend is recorded so a Cost / Conversion winner can't be picked. Source: Zoho CRM (Lead_Status)."
+            meaning="Channel with the highest conversion rate (≥ 5 leads). Shown when no spend is recorded."
+            source="Zoho CRM (Lead_Status)."
             iconColor="text-violet-600" iconBg="bg-violet-50"
             channel={winners?.bestConversion?.channel ?? null}
             value={winners?.bestConversion ? `${winners.bestConversion.conversionRate.toFixed(1)}%` : ""}
@@ -223,22 +222,22 @@ export function ChannelEconomicsTable() {
               <TableRow className="hover:bg-transparent">
                 <TableHead className="text-[10px] uppercase tracking-wide h-8">Channel</TableHead>
                 <TableHead className="text-[10px] uppercase tracking-wide h-8 text-right">
-                  <HeaderHint label="Leads" hint="Total Zoho leads attributed to this channel in the selected date range. Source: Zoho CRM (Lead_Source)." className="justify-end" />
+                  <HeaderHint label="Leads" meaning="Zoho leads attributed to this channel in the period." source="Zoho CRM (Lead_Source)." className="justify-end" />
                 </TableHead>
                 <TableHead className="text-[10px] uppercase tracking-wide h-8 text-right">
-                  <HeaderHint label="Cost / Lead" hint="Marketing spend ÷ leads. The headline efficiency metric — lower is better. Shown as “—” when no spend was recorded for the channel. Source: marketing-spend imports + Zoho CRM." className="justify-end" />
+                  <HeaderHint label="Cost / Lead" meaning="Spend ÷ leads. Lower is better." source="Marketing-spend imports + Zoho CRM." className="justify-end" />
                 </TableHead>
                 <TableHead className="text-[10px] uppercase tracking-wide h-8 text-right">
-                  <HeaderHint label="Qualified" hint="Leads that reached a qualified status: Initial Sales Call Completed, High Priority Follow up, or Closed Won. % shows the qualification rate. “Contact in Future” is excluded. Source: Zoho CRM (Lead_Status)." className="justify-end" />
+                  <HeaderHint label="Qualified" meaning='Leads at Initial Sales Call Completed, High Priority Follow up, or Closed Won. "Contact in Future" excluded.' source="Zoho CRM (Lead_Status)." className="justify-end" />
                 </TableHead>
                 <TableHead className="text-[10px] uppercase tracking-wide h-8 text-right">
-                  <HeaderHint label="Cost / Qual." hint="Marketing spend ÷ qualified leads. More meaningful than Cost / Lead because it adjusts for lead quality. Lower is better. Source: marketing-spend imports + Zoho CRM." className="justify-end" />
+                  <HeaderHint label="Cost / Qual." meaning="Spend ÷ qualified leads." source="Marketing-spend imports + Zoho CRM." className="justify-end" />
                 </TableHead>
                 <TableHead className="text-[10px] uppercase tracking-wide h-8 text-right">
-                  <HeaderHint label="Conv. Rate" hint="Share of leads that converted (High Priority Follow up or Closed Won). Coloured: green ≥ 40%, blue ≥ 20%, amber below. Source: Zoho CRM (Lead_Status)." className="justify-end" />
+                  <HeaderHint label="Conv. Rate" meaning="Share of leads converted (High Priority Follow up or Closed Won)." source="Zoho CRM (Lead_Status)." className="justify-end" />
                 </TableHead>
                 <TableHead className="text-[10px] uppercase tracking-wide h-8 text-right">
-                  <HeaderHint label="Spend" hint="Total marketing spend recorded for this channel in the period. “—” means no spend was logged (lead came in organically or attribution is missing). Source: marketing-spend imports." className="justify-end" />
+                  <HeaderHint label="Spend" meaning='Marketing spend recorded for this channel. "—" = no spend logged.' source="Marketing-spend imports." className="justify-end" />
                 </TableHead>
                 <TableHead className="text-[10px] uppercase tracking-wide h-8 text-right w-[80px]">Drill in</TableHead>
               </TableRow>

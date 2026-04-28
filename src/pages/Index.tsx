@@ -8,26 +8,25 @@ import {
   AreaChart, Area, XAxis, YAxis, Tooltip, ResponsiveContainer,
   CartesianGrid, Line,
 } from "recharts";
-import { Tooltip as UiTooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
+import { InfoIcon } from "@/components/InfoIcon";
 import {
   Activity, Award, AlertTriangle, Calendar, FileText, Handshake,
   UserPlus, Phone, Loader2, Users, TrendingUp, DollarSign, Clock, CheckCircle,
 } from "lucide-react";
 
-// Plain-English explanation for each pipeline stage on the funnel chart.
-// Same canonical labels as STATUS_LABEL in use-zoho-data.ts.
+// Short explanation for each pipeline stage on the funnel chart.
 const FUNNEL_STAGE_HINTS: Record<string, string> = {
-  "Not Contacted":         "Lead exists in Zoho but no recruiter has reached out yet.",
-  "Attempted to Contact":  "Recruiter has tried at least once but hasn't connected yet.",
-  "Initial Sales Call Completed": "Lead made it to a real sales call. The first qualified milestone.",
-  "Follow-up Scheduled":   'Recruiter deferred the conversation ("Contact in Future"). NOT counted as qualified.',
-  "Contact in Future":     'Recruiter deferred the conversation. NOT counted as qualified.',
-  "High Priority Follow up": "Hot lead — owes the team a callback. Counted as qualified AND converted.",
-  "Closed Won":            "Lead became a placement. The end of the funnel.",
-  "Closed Lost":           "Lead is dead — recruiter closed the loop with no placement.",
-  "Unqualified":           "Lead doesn't meet our criteria — wrong specialty, region, etc.",
-  "Unqualified Leads":     "Lead doesn't meet our criteria — wrong specialty, region, etc.",
-  "Not Interested":        "Lead actively declined.",
+  "Not Contacted":                "Lead in Zoho with no recruiter outreach yet.",
+  "Attempted to Contact":         "Recruiter tried at least once but hasn't connected.",
+  "Initial Sales Call Completed": "Lead reached a real sales call. First qualified milestone.",
+  "Follow-up Scheduled":          'Deferred conversation ("Contact in Future"). NOT qualified.',
+  "Contact in Future":            "Deferred conversation. NOT counted as qualified.",
+  "High Priority Follow up":      "Hot lead owes the team a callback. Qualified + converted.",
+  "Closed Won":                   "Lead became a placement.",
+  "Closed Lost":                  "Lead is dead — closed without a placement.",
+  "Unqualified":                  "Lead doesn't meet our criteria.",
+  "Unqualified Leads":            "Lead doesn't meet our criteria.",
+  "Not Interested":               "Lead actively declined.",
 };
 import { ChannelIcon } from "@/components/ChannelIcon";
 import { Link } from "react-router-dom";
@@ -318,7 +317,10 @@ const Index = () => {
         {/* Applications over time */}
         <Card className="lg:col-span-3 shadow-sm border-border/50 hover:shadow-md transition-shadow">
           <CardHeader className="pb-1 pt-4 px-4">
-            <CardTitle className="text-[14px] font-semibold text-foreground">Doctor Applications Over Time</CardTitle>
+            <CardTitle className="inline-flex items-center gap-1 text-[14px] font-semibold text-foreground">
+              Doctor Applications Over Time
+              <InfoIcon meaning="Monthly count of new Zoho leads created in the period." source="Zoho CRM (Created_Time)." size={13} side="bottom" />
+            </CardTitle>
           </CardHeader>
           <CardContent className="px-2 sm:px-4 pb-4">
             {zohoLoading ? (
@@ -355,7 +357,10 @@ const Index = () => {
         {/* Funnel */}
         <Card className="lg:col-span-2 shadow-sm border-border/50 hover:shadow-md transition-shadow">
           <CardHeader className="pb-1 pt-4 px-4">
-            <CardTitle className="text-[14px] font-semibold text-foreground">How Doctors Move Through the Process</CardTitle>
+            <CardTitle className="inline-flex items-center gap-1 text-[14px] font-semibold text-foreground">
+              How Doctors Move Through the Process
+              <InfoIcon meaning="Distribution of leads across pipeline statuses. Click any row to see what that stage means." source="Zoho CRM (Lead_Status)." size={13} side="bottom" />
+            </CardTitle>
           </CardHeader>
           <CardContent className="px-4 pb-4">
             {zohoLoading ? (
@@ -370,10 +375,13 @@ const Index = () => {
               <div className="space-y-3">
                 {funnel.map((item, i) => {
                   const hint = FUNNEL_STAGE_HINTS[item.stage];
-                  const row = (
-                    <div className={hint ? "cursor-help" : ""}>
+                  return (
+                    <div key={item.stage}>
                       <div className="flex items-center justify-between mb-1.5">
-                        <span className="text-[13px] font-medium text-foreground">{item.stage}</span>
+                        <span className="inline-flex items-center gap-1 text-[13px] font-medium text-foreground">
+                          {item.stage}
+                          {hint && <InfoIcon meaning={hint} source="Zoho CRM (Lead_Status)." side="right" />}
+                        </span>
                         <div className="flex items-center gap-2">
                           <span className="text-[12px] font-semibold text-foreground tabular-nums">{item.count.toLocaleString()}</span>
                           <span className="text-[11px] text-muted-foreground w-8 text-right tabular-nums">{item.pct}%</span>
@@ -387,14 +395,6 @@ const Index = () => {
                       </div>
                     </div>
                   );
-                  return hint ? (
-                    <UiTooltip key={item.stage}>
-                      <TooltipTrigger asChild>{row}</TooltipTrigger>
-                      <TooltipContent side="left" className="text-[11px] max-w-[260px] leading-snug">{hint}</TooltipContent>
-                    </UiTooltip>
-                  ) : (
-                    <div key={item.stage}>{row}</div>
-                  );
                 })}
               </div>
             )}
@@ -407,7 +407,10 @@ const Index = () => {
         <Card className="shadow-sm border-border/50 hover:shadow-md transition-shadow">
           <CardHeader className="pb-1 pt-4 px-4">
             <div className="flex items-center justify-between">
-              <CardTitle className="text-[14px] font-semibold text-foreground">Where Doctors Come From</CardTitle>
+              <CardTitle className="inline-flex items-center gap-1 text-[14px] font-semibold text-foreground">
+                Where Doctors Come From
+                <InfoIcon meaning="Top channels by number of new leads in the selected window." source="Zoho CRM (Lead_Source)." size={13} side="bottom" />
+              </CardTitle>
               <div className="flex gap-0.5">
                 {CHANNEL_RANGES.map(r => (
                   <button
@@ -459,7 +462,10 @@ const Index = () => {
         {/* Recent Activity */}
         <Card className="shadow-sm border-border/50 hover:shadow-md transition-shadow">
           <CardHeader className="pb-1 pt-4 px-4">
-            <CardTitle className="text-[14px] font-semibold text-foreground">Recent Activity</CardTitle>
+            <CardTitle className="inline-flex items-center gap-1 text-[14px] font-semibold text-foreground">
+              Recent Activity
+              <InfoIcon meaning="Latest pipeline events — new leads, status changes, deal updates." source="Zoho CRM." size={13} side="bottom" />
+            </CardTitle>
           </CardHeader>
           <CardContent className="px-4 pb-4">
             {zohoLoading ? (

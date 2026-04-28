@@ -4,7 +4,7 @@ import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@
 import {
   BarChart, Bar, XAxis, YAxis, Tooltip, ResponsiveContainer, CartesianGrid, Cell, LabelList,
 } from "recharts";
-import { Tooltip as UiTooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
+import { InfoIcon } from "@/components/InfoIcon";
 import { Star, User, ArrowLeft, X } from "lucide-react";
 import { ChannelIcon } from "@/components/ChannelIcon";
 import { ChannelWinnerCards, ChannelEconomicsTable } from "@/components/ChannelEconomics";
@@ -183,44 +183,38 @@ const Marketing = () => {
         {visibleMarketing.map(ch => {
           const isSelected = selectedKpiChannel === ch.channel;
           const isBest = bestChannel?.channel === ch.channel;
-          const cardButton = (
-            <button
-              key={ch.channel}
-              onClick={() => setSelectedKpiChannel(isSelected ? null : ch.channel)}
-              className={`text-left rounded-xl border p-3 bg-kpi shadow-sm transition-all duration-200
-                hover:shadow-md hover:scale-[1.02] focus:outline-none w-full
-                ${isSelected
-                  ? 'ring-2 ring-primary border-primary/40 scale-[1.02]'
-                  : isBest
-                  ? 'ring-1 ring-primary/40 border-kpi/60'
-                  : 'border-kpi/60'
-                }`}
-            >
-              <div className="flex items-center gap-2 mb-1">
-                <ChannelIcon channel={ch.channel} size={14} />
-                <p className="text-[10px] font-medium text-muted-foreground uppercase tracking-wide truncate">{ch.channel}</p>
-                {isBest && !isSelected && <Star className="h-3 w-3 text-primary fill-primary ml-auto shrink-0" />}
-                {isSelected && <X className="h-3 w-3 text-primary ml-auto shrink-0" />}
-              </div>
-              <p className="text-lg font-semibold tabular-nums">{ch.doctors}</p>
-              <p className="text-[10px] text-muted-foreground">{ch.contacted} contacted <span className="opacity-60">({ch.contactRate}% of total)</span></p>
-              <p className="text-[10px] text-primary/70">{ch.qualified} qualified <span className="opacity-60">({ch.qualifiedRate}%)</span></p>
-              <p className="text-[10px] text-primary">{ch.converted} converted <span className="opacity-60">({ch.conversionRate}%)</span></p>
-            </button>
-          );
           return (
-            <UiTooltip key={ch.channel}>
-              <TooltipTrigger asChild>{cardButton}</TooltipTrigger>
-              <TooltipContent side="bottom" className="text-[11px] max-w-[280px] leading-snug">
-                <strong>{ch.channel}</strong> — {ch.doctors} doctors in this period.
-                <div className="mt-1 space-y-0.5 text-[10px]">
-                  <div><strong>Contacted:</strong> unique leads engaged (Lead_Status past Not Contacted), {ch.contactRate}% of leads — counts leads, not call attempts.</div>
-                  <div><strong>Qualified:</strong> reached Initial Sales Call Completed or High Priority Follow up ({ch.qualifiedRate}%).</div>
-                  <div><strong>Converted:</strong> reached High Priority Follow up or Closed Won ({ch.conversionRate}%).</div>
+            <div key={ch.channel} className="relative">
+              <button
+                onClick={() => setSelectedKpiChannel(isSelected ? null : ch.channel)}
+                className={`text-left rounded-xl border p-3 bg-kpi shadow-sm transition-all duration-200
+                  hover:shadow-md hover:scale-[1.02] focus:outline-none w-full
+                  ${isSelected
+                    ? 'ring-2 ring-primary border-primary/40 scale-[1.02]'
+                    : isBest
+                    ? 'ring-1 ring-primary/40 border-kpi/60'
+                    : 'border-kpi/60'
+                  }`}
+              >
+                <div className="flex items-center gap-2 mb-1">
+                  <ChannelIcon channel={ch.channel} size={14} />
+                  <p className="text-[10px] font-medium text-muted-foreground uppercase tracking-wide truncate">{ch.channel}</p>
+                  {isBest && !isSelected && <Star className="h-3 w-3 text-primary fill-primary ml-auto shrink-0" />}
+                  {isSelected && <X className="h-3 w-3 text-primary ml-auto shrink-0" />}
                 </div>
-                <div className="text-[10px] text-muted-foreground mt-1">{isBest ? "Top channel by volume." : "Click to filter the dashboard to this channel."} Source: Zoho CRM (Lead_Source, Lead_Status).</div>
-              </TooltipContent>
-            </UiTooltip>
+                <p className="text-lg font-semibold tabular-nums">{ch.doctors}</p>
+                <p className="text-[10px] text-muted-foreground">{ch.contacted} contacted <span className="opacity-60">({ch.contactRate}% of total)</span></p>
+                <p className="text-[10px] text-primary/70">{ch.qualified} qualified <span className="opacity-60">({ch.qualifiedRate}%)</span></p>
+                <p className="text-[10px] text-primary">{ch.converted} converted <span className="opacity-60">({ch.conversionRate}%)</span></p>
+              </button>
+              <span className="absolute top-2.5 right-2.5">
+                <InfoIcon
+                  meaning={`${ch.channel}: ${ch.doctors} leads. Contacted = unique leads engaged (NOT call attempts). Qualified = Initial Sales Call Completed or High Priority Follow up. Converted = HPF or Closed Won. ${isBest ? "Top channel by volume." : "Click card to filter dashboard."}`}
+                  source="Zoho CRM (Lead_Source, Lead_Status)."
+                  side="bottom"
+                />
+              </span>
+            </div>
           );
         })}
       </div>

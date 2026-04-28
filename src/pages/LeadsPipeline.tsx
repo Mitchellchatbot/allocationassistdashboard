@@ -7,24 +7,22 @@ import { useZohoLeads, useDebounce, type LeadsFilters } from "@/hooks/use-zoho-l
 import { useZohoData } from "@/hooks/use-zoho-data";
 import { ArrowRight, AlertTriangle, CheckCircle, Clock, Search, Loader2, Check, X, ChevronDown, Phone, Calendar } from "lucide-react";
 import { Input } from "@/components/ui/input";
-import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
+import { InfoIcon } from "@/components/InfoIcon";
 import { useState, useRef, useEffect, useMemo, Fragment } from "react";
 
-// Plain-English explanation for each pipeline stage shown on the funnel.
-// Names mirror the canonical labels produced by use-zoho-data's STATUS_LABEL
-// mapping (e.g. "Follow-up Scheduled" is what we render for "Contact in Future").
+// Short stage explanations.
 const STAGE_HINTS: Record<string, string> = {
-  "Not Contacted":         "Lead exists in Zoho but no recruiter has reached out yet.",
-  "Attempted to Contact":  "Recruiter has tried at least once but hasn't connected yet.",
-  "Initial Sales Call Completed": "Lead made it to a real sales call. The first qualified milestone.",
-  "Follow-up Scheduled":   'Recruiter deferred the conversation ("Contact in Future"). NOT counted as qualified.',
-  "Contact in Future":     'Recruiter deferred the conversation. NOT counted as qualified.',
-  "High Priority Follow up": "Hot lead — owes the team a callback. Counted as qualified AND converted.",
-  "Closed Won":            "Lead became a placement. The end of the funnel.",
-  "Closed Lost":           "Lead is dead — recruiter closed the loop with no placement.",
-  "Unqualified":           "Lead doesn't meet our criteria — wrong specialty, wrong region, etc.",
-  "Unqualified Leads":     "Lead doesn't meet our criteria — wrong specialty, wrong region, etc.",
-  "Not Interested":        "Lead actively declined.",
+  "Not Contacted":                "Lead in Zoho with no recruiter outreach yet.",
+  "Attempted to Contact":         "Recruiter tried at least once but hasn't connected.",
+  "Initial Sales Call Completed": "Lead reached a real sales call. First qualified milestone.",
+  "Follow-up Scheduled":          'Deferred conversation ("Contact in Future"). NOT qualified.',
+  "Contact in Future":            "Deferred conversation. NOT counted as qualified.",
+  "High Priority Follow up":      "Hot lead owes the team a callback. Qualified + converted.",
+  "Closed Won":                   "Lead became a placement.",
+  "Closed Lost":                  "Lead is dead — closed without a placement.",
+  "Unqualified":                  "Lead doesn't meet our criteria.",
+  "Unqualified Leads":            "Lead doesn't meet our criteria.",
+  "Not Interested":               "Lead actively declined.",
 };
 import { useSearchParams } from "react-router-dom";
 import { useMutation, useQueryClient } from "@tanstack/react-query";
@@ -322,20 +320,17 @@ const LeadsPipeline = () => {
           <div className="flex flex-wrap items-center gap-1.5 overflow-x-auto">
             {workflow.map((stage, i) => {
               const hint = STAGE_HINTS[stage.name];
-              const tile = (
-                <div className="rounded-lg border border-kpi/60 bg-kpi px-3 py-2.5 text-center min-w-[100px] hover:shadow-md hover:scale-[1.02] transition-all duration-200 cursor-help">
-                  <p className="text-lg font-semibold text-foreground tabular-nums">{stage.count}</p>
-                  <p className="text-[9px] text-muted-foreground leading-tight">{stage.name}</p>
-                </div>
-              );
               return (
                 <div key={stage.name} className="flex items-center gap-1.5">
-                  {hint ? (
-                    <Tooltip>
-                      <TooltipTrigger asChild>{tile}</TooltipTrigger>
-                      <TooltipContent side="bottom" className="text-[11px] max-w-[260px] leading-snug">{hint}</TooltipContent>
-                    </Tooltip>
-                  ) : tile}
+                  <div className="relative rounded-lg border border-kpi/60 bg-kpi px-3 py-2.5 text-center min-w-[100px] hover:shadow-md hover:scale-[1.02] transition-all duration-200">
+                    <p className="text-lg font-semibold text-foreground tabular-nums">{stage.count}</p>
+                    <p className="text-[9px] text-muted-foreground leading-tight">{stage.name}</p>
+                    {hint && (
+                      <span className="absolute top-1 right-1">
+                        <InfoIcon meaning={hint} source="Zoho CRM (Lead_Status)." size={11} side="bottom" />
+                      </span>
+                    )}
+                  </div>
                   {i < workflow.length - 1 && <ArrowRight className="h-3 w-3 text-primary/30 shrink-0" />}
                 </div>
               );
