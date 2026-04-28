@@ -114,6 +114,29 @@ export function ChannelWinnerCards() {
     <div className="mb-3">
       <p className="text-[10px] text-muted-foreground mb-2">Channel performance · {dateLabel}</p>
       <div className="grid grid-cols-2 lg:grid-cols-4 gap-3">
+        {/* Headline metric — Cost per Qualified Lead. Sits first because this is
+            the metric Ammar prioritises over volume / CPL. */}
+        <WinnerCard
+          icon={Target}
+          label="Lowest Cost / Qualified ★"
+          meaning="The headline metric — cheapest channel per qualified lead (Initial Sales Call Completed or High Priority Follow up). Lower = better quality at lower cost."
+          source="Marketing-spend imports + Zoho CRM (Lead_Status)."
+          iconColor="text-orange-600" iconBg="bg-orange-50"
+          channel={winners?.lowestCPQ?.channel ?? null}
+          value={winners?.lowestCPQ ? fmtAED(winners.lowestCPQ.costPerQualified) : ""}
+          sub={winners?.lowestCPQ ? `${fmtN(winners.lowestCPQ.qualified)} qualified leads` : undefined}
+        />
+        {/* Lifetime CPC — surfaces channels that have been losing money for years. */}
+        <WinnerCard
+          icon={TrendingDown}
+          label="Best Lifetime Cost / Conv."
+          meaning="Cheapest channel per converted lead across ALL time (ignores the date filter). Tells you which channels actually pay back over their full history."
+          source="Marketing-spend imports + Zoho CRM, lifetime."
+          iconColor="text-emerald-600" iconBg="bg-emerald-50"
+          channel={winners?.bestLifetimeCPC?.channel ?? null}
+          value={winners?.bestLifetimeCPC ? fmtAED(winners.bestLifetimeCPC.lifetimeCostPerConversion) : ""}
+          sub={winners?.bestLifetimeCPC ? `${fmtN(winners.bestLifetimeCPC.lifetimeConverted)} converted lifetime` : undefined}
+        />
         <WinnerCard
           icon={Trophy}
           label="Best Channel (Volume)"
@@ -124,33 +147,14 @@ export function ChannelWinnerCards() {
           value={winners?.mostLeads ? `${fmtN(winners.mostLeads.leads)} leads` : ""}
           sub={winners?.mostLeads ? `${fmtN(winners.mostLeads.qualified)} qualified · ${winners.mostLeads.qualifiedRate.toFixed(0)}% rate` : undefined}
         />
-        <WinnerCard
-          icon={TrendingDown}
-          label="Lowest Cost Per Lead"
-          meaning="Cheapest channel per lead. Spend ÷ leads."
-          source="Marketing-spend imports + Zoho CRM."
-          iconColor="text-emerald-600" iconBg="bg-emerald-50"
-          channel={winners?.lowestCPL?.channel ?? null}
-          value={winners?.lowestCPL ? fmtAED(winners.lowestCPL.costPerLead) : ""}
-          sub={winners?.lowestCPL ? `${fmtAED(winners.lowestCPL.spend)} / ${fmtN(winners.lowestCPL.leads)} leads` : undefined}
-        />
-        <WinnerCard
-          icon={Target}
-          label="Lowest Cost / Qualified"
-          meaning='Cheapest channel per qualified lead. "Contact in Future" excluded.'
-          source="Marketing-spend imports + Zoho CRM (Lead_Status)."
-          iconColor="text-orange-600" iconBg="bg-orange-50"
-          channel={winners?.lowestCPQ?.channel ?? null}
-          value={winners?.lowestCPQ ? fmtAED(winners.lowestCPQ.costPerQualified) : ""}
-          sub={winners?.lowestCPQ ? `${fmtN(winners.lowestCPQ.qualified)} qualified leads` : undefined}
-        />
-        {/* Prefer Cost / Conversion when we have spend + a converted lead; otherwise show
-            the rate-based winner so the card never reads as empty. */}
+        {/* Cost / Conversion in the windowed period (or fallback to highest
+            conversion rate if no spend matched). Kept as the 4th card so the
+            full-history "Best Lifetime CPC" doesn't double up. */}
         {winners?.lowestCPC ? (
           <WinnerCard
             icon={Zap}
-            label="Lowest Cost / Conversion"
-            meaning="Cheapest channel per converted lead (High Priority Follow up or Closed Won)."
+            label="Lowest Cost / Conv. (this period)"
+            meaning="Cheapest channel per converted lead in the SELECTED date range. Compare to the lifetime card to spot windows where a channel is suddenly more expensive."
             source="Marketing-spend imports + Zoho CRM."
             iconColor="text-violet-600" iconBg="bg-violet-50"
             channel={winners.lowestCPC.channel}
@@ -196,23 +200,28 @@ export function ChannelEconomicsTable() {
   // Per-group totals shown alongside each section header so users can compare
   // groups (e.g. "Social spent 80% of the budget but delivered 30% of leads").
   const groupTotals = (list: ChannelEconomicsRow[]) => {
-    const leads     = list.reduce((s, r) => s + r.leads,     0);
-    const spend     = list.reduce((s, r) => s + r.spend,     0);
-    const qualified = list.reduce((s, r) => s + r.qualified, 0);
+    const leads             = list.reduce((s, r) => s + r.leads,             0);
+    const spend             = list.reduce((s, r) => s + r.spend,             0);
+    const qualified         = list.reduce((s, r) => s + r.qualified,         0);
+    const lifetimeSpend     = list.reduce((s, r) => s + r.lifetimeSpend,     0);
+    const lifetimeConverted = list.reduce((s, r) => s + r.lifetimeConverted, 0);
     return {
       leads, spend, qualified,
-      costPerLead: leads > 0 && spend > 0 ? spend / leads : 0,
+      costPerQualified: qualified > 0 && spend > 0 ? spend / qualified : 0,
+      lifetimeCostPerConversion: lifetimeConverted > 0 && lifetimeSpend > 0
+        ? lifetimeSpend / lifetimeConverted
+        : 0,
     };
   };
 
-  const colCount = 8; // Channel + 6 metric columns + drill-in
+  const colCount = 9; // Channel + 7 metric columns + drill-in
 
   return (
     <Card className="shadow-sm border-border/50 mb-5">
       <CardHeader className="pb-1 pt-4 px-4">
         <CardTitle className="text-[12px] font-medium text-muted-foreground uppercase tracking-wide">Channel Economics</CardTitle>
         <p className="text-[10px] text-muted-foreground mt-0.5">
-          Channels grouped by source type. Cost / Lead is the headline efficiency metric — lower is better. "—" means no spend recorded. Click a row to drill into that channel's leads.
+          Channels grouped by source type. <strong className="text-foreground">Cost / Qualified is the headline metric</strong> — it filters out junk leads and reflects what you really pay to source someone worth pursuing. The lifetime column shows whether a channel is gradually losing money over its full history. "—" means no data. Click a row to drill in.
         </p>
       </CardHeader>
       <CardContent className="px-4 pb-4">
@@ -222,22 +231,25 @@ export function ChannelEconomicsTable() {
               <TableRow className="hover:bg-transparent">
                 <TableHead className="text-[10px] uppercase tracking-wide h-8">Channel</TableHead>
                 <TableHead className="text-[10px] uppercase tracking-wide h-8 text-right">
+                  <HeaderHint label="Qualified" meaning="Leads at Initial Sales Call Completed or High Priority Follow up." source="Zoho CRM (Lead_Status)." className="justify-end" />
+                </TableHead>
+                <TableHead className="text-[10px] uppercase tracking-wide h-8 text-right bg-primary/5">
+                  <HeaderHint label="Cost / Qualified" meaning="The headline metric. Spend ÷ qualified leads — what you really pay to source one prospect worth pursuing. Lower is better." source="Marketing-spend imports + Zoho CRM." className="justify-end" />
+                </TableHead>
+                <TableHead className="text-[10px] uppercase tracking-wide h-8 text-right">
                   <HeaderHint label="Leads" meaning="Zoho leads attributed to this channel in the period." source="Zoho CRM (Lead_Source)." className="justify-end" />
                 </TableHead>
                 <TableHead className="text-[10px] uppercase tracking-wide h-8 text-right">
-                  <HeaderHint label="Cost / Lead" meaning="Spend ÷ leads. Lower is better." source="Marketing-spend imports + Zoho CRM." className="justify-end" />
-                </TableHead>
-                <TableHead className="text-[10px] uppercase tracking-wide h-8 text-right">
-                  <HeaderHint label="Qualified" meaning="Leads at Initial Sales Call Completed or High Priority Follow up." source="Zoho CRM (Lead_Status)." className="justify-end" />
-                </TableHead>
-                <TableHead className="text-[10px] uppercase tracking-wide h-8 text-right">
-                  <HeaderHint label="Cost / Qual." meaning="Spend ÷ qualified leads." source="Marketing-spend imports + Zoho CRM." className="justify-end" />
+                  <HeaderHint label="Cost / Lead" meaning="Spend ÷ leads. Includes every lead regardless of quality." source="Marketing-spend imports + Zoho CRM." className="justify-end" />
                 </TableHead>
                 <TableHead className="text-[10px] uppercase tracking-wide h-8 text-right">
                   <HeaderHint label="Conv. Rate" meaning="Share of leads converted (High Priority Follow up or Closed Won)." source="Zoho CRM (Lead_Status)." className="justify-end" />
                 </TableHead>
                 <TableHead className="text-[10px] uppercase tracking-wide h-8 text-right">
                   <HeaderHint label="Spend" meaning='Marketing spend recorded for this channel. "—" = no spend logged.' source="Marketing-spend imports." className="justify-end" />
+                </TableHead>
+                <TableHead className="text-[10px] uppercase tracking-wide h-8 text-right">
+                  <HeaderHint label="Cost / Conv. (lifetime)" meaning="All-time spend on this channel ÷ all-time conversions, ignoring the date filter. Surfaces channels that look fine in a recent window but have been losing money for years." source="Marketing-spend imports + Zoho CRM, lifetime." className="justify-end" />
                 </TableHead>
                 <TableHead className="text-[10px] uppercase tracking-wide h-8 text-right w-[80px]">Drill in</TableHead>
               </TableRow>
@@ -256,9 +268,10 @@ export function ChannelEconomicsTable() {
                           <span className="text-[10px] text-muted-foreground ml-2">{GROUP_DESCRIPTION[group]}</span>
                         </div>
                         <div className="text-[10px] text-muted-foreground tabular-nums shrink-0">
-                          {fmtN(totals.leads)} leads
+                          {fmtN(totals.leads)} leads · {fmtN(totals.qualified)} qualified
                           {totals.spend > 0 && <> · {fmtAED(totals.spend)} spend</>}
-                          {totals.costPerLead > 0 && <> · <span className="font-medium text-foreground">{fmtAED(totals.costPerLead)} avg CPL</span></>}
+                          {totals.costPerQualified > 0 && <> · <span className="font-medium text-foreground">{fmtAED(totals.costPerQualified)} avg CPQL</span></>}
+                          {totals.lifetimeCostPerConversion > 0 && <> · <span className="text-muted-foreground/80">{fmtAED(totals.lifetimeCostPerConversion)} lifetime CPC</span></>}
                         </div>
                       </div>
                     </TableCell>
@@ -273,16 +286,18 @@ export function ChannelEconomicsTable() {
                           {r.channel}
                         </div>
                       </TableCell>
-                      <TableCell className="text-[12px] text-right py-2.5 tabular-nums">{fmtN(r.leads)}</TableCell>
-                      <TableCell className="text-[12px] text-right py-2.5 tabular-nums font-semibold">
-                        {r.costPerLead > 0 ? fmtAED(r.costPerLead) : <span className="text-muted-foreground font-normal">—</span>}
-                      </TableCell>
                       <TableCell className="text-[12px] text-right py-2.5 tabular-nums">
                         <span className="text-primary/80">{fmtN(r.qualified)}</span>
                         <span className="text-[10px] font-normal ml-1 opacity-70">({r.qualifiedRate.toFixed(0)}%)</span>
                       </TableCell>
-                      <TableCell className="text-[12px] text-right py-2.5 tabular-nums">
-                        {r.costPerQualified > 0 ? fmtAED(r.costPerQualified) : <span className="text-muted-foreground">—</span>}
+                      <TableCell className="text-[13px] text-right py-2.5 tabular-nums font-bold bg-primary/5">
+                        {r.costPerQualified > 0
+                          ? <span className="text-foreground">{fmtAED(r.costPerQualified)}</span>
+                          : <span className="text-muted-foreground font-normal">—</span>}
+                      </TableCell>
+                      <TableCell className="text-[12px] text-right py-2.5 tabular-nums">{fmtN(r.leads)}</TableCell>
+                      <TableCell className="text-[12px] text-right py-2.5 tabular-nums text-muted-foreground">
+                        {r.costPerLead > 0 ? fmtAED(r.costPerLead) : <span>—</span>}
                       </TableCell>
                       <TableCell className="text-right py-2.5">
                         <span className={`text-[12px] tabular-nums ${
@@ -295,6 +310,11 @@ export function ChannelEconomicsTable() {
                       </TableCell>
                       <TableCell className="text-[12px] text-right py-2.5 tabular-nums text-muted-foreground">
                         {r.spend > 0 ? fmtAED(r.spend) : <span>—</span>}
+                      </TableCell>
+                      <TableCell className="text-[12px] text-right py-2.5 tabular-nums">
+                        {r.lifetimeCostPerConversion > 0
+                          ? <span className="text-foreground/80">{fmtAED(r.lifetimeCostPerConversion)}</span>
+                          : <span className="text-muted-foreground">—</span>}
                       </TableCell>
                       <TableCell className="text-right py-2.5">
                         <Link

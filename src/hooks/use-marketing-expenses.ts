@@ -139,6 +139,9 @@ export function useMarketingExpenses() {
 
     return {
       rows,
+      // All expense rows ignoring the date filter — used by callers that need
+      // lifetime totals (e.g. lifetime cost per conversion per channel).
+      allRowsUnfiltered: allRows,
       total,
       prevTotal,
       growthPct,
