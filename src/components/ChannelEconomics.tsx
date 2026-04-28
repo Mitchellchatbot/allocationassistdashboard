@@ -2,7 +2,7 @@ import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
 import { ChannelIcon } from "@/components/ChannelIcon";
-import { Trophy, TrendingDown, Target, Zap, ChevronRight, HelpCircle } from "lucide-react";
+import { Trophy, TrendingDown, Target, Zap, ChevronRight } from "lucide-react";
 import { Link, useNavigate } from "react-router-dom";
 import { useChannelEconomics, useChannelWinners, type ChannelEconomicsRow } from "@/hooks/use-channel-economics";
 import { useFilters } from "@/lib/filters";
@@ -11,17 +11,14 @@ import type { ChannelKey } from "@/lib/channel-mapping";
 
 const fmtN = (v: number) => v.toLocaleString();
 
-// Lightweight helper: header label with a hover-tooltip explaining the metric.
-// Used in both winner cards and the column headers of the channel economics
-// table so the same definitions live in one place.
+// Lightweight helper: a label with a hover-tooltip explaining the metric.
+// No visible info icon — hover anywhere on the label reveals the tooltip,
+// matching the rest of the dashboard's hover-only KPI tooltip pattern.
 function HeaderHint({ label, hint, className = "" }: { label: string; hint: string; className?: string }) {
   return (
     <Tooltip>
       <TooltipTrigger asChild>
-        <span className={`inline-flex items-center gap-1 cursor-help ${className}`}>
-          {label}
-          <HelpCircle className="h-3 w-3 opacity-50" />
-        </span>
+        <span className={`cursor-help ${className}`}>{label}</span>
       </TooltipTrigger>
       <TooltipContent side="top" className="text-[11px] max-w-[260px] leading-snug">
         {hint}

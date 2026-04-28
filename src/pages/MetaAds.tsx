@@ -14,12 +14,28 @@ import {
   AreaChart, Area, BarChart, Bar, PieChart, Pie, Cell,
   XAxis, YAxis, CartesianGrid, Tooltip, Legend, ResponsiveContainer,
 } from "recharts";
+import { Tooltip as UiTooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
 import {
   Users, Megaphone, Globe, Loader2, TrendingUp, DollarSign,
   Eye, MousePointer, AlertCircle, X, ImageOff,
   Repeat2, Hash, Target, Zap, Award, KeyRound, CheckCircle2,
   ChevronDown, ChevronUp, Play, ExternalLink, ClipboardList,
 } from "lucide-react";
+
+// Hover hints for MetaKpiCard fronts. Click still flips to the detailed back.
+const META_KPI_HINTS: Record<string, string> = {
+  "Total Spend":             "Total Meta Ads spend in the selected period (live from the Meta Marketing API).",
+  "Impressions":             "How many times your ads were shown. One person seeing the ad three times = 3 impressions.",
+  "Reach":                   "Unique people who saw your ads at least once. Reach × Frequency ≈ Impressions.",
+  "Link Clicks":             "Clicks on the ad's destination link (not just any click on the ad). The action that drives leads.",
+  "Frequency":               "Average times each person saw your ad (Impressions ÷ Reach). 2–3 is healthy; >5 means audience is saturating.",
+  "CPM":                     "Cost per 1,000 impressions. Brand-awareness efficiency. Lower = cheaper exposure.",
+  "Leads from Ads":          "Leads attributed by the Meta API as ad-driven conversions in the period.",
+  "Leads from Forms":        'Lead form submissions imported from your "meta_leads" Supabase table — independent of Meta API attribution.',
+  "Cost Per Lead (forms)":   "Total Meta spend ÷ form-lead submissions. The honest CPL, since form-leads come straight from your forms (not Meta's attributed conversion count).",
+  "Cost Per Qualified":      'Meta spend ÷ qualified form-leads. Qualified = lead reached Initial Sales Call Completed or High Priority Follow up in Zoho. "Contact in Future" is excluded.',
+  "Cost Per Placement":      "Meta spend ÷ placed leads (Closed Won). The ultimate efficiency metric — what does it cost Meta Ads to produce one paying customer.",
+};
 
 // ── Colours ───────────────────────────────────────────────────────────────────
 const PIE_COLORS = [
@@ -63,6 +79,22 @@ function MetaKpiCard({
   color: string; bg: string; back: React.ReactNode; backHeight?: number;
 }) {
   const [flipped, setFlipped] = useState(false);
+  const hint = META_KPI_HINTS[label];
+  const front = (
+    <div
+      style={{ backfaceVisibility: "hidden", WebkitBackfaceVisibility: "hidden" }}
+      className="absolute inset-0 rounded-xl border border-kpi/60 bg-kpi px-4 py-3 flex items-start justify-between shadow-sm hover:shadow-md hover:scale-[1.01] transition-all"
+    >
+      <div className="min-w-0">
+        <p className="text-[11px] font-medium text-muted-foreground mb-1">{label}</p>
+        <p className={`text-[24px] font-bold tabular-nums leading-none ${color}`}>{value}</p>
+        {sub && <p className="text-[10px] text-muted-foreground mt-1">{sub}</p>}
+      </div>
+      <div className={`h-7 w-7 rounded-lg ${bg} flex items-center justify-center shrink-0 ml-2`}>
+        <Icon className={`h-3.5 w-3.5 ${color}`} />
+      </div>
+    </div>
+  );
   return (
     <div
       className="cursor-pointer select-none"
@@ -79,20 +111,15 @@ function MetaKpiCard({
         transform: flipped ? "rotateX(-180deg)" : "rotateX(0deg)",
         position: "relative", height: "100%",
       }}>
-        {/* Front */}
-        <div
-          style={{ backfaceVisibility: "hidden", WebkitBackfaceVisibility: "hidden" }}
-          className="absolute inset-0 rounded-xl border border-kpi/60 bg-kpi px-4 py-3 flex items-start justify-between shadow-sm hover:shadow-md hover:scale-[1.01] transition-all"
-        >
-          <div className="min-w-0">
-            <p className="text-[11px] font-medium text-muted-foreground mb-1">{label}</p>
-            <p className={`text-[24px] font-bold tabular-nums leading-none ${color}`}>{value}</p>
-            {sub && <p className="text-[10px] text-muted-foreground mt-1">{sub}</p>}
-          </div>
-          <div className={`h-7 w-7 rounded-lg ${bg} flex items-center justify-center shrink-0 ml-2`}>
-            <Icon className={`h-3.5 w-3.5 ${color}`} />
-          </div>
-        </div>
+        {hint && !flipped ? (
+          <UiTooltip>
+            <TooltipTrigger asChild>{front}</TooltipTrigger>
+            <TooltipContent side="bottom" className="text-[11px] max-w-[260px] leading-snug">
+              {hint}
+              <div className="text-[10px] text-muted-foreground mt-1">Click for details.</div>
+            </TooltipContent>
+          </UiTooltip>
+        ) : front}
         {/* Back */}
         <div
           style={{

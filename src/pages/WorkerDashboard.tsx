@@ -12,11 +12,30 @@ import {
   AreaChart, Area, BarChart, Bar, PieChart, Pie, Cell,
   XAxis, YAxis, CartesianGrid, Tooltip, Legend, ResponsiveContainer,
 } from "recharts";
+import { Tooltip as UiTooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
 import {
   ClipboardList, PlusCircle, LogOut, Loader2, Save, Trash2,
   CalendarDays, Clock, BarChart2, ChevronDown, Check, X,
   Users, TrendingUp, LayoutDashboard, Search, Award, Phone,
 } from "lucide-react";
+
+// Hover hints for the KPI tiles on the Worker dashboard. Centralised so every
+// tile gets the same explanation regardless of which section renders it.
+const KPI_TILE_HINTS: Record<string, string> = {
+  "Total Entries":    "Total worker call-log entries logged across all time.",
+  "Workers Active":   "Distinct workers who have logged at least one entry.",
+  "Today":            "Entries logged today (your local timezone).",
+  "High Priority":    "Entries flagged as High Priority — leads that need urgent follow-up.",
+  "All Time":         "Total entries this worker has ever logged.",
+  "This Week":        "Entries logged since the start of this week (Monday).",
+  "Sales Calls":      "Total full sales calls in the selected period.",
+  "Good Calls":       "Calls marked as good outcomes. Good Call Rate = Good ÷ Sales Calls.",
+  "Qualified Leads":  'Zoho leads owned by this worker that reached a qualified status (Initial Sales Call Completed or High Priority Follow up). "Contact in Future" is excluded.',
+  "Conversion":       "Qualified ÷ assigned. The worker's hit rate on the leads they own.",
+  "Total Doctors":    "Zoho leads currently assigned to this worker.",
+  "Contact in Future":"Leads scheduled for a future contact attempt — deferred conversations, not yet qualified.",
+  "Attempted":        'Leads where the worker has reached out at least once but the lead is still "Attempted to Contact".',
+};
 
 // ── Constants ──────────────────────────────────────────────────────────────────
 
@@ -184,12 +203,20 @@ function emptyRow(): WorkerEntry & { _key: string } {
 function KpiTile({ label, value, sub, accent }: {
   label: string; value: string | number; sub?: string; accent?: string;
 }) {
-  return (
-    <div className="flex-1 rounded-xl border border-border/60 bg-card px-4 py-3 hover:shadow-sm transition-shadow min-w-0">
+  const hint = KPI_TILE_HINTS[label];
+  const tile = (
+    <div className="flex-1 rounded-xl border border-border/60 bg-card px-4 py-3 hover:shadow-sm transition-shadow min-w-0 cursor-default">
       <p className="text-[9px] font-medium text-muted-foreground uppercase tracking-wide mb-1">{label}</p>
       <p className={`text-[22px] font-semibold tabular-nums leading-none ${accent ?? "text-foreground"}`}>{value}</p>
       {sub && <p className="text-[9px] text-muted-foreground mt-0.5">{sub}</p>}
     </div>
+  );
+  if (!hint) return tile;
+  return (
+    <UiTooltip>
+      <TooltipTrigger asChild>{tile}</TooltipTrigger>
+      <TooltipContent side="bottom" className="text-[11px] max-w-[260px] leading-snug">{hint}</TooltipContent>
+    </UiTooltip>
   );
 }
 

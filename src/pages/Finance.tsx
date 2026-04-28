@@ -11,10 +11,25 @@ import {
   BarChart, Bar, XAxis, YAxis, Tooltip, ResponsiveContainer, CartesianGrid, Cell,
   AreaChart, Area, PieChart, Pie, Legend, LineChart, Line, ComposedChart,
 } from "recharts";
+import { Tooltip as UiTooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
 import {
   DollarSign, TrendingUp, TrendingDown, Crown, Receipt, Award, CalendarDays, ArrowUpRight,
   Wallet, Target, Zap, Users, Search, ArrowUpDown, ArrowUp, ArrowDown,
 } from "lucide-react";
+
+// Hover hints for FlipKpiCard fronts. Click still flips to the detailed back —
+// hover just gives a one-liner so users know what the metric means without
+// having to discover the flip interaction.
+const FINANCE_KPI_HINTS: Record<string, string> = {
+  "Marketing Spend":     "Total marketing spend in the selected period (sum of all logged expense rows). Click to see the breakdown by channel.",
+  "Leads Generated":     "Zoho leads created in the selected period. Includes every Lead_Source. Click to see the top sources ranked.",
+  "Cost Per Lead":       "Marketing spend ÷ leads generated. Lower is better. Includes ALL leads regardless of quality — see Cost Per Qualified for the more meaningful figure.",
+  "Cost Per Qualified":  'Marketing spend ÷ qualified leads. Qualified = Initial Sales Call Completed or High Priority Follow up. "Contact in Future" is excluded.',
+  "Top Channel":         "Channel that generated the most leads in this period (by Lead_Source).",
+  "Biggest Expense":     "Largest single expense category in the period.",
+  "Avg Monthly":         "Average monthly marketing spend over the months covered by the selected range.",
+  "Transactions":        "Number of expense rows recorded in the period.",
+};
 
 // ── Formatting ────────────────────────────────────────────────────────────────
 // fmtAED is provided by useCurrency() inside each component that needs it.
@@ -56,6 +71,22 @@ function FlipKpiCard({
   backHeight?: number;
 }) {
   const [flipped, setFlipped] = useState(false);
+  const hint = FINANCE_KPI_HINTS[label];
+  const front = (
+    <div
+      style={{ backfaceVisibility: "hidden", WebkitBackfaceVisibility: "hidden" }}
+      className="absolute inset-0 rounded-xl border border-kpi/60 bg-kpi px-4 py-3 flex items-start justify-between shadow-sm hover:shadow-md hover:scale-[1.01] transition-all"
+    >
+      <div className="min-w-0">
+        <p className="text-[11px] font-medium text-muted-foreground mb-1">{label}</p>
+        <p className={`text-[22px] font-bold tabular-nums leading-none ${color}`}>{value}</p>
+        {sub && <p className="text-[10px] text-muted-foreground mt-1.5">{sub}</p>}
+      </div>
+      <div className={`h-8 w-8 rounded-lg ${bg} flex items-center justify-center shrink-0 ml-2`}>
+        <Icon className={`h-4 w-4 ${color}`} />
+      </div>
+    </div>
+  );
   return (
     <div
       className="cursor-pointer select-none"
@@ -72,20 +103,15 @@ function FlipKpiCard({
         transform: flipped ? "rotateX(-180deg)" : "rotateX(0deg)",
         position: "relative", height: "100%",
       }}>
-        {/* Front */}
-        <div
-          style={{ backfaceVisibility: "hidden", WebkitBackfaceVisibility: "hidden" }}
-          className="absolute inset-0 rounded-xl border border-kpi/60 bg-kpi px-4 py-3 flex items-start justify-between shadow-sm hover:shadow-md hover:scale-[1.01] transition-all"
-        >
-          <div className="min-w-0">
-            <p className="text-[11px] font-medium text-muted-foreground mb-1">{label}</p>
-            <p className={`text-[22px] font-bold tabular-nums leading-none ${color}`}>{value}</p>
-            {sub && <p className="text-[10px] text-muted-foreground mt-1.5">{sub}</p>}
-          </div>
-          <div className={`h-8 w-8 rounded-lg ${bg} flex items-center justify-center shrink-0 ml-2`}>
-            <Icon className={`h-4 w-4 ${color}`} />
-          </div>
-        </div>
+        {hint && !flipped ? (
+          <UiTooltip>
+            <TooltipTrigger asChild>{front}</TooltipTrigger>
+            <TooltipContent side="bottom" className="text-[11px] max-w-[260px] leading-snug">
+              {hint}
+              <div className="text-[10px] text-muted-foreground mt-1">Click for details.</div>
+            </TooltipContent>
+          </UiTooltip>
+        ) : front}
         {/* Back */}
         <div
           style={{
