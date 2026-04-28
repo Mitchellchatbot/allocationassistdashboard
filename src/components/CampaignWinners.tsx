@@ -1,5 +1,6 @@
 import { useState } from "react";
 import { Trophy, Target, Zap } from "lucide-react";
+import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
 import { useCampaignWinners, type CampaignRow } from "@/hooks/use-campaign-winners";
 import { useCurrency } from "@/lib/CurrencyProvider";
 
@@ -10,6 +11,7 @@ interface WinnerCardProps {
   iconColor: string;
   iconBg: string;
   label: string;
+  hint?: string;
   campaign: CampaignRow | null;
   primaryValue: string;
   sub?: string;
@@ -21,9 +23,35 @@ interface WinnerCardProps {
  * the card to a back face that explains how the number was computed (input
  * spend, lead counts, division shown step-by-step).
  */
-function CampaignCard({ icon: Icon, iconColor, iconBg, label, campaign, primaryValue, sub, back }: WinnerCardProps) {
+function CampaignCard({ icon: Icon, iconColor, iconBg, label, hint, campaign, primaryValue, sub, back }: WinnerCardProps) {
   const [flipped, setFlipped] = useState(false);
   const empty = !campaign;
+  const front = (
+    <div
+      style={{ backfaceVisibility: "hidden", WebkitBackfaceVisibility: "hidden" }}
+      className="absolute inset-0 rounded-xl border border-border/50 bg-card shadow-sm hover:shadow-md hover:scale-[1.01] transition-all p-4 flex flex-col"
+    >
+      <div className="flex items-start justify-between mb-2">
+        <p className="text-[10px] font-medium text-muted-foreground uppercase tracking-wide">{label}</p>
+        <div className={`h-7 w-7 rounded-lg flex items-center justify-center ${iconBg}`}>
+          <Icon className={`h-3.5 w-3.5 ${iconColor}`} />
+        </div>
+      </div>
+      {campaign ? (
+        <>
+          <p className="text-base font-semibold truncate" title={campaign.campaign}>{campaign.campaign}</p>
+          <p className="text-lg font-bold tabular-nums">{primaryValue}</p>
+          {sub && <p className="text-[10px] text-muted-foreground mt-0.5">{sub}</p>}
+          <p className="text-[9px] text-muted-foreground/50 mt-auto pt-1">click to see how this was calculated</p>
+        </>
+      ) : (
+        <>
+          <p className="text-base font-semibold text-muted-foreground">—</p>
+          <p className="text-[10px] text-muted-foreground mt-0.5">Not enough campaign data</p>
+        </>
+      )}
+    </div>
+  );
   return (
     <div
       className={empty ? "select-none" : "cursor-pointer select-none"}
@@ -44,30 +72,12 @@ function CampaignCard({ icon: Icon, iconColor, iconBg, label, campaign, primaryV
         }}
       >
         {/* Front */}
-        <div
-          style={{ backfaceVisibility: "hidden", WebkitBackfaceVisibility: "hidden" }}
-          className="absolute inset-0 rounded-xl border border-border/50 bg-card shadow-sm hover:shadow-md hover:scale-[1.01] transition-all p-4 flex flex-col"
-        >
-          <div className="flex items-start justify-between mb-2">
-            <p className="text-[10px] font-medium text-muted-foreground uppercase tracking-wide">{label}</p>
-            <div className={`h-7 w-7 rounded-lg flex items-center justify-center ${iconBg}`}>
-              <Icon className={`h-3.5 w-3.5 ${iconColor}`} />
-            </div>
-          </div>
-          {campaign ? (
-            <>
-              <p className="text-base font-semibold truncate" title={campaign.campaign}>{campaign.campaign}</p>
-              <p className="text-lg font-bold tabular-nums">{primaryValue}</p>
-              {sub && <p className="text-[10px] text-muted-foreground mt-0.5">{sub}</p>}
-              <p className="text-[9px] text-muted-foreground/50 mt-auto pt-1">click to see how this was calculated</p>
-            </>
-          ) : (
-            <>
-              <p className="text-base font-semibold text-muted-foreground">—</p>
-              <p className="text-[10px] text-muted-foreground mt-0.5">Not enough campaign data</p>
-            </>
-          )}
-        </div>
+        {hint && !flipped ? (
+          <Tooltip>
+            <TooltipTrigger asChild>{front}</TooltipTrigger>
+            <TooltipContent side="bottom" className="text-[11px] max-w-[260px] leading-snug">{hint}</TooltipContent>
+          </Tooltip>
+        ) : front}
 
         {/* Back */}
         <div
@@ -207,6 +217,7 @@ export function CampaignWinnerCards() {
           icon={Trophy}
           iconColor="text-amber-600" iconBg="bg-amber-50"
           label="Most Qualified Leads"
+          hint='Campaign that produced the most qualified leads (count, not rate). Qualified = Initial Sales Call Completed, High Priority Follow up, or Closed Won. "Contact in Future" excluded. Click for the full breakdown.'
           campaign={mostQualified}
           primaryValue={mostQualified ? `${fmtN(mostQualified.qualified)} qualified` : ""}
           sub={mostQualified
@@ -218,6 +229,9 @@ export function CampaignWinnerCards() {
           icon={Target}
           iconColor="text-orange-600" iconBg="bg-orange-50"
           label={qualifiedLabel}
+          hint={hasSpendData
+            ? "Cheapest campaign per qualified lead — Meta ad spend ÷ qualified count. Only campaigns with both spend and qualified leads are eligible."
+            : "No Meta spend matched — ranked by qualification rate (qualified ÷ total leads). Campaigns need ≥ 5 leads to be eligible."}
           campaign={bestQualifiedKpi}
           primaryValue={
             bestQualifiedKpi
@@ -237,6 +251,9 @@ export function CampaignWinnerCards() {
           icon={Zap}
           iconColor="text-violet-600" iconBg="bg-violet-50"
           label={conversionLabel}
+          hint={hasSpendData
+            ? "Cheapest campaign per converted lead — Meta ad spend ÷ converted count. Converted = High Priority Follow up or Closed Won."
+            : "No Meta spend matched — ranked by conversion rate (converted ÷ total leads). Campaigns need ≥ 5 leads to be eligible."}
           campaign={bestConversionKpi}
           primaryValue={
             bestConversionKpi

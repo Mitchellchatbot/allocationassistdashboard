@@ -8,10 +8,27 @@ import {
   AreaChart, Area, XAxis, YAxis, Tooltip, ResponsiveContainer,
   CartesianGrid, Line,
 } from "recharts";
+import { Tooltip as UiTooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
 import {
   Activity, Award, AlertTriangle, Calendar, FileText, Handshake,
   UserPlus, Phone, Loader2, Users, TrendingUp, DollarSign, Clock, CheckCircle,
 } from "lucide-react";
+
+// Plain-English explanation for each pipeline stage on the funnel chart.
+// Same canonical labels as STATUS_LABEL in use-zoho-data.ts.
+const FUNNEL_STAGE_HINTS: Record<string, string> = {
+  "Not Contacted":         "Lead exists in Zoho but no recruiter has reached out yet.",
+  "Attempted to Contact":  "Recruiter has tried at least once but hasn't connected yet.",
+  "Initial Sales Call Completed": "Lead made it to a real sales call. The first qualified milestone.",
+  "Follow-up Scheduled":   'Recruiter deferred the conversation ("Contact in Future"). NOT counted as qualified.',
+  "Contact in Future":     'Recruiter deferred the conversation. NOT counted as qualified.',
+  "High Priority Follow up": "Hot lead — owes the team a callback. Counted as qualified AND converted.",
+  "Closed Won":            "Lead became a placement. The end of the funnel.",
+  "Closed Lost":           "Lead is dead — recruiter closed the loop with no placement.",
+  "Unqualified":           "Lead doesn't meet our criteria — wrong specialty, region, etc.",
+  "Unqualified Leads":     "Lead doesn't meet our criteria — wrong specialty, region, etc.",
+  "Not Interested":        "Lead actively declined.",
+};
 import { ChannelIcon } from "@/components/ChannelIcon";
 import { Link } from "react-router-dom";
 import { useState, useMemo } from "react";
@@ -351,23 +368,34 @@ const Index = () => {
               <p className="text-[11px] text-muted-foreground text-center py-8">No pipeline data</p>
             ) : (
               <div className="space-y-3">
-                {funnel.map((item, i) => (
-                  <div key={item.stage}>
-                    <div className="flex items-center justify-between mb-1.5">
-                      <span className="text-[13px] font-medium text-foreground">{item.stage}</span>
-                      <div className="flex items-center gap-2">
-                        <span className="text-[12px] font-semibold text-foreground tabular-nums">{item.count.toLocaleString()}</span>
-                        <span className="text-[11px] text-muted-foreground w-8 text-right tabular-nums">{item.pct}%</span>
+                {funnel.map((item, i) => {
+                  const hint = FUNNEL_STAGE_HINTS[item.stage];
+                  const row = (
+                    <div className={hint ? "cursor-help" : ""}>
+                      <div className="flex items-center justify-between mb-1.5">
+                        <span className="text-[13px] font-medium text-foreground">{item.stage}</span>
+                        <div className="flex items-center gap-2">
+                          <span className="text-[12px] font-semibold text-foreground tabular-nums">{item.count.toLocaleString()}</span>
+                          <span className="text-[11px] text-muted-foreground w-8 text-right tabular-nums">{item.pct}%</span>
+                        </div>
+                      </div>
+                      <div className="h-2 rounded-full bg-muted overflow-hidden">
+                        <div
+                          className="h-full rounded-full transition-all duration-500"
+                          style={{ width: `${item.pct}%`, backgroundColor: `hsl(170, ${55 - i * 5}%, ${45 + i * 4}%)` }}
+                        />
                       </div>
                     </div>
-                    <div className="h-2 rounded-full bg-muted overflow-hidden">
-                      <div
-                        className="h-full rounded-full transition-all duration-500"
-                        style={{ width: `${item.pct}%`, backgroundColor: `hsl(170, ${55 - i * 5}%, ${45 + i * 4}%)` }}
-                      />
-                    </div>
-                  </div>
-                ))}
+                  );
+                  return hint ? (
+                    <UiTooltip key={item.stage}>
+                      <TooltipTrigger asChild>{row}</TooltipTrigger>
+                      <TooltipContent side="left" className="text-[11px] max-w-[260px] leading-snug">{hint}</TooltipContent>
+                    </UiTooltip>
+                  ) : (
+                    <div key={item.stage}>{row}</div>
+                  );
+                })}
               </div>
             )}
           </CardContent>

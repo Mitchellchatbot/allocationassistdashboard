@@ -1,6 +1,7 @@
 import { DashboardLayout } from "@/components/layout/DashboardLayout";
 import { ExpandableKPICard } from "@/components/ExpandableKPICard";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
+import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
 import { useFilteredData } from "@/hooks/use-filtered-data";
 import { Phone, Mail, Clock, Users, UserCheck, Activity, ArrowRight, PhoneCall, AlertTriangle } from "lucide-react";
 
@@ -172,6 +173,7 @@ const Sales = () => {
           icon={Users}
           color="text-primary"
           bg="bg-primary/10"
+          hint="All Zoho leads created in the selected date range — every lead the sales team owns this period regardless of status."
           expandedContent={totalLeadsContent}
           expandedHeight={260}
         />
@@ -181,6 +183,7 @@ const Sales = () => {
           icon={Activity}
           color="text-success"
           bg="bg-success/10"
+          hint="Leads whose status is one of: Not Contacted, Attempted to Contact, Initial Sales Call Completed, Contact in Future, or High Priority Follow up. Excludes Unqualified and Not Interested."
           expandedContent={activePipelineContent}
           expandedHeight={260}
         />
@@ -190,6 +193,7 @@ const Sales = () => {
           icon={UserCheck}
           color="text-info"
           bg="bg-info/10"
+          hint="Share of leads that progressed past initial contact (reached Initial Sales Call Completed or High Priority Follow up). Same definition used elsewhere on the dashboard for true qualified leads."
           expandedContent={conversionRateContent}
           expandedHeight={240}
         />
@@ -199,6 +203,7 @@ const Sales = () => {
           icon={PhoneCall}
           color="text-warning"
           bg="bg-warning/10"
+          hint="Share of pipeline leads the team has actually contacted (anything beyond Not Contacted). Measures recruiter responsiveness — high means leads aren't sitting untouched."
           expandedContent={contactRateContent}
           expandedHeight={240}
         />
@@ -208,6 +213,7 @@ const Sales = () => {
           icon={Clock}
           color="text-destructive"
           bg="bg-destructive/10"
+          hint="Leads currently flagged High Priority Follow up — recruiters owe these a callback. Higher = more work piling up."
           expandedContent={urgentContent}
           expandedHeight={280}
         />
@@ -244,13 +250,16 @@ const Sales = () => {
           </CardHeader>
           <CardContent className="px-5 pb-5 space-y-3">
             {[
-              { icon: Phone, label: "Calls Made",        val: sales.outboundCalls.toLocaleString(), sub: "outbound from Zoho Calls", color: "bg-primary/10 text-primary" },
-              { icon: Mail,  label: "Emails Sent",       val: sales.emailsSent.toLocaleString(),    sub: "sampled from contacted leads",  color: "bg-info/10 text-info" },
-              { icon: Clock, label: "Follow-ups Needed", val: sales.followUpsPending.toString(),    sub: "High Priority Follow up status", color: "bg-warning/10 text-warning" },
+              { icon: Phone, label: "Calls Made",        val: sales.outboundCalls.toLocaleString(), sub: "outbound from Zoho Calls", color: "bg-primary/10 text-primary",
+                hint: "Total outbound calls logged in the Zoho Calls module for the selected period." },
+              { icon: Mail,  label: "Emails Sent",       val: sales.emailsSent.toLocaleString(),    sub: "sampled from contacted leads",  color: "bg-info/10 text-info",
+                hint: "Email volume sampled from contacted leads. Approximate — Zoho's Email module isn't fully synced." },
+              { icon: Clock, label: "Follow-ups Needed", val: sales.followUpsPending.toString(),    sub: "High Priority Follow up status", color: "bg-warning/10 text-warning",
+                hint: "Leads currently flagged High Priority Follow up — these need a recruiter callback." },
             ].map(m => {
               const Icon = m.icon;
-              return (
-                <div key={m.label} className="flex items-center gap-3 rounded-xl border border-border/40 bg-muted/20 px-4 py-3 hover:bg-muted/40 transition-colors">
+              const tile = (
+                <div className="flex items-center gap-3 rounded-xl border border-border/40 bg-muted/20 px-4 py-3 hover:bg-muted/40 transition-colors cursor-help">
                   <div className={`h-9 w-9 rounded-lg ${m.color} flex items-center justify-center shrink-0`}>
                     <Icon className="h-4 w-4" />
                   </div>
@@ -260,6 +269,12 @@ const Sales = () => {
                   </div>
                   <p className="text-[22px] font-bold tabular-nums text-foreground">{m.val}</p>
                 </div>
+              );
+              return (
+                <Tooltip key={m.label}>
+                  <TooltipTrigger asChild>{tile}</TooltipTrigger>
+                  <TooltipContent side="bottom" className="text-[11px] max-w-[260px] leading-snug">{m.hint}</TooltipContent>
+                </Tooltip>
               );
             })}
           </CardContent>
