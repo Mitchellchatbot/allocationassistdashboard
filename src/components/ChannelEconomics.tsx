@@ -224,34 +224,34 @@ export function ChannelEconomicsTable() {
           Channels grouped by source type. <strong className="text-foreground">Cost / Qualified is the headline metric</strong> — it filters out junk leads and reflects what you really pay to source someone worth pursuing. The lifetime column shows whether a channel is gradually losing money over its full history. "—" means no data. Click a row to drill in.
         </p>
       </CardHeader>
-      <CardContent className="px-4 pb-4">
-        <div className="overflow-x-auto -mx-4 px-4">
-          <Table>
+      <CardContent className="px-0 pb-4">
+        <div className="overflow-x-auto">
+          <Table className="min-w-[920px]">
             <TableHeader>
-              <TableRow className="hover:bg-transparent">
-                <TableHead className="text-[10px] uppercase tracking-wide h-8">Channel</TableHead>
-                <TableHead className="text-[10px] uppercase tracking-wide h-8 text-right">
+              <TableRow className="hover:bg-transparent border-b-border/60">
+                <TableHead className="text-[10px] uppercase tracking-wide h-9 pl-5 pr-3 w-[180px]">Channel</TableHead>
+                <TableHead className="text-[10px] uppercase tracking-wide h-9 px-3 text-right whitespace-nowrap w-[110px]">
                   <HeaderHint label="Qualified" meaning="Leads at Initial Sales Call Completed or High Priority Follow up." source="Zoho CRM (Lead_Status)." className="justify-end" />
                 </TableHead>
-                <TableHead className="text-[10px] uppercase tracking-wide h-8 text-right bg-primary/5">
+                <TableHead className="text-[10px] uppercase tracking-wide h-9 px-4 text-right whitespace-nowrap bg-primary/[0.06] w-[140px]">
                   <HeaderHint label="Cost / Qualified" meaning="The headline metric. Spend ÷ qualified leads — what you really pay to source one prospect worth pursuing. Lower is better." source="Marketing-spend imports + Zoho CRM." className="justify-end" />
                 </TableHead>
-                <TableHead className="text-[10px] uppercase tracking-wide h-8 text-right">
+                <TableHead className="text-[10px] uppercase tracking-wide h-9 px-3 text-right whitespace-nowrap w-[80px]">
                   <HeaderHint label="Leads" meaning="Zoho leads attributed to this channel in the period." source="Zoho CRM (Lead_Source)." className="justify-end" />
                 </TableHead>
-                <TableHead className="text-[10px] uppercase tracking-wide h-8 text-right">
+                <TableHead className="text-[10px] uppercase tracking-wide h-9 px-3 text-right whitespace-nowrap w-[100px]">
                   <HeaderHint label="Cost / Lead" meaning="Spend ÷ leads. Includes every lead regardless of quality." source="Marketing-spend imports + Zoho CRM." className="justify-end" />
                 </TableHead>
-                <TableHead className="text-[10px] uppercase tracking-wide h-8 text-right">
+                <TableHead className="text-[10px] uppercase tracking-wide h-9 px-3 text-right whitespace-nowrap w-[90px]">
                   <HeaderHint label="Conv. Rate" meaning="Share of leads converted (High Priority Follow up or Closed Won)." source="Zoho CRM (Lead_Status)." className="justify-end" />
                 </TableHead>
-                <TableHead className="text-[10px] uppercase tracking-wide h-8 text-right">
+                <TableHead className="text-[10px] uppercase tracking-wide h-9 px-3 text-right whitespace-nowrap w-[110px]">
                   <HeaderHint label="Spend" meaning='Marketing spend recorded for this channel. "—" = no spend logged.' source="Marketing-spend imports." className="justify-end" />
                 </TableHead>
-                <TableHead className="text-[10px] uppercase tracking-wide h-8 text-right">
-                  <HeaderHint label="Cost / Conv. (lifetime)" meaning="All-time spend on this channel ÷ all-time conversions, ignoring the date filter. Surfaces channels that look fine in a recent window but have been losing money for years." source="Marketing-spend imports + Zoho CRM, lifetime." className="justify-end" />
+                <TableHead className="text-[10px] uppercase tracking-wide h-9 px-3 text-right whitespace-nowrap w-[130px]">
+                  <HeaderHint label="Lifetime CPC" meaning="All-time spend on this channel ÷ all-time conversions, ignoring the date filter. Surfaces channels that look fine in a recent window but have been losing money for years." source="Marketing-spend imports + Zoho CRM, lifetime." className="justify-end" />
                 </TableHead>
-                <TableHead className="text-[10px] uppercase tracking-wide h-8 text-right w-[80px]">Drill in</TableHead>
+                <TableHead className="text-[10px] uppercase tracking-wide h-9 px-3 text-right w-[80px]">Drill</TableHead>
               </TableRow>
             </TableHeader>
             <TableBody>
@@ -260,63 +260,71 @@ export function ChannelEconomicsTable() {
                 if (!list || list.length === 0) return [];
                 const totals = groupTotals(list);
                 return [
-                  <TableRow key={`hdr-${group}`} className="hover:bg-transparent bg-muted/20">
-                    <TableCell colSpan={colCount} className="py-2 px-3">
-                      <div className="flex items-baseline justify-between gap-3">
+                  <TableRow key={`hdr-${group}`} className="hover:bg-transparent bg-muted/30 border-b-border/60">
+                    <TableCell colSpan={colCount} className="py-2.5 pl-5 pr-4">
+                      <div className="flex items-center justify-between gap-4 flex-wrap">
                         <div className="min-w-0">
                           <span className="text-[11px] font-semibold uppercase tracking-wide text-foreground">{group}</span>
                           <span className="text-[10px] text-muted-foreground ml-2">{GROUP_DESCRIPTION[group]}</span>
                         </div>
-                        <div className="text-[10px] text-muted-foreground tabular-nums shrink-0">
-                          {fmtN(totals.leads)} leads · {fmtN(totals.qualified)} qualified
-                          {totals.spend > 0 && <> · {fmtAED(totals.spend)} spend</>}
-                          {totals.costPerQualified > 0 && <> · <span className="font-medium text-foreground">{fmtAED(totals.costPerQualified)} avg CPQL</span></>}
-                          {totals.lifetimeCostPerConversion > 0 && <> · <span className="text-muted-foreground/80">{fmtAED(totals.lifetimeCostPerConversion)} lifetime CPC</span></>}
+                        <div className="text-[10px] text-muted-foreground tabular-nums shrink-0 whitespace-nowrap flex items-center gap-x-3 gap-y-0.5 flex-wrap justify-end">
+                          <span>{fmtN(totals.leads)} leads</span>
+                          <span>{fmtN(totals.qualified)} qualified</span>
+                          {totals.spend > 0 && <span>{fmtAED(totals.spend)} spend</span>}
+                          {totals.costPerQualified > 0 && (
+                            <span className="font-semibold text-foreground">{fmtAED(totals.costPerQualified)} avg CPQL</span>
+                          )}
+                          {totals.lifetimeCostPerConversion > 0 && (
+                            <span>{fmtAED(totals.lifetimeCostPerConversion)} lifetime CPC</span>
+                          )}
                         </div>
                       </div>
                     </TableCell>
                   </TableRow>,
                   ...list.map(r => (
-                    <TableRow key={r.channel} className="hover:bg-muted/30 cursor-pointer group" onClick={() => {
+                    <TableRow key={r.channel} className="hover:bg-muted/30 cursor-pointer group border-b-border/40" onClick={() => {
                       navigate(`/leads-pipeline?source=${encodeURIComponent(r.channel)}`);
                     }}>
-                      <TableCell className="text-[12px] font-medium py-2.5 pl-6">
+                      <TableCell className="text-[12px] font-medium py-3 pl-7 pr-3 whitespace-nowrap">
                         <div className="flex items-center gap-2">
-                          <ChannelIcon channel={r.channel} size={13} />
-                          {r.channel}
+                          <ChannelIcon channel={r.channel} size={14} />
+                          <span className="truncate">{r.channel}</span>
                         </div>
                       </TableCell>
-                      <TableCell className="text-[12px] text-right py-2.5 tabular-nums">
-                        <span className="text-primary/80">{fmtN(r.qualified)}</span>
-                        <span className="text-[10px] font-normal ml-1 opacity-70">({r.qualifiedRate.toFixed(0)}%)</span>
+                      <TableCell className="text-[12px] text-right py-3 px-3 tabular-nums whitespace-nowrap">
+                        <span className="text-primary/80 font-medium">{fmtN(r.qualified)}</span>
+                        <span className="text-[10px] font-normal ml-1 text-muted-foreground">({r.qualifiedRate.toFixed(0)}%)</span>
                       </TableCell>
-                      <TableCell className="text-[13px] text-right py-2.5 tabular-nums font-bold bg-primary/5">
+                      <TableCell className="text-[13px] text-right py-3 px-4 tabular-nums font-bold whitespace-nowrap bg-primary/[0.06]">
                         {r.costPerQualified > 0
                           ? <span className="text-foreground">{fmtAED(r.costPerQualified)}</span>
-                          : <span className="text-muted-foreground font-normal">—</span>}
+                          : <span className="text-muted-foreground/50 font-normal">—</span>}
                       </TableCell>
-                      <TableCell className="text-[12px] text-right py-2.5 tabular-nums">{fmtN(r.leads)}</TableCell>
-                      <TableCell className="text-[12px] text-right py-2.5 tabular-nums text-muted-foreground">
-                        {r.costPerLead > 0 ? fmtAED(r.costPerLead) : <span>—</span>}
+                      <TableCell className="text-[12px] text-right py-3 px-3 tabular-nums whitespace-nowrap">
+                        {fmtN(r.leads)}
                       </TableCell>
-                      <TableCell className="text-right py-2.5">
-                        <span className={`text-[12px] tabular-nums ${
+                      <TableCell className="text-[12px] text-right py-3 px-3 tabular-nums whitespace-nowrap text-muted-foreground">
+                        {r.costPerLead > 0 ? fmtAED(r.costPerLead) : <span className="text-muted-foreground/50">—</span>}
+                      </TableCell>
+                      <TableCell className="text-right py-3 px-3 whitespace-nowrap">
+                        <span className={`text-[12px] tabular-nums font-medium ${
                           r.conversionRate >= 40 ? "text-success" :
                           r.conversionRate >= 20 ? "text-primary" :
-                          "text-warning"
+                          r.conversionRate > 0  ? "text-warning" :
+                          "text-muted-foreground/50"
                         }`}>
                           {r.conversionRate.toFixed(1)}%
                         </span>
                       </TableCell>
-                      <TableCell className="text-[12px] text-right py-2.5 tabular-nums text-muted-foreground">
-                        {r.spend > 0 ? fmtAED(r.spend) : <span>—</span>}
+                      <TableCell className="text-[12px] text-right py-3 px-3 tabular-nums whitespace-nowrap text-muted-foreground">
+                        {r.spend > 0 ? fmtAED(r.spend) : <span className="text-muted-foreground/50">—</span>}
                       </TableCell>
-                      <TableCell className="text-[12px] text-right py-2.5 tabular-nums">
+                      <TableCell className="text-[12px] text-right py-3 px-3 tabular-nums whitespace-nowrap">
                         {r.lifetimeCostPerConversion > 0
                           ? <span className="text-foreground/80">{fmtAED(r.lifetimeCostPerConversion)}</span>
-                          : <span className="text-muted-foreground">—</span>}
+                          : <span className="text-muted-foreground/50">—</span>}
                       </TableCell>
-                      <TableCell className="text-right py-2.5">
+                      <TableCell className="text-right py-3 px-3 whitespace-nowrap">
                         <Link
                           to={`/leads-pipeline?source=${encodeURIComponent(r.channel)}&stage=Not%20Contacted`}
                           onClick={(e) => e.stopPropagation()}
