@@ -813,14 +813,62 @@ const MetaAds = () => {
   } : undefined);
 
   // Supabase
-  const total        = data?.total        ?? 0;
-  const withUtm      = data?.withUtm      ?? 0;
-  const byCreative   = data?.byCreative   ?? [];
-  const byCampaign   = data?.byCampaign   ?? [];
-  const byPlatformL  = data?.byPlatform   ?? [];
-  const byLocation   = data?.byLocation   ?? [];
-  const bySpeciality = data?.bySpeciality ?? [];
-  const trackedPct   = total > 0 ? Math.round((withUtm / total) * 100) : 0;
+  const total           = data?.total           ?? 0;
+  const withUtm         = data?.withUtm         ?? 0;
+  const byCreative      = data?.byCreative      ?? [];
+  const byCampaign      = data?.byCampaign      ?? [];
+  const byPlatformL     = data?.byPlatform      ?? [];
+  const byLocation      = data?.byLocation      ?? [];
+  const bySpeciality    = data?.bySpeciality    ?? [];
+  const creativeFunnels = data?.creativeFunnels ?? [];
+  const trackedPct      = total > 0 ? Math.round((withUtm / total) * 100) : 0;
+
+  // ── Per-video performance ─────────────────────────────────────────────────
+  // Joins Meta API ads (spend / impressions) with form-lead funnels keyed on
+  // utm_content. Match is by normalised name — "RnP-Q4-vid01" in Meta and
+  // "rnpq4vid01" in utm_content collapse to the same key.
+  // Only video ads are surfaced since the user asked for a per-video breakdown.
+  const videoPerformance = useMemo(() => {
+    const norm = (s: string) => s.toLowerCase().replace(/[^a-z0-9]/g, "");
+
+    // Index funnels by normalised utm_content so we can do O(1) lookups by ad.
+    const funnelByKey = new Map<string, typeof creativeFunnels[number]>();
+    for (const f of creativeFunnels) {
+      const k = norm(f.creative);
+      if (k) funnelByKey.set(k, f);
+    }
+
+    // Start with video ads from Meta API (have spend, thumbnail, video flag).
+    const rows = topAds
+      .filter(ad => ad.isVideo)
+      .map(ad => {
+        const f = funnelByKey.get(norm(ad.name));
+        const formLeads = f?.total     ?? 0;
+        const qualified = f?.qualified ?? 0;
+        const placed    = f?.converted ?? 0;
+        return {
+          id:          ad.id,
+          name:        ad.name,
+          thumbnail:   ad.thumbnail,
+          status:      ad.status,
+          ad,
+          spend:       ad.spend,
+          impressions: ad.impressions,
+          metaLeads:   ad.leads,
+          formLeads,
+          qualified,
+          placed,
+          cpql:        qualified > 0 ? ad.spend / qualified : 0,
+          cpp:         placed    > 0 ? ad.spend / placed    : 0,
+          qualRate:    formLeads > 0 ? (qualified / formLeads) * 100 : 0,
+        };
+      })
+      // Drop video ads with no measurable activity at all.
+      .filter(r => r.spend > 0 || r.formLeads > 0 || r.metaLeads > 0)
+      .sort((a, b) => b.qualified - a.qualified || b.formLeads - a.formLeads || b.spend - a.spend);
+
+    return rows;
+  }, [topAds, creativeFunnels]);
 
   // ── Back-side content for each KPI flip card ──────────────────────────────
   const topCampBySpend = campaigns.slice(0, 5);
@@ -1362,6 +1410,139 @@ const MetaAds = () => {
                     </tbody>
                   </table>
                 )}
+              </CardContent>
+            </Card>
+          )}
+
+          {/* ── Per-Video Performance ─────────────────────────────────── */}
+          {/* Joins Meta API ads (spend) with form-lead funnels by ad name ↔ utm_content,
+              then surfaces qualified + placement counts and the cost-per metrics
+              (CPQL / cost per placement) the user asked for. */}
+          {videoPerformance.length > 0 && (
+            <Card className="mb-4 shadow-sm border-border/50">
+              <CardHeader className="pb-1 pt-4 px-4">
+                <CardTitle className="text-[12px] font-medium text-muted-foreground uppercase tracking-wide">
+                  Per-Video Performance
+                  <span className="ml-2 normal-case font-normal text-muted-foreground/40">
+                    · video ads only · spend from Meta API · qualified/placed from Zoho via utm_content match
+                  </span>
+                </CardTitle>
+              </CardHeader>
+              <CardContent className="px-0 pb-2 overflow-x-auto">
+                <table className="w-full text-left">
+                  <thead>
+                    <tr className="border-b border-border/40">
+                      <th className="py-2 px-3 text-[10px] font-medium text-muted-foreground uppercase tracking-wide w-8">#</th>
+                      <th className="py-2 px-3 text-[10px] font-medium text-muted-foreground uppercase tracking-wide w-12">Video</th>
+                      <th className="py-2 px-3 text-[10px] font-medium text-muted-foreground uppercase tracking-wide">Name</th>
+                      <UiTooltip>
+                        <TooltipTrigger asChild>
+                          <th className="py-2 px-3 text-[10px] font-medium text-muted-foreground uppercase tracking-wide text-right cursor-help">Spend</th>
+                        </TooltipTrigger>
+                        <TooltipContent side="top" className="text-[11px] max-w-[260px] leading-snug">
+                          Meta Ads spend on this specific video in the selected period.
+                          <div className="text-[10px] text-muted-foreground mt-1">Source: Meta Marketing API.</div>
+                        </TooltipContent>
+                      </UiTooltip>
+                      <UiTooltip>
+                        <TooltipTrigger asChild>
+                          <th className="py-2 px-3 text-[10px] font-medium text-muted-foreground uppercase tracking-wide text-right cursor-help">Leads</th>
+                        </TooltipTrigger>
+                        <TooltipContent side="top" className="text-[11px] max-w-[280px] leading-snug">
+                          Form leads attributed to this video by matching ad name to <code>utm_content</code>. Counts unique form submissions.
+                          <div className="text-[10px] text-muted-foreground mt-1">Source: Supabase meta_leads (utm_content).</div>
+                        </TooltipContent>
+                      </UiTooltip>
+                      <UiTooltip>
+                        <TooltipTrigger asChild>
+                          <th className="py-2 px-3 text-[10px] font-medium text-muted-foreground uppercase tracking-wide text-right cursor-help">Qualified</th>
+                        </TooltipTrigger>
+                        <TooltipContent side="top" className="text-[11px] max-w-[280px] leading-snug">
+                          Of those form leads, how many reached a qualified Lead_Status in Zoho (Initial Sales Call Completed, High Priority Follow up, or Closed Won). "Contact in Future" excluded.
+                          <div className="text-[10px] text-muted-foreground mt-1">Source: Supabase meta_leads × Zoho Lead_Status.</div>
+                        </TooltipContent>
+                      </UiTooltip>
+                      <UiTooltip>
+                        <TooltipTrigger asChild>
+                          <th className="py-2 px-3 text-[10px] font-medium text-muted-foreground uppercase tracking-wide text-right cursor-help">CPQL</th>
+                        </TooltipTrigger>
+                        <TooltipContent side="top" className="text-[11px] max-w-[280px] leading-snug">
+                          Cost per Qualified Lead — Meta spend ÷ qualified leads for this video. Lower = cheaper to source a qualified prospect. "—" when there are no qualified leads (or no spend) yet.
+                          <div className="text-[10px] text-muted-foreground mt-1">Source: Meta API spend ÷ Zoho-qualified meta_leads.</div>
+                        </TooltipContent>
+                      </UiTooltip>
+                      <UiTooltip>
+                        <TooltipTrigger asChild>
+                          <th className="py-2 px-3 text-[10px] font-medium text-muted-foreground uppercase tracking-wide text-right cursor-help">Cost / Placement</th>
+                        </TooltipTrigger>
+                        <TooltipContent side="top" className="text-[11px] max-w-[280px] leading-snug">
+                          Meta spend ÷ placements (leads that reached High Priority Follow up or Closed Won). The ultimate efficiency metric — what does this video cost us per placed doctor.
+                          <div className="text-[10px] text-muted-foreground mt-1">Source: Meta API spend ÷ Zoho converted/placed meta_leads.</div>
+                        </TooltipContent>
+                      </UiTooltip>
+                      <th className="py-2 px-3 text-[10px] font-medium text-muted-foreground uppercase tracking-wide text-center">Preview</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {videoPerformance.map((v, i) => (
+                      <tr key={v.id} className="border-b border-border/30 hover:bg-muted/30 transition-colors">
+                        <td className="py-2.5 px-3 text-[11px] text-muted-foreground">{i + 1}</td>
+                        <td className="py-2.5 px-3">
+                          {v.thumbnail ? (
+                            <div className="relative h-9 w-14 rounded overflow-hidden bg-muted shrink-0">
+                              <img src={v.thumbnail} alt="" className="h-full w-full object-cover" />
+                              <div className="absolute inset-0 flex items-center justify-center bg-black/30">
+                                <Play className="h-3 w-3 text-white" />
+                              </div>
+                            </div>
+                          ) : (
+                            <div className="h-9 w-14 rounded bg-muted/50 flex items-center justify-center">
+                              <ImageOff className="h-3.5 w-3.5 text-muted-foreground/30" />
+                            </div>
+                          )}
+                        </td>
+                        <td className="py-2.5 px-3">
+                          <div className="flex items-center gap-1.5">
+                            <span className={`h-1.5 w-1.5 rounded-full shrink-0 ${v.status === "ACTIVE" ? "bg-success" : "bg-muted-foreground/30"}`} />
+                            <span className="text-[11px] font-medium truncate max-w-[200px]" title={v.name}>{v.name}</span>
+                          </div>
+                        </td>
+                        <td className="py-2.5 px-3 text-right text-[11px] font-semibold text-primary tabular-nums">
+                          {v.spend > 0 ? fmtC(toDisplay(v.spend), currency) : <span className="text-muted-foreground/40">—</span>}
+                        </td>
+                        <td className="py-2.5 px-3 text-right text-[12px] tabular-nums">
+                          {v.formLeads > 0 ? v.formLeads.toLocaleString() : <span className="text-muted-foreground/40">—</span>}
+                        </td>
+                        <td className="py-2.5 px-3 text-right text-[12px] tabular-nums">
+                          {v.qualified > 0 ? (
+                            <>
+                              <span className="font-semibold text-success">{v.qualified.toLocaleString()}</span>
+                              <span className="text-[10px] font-normal ml-1 opacity-70">({v.qualRate.toFixed(0)}%)</span>
+                            </>
+                          ) : <span className="text-muted-foreground/40">—</span>}
+                        </td>
+                        <td className="py-2.5 px-3 text-right text-[12px] font-semibold tabular-nums">
+                          {v.cpql > 0 ? fmtC(toDisplay(v.cpql), currency) : <span className="text-muted-foreground/40 font-normal">—</span>}
+                        </td>
+                        <td className="py-2.5 px-3 text-right text-[12px] font-semibold tabular-nums">
+                          {v.cpp > 0 ? fmtC(toDisplay(v.cpp), currency) : <span className="text-muted-foreground/40 font-normal">—</span>}
+                        </td>
+                        <td className="py-2.5 px-3 text-center">
+                          <button
+                            type="button"
+                            onClick={() => setDirectPreviewAd(v.ad)}
+                            className="inline-flex items-center gap-1 rounded-lg bg-primary/10 hover:bg-primary hover:text-white text-primary px-2.5 py-1 text-[10px] font-semibold transition-colors"
+                          >
+                            <Play className="h-2.5 w-2.5" /> Preview
+                          </button>
+                        </td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+                <p className="text-[10px] text-muted-foreground px-4 pt-2 pb-1">
+                  Match is by normalised ad name ↔ <code>utm_content</code>. A video with no match (e.g. forms not tagged with <code>utm_content</code>) shows "—" for leads/qualified.
+                </p>
               </CardContent>
             </Card>
           )}

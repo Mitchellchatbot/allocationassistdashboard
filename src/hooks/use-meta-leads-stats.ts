@@ -12,6 +12,13 @@ export type CampaignFunnel = {
   converted: number;
 };
 
+export type CreativeFunnel = {
+  creative:  string;   // raw utm_content value
+  total:     number;
+  qualified: number;
+  converted: number;
+};
+
 export type MetaLeadsStats = {
   total:           number;
   withUtm:         number;
@@ -26,6 +33,7 @@ export type MetaLeadsStats = {
   bySpeciality:    GroupedStat[];
   byStage:         GroupedStat[];
   campaignFunnels: CampaignFunnel[];
+  creativeFunnels: CreativeFunnel[];
 };
 
 // Stage classification mirrors how Zoho Lead_Status is treated elsewhere in the app.
@@ -230,28 +238,46 @@ export function useMetaLeadsStats(dateRange: DateRangeInput) {
         return (r.stage ?? "").trim().toLowerCase();
       };
 
-      // Build per-campaign funnel + global qualified/placed totals in one pass.
-      const funnelMap = new Map<string, CampaignFunnel>();
+      // Build per-campaign + per-creative funnels + global totals in one pass.
+      // utm_content is treated as the creative identifier (it usually mirrors
+      // the ad name on Meta, e.g. "RnP-Q4-Doc-IG_Reels-vid01").
+      const campaignMap = new Map<string, CampaignFunnel>();
+      const creativeMap = new Map<string, CreativeFunnel>();
       let qualifiedCount = 0;
       let placedCount    = 0;
       for (const r of filtered) {
         const stage = resolveStage(r);
         if (QUALIFIED_STAGES.has(stage)) qualifiedCount++;
         if (CONVERTED_STAGES.has(stage)) placedCount++;
+
         const camp = (r.utm_campaign ?? "").trim();
-        if (!camp || camp === "xxxxx") continue;
-        const cur = funnelMap.get(camp) ?? { campaign: camp, total: 0, qualified: 0, converted: 0 };
-        cur.total++;
-        if (QUALIFIED_STAGES.has(stage)) cur.qualified++;
-        if (CONVERTED_STAGES.has(stage)) cur.converted++;
-        funnelMap.set(camp, cur);
+        if (camp && camp !== "xxxxx") {
+          const cur = campaignMap.get(camp) ?? { campaign: camp, total: 0, qualified: 0, converted: 0 };
+          cur.total++;
+          if (QUALIFIED_STAGES.has(stage)) cur.qualified++;
+          if (CONVERTED_STAGES.has(stage)) cur.converted++;
+          campaignMap.set(camp, cur);
+        }
+
+        // Skip creatives with no name, the placeholder, or pure-numeric
+        // content (often a Meta-internal ID, not an ad creative we can match).
+        const creative = (r.utm_content ?? "").trim();
+        if (creative && creative !== "xxxxx" && !/^\d+$/.test(creative)) {
+          const cur = creativeMap.get(creative) ?? { creative, total: 0, qualified: 0, converted: 0 };
+          cur.total++;
+          if (QUALIFIED_STAGES.has(stage)) cur.qualified++;
+          if (CONVERTED_STAGES.has(stage)) cur.converted++;
+          creativeMap.set(creative, cur);
+        }
       }
-      const campaignFunnels = Array.from(funnelMap.values()).sort((a, b) => b.total - a.total);
+      const campaignFunnels = Array.from(campaignMap.values()).sort((a, b) => b.total - a.total);
+      const creativeFunnels = Array.from(creativeMap.values()).sort((a, b) => b.total - a.total);
 
       return {
         total, withUtm, qualifiedCount, placedCount,
         totalAllTime: allRows.length, zohoMatched,
-        byCreative, byCampaign, byPlatform, byLocation, bySpeciality, byStage, campaignFunnels,
+        byCreative, byCampaign, byPlatform, byLocation, bySpeciality, byStage,
+        campaignFunnels, creativeFunnels,
       };
     },
     staleTime: 5 * 60 * 1000,
