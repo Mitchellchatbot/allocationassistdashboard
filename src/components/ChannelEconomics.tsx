@@ -220,9 +220,6 @@ export function ChannelEconomicsTable() {
     <Card className="shadow-sm border-border/50 mb-5">
       <CardHeader className="pb-1 pt-4 px-4">
         <CardTitle className="text-[12px] font-medium text-muted-foreground uppercase tracking-wide">Channel Economics</CardTitle>
-        <p className="text-[10px] text-muted-foreground mt-0.5">
-          Channels grouped by source type. <strong className="text-foreground">Cost / Qualified is the headline metric</strong> — it filters out junk leads and reflects what you really pay to source someone worth pursuing. The lifetime column shows whether a channel is gradually losing money over its full history. "—" means no data. Click a row to drill in.
-        </p>
       </CardHeader>
       <CardContent className="px-0 pb-4">
         <div className="overflow-x-auto">
