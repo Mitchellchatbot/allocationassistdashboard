@@ -16,16 +16,16 @@ const iconMap: Record<string, LucideIcon> = {
 // not paragraphs.
 const HINTS: Record<string, { meaning: string; source: string }> = {
   // Current dashboard KPIs
-  "Qualified Active":     { meaning: "Qualified leads still active in the pipeline. Excludes Closed Won, Contact in Future, and unqualified leads.",                                  source: "Zoho CRM (Lead_Status)." },
-  "Qualified Leads":      { meaning: "Leads that reached Initial Sales Call Completed or High Priority Follow up. Closed Won is tracked separately as a placement.",                  source: "Zoho CRM (Lead_Status)." },
+  "Qualified Active":     { meaning: "Qualified leads still active in the pipeline. Excludes converted doctors, Contact in Future, and unqualified leads.",                            source: "Zoho CRM (Lead_Status)." },
+  "Qualified Leads":      { meaning: "Leads that reached Initial Sales Call Completed or High Priority Follow up. Conversions are tracked separately via the Doctors on Board module.", source: "Zoho CRM (Lead_Status)." },
   "Qualification Rate":   { meaning: "Qualified leads ÷ total leads in the period.",                                                                                                  source: "Zoho CRM (Lead_Status)." },
-  "Lead → Placement":     { meaning: "Share of leads that reached Initial Sales Call Completed or High Priority Follow up.",                                                          source: "Zoho CRM (Lead_Status)." },
+  "Lead → Conversion":    { meaning: "Share of leads that became a converted doctor — i.e. show up in the Zoho Doctors on Board module. NOT derived from Closed Won deals or lead status.", source: "Zoho Doctors on Board module (api_name: Contacts)." },
   "Pipeline Value":       { meaning: "Total $ value of open deals. Weighted figure applies stage probability.",                                                                       source: "Zoho CRM (Deals — Amount)." },
   "Avg. Time to Place":   { meaning: "Average days from lead creation to a Closed Won deal. Falls back to active-lead age when no deals closed.",                                     source: "Zoho CRM (Created_Time → Closing_Date)." },
 
   // Legacy labels still rendered in places
   "Active Doctors":         { meaning: "Doctors currently in the placement process.",                            source: "Zoho CRM (Lead_Status)." },
-  "Doctors Placed":         { meaning: "Doctors successfully placed this period.",                               source: "Zoho CRM (Closed Won deals)." },
+  "Doctors Placed":         { meaning: "Doctors successfully placed (converted) this period.",                   source: "Zoho Doctors on Board module." },
   "Awaiting License":       { meaning: "Doctors waiting for medical-license approval.",                          source: "Zoho CRM (license fields)." },
   "Partner Hospitals":      { meaning: "Hospitals we work with across all regions.",                             source: "Zoho CRM (Accounts module)." },
   "Revenue":                { meaning: "Total income from placements.",                                          source: "Zoho CRM (Closed Won deals — Amount)." },

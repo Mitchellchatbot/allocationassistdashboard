@@ -61,6 +61,8 @@ export function useFilteredData() {
 
     const filteredAccounts  = zoho.rawAccounts;
     const filteredCampaigns = zoho.rawCampaigns;
+    const filteredDoB       = (zoho.rawDoctorsOnBoard ?? [])
+      .filter(d => inWindow(d.Created_Time));
 
     // ── Re-aggregate ──────────────────────────────────────────────────────
     const agg = aggregateZohoData(
@@ -70,6 +72,7 @@ export function useFilteredData() {
       filteredAccounts,
       filteredCampaigns,
       EMPTY_EMAIL,
+      filteredDoB,
     );
 
     // ── Time-series chart: slice to the number of months in the range ────

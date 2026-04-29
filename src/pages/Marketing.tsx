@@ -44,20 +44,16 @@ const Marketing = () => {
     const qualifiedByChannel:    Record<string, number> = {};
     const convertedByChannel:    Record<string, number> = {};
 
-    // A lead has been "contacted" if its status is anything past Not Contacted.
-    // "Qualified" includes converted statuses (a converted lead must first be qualified).
-    // "Converted" is a strict subset of qualified.
+    // "Contacted" = anything past Not Contacted.
+    // "Qualified" = passed Initial Sales Call (lead-status based).
+    // "Converted" = a row in `Doctors on Board` for this channel — single
+    // source of truth, NOT derived from Lead_Status.
     const activeStatuses = new Set([
       'Not Contacted', 'Attempted to Contact', 'Initial Sales Call Completed',
       'Contact in Future', 'High Priority Follow up',
     ]);
-    // CRITICAL: Qualified = ICS Completed + High Priority Follow up only.
-    // Closed Won is a placement signal, tracked separately via convertedStatuses.
     const qualifiedStatuses = new Set([
       'Initial Sales Call Completed', 'High Priority Follow up',
-    ]);
-    const convertedStatuses = new Set([
-      'High Priority Follow up', 'Closed Won',
     ]);
 
     for (const l of recentLeads) {
@@ -72,9 +68,14 @@ const Marketing = () => {
       if (qualifiedStatuses.has(l.Lead_Status)) {
         qualifiedByChannel[ch] = (qualifiedByChannel[ch] ?? 0) + 1;
       }
-      if (convertedStatuses.has(l.Lead_Status)) {
-        convertedByChannel[ch] = (convertedByChannel[ch] ?? 0) + 1;
-      }
+    }
+
+    // Conversions from Doctors on Board, attributed to channel via Lead_Source.
+    for (const dob of zoho.rawDoctorsOnBoard ?? []) {
+      const t = dob.Created_Time ? new Date(dob.Created_Time).getTime() : NaN;
+      if (isNaN(t) || t < fromMs || t >= toMs) continue;
+      const ch = displaySource(dob.Lead_Source);
+      convertedByChannel[ch] = (convertedByChannel[ch] ?? 0) + 1;
     }
 
     return Object.entries(leadsByChannel)
@@ -97,14 +98,22 @@ const Marketing = () => {
     ? marketing.reduce((a, b) => (a.doctors > b.doctors ? a : b))
     : null;
 
-  // Hide low-volume channels (< 10 leads) behind a "Show all" toggle so the grid stays scannable
+  // Hide low-volume channels (< 10 leads) AND the "Undefined" bucket by default
+  // so the grid stays scannable. Two independent toggles let users opt in to
+  // either group.
   const MIN_LEADS_THRESHOLD = 10;
   const [showAllChannels, setShowAllChannels] = useState(false);
+  const [showUndefined,   setShowUndefined]   = useState(false);
   const visibleMarketing = useMemo(() => {
-    if (showAllChannels) return marketing;
-    return marketing.filter(c => c.doctors >= MIN_LEADS_THRESHOLD);
-  }, [marketing, showAllChannels]);
-  const hiddenChannelCount = marketing.length - visibleMarketing.length;
+    return marketing.filter(c => {
+      if (!showUndefined && c.channel === "Undefined") return false;
+      if (!showAllChannels && c.doctors < MIN_LEADS_THRESHOLD) return false;
+      return true;
+    });
+  }, [marketing, showAllChannels, showUndefined]);
+  const undefinedRow         = marketing.find(c => c.channel === "Undefined");
+  const undefinedLeads       = undefinedRow?.doctors ?? 0;
+  const hiddenLowVolumeCount = marketing.filter(c => c.doctors < MIN_LEADS_THRESHOLD && c.channel !== "Undefined").length;
 
   // KPI card expand panel
   const [selectedKpiChannel, setSelectedKpiChannel] = useState<string | null>(null);
@@ -167,18 +176,29 @@ const Marketing = () => {
       <ChannelWinnerCards />
 
       {/* Channel KPI cards */}
-      <div className="flex items-center justify-between mb-2">
+      <div className="flex items-center justify-between mb-2 flex-wrap gap-2">
         <p className="text-[10px] uppercase tracking-widest font-semibold text-muted-foreground/70">
           Channels {visibleMarketing.length > 0 && <span className="opacity-60">· {visibleMarketing.length} of {marketing.length}</span>}
         </p>
-        {hiddenChannelCount > 0 && (
-          <button
-            onClick={() => setShowAllChannels(s => !s)}
-            className="text-[10px] text-primary hover:text-primary/80 font-medium transition-colors"
-          >
-            {showAllChannels ? `Hide ${hiddenChannelCount} smaller channels` : `Show ${hiddenChannelCount} smaller channels`}
-          </button>
-        )}
+        <div className="flex items-center gap-3">
+          {undefinedLeads > 0 && (
+            <button
+              onClick={() => setShowUndefined(s => !s)}
+              className="text-[10px] text-primary hover:text-primary/80 font-medium transition-colors"
+              title="Undefined = leads with no Lead_Source, 'xxxxx', or other untagged values"
+            >
+              {showUndefined ? `Hide undefined (${undefinedLeads})` : `Show undefined (${undefinedLeads})`}
+            </button>
+          )}
+          {hiddenLowVolumeCount > 0 && (
+            <button
+              onClick={() => setShowAllChannels(s => !s)}
+              className="text-[10px] text-primary hover:text-primary/80 font-medium transition-colors"
+            >
+              {showAllChannels ? `Hide ${hiddenLowVolumeCount} smaller channels` : `Show ${hiddenLowVolumeCount} smaller channels`}
+            </button>
+          )}
+        </div>
       </div>
       <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-4 xl:grid-cols-5 gap-3 mb-6">
         {visibleMarketing.map(ch => {

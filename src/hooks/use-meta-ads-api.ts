@@ -178,6 +178,7 @@ export interface MetaTopAd {
   leads:       number;
   spend:       number;
   impressions: number;
+  clicks:      number;
   ctr:         number;
 }
 
@@ -283,8 +284,16 @@ async function gql(path: string, params: Record<string, string>): Promise<unknow
 
 // ── Main hook ──────────────────────────────────────────────────────────────────
 
+// Meta's /insights endpoint caps queryable history at ~37 months. If the user
+// picks "All Time" globally (which goes back to year 2000), the API silently
+// returns nothing — making every Meta KPI read as zero. Clamp to the past
+// ~36 months so the call still succeeds.
+const META_MAX_HISTORY_DAYS = 36 * 30; // ≈ 36 months
+
 export function useMetaAdsApi(dateRange: { from: Date; to: Date }) {
-  const since = dateRange.from.toISOString().slice(0, 10);
+  const earliest = new Date(Date.now() - META_MAX_HISTORY_DAYS * 86_400_000);
+  const fromClamped = dateRange.from < earliest ? earliest : dateRange.from;
+  const since = fromClamped.toISOString().slice(0, 10);
   const until = dateRange.to.toISOString().slice(0, 10);
 
   return useQuery<MetaAdsApiData>({
@@ -303,11 +312,14 @@ export function useMetaAdsApi(dateRange: { from: Date; to: Date }) {
       const allAccounts = accountsResp.data ?? [];
       const currency    = "AED";
 
+      // Meta's amount_spent is in the SMALLEST currency unit (cents for USD,
+      // fils for AED). Convert to major units to match how /insights reports
+      // spend, otherwise the lifetime chip reads 100× higher than reality.
       const accountsMapped: MetaAccount[] = allAccounts.map(a => ({
         id:          a.id,
         name:        a.name,
         currency:    a.currency,
-        amountSpent: n(a.amount_spent),
+        amountSpent: n(a.amount_spent) / 100,
       }));
 
       if (allAccounts.length === 0) {
@@ -806,20 +818,32 @@ const TOP_AD_FIELDS =
 export function useMetaTopAds(accountIds: string[], since: string, until: string) {
   const key = accountIds.join(",");
   return useQuery<MetaTopAd[]>({
-    queryKey: ["meta-top-ads-v1", key, since, until],
+    queryKey: ["meta-top-ads-v2", key, since, until],
     enabled:  accountIds.length > 0 && !!getMetaToken(),
     staleTime: 5 * 60 * 1000,
     refetchOnWindowFocus: false,
 
     queryFn: async () => {
       if (accountIds.length === 0) return [];
-      const TIME_RANGE = JSON.stringify({ since, until });
+
+      // Meta's /ads endpoint is strict on Development-access apps:
+      //   - `effective_status` cannot include ARCHIVED or DELETED
+      //   - `insights.time_range` with `actions` field is capped tightly
+      //   - `limit` above ~50 sometimes 400s
+      // Cap window at 90 days, drop archived/deleted, lower the limit.
+      const MAX_DAYS = 90;
+      const untilD = new Date(`${until}T00:00:00Z`);
+      const sinceD = new Date(`${since}T00:00:00Z`);
+      const earliest = new Date(untilD.getTime() - MAX_DAYS * 86_400_000);
+      const sinceClamped = sinceD < earliest ? earliest.toISOString().slice(0, 10) : since;
+      const TIME_RANGE = JSON.stringify({ since: sinceClamped, until });
+      const SAFE_STATUSES = JSON.stringify(["ACTIVE", "PAUSED"]);
 
       const perAccount = await Promise.all(accountIds.map(accountId =>
         gql(`${accountId}/ads`, {
           fields: `${TOP_AD_FIELDS},insights.time_range(${TIME_RANGE}){spend,impressions,clicks,ctr,actions}`,
-          effective_status: ALL_STATUSES,
-          limit: "200",
+          effective_status: SAFE_STATUSES,
+          limit: "50",
         }).catch(() => ({ data: [] }))
       )) as { data: {
         id: string; name: string; status: string;
@@ -869,6 +893,7 @@ export function useMetaTopAds(accountIds: string[], since: string, until: string
             leads,
             spend,
             impressions: n(ins.impressions),
+            clicks:      n(ins.clicks),
             ctr:         n(ins.ctr),
           });
         }

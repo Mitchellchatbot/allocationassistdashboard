@@ -5,8 +5,9 @@ import { useFilteredData } from "@/hooks/use-filtered-data";
 import { useMarketingExpenses, type CategorySpend, type MonthlyPoint, type TopTransaction } from "@/hooks/use-marketing-expenses";
 import { useZohoData } from "@/hooks/use-zoho-data";
 import { useFilters } from "@/lib/filters";
-import { ChannelWinnerCards, ChannelEconomicsTable } from "@/components/ChannelEconomics";
+import { ChannelWinnerCards } from "@/components/ChannelEconomics";
 import { useCurrency } from "@/lib/CurrencyProvider";
+import { normalizeChannelKey } from "@/lib/channel-mapping";
 import {
   BarChart, Bar, XAxis, YAxis, Tooltip, ResponsiveContainer, CartesianGrid, Cell,
   AreaChart, Area, PieChart, Pie, Legend, LineChart, Line, ComposedChart,
@@ -182,7 +183,7 @@ function TopCategoryBack({ top }: { top?: CategorySpend }) {
     <div className="space-y-2">
       <div>
         <p className="text-[9px] text-muted-foreground uppercase tracking-wide">Channel</p>
-        <p className="text-[14px] font-semibold">{top.category}</p>
+        <p className="text-[14px] font-semibold">{normalizeChannelKey(top.category)}</p>
       </div>
       <div className="grid grid-cols-2 gap-2 pt-1">
         <div className="rounded-lg bg-muted/30 p-2">
@@ -257,7 +258,7 @@ function BiggestBack({ biggest }: { biggest?: TopTransaction }) {
       </div>
       <div>
         <p className="text-[9px] text-muted-foreground uppercase tracking-wide">Channel</p>
-        <p className="font-semibold">{biggest.category}</p>
+        <p className="font-semibold">{normalizeChannelKey(biggest.category)}</p>
       </div>
       <div>
         <p className="text-[9px] text-muted-foreground uppercase tracking-wide">Description</p>
@@ -372,19 +373,19 @@ function RoasBack({ roas, revenue, spend }: { roas: number; revenue: number; spe
   );
 }
 
-function CostPerPlacementBack({ cpp, spend, placements }: { cpp: number; spend: number; placements: number }) {
+function CostPerConversionBack({ cpc, spend, conversions }: { cpc: number; spend: number; conversions: number }) {
   const { fmt: fmtAED } = useCurrency();
   return (
     <div className="space-y-2">
       <div className="flex justify-between"><span className="text-muted-foreground">Total spend</span><span className="font-semibold tabular-nums">{fmtAED(spend)}</span></div>
-      <div className="flex justify-between"><span className="text-muted-foreground">Placements (Closed Won)</span><span className="font-semibold tabular-nums">{placements}</span></div>
+      <div className="flex justify-between"><span className="text-muted-foreground">Conversions (Doctors on Board)</span><span className="font-semibold tabular-nums">{conversions}</span></div>
       <div className="pt-2 border-t border-border/40 flex justify-between">
-        <span className="font-semibold">Cost per placement</span>
-        <span className="font-bold text-orange-600 tabular-nums">{fmtAED(cpp)}</span>
+        <span className="font-semibold">Cost per conversion</span>
+        <span className="font-bold text-orange-600 tabular-nums">{fmtAED(cpc)}</span>
       </div>
       <p className="text-[10px] text-muted-foreground pt-1">
-        {placements === 0
-          ? "No placements recorded in this period. Check if deals are being marked Closed Won in Zoho."
+        {conversions === 0
+          ? "No conversions recorded in this period. Source: Zoho Doctors on Board module."
           : "Lower is better."}
       </p>
     </div>
@@ -534,8 +535,106 @@ const Finance = () => {
 
   const hasData = transactionCount > 0 || leadStats.totalLeads > 0;
 
+  // ── Monthly Spend × Channel grid (for the CEO-glanceable section) ─────────
+  // Builds rows = channel, cols = months in the selected period. Used by the
+  // "Monthly Marketing Spend by Channel" section + the profit P&L beneath it.
+  const monthlySpendByChannel = useMemo(() => {
+    if (allTransactions.length === 0 || monthly.length === 0) {
+      return { months: [] as { key: string; label: string }[], channels: [] as { channel: string; perMonth: Record<string, number>; total: number }[] };
+    }
+    const months = monthly
+      .slice()
+      .sort((a, b) => a.monthKey.localeCompare(b.monthKey))
+      .map(m => ({ key: m.monthKey, label: m.month }));
+
+    const grid = new Map<string, Map<string, number>>();
+    for (const t of allTransactions) {
+      const ch = normalizeChannelKey(t.category);
+      const key = (t.expense_date ?? "").slice(0, 7);
+      if (!key) continue;
+      const row = grid.get(ch) ?? new Map<string, number>();
+      row.set(key, (row.get(key) ?? 0) + (t.amount ?? 0));
+      grid.set(ch, row);
+    }
+
+    const channels = Array.from(grid.entries())
+      .map(([channel, perMonthMap]) => {
+        const perMonth: Record<string, number> = {};
+        let total = 0;
+        for (const m of months) {
+          const v = perMonthMap.get(m.key) ?? 0;
+          perMonth[m.key] = v;
+          total += v;
+        }
+        return { channel, perMonth, total };
+      })
+      .sort((a, b) => b.total - a.total);
+
+    return { months, channels };
+  }, [allTransactions, monthly]);
+
+  // ── Profit P&L placeholders ───────────────────────────────────────────────
+  // Marketing spend is real; payroll + other expenses + revenue are stubbed
+  // until the new accountant delivers numbers. Structure shipped now so we
+  // only have to fill in values when they land.
+  const profitRows = useMemo(() => {
+    const months = monthlySpendByChannel.months;
+    const marketingByMonth: Record<string, number> = {};
+    let marketingTotal = 0;
+    for (const c of monthlySpendByChannel.channels) {
+      for (const m of months) {
+        marketingByMonth[m.key] = (marketingByMonth[m.key] ?? 0) + c.perMonth[m.key];
+      }
+      marketingTotal += c.total;
+    }
+    // Conversions from Zoho "Doctors on Board" module — the SOLE source of
+    // truth for converted doctors. Bucketed by Created_Time per month.
+    const conversionsByMonth: Record<string, number> = {};
+    let conversionsTotal = 0;
+    for (const dob of (zoho as { rawDoctorsOnBoard?: { Created_Time: string }[] } | undefined)?.rawDoctorsOnBoard ?? []) {
+      if (!dob.Created_Time) continue;
+      const t = new Date(dob.Created_Time).getTime();
+      if (isNaN(t) || t < dateRange.from.getTime() || t >= dateRange.to.getTime() + 86_400_000) continue;
+      const key = dob.Created_Time.slice(0, 7);
+      conversionsByMonth[key] = (conversionsByMonth[key] ?? 0) + 1;
+      conversionsTotal += 1;
+    }
+    return { marketingByMonth, marketingTotal, conversionsByMonth, conversionsTotal, months };
+  }, [monthlySpendByChannel, zoho, dateRange]);
+
   return (
     <DashboardLayout title="Finance" subtitle="Revenue, spend, profit, and ROI across all channels">
+      {/* ── Period banner — explicit date range + currency lock ───────────────
+          Designed to remove ambiguity: every figure on this tab is for the
+          stated period, in the stated currency. Reduces "is that monthly or
+          the whole quarter?" / "is that AED or USD?" confusion. */}
+      <div className="mb-5 rounded-xl border border-primary/20 bg-primary/5 px-4 py-3 flex flex-wrap items-center justify-between gap-3">
+        <div>
+          <p className="text-[10px] uppercase tracking-widest font-semibold text-primary/70 mb-0.5">
+            Showing finance for
+          </p>
+          <p className="text-[14px] font-semibold text-foreground">
+            {dateRange.from.toLocaleDateString("en-GB", { day: "numeric", month: "short", year: "numeric" })}
+            {" → "}
+            {dateRange.to.toLocaleDateString("en-GB", { day: "numeric", month: "short", year: "numeric" })}
+            <span className="text-[12px] font-normal text-muted-foreground ml-2">
+              ({monthly.length} {monthly.length === 1 ? "month" : "months"})
+            </span>
+          </p>
+        </div>
+        <div className="text-right">
+          <p className="text-[10px] uppercase tracking-widest font-semibold text-primary/70 mb-0.5">
+            All values in
+          </p>
+          <p className="text-[14px] font-semibold text-foreground">
+            {currency}
+            <span className="text-[11px] font-normal text-muted-foreground ml-1">
+              · toggle in header
+            </span>
+          </p>
+        </div>
+      </div>
+
       {!hasData && (
         <div className="mb-5 rounded-xl border border-border/50 bg-muted/30 px-4 py-3">
           <p className="text-[12px] font-medium mb-1">No activity in this period</p>
@@ -552,10 +651,15 @@ const Finance = () => {
       {/* Only render lead KPIs when we actually have leads in the period — otherwise just show spend */}
       <div className={`grid grid-cols-2 ${leadStats.totalLeads > 0 ? "lg:grid-cols-4" : "lg:grid-cols-2"} gap-3 mb-3`}>
         <FlipKpiCard
-          icon={DollarSign} label="Marketing Spend" color="text-primary" bg="bg-primary/10"
+          icon={DollarSign}
+          // Label explicitly says "(period total)" so a multi-month figure
+          // can never be mistaken for a monthly number — Yemima saw 121K
+          // and assumed it was monthly when it was a 3-month aggregate.
+          label={monthly.length > 1 ? "Marketing Spend (period total)" : "Marketing Spend"}
+          color="text-primary" bg="bg-primary/10"
           value={fmtAED(spend)}
           sub={monthly.length > 1
-            ? `${monthly.length}-month total · ${fmtAED(avgMonthly)}/mo avg`
+            ? `${monthly.length} months · ${fmtAED(avgMonthly)} / month avg`
             : `${transactionCount} transactions · ${byCategory.length} channels`}
           back={<TotalSpendBack byCategory={byCategory} total={spend} />}
         />
@@ -622,7 +726,7 @@ const Finance = () => {
             sub={`${fmtN(leadStats.qualified)} qualified · ${leadStats.qualRate.toFixed(0)}% rate`}
             back={
               <div className="space-y-2">
-                <p className="text-[10px]">Qualified = reached <strong>Initial Sales Call Completed</strong> or <strong>High Priority Follow up</strong>. Closed Won is tracked separately as a placement; "Contact in Future" is a deferred conversation, not a qualification.</p>
+                <p className="text-[10px]">Qualified = reached <strong>Initial Sales Call Completed</strong> or <strong>High Priority Follow up</strong>. Conversions are tracked separately via the <strong>Doctors on Board</strong> module; "Contact in Future" is a deferred conversation, not a qualification.</p>
                 <div className="pt-2 border-t border-border/40 space-y-1">
                   <div className="flex justify-between"><span className="text-muted-foreground">Total leads</span><span className="font-semibold tabular-nums">{fmtN(leadStats.totalLeads)}</span></div>
                   <div className="flex justify-between"><span className="text-muted-foreground">Qualified</span><span className="font-semibold tabular-nums">{fmtN(leadStats.qualified)}</span></div>
@@ -647,15 +751,15 @@ const Finance = () => {
       {/* ── Row 2: Top channel / Biggest expense / Spend growth / Avg monthly / Txns ── */}
       <div className="grid grid-cols-2 lg:grid-cols-3 xl:grid-cols-5 gap-3 mb-5">
         <FlipKpiCard
-          icon={Crown} label="Top Channel" color="text-amber-600" bg="bg-amber-50"
-          value={topCategory?.category ?? "—"}
-          sub={topCategory ? `${fmtAED(topCategory.amount)} · ${topCategory.pct.toFixed(1)}%` : ""}
+          icon={Crown} label="Top Channel (period)" color="text-amber-600" bg="bg-amber-50"
+          value={topCategory ? normalizeChannelKey(topCategory.category) : "—"}
+          sub={topCategory ? `${fmtAED(topCategory.amount)} period total · ${topCategory.pct.toFixed(1)}%` : ""}
           back={<TopCategoryBack top={topCategory} />}
         />
         <FlipKpiCard
-          icon={Award} label="Biggest Expense" color="text-orange-600" bg="bg-orange-50"
+          icon={Award} label="Biggest Single Expense" color="text-orange-600" bg="bg-orange-50"
           value={biggest ? fmtAED(biggest.amount) : "—"}
-          sub={biggest ? biggest.category : ""}
+          sub={biggest ? `${normalizeChannelKey(biggest.category)} · single transaction` : ""}
           back={<BiggestBack biggest={biggest} />}
         />
         <FlipKpiCard
@@ -680,6 +784,187 @@ const Finance = () => {
           back={<TransactionsBack txns={topTransactions} />}
         />
       </div>
+
+      {/* ── CEO View: Monthly Marketing Spend by Channel + Profit P&L ─────
+          Built for Emilie. Rows = channels (canonical names — Meta, LinkedIn,
+          etc.), cols = months in the selected period. Profit P&L underneath
+          uses real marketing-spend + Zoho Closed Won revenue; payroll and
+          other expenses are placeholder rows that read "—" until the new
+          accountant's numbers are imported. */}
+      {monthlySpendByChannel.months.length > 0 && (
+        <Card className="shadow-sm border-border/50 mb-5">
+          <CardHeader className="pb-1 pt-4 px-4">
+            <CardTitle className="text-[12px] font-medium text-muted-foreground uppercase tracking-wide">
+              Monthly Marketing Spend by Channel
+              <span className="ml-2 normal-case font-normal text-muted-foreground/60">
+                · all values in {currency} per month
+              </span>
+            </CardTitle>
+          </CardHeader>
+          <CardContent className="px-0 pb-2 overflow-x-auto">
+            <table className="w-full text-left">
+              <thead>
+                <tr className="border-b border-border/40">
+                  <th className="py-2 px-3 text-[10px] font-medium text-muted-foreground uppercase tracking-wide">Channel</th>
+                  {monthlySpendByChannel.months.map(m => (
+                    <th key={m.key} className="py-2 px-3 text-[10px] font-medium text-muted-foreground uppercase tracking-wide text-right whitespace-nowrap">
+                      {m.label}
+                    </th>
+                  ))}
+                  <th className="py-2 px-3 text-[10px] font-medium text-muted-foreground uppercase tracking-wide text-right">Period total</th>
+                </tr>
+              </thead>
+              <tbody>
+                {monthlySpendByChannel.channels.map(c => (
+                  <tr key={c.channel} className="border-b border-border/30 hover:bg-muted/30">
+                    <td className="py-2 px-3 text-[12px] font-medium">{c.channel}</td>
+                    {monthlySpendByChannel.months.map(m => {
+                      const v = c.perMonth[m.key];
+                      return (
+                        <td key={m.key} className="py-2 px-3 text-[11px] text-right tabular-nums">
+                          {v > 0 ? fmtAED(v) : <span className="text-muted-foreground/30">—</span>}
+                        </td>
+                      );
+                    })}
+                    <td className="py-2 px-3 text-[12px] text-right tabular-nums font-semibold text-primary">
+                      {fmtAED(c.total)}
+                    </td>
+                  </tr>
+                ))}
+                <tr className="border-t-2 border-border/80 font-semibold bg-muted/20">
+                  <td className="py-2 px-3 text-[12px]">Total marketing spend</td>
+                  {monthlySpendByChannel.months.map(m => {
+                    const v = monthlySpendByChannel.channels.reduce((s, c) => s + (c.perMonth[m.key] ?? 0), 0);
+                    return (
+                      <td key={m.key} className="py-2 px-3 text-[12px] text-right tabular-nums">
+                        {fmtAED(v)}
+                      </td>
+                    );
+                  })}
+                  <td className="py-2 px-3 text-[13px] text-right tabular-nums font-bold text-primary">
+                    {fmtAED(profitRows.marketingTotal)}
+                  </td>
+                </tr>
+              </tbody>
+            </table>
+            <p className="text-[10px] text-muted-foreground px-4 pt-2 pb-1">
+              Each cell shows that channel's spend during that single month. Hover the date-range banner above to confirm the window.
+            </p>
+          </CardContent>
+        </Card>
+      )}
+
+      {/* ── Profit P&L (structure shipped, numbers fill in as data arrives) ─ */}
+      {monthlySpendByChannel.months.length > 0 && (
+        <Card className="shadow-sm border-border/50 mb-5">
+          <CardHeader className="pb-1 pt-4 px-4">
+            <CardTitle className="text-[12px] font-medium text-muted-foreground uppercase tracking-wide">
+              Profit P&amp;L (per month)
+              <span className="ml-2 normal-case font-normal text-amber-700/80">
+                · payroll &amp; other expenses pending from accountant — structure shown, numbers filling in
+              </span>
+            </CardTitle>
+          </CardHeader>
+          <CardContent className="px-0 pb-2 overflow-x-auto">
+            <table className="w-full text-left">
+              <thead>
+                <tr className="border-b border-border/40">
+                  <th className="py-2 px-3 text-[10px] font-medium text-muted-foreground uppercase tracking-wide">Line item</th>
+                  {profitRows.months.map(m => (
+                    <th key={m.key} className="py-2 px-3 text-[10px] font-medium text-muted-foreground uppercase tracking-wide text-right whitespace-nowrap">
+                      {m.label}
+                    </th>
+                  ))}
+                  <th className="py-2 px-3 text-[10px] font-medium text-muted-foreground uppercase tracking-wide text-right">Period</th>
+                </tr>
+              </thead>
+              <tbody>
+                {/* Conversions — real count, from Zoho "Doctors on Board" module */}
+                <tr className="border-b border-border/30 bg-emerald-50/30">
+                  <td className="py-2 px-3 text-[12px] font-medium text-emerald-800">
+                    Conversions (Doctors on Board)
+                    <span className="text-[9px] uppercase tracking-wide bg-amber-100 text-amber-800 rounded px-1 py-0.5 ml-1 font-normal">value pending</span>
+                  </td>
+                  {profitRows.months.map(m => {
+                    const v = profitRows.conversionsByMonth[m.key] ?? 0;
+                    return (
+                      <td key={m.key} className="py-2 px-3 text-[11px] text-right tabular-nums text-emerald-700">
+                        {v > 0 ? `${v} doctor${v === 1 ? "" : "s"}` : <span className="text-muted-foreground/30">—</span>}
+                      </td>
+                    );
+                  })}
+                  <td className="py-2 px-3 text-[12px] text-right tabular-nums font-semibold text-emerald-700">
+                    {profitRows.conversionsTotal} doctors
+                  </td>
+                </tr>
+                {/* Marketing spend — real */}
+                <tr className="border-b border-border/30">
+                  <td className="py-2 px-3 text-[12px] font-medium">Marketing spend</td>
+                  {profitRows.months.map(m => {
+                    const v = profitRows.marketingByMonth[m.key] ?? 0;
+                    return (
+                      <td key={m.key} className="py-2 px-3 text-[11px] text-right tabular-nums">
+                        {v > 0 ? `(${fmtAED(v)})` : <span className="text-muted-foreground/30">—</span>}
+                      </td>
+                    );
+                  })}
+                  <td className="py-2 px-3 text-[12px] text-right tabular-nums font-semibold">
+                    ({fmtAED(profitRows.marketingTotal)})
+                  </td>
+                </tr>
+                {/* Payroll — placeholder until accountant delivers */}
+                <tr className="border-b border-border/30">
+                  <td className="py-2 px-3 text-[12px] font-medium text-muted-foreground">
+                    Payroll <span className="text-[9px] uppercase tracking-wide bg-amber-100 text-amber-800 rounded px-1 py-0.5 ml-1">pending</span>
+                  </td>
+                  {profitRows.months.map(m => (
+                    <td key={m.key} className="py-2 px-3 text-[11px] text-right text-muted-foreground/40">—</td>
+                  ))}
+                  <td className="py-2 px-3 text-[12px] text-right text-muted-foreground/40">—</td>
+                </tr>
+                {/* Other operating expenses — placeholder */}
+                <tr className="border-b border-border/30">
+                  <td className="py-2 px-3 text-[12px] font-medium text-muted-foreground">
+                    Other operating expenses <span className="text-[9px] uppercase tracking-wide bg-amber-100 text-amber-800 rounded px-1 py-0.5 ml-1">pending</span>
+                  </td>
+                  {profitRows.months.map(m => (
+                    <td key={m.key} className="py-2 px-3 text-[11px] text-right text-muted-foreground/40">—</td>
+                  ))}
+                  <td className="py-2 px-3 text-[12px] text-right text-muted-foreground/40">—</td>
+                </tr>
+                {/* Cost per Conversion — real, from spend ÷ Doctors on Board count */}
+                <tr className="border-t-2 border-border/80 bg-muted/20 font-semibold">
+                  <td className="py-2 px-3 text-[12px]">
+                    Cost per Conversion <span className="text-[9px] uppercase tracking-wide bg-muted text-muted-foreground rounded px-1 py-0.5 ml-1 font-normal">marketing only — payroll/other pending</span>
+                  </td>
+                  {profitRows.months.map(m => {
+                    const conversions = profitRows.conversionsByMonth[m.key] ?? 0;
+                    const spd         = profitRows.marketingByMonth[m.key] ?? 0;
+                    if (conversions === 0 || spd === 0) {
+                      return <td key={m.key} className="py-2 px-3 text-[11px] text-right text-muted-foreground/30">—</td>;
+                    }
+                    const cpc = spd / conversions;
+                    return (
+                      <td key={m.key} className="py-2 px-3 text-[12px] text-right tabular-nums text-foreground">
+                        {fmtAED(cpc)}
+                      </td>
+                    );
+                  })}
+                  <td className="py-2 px-3 text-[13px] text-right tabular-nums font-bold">
+                    {profitRows.conversionsTotal > 0 && profitRows.marketingTotal > 0
+                      ? fmtAED(profitRows.marketingTotal / profitRows.conversionsTotal)
+                      : <span className="text-muted-foreground/30">—</span>}
+                  </td>
+                </tr>
+              </tbody>
+            </table>
+            <div className="px-4 pt-3 pb-1 text-[10px] text-muted-foreground/80 leading-relaxed">
+              <p className="mb-1"><strong className="text-foreground/70">How to read:</strong> Conversions come from the Zoho <code>Doctors on Board</code> module — each row is one converted doctor. Marketing spend is from imported expenses. Payroll &amp; other expenses are placeholders until the accountant delivers monthly numbers.</p>
+              <p>The <strong className="text-foreground/70">Cost per Conversion</strong> row divides marketing spend by conversion count. Once payroll + other expenses are filled in, we'll add a true Profit row that subtracts them too.</p>
+            </div>
+          </CardContent>
+        </Card>
+      )}
 
       {/* ── Monthly: Spend + Leads combined ── */}
       {monthlySpendLeads.length > 0 && (
@@ -939,8 +1224,7 @@ const Finance = () => {
         </Card>
       )}
 
-      {/* Per-channel economics: spend joined with Zoho lead funnel */}
-      <ChannelEconomicsTable />
+      {/* Channel-economics table lives on Marketing — no duplicate here. */}
     </DashboardLayout>
   );
 };

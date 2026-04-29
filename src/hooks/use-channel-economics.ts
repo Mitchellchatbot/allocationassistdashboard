@@ -1,6 +1,6 @@
 import { useMemo } from "react";
 import { useMarketingExpenses } from "@/hooks/use-marketing-expenses";
-import { useZohoData } from "@/hooks/use-zoho-data";
+import { useZohoData, type ZohoDoctorOnBoard } from "@/hooks/use-zoho-data";
 import { useFilters } from "@/lib/filters";
 import { normalizeChannelKey, type ChannelKey } from "@/lib/channel-mapping";
 
@@ -22,20 +22,16 @@ export interface ChannelEconomicsRow {
   lifetimeCostPerConversion: number; // 0 when no spend or no conversions ever
 }
 
-// CRITICAL: Qualified = Initial Sales Call Completed + High Priority Follow up
-// ONLY. Closed Won is a separate "converted/placement" signal, not a qualified
-// status. Contact in Future is also excluded (deferred conversation).
-// This matches Ammar's manual tally so cost-per-qualified numbers reflect
-// reality.
+// Qualified = Initial Sales Call Completed + High Priority Follow up.
+// Contact in Future is excluded (deferred conversation, not a pass).
 const QUALIFIED_STATUSES = new Set([
   "Initial Sales Call Completed",
   "High Priority Follow up",
 ]);
-// Converted = qualified leads that progressed to a placement signal.
-const CONVERTED_STATUSES = new Set([
-  "High Priority Follow up",
-  "Closed Won",
-]);
+// Converted = a row in the Zoho `Doctors on Board` module (api_name `Contacts`)
+// attributed to this channel via Lead_Source. SOLE source of truth — the
+// previous lead-status proxy was dropped because it counted engagement, not
+// real conversions. There's no equivalent CONVERTED_STATUSES set anymore.
 
 /**
  * Joins marketing-spend categories with Zoho lead sources on a normalised
@@ -77,7 +73,15 @@ export function useChannelEconomics() {
       const row = ensure(normalizeChannelKey(l.Lead_Source));
       row.leads++;
       if (QUALIFIED_STATUSES.has(l.Lead_Status)) row.qualified++;
-      if (CONVERTED_STATUSES.has(l.Lead_Status)) row.converted++;
+    }
+
+    // Conversions — counted ONLY from Doctors on Board, attributed to channel
+    // via Lead_Source, bucketed by Created_Time for the date window.
+    const doctorsOnBoard = (zoho as { rawDoctorsOnBoard?: ZohoDoctorOnBoard[] } | undefined)?.rawDoctorsOnBoard ?? [];
+    for (const dob of doctorsOnBoard) {
+      const t = dob.Created_Time ? new Date(dob.Created_Time).getTime() : NaN;
+      if (isNaN(t) || t < fromMs || t >= toMs) continue;
+      ensure(normalizeChannelKey(dob.Lead_Source)).converted++;
     }
 
     // ── Lifetime (all-time, ignores date filter) ────────────────────────
@@ -86,9 +90,8 @@ export function useChannelEconomics() {
     for (const r of allRowsUnfiltered ?? []) {
       ensure(normalizeChannelKey(r.category)).lifetimeSpend += r.amount ?? 0;
     }
-    for (const l of zoho?.rawLeads ?? []) {
-      if (!CONVERTED_STATUSES.has(l.Lead_Status)) continue;
-      ensure(normalizeChannelKey(l.Lead_Source)).lifetimeConverted++;
+    for (const dob of doctorsOnBoard) {
+      ensure(normalizeChannelKey(dob.Lead_Source)).lifetimeConverted++;
     }
 
     const rows = Array.from(map.values());

@@ -1,4 +1,5 @@
 import { useState, useMemo, useEffect } from "react";
+import { motion, LayoutGroup } from "framer-motion";
 import { useSetAIPageContext } from "@/lib/ai-page-context";
 import { useCurrency } from "@/lib/CurrencyProvider";
 import { createPortal } from "react-dom";
@@ -7,7 +8,7 @@ import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { CampaignWinnerCards } from "@/components/CampaignWinners";
 import { useMetaLeadsStats, type GroupedStat } from "@/hooks/use-meta-leads-stats";
 import { useMetaAdsApi, useMetaCampaignAds, useMetaAdsByName, useMetaTopAds, type MetaTopAd, getMetaToken, META_TOKEN_LS_KEY } from "@/hooks/use-meta-ads-api";
-import { useZohoData } from "@/hooks/use-zoho-data";
+import { useZohoData, displaySource } from "@/hooks/use-zoho-data";
 import { useFilters } from "@/lib/filters";
 import { useQueryClient } from "@tanstack/react-query";
 import {
@@ -34,7 +35,7 @@ const META_KPI_HINTS: Record<string, { meaning: string; source: string }> = {
   "Leads from Forms":        { meaning: "Form submissions tagged as Meta — independent of Meta's attribution.",          source: "Supabase (meta_leads table)." },
   "Cost Per Lead (forms)":   { meaning: "Meta spend ÷ form-lead submissions. The honest CPL.",                           source: "Meta API + Supabase meta_leads." },
   "Cost Per Qualified":      { meaning: 'Meta spend ÷ qualified form-leads. "Contact in Future" excluded.',              source: "Meta API + meta_leads × Zoho Lead_Status." },
-  "Cost Per Placement":      { meaning: "Meta spend ÷ placed leads (Closed Won).",                                       source: "Meta API + Zoho Deals." },
+  "Cost per Conversion":     { meaning: "Meta spend ÷ conversions (Doctors on Board attributed to the Meta channel).", source: "Meta API + Zoho Doctors on Board module." },
 };
 
 // ── Colours ───────────────────────────────────────────────────────────────────
@@ -723,6 +724,21 @@ const MetaAds = () => {
   const queryClient = useQueryClient();
 
   const [metaDays, setMetaDays] = useState(365);
+  // Per-Creative table view mode — toggles which columns are shown.
+  // "performance" focuses on volume + cost-per-qualified (default).
+  // "cost"        focuses on every cost-per metric (CPL/CPQL/CPP).
+  // "reach"       focuses on Meta-side reach (impr/clicks/CTR).
+  type CreativeView = "performance" | "cost" | "reach";
+  const [creativeView, setCreativeView] = useState<CreativeView>("performance");
+  // Conversion attribution mode for the Meta-side KPI cards.
+  // "strict"  — only count DoB rows whose Lead_Source resolves to Meta in Zoho
+  //              (matches Zoho's picklist filter; under-counts when DoB rows
+  //              from Meta forms have no Lead_Source set, which is most of them).
+  // "matched" — also include DoB rows whose email/phone matches a meta_leads
+  //              form submission. Stronger attribution but harder to reproduce
+  //              from Zoho's UI alone.
+  type AttributionMode = "strict" | "matched";
+  const [attributionMode, setAttributionMode] = useState<AttributionMode>("matched");
   // Display currency comes from the global toggle in the dashboard header.
   const { currency: displayCurrency, fromAED: toDisplay } = useCurrency();
   const metaDateRange = useMemo(() => {
@@ -737,15 +753,16 @@ const MetaAds = () => {
   const [tokenSet, setTokenSet] = useState(true);
   const { data: api, isLoading: apiLoading, error: apiError } = useMetaAdsApi(metaDateRange);
   const { data: zoho } = useZohoData();
-  // Count Zoho leads sourced from Facebook or Instagram, filtered by the selected date range
+  // Count Zoho leads sourced from Meta (Facebook + Instagram, since they're
+  // merged into a single channel everywhere else in the dashboard), filtered
+  // by the Meta-side date range.
   const zohoMetaLeads = useMemo(() => {
     if (!zoho?.rawLeads) return 0;
     const from = metaDateRange.from.getTime();
     const to   = metaDateRange.to.getTime();
     return zoho.rawLeads.filter(l => {
       const t = new Date(l.Created_Time).getTime();
-      const src = (l.Lead_Source ?? '').toLowerCase();
-      return t >= from && t <= to && (src.includes('facebook') || src.includes('instagram') || src.includes('meta'));
+      return t >= from && t <= to && displaySource(l.Lead_Source) === "Meta";
     }).length;
   }, [zoho?.rawLeads, metaDateRange]);
   const [previewCampaign, setPreviewCampaign] = useState<{ id: string; name: string } | null>(null);
@@ -815,26 +832,37 @@ const MetaAds = () => {
   const creativeFunnels = data?.creativeFunnels ?? [];
   const trackedPct      = total > 0 ? Math.round((withUtm / total) * 100) : 0;
 
-  // ── Per-video performance ─────────────────────────────────────────────────
+  // ── Per-creative performance ──────────────────────────────────────────────
   // Joins Meta API ads (spend / impressions) with form-lead funnels keyed on
-  // utm_content. Match is by normalised name — "RnP-Q4-vid01" in Meta and
-  // "rnpq4vid01" in utm_content collapse to the same key.
-  // Only video ads are surfaced since the user asked for a per-video breakdown.
+  // utm_content. We try TWO match strategies because utm_content can be either:
+  //   (a) a Meta numeric ad ID like "120213355981040302" — match by ad.id exact
+  //   (b) a human-readable slug like "RnP-Q4-vid01"      — match by normalised ad.name
+  // Whichever strategy matches per ad wins.
+  // Originally this was video-only, but Meta's `isVideo` flag is unreliable for
+  // Reels, Instant Experiences, and dynamic creatives — so we now show every
+  // creative and badge the ones we can confirm are video.
   const videoPerformance = useMemo(() => {
     const norm = (s: string) => s.toLowerCase().replace(/[^a-z0-9]/g, "");
 
-    // Index funnels by normalised utm_content so we can do O(1) lookups by ad.
-    const funnelByKey = new Map<string, typeof creativeFunnels[number]>();
+    // Build BOTH lookups: exact (raw id) and normalised (slug match).
+    const funnelById      = new Map<string, typeof creativeFunnels[number]>();
+    const funnelByNameKey = new Map<string, typeof creativeFunnels[number]>();
     for (const f of creativeFunnels) {
-      const k = norm(f.creative);
-      if (k) funnelByKey.set(k, f);
+      const raw = (f.creative ?? "").trim();
+      if (!raw) continue;
+      // utm_content that's all digits is almost always a Meta ad ID
+      if (/^\d+$/.test(raw)) funnelById.set(raw, f);
+      const k = norm(raw);
+      if (k) funnelByNameKey.set(k, f);
     }
 
-    // Start with video ads from Meta API (have spend, thumbnail, video flag).
+    // Every creative from Meta API — we no longer filter by isVideo here since
+    // the flag is unreliable. The video badge in the rendered table marks the
+    // ones we can confirm are video.
     const rows = topAds
-      .filter(ad => ad.isVideo)
       .map(ad => {
-        const f = funnelByKey.get(norm(ad.name));
+        // Try ID match first (utm_content is a numeric Meta ad ID), then name slug.
+        const f = funnelById.get(ad.id) ?? funnelByNameKey.get(norm(ad.name));
         const formLeads = f?.total     ?? 0;
         const qualified = f?.qualified ?? 0;
         const placed    = f?.converted ?? 0;
@@ -843,6 +871,7 @@ const MetaAds = () => {
           name:        ad.name,
           thumbnail:   ad.thumbnail,
           status:      ad.status,
+          isVideo:     ad.isVideo,
           ad,
           spend:       ad.spend,
           impressions: ad.impressions,
@@ -855,12 +884,34 @@ const MetaAds = () => {
           qualRate:    formLeads > 0 ? (qualified / formLeads) * 100 : 0,
         };
       })
-      // Drop video ads with no measurable activity at all.
-      .filter(r => r.spend > 0 || r.formLeads > 0 || r.metaLeads > 0)
-      .sort((a, b) => b.qualified - a.qualified || b.formLeads - a.formLeads || b.spend - a.spend);
+      // Drop creatives with no measurable activity at all.
+      .filter(r => r.spend > 0 || r.formLeads > 0 || r.metaLeads > 0);
+
+    // Sort depends on which view mode is active so the most relevant
+    // creative sits at the top regardless of which columns are showing.
+    if (creativeView === "cost") {
+      // Lowest CPQL first; ads with no CPQL sink to the bottom.
+      rows.sort((a, b) => {
+        const av = a.cpql > 0 ? a.cpql : Infinity;
+        const bv = b.cpql > 0 ? b.cpql : Infinity;
+        if (av !== bv) return av - bv;
+        return b.spend - a.spend;
+      });
+    } else if (creativeView === "reach") {
+      rows.sort((a, b) =>
+        b.impressions - a.impressions
+        || b.ad.clicks - a.ad.clicks
+        || b.spend - a.spend);
+    } else {
+      // performance (default): qualified count desc, then form leads, then spend.
+      rows.sort((a, b) =>
+        b.qualified - a.qualified
+        || b.formLeads - a.formLeads
+        || b.spend - a.spend);
+    }
 
     return rows;
-  }, [topAds, creativeFunnels]);
+  }, [topAds, creativeFunnels, creativeView]);
 
   // ── Back-side content for each KPI flip card ──────────────────────────────
   const topCampBySpend = campaigns.slice(0, 5);
@@ -1095,6 +1146,24 @@ const MetaAds = () => {
           Live Ad Performance · Meta Marketing API
         </p>
         <div className="flex items-center gap-3">
+          {/* Conversion attribution toggle */}
+          <div className="flex items-center gap-1" title="Strict: only Zoho DoB rows tagged Meta in Lead_Source. Matched: also include DoB rows whose email/phone matches a Meta form submission.">
+            <span className="text-[9px] uppercase tracking-wider font-semibold text-muted-foreground/60">Attribution</span>
+            <div className="flex gap-0.5">
+              <button type="button" onClick={() => setAttributionMode("strict")}
+                className={`px-2 py-0.5 rounded text-[9px] font-medium transition-colors ${
+                  attributionMode === "strict" ? "bg-primary text-white" : "text-muted-foreground hover:bg-secondary"
+                }`}>
+                Strict (Zoho)
+              </button>
+              <button type="button" onClick={() => setAttributionMode("matched")}
+                className={`px-2 py-0.5 rounded text-[9px] font-medium transition-colors ${
+                  attributionMode === "matched" ? "bg-primary text-white" : "text-muted-foreground hover:bg-secondary"
+                }`}>
+                Matched (Zoho + forms)
+              </button>
+            </div>
+          </div>
           {/* Currency toggle moved to dashboard header (applies to all pages). */}
           {/* Date range presets */}
           <div className="flex gap-0.5">
@@ -1139,7 +1208,9 @@ const MetaAds = () => {
           {/* ── 8 Flip KPI cards ── */}
           <div className="grid grid-cols-2 lg:grid-cols-4 gap-3 mb-4">
             <MetaKpiCard icon={DollarSign}   label="Total Spend"    color="text-primary"     bg="bg-primary/10"
-              value={fmtC(toDisplay(summary?.spend ?? 0), currency)}     sub={currency}                      back={spendBack}  backHeight={230} />
+              value={fmtC(toDisplay(summary?.spend ?? 0), currency)}
+              sub={`${since} → ${until} · ${currency}`}
+              back={spendBack}  backHeight={230} />
             <MetaKpiCard icon={Eye}          label="Impressions"    color="text-info"        bg="bg-info/10"
               value={fmtN(summary?.impressions ?? 0)}         sub="times ads were shown"          back={imprBack}   backHeight={200} />
             <MetaKpiCard icon={Users}        label="Reach"          color="text-success"     bg="bg-success/10"
@@ -1152,7 +1223,7 @@ const MetaAds = () => {
               value={fmtC(toDisplay(summary?.cpm ?? 0), currency)}       sub="per 1,000 impressions"         back={cpmBack}    backHeight={230} />
             <MetaKpiCard icon={Zap}           label="Leads from Ads"   color="text-success"     bg="bg-success/10"
               value={fmtN((summary?.leads ?? 0) > 0 ? (summary?.leads ?? 0) : zohoMetaLeads)}
-              sub={(summary?.leads ?? 0) > 0 ? "form submissions" : "via Zoho (Facebook + Instagram)"}
+              sub={(summary?.leads ?? 0) > 0 ? "form submissions" : "via Zoho (Meta channel)"}
               back={leadsBack}  backHeight={220} />
             <MetaKpiCard icon={ClipboardList} label="Leads from Forms" color="text-orange-500" bg="bg-orange-50"
               value={fmtN(data?.total ?? 0)}
@@ -1167,10 +1238,37 @@ const MetaAds = () => {
               const adSpend          = summary?.spend ?? 0;
               const totalLeads       = data?.total          ?? 0;
               const qualifiedLeads   = data?.qualifiedCount ?? 0;
-              const placedLeads      = data?.placedCount    ?? 0;
+              // Conversions: a DoB record counts as a Meta conversion if its
+              // email/phone matches a row in meta_leads (Meta form submissions)
+              // OR its Lead_Source explicitly resolves to Meta. The identity
+              // join is the strong signal — most DoB rows have no Lead_Source
+              // set, so the Lead_Source fallback alone misses ~98% of Meta
+              // conversions.
+              const metaFromMs = metaDateRange.from.getTime();
+              const metaToMs   = metaDateRange.to.getTime();
+              const normEmail = (s: string | null | undefined) => (s ?? "").trim().toLowerCase();
+              const normPhone = (s: string | null | undefined) => (s ?? "").replace(/\D/g, "");
+              const metaEmails = data?.metaLeadEmails;
+              const metaPhones = data?.metaLeadPhones;
+              const conversions = (zoho?.rawDoctorsOnBoard ?? []).filter(dob => {
+                const t = dob.Created_Time ? new Date(dob.Created_Time).getTime() : NaN;
+                if (isNaN(t) || t < metaFromMs || t > metaToMs) return false;
+                // Strict mode: only count rows tagged Meta in Zoho's Lead_Source.
+                if (attributionMode === "strict") {
+                  return displaySource(dob.Lead_Source) === "Meta";
+                }
+                // Matched mode: identity-match against meta_leads first, fall
+                // back to Lead_Source. Catches DoBs from Meta forms that
+                // weren't tagged in Zoho.
+                const email = normEmail(dob.Email);
+                const phone = normPhone(dob.Phone ?? dob.Mobile);
+                if (email && metaEmails?.has(email)) return true;
+                if (phone && metaPhones?.has(phone)) return true;
+                return displaySource(dob.Lead_Source) === "Meta";
+              }).length;
               const cpl = totalLeads     > 0 ? adSpend / totalLeads     : 0;
               const cpq = qualifiedLeads > 0 ? adSpend / qualifiedLeads : 0;
-              const cpp = placedLeads    > 0 ? adSpend / placedLeads    : 0;
+              const cpc = conversions    > 0 ? adSpend / conversions    : 0;
               return (
                 <>
                   <MetaKpiCard
@@ -1204,16 +1302,20 @@ const MetaAds = () => {
                     } backHeight={220}
                   />
                   <MetaKpiCard
-                    icon={Award} label="Cost Per Placement" color="text-violet-600" bg="bg-violet-50"
-                    value={cpp > 0 ? fmtC(toDisplay(cpp), currency) : "—"}
-                    sub={cpp > 0 ? `${fmtN(placedLeads)} placed (Closed Won)` : "no placements in period"}
+                    icon={Award} label="Cost per Conversion" color="text-violet-600" bg="bg-violet-50"
+                    value={cpc > 0 ? fmtC(toDisplay(cpc), currency) : "—"}
+                    sub={cpc > 0 ? `${fmtN(conversions)} converted · ${attributionMode === "strict" ? "Zoho only" : "Zoho + form match"}` : "no conversions in period"}
                     back={
                       <div className="space-y-2 text-[11px]">
-                        <p className="text-muted-foreground">Placement = lead's <strong>stage</strong> is "Closed Won", "Won", "Converted" or "Placed".</p>
+                        <p className="text-muted-foreground">Conversion = a row in the Zoho <strong>Doctors on Board</strong> module. Attribution toggle (top-right) controls scope:</p>
+                        <ul className="text-muted-foreground list-disc pl-4 space-y-1">
+                          <li><strong>Strict (Zoho)</strong>: Lead_Source resolves to Meta. Reproducible from Zoho's filter UI.</li>
+                          <li><strong>Matched</strong>: also includes DoBs whose email/phone matches a Meta form submission — recovers conversions whose Lead_Source isn't tagged.</li>
+                        </ul>
                         <div className="pt-2 border-t border-border/40 space-y-1">
                           <div className="flex justify-between"><span className="text-muted-foreground">Ad spend</span><span className="font-semibold tabular-nums">{fmtC(toDisplay(adSpend), currency)}</span></div>
-                          <div className="flex justify-between"><span className="text-muted-foreground">Placements</span><span className="font-semibold tabular-nums">{fmtN(placedLeads)}</span></div>
-                          <div className="flex justify-between"><span className="font-semibold">Cost / placement</span><span className="font-bold tabular-nums text-violet-600">{cpp > 0 ? fmtC(toDisplay(cpp), currency) : "—"}</span></div>
+                          <div className="flex justify-between"><span className="text-muted-foreground">Conversions</span><span className="font-semibold tabular-nums">{fmtN(conversions)}</span></div>
+                          <div className="flex justify-between"><span className="font-semibold">Cost / conversion</span><span className="font-bold tabular-nums text-violet-600">{cpc > 0 ? fmtC(toDisplay(cpc), currency) : "—"}</span></div>
                         </div>
                       </div>
                     } backHeight={220}
@@ -1233,7 +1335,7 @@ const MetaAds = () => {
                 <div key={acc.id} className="flex items-center gap-2 rounded-lg border border-border/50 bg-muted/40 px-3 py-1.5 text-[10px]">
                   <span className="h-1.5 w-1.5 rounded-full bg-success shrink-0" />
                   <span className="font-medium">{acc.name}</span>
-                  {acc.amountSpent > 0 && <span className="text-muted-foreground">· {fmtC(toDisplay(acc.amountSpent), currency)} lifetime</span>}
+                  {acc.amountSpent > 0 && <span className="text-muted-foreground">· {fmtC(toDisplay(acc.amountSpent), currency)} all-time (since account opened)</span>}
                 </div>
               ))}
             </div>
@@ -1325,152 +1427,145 @@ const MetaAds = () => {
             </div>
           )}
 
-          {/* ── Top Ads by Leads (from Meta API, instant preview) ── */}
-          {(topAdsLoading || topAds.length > 0) && (
-            <Card className="mb-4 shadow-sm border-border/50">
-              <CardHeader className="pb-1 pt-4 px-4">
-                <CardTitle className="text-[12px] font-medium text-muted-foreground uppercase tracking-wide">
-                  Top Ads by Leads
-                  <span className="ml-2 normal-case font-normal text-muted-foreground/40">· from Meta API · click <Play className="h-2.5 w-2.5 inline" /> to preview</span>
-                </CardTitle>
-              </CardHeader>
-              <CardContent className="px-0 pb-2 overflow-x-auto">
-                {topAdsLoading ? (
-                  <div className="flex items-center gap-2 px-4 py-6 text-muted-foreground">
-                    <Loader2 className="h-4 w-4 animate-spin" />
-                    <span className="text-[11px]">Loading ads from Meta…</span>
-                  </div>
-                ) : (
-                  <table className="w-full text-left">
-                    <thead>
-                      <tr className="border-b border-border/40">
-                        <th className="py-2 px-3 text-[10px] font-medium text-muted-foreground uppercase tracking-wide w-8">#</th>
-                        <th className="py-2 px-3 text-[10px] font-medium text-muted-foreground uppercase tracking-wide w-10">Ad</th>
-                        <th className="py-2 px-3 text-[10px] font-medium text-muted-foreground uppercase tracking-wide">Name</th>
-                        <th className="py-2 px-3 text-[10px] font-medium text-muted-foreground uppercase tracking-wide text-right">Leads</th>
-                        <th className="py-2 px-3 text-[10px] font-medium text-muted-foreground uppercase tracking-wide text-right hidden sm:table-cell">Spend</th>
-                        <th className="py-2 px-3 text-[10px] font-medium text-muted-foreground uppercase tracking-wide text-right hidden md:table-cell">Impr.</th>
-                        <th className="py-2 px-3 text-[10px] font-medium text-muted-foreground uppercase tracking-wide text-right hidden sm:table-cell">CTR</th>
-                        <th className="py-2 px-3 text-[10px] font-medium text-muted-foreground uppercase tracking-wide text-center">Preview</th>
-                      </tr>
-                    </thead>
-                    <tbody>
-                      {topAds.map((ad, i) => (
-                        <tr key={ad.id} className="border-b border-border/30 hover:bg-muted/30 transition-colors">
-                          <td className="py-2.5 px-3 text-[11px] text-muted-foreground">{i + 1}</td>
-                          <td className="py-2.5 px-3">
-                            {ad.thumbnail ? (
-                              <div className="relative h-9 w-14 rounded overflow-hidden bg-muted shrink-0">
-                                <img src={ad.thumbnail} alt="" className="h-full w-full object-cover" />
-                                {ad.isVideo && (
-                                  <div className="absolute inset-0 flex items-center justify-center bg-black/30">
-                                    <Play className="h-3 w-3 text-white" />
-                                  </div>
-                                )}
-                              </div>
-                            ) : (
-                              <div className="h-9 w-14 rounded bg-muted/50 flex items-center justify-center">
-                                <ImageOff className="h-3.5 w-3.5 text-muted-foreground/30" />
-                              </div>
-                            )}
-                          </td>
-                          <td className="py-2.5 px-3">
-                            <div className="flex items-center gap-1.5">
-                              <span className={`h-1.5 w-1.5 rounded-full shrink-0 ${ad.status === "ACTIVE" ? "bg-success" : "bg-muted-foreground/30"}`} />
-                              <span className="text-[11px] font-medium truncate max-w-[180px]" title={ad.name}>{ad.name}</span>
-                            </div>
-                          </td>
-                          <td className="py-2.5 px-3 text-right">
-                            <span className={`text-[12px] font-bold tabular-nums ${ad.leads > 0 ? "text-success" : "text-muted-foreground/40"}`}>
-                              {ad.leads > 0 ? ad.leads.toLocaleString() : "—"}
-                            </span>
-                          </td>
-                          <td className="py-2.5 px-3 text-right text-[11px] font-semibold text-primary tabular-nums hidden sm:table-cell">{fmtC(toDisplay(ad.spend), currency)}</td>
-                          <td className="py-2.5 px-3 text-right text-[11px] text-muted-foreground tabular-nums hidden md:table-cell">{fmtN(ad.impressions)}</td>
-                          <td className="py-2.5 px-3 text-right text-[11px] tabular-nums hidden sm:table-cell">{ad.ctr.toFixed(2)}%</td>
-                          <td className="py-2.5 px-3 text-center">
-                            <button
-                              type="button"
-                              onClick={() => setDirectPreviewAd(ad)}
-                              className="inline-flex items-center gap-1 rounded-lg bg-primary/10 hover:bg-primary hover:text-white text-primary px-2.5 py-1 text-[10px] font-semibold transition-colors"
-                            >
-                              <Play className="h-2.5 w-2.5" /> Preview
-                            </button>
-                          </td>
-                        </tr>
-                      ))}
-                    </tbody>
-                  </table>
-                )}
-              </CardContent>
-            </Card>
-          )}
-
-          {/* ── Per-Video Performance ─────────────────────────────────── */}
+          {/* ── Per-Creative Performance ──────────────────────────────── */}
           {/* Joins Meta API ads (spend) with form-lead funnels by ad name ↔ utm_content,
               then surfaces qualified + placement counts and the cost-per metrics
-              (CPQL / cost per placement) the user asked for. */}
+              (CPQL / cost per placement) per creative. Video ads are badged. */}
           {videoPerformance.length > 0 && (
             <Card className="mb-4 shadow-sm border-border/50">
               <CardHeader className="pb-1 pt-4 px-4">
-                <CardTitle className="text-[12px] font-medium text-muted-foreground uppercase tracking-wide">
-                  Per-Video Performance
-                  <span className="ml-2 normal-case font-normal text-muted-foreground/40">
-                    · video ads only · spend from Meta API · qualified/placed from Zoho via utm_content match
-                  </span>
-                </CardTitle>
+                <div className="flex items-start justify-between gap-3 flex-wrap">
+                  <div>
+                    <CardTitle className="text-[12px] font-medium text-muted-foreground uppercase tracking-wide">
+                      Per-Creative Performance
+                    </CardTitle>
+                    <p className="text-[10px] text-muted-foreground/70 mt-0.5">
+                      spend from Meta API · qualified/placed from Zoho via utm_content match · video badge where confirmed
+                    </p>
+                  </div>
+                  {/* View-mode toggle — swaps which columns are shown */}
+                  <div className="inline-flex rounded-md border border-border/60 overflow-hidden text-[10px] font-medium shrink-0">
+                    {([
+                      { v: "performance", label: "Performance" },
+                      { v: "cost",        label: "Cost-per" },
+                      { v: "reach",       label: "Reach" },
+                    ] as const).map(opt => (
+                      <button
+                        key={opt.v}
+                        type="button"
+                        onClick={() => setCreativeView(opt.v)}
+                        className={`px-3 py-1 transition-colors ${
+                          creativeView === opt.v ? "bg-primary text-white" : "bg-card text-muted-foreground hover:bg-muted/40"
+                        }`}
+                      >
+                        {opt.label}
+                      </button>
+                    ))}
+                  </div>
+                </div>
               </CardHeader>
               <CardContent className="px-0 pb-2 overflow-x-auto">
                 <table className="w-full text-left">
                   <thead>
                     <tr className="border-b border-border/40">
                       <th className="py-2 px-3 text-[10px] font-medium text-muted-foreground uppercase tracking-wide w-8">#</th>
-                      <th className="py-2 px-3 text-[10px] font-medium text-muted-foreground uppercase tracking-wide w-12">Video</th>
+                      <th className="py-2 px-3 text-[10px] font-medium text-muted-foreground uppercase tracking-wide w-12">Ad</th>
                       <th className="py-2 px-3 text-[10px] font-medium text-muted-foreground uppercase tracking-wide">Name</th>
                       <th className="py-2 px-3 text-[10px] font-medium text-muted-foreground uppercase tracking-wide text-right">
                         <span className="inline-flex items-center justify-end gap-1">
                           Spend
-                          <InfoIcon meaning="Meta Ads spend on this video in the period." source="Meta Marketing API." side="top" />
+                          <InfoIcon meaning="Meta Ads spend on this creative in the period." source="Meta Marketing API." side="top" />
                         </span>
                       </th>
-                      <th className="py-2 px-3 text-[10px] font-medium text-muted-foreground uppercase tracking-wide text-right">
-                        <span className="inline-flex items-center justify-end gap-1">
-                          Leads
-                          <InfoIcon meaning="Form leads matched to this video by ad-name ↔ utm_content." source="Supabase meta_leads." side="top" />
-                        </span>
-                      </th>
-                      <th className="py-2 px-3 text-[10px] font-medium text-muted-foreground uppercase tracking-wide text-right">
-                        <span className="inline-flex items-center justify-end gap-1">
-                          Qualified
-                          <InfoIcon meaning='How many of those leads reached qualified status. "Contact in Future" excluded.' source="meta_leads × Zoho Lead_Status." side="top" />
-                        </span>
-                      </th>
-                      <th className="py-2 px-3 text-[10px] font-medium text-muted-foreground uppercase tracking-wide text-right">
-                        <span className="inline-flex items-center justify-end gap-1">
-                          CPQL
-                          <InfoIcon meaning="Cost per Qualified Lead = Meta spend ÷ qualified leads for this video." source="Meta API + Zoho." side="top" />
-                        </span>
-                      </th>
-                      <th className="py-2 px-3 text-[10px] font-medium text-muted-foreground uppercase tracking-wide text-right">
-                        <span className="inline-flex items-center justify-end gap-1">
-                          Cost / Placement
-                          <InfoIcon meaning="Meta spend ÷ placements (HPF or Closed Won) for this video." source="Meta API + Zoho." side="top" />
-                        </span>
-                      </th>
+
+                      {/* Performance view: Leads → Qualified → CPQL */}
+                      {creativeView === "performance" && <>
+                        <th className="py-2 px-3 text-[10px] font-medium text-muted-foreground uppercase tracking-wide text-right">
+                          <span className="inline-flex items-center justify-end gap-1">
+                            Leads
+                            <InfoIcon meaning="Form leads matched to this creative by ad-id or ad-name ↔ utm_content." source="Supabase meta_leads." side="top" />
+                          </span>
+                        </th>
+                        <th className="py-2 px-3 text-[10px] font-medium text-muted-foreground uppercase tracking-wide text-right">
+                          <span className="inline-flex items-center justify-end gap-1">
+                            Qualified
+                            <InfoIcon meaning='How many of those leads reached qualified status. "Contact in Future" excluded.' source="meta_leads × Zoho Lead_Status." side="top" />
+                          </span>
+                        </th>
+                        <th className="py-2 px-3 text-[10px] font-medium text-muted-foreground uppercase tracking-wide text-right">
+                          <span className="inline-flex items-center justify-end gap-1">
+                            CPQL
+                            <InfoIcon meaning="Cost per Qualified Lead = Meta spend ÷ qualified leads for this creative." source="Meta API + Zoho." side="top" />
+                          </span>
+                        </th>
+                      </>}
+
+                      {/* Cost view: CPL → CPQL → Cost / Conversion */}
+                      {creativeView === "cost" && <>
+                        <th className="py-2 px-3 text-[10px] font-medium text-muted-foreground uppercase tracking-wide text-right">
+                          <span className="inline-flex items-center justify-end gap-1">
+                            Cost / Lead
+                            <InfoIcon meaning="Meta spend ÷ form leads for this creative." source="Meta API + Supabase meta_leads." side="top" />
+                          </span>
+                        </th>
+                        <th className="py-2 px-3 text-[10px] font-medium text-muted-foreground uppercase tracking-wide text-right">
+                          <span className="inline-flex items-center justify-end gap-1">
+                            CPQL
+                            <InfoIcon meaning="Cost per Qualified Lead = Meta spend ÷ qualified leads for this creative." source="Meta API + Zoho Lead_Status (cross-referenced via meta_leads email/phone/name)." side="top" />
+                          </span>
+                        </th>
+                        <th className="py-2 px-3 text-[10px] font-medium text-muted-foreground uppercase tracking-wide text-right">
+                          <span className="inline-flex items-center justify-end gap-1">
+                            Cost / Conversion
+                            <InfoIcon meaning="Meta spend ÷ conversions for this creative. NOTE: per-creative conversion attribution still uses meta_leads stage progression — DoB-level attribution per creative requires utm_content matching that we don't have yet. Channel-level conversion is sourced from Zoho Doctors on Board." source="Meta API + meta_leads (per-creative); Zoho Doctors on Board (channel-level)." side="top" />
+                          </span>
+                        </th>
+                      </>}
+
+                      {/* Reach view: Impressions → Clicks → CTR */}
+                      {creativeView === "reach" && <>
+                        <th className="py-2 px-3 text-[10px] font-medium text-muted-foreground uppercase tracking-wide text-right">
+                          <span className="inline-flex items-center justify-end gap-1">
+                            Impressions
+                            <InfoIcon meaning="Times this creative was shown in the period." source="Meta Marketing API." side="top" />
+                          </span>
+                        </th>
+                        <th className="py-2 px-3 text-[10px] font-medium text-muted-foreground uppercase tracking-wide text-right">
+                          <span className="inline-flex items-center justify-end gap-1">
+                            Clicks
+                            <InfoIcon meaning="Link clicks on this creative." source="Meta Marketing API." side="top" />
+                          </span>
+                        </th>
+                        <th className="py-2 px-3 text-[10px] font-medium text-muted-foreground uppercase tracking-wide text-right">
+                          <span className="inline-flex items-center justify-end gap-1">
+                            CTR
+                            <InfoIcon meaning="Click-through rate = clicks ÷ impressions." source="Meta Marketing API." side="top" />
+                          </span>
+                        </th>
+                      </>}
+
                       <th className="py-2 px-3 text-[10px] font-medium text-muted-foreground uppercase tracking-wide text-center">Preview</th>
                     </tr>
                   </thead>
-                  <tbody>
+                  <LayoutGroup>
+                  <motion.tbody layout>
                     {videoPerformance.map((v, i) => (
-                      <tr key={v.id} className="border-b border-border/30 hover:bg-muted/30 transition-colors">
-                        <td className="py-2.5 px-3 text-[11px] text-muted-foreground">{i + 1}</td>
+                      <motion.tr
+                        key={v.id}
+                        layout
+                        transition={{ type: "spring", stiffness: 380, damping: 32 }}
+                        className="border-b border-border/30 hover:bg-muted/30"
+                      >
+                        <motion.td layout="position" className="py-2.5 px-3 text-[11px] text-muted-foreground">{i + 1}</motion.td>
                         <td className="py-2.5 px-3">
                           {v.thumbnail ? (
                             <div className="relative h-9 w-14 rounded overflow-hidden bg-muted shrink-0">
                               <img src={v.thumbnail} alt="" className="h-full w-full object-cover" />
-                              <div className="absolute inset-0 flex items-center justify-center bg-black/30">
-                                <Play className="h-3 w-3 text-white" />
-                              </div>
+                              {v.isVideo && (
+                                <div className="absolute inset-0 flex items-center justify-center bg-black/30">
+                                  <Play className="h-3 w-3 text-white" />
+                                </div>
+                              )}
                             </div>
                           ) : (
                             <div className="h-9 w-14 rounded bg-muted/50 flex items-center justify-center">
@@ -1487,23 +1582,53 @@ const MetaAds = () => {
                         <td className="py-2.5 px-3 text-right text-[11px] font-semibold text-primary tabular-nums">
                           {v.spend > 0 ? fmtC(toDisplay(v.spend), currency) : <span className="text-muted-foreground/40">—</span>}
                         </td>
-                        <td className="py-2.5 px-3 text-right text-[12px] tabular-nums">
-                          {v.formLeads > 0 ? v.formLeads.toLocaleString() : <span className="text-muted-foreground/40">—</span>}
-                        </td>
-                        <td className="py-2.5 px-3 text-right text-[12px] tabular-nums">
-                          {v.qualified > 0 ? (
-                            <>
-                              <span className="font-semibold text-success">{v.qualified.toLocaleString()}</span>
-                              <span className="text-[10px] font-normal ml-1 opacity-70">({v.qualRate.toFixed(0)}%)</span>
-                            </>
-                          ) : <span className="text-muted-foreground/40">—</span>}
-                        </td>
-                        <td className="py-2.5 px-3 text-right text-[12px] font-semibold tabular-nums">
-                          {v.cpql > 0 ? fmtC(toDisplay(v.cpql), currency) : <span className="text-muted-foreground/40 font-normal">—</span>}
-                        </td>
-                        <td className="py-2.5 px-3 text-right text-[12px] font-semibold tabular-nums">
-                          {v.cpp > 0 ? fmtC(toDisplay(v.cpp), currency) : <span className="text-muted-foreground/40 font-normal">—</span>}
-                        </td>
+
+                        {/* Performance: Leads / Qualified / CPQL */}
+                        {creativeView === "performance" && <>
+                          <td className="py-2.5 px-3 text-right text-[12px] tabular-nums">
+                            {v.formLeads > 0 ? v.formLeads.toLocaleString() : <span className="text-muted-foreground/40">—</span>}
+                          </td>
+                          <td className="py-2.5 px-3 text-right text-[12px] tabular-nums">
+                            {v.qualified > 0 ? (
+                              <>
+                                <span className="font-semibold text-success">{v.qualified.toLocaleString()}</span>
+                                <span className="text-[10px] font-normal ml-1 opacity-70">({v.qualRate.toFixed(0)}%)</span>
+                              </>
+                            ) : <span className="text-muted-foreground/40">—</span>}
+                          </td>
+                          <td className="py-2.5 px-3 text-right text-[12px] font-semibold tabular-nums">
+                            {v.cpql > 0 ? fmtC(toDisplay(v.cpql), currency) : <span className="text-muted-foreground/40 font-normal">—</span>}
+                          </td>
+                        </>}
+
+                        {/* Cost: CPL / CPQL / CPP */}
+                        {creativeView === "cost" && <>
+                          <td className="py-2.5 px-3 text-right text-[12px] font-semibold tabular-nums">
+                            {(v.spend > 0 && v.formLeads > 0)
+                              ? fmtC(toDisplay(v.spend / v.formLeads), currency)
+                              : <span className="text-muted-foreground/40 font-normal">—</span>}
+                          </td>
+                          <td className="py-2.5 px-3 text-right text-[12px] font-semibold tabular-nums">
+                            {v.cpql > 0 ? fmtC(toDisplay(v.cpql), currency) : <span className="text-muted-foreground/40 font-normal">—</span>}
+                          </td>
+                          <td className="py-2.5 px-3 text-right text-[12px] font-semibold tabular-nums">
+                            {v.cpp > 0 ? fmtC(toDisplay(v.cpp), currency) : <span className="text-muted-foreground/40 font-normal">—</span>}
+                          </td>
+                        </>}
+
+                        {/* Reach: Impressions / Clicks / CTR */}
+                        {creativeView === "reach" && <>
+                          <td className="py-2.5 px-3 text-right text-[11px] text-muted-foreground tabular-nums">
+                            {v.impressions > 0 ? fmtN(v.impressions) : <span className="text-muted-foreground/40">—</span>}
+                          </td>
+                          <td className="py-2.5 px-3 text-right text-[12px] tabular-nums">
+                            {v.ad.clicks > 0 ? fmtN(v.ad.clicks) : <span className="text-muted-foreground/40">—</span>}
+                          </td>
+                          <td className="py-2.5 px-3 text-right text-[11px] tabular-nums">
+                            {v.ad.ctr > 0 ? `${v.ad.ctr.toFixed(2)}%` : <span className="text-muted-foreground/40">—</span>}
+                          </td>
+                        </>}
+
                         <td className="py-2.5 px-3 text-center">
                           <button
                             type="button"
@@ -1513,12 +1638,13 @@ const MetaAds = () => {
                             <Play className="h-2.5 w-2.5" /> Preview
                           </button>
                         </td>
-                      </tr>
+                      </motion.tr>
                     ))}
-                  </tbody>
+                  </motion.tbody>
+                  </LayoutGroup>
                 </table>
                 <p className="text-[10px] text-muted-foreground px-4 pt-2 pb-1">
-                  Match is by normalised ad name ↔ <code>utm_content</code>. A video with no match (e.g. forms not tagged with <code>utm_content</code>) shows "—" for leads/qualified.
+                  Match is by Meta ad ID or normalised ad-name ↔ <code>utm_content</code>. A creative with no match shows "—" for leads/qualified.
                 </p>
               </CardContent>
             </Card>

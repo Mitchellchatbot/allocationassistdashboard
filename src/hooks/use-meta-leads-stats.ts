@@ -1,4 +1,3 @@
-import { useMemo } from "react";
 import { useQuery } from "@tanstack/react-query";
 import { supabase } from "@/lib/supabase";
 import { useZohoData } from "@/hooks/use-zoho-data";
@@ -26,6 +25,11 @@ export type MetaLeadsStats = {
   placedCount:     number;  // meta_leads in converted/placed stages
   totalAllTime:    number;  // meta_leads rows ignoring date filter
   zohoMatched:     number;  // meta_leads matched to a Zoho lead in this period
+  // Identity Sets for cross-referencing with Doctors on Board / Leads. Built
+  // from the date-windowed meta_leads rows so we know which leads in the
+  // period came from Meta forms.
+  metaLeadEmails:  Set<string>;
+  metaLeadPhones:  Set<string>;
   byCreative:      GroupedStat[];
   byCampaign:      GroupedStat[];
   byPlatform:      GroupedStat[];
@@ -119,33 +123,49 @@ export function useMetaLeadsStats(dateRange: DateRangeInput) {
   // common for fresh form imports that haven't been touched in Zoho yet).
   const { data: zoho } = useZohoData();
 
-  // Memoize the Zoho lookup maps so we don't rebuild them on every render.
-  // The maps only need to change when the Zoho leads array reference changes.
-  const { zohoStatusByEmail, zohoStatusByPhone, zohoStatusByName, zohoCount } = useMemo(() => {
-    const byEmail = new Map<string, string>();
-    const byPhone = new Map<string, string>();
-    const byName  = new Map<string, string>();
-    for (const l of zoho?.rawLeads ?? []) {
-      const status = (l.Lead_Status ?? "").trim();
-      if (!status) continue;
-      const email = normalizeEmail(l.Email);
-      const phone = normalizePhone(l.Phone ?? l.Mobile);
-      const name  = normalizeName(l.First_Name, l.Last_Name);
-      if (email) byEmail.set(email, status);
-      if (phone) byPhone.set(phone, status);
-      if (name)  byName.set(name, status);
-    }
-    return {
-      zohoStatusByEmail: byEmail,
-      zohoStatusByPhone: byPhone,
-      zohoStatusByName:  byName,
-      zohoCount: zoho?.rawLeads?.length ?? 0,
-    };
-  }, [zoho?.rawLeads]);
+  // Build Zoho lookup maps INSIDE queryFn each run — useMemo captured stale
+  // empty maps in closure when zoho was undefined on first render and didn't
+  // recompute reliably after zoho loaded. Doing it inside queryFn guarantees
+  // we always see the current zoho.rawLeads.
+  const zohoLeads = zoho?.rawLeads ?? [];
+  const zohoCount = zohoLeads.length;
+  // One-shot render-time diagnostic so we can verify zoho really arrives here.
+  if (zoho) {
+    console.log(`[useMetaLeadsStats] render — zoho keys:${Object.keys(zoho as object).length} rawLeads:${(zoho as { rawLeads?: unknown[] }).rawLeads?.length ?? 'MISSING'} rawDoctorsOnBoard:${(zoho as { rawDoctorsOnBoard?: unknown[] }).rawDoctorsOnBoard?.length ?? 'MISSING'}`);
+  } else {
+    console.log('[useMetaLeadsStats] render — zoho is undefined');
+  }
 
   return useQuery<MetaLeadsStats>({
     queryKey: ["meta-leads-stats", fromKey, toKey, zohoCount],
     queryFn: async () => {
+      const zohoStatusByEmail = new Map<string, string>();
+      const zohoStatusByPhone = new Map<string, string>();
+      const zohoStatusByName  = new Map<string, string>();
+      let leadsWithStatus = 0;
+      for (const l of zohoLeads) {
+        const status = (l.Lead_Status ?? "").trim();
+        if (!status) continue;
+        leadsWithStatus++;
+        const email = normalizeEmail(l.Email);
+        const phone = normalizePhone(l.Phone ?? l.Mobile);
+        const name  = normalizeName(l.First_Name, l.Last_Name);
+        if (email) zohoStatusByEmail.set(email, status);
+        if (phone) zohoStatusByPhone.set(phone, status);
+        if (name)  zohoStatusByName.set(name, status);
+      }
+      const sample = zohoLeads[0];
+      console.log(`[useMetaLeadsStats] zoho lookup maps — leads:${zohoLeads.length} withStatus:${leadsWithStatus} byEmail:${zohoStatusByEmail.size} byPhone:${zohoStatusByPhone.size} byName:${zohoStatusByName.size}`);
+      if (sample) {
+        console.log('[useMetaLeadsStats] sample Zoho lead keys:', Object.keys(sample as object));
+        console.log('[useMetaLeadsStats] sample Zoho lead values:', {
+          Email: (sample as { Email?: string }).Email,
+          Phone: (sample as { Phone?: string }).Phone,
+          Mobile: (sample as { Mobile?: string }).Mobile,
+          First_Name: (sample as { First_Name?: string }).First_Name,
+          Last_Name: (sample as { Last_Name?: string }).Last_Name,
+        });
+      }
       const fromISO = dateRange.from.toISOString();
       // end-of-day for `to`
       const toISO = new Date(
@@ -276,9 +296,37 @@ export function useMetaLeadsStats(dateRange: DateRangeInput) {
       const campaignFunnels = Array.from(campaignMap.values()).sort((a, b) => b.total - a.total);
       const creativeFunnels = Array.from(creativeMap.values()).sort((a, b) => b.total - a.total);
 
+      // Identity Sets — every email/phone in the windowed meta_leads. The
+      // Meta Ads page intersects these with Doctors on Board to count
+      // identity-confirmed Meta conversions.
+      const metaLeadEmails = new Set<string>();
+      const metaLeadPhones = new Set<string>();
+      for (const r of filtered) {
+        const email = normalizeEmail(r.email);
+        const phone = normalizePhone(r.phone);
+        if (email) metaLeadEmails.add(email);
+        if (phone) metaLeadPhones.add(phone);
+      }
+
+      console.log(`[useMetaLeadsStats] window: ${total} meta_leads · ${qualifiedCount} qualified · ${zohoMatched} matched-to-Zoho · ${metaLeadEmails.size} unique emails · ${metaLeadPhones.size} unique phones`);
+      // If we got rows but matched 0, dump a sample meta_lead row + first-3 Zoho keys
+      // so we can see the format mismatch (e.g. one side trims, the other doesn't).
+      if (filtered.length > 0 && zohoMatched === 0 && (zohoStatusByEmail.size > 0 || zohoStatusByPhone.size > 0 || zohoStatusByName.size > 0)) {
+        const r = filtered[0];
+        console.warn('[useMetaLeadsStats] zero matches despite populated maps. Sample meta_lead:', {
+          email_raw: r.email, email_norm: normalizeEmail(r.email),
+          phone_raw: r.phone, phone_norm: normalizePhone(r.phone),
+          name_norm: normalizeName(r.first_name, r.last_name),
+        });
+        console.warn('[useMetaLeadsStats] first 3 Zoho byEmail keys:', Array.from(zohoStatusByEmail.keys()).slice(0, 3));
+        console.warn('[useMetaLeadsStats] first 3 Zoho byPhone keys:', Array.from(zohoStatusByPhone.keys()).slice(0, 3));
+        console.warn('[useMetaLeadsStats] first 3 Zoho byName keys:',  Array.from(zohoStatusByName.keys()).slice(0, 3));
+      }
+
       return {
         total, withUtm, qualifiedCount, placedCount,
         totalAllTime: allRows.length, zohoMatched,
+        metaLeadEmails, metaLeadPhones,
         byCreative, byCampaign, byPlatform, byLocation, bySpeciality, byStage,
         campaignFunnels, creativeFunnels,
       };

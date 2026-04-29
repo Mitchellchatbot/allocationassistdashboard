@@ -25,6 +25,9 @@ export interface ZohoLead {
   Full_Name: string;
   First_Name: string;
   Last_Name: string;
+  Email: string | null;
+  Phone: string | null;
+  Mobile: string | null;
   Lead_Status: string;
   Lead_Source: string | null;
   Owner: { name: string; email: string };
@@ -78,6 +81,28 @@ export interface ZohoCampaign {
   Budgeted_Cost: number | null;
   Actual_Cost: number | null;
   Owner: { name: string; email: string };
+}
+
+// "Doctors on Board" — the standard Zoho Contacts module renamed in this org.
+// One row per actually-placed doctor. SOLE source of truth for conversions.
+// Email/Phone/Mobile fields drive cross-reference to meta_leads and to the
+// Lead module — most DoB rows have no Lead_Source set, so identity-based
+// matching gives us much stronger attribution than Lead_Source alone.
+export interface ZohoDoctorOnBoard {
+  id: string;
+  Full_Name: string | null;
+  First_Name: string | null;
+  Last_Name: string | null;
+  Email: string | null;
+  Phone: string | null;
+  Mobile: string | null;
+  Specialty: string | null;
+  Specialty_Details: string | null;
+  Lead_Source: string | null;
+  Owner: { name: string; email: string } | null;
+  Account_Name: { name: string; id: string } | null;   // linked Hospital
+  Created_Time: string;
+  Modified_Time: string | null;
 }
 
 // ── Aggregation helpers ───────────────────────────────────────────────────────
@@ -135,14 +160,16 @@ const STAGE_COLORS: Record<string, string> = {
   'Closed Lost':          'hsl(0, 60%, 55%)',
 };
 
-// Aggressive normalization — merges variants and junks garbage data.
+// Aggressive normalization — merges variants and pushes junk/empty values
+// into a single "Undefined" bucket so the Marketing grid can hide them with
+// one toggle.
 export function displaySource(src: string | null): string {
-  if (!src) return 'Uncategorized';
+  if (!src) return 'Undefined';
   const s = src.trim().toLowerCase();
 
-  // Junk / test entries
+  // Junk / test entries — empty, all-x, common nulls, single chars
   if (!s || /^x+$/i.test(s) || s === 'none' || s === 'null' || s === 'n/a' || s.length < 2) {
-    return 'Uncategorized';
+    return 'Undefined';
   }
 
   // Meta = Facebook + Instagram (single channel; both owned by Meta)
@@ -160,14 +187,23 @@ export function displaySource(src: string | null): string {
   if (s.includes('tiktok')) return 'TikTok';
 
   // Social / professional
-  if (s.includes('linkedin')) return 'LinkedIn';
+  if (s.includes('linkedin') || s.includes('linked in')) return 'LinkedIn';
   if (s.includes('whatsapp')) return 'WhatsApp';
 
-  // Referral / word of mouth
-  if (s.includes('referral') || s.includes('referrer') || s.includes('word of mouth')) return 'Referrals';
+  // Referral / word of mouth — covers "Referral", "Reference", "Word of mouth"
+  if (s.includes('referral') || s.includes('referrer')
+      || s === 'reference' || s.startsWith('reference')
+      || s.includes('word of mouth')) return 'Referrals';
 
-  // Agencies / external
+  // Agencies / external job boards
   if (s.includes('go hire') || s.includes('gohire')) return 'Go Hire';
+  if (s.includes('naukri')) return 'Naukri Gulf';
+  if (s === 'indeed' || s.startsWith('indeed')) return 'Indeed';
+  if (s === 'jobsoid' || s.startsWith('jobsoid')) return 'Jobsoid';
+  if (s === 'bmj ads' || s.startsWith('bmj')) return 'BMJ Ads';
+
+  // NHS Website is a UK referral source, not organic web
+  if (s.includes('nhs')) return 'Referrals';
 
   // Fallback: Title Case the raw value
   return src.replace(/_/g, ' ').replace(/\b\w/g, c => c.toUpperCase()).trim();
@@ -320,6 +356,7 @@ export function aggregateZohoData(
   accounts: ZohoAccount[],
   campaigns: ZohoCampaign[],
   emailData: { total: number; bySender: Record<string, number>; sampled: number },
+  doctorsOnBoard: ZohoDoctorOnBoard[] = [],
 ) {
   // ── Normalise all leads before any aggregation ────────────────────────────
   leads = leads.map(normaliseLead);
@@ -377,16 +414,13 @@ export function aggregateZohoData(
     return sum + (d.Amount ?? 0) * p;
   }, 0);
 
-  // ── Conversion rates ─────────────────────────────────────────────────────
-  // Statuses that represent a real engagement past initial qualification.
-  // "Contact in Future" excluded — that's a deferred conversation, not progress.
-  const convertedStatuses = new Set([
-    'Initial Sales Call Completed',
-    'High Priority Follow up',
-  ]);
-  const convertedLeads = leads.filter(l => convertedStatuses.has(l.Lead_Status));
+  // ── Conversion rate ──────────────────────────────────────────────────────
+  // SOLE source of truth: every row in the Zoho `Doctors on Board` module
+  // (api_name `Contacts`) is one converted doctor. Lead-status proxies have
+  // been removed.
+  const convertedCount = doctorsOnBoard.length;
   const leadConversionRate = leads.length > 0
-    ? parseFloat(((convertedLeads.length / leads.length) * 100).toFixed(1))
+    ? parseFloat(((convertedCount / leads.length) * 100).toFixed(2))
     : 0;
 
   const conversionRate = leads.length > 0
@@ -464,10 +498,10 @@ export function aggregateZohoData(
       icon:   'users' as const,
     },
     {
-      label:  'Lead → Placement',
+      label:  'Lead → Conversion',
       value:  `${leadConversionRate}%`,
       change: 0,
-      period: `${convertedLeads.length} converted / ${leads.length.toLocaleString()} leads`,
+      period: `${convertedCount.toLocaleString()} converted / ${leads.length.toLocaleString()} leads`,
       icon:   'check' as const,
     },
     {
@@ -564,11 +598,51 @@ export function aggregateZohoData(
     },
   ];
 
-  // Debug: log all lead sources from Zoho so we can verify Facebook/Meta coverage
+  // Debug: log unique Lead_Source values so we can verify channel coverage.
+  // (Facebook + Instagram are now merged into "Meta" via displaySource.)
   const rawSources = leads.map(l => l.Lead_Source).filter(Boolean);
   console.log('[ZohoData] raw Lead_Source values (sample 20):', [...new Set(rawSources)].slice(0, 20));
-  const fbLeads = leads.filter(l => displaySource(l.Lead_Source) === 'Facebook');
-  console.log('[ZohoData] leads with Facebook source:', fbLeads.length);
+
+  // Cross-module audit: every unique Lead_Source value across Leads + DoB,
+  // with row counts, sorted by total. The "metaSuspect" column highlights
+  // anything that smells like Facebook / Instagram / Meta — useful for
+  // discovering legacy / API-written values that aren't in Zoho's picklist.
+  const sourceCounts = new Map<string, { leads: number; dob: number }>();
+  for (const l of leads) {
+    const k = (l.Lead_Source ?? '(null)').trim() || '(empty)';
+    const cur = sourceCounts.get(k) ?? { leads: 0, dob: 0 };
+    cur.leads++;
+    sourceCounts.set(k, cur);
+  }
+  for (const d of doctorsOnBoard ?? []) {
+    const k = ((d as { Lead_Source?: string | null }).Lead_Source ?? '(null)').toString().trim() || '(empty)';
+    const cur = sourceCounts.get(k) ?? { leads: 0, dob: 0 };
+    cur.dob++;
+    sourceCounts.set(k, cur);
+  }
+  const META_RX = /(facebook|instagram|insta|^fb$|^ig$|meta|messenger|whatsapp)/i;
+  const allSourcesAudit = Array.from(sourceCounts.entries())
+    .map(([rawValue, c]) => ({
+      rawValue,
+      leads: c.leads,
+      dob: c.dob,
+      total: c.leads + c.dob,
+      metaSuspect: META_RX.test(rawValue) ? 'YES' : '',
+      normalizedTo: displaySource(rawValue === '(null)' || rawValue === '(empty)' ? null : rawValue),
+    }))
+    .sort((a, b) => b.total - a.total);
+  console.log('[ZohoData] all Lead_Source values across Leads + DoB:');
+  console.table(allSourcesAudit);
+  const metaSuspects = allSourcesAudit.filter(r => r.metaSuspect === 'YES');
+  console.log(`[ZohoData] Meta-suspect raw values (${metaSuspects.length}):`);
+  console.table(metaSuspects);
+
+  // Hunt for "Doctors Onboarded" / "Converted Doctor" — it isn't in Lead_Status
+  // or Deal Stage, so dump Prime_Classification + any other custom-ish field
+  // that might be carrying it. If it shows up here, we wire it; if nothing
+  // matches, the field hasn't been added to the synced field list yet.
+  const primeVals = [...new Set(leads.map(l => (l as { Prime_Classification?: string }).Prime_Classification).filter(Boolean))];
+  console.log('[ZohoData] unique Prime_Classification values:', primeVals);
 
   // ── Source / channel performance ─────────────────────────────────────────
   const sourceGroups = countBy(leads, l => displaySource(l.Lead_Source));
@@ -600,7 +674,15 @@ export function aggregateZohoData(
     leadsByOwner[name].push(l);
   });
 
-  // convertedStatuses is defined above (near conversionRate computation)
+  // Per-recruiter "converted" still uses Lead_Status (DoB has no recruiter
+   // attribution). Mirrors the old convertedStatuses set we removed when DoB
+   // became the company-wide conversion source.
+  const convertedStatuses = new Set([
+    'Contact in Future',
+    'High Priority Follow up',
+    'High Priority Follow-up',
+    'Closed Won',
+  ]);
 
   const recruiters = Object.entries(leadsByOwner)
     .filter(([name]) => name !== 'Unknown')
@@ -868,16 +950,56 @@ const CAMPAIGN_FIELDS = [
 ];
 
 function parseCacheRow(row: { data: unknown; synced_at: string }) {
-  const { leads, deals, calls, accounts, campaigns, emailData } = row.data as {
+  const { leads, deals, calls, accounts, campaigns, doctorsOnBoard, emailData } = row.data as {
     leads: ZohoLead[]; deals: ZohoDeal[]; calls: ZohoCall[];
     accounts: ZohoAccount[]; campaigns: ZohoCampaign[];
+    doctorsOnBoard?: ZohoDoctorOnBoard[];
     emailData?: { total: number; bySender: Record<string, number>; sampled: number };
   };
-  return {
-    ...aggregateZohoData(leads, deals, calls, accounts, campaigns,
-      emailData ?? { total: 0, bySender: {} as Record<string, number>, sampled: 0 }),
+  // Quick visibility for the new module — print Lead_Source distribution as
+  // a table, with the normalized channel each value resolves to.
+  // Pass the RAW value (including null) through displaySource so the log
+  // matches what the rest of the dashboard sees.
+  const dobBuckets = new Map<string, { rawSamples: Set<string>; count: number; normalized: string }>();
+  for (const d of doctorsOnBoard ?? []) {
+    const raw = (d as { Lead_Source?: string | null }).Lead_Source ?? null;
+    const normalized = displaySource(raw);
+    const cur = dobBuckets.get(normalized) ?? { rawSamples: new Set<string>(), count: 0, normalized };
+    cur.count++;
+    cur.rawSamples.add(raw === null ? "(null)" : raw);
+    dobBuckets.set(normalized, cur);
+  }
+  console.log(`[ZohoData] doctorsOnBoard rows: ${doctorsOnBoard?.length ?? 0}`);
+  const dobTable = Array.from(dobBuckets.values())
+    .sort((a, b) => b.count - a.count)
+    .map(r => ({ channel: r.normalized, count: r.count, rawValues: [...r.rawSamples].slice(0, 4).join(", ") }));
+  console.table(dobTable);
+  console.log(`[ZohoData] doctorsOnBoard rows attributed to Meta: ${dobBuckets.get("Meta")?.count ?? 0}`);
+
+  // FULL audit: every unique raw Lead_Source value in DoB with counts, so we
+  // can reconcile against Zoho's picklist filter (which only sees current
+  // picklist values, not legacy/API-written ones).
+  const dobRawCounts: Record<string, number> = {};
+  for (const d of doctorsOnBoard ?? []) {
+    const raw = (d as { Lead_Source?: string | null }).Lead_Source;
+    const key = raw === null || raw === undefined ? '(null)' : raw;
+    dobRawCounts[key] = (dobRawCounts[key] ?? 0) + 1;
+  }
+  const dobRawTable = Object.entries(dobRawCounts)
+    .sort((a, b) => b[1] - a[1])
+    .map(([rawValue, count]) => ({ rawValue, count, normalizedTo: displaySource(rawValue === '(null)' ? null : rawValue) }));
+  console.log('[ZohoData] DoB Lead_Source — every unique raw value:');
+  console.table(dobRawTable);
+  const aggregated = aggregateZohoData(leads, deals, calls, accounts, campaigns,
+    emailData ?? { total: 0, bySender: {} as Record<string, number>, sampled: 0 },
+    doctorsOnBoard ?? []);
+  const result = {
+    ...aggregated,
+    rawDoctorsOnBoard: doctorsOnBoard ?? [],
     syncedAt: row.synced_at,
   };
+  console.log(`[ZohoData] parseCacheRow returning — rawLeads:${(result as { rawLeads?: unknown[] }).rawLeads?.length ?? 'MISSING'} keys:[${Object.keys(result).join(', ')}]`);
+  return result;
 }
 
 export function useZohoData() {
@@ -886,43 +1008,56 @@ export function useZohoData() {
   return useQuery({
     queryKey: ['zoho-data'],
     queryFn: async () => {
-      // ── Always read from Supabase cache first (fast path) ───────────────
-      const { data: cached } = await supabase
-        .from('zoho_cache')
-        .select('data, synced_at')
-        .eq('id', 1)
-        .single();
+      // The cache is split across TWO rows in zoho_cache (was hitting
+      // statement-timeout when stored as one). Row 1 = leads, Row 2 = the rest.
+      // Both rows share a synced_at; we merge them client-side before parsing.
+      const fetchMerged = async (): Promise<{ data: unknown; synced_at: string } | null> => {
+        const { data: rows, error } = await supabase
+          .from('zoho_cache')
+          .select('id, data, synced_at')
+          .in('id', [1, 2]);
+        if (error) console.warn('[ZohoData] cache fetch error:', error.message);
+        if (!rows || rows.length === 0) {
+          console.warn('[ZohoData] zoho_cache returned no rows for ids [1,2]');
+          return null;
+        }
+        const merged: Record<string, unknown> = {};
+        let synced = '';
+        const seenIds: number[] = [];
+        for (const r of rows as Array<{ id: number; data: Record<string, unknown>; synced_at: string }>) {
+          seenIds.push(r.id);
+          if (r.data) {
+            const keys = Object.keys(r.data);
+            const counts = Object.fromEntries(keys.map(k => [k, Array.isArray(r.data[k]) ? (r.data[k] as unknown[]).length : typeof r.data[k]]));
+            console.log(`[ZohoData] cache row id=${r.id} synced=${r.synced_at} keys=`, counts);
+            Object.assign(merged, r.data);
+          }
+          if (r.synced_at && r.synced_at > synced) synced = r.synced_at;
+        }
+        console.log(`[ZohoData] merged keys: ${Object.keys(merged).join(', ')} | rows: ${seenIds.join(', ')}`);
+        if (!synced) return null;
+        return { data: merged, synced_at: synced };
+      };
 
-      if (cached?.data && cached?.synced_at) {
+      // ── Fast path: cache exists, return it ──
+      const cached = await fetchMerged();
+      if (cached) {
         const isStale = Date.now() - new Date(cached.synced_at).getTime() > CACHE_MAX_AGE_MS;
-
         if (isStale) {
-          // Return stale data immediately; refresh in background via server-side sync
           zohoSync()
             .then(() => queryClient.invalidateQueries({ queryKey: ['zoho-data'] }))
             .catch(() => {});
         }
-
-        // Return cached data right away — user sees the dashboard instantly
-        return parseCacheRow(cached as { data: unknown; synced_at: string });
+        return parseCacheRow(cached);
       }
 
-      // ── No cache at all: fire server-side sync, poll until data arrives ──
-      // This keeps queryFn pending (isLoading: true) so the UI shows a
-      // skeleton instead of a blank page. zoho-sync runs server-to-Zoho
-      // which is ~3-4x faster than routing every page through the proxy.
+      // ── No cache: fire server-side sync, poll until both rows arrive ──
       zohoSync().catch(() => {});
-
       for (let i = 0; i < 20; i++) {
         await new Promise<void>(r => setTimeout(r, 3000));
-        const { data: poll } = await supabase
-          .from('zoho_cache')
-          .select('data, synced_at')
-          .eq('id', 1)
-          .single();
-        if (poll?.data) return parseCacheRow(poll as { data: unknown; synced_at: string });
+        const poll = await fetchMerged();
+        if (poll) return parseCacheRow(poll);
       }
-
       throw new Error('Initial Zoho sync timed out — try refreshing');
     },
     staleTime:            55 * 60 * 1000,
