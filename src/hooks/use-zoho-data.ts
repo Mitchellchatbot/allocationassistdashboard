@@ -430,25 +430,53 @@ export function aggregateZohoData(
     ? (qualifiedLeads.length / leads.length) * 100
     : 0;
 
-  // ── Avg time to place (Created_Time → Closing_Date on Closed Won deals) ──
-  const wonWithDates = closedWon.filter(d => d.Created_Time && d.Closing_Date);
-  const avgCycleDays = wonWithDates.length > 0
-    ? Math.round(
-        wonWithDates.reduce((sum, d) => {
-          const ms = new Date(d.Closing_Date).getTime() - new Date(d.Created_Time).getTime();
-          return sum + ms / 86_400_000;
-        }, 0) / wonWithDates.length
-      )
+  // ── Avg time to place — cross-reference DoB → Lead by email / phone / name ──
+  // Closed Won deals only have ~4 records and aren't representative. Doctors
+  // on Board is the canonical conversion source (~2900 rows), so we compute:
+  //   for each DoB row → find matching Lead → days = DoB.Created - Lead.Created
+  //   average across all matched pairs.
+  const _normEmail = (s: string | null | undefined) => (s ?? '').trim().toLowerCase();
+  const _normPhone = (s: string | null | undefined) => (s ?? '').replace(/\D/g, '');
+  const _normName  = (f: string | null | undefined, l: string | null | undefined) =>
+    `${(f ?? '').trim().toLowerCase()} ${(l ?? '').trim().toLowerCase()}`.trim();
+  const leadByEmail = new Map<string, ZohoLead>();
+  const leadByPhone = new Map<string, ZohoLead>();
+  const leadByName  = new Map<string, ZohoLead>();
+  for (const l of leads) {
+    const e = _normEmail(l.Email);
+    const p = _normPhone(l.Phone ?? l.Mobile);
+    const n = _normName(l.First_Name, l.Last_Name);
+    if (e && !leadByEmail.has(e)) leadByEmail.set(e, l);
+    if (p && !leadByPhone.has(p)) leadByPhone.set(p, l);
+    if (n && !leadByName.has(n))  leadByName.set(n, l);
+  }
+  const placementCycles: { name: string; days: number }[] = [];
+  for (const dob of doctorsOnBoard) {
+    if (!dob.Created_Time) continue;
+    const lead =
+      leadByEmail.get(_normEmail(dob.Email)) ||
+      leadByPhone.get(_normPhone(dob.Phone ?? dob.Mobile)) ||
+      leadByName.get(_normName(dob.First_Name, dob.Last_Name));
+    if (!lead?.Created_Time) continue;
+    const days = (new Date(dob.Created_Time).getTime() - new Date(lead.Created_Time).getTime()) / 86_400_000;
+    if (days < 0 || days > 730) continue;   // sanity bounds: 0–2 years
+    placementCycles.push({
+      name: dob.Full_Name || `${dob.First_Name ?? ''} ${dob.Last_Name ?? ''}`.trim() || '—',
+      days: Math.round(days),
+    });
+  }
+  const avgCycleDays = placementCycles.length > 0
+    ? Math.round(placementCycles.reduce((s, c) => s + c.days, 0) / placementCycles.length)
     : 0;
   const avgCycleTime = avgCycleDays > 0 ? `${avgCycleDays} days` : '—';
 
-  // When there are no Closed Won deals, fall back to avg age of active leads
+  // When DoB matches yield nothing, fall back to avg age of active leads.
   const avgActiveLeadDays = activeLeads.length > 0
     ? Math.round(activeLeads.reduce((sum, l) => sum + (Date.now() - new Date(l.Created_Time).getTime()) / 86_400_000, 0) / activeLeads.length)
     : 0;
-  const avgTimeDisplay  = wonWithDates.length > 0 ? avgCycleTime : avgActiveLeadDays > 0 ? `${avgActiveLeadDays} days` : '—';
-  const avgTimePeriod   = wonWithDates.length > 0
-    ? `${wonWithDates.length} closed-won deals`
+  const avgTimeDisplay  = placementCycles.length > 0 ? avgCycleTime : avgActiveLeadDays > 0 ? `${avgActiveLeadDays} days` : '—';
+  const avgTimePeriod   = placementCycles.length > 0
+    ? `${placementCycles.length.toLocaleString()} matched DoB conversions`
     : `avg age across ${activeLeads.length.toLocaleString()} active leads`;
 
   // ── Period-over-period deltas (last 30 days vs previous 30 days) ─────────
@@ -489,12 +517,40 @@ export function aggregateZohoData(
     : v >= 1000    ? `AED ${(v / 1000).toFixed(0)}K`
     : `AED ${Math.round(v)}`;
 
+  // ── Best Channel by Conversion ────────────────────────────────────────────
+  // Rate = DoB conversions ÷ leads per channel. Apply a minimum-volume floor
+  // to avoid one-lead channels with 100% rate dominating the headline.
+  const MIN_LEADS_FOR_CHANNEL_RANK = 25;
+  const leadsByChannel = new Map<string, number>();
+  for (const l of leads) {
+    const ch = displaySource(l.Lead_Source);
+    if (!ch || ch === 'Undefined') continue;
+    leadsByChannel.set(ch, (leadsByChannel.get(ch) ?? 0) + 1);
+  }
+  const dobsByChannel = new Map<string, number>();
+  for (const d of doctorsOnBoard) {
+    const ch = displaySource(d.Lead_Source);
+    if (!ch || ch === 'Undefined') continue;
+    dobsByChannel.set(ch, (dobsByChannel.get(ch) ?? 0) + 1);
+  }
+  const bestChannel = Array.from(leadsByChannel.entries())
+    .filter(([, n]) => n >= MIN_LEADS_FOR_CHANNEL_RANK)
+    .map(([ch, n]) => ({
+      channel: ch,
+      leads: n,
+      conversions: dobsByChannel.get(ch) ?? 0,
+      rate: n > 0 ? ((dobsByChannel.get(ch) ?? 0) / n) * 100 : 0,
+    }))
+    .sort((a, b) => b.rate - a.rate)[0];
+
   const kpis = [
     {
-      label:  'Qualified Active',
-      value:  qualifiedLeads.filter(l => activeStatuses.has(l.Lead_Status)).length.toLocaleString(),
-      change: pctDelta(qualifiedCurrent, qualifiedPrev),
-      period: 'vs prior 30 days',
+      label:  'Best Channel',
+      value:  bestChannel ? bestChannel.channel : '—',
+      change: 0,
+      period: bestChannel
+        ? `${bestChannel.rate.toFixed(1)}% conversion · ${bestChannel.conversions.toLocaleString()} of ${bestChannel.leads.toLocaleString()} leads`
+        : `needs ≥${MIN_LEADS_FOR_CHANNEL_RANK} leads per channel`,
       icon:   'users' as const,
     },
     {
@@ -519,10 +575,13 @@ export function aggregateZohoData(
       icon:   'check' as const,
     },
     {
-      label:  'Avg. Time to Place',
-      value:  avgTimeDisplay,
+      // Value + period are overridden in useFilteredData with the avg
+      // duration each DoB was active before its last status change.
+      // Default placeholder here is a no-op.
+      label:  'Time to Placement',
+      value:  '—',
       change: 0,
-      period: avgTimePeriod,
+      period: 'avg DoB cycle',
       icon:   'clock' as const,
     },
     {
@@ -920,6 +979,8 @@ export function aggregateZohoData(
     rawCalls,
     rawAccounts,
     rawCampaigns,
+    // Per-DoB cycle times (used by the Avg. Time to Place drilldown)
+    placementCycles,
   };
 }
 

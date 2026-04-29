@@ -1,5 +1,6 @@
-import { useState, useEffect, useMemo, useRef } from "react";
+import { useState, useEffect, useMemo, useRef, Fragment } from "react";
 import { DashboardLayout } from "@/components/layout/DashboardLayout";
+import { SectionDateRange } from "@/components/SectionDateRange";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { useFilteredData } from "@/hooks/use-filtered-data";
 import { useMarketingExpenses, type CategorySpend, type MonthlyPoint, type TopTransaction } from "@/hooks/use-marketing-expenses";
@@ -15,14 +16,14 @@ import {
 import { InfoIcon } from "@/components/InfoIcon";
 import {
   DollarSign, TrendingUp, TrendingDown, Crown, Receipt, Award, CalendarDays, ArrowUpRight,
-  Wallet, Target, Zap, Users, Search, ArrowUpDown, ArrowUp, ArrowDown,
+  Wallet, Target, Zap, Users, Search, ArrowUpDown, ArrowUp, ArrowDown, ChevronRight,
 } from "lucide-react";
 
 // Short {meaning, source} pair for every Finance KPI label.
 const FINANCE_KPI_HINTS: Record<string, { meaning: string; source: string }> = {
   "Marketing Spend":     { meaning: "Total spend across the SELECTED date range — not a monthly figure. Multi-month windows show the avg/mo in the sub-line.", source: "Marketing-spend imports." },
   "Leads Generated":     { meaning: "Zoho leads created in the period across every source.",                                    source: "Zoho CRM (Leads — Created_Time)." },
-  "Cost Per Lead":       { meaning: "Marketing spend ÷ leads generated. Includes every lead regardless of quality.",            source: "Marketing-spend imports + Zoho CRM." },
+  "Cost Per Conversion": { meaning: "Marketing spend ÷ doctors onboarded (Doctors on Board rows in the period). The single ROI number across all channels.", source: "Marketing-spend imports + Zoho Doctors on Board." },
   "Cost Per Qualified":  { meaning: 'Marketing spend ÷ qualified leads. "Contact in Future" excluded.',                          source: "Marketing-spend imports + Zoho CRM (Lead_Status)." },
   "Top Channel":         { meaning: "Channel that generated the most leads this period.",                                       source: "Zoho CRM (Lead_Source)." },
   "Biggest Expense":     { meaning: "Largest single expense category in the period.",                                           source: "Marketing-spend imports." },
@@ -55,22 +56,49 @@ const CAT_COLORS = [
   "hsl(50,85%,50%)",  "hsl(190,60%,50%)",
 ];
 
+// Revenue per converted doctor lives in @/lib/revenue so Marketing + Finance
+// rank channels using the same fee.
+import { REVENUE_PER_CONVERSION_AED } from "@/lib/revenue";
+
 // ── Flippable KPI card ────────────────────────────────────────────────────────
 
 function FlipKpiCard({
-  icon: Icon, label, value, sub, color, bg, back, backHeight = 240,
+  icon: Icon, label, value, sub, tone = "neutral", accent = "slate", back, backHeight = 240,
 }: {
   icon: React.ElementType;
   label: string;
   value: string;
   sub?: string;
-  color: string;
-  bg: string;
+  /** Signal tone — colors the VALUE. Use sparingly for true positive/negative signals. */
+  tone?: "neutral" | "good" | "bad" | "pending";
+  /** Decorative tint for the icon chip only — gives each KPI a category color
+   *  without bleeding into the value. Pick something that fits the metric. */
+  accent?: "slate" | "blue" | "emerald" | "amber" | "violet" | "sky" | "rose" | "orange";
   back: React.ReactNode;
   backHeight?: number;
 }) {
   const [flipped, setFlipped] = useState(false);
   const hint = FINANCE_KPI_HINTS[label];
+  // Tone colors the VALUE only — used when the number is itself good/bad news.
+  const valueColor =
+    tone === "good"      ? "text-emerald-700"
+    : tone === "bad"     ? "text-rose-700"
+    : tone === "pending" ? "text-amber-700"
+    : "text-foreground";
+  // Accent colors the ICON CHIP, the top color stripe, and the card's
+  // background gradient — gives each KPI a category identity without
+  // shouting at the user.
+  const ACCENTS = {
+    slate:   { bg: "bg-slate-100",   fg: "text-slate-600",   stripe: "bg-slate-300",   gradient: "from-slate-50 to-card",   border: "border-slate-200"   },
+    blue:    { bg: "bg-blue-50",     fg: "text-blue-600",    stripe: "bg-blue-400",    gradient: "from-blue-50 to-card",    border: "border-blue-200"    },
+    emerald: { bg: "bg-emerald-50",  fg: "text-emerald-600", stripe: "bg-emerald-400", gradient: "from-emerald-50 to-card", border: "border-emerald-200" },
+    amber:   { bg: "bg-amber-50",    fg: "text-amber-600",   stripe: "bg-amber-400",   gradient: "from-amber-50 to-card",   border: "border-amber-200"   },
+    violet:  { bg: "bg-violet-50",   fg: "text-violet-600",  stripe: "bg-violet-400",  gradient: "from-violet-50 to-card",  border: "border-violet-200"  },
+    sky:     { bg: "bg-sky-50",      fg: "text-sky-600",     stripe: "bg-sky-400",     gradient: "from-sky-50 to-card",     border: "border-sky-200"     },
+    rose:    { bg: "bg-rose-50",     fg: "text-rose-600",    stripe: "bg-rose-400",    gradient: "from-rose-50 to-card",    border: "border-rose-200"    },
+    orange:  { bg: "bg-orange-50",   fg: "text-orange-600",  stripe: "bg-orange-400",  gradient: "from-orange-50 to-card",  border: "border-orange-200"  },
+  } as const;
+  const a = ACCENTS[accent];
   return (
     <div
       className="cursor-pointer select-none"
@@ -89,18 +117,21 @@ function FlipKpiCard({
       }}>
         <div
           style={{ backfaceVisibility: "hidden", WebkitBackfaceVisibility: "hidden" }}
-          className="absolute inset-0 rounded-xl border border-kpi/60 bg-kpi px-4 py-3 flex items-start justify-between shadow-sm hover:shadow-md hover:scale-[1.01] transition-all"
+          className={`absolute inset-0 rounded-xl border ${a.border} bg-gradient-to-br ${a.gradient} shadow-sm hover:shadow-md hover:scale-[1.01] transition-all overflow-hidden flex flex-col`}
         >
-          <div className="min-w-0">
-            <div className="flex items-center gap-1 mb-1">
-              <p className="text-[11px] font-medium text-muted-foreground">{label}</p>
-              {hint && <InfoIcon meaning={hint.meaning} source={hint.source} side="bottom" />}
+          <div className={`h-1 ${a.stripe} shrink-0`} />
+          <div className="px-4 py-3 flex items-start justify-between flex-1">
+            <div className="min-w-0">
+              <div className="flex items-center gap-1 mb-1">
+                <p className="text-[11px] font-medium text-muted-foreground">{label}</p>
+                {hint && <InfoIcon meaning={hint.meaning} source={hint.source} side="bottom" />}
+              </div>
+              <p className={`text-[22px] font-bold tabular-nums leading-none ${valueColor}`}>{value}</p>
+              {sub && <p className="text-[10px] text-muted-foreground mt-1.5">{sub}</p>}
             </div>
-            <p className={`text-[22px] font-bold tabular-nums leading-none ${color}`}>{value}</p>
-            {sub && <p className="text-[10px] text-muted-foreground mt-1.5">{sub}</p>}
-          </div>
-          <div className={`h-8 w-8 rounded-lg ${bg} flex items-center justify-center shrink-0 ml-2`}>
-            <Icon className={`h-4 w-4 ${color}`} />
+            <div className={`h-8 w-8 rounded-lg ${a.bg} flex items-center justify-center shrink-0 ml-2`}>
+              <Icon className={`h-4 w-4 ${a.fg}`} />
+            </div>
           </div>
         </div>
         {/* Back */}
@@ -111,9 +142,9 @@ function FlipKpiCard({
           }}
           className="absolute inset-0 rounded-xl border border-border/50 bg-card shadow-md flex flex-col overflow-hidden"
         >
-          <div className={`flex items-center justify-between px-4 py-2 border-b border-border/30 ${bg} shrink-0`}>
+          <div className={`flex items-center justify-between px-4 py-2 border-b border-border/30 ${a.bg} shrink-0`}>
             <div className="flex items-center gap-1.5">
-              <Icon className={`h-3 w-3 ${color}`} />
+              <Icon className={`h-3 w-3 ${a.fg}`} />
               <span className="text-[11px] font-semibold">{label}</span>
             </div>
             <span className="text-[9px] text-muted-foreground">click to close</span>
@@ -139,7 +170,7 @@ function TotalSpendBack({ byCategory, total }: { byCategory: CategorySpend[]; to
         <div key={c.category}>
           <div className="flex items-center justify-between mb-0.5">
             <span className="truncate max-w-[130px]">{c.category}</span>
-            <span className="font-semibold text-primary tabular-nums">{fmtAED(c.amount)}</span>
+            <span className="font-semibold tabular-nums">{fmtAED(c.amount)}</span>
           </div>
           <div className="h-1.5 bg-muted rounded-full overflow-hidden">
             <div className="h-full rounded-full" style={{
@@ -217,7 +248,7 @@ function GrowthBack({ growthPct, total, prevTotal }: { growthPct: number; total:
       </div>
       <div className="pt-1 border-t border-border/40">
         <p className="text-[10px] text-muted-foreground">Change</p>
-        <p className={`text-[15px] font-bold ${up ? "text-rose-600" : "text-emerald-600"}`}>
+        <p className={`text-[15px] font-bold ${up ? "text-rose-700" : "text-emerald-700"}`}>
           {up ? "↑" : "↓"} {fmtPct(Math.abs(growthPct))}
         </p>
         <p className="text-[9px] text-muted-foreground mt-1">
@@ -254,7 +285,7 @@ function BiggestBack({ biggest }: { biggest?: TopTransaction }) {
     <div className="space-y-2">
       <div>
         <p className="text-[9px] text-muted-foreground uppercase tracking-wide">Amount</p>
-        <p className="text-[18px] font-bold text-amber-600 tabular-nums">{fmtAED(biggest.amount)}</p>
+        <p className="text-[18px] font-bold tabular-nums">{fmtAED(biggest.amount)}</p>
       </div>
       <div>
         <p className="text-[9px] text-muted-foreground uppercase tracking-wide">Channel</p>
@@ -316,7 +347,7 @@ function RevenueBack({ bySource, total }: { bySource: { source: string; amount: 
         <div key={s.source}>
           <div className="flex items-center justify-between mb-0.5">
             <span className="truncate max-w-[140px]">{s.source}</span>
-            <span className="font-semibold text-emerald-600 tabular-nums">{fmtAED(s.amount)}</span>
+            <span className="font-semibold tabular-nums">{fmtAED(s.amount)}</span>
           </div>
           <div className="h-1.5 bg-muted rounded-full overflow-hidden">
             <div className="h-full rounded-full" style={{
@@ -340,7 +371,7 @@ function ProfitBack({ revenue, spend, profit }: { revenue: number; spend: number
       <div className="flex justify-between"><span className="text-muted-foreground">Marketing spend</span><span className="font-semibold tabular-nums">-{fmtAED(spend)}</span></div>
       <div className="pt-2 border-t border-border/40 flex justify-between">
         <span className="font-semibold">Net</span>
-        <span className={`font-bold tabular-nums ${profit >= 0 ? "text-emerald-600" : "text-rose-600"}`}>{fmtAED(profit)}</span>
+        <span className={`font-bold tabular-nums ${profit >= 0 ? "text-emerald-700" : "text-rose-700"}`}>{fmtAED(profit)}</span>
       </div>
       <p className="text-[10px] text-muted-foreground pt-1">
         Net margin: <span className="font-semibold text-foreground">{margin.toFixed(1)}%</span>
@@ -353,7 +384,8 @@ function ProfitBack({ revenue, spend, profit }: { revenue: number; spend: number
 function RoasBack({ roas, revenue, spend }: { roas: number; revenue: number; spend: number }) {
   const { fmt: fmtAED } = useCurrency();
   const rating = roas >= 4 ? "Excellent" : roas >= 2 ? "Healthy" : roas >= 1 ? "Break-even" : "Losing money";
-  const ratingColor = roas >= 4 ? "text-emerald-600" : roas >= 2 ? "text-sky-600" : roas >= 1 ? "text-amber-600" : "text-rose-600";
+  // Three-tone signal only — good / pending / bad. No more sky-blue mid tier.
+  const ratingColor = roas >= 2 ? "text-emerald-700" : roas >= 1 ? "text-amber-700" : "text-rose-700";
   return (
     <div className="space-y-2">
       <p className="text-[9px] text-muted-foreground uppercase tracking-wide">Formula</p>
@@ -381,7 +413,7 @@ function CostPerConversionBack({ cpc, spend, conversions }: { cpc: number; spend
       <div className="flex justify-between"><span className="text-muted-foreground">Conversions (Doctors on Board)</span><span className="font-semibold tabular-nums">{conversions}</span></div>
       <div className="pt-2 border-t border-border/40 flex justify-between">
         <span className="font-semibold">Cost per conversion</span>
-        <span className="font-bold text-orange-600 tabular-nums">{fmtAED(cpc)}</span>
+        <span className="font-bold tabular-nums">{fmtAED(cpc)}</span>
       </div>
       <p className="text-[10px] text-muted-foreground pt-1">
         {conversions === 0
@@ -416,7 +448,25 @@ const Finance = () => {
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
-  // Transactions table — sort + search state
+  // Channel-breakdown drill-down — click a channel row to expand its
+  // individual transactions inline. Single-channel expansion at a time keeps
+  // the page short.
+  const [expandedCategory, setExpandedCategory] = useState<string | null>(null);
+  const txnsByCategory = useMemo(() => {
+    const m = new Map<string, typeof allTransactions>();
+    for (const t of allTransactions) {
+      const list = m.get(t.category) ?? [];
+      list.push(t);
+      m.set(t.category, list);
+    }
+    // Sort each list by date desc so the most recent shows first when expanded
+    for (const list of m.values()) {
+      list.sort((a, b) => (b.expense_date ?? "").localeCompare(a.expense_date ?? ""));
+    }
+    return m;
+  }, [allTransactions]);
+
+  // Legacy refs — kept for any back-card consumers (TopCategoryBack etc.)
   const [txnSortKey, setTxnSortKey] = useState<"date" | "amount" | "category">("date");
   const [txnSortDir, setTxnSortDir] = useState<"asc" | "desc">("desc");
   const [txnSearch, setTxnSearch] = useState("");
@@ -449,8 +499,8 @@ const Finance = () => {
   function SortIcon({ active, dir }: { active: boolean; dir: "asc" | "desc" }) {
     if (!active) return <ArrowUpDown className="h-3 w-3 opacity-40 shrink-0" />;
     return dir === "asc"
-      ? <ArrowUp className="h-3 w-3 text-primary shrink-0" />
-      : <ArrowDown className="h-3 w-3 text-primary shrink-0" />;
+      ? <ArrowUp className="h-3 w-3 text-foreground shrink-0" />
+      : <ArrowDown className="h-3 w-3 text-foreground shrink-0" />;
   }
 
   // Zoho leads created in the selected period — the real signal of marketing working.
@@ -508,30 +558,36 @@ const Finance = () => {
     return { totalLeads, prevTotalLeads, qualified, qualRate, leadGrowth, leadsBySource };
   }, [zoho?.rawLeads, dateRange]);
 
-  const costPerLead   = leadStats.totalLeads     > 0 ? spend / leadStats.totalLeads     : 0;
-  const costPerQualified = leadStats.qualified   > 0 ? spend / leadStats.qualified     : 0;
+  const costPerQualified  = leadStats.qualified  > 0 ? spend / leadStats.qualified  : 0;
 
-  // Monthly spend + leads generated — what the team should actually watch
-  const monthlySpendLeads = useMemo(() => {
-    const map = new Map<string, { month: string; monthKey: string; spend: number; leads: number }>();
+  // Monthly P&L series — revenue, spend, and resulting profit per month.
+  // Drives the chart at the bottom of the page so it tells the same story as
+  // the P&L table above (Conversions × per-doctor fee − Marketing spend).
+  const monthlyPnl = useMemo(() => {
+    const map = new Map<string, { month: string; monthKey: string; spend: number; revenue: number; profit: number }>();
     for (const m of monthly) {
-      map.set(m.monthKey, { month: m.month, monthKey: m.monthKey, spend: m.amount, leads: 0 });
+      map.set(m.monthKey, { month: m.month, monthKey: m.monthKey, spend: m.amount, revenue: 0, profit: 0 });
     }
-    const leads = zoho?.rawLeads ?? [];
+    // Layer revenue from DoB conversions in window
     const fromMs = dateRange.from.getTime();
     const toMs   = dateRange.to.getTime() + 86_400_000;
-    for (const l of leads) {
-      const t = l.Created_Time ? new Date(l.Created_Time).getTime() : NaN;
+    for (const dob of zoho?.rawDoctorsOnBoard ?? []) {
+      if (!dob.Created_Time) continue;
+      const t = new Date(dob.Created_Time).getTime();
       if (isNaN(t) || t < fromMs || t >= toMs) continue;
-      const key = (l.Created_Time ?? "").slice(0, 7);
+      const key = dob.Created_Time.slice(0, 7);
       if (!key) continue;
       const label = new Date(key + "-01").toLocaleDateString("en-GB", { month: "short", year: "2-digit" });
-      const cur = map.get(key) ?? { month: label, monthKey: key, spend: 0, leads: 0 };
-      cur.leads += 1;
+      const cur = map.get(key) ?? { month: label, monthKey: key, spend: 0, revenue: 0, profit: 0 };
+      cur.revenue += REVENUE_PER_CONVERSION_AED;
       map.set(key, cur);
     }
+    // Compute profit per month
+    for (const row of map.values()) {
+      row.profit = row.revenue - row.spend;
+    }
     return Array.from(map.values()).sort((a, b) => a.monthKey.localeCompare(b.monthKey));
-  }, [monthly, zoho?.rawLeads, dateRange]);
+  }, [monthly, zoho?.rawDoctorsOnBoard, dateRange]);
 
   const hasData = transactionCount > 0 || leadStats.totalLeads > 0;
 
@@ -599,18 +655,31 @@ const Finance = () => {
       conversionsByMonth[key] = (conversionsByMonth[key] ?? 0) + 1;
       conversionsTotal += 1;
     }
-    return { marketingByMonth, marketingTotal, conversionsByMonth, conversionsTotal, months };
+    // Revenue = conversions × fee per placement (5,000 AED). Computed per
+    // month so the P&L lines up cleanly with marketing spend per month.
+    const revenueByMonth: Record<string, number> = {};
+    for (const m of months) {
+      revenueByMonth[m.key] = (conversionsByMonth[m.key] ?? 0) * REVENUE_PER_CONVERSION_AED;
+    }
+    const revenueTotal = conversionsTotal * REVENUE_PER_CONVERSION_AED;
+    return {
+      marketingByMonth, marketingTotal,
+      conversionsByMonth, conversionsTotal,
+      revenueByMonth, revenueTotal,
+      months,
+    };
   }, [monthlySpendByChannel, zoho, dateRange]);
 
   return (
     <DashboardLayout title="Finance" subtitle="Revenue, spend, profit, and ROI across all channels">
+      <SectionDateRange />
       {/* ── Period banner — explicit date range + currency lock ───────────────
           Designed to remove ambiguity: every figure on this tab is for the
           stated period, in the stated currency. Reduces "is that monthly or
           the whole quarter?" / "is that AED or USD?" confusion. */}
-      <div className="mb-5 rounded-xl border border-primary/20 bg-primary/5 px-4 py-3 flex flex-wrap items-center justify-between gap-3">
+      <div className="mb-5 rounded-xl border border-blue-100 bg-blue-50/40 px-4 py-3 flex flex-wrap items-center justify-between gap-3">
         <div>
-          <p className="text-[10px] uppercase tracking-widest font-semibold text-primary/70 mb-0.5">
+          <p className="text-[10px] uppercase tracking-widest font-semibold text-blue-700/80 mb-0.5">
             Showing finance for
           </p>
           <p className="text-[14px] font-semibold text-foreground">
@@ -623,7 +692,7 @@ const Finance = () => {
           </p>
         </div>
         <div className="text-right">
-          <p className="text-[10px] uppercase tracking-widest font-semibold text-primary/70 mb-0.5">
+          <p className="text-[10px] uppercase tracking-widest font-semibold text-blue-700/80 mb-0.5">
             All values in
           </p>
           <p className="text-[14px] font-semibold text-foreground">
@@ -651,12 +720,11 @@ const Finance = () => {
       {/* Only render lead KPIs when we actually have leads in the period — otherwise just show spend */}
       <div className={`grid grid-cols-2 ${leadStats.totalLeads > 0 ? "lg:grid-cols-4" : "lg:grid-cols-2"} gap-3 mb-3`}>
         <FlipKpiCard
-          icon={DollarSign}
+          icon={DollarSign} accent="blue"
           // Label explicitly says "(period total)" so a multi-month figure
           // can never be mistaken for a monthly number — Yemima saw 121K
           // and assumed it was monthly when it was a 3-month aggregate.
           label={monthly.length > 1 ? "Marketing Spend (period total)" : "Marketing Spend"}
-          color="text-primary" bg="bg-primary/10"
           value={fmtAED(spend)}
           sub={monthly.length > 1
             ? `${monthly.length} months · ${fmtAED(avgMonthly)} / month avg`
@@ -665,7 +733,7 @@ const Finance = () => {
         />
         {leadStats.totalLeads > 0 && (
           <FlipKpiCard
-            icon={Users} label="Leads Generated" color="text-emerald-600" bg="bg-emerald-50"
+            icon={Users} label="Leads Generated" accent="emerald"
             value={fmtN(leadStats.totalLeads)}
             sub={leadStats.prevTotalLeads > 0
               ? `${fmtPct(leadStats.leadGrowth)} vs prior`
@@ -697,31 +765,33 @@ const Finance = () => {
             }
           />
         )}
-        {leadStats.totalLeads > 0 && spend > 0 && (
-          <FlipKpiCard
-            icon={Target} label="Cost Per Lead" color="text-orange-600" bg="bg-orange-50"
-            value={fmtAED(costPerLead)}
-            sub={`${fmtAED(spend)} / ${fmtN(leadStats.totalLeads)}`}
-            back={
-              <div className="space-y-2">
-                <div className="flex justify-between"><span className="text-muted-foreground">Marketing spend</span><span className="font-semibold tabular-nums">{fmtAED(spend)}</span></div>
-                <div className="flex justify-between"><span className="text-muted-foreground">Leads generated</span><span className="font-semibold tabular-nums">{fmtN(leadStats.totalLeads)}</span></div>
-                <div className="pt-2 border-t border-border/40 flex justify-between">
-                  <span className="font-semibold">Cost per lead</span>
-                  <span className="font-bold text-orange-600 tabular-nums">{fmtAED(costPerLead)}</span>
+        {profitRows.conversionsTotal > 0 && spend > 0 && (() => {
+          const cpc = spend / profitRows.conversionsTotal;
+          return (
+            <FlipKpiCard
+              icon={Target} label="Cost Per Conversion" accent="orange"
+              value={fmtAED(cpc)}
+              sub={`${fmtAED(spend)} / ${fmtN(profitRows.conversionsTotal)} doctors`}
+              back={
+                <div className="space-y-2">
+                  <div className="flex justify-between"><span className="text-muted-foreground">Marketing spend</span><span className="font-semibold tabular-nums">{fmtAED(spend)}</span></div>
+                  <div className="flex justify-between"><span className="text-muted-foreground">Doctors onboarded</span><span className="font-semibold tabular-nums">{fmtN(profitRows.conversionsTotal)}</span></div>
+                  <div className="pt-2 border-t border-border/40 flex justify-between">
+                    <span className="font-semibold">Cost per conversion</span>
+                    <span className="font-bold tabular-nums">{fmtAED(cpc)}</span>
+                  </div>
+                  <p className="text-[10px] text-muted-foreground pt-1">
+                    The single ROI number across all channels. Lower = more efficient marketing spend per placement. Source: Zoho Doctors on Board × marketing_expenses.
+                  </p>
                 </div>
-                <p className="text-[10px] text-muted-foreground pt-1">
-                  Includes all leads regardless of quality. See Cost Per Qualified for the more meaningful figure.
-                </p>
-              </div>
-            }
-          />
-        )}
+              }
+            />
+          );
+        })()}
         {leadStats.qualified > 0 && spend > 0 && (
           <FlipKpiCard
-            icon={Zap} label="Cost Per Qualified"
-            color={costPerQualified < 500 ? "text-emerald-600" : costPerQualified < 2000 ? "text-amber-600" : "text-rose-600"}
-            bg={costPerQualified < 500 ? "bg-emerald-50" : costPerQualified < 2000 ? "bg-amber-50" : "bg-rose-50"}
+            icon={Zap} label="Cost Per Qualified" accent="amber"
+            tone={costPerQualified < 500 ? "good" : costPerQualified < 2000 ? "neutral" : "bad"}
             value={fmtAED(costPerQualified)}
             sub={`${fmtN(leadStats.qualified)} qualified · ${leadStats.qualRate.toFixed(0)}% rate`}
             back={
@@ -744,20 +814,20 @@ const Finance = () => {
       {/* Helpful note when we have spend but no leads (so users know why the lead KPIs are missing) */}
       {spend > 0 && leadStats.totalLeads === 0 && (
         <div className="mb-3 rounded-lg border border-amber-200 bg-amber-50/50 px-3 py-2 text-[11px] text-amber-900">
-          <strong>No Zoho leads created in this period.</strong> Cost Per Lead / Cost Per Qualified cards are hidden because they'd divide by zero. If you expect leads here, check whether your lead capture forms are creating records in Zoho (not just in Meta / a landing page).
+          <strong>No Zoho leads created in this period.</strong> Cost Per Qualified is hidden because it'd divide by zero. If you expect leads here, check whether your lead capture forms are creating records in Zoho (not just in Meta / a landing page).
         </div>
       )}
 
       {/* ── Row 2: Top channel / Biggest expense / Spend growth / Avg monthly / Txns ── */}
       <div className="grid grid-cols-2 lg:grid-cols-3 xl:grid-cols-5 gap-3 mb-5">
         <FlipKpiCard
-          icon={Crown} label="Top Channel (period)" color="text-amber-600" bg="bg-amber-50"
+          icon={Crown} label="Top Channel (period)" accent="amber"
           value={topCategory ? normalizeChannelKey(topCategory.category) : "—"}
           sub={topCategory ? `${fmtAED(topCategory.amount)} period total · ${topCategory.pct.toFixed(1)}%` : ""}
           back={<TopCategoryBack top={topCategory} />}
         />
         <FlipKpiCard
-          icon={Award} label="Biggest Single Expense" color="text-orange-600" bg="bg-orange-50"
+          icon={Award} label="Biggest Single Expense" accent="orange"
           value={biggest ? fmtAED(biggest.amount) : "—"}
           sub={biggest ? `${normalizeChannelKey(biggest.category)} · single transaction` : ""}
           back={<BiggestBack biggest={biggest} />}
@@ -765,20 +835,21 @@ const Finance = () => {
         <FlipKpiCard
           icon={growthPct >= 0 ? TrendingUp : TrendingDown}
           label={growthPct >= 0 ? "Spend Increased" : "Spend Reduced"}
-          color={growthPct >= 0 ? "text-rose-600" : "text-emerald-600"}
-          bg={growthPct >= 0 ? "bg-rose-50" : "bg-emerald-50"}
+          // Spend going UP = bad (red), going DOWN = good (green).
+          tone={growthPct >= 0 ? "bad" : "good"}
+          accent={growthPct >= 0 ? "rose" : "emerald"}
           value={`${growthPct >= 0 ? "↑" : "↓"} ${Math.abs(growthPct).toFixed(1)}%`}
           sub={`vs ${fmtAED(prevSpend)} prior`}
           back={<GrowthBack growthPct={growthPct} total={spend} prevTotal={prevSpend} />}
         />
         <FlipKpiCard
-          icon={CalendarDays} label="Avg Monthly" color="text-sky-600" bg="bg-sky-50"
+          icon={CalendarDays} label="Avg Monthly" accent="sky"
           value={fmtAED(avgMonthly)}
           sub={`across ${monthly.length} month${monthly.length === 1 ? "" : "s"}`}
           back={<AvgMonthlyBack monthly={monthly} avg={avgMonthly} />}
         />
         <FlipKpiCard
-          icon={Receipt} label="Transactions" color="text-violet-600" bg="bg-violet-50"
+          icon={Receipt} label="Transactions" accent="violet"
           value={fmtN(transactionCount)}
           sub={byCategory.length > 0 ? `across ${byCategory.length} channels` : ""}
           back={<TransactionsBack txns={topTransactions} />}
@@ -792,165 +863,178 @@ const Finance = () => {
           other expenses are placeholder rows that read "—" until the new
           accountant's numbers are imported. */}
       {monthlySpendByChannel.months.length > 0 && (
-        <Card className="shadow-sm border-border/50 mb-5">
-          <CardHeader className="pb-1 pt-4 px-4">
-            <CardTitle className="text-[12px] font-medium text-muted-foreground uppercase tracking-wide">
+        <Card className="shadow-md border-border/60 mb-5">
+          <CardHeader className="pb-2 pt-4 px-5">
+            <CardTitle className="text-[14px] font-semibold text-foreground">
               Monthly Marketing Spend by Channel
-              <span className="ml-2 normal-case font-normal text-muted-foreground/60">
-                · all values in {currency} per month
-              </span>
             </CardTitle>
+            <p className="text-[11px] text-muted-foreground/80 mt-0.5">All values in {currency}, per month — channels sorted by period total</p>
           </CardHeader>
-          <CardContent className="px-0 pb-2 overflow-x-auto">
-            <table className="w-full text-left">
-              <thead>
-                <tr className="border-b border-border/40">
-                  <th className="py-2 px-3 text-[10px] font-medium text-muted-foreground uppercase tracking-wide">Channel</th>
+          <CardContent className="px-0 pb-3 overflow-x-auto">
+            <table className="w-full text-left border-collapse">
+              <thead className="bg-muted/40 border-y border-border/60">
+                <tr>
+                  <th className="py-3 px-5 text-[12px] font-semibold text-muted-foreground uppercase tracking-wide">Channel</th>
                   {monthlySpendByChannel.months.map(m => (
-                    <th key={m.key} className="py-2 px-3 text-[10px] font-medium text-muted-foreground uppercase tracking-wide text-right whitespace-nowrap">
+                    <th key={m.key} className="py-3 px-3 text-[12px] font-semibold text-muted-foreground uppercase tracking-wide text-right whitespace-nowrap">
                       {m.label}
                     </th>
                   ))}
-                  <th className="py-2 px-3 text-[10px] font-medium text-muted-foreground uppercase tracking-wide text-right">Period total</th>
+                  <th className="py-3 px-5 text-[12px] font-semibold text-muted-foreground uppercase tracking-wide text-right whitespace-nowrap">Period total</th>
                 </tr>
               </thead>
               <tbody>
                 {monthlySpendByChannel.channels.map(c => (
-                  <tr key={c.channel} className="border-b border-border/30 hover:bg-muted/30">
-                    <td className="py-2 px-3 text-[12px] font-medium">{c.channel}</td>
+                  <tr key={c.channel} className="border-b border-border/30 hover:bg-muted/30 transition-colors">
+                    <td className="py-3.5 px-5 text-[14px] font-semibold text-foreground">{c.channel}</td>
                     {monthlySpendByChannel.months.map(m => {
                       const v = c.perMonth[m.key];
                       return (
-                        <td key={m.key} className="py-2 px-3 text-[11px] text-right tabular-nums">
+                        <td key={m.key} className="py-3.5 px-3 text-[14px] text-right tabular-nums text-foreground/80">
                           {v > 0 ? fmtAED(v) : <span className="text-muted-foreground/30">—</span>}
                         </td>
                       );
                     })}
-                    <td className="py-2 px-3 text-[12px] text-right tabular-nums font-semibold text-primary">
+                    <td className="py-3.5 px-5 text-[14px] text-right tabular-nums font-bold text-blue-700">
                       {fmtAED(c.total)}
                     </td>
                   </tr>
                 ))}
-                <tr className="border-t-2 border-border/80 font-semibold bg-muted/20">
-                  <td className="py-2 px-3 text-[12px]">Total marketing spend</td>
+                <tr className="bg-blue-50/60 font-semibold border-t-2 border-blue-200">
+                  <td className="py-3.5 px-5 text-[13px] text-foreground">Total marketing spend</td>
                   {monthlySpendByChannel.months.map(m => {
                     const v = monthlySpendByChannel.channels.reduce((s, c) => s + (c.perMonth[m.key] ?? 0), 0);
                     return (
-                      <td key={m.key} className="py-2 px-3 text-[12px] text-right tabular-nums">
+                      <td key={m.key} className="py-3.5 px-3 text-[14px] text-right tabular-nums">
                         {fmtAED(v)}
                       </td>
                     );
                   })}
-                  <td className="py-2 px-3 text-[13px] text-right tabular-nums font-bold text-primary">
+                  <td className="py-3.5 px-5 text-[15px] text-right tabular-nums font-bold text-blue-700">
                     {fmtAED(profitRows.marketingTotal)}
                   </td>
                 </tr>
               </tbody>
             </table>
-            <p className="text-[10px] text-muted-foreground px-4 pt-2 pb-1">
-              Each cell shows that channel's spend during that single month. Hover the date-range banner above to confirm the window.
-            </p>
           </CardContent>
         </Card>
       )}
 
       {/* ── Profit P&L (structure shipped, numbers fill in as data arrives) ─ */}
       {monthlySpendByChannel.months.length > 0 && (
-        <Card className="shadow-sm border-border/50 mb-5">
-          <CardHeader className="pb-1 pt-4 px-4">
-            <CardTitle className="text-[12px] font-medium text-muted-foreground uppercase tracking-wide">
-              Profit P&amp;L (per month)
-              <span className="ml-2 normal-case font-normal text-amber-700/80">
-                · payroll &amp; other expenses pending from accountant — structure shown, numbers filling in
-              </span>
+        <Card className="shadow-md border-border/60 mb-5">
+          <CardHeader className="pb-2 pt-4 px-5">
+            <CardTitle className="text-[14px] font-semibold text-foreground">
+              Profit &amp; Loss <span className="font-normal text-muted-foreground">(per month)</span>
             </CardTitle>
+            <p className="text-[11px] text-muted-foreground/80 mt-0.5">Conversions × {fmtAED(REVENUE_PER_CONVERSION_AED)} per doctor − marketing spend. Payroll &amp; other operating costs fill in once the accountant delivers them.</p>
           </CardHeader>
-          <CardContent className="px-0 pb-2 overflow-x-auto">
-            <table className="w-full text-left">
-              <thead>
-                <tr className="border-b border-border/40">
-                  <th className="py-2 px-3 text-[10px] font-medium text-muted-foreground uppercase tracking-wide">Line item</th>
+          <CardContent className="px-0 pb-3 overflow-x-auto">
+            <table className="w-full text-left border-collapse">
+              <thead className="bg-muted/40 border-y border-border/60">
+                <tr>
+                  <th className="py-3 px-5 text-[12px] font-semibold text-muted-foreground uppercase tracking-wide">Line item</th>
                   {profitRows.months.map(m => (
-                    <th key={m.key} className="py-2 px-3 text-[10px] font-medium text-muted-foreground uppercase tracking-wide text-right whitespace-nowrap">
+                    <th key={m.key} className="py-3 px-3 text-[12px] font-semibold text-muted-foreground uppercase tracking-wide text-right whitespace-nowrap">
                       {m.label}
                     </th>
                   ))}
-                  <th className="py-2 px-3 text-[10px] font-medium text-muted-foreground uppercase tracking-wide text-right">Period</th>
+                  <th className="py-3 px-5 text-[12px] font-semibold text-muted-foreground uppercase tracking-wide text-right whitespace-nowrap">Period</th>
                 </tr>
               </thead>
               <tbody>
-                {/* Conversions — real count, from Zoho "Doctors on Board" module */}
-                <tr className="border-b border-border/30 bg-emerald-50/30">
-                  <td className="py-2 px-3 text-[12px] font-medium text-emerald-800">
-                    Conversions (Doctors on Board)
-                    <span className="text-[9px] uppercase tracking-wide bg-amber-100 text-amber-800 rounded px-1 py-0.5 ml-1 font-normal">value pending</span>
-                  </td>
+                {/* Conversions — money brought in from Doctors on Board
+                    placements (count × per-doctor revenue). */}
+                <tr className="border-b border-border/30 hover:bg-muted/30 transition-colors">
+                  <td className="py-3.5 px-5 text-[14px] font-semibold text-foreground">Conversions</td>
                   {profitRows.months.map(m => {
-                    const v = profitRows.conversionsByMonth[m.key] ?? 0;
+                    const v = profitRows.revenueByMonth[m.key] ?? 0;
+                    const n = profitRows.conversionsByMonth[m.key] ?? 0;
                     return (
-                      <td key={m.key} className="py-2 px-3 text-[11px] text-right tabular-nums text-emerald-700">
-                        {v > 0 ? `${v} doctor${v === 1 ? "" : "s"}` : <span className="text-muted-foreground/30">—</span>}
+                      <td key={m.key} className="py-3.5 px-3 text-[14px] text-right tabular-nums text-emerald-700 font-semibold">
+                        {v > 0
+                          ? <>{fmtAED(v)} <span className="text-[10px] text-emerald-700/70 font-normal ml-0.5">({n})</span></>
+                          : <span className="text-muted-foreground/30">—</span>}
                       </td>
                     );
                   })}
-                  <td className="py-2 px-3 text-[12px] text-right tabular-nums font-semibold text-emerald-700">
-                    {profitRows.conversionsTotal} doctors
+                  <td className="py-3.5 px-5 text-[14px] text-right tabular-nums font-bold text-emerald-700">
+                    {fmtAED(profitRows.revenueTotal)} <span className="text-[10px] text-emerald-700/70 font-normal ml-0.5">({profitRows.conversionsTotal})</span>
                   </td>
                 </tr>
                 {/* Marketing spend — real */}
-                <tr className="border-b border-border/30">
-                  <td className="py-2 px-3 text-[12px] font-medium">Marketing spend</td>
+                <tr className="border-b border-border/30 hover:bg-muted/30 transition-colors">
+                  <td className="py-3.5 px-5 text-[14px] font-semibold text-foreground">Marketing spend</td>
                   {profitRows.months.map(m => {
                     const v = profitRows.marketingByMonth[m.key] ?? 0;
                     return (
-                      <td key={m.key} className="py-2 px-3 text-[11px] text-right tabular-nums">
+                      <td key={m.key} className="py-3.5 px-3 text-[14px] text-right tabular-nums text-rose-700/90">
                         {v > 0 ? `(${fmtAED(v)})` : <span className="text-muted-foreground/30">—</span>}
                       </td>
                     );
                   })}
-                  <td className="py-2 px-3 text-[12px] text-right tabular-nums font-semibold">
+                  <td className="py-3.5 px-5 text-[14px] text-right tabular-nums font-bold text-rose-700">
                     ({fmtAED(profitRows.marketingTotal)})
                   </td>
                 </tr>
                 {/* Payroll — placeholder until accountant delivers */}
                 <tr className="border-b border-border/30">
-                  <td className="py-2 px-3 text-[12px] font-medium text-muted-foreground">
-                    Payroll <span className="text-[9px] uppercase tracking-wide bg-amber-100 text-amber-800 rounded px-1 py-0.5 ml-1">pending</span>
-                  </td>
+                  <td className="py-3.5 px-5 text-[13px] font-medium text-muted-foreground">Payroll</td>
                   {profitRows.months.map(m => (
-                    <td key={m.key} className="py-2 px-3 text-[11px] text-right text-muted-foreground/40">—</td>
+                    <td key={m.key} className="py-3.5 px-3 text-[13px] text-right text-muted-foreground/40">—</td>
                   ))}
-                  <td className="py-2 px-3 text-[12px] text-right text-muted-foreground/40">—</td>
+                  <td className="py-3.5 px-5 text-[13px] text-right text-muted-foreground/40">—</td>
                 </tr>
                 {/* Other operating expenses — placeholder */}
                 <tr className="border-b border-border/30">
-                  <td className="py-2 px-3 text-[12px] font-medium text-muted-foreground">
-                    Other operating expenses <span className="text-[9px] uppercase tracking-wide bg-amber-100 text-amber-800 rounded px-1 py-0.5 ml-1">pending</span>
-                  </td>
+                  <td className="py-3.5 px-5 text-[13px] font-medium text-muted-foreground">Other operating expenses</td>
                   {profitRows.months.map(m => (
-                    <td key={m.key} className="py-2 px-3 text-[11px] text-right text-muted-foreground/40">—</td>
+                    <td key={m.key} className="py-3.5 px-3 text-[13px] text-right text-muted-foreground/40">—</td>
                   ))}
-                  <td className="py-2 px-3 text-[12px] text-right text-muted-foreground/40">—</td>
+                  <td className="py-3.5 px-5 text-[13px] text-right text-muted-foreground/40">—</td>
                 </tr>
-                {/* Cost per Conversion — real, from spend ÷ Doctors on Board count */}
-                <tr className="border-t-2 border-border/80 bg-muted/20 font-semibold">
-                  <td className="py-2 px-3 text-[12px]">
-                    Cost per Conversion <span className="text-[9px] uppercase tracking-wide bg-muted text-muted-foreground rounded px-1 py-0.5 ml-1 font-normal">marketing only — payroll/other pending</span>
-                  </td>
+                {/* Profit (marketing-only) — Revenue − Marketing spend.
+                    True net profit will subtract payroll + other once those land. */}
+                <tr className="border-t-2 border-emerald-200 bg-emerald-50/60 font-bold">
+                  <td className="py-4 px-5 text-[14px] text-foreground">Profit <span className="text-[11px] font-normal text-muted-foreground">(marketing-only)</span></td>
+                  {profitRows.months.map(m => {
+                    const rev = profitRows.revenueByMonth[m.key] ?? 0;
+                    const spd = profitRows.marketingByMonth[m.key] ?? 0;
+                    if (rev === 0 && spd === 0) {
+                      return <td key={m.key} className="py-4 px-3 text-[13px] text-right text-muted-foreground/30">—</td>;
+                    }
+                    const profit = rev - spd;
+                    return (
+                      <td key={m.key} className={`py-4 px-3 text-[15px] text-right tabular-nums ${profit >= 0 ? "text-emerald-700" : "text-rose-700"}`}>
+                        {profit < 0 ? `(${fmtAED(Math.abs(profit))})` : fmtAED(profit)}
+                      </td>
+                    );
+                  })}
+                  {(() => {
+                    const profit = profitRows.revenueTotal - profitRows.marketingTotal;
+                    return (
+                      <td className={`py-4 px-5 text-[16px] text-right tabular-nums ${profit >= 0 ? "text-emerald-700" : "text-rose-700"}`}>
+                        {profit < 0 ? `(${fmtAED(Math.abs(profit))})` : fmtAED(profit)}
+                      </td>
+                    );
+                  })()}
+                </tr>
+                {/* Cost per Conversion — supplementary row, shown smaller below the Profit total */}
+                <tr className="border-t border-border/40">
+                  <td className="py-2.5 px-5 text-[11px] text-muted-foreground">Cost per Conversion</td>
                   {profitRows.months.map(m => {
                     const conversions = profitRows.conversionsByMonth[m.key] ?? 0;
                     const spd         = profitRows.marketingByMonth[m.key] ?? 0;
                     if (conversions === 0 || spd === 0) {
-                      return <td key={m.key} className="py-2 px-3 text-[11px] text-right text-muted-foreground/30">—</td>;
+                      return <td key={m.key} className="py-2.5 px-3 text-[11px] text-right text-muted-foreground/30">—</td>;
                     }
-                    const cpc = spd / conversions;
                     return (
-                      <td key={m.key} className="py-2 px-3 text-[12px] text-right tabular-nums text-foreground">
-                        {fmtAED(cpc)}
+                      <td key={m.key} className="py-2.5 px-3 text-[11px] text-right tabular-nums text-muted-foreground">
+                        {fmtAED(spd / conversions)}
                       </td>
                     );
                   })}
-                  <td className="py-2 px-3 text-[13px] text-right tabular-nums font-bold">
+                  <td className="py-2.5 px-5 text-[11px] text-right tabular-nums text-muted-foreground font-medium">
                     {profitRows.conversionsTotal > 0 && profitRows.marketingTotal > 0
                       ? fmtAED(profitRows.marketingTotal / profitRows.conversionsTotal)
                       : <span className="text-muted-foreground/30">—</span>}
@@ -958,42 +1042,43 @@ const Finance = () => {
                 </tr>
               </tbody>
             </table>
-            <div className="px-4 pt-3 pb-1 text-[10px] text-muted-foreground/80 leading-relaxed">
-              <p className="mb-1"><strong className="text-foreground/70">How to read:</strong> Conversions come from the Zoho <code>Doctors on Board</code> module — each row is one converted doctor. Marketing spend is from imported expenses. Payroll &amp; other expenses are placeholders until the accountant delivers monthly numbers.</p>
-              <p>The <strong className="text-foreground/70">Cost per Conversion</strong> row divides marketing spend by conversion count. Once payroll + other expenses are filled in, we'll add a true Profit row that subtracts them too.</p>
-            </div>
           </CardContent>
         </Card>
       )}
 
-      {/* ── Monthly: Spend + Leads combined ── */}
-      {monthlySpendLeads.length > 0 && (
-        <Card className="shadow-sm border-border/50 mb-5">
-          <CardHeader className="pb-1 pt-4 px-4">
+      {/* ── Monthly P&L: Revenue / Spend / Profit ── */}
+      {monthlyPnl.length > 0 && (
+        <Card className="shadow-md border-border/60 mb-5">
+          <CardHeader className="pb-2 pt-4 px-5">
             <div className="flex items-center justify-between flex-wrap gap-2">
-              <CardTitle className="text-[12px] font-medium text-muted-foreground uppercase tracking-wide">Spend vs Leads Generated</CardTitle>
-              <div className="flex items-center gap-3 text-[10px] text-muted-foreground">
-                <span className="flex items-center gap-1"><span className="h-2 w-2 rounded-full bg-primary" />Spend ({currency})</span>
-                <span className="flex items-center gap-1"><span className="h-2 w-2 rounded-full bg-emerald-500" />Leads</span>
+              <div>
+                <CardTitle className="text-[14px] font-semibold text-foreground">Revenue vs Spend vs Profit</CardTitle>
+                <p className="text-[11px] text-muted-foreground/80 mt-0.5">Monthly P&amp;L — same numbers as the table above, in chart form</p>
+              </div>
+              <div className="flex items-center gap-3 text-[11px] text-muted-foreground">
+                <span className="flex items-center gap-1.5"><span className="h-2.5 w-2.5 rounded-sm bg-emerald-500" />Revenue</span>
+                <span className="flex items-center gap-1.5"><span className="h-2.5 w-2.5 rounded-sm bg-rose-400" />Spend</span>
+                <span className="flex items-center gap-1.5"><span className="h-0.5 w-3 bg-violet-500 rounded-full" />Profit</span>
               </div>
             </div>
           </CardHeader>
           <CardContent className="px-4 pb-4">
-            <ResponsiveContainer width="100%" height={300}>
-              <ComposedChart data={monthlySpendLeads} margin={{ top: 4, right: 40, left: -10, bottom: 0 }}>
+            <ResponsiveContainer width="100%" height={320}>
+              <ComposedChart data={monthlyPnl} margin={{ top: 8, right: 16, left: -10, bottom: 0 }}>
                 <CartesianGrid strokeDasharray="3 3" stroke="hsl(220,14%,92%)" vertical={false} />
-                <XAxis dataKey="month" fontSize={10} tickLine={false} axisLine={false} stroke="hsl(220,10%,55%)" />
-                <YAxis yAxisId="spend" fontSize={10} tickLine={false} axisLine={false} stroke="hsl(170,55%,45%)"
-                  tickFormatter={v => v >= 1000 ? `${(v / 1000).toFixed(0)}K` : `${v}`} />
-                <YAxis yAxisId="leads" orientation="right" fontSize={10} tickLine={false} axisLine={false} stroke="hsl(142,70%,45%)" />
+                <XAxis dataKey="month" fontSize={11} tickLine={false} axisLine={false} stroke="hsl(220,10%,45%)" />
+                <YAxis fontSize={11} tickLine={false} axisLine={false} stroke="hsl(220,10%,45%)"
+                  tickFormatter={v => v >= 1_000_000 ? `${(v / 1_000_000).toFixed(1)}M`
+                                  : v >= 1_000     ? `${(v / 1_000).toFixed(0)}K`
+                                  : `${v}`} />
                 <Tooltip contentStyle={tip}
-                  formatter={(v: number, name: string) => [
-                    name === "Spend" ? fmtAED(v) : `${v} leads`,
-                    name,
-                  ]} />
-                <Bar yAxisId="spend" dataKey="spend" name="Spend" fill="hsl(170,55%,45%)" radius={[4, 4, 0, 0]} />
-                <Line yAxisId="leads" type="monotone" dataKey="leads" name="Leads"
-                  stroke="hsl(142,70%,45%)" strokeWidth={2} dot={{ r: 4 }} activeDot={{ r: 6 }} />
+                  formatter={(v: number, name: string) => [fmtAED(v), name]} />
+                <Bar  dataKey="revenue" name="Revenue" fill="hsl(160,65%,45%)" radius={[4, 4, 0, 0]} />
+                <Bar  dataKey="spend"   name="Spend"   fill="hsl(0,75%,68%)"   radius={[4, 4, 0, 0]} />
+                <Line type="monotone" dataKey="profit" name="Profit"
+                  stroke="hsl(265,65%,55%)" strokeWidth={2.5}
+                  dot={{ r: 4, fill: "hsl(265,65%,55%)", strokeWidth: 2, stroke: "#fff" }}
+                  activeDot={{ r: 6 }} />
               </ComposedChart>
             </ResponsiveContainer>
           </CardContent>
@@ -1082,117 +1167,94 @@ const Finance = () => {
         </div>
       )}
 
-      {/* ── Top transactions table ── */}
-      {allTransactions.length > 0 && (
-        <Card className="shadow-sm border-border/50 mb-5">
-          <CardHeader className="pb-1 pt-4 px-4">
-            <div className="flex items-center justify-between gap-3 flex-wrap">
-              <div>
-                <CardTitle className="text-[12px] font-medium text-muted-foreground uppercase tracking-wide">All Transactions</CardTitle>
-                <p className="text-[10px] text-muted-foreground mt-0.5">
-                  {sortedTransactions.length.toLocaleString()} of {allTransactions.length.toLocaleString()} · click column headers to sort
-                </p>
-              </div>
-              <div className="relative">
-                <Search className="absolute left-2.5 top-1/2 -translate-y-1/2 h-3 w-3 text-muted-foreground" />
-                <input
-                  type="text"
-                  placeholder="Search description or channel…"
-                  value={txnSearch}
-                  onChange={e => setTxnSearch(e.target.value)}
-                  className="w-[260px] rounded-md border border-border/60 bg-background pl-7 pr-3 py-1.5 text-[11px] focus:outline-none focus:ring-1 focus:ring-primary/40 focus:border-primary/50"
-                />
-              </div>
-            </div>
-          </CardHeader>
-          <CardContent className="px-4 pb-4">
-            <div className="overflow-x-auto" style={{ maxHeight: 480 }}>
-              <table className="w-full text-left border-collapse">
-                <thead className="sticky top-0 bg-card z-10">
-                  <tr className="border-b border-border/60">
-                    <th className="py-2">
-                      <button onClick={() => toggleTxnSort("date")} className="flex items-center gap-1 text-[10px] uppercase tracking-wide text-muted-foreground hover:text-foreground transition-colors">
-                        Date <SortIcon active={txnSortKey === "date"} dir={txnSortDir} />
-                      </button>
-                    </th>
-                    <th className="py-2">
-                      <button onClick={() => toggleTxnSort("category")} className="flex items-center gap-1 text-[10px] uppercase tracking-wide text-muted-foreground hover:text-foreground transition-colors">
-                        Channel <SortIcon active={txnSortKey === "category"} dir={txnSortDir} />
-                      </button>
-                    </th>
-                    <th className="py-2 text-[10px] uppercase tracking-wide text-muted-foreground">Description</th>
-                    <th className="py-2 text-right">
-                      <button onClick={() => toggleTxnSort("amount")} className="ml-auto flex items-center gap-1 text-[10px] uppercase tracking-wide text-muted-foreground hover:text-foreground transition-colors">
-                        Amount <SortIcon active={txnSortKey === "amount"} dir={txnSortDir} />
-                      </button>
-                    </th>
-                  </tr>
-                </thead>
-                <tbody>
-                  {sortedTransactions.length === 0 ? (
-                    <tr>
-                      <td colSpan={4} className="py-8 text-center text-[11px] text-muted-foreground">
-                        No transactions match "{txnSearch}"
-                      </td>
-                    </tr>
-                  ) : sortedTransactions.map(t => (
-                    <tr key={t.id} className="border-b border-border/30 hover:bg-muted/20">
-                      <td className="py-2 text-[11px] font-mono text-muted-foreground whitespace-nowrap">{t.expense_date}</td>
-                      <td className="py-2 text-[12px] font-medium">{t.category}</td>
-                      <td className="py-2 text-[11px] text-muted-foreground max-w-[400px] truncate" title={t.description ?? ""}>
-                        {t.description || "—"}
-                      </td>
-                      <td className="py-2 text-[12px] text-right tabular-nums font-semibold">{fmtAED(t.amount)}</td>
-                    </tr>
-                  ))}
-                </tbody>
-              </table>
-            </div>
-          </CardContent>
-        </Card>
-      )}
-
-      {/* ── Full breakdown ── */}
+      {/* ── Spend Breakdown by Channel — click a row to drill into its
+          individual transactions inline. Replaces the old standalone
+          per-transaction table that was overwhelming. ── */}
       {byCategory.length > 0 && (
-        <Card className="shadow-sm border-border/50 mb-5">
-          <CardHeader className="pb-1 pt-4 px-4">
-            <CardTitle className="text-[12px] font-medium text-muted-foreground uppercase tracking-wide">Full Breakdown by Channel</CardTitle>
+        <Card className="shadow-md border-border/60 mb-5">
+          <CardHeader className="pb-2 pt-4 px-5">
+            <CardTitle className="text-[14px] font-semibold text-foreground">Spend Breakdown by Channel</CardTitle>
+            <p className="text-[11px] text-muted-foreground/80 mt-0.5">Click any channel row to see its individual transactions</p>
           </CardHeader>
-          <CardContent className="px-4 pb-4">
-            <div className="overflow-x-auto">
-              <table className="w-full text-left border-collapse">
-                <thead>
-                  <tr className="border-b border-border/60">
-                    <th className="text-[10px] uppercase tracking-wide text-muted-foreground py-2">Channel</th>
-                    <th className="text-[10px] uppercase tracking-wide text-muted-foreground py-2 text-right">Txns</th>
-                    <th className="text-[10px] uppercase tracking-wide text-muted-foreground py-2 text-right">Avg / Txn</th>
-                    <th className="text-[10px] uppercase tracking-wide text-muted-foreground py-2 text-right">Total</th>
-                    <th className="text-[10px] uppercase tracking-wide text-muted-foreground py-2 text-right">% of Total</th>
-                  </tr>
-                </thead>
-                <tbody>
-                  {byCategory.map((c, i) => (
-                    <tr key={c.category} className="border-b border-border/30 hover:bg-muted/20">
-                      <td className="py-2 text-[12px] font-medium flex items-center gap-2">
-                        <span className="h-2.5 w-2.5 rounded-full shrink-0" style={{ backgroundColor: CAT_COLORS[i % CAT_COLORS.length] }} />
-                        {c.category}
-                      </td>
-                      <td className="py-2 text-[12px] text-right tabular-nums text-muted-foreground">{c.count}</td>
-                      <td className="py-2 text-[12px] text-right tabular-nums text-muted-foreground">{fmtAED(c.avg)}</td>
-                      <td className="py-2 text-[12px] text-right tabular-nums font-semibold">{fmtAED(c.amount)}</td>
-                      <td className="py-2 text-[12px] text-right tabular-nums text-muted-foreground">{c.pct.toFixed(1)}%</td>
-                    </tr>
-                  ))}
-                  <tr className="border-t-2 border-border/80 font-semibold bg-muted/10">
-                    <td className="py-2 text-[12px]">Total</td>
-                    <td className="py-2 text-[12px] text-right tabular-nums">{byCategory.reduce((s, c) => s + c.count, 0)}</td>
-                    <td className="py-2 text-[12px] text-right tabular-nums">—</td>
-                    <td className="py-2 text-[12px] text-right tabular-nums">{fmtAED(spend)}</td>
-                    <td className="py-2 text-[12px] text-right tabular-nums">100%</td>
-                  </tr>
-                </tbody>
-              </table>
-            </div>
+          <CardContent className="px-0 pb-3 overflow-x-auto">
+            <table className="w-full text-left border-collapse">
+              <thead className="bg-muted/40 border-y border-border/60">
+                <tr>
+                  <th className="py-3 px-2 w-8"></th>
+                  <th className="py-3 px-3 text-[12px] font-semibold text-muted-foreground uppercase tracking-wide">Channel</th>
+                  <th className="py-3 px-3 text-[12px] font-semibold text-muted-foreground uppercase tracking-wide text-right">Txns</th>
+                  <th className="py-3 px-3 text-[12px] font-semibold text-muted-foreground uppercase tracking-wide text-right">Avg / Txn</th>
+                  <th className="py-3 px-3 text-[12px] font-semibold text-muted-foreground uppercase tracking-wide text-right">Total</th>
+                  <th className="py-3 px-5 text-[12px] font-semibold text-muted-foreground uppercase tracking-wide text-right">% of Total</th>
+                </tr>
+              </thead>
+              <tbody>
+                {byCategory.map((c, i) => {
+                  const isOpen = expandedCategory === c.category;
+                  const txns = txnsByCategory.get(c.category) ?? [];
+                  return (
+                    <Fragment key={c.category}>
+                      <tr
+                        className={`border-b border-border/30 cursor-pointer transition-colors ${isOpen ? "bg-violet-50/60" : "hover:bg-muted/30"}`}
+                        onClick={() => setExpandedCategory(isOpen ? null : c.category)}
+                      >
+                        <td className="py-3.5 px-2 text-center">
+                          <ChevronRight className={`h-3.5 w-3.5 text-muted-foreground transition-transform inline-block ${isOpen ? "rotate-90 text-violet-700" : ""}`} />
+                        </td>
+                        <td className="py-3.5 px-3 text-[14px] font-semibold">
+                          <div className="flex items-center gap-2.5">
+                            <span className="h-3 w-3 rounded-full shrink-0" style={{ backgroundColor: CAT_COLORS[i % CAT_COLORS.length] }} />
+                            <span className="text-foreground">{c.category}</span>
+                          </div>
+                        </td>
+                        <td className="py-3.5 px-3 text-[14px] text-right tabular-nums text-muted-foreground">{c.count}</td>
+                        <td className="py-3.5 px-3 text-[14px] text-right tabular-nums text-muted-foreground">{fmtAED(c.avg)}</td>
+                        <td className="py-3.5 px-3 text-[14px] text-right tabular-nums font-bold text-violet-700">{fmtAED(c.amount)}</td>
+                        <td className="py-3.5 px-5 text-[14px] text-right tabular-nums text-muted-foreground">{c.pct.toFixed(1)}%</td>
+                      </tr>
+                      {isOpen && (
+                        <tr className="bg-violet-50/30 border-b border-border/30">
+                          <td colSpan={6} className="py-3 px-5">
+                            <div className="overflow-x-auto" style={{ maxHeight: 320 }}>
+                              <table className="w-full text-left border-collapse">
+                                <thead>
+                                  <tr className="border-b border-border/40">
+                                    <th className="py-2 text-[10px] uppercase tracking-wide text-muted-foreground/70 font-semibold">Date</th>
+                                    <th className="py-2 text-[10px] uppercase tracking-wide text-muted-foreground/70 font-semibold">Description</th>
+                                    <th className="py-2 text-[10px] uppercase tracking-wide text-muted-foreground/70 font-semibold text-right">Amount</th>
+                                  </tr>
+                                </thead>
+                                <tbody>
+                                  {txns.length === 0 ? (
+                                    <tr><td colSpan={3} className="py-3 text-center text-[12px] text-muted-foreground">No transactions in this period</td></tr>
+                                  ) : txns.map(t => (
+                                    <tr key={t.id} className="border-b border-border/20 last:border-0">
+                                      <td className="py-2 text-[12px] font-mono text-muted-foreground whitespace-nowrap pr-3">{t.expense_date}</td>
+                                      <td className="py-2 text-[12px] text-foreground/80 max-w-[480px] truncate" title={t.description ?? ""}>
+                                        {t.description || <span className="text-muted-foreground/40">—</span>}
+                                      </td>
+                                      <td className="py-2 text-[12px] text-right tabular-nums font-semibold">{fmtAED(t.amount)}</td>
+                                    </tr>
+                                  ))}
+                                </tbody>
+                              </table>
+                            </div>
+                          </td>
+                        </tr>
+                      )}
+                    </Fragment>
+                  );
+                })}
+                <tr className="border-t-2 border-violet-200 bg-violet-50/60 font-bold">
+                  <td></td>
+                  <td className="py-3.5 px-3 text-[14px] text-foreground">Total</td>
+                  <td className="py-3.5 px-3 text-[14px] text-right tabular-nums">{byCategory.reduce((s, c) => s + c.count, 0)}</td>
+                  <td className="py-3.5 px-3 text-[14px] text-right tabular-nums">—</td>
+                  <td className="py-3.5 px-3 text-[15px] text-right tabular-nums text-violet-700">{fmtAED(spend)}</td>
+                  <td className="py-3.5 px-5 text-[14px] text-right tabular-nums">100%</td>
+                </tr>
+              </tbody>
+            </table>
           </CardContent>
         </Card>
       )}

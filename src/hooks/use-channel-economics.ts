@@ -96,6 +96,10 @@ export function useChannelEconomics() {
 
     const rows = Array.from(map.values());
     for (const r of rows) {
+      // Qualified ≥ converted by definition — anything in DoB has progressed
+      // past qualified. Floors out cases where leads bypass the qualified
+      // Lead_Status entirely (e.g. Dave's pre-vetted referrals).
+      r.qualified         = Math.max(r.qualified, r.converted);
       r.costPerLead       = r.leads     > 0 ? r.spend / r.leads     : 0;
       r.costPerQualified  = r.qualified > 0 ? r.spend / r.qualified : 0;
       r.costPerConversion = r.converted > 0 ? r.spend / r.converted : 0;
@@ -120,48 +124,42 @@ export function useChannelEconomics() {
   }, [byCategory, allRowsUnfiltered, zoho?.rawLeads, dateRange]);
 }
 
-/** "Best" picks: who's the clear winner on each metric, with sensible fallbacks. */
+/** Three "Best" picks for the Channel-winner cards: Volume, Quality, Cost/Conv. */
 export function useChannelWinners() {
   const rows = useChannelEconomics();
 
   return useMemo(() => {
     if (rows.length === 0) return null;
 
-    // Most leads = best on volume
+    // BEST VOLUME — most leads in the period.
     const mostLeads = [...rows].sort((a, b) => b.leads - a.leads)[0];
 
-    // Lowest cost per lead — only consider channels that have BOTH spend and leads
-    const cplCandidates = rows.filter(r => r.spend > 0 && r.leads > 0);
-    const lowestCPL = cplCandidates.length
-      ? [...cplCandidates].sort((a, b) => a.costPerLead - b.costPerLead)[0]
-      : null;
+    // BEST LEAD QUALITY — share of qualified leads that actually converted.
+    // qualityScore = converted ÷ qualified. Tells you "of the leads from this
+    // channel that we deemed worth pursuing, how many became Doctors on Board?"
+    // Higher = better quality leads (the channel sends prospects who close).
+    // Min 5 qualified to avoid 1-of-1 noise.
+    const QUALITY_MIN_QUALIFIED = 5;
+    type WithQuality = ChannelEconomicsRow & { qualityScore: number };
+    const qualityCandidates: WithQuality[] = rows
+      .filter(r => r.qualified >= QUALITY_MIN_QUALIFIED)
+      .map(r => ({
+        ...r,
+        // Cap at 100% — for the few channels (e.g. Dave) where DoB count
+        // exceeds the qualified count due to leads that bypass the qualified
+        // status entirely, we'd otherwise see >100%.
+        qualityScore: Math.min(100, (r.converted / r.qualified) * 100),
+      }))
+      .sort((a, b) => b.qualityScore - a.qualityScore);
+    const bestQuality = qualityCandidates[0] ?? null;
 
-    // Lowest cost per qualified — only channels with spend AND qualified leads
-    const cpqCandidates = rows.filter(r => r.spend > 0 && r.qualified > 0);
-    const lowestCPQ = cpqCandidates.length
-      ? [...cpqCandidates].sort((a, b) => a.costPerQualified - b.costPerQualified)[0]
-      : null;
-
-    // Lowest cost per conversion — only channels with spend AND converted leads.
-    // Falls back to highest conversion rate (>= 5 leads) when no channel has both
-    // spend and a converted lead, so the card always has something to show.
+    // BEST COST / CONVERSION — cheapest channel per converted lead, in the
+    // active date range. Only channels that have BOTH spend and converted leads.
     const cpcCandidates = rows.filter(r => r.spend > 0 && r.converted > 0);
     const lowestCPC = cpcCandidates.length
       ? [...cpcCandidates].sort((a, b) => a.costPerConversion - b.costPerConversion)[0]
       : null;
-    const convCandidates = rows.filter(r => r.leads >= 5 && r.converted > 0);
-    const bestConversion = convCandidates.length
-      ? [...convCandidates].sort((a, b) => b.conversionRate - a.conversionRate)[0]
-      : null;
 
-    // Best lifetime cost per conversion — uses ALL-TIME spend and conversions
-    // for each channel, ignoring the date filter. Surfaces channels that pay
-    // back over their full history vs. ones that look fine in a recent window.
-    const lifetimeCandidates = rows.filter(r => r.lifetimeSpend > 0 && r.lifetimeConverted > 0);
-    const bestLifetimeCPC = lifetimeCandidates.length
-      ? [...lifetimeCandidates].sort((a, b) => a.lifetimeCostPerConversion - b.lifetimeCostPerConversion)[0]
-      : null;
-
-    return { mostLeads, lowestCPL, lowestCPQ, lowestCPC, bestConversion, bestLifetimeCPC };
+    return { mostLeads, bestQuality, lowestCPC };
   }, [rows]);
 }

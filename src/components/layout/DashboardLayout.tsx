@@ -5,7 +5,6 @@ import { Bell, Download, AlertTriangle, ChevronRight, Home, Sparkles, RefreshCw,
 import { ChatChart, parseCharts } from "@/components/ChatChart";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
-import { DateRangePicker } from "@/components/DateRangePicker";
 import { CurrencyToggle } from "@/components/CurrencyToggle";
 import { UniversalSearch } from "@/components/UniversalSearch";
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
@@ -319,7 +318,6 @@ export function DashboardLayout({ children, title, subtitle }: DashboardLayoutPr
                 </TooltipTrigger>
                 <TooltipContent side="bottom" className="text-[10px]">Search anything · ⌘K</TooltipContent>
               </Tooltip>
-              <DateRangePicker />
               <CurrencyToggle />
 <Tooltip>
                 <TooltipTrigger asChild>

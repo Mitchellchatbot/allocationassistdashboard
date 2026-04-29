@@ -290,11 +290,17 @@ async function gql(path: string, params: Record<string, string>): Promise<unknow
 // ~36 months so the call still succeeds.
 const META_MAX_HISTORY_DAYS = 36 * 30; // ≈ 36 months
 
+// Format YYYY-MM-DD in LOCAL time. toISOString() shifts to UTC, which rolls
+// back a day for east-of-UTC users — making "Jan 1" become "Dec 31" before
+// the Meta API sees it.
+const ymdLocal = (d: Date) =>
+  `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`;
+
 export function useMetaAdsApi(dateRange: { from: Date; to: Date }) {
   const earliest = new Date(Date.now() - META_MAX_HISTORY_DAYS * 86_400_000);
   const fromClamped = dateRange.from < earliest ? earliest : dateRange.from;
-  const since = fromClamped.toISOString().slice(0, 10);
-  const until = dateRange.to.toISOString().slice(0, 10);
+  const since = ymdLocal(fromClamped);
+  const until = ymdLocal(dateRange.to);
 
   return useQuery<MetaAdsApiData>({
     queryKey:            ["meta-ads-api-v3", since, until],
@@ -835,7 +841,7 @@ export function useMetaTopAds(accountIds: string[], since: string, until: string
       const untilD = new Date(`${until}T00:00:00Z`);
       const sinceD = new Date(`${since}T00:00:00Z`);
       const earliest = new Date(untilD.getTime() - MAX_DAYS * 86_400_000);
-      const sinceClamped = sinceD < earliest ? earliest.toISOString().slice(0, 10) : since;
+      const sinceClamped = sinceD < earliest ? ymdLocal(earliest) : since;
       const TIME_RANGE = JSON.stringify({ since: sinceClamped, until });
       const SAFE_STATUSES = JSON.stringify(["ACTIVE", "PAUSED"]);
 
@@ -899,7 +905,10 @@ export function useMetaTopAds(accountIds: string[], since: string, until: string
         }
       }
 
-      return ads.sort((a, b) => b.leads - a.leads || b.spend - a.spend).slice(0, 30);
+      // Return everything we already fetched (typically up to 50 per account
+      // before dedup). The Per-Creative table caps display via a "Show more"
+      // button so we don't slice here.
+      return ads.sort((a, b) => b.leads - a.leads || b.spend - a.spend);
     },
   });
 }

@@ -44,7 +44,6 @@ const App = () => (
     <TooltipProvider>
       <AIPageContextProvider>
       <CurrencyProvider>
-      <FilterProvider>
         <Toaster />
         <Sonner />
         <BrowserRouter>
@@ -53,25 +52,26 @@ const App = () => (
               {/* Public */}
               <Route path="/login" element={<Login />} />
 
-              {/* Protected — page-level role gating via requiredPage */}
-              <Route path="/"               element={<ProtectedRoute requiredPage="/"><Index /></ProtectedRoute>} />
-              <Route path="/sales"          element={<ProtectedRoute requiredPage="/sales"><Sales /></ProtectedRoute>} />
-              <Route path="/marketing"      element={<ProtectedRoute requiredPage="/marketing"><Marketing /></ProtectedRoute>} />
-              <Route path="/leads-pipeline" element={<ProtectedRoute requiredPage="/leads-pipeline"><LeadsPipeline /></ProtectedRoute>} />
-              <Route path="/team"           element={<ProtectedRoute requiredPage="/team"><TeamPerformance /></ProtectedRoute>} />
-              <Route path="/finance"        element={<ProtectedRoute requiredPage="/finance"><Finance /></ProtectedRoute>} />
-              <Route path="/settings"       element={<ProtectedRoute requiredPage="/settings"><Settings /></ProtectedRoute>} />
-              <Route path="/meta-ads"       element={<ProtectedRoute requiredPage="/meta-ads"><MetaAds /></ProtectedRoute>} />
-              <Route path="/worker"         element={<ProtectedRoute requiredPage="/worker"><WorkerDashboard /></ProtectedRoute>} />
-              <Route path="/import"         element={<ProtectedRoute requiredPage="/"><CallLogImport /></ProtectedRoute>} />
-              <Route path="/contracts"      element={<ProtectedRoute requiredPage="/"><Contracts /></ProtectedRoute>} />
-              <Route path="/follow-ups"     element={<ProtectedRoute requiredPage="/follow-ups"><FollowUps /></ProtectedRoute>} />
+              {/* Protected — page-level role gating via requiredPage.
+                  FilterProvider wraps each route element so every page mount
+                  gets its own date-range scope (state resets on navigation). */}
+              <Route path="/"               element={<ProtectedRoute requiredPage="/"><FilterProvider><Index /></FilterProvider></ProtectedRoute>} />
+              <Route path="/sales"          element={<ProtectedRoute requiredPage="/sales"><FilterProvider><Sales /></FilterProvider></ProtectedRoute>} />
+              <Route path="/marketing"      element={<ProtectedRoute requiredPage="/marketing"><FilterProvider><Marketing /></FilterProvider></ProtectedRoute>} />
+              <Route path="/leads-pipeline" element={<ProtectedRoute requiredPage="/leads-pipeline"><FilterProvider><LeadsPipeline /></FilterProvider></ProtectedRoute>} />
+              <Route path="/team"           element={<ProtectedRoute requiredPage="/team"><FilterProvider><TeamPerformance /></FilterProvider></ProtectedRoute>} />
+              <Route path="/finance"        element={<ProtectedRoute requiredPage="/finance"><FilterProvider><Finance /></FilterProvider></ProtectedRoute>} />
+              <Route path="/settings"       element={<ProtectedRoute requiredPage="/settings"><FilterProvider><Settings /></FilterProvider></ProtectedRoute>} />
+              <Route path="/meta-ads"       element={<ProtectedRoute requiredPage="/meta-ads"><FilterProvider><MetaAds /></FilterProvider></ProtectedRoute>} />
+              <Route path="/worker"         element={<ProtectedRoute requiredPage="/worker"><FilterProvider><WorkerDashboard /></FilterProvider></ProtectedRoute>} />
+              <Route path="/import"         element={<ProtectedRoute requiredPage="/"><FilterProvider><CallLogImport /></FilterProvider></ProtectedRoute>} />
+              <Route path="/contracts"      element={<ProtectedRoute requiredPage="/"><FilterProvider><Contracts /></FilterProvider></ProtectedRoute>} />
+              <Route path="/follow-ups"     element={<ProtectedRoute requiredPage="/follow-ups"><FilterProvider><FollowUps /></FilterProvider></ProtectedRoute>} />
 
               <Route path="*" element={<NotFound />} />
             </Routes>
           </Suspense>
         </BrowserRouter>
-      </FilterProvider>
       </CurrencyProvider>
       </AIPageContextProvider>
     </TooltipProvider>

@@ -1,6 +1,11 @@
 import { createContext, useContext } from "react";
 
-export type TimeRangePreset = "today" | "week" | "month" | "quarter" | "year" | "all" | "custom";
+export type TimeRangePreset =
+  | "today" | "week"
+  | "month" | "lastMonth" | "last30days"
+  | "quarter" | "lastQuarter"
+  | "year" | "lastYear" | "last12months"
+  | "all" | "custom";
 
 /** Backward-compat alias used in older code */
 export type TimeRange = TimeRangePreset;
@@ -54,13 +59,48 @@ export function getPresetRange(preset: TimeRangePreset): DateRange {
     case "month":
       return { from: new Date(now.getFullYear(), now.getMonth(), 1), to: today };
 
+    case "lastMonth": {
+      // Calendar previous month: from = 1st of last month, to = last day of last month
+      const firstOfThis = new Date(now.getFullYear(), now.getMonth(), 1);
+      const lastOfPrev  = new Date(firstOfThis.getTime() - 86_400_000);
+      const firstOfPrev = new Date(lastOfPrev.getFullYear(), lastOfPrev.getMonth(), 1);
+      return { from: firstOfPrev, to: lastOfPrev };
+    }
+
+    case "last30days": {
+      const from = new Date(today);
+      from.setDate(from.getDate() - 29);
+      return { from, to: today };
+    }
+
     case "quarter": {
       const qStartMonth = Math.floor(now.getMonth() / 3) * 3;
       return { from: new Date(now.getFullYear(), qStartMonth, 1), to: today };
     }
 
+    case "lastQuarter": {
+      const qStartMonth = Math.floor(now.getMonth() / 3) * 3;
+      const prevQEnd    = new Date(now.getFullYear(), qStartMonth, 1);
+      prevQEnd.setDate(prevQEnd.getDate() - 1);                                // last day of previous quarter
+      const prevQStartMonth = Math.floor(prevQEnd.getMonth() / 3) * 3;
+      const prevQStart  = new Date(prevQEnd.getFullYear(), prevQStartMonth, 1);
+      return { from: prevQStart, to: prevQEnd };
+    }
+
     case "year":
       return { from: new Date(now.getFullYear(), 0, 1), to: today };
+
+    case "lastYear": {
+      const y = now.getFullYear() - 1;
+      return { from: new Date(y, 0, 1), to: new Date(y, 11, 31) };
+    }
+
+    case "last12months": {
+      const from = new Date(today);
+      from.setFullYear(from.getFullYear() - 1);
+      from.setDate(from.getDate() + 1);  // exactly 12 months back
+      return { from, to: today };
+    }
 
     case "all":
       // Far enough back to include every record in Zoho / Supabase, including
@@ -75,13 +115,18 @@ export function getPresetRange(preset: TimeRangePreset): DateRange {
 // ── Display label ──────────────────────────────────────────────────────────
 
 const PRESET_LABELS: Record<TimeRangePreset, string> = {
-  today:   "Today",
-  week:    "This Week",
-  month:   "This Month",
-  quarter: "This Quarter",
-  year:    "This Year",
-  all:     "All Time",
-  custom:  "Custom",
+  today:        "Today",
+  week:         "This Week",
+  month:        "This Month",
+  lastMonth:    "Last Month",
+  last30days:   "Last 30 Days",
+  quarter:      "This Quarter",
+  lastQuarter:  "Last Quarter",
+  year:         "This Year",
+  lastYear:     "Last Year",
+  last12months: "Last 12 Months",
+  all:          "All Time",
+  custom:       "Custom",
 };
 
 export function getPresetLabel(preset: TimeRangePreset): string {
@@ -108,13 +153,18 @@ export function formatDateRangeLabel(preset: TimeRangePreset, range: DateRange):
 export function getTimeLabel(preset: TimeRangePreset, range?: DateRange): string {
   if (preset !== "custom") {
     const map: Record<TimeRangePreset, string> = {
-      today:   "today",
-      week:    "this week",
-      month:   "this month",
-      quarter: "this quarter",
-      year:    "this year",
-      all:     "all time",
-      custom:  "selected period",
+      today:        "today",
+      week:         "this week",
+      month:        "this month",
+      lastMonth:    "last month",
+      last30days:   "last 30 days",
+      quarter:      "this quarter",
+      lastQuarter:  "last quarter",
+      year:         "this year",
+      lastYear:     "last year",
+      last12months: "last 12 months",
+      all:          "all time",
+      custom:       "selected period",
     };
     return map[preset];
   }

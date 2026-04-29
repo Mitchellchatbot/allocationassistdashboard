@@ -53,20 +53,25 @@ export function ExpandableKPICard({
         {/* ── Front ── */}
         <div
           style={{ backfaceVisibility: "hidden", WebkitBackfaceVisibility: "hidden" }}
-          className="absolute inset-0 rounded-xl border border-kpi/60 bg-kpi px-4 py-3 flex items-start justify-between shadow-sm transition-all duration-200 hover:shadow-md hover:scale-[1.01]"
+          className={`absolute inset-0 rounded-xl border border-kpi/60 ${bg} shadow-sm transition-all duration-200 hover:shadow-md hover:scale-[1.01] overflow-hidden flex flex-col`}
         >
-          <div className="min-w-0">
-            <div className="flex items-center gap-1 mb-1">
-              <p className="text-[11px] font-medium text-muted-foreground truncate">{title}</p>
-              {meaning && <InfoIcon meaning={meaning} source={hintSource} side="bottom" />}
+          {/* Top stripe — pulls the card's color to a thin accent bar so each
+              KPI reads as its own family even when the bg is light. */}
+          <div className={`h-1 shrink-0 ${color.replace("text-", "bg-")}`} />
+          <div className="px-4 py-3 flex items-start justify-between flex-1">
+            <div className="min-w-0">
+              <div className="flex items-center gap-1 mb-1">
+                <p className="text-[11px] font-medium text-muted-foreground truncate">{title}</p>
+                {meaning && <InfoIcon meaning={meaning} source={hintSource} side="bottom" />}
+              </div>
+              <p className={`text-[24px] font-bold tabular-nums leading-none ${color}`}>{value}</p>
+              {frontExtra && (
+                <p className="text-[10px] text-muted-foreground mt-1 truncate">{frontExtra}</p>
+              )}
             </div>
-            <p className={`text-[24px] font-bold tabular-nums leading-none ${color}`}>{value}</p>
-            {frontExtra && (
-              <p className="text-[10px] text-muted-foreground mt-1 truncate">{frontExtra}</p>
-            )}
-          </div>
-          <div className={`h-7 w-7 rounded-lg ${bg} flex items-center justify-center shrink-0 ml-2`}>
-            <Icon className={`h-3.5 w-3.5 ${color}`} />
+            <div className={`h-7 w-7 rounded-lg bg-card/70 flex items-center justify-center shrink-0 ml-2`}>
+              <Icon className={`h-3.5 w-3.5 ${color}`} />
+            </div>
           </div>
         </div>
 

@@ -1,5 +1,6 @@
 import { useState, useMemo, useEffect } from "react";
 import { motion, LayoutGroup } from "framer-motion";
+import { SectionDateRange } from "@/components/SectionDateRange";
 import { useSetAIPageContext } from "@/lib/ai-page-context";
 import { useCurrency } from "@/lib/CurrencyProvider";
 import { createPortal } from "react-dom";
@@ -20,7 +21,7 @@ import {
   Users, Megaphone, Globe, Loader2, TrendingUp, DollarSign,
   Eye, MousePointer, AlertCircle, X, ImageOff,
   Repeat2, Hash, Target, Zap, Award, KeyRound, CheckCircle2,
-  ChevronDown, ChevronUp, Play, ExternalLink, ClipboardList,
+  ChevronDown, ChevronUp, ChevronsUpDown, Play, ExternalLink, ClipboardList,
 } from "lucide-react";
 
 // Short {meaning, source} pair shown in the (i) popover on each card.
@@ -658,6 +659,9 @@ function SectionLabel({ children }: { children: React.ReactNode }) {
   return <p className="text-[10px] uppercase tracking-widest font-semibold text-muted-foreground/50 mb-3 mt-2 px-0.5">{children}</p>;
 }
 
+// SortableTH lives in a shared component so Marketing's channel table reuses it.
+import { SortableTH } from "@/components/SortableTH";
+
 function RankList({ items, useOwnTotal = false, onItemClick }: { items: GroupedStat[]; useOwnTotal?: boolean; onItemClick?: (label: string) => void }) {
   if (items.length === 0) return <p className="text-[11px] text-muted-foreground py-6 text-center">No data</p>;
   const maxCount = items[0]?.count ?? 1;
@@ -709,43 +713,50 @@ function HBarChart({ data, color, height = 260 }: { data: GroupedStat[]; color: 
   );
 }
 
-// ── Meta presets ──────────────────────────────────────────────────────────────
-const META_PRESETS = [
-  { label: "30D",  days: 30 },
-  { label: "90D",  days: 90 },
-  { label: "180D", days: 180 },
-  { label: "1Y",   days: 365 },
-  { label: "All",  days: 730 },
-] as const;
-
 // ── Main page ─────────────────────────────────────────────────────────────────
 const MetaAds = () => {
+  // Page-scoped date range — driven by the unified <SectionDateRange /> picker
+  // at the top of the page (DashboardLayout mounts a per-page FilterProvider).
   const { dateRange } = useFilters();
   const queryClient = useQueryClient();
-
-  const [metaDays, setMetaDays] = useState(365);
   // Per-Creative table view mode — toggles which columns are shown.
   // "performance" focuses on volume + cost-per-qualified (default).
   // "cost"        focuses on every cost-per metric (CPL/CPQL/CPP).
   // "reach"       focuses on Meta-side reach (impr/clicks/CTR).
   type CreativeView = "performance" | "cost" | "reach";
   const [creativeView, setCreativeView] = useState<CreativeView>("performance");
-  // Conversion attribution mode for the Meta-side KPI cards.
-  // "strict"  — only count DoB rows whose Lead_Source resolves to Meta in Zoho
-  //              (matches Zoho's picklist filter; under-counts when DoB rows
-  //              from Meta forms have no Lead_Source set, which is most of them).
-  // "matched" — also include DoB rows whose email/phone matches a meta_leads
-  //              form submission. Stronger attribution but harder to reproduce
-  //              from Zoho's UI alone.
-  type AttributionMode = "strict" | "matched";
-  const [attributionMode, setAttributionMode] = useState<AttributionMode>("matched");
+  // Per-Creative table user-controlled sort. null = use creativeView default.
+  type SortKey = "spend" | "leads" | "qualified" | "cpql" | "cpp" | "impressions" | "clicks" | "ctr";
+  const [sortKey, setSortKey] = useState<SortKey | null>(null);
+  const [sortDir, setSortDir] = useState<"asc" | "desc">("desc");
+  const handleSort = (k: SortKey) => {
+    if (sortKey === k) setSortDir(d => d === "asc" ? "desc" : "asc");
+    else { setSortKey(k); setSortDir("desc"); }
+  };
+  // Campaigns table sort. Default desc by spend.
+  type CampSortKey = "spend" | "impressions" | "ctr" | "leads";
+  const [campSortKey, setCampSortKey] = useState<CampSortKey>("spend");
+  const [campSortDir, setCampSortDir] = useState<"asc" | "desc">("desc");
+  const handleCampSort = (k: CampSortKey) => {
+    if (campSortKey === k) setCampSortDir(d => d === "asc" ? "desc" : "asc");
+    else { setCampSortKey(k); setCampSortDir("desc"); }
+  };
+  // Per-Creative table render-cap. Starts at 30 to keep render fast; user
+  // can expand 20 at a time. All data is already in hand from the API,
+  // so this is purely a UI knob — no extra fetches.
+  const CREATIVES_INITIAL = 30;
+  const CREATIVES_STEP    = 20;
+  const [visibleCreatives, setVisibleCreatives] = useState(CREATIVES_INITIAL);
   // Display currency comes from the global toggle in the dashboard header.
   const { currency: displayCurrency, fromAED: toDisplay } = useCurrency();
+  // metaDateRange now mirrors the page-scoped date filter (used to be a
+  // separate rolling-X-days state). End-of-day on `to` so same-day data is
+  // included.
   const metaDateRange = useMemo(() => {
-    const to = new Date(); const from = new Date();
-    from.setDate(from.getDate() - metaDays);
-    return { from, to };
-  }, [metaDays]);
+    const to = new Date(dateRange.to);
+    to.setHours(23, 59, 59, 999);
+    return { from: dateRange.from, to };
+  }, [dateRange]);
 
   // Both leads cards use metaDateRange so they respond to the 30D/90D/1Y buttons
   const { data, isLoading: leadsLoading } = useMetaLeadsStats(metaDateRange);
@@ -773,8 +784,13 @@ const MetaAds = () => {
     queryClient.invalidateQueries({ queryKey: ["meta-ads-api-v3"] });
   }
 
-  const since    = metaDateRange.from.toISOString().slice(0, 10);
-  const until    = metaDateRange.to.toISOString().slice(0, 10);
+  // Format dates as YYYY-MM-DD in LOCAL time. toISOString().slice(0,10)
+  // converts to UTC and rolls back a day for east-of-UTC users (UAE +4 etc.),
+  // making "Year" send "2025-12-31" to Meta instead of "2026-01-01".
+  const ymd = (d: Date) =>
+    `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`;
+  const since    = ymd(metaDateRange.from);
+  const until    = ymd(metaDateRange.to);
   const allAccountIds = api?.accounts?.map(a => a.id) ?? [];
 
   const { data: topAds = [], isLoading: topAdsLoading } = useMetaTopAds(allAccountIds, since, until);
@@ -832,6 +848,43 @@ const MetaAds = () => {
   const creativeFunnels = data?.creativeFunnels ?? [];
   const trackedPct      = total > 0 ? Math.round((withUtm / total) * 100) : 0;
 
+  // Meta API doesn't return lead-action data for this account (their pixel
+  // tracks `purchase`/`messaging`, not `lead*`), so c.leads on every campaign
+  // is 0. Fill it in by matching campaign.name → meta_leads.utm_campaign.
+  // utm_campaign in our form data is sometimes the Meta campaign ID and
+  // sometimes a human slug, so we build TWO lookups: by raw id, by normalised
+  // name. Whichever hits wins.
+  const formLeadsByCampaign = useMemo(() => {
+    const norm = (s: string) => s.toLowerCase().replace(/[^a-z0-9]/g, "");
+    const byId   = new Map<string, number>();
+    const byName = new Map<string, number>();
+    for (const row of byCampaign) {
+      const label = (row.label ?? "").trim();
+      if (!label) continue;
+      if (/^\d+$/.test(label)) byId.set(label, (byId.get(label) ?? 0) + row.count);
+      const k = norm(label);
+      if (k) byName.set(k, (byName.get(k) ?? 0) + row.count);
+    }
+    return (campaign: { id: string; name: string }): number => {
+      return byId.get(campaign.id) ?? byName.get(norm(campaign.name)) ?? 0;
+    };
+  }, [byCampaign]);
+
+  // Apply user-selected sort to the campaigns list. Effective leads = Meta API
+  // leads if reported, else our form-side fallback.
+  const sortedCampaigns = useMemo(() => {
+    const sign = campSortDir === "asc" ? 1 : -1;
+    const get = (c: typeof campaigns[number]): number => {
+      switch (campSortKey) {
+        case "spend":       return c.spend;
+        case "impressions": return c.impressions;
+        case "ctr":         return c.ctr;
+        case "leads":       return c.leads > 0 ? c.leads : formLeadsByCampaign(c);
+      }
+    };
+    return [...campaigns].sort((a, b) => (get(a) - get(b)) * sign);
+  }, [campaigns, campSortKey, campSortDir, formLeadsByCampaign]);
+
   // ── Per-creative performance ──────────────────────────────────────────────
   // Joins Meta API ads (spend / impressions) with form-lead funnels keyed on
   // utm_content. We try TWO match strategies because utm_content can be either:
@@ -887,9 +940,24 @@ const MetaAds = () => {
       // Drop creatives with no measurable activity at all.
       .filter(r => r.spend > 0 || r.formLeads > 0 || r.metaLeads > 0);
 
-    // Sort depends on which view mode is active so the most relevant
-    // creative sits at the top regardless of which columns are showing.
-    if (creativeView === "cost") {
+    // User-controlled sort takes precedence; otherwise fall back to a
+    // sensible default for the active view mode.
+    if (sortKey) {
+      const sign = sortDir === "asc" ? 1 : -1;
+      const getter = (r: typeof rows[number]): number => {
+        switch (sortKey) {
+          case "spend":       return r.spend;
+          case "leads":       return r.formLeads;
+          case "qualified":   return r.qualified;
+          case "cpql":        return r.cpql > 0 ? r.cpql : (sortDir === "asc" ? Infinity : -Infinity);
+          case "cpp":         return r.cpp  > 0 ? r.cpp  : (sortDir === "asc" ? Infinity : -Infinity);
+          case "impressions": return r.impressions;
+          case "clicks":      return r.ad.clicks;
+          case "ctr":         return r.ad.ctr;
+        }
+      };
+      rows.sort((a, b) => (getter(a) - getter(b)) * sign);
+    } else if (creativeView === "cost") {
       // Lowest CPQL first; ads with no CPQL sink to the bottom.
       rows.sort((a, b) => {
         const av = a.cpql > 0 ? a.cpql : Infinity;
@@ -911,7 +979,7 @@ const MetaAds = () => {
     }
 
     return rows;
-  }, [topAds, creativeFunnels, creativeView]);
+  }, [topAds, creativeFunnels, creativeView, sortKey, sortDir]);
 
   // ── Back-side content for each KPI flip card ──────────────────────────────
   const topCampBySpend = campaigns.slice(0, 5);
@@ -1139,44 +1207,16 @@ const MetaAds = () => {
 
   return (
     <DashboardLayout title="Meta Ads" subtitle="Live performance from Facebook Marketing API · Lead form data from Supabase">
+      <SectionDateRange />
 
       {/* ══ Meta API section ══════════════════════════════════════════════════ */}
       <div className="flex items-center justify-between mb-3 mt-2 gap-3 flex-wrap">
         <p className="text-[10px] uppercase tracking-widest font-semibold text-muted-foreground/50">
           Live Ad Performance · Meta Marketing API
+          <span className="ml-2 normal-case text-muted-foreground/80 font-normal tracking-normal">
+            · {since} → {until}
+          </span>
         </p>
-        <div className="flex items-center gap-3">
-          {/* Conversion attribution toggle */}
-          <div className="flex items-center gap-1" title="Strict: only Zoho DoB rows tagged Meta in Lead_Source. Matched: also include DoB rows whose email/phone matches a Meta form submission.">
-            <span className="text-[9px] uppercase tracking-wider font-semibold text-muted-foreground/60">Attribution</span>
-            <div className="flex gap-0.5">
-              <button type="button" onClick={() => setAttributionMode("strict")}
-                className={`px-2 py-0.5 rounded text-[9px] font-medium transition-colors ${
-                  attributionMode === "strict" ? "bg-primary text-white" : "text-muted-foreground hover:bg-secondary"
-                }`}>
-                Strict (Zoho)
-              </button>
-              <button type="button" onClick={() => setAttributionMode("matched")}
-                className={`px-2 py-0.5 rounded text-[9px] font-medium transition-colors ${
-                  attributionMode === "matched" ? "bg-primary text-white" : "text-muted-foreground hover:bg-secondary"
-                }`}>
-                Matched (Zoho + forms)
-              </button>
-            </div>
-          </div>
-          {/* Currency toggle moved to dashboard header (applies to all pages). */}
-          {/* Date range presets */}
-          <div className="flex gap-0.5">
-            {META_PRESETS.map(p => (
-              <button key={p.label} type="button" onClick={() => setMetaDays(p.days)}
-                className={`px-2 py-0.5 rounded text-[9px] font-medium transition-colors ${
-                  metaDays === p.days ? "bg-primary text-white" : "text-muted-foreground hover:bg-secondary"
-                }`}>
-                {p.label}
-              </button>
-            ))}
-          </div>
-        </div>
       </div>
 
       {!tokenSet ? (
@@ -1239,31 +1279,14 @@ const MetaAds = () => {
               const totalLeads       = data?.total          ?? 0;
               const qualifiedLeads   = data?.qualifiedCount ?? 0;
               // Conversions: a DoB record counts as a Meta conversion if its
-              // email/phone matches a row in meta_leads (Meta form submissions)
-              // OR its Lead_Source explicitly resolves to Meta. The identity
-              // join is the strong signal — most DoB rows have no Lead_Source
-              // set, so the Lead_Source fallback alone misses ~98% of Meta
-              // conversions.
+              // Lead_Source resolves to Meta (Facebook / Instagram / Meta /
+              // their placement variants). Zoho is the sole source of truth —
+              // no meta_leads cross-references.
               const metaFromMs = metaDateRange.from.getTime();
               const metaToMs   = metaDateRange.to.getTime();
-              const normEmail = (s: string | null | undefined) => (s ?? "").trim().toLowerCase();
-              const normPhone = (s: string | null | undefined) => (s ?? "").replace(/\D/g, "");
-              const metaEmails = data?.metaLeadEmails;
-              const metaPhones = data?.metaLeadPhones;
               const conversions = (zoho?.rawDoctorsOnBoard ?? []).filter(dob => {
                 const t = dob.Created_Time ? new Date(dob.Created_Time).getTime() : NaN;
                 if (isNaN(t) || t < metaFromMs || t > metaToMs) return false;
-                // Strict mode: only count rows tagged Meta in Zoho's Lead_Source.
-                if (attributionMode === "strict") {
-                  return displaySource(dob.Lead_Source) === "Meta";
-                }
-                // Matched mode: identity-match against meta_leads first, fall
-                // back to Lead_Source. Catches DoBs from Meta forms that
-                // weren't tagged in Zoho.
-                const email = normEmail(dob.Email);
-                const phone = normPhone(dob.Phone ?? dob.Mobile);
-                if (email && metaEmails?.has(email)) return true;
-                if (phone && metaPhones?.has(phone)) return true;
                 return displaySource(dob.Lead_Source) === "Meta";
               }).length;
               const cpl = totalLeads     > 0 ? adSpend / totalLeads     : 0;
@@ -1304,14 +1327,10 @@ const MetaAds = () => {
                   <MetaKpiCard
                     icon={Award} label="Cost per Conversion" color="text-violet-600" bg="bg-violet-50"
                     value={cpc > 0 ? fmtC(toDisplay(cpc), currency) : "—"}
-                    sub={cpc > 0 ? `${fmtN(conversions)} converted · ${attributionMode === "strict" ? "Zoho only" : "Zoho + form match"}` : "no conversions in period"}
+                    sub={cpc > 0 ? `${fmtN(conversions)} converted (Doctors on Board)` : "no conversions in period"}
                     back={
                       <div className="space-y-2 text-[11px]">
-                        <p className="text-muted-foreground">Conversion = a row in the Zoho <strong>Doctors on Board</strong> module. Attribution toggle (top-right) controls scope:</p>
-                        <ul className="text-muted-foreground list-disc pl-4 space-y-1">
-                          <li><strong>Strict (Zoho)</strong>: Lead_Source resolves to Meta. Reproducible from Zoho's filter UI.</li>
-                          <li><strong>Matched</strong>: also includes DoBs whose email/phone matches a Meta form submission — recovers conversions whose Lead_Source isn't tagged.</li>
-                        </ul>
+                        <p className="text-muted-foreground">Conversion = a row in the Zoho <strong>Doctors on Board</strong> module whose <code>Lead_Source</code> resolves to Meta (Facebook / Instagram / placement variants). Zoho is the sole source — no form-side cross-references.</p>
                         <div className="pt-2 border-t border-border/40 space-y-1">
                           <div className="flex justify-between"><span className="text-muted-foreground">Ad spend</span><span className="font-semibold tabular-nums">{fmtC(toDisplay(adSpend), currency)}</span></div>
                           <div className="flex justify-between"><span className="text-muted-foreground">Conversions</span><span className="font-semibold tabular-nums">{fmtN(conversions)}</span></div>
@@ -1442,6 +1461,10 @@ const MetaAds = () => {
                     <p className="text-[10px] text-muted-foreground/70 mt-0.5">
                       spend from Meta API · qualified/placed from Zoho via utm_content match · video badge where confirmed
                     </p>
+                    <p className="text-[10px] text-primary/80 mt-1 inline-flex items-center gap-1">
+                      <ChevronsUpDown className="h-3 w-3" />
+                      Click any column header to sort
+                    </p>
                   </div>
                   {/* View-mode toggle — swaps which columns are shown */}
                   <div className="inline-flex rounded-md border border-border/60 overflow-hidden text-[10px] font-medium shrink-0">
@@ -1471,77 +1494,57 @@ const MetaAds = () => {
                       <th className="py-2 px-3 text-[10px] font-medium text-muted-foreground uppercase tracking-wide w-8">#</th>
                       <th className="py-2 px-3 text-[10px] font-medium text-muted-foreground uppercase tracking-wide w-12">Ad</th>
                       <th className="py-2 px-3 text-[10px] font-medium text-muted-foreground uppercase tracking-wide">Name</th>
-                      <th className="py-2 px-3 text-[10px] font-medium text-muted-foreground uppercase tracking-wide text-right">
-                        <span className="inline-flex items-center justify-end gap-1">
-                          Spend
-                          <InfoIcon meaning="Meta Ads spend on this creative in the period." source="Meta Marketing API." side="top" />
-                        </span>
-                      </th>
+                      <SortableTH sortKey="spend" current={sortKey} dir={sortDir} onSort={handleSort}
+                        info={{ meaning: "Meta Ads spend on this creative in the period.", source: "Meta Marketing API." }}>
+                        Spend
+                      </SortableTH>
 
                       {/* Performance view: Leads → Qualified → CPQL */}
                       {creativeView === "performance" && <>
-                        <th className="py-2 px-3 text-[10px] font-medium text-muted-foreground uppercase tracking-wide text-right">
-                          <span className="inline-flex items-center justify-end gap-1">
-                            Leads
-                            <InfoIcon meaning="Form leads matched to this creative by ad-id or ad-name ↔ utm_content." source="Supabase meta_leads." side="top" />
-                          </span>
-                        </th>
-                        <th className="py-2 px-3 text-[10px] font-medium text-muted-foreground uppercase tracking-wide text-right">
-                          <span className="inline-flex items-center justify-end gap-1">
-                            Qualified
-                            <InfoIcon meaning='How many of those leads reached qualified status. "Contact in Future" excluded.' source="meta_leads × Zoho Lead_Status." side="top" />
-                          </span>
-                        </th>
-                        <th className="py-2 px-3 text-[10px] font-medium text-muted-foreground uppercase tracking-wide text-right">
-                          <span className="inline-flex items-center justify-end gap-1">
-                            CPQL
-                            <InfoIcon meaning="Cost per Qualified Lead = Meta spend ÷ qualified leads for this creative." source="Meta API + Zoho." side="top" />
-                          </span>
-                        </th>
+                        <SortableTH sortKey="leads" current={sortKey} dir={sortDir} onSort={handleSort}
+                          info={{ meaning: "Form leads matched to this creative by ad-id or ad-name ↔ utm_content.", source: "Supabase meta_leads." }}>
+                          Leads
+                        </SortableTH>
+                        <SortableTH sortKey="qualified" current={sortKey} dir={sortDir} onSort={handleSort}
+                          info={{ meaning: 'How many of those leads reached qualified status. "Contact in Future" excluded.', source: "meta_leads × Zoho Lead_Status." }}>
+                          Qualified
+                        </SortableTH>
+                        <SortableTH sortKey="cpql" current={sortKey} dir={sortDir} onSort={handleSort}
+                          info={{ meaning: "Cost per Qualified Lead = Meta spend ÷ qualified leads for this creative.", source: "Meta API + Zoho." }}>
+                          CPQL
+                        </SortableTH>
                       </>}
 
                       {/* Cost view: CPL → CPQL → Cost / Conversion */}
                       {creativeView === "cost" && <>
-                        <th className="py-2 px-3 text-[10px] font-medium text-muted-foreground uppercase tracking-wide text-right">
-                          <span className="inline-flex items-center justify-end gap-1">
-                            Cost / Lead
-                            <InfoIcon meaning="Meta spend ÷ form leads for this creative." source="Meta API + Supabase meta_leads." side="top" />
-                          </span>
-                        </th>
-                        <th className="py-2 px-3 text-[10px] font-medium text-muted-foreground uppercase tracking-wide text-right">
-                          <span className="inline-flex items-center justify-end gap-1">
-                            CPQL
-                            <InfoIcon meaning="Cost per Qualified Lead = Meta spend ÷ qualified leads for this creative." source="Meta API + Zoho Lead_Status (cross-referenced via meta_leads email/phone/name)." side="top" />
-                          </span>
-                        </th>
-                        <th className="py-2 px-3 text-[10px] font-medium text-muted-foreground uppercase tracking-wide text-right">
-                          <span className="inline-flex items-center justify-end gap-1">
-                            Cost / Conversion
-                            <InfoIcon meaning="Meta spend ÷ conversions for this creative. NOTE: per-creative conversion attribution still uses meta_leads stage progression — DoB-level attribution per creative requires utm_content matching that we don't have yet. Channel-level conversion is sourced from Zoho Doctors on Board." source="Meta API + meta_leads (per-creative); Zoho Doctors on Board (channel-level)." side="top" />
-                          </span>
-                        </th>
+                        <SortableTH sortKey="leads" current={sortKey} dir={sortDir} onSort={handleSort}
+                          info={{ meaning: "Meta spend ÷ form leads for this creative. Sort by lead volume.", source: "Meta API + Supabase meta_leads." }}>
+                          Cost / Lead
+                        </SortableTH>
+                        <SortableTH sortKey="cpql" current={sortKey} dir={sortDir} onSort={handleSort}
+                          info={{ meaning: "Cost per Qualified Lead = Meta spend ÷ qualified leads for this creative.", source: "Meta API + Zoho Lead_Status." }}>
+                          CPQL
+                        </SortableTH>
+                        <SortableTH sortKey="cpp" current={sortKey} dir={sortDir} onSort={handleSort}
+                          info={{ meaning: "Meta spend ÷ conversions for this creative.", source: "Meta API + Zoho Doctors on Board." }}>
+                          Cost / Conversion
+                        </SortableTH>
                       </>}
 
                       {/* Reach view: Impressions → Clicks → CTR */}
                       {creativeView === "reach" && <>
-                        <th className="py-2 px-3 text-[10px] font-medium text-muted-foreground uppercase tracking-wide text-right">
-                          <span className="inline-flex items-center justify-end gap-1">
-                            Impressions
-                            <InfoIcon meaning="Times this creative was shown in the period." source="Meta Marketing API." side="top" />
-                          </span>
-                        </th>
-                        <th className="py-2 px-3 text-[10px] font-medium text-muted-foreground uppercase tracking-wide text-right">
-                          <span className="inline-flex items-center justify-end gap-1">
-                            Clicks
-                            <InfoIcon meaning="Link clicks on this creative." source="Meta Marketing API." side="top" />
-                          </span>
-                        </th>
-                        <th className="py-2 px-3 text-[10px] font-medium text-muted-foreground uppercase tracking-wide text-right">
-                          <span className="inline-flex items-center justify-end gap-1">
-                            CTR
-                            <InfoIcon meaning="Click-through rate = clicks ÷ impressions." source="Meta Marketing API." side="top" />
-                          </span>
-                        </th>
+                        <SortableTH sortKey="impressions" current={sortKey} dir={sortDir} onSort={handleSort}
+                          info={{ meaning: "Times this creative was shown in the period.", source: "Meta Marketing API." }}>
+                          Impressions
+                        </SortableTH>
+                        <SortableTH sortKey="clicks" current={sortKey} dir={sortDir} onSort={handleSort}
+                          info={{ meaning: "Link clicks on this creative.", source: "Meta Marketing API." }}>
+                          Clicks
+                        </SortableTH>
+                        <SortableTH sortKey="ctr" current={sortKey} dir={sortDir} onSort={handleSort}
+                          info={{ meaning: "Click-through rate = clicks ÷ impressions.", source: "Meta Marketing API." }}>
+                          CTR
+                        </SortableTH>
                       </>}
 
                       <th className="py-2 px-3 text-[10px] font-medium text-muted-foreground uppercase tracking-wide text-center">Preview</th>
@@ -1549,7 +1552,7 @@ const MetaAds = () => {
                   </thead>
                   <LayoutGroup>
                   <motion.tbody layout>
-                    {videoPerformance.map((v, i) => (
+                    {videoPerformance.slice(0, visibleCreatives).map((v, i) => (
                       <motion.tr
                         key={v.id}
                         layout
@@ -1643,6 +1646,32 @@ const MetaAds = () => {
                   </motion.tbody>
                   </LayoutGroup>
                 </table>
+                {videoPerformance.length > visibleCreatives && (
+                  <div className="flex flex-col items-center gap-1 px-4 pt-3 pb-1">
+                    <button
+                      type="button"
+                      onClick={() => setVisibleCreatives(n => n + CREATIVES_STEP)}
+                      className="inline-flex items-center gap-1.5 rounded-lg bg-primary/10 hover:bg-primary hover:text-white text-primary px-3 py-1.5 text-[11px] font-semibold transition-colors"
+                    >
+                      <ChevronDown className="h-3 w-3" />
+                      Show {Math.min(CREATIVES_STEP, videoPerformance.length - visibleCreatives)} more
+                    </button>
+                    <span className="text-[9px] text-muted-foreground/60">
+                      Showing {visibleCreatives} of {videoPerformance.length} creatives — already loaded, no extra API call
+                    </span>
+                  </div>
+                )}
+                {videoPerformance.length > CREATIVES_INITIAL && visibleCreatives > CREATIVES_INITIAL && (
+                  <div className="flex justify-center px-4 pt-1 pb-1">
+                    <button
+                      type="button"
+                      onClick={() => setVisibleCreatives(CREATIVES_INITIAL)}
+                      className="text-[10px] text-muted-foreground hover:text-foreground underline-offset-2 hover:underline transition-colors"
+                    >
+                      Collapse to top {CREATIVES_INITIAL}
+                    </button>
+                  </div>
+                )}
                 <p className="text-[10px] text-muted-foreground px-4 pt-2 pb-1">
                   Match is by Meta ad ID or normalised ad-name ↔ <code>utm_content</code>. A creative with no match shows "—" for leads/qualified.
                 </p>
@@ -1660,6 +1689,10 @@ const MetaAds = () => {
                     · click <Play className="h-2.5 w-2.5 inline" /> to preview ads
                   </span>
                 </CardTitle>
+                <p className="text-[10px] text-primary/80 mt-1 inline-flex items-center gap-1">
+                  <ChevronsUpDown className="h-3 w-3" />
+                  Click any column header to sort
+                </p>
               </CardHeader>
               <CardContent className="px-0 pb-2 overflow-x-auto">
                 <table className="w-full text-left">
@@ -1667,16 +1700,39 @@ const MetaAds = () => {
                     <tr className="border-b border-border/40">
                       <th className="py-2 px-3 text-[10px] font-medium text-muted-foreground uppercase tracking-wide">Campaign</th>
                       <th className="py-2 px-3 text-[10px] font-medium text-muted-foreground uppercase tracking-wide">Objective</th>
-                      <th className="py-2 px-3 text-[10px] font-medium text-muted-foreground uppercase tracking-wide text-right">Spend</th>
-                      <th className="py-2 px-3 text-[10px] font-medium text-muted-foreground uppercase tracking-wide text-right">Impr.</th>
-                      <th className="py-2 px-3 text-[10px] font-medium text-muted-foreground uppercase tracking-wide text-right">CTR</th>
-                      <th className="py-2 px-3 text-[10px] font-medium text-muted-foreground uppercase tracking-wide text-right">Leads</th>
+                      <SortableTH sortKey="spend" current={campSortKey} dir={campSortDir} onSort={handleCampSort}
+                        info={{ meaning: "Total Meta Ads spend on this campaign in the period.", source: "Meta Marketing API." }}>
+                        Spend
+                      </SortableTH>
+                      <SortableTH sortKey="impressions" current={campSortKey} dir={campSortDir} onSort={handleCampSort}
+                        info={{ meaning: "Times any ad in this campaign was shown.", source: "Meta Marketing API." }}>
+                        Impr.
+                      </SortableTH>
+                      <SortableTH sortKey="ctr" current={campSortKey} dir={campSortDir} onSort={handleCampSort}
+                        info={{ meaning: "Click-through rate = clicks ÷ impressions.", source: "Meta Marketing API." }}>
+                        CTR
+                      </SortableTH>
+                      <SortableTH sortKey="leads" current={campSortKey} dir={campSortDir} onSort={handleCampSort}
+                        info={{ meaning: "Form leads attributed to this campaign. Meta API first; falls back to meta_leads.utm_campaign join when API returns no lead actions (marked *).", source: "Meta API + Supabase meta_leads." }}>
+                        Leads
+                      </SortableTH>
                       <th className="py-2 px-3 text-[10px] font-medium text-muted-foreground uppercase tracking-wide text-center">Preview</th>
                     </tr>
                   </thead>
-                  <tbody>
-                    {campaigns.map(c => (
-                      <tr key={c.id} className="border-b border-border/30 hover:bg-muted/30 transition-colors">
+                  <LayoutGroup>
+                  <motion.tbody layout>
+                    {sortedCampaigns.map(c => {
+                      const formLeads = formLeadsByCampaign(c);
+                      // Meta API leads first; fall back to form-side count.
+                      const displayLeads = c.leads > 0 ? c.leads : formLeads;
+                      const fromForms = c.leads === 0 && formLeads > 0;
+                      return (
+                      <motion.tr
+                        key={c.id}
+                        layout
+                        transition={{ type: "spring", stiffness: 380, damping: 32 }}
+                        className="border-b border-border/30 hover:bg-muted/30"
+                      >
                         <td className="py-2.5 px-3">
                           <div className="flex items-center gap-1.5">
                             <span className={`h-1.5 w-1.5 rounded-full shrink-0 ${c.status === "ACTIVE" ? "bg-success" : "bg-muted-foreground/40"}`} />
@@ -1687,7 +1743,14 @@ const MetaAds = () => {
                         <td className="py-2.5 px-3 text-right text-[11px] font-semibold tabular-nums text-primary">{fmtC(toDisplay(c.spend), currency)}</td>
                         <td className="py-2.5 px-3 text-right text-[11px] tabular-nums text-muted-foreground">{fmtN(c.impressions)}</td>
                         <td className="py-2.5 px-3 text-right text-[11px] tabular-nums">{c.ctr.toFixed(2)}%</td>
-                        <td className="py-2.5 px-3 text-right text-[11px] tabular-nums font-semibold text-success">{c.leads > 0 ? c.leads : "—"}</td>
+                        <td className="py-2.5 px-3 text-right text-[11px] tabular-nums font-semibold text-success">
+                          {displayLeads > 0 ? (
+                            <span title={fromForms ? "Sourced from form submissions (Meta API didn't report lead actions for this campaign)" : "Sourced from Meta API"}>
+                              {displayLeads}
+                              {fromForms && <span className="ml-0.5 text-[8px] text-muted-foreground/60 font-normal">*</span>}
+                            </span>
+                          ) : "—"}
+                        </td>
                         <td className="py-2.5 px-3 text-center">
                           <button
                             type="button"
@@ -1698,10 +1761,15 @@ const MetaAds = () => {
                             View Ads
                           </button>
                         </td>
-                      </tr>
-                    ))}
-                  </tbody>
+                      </motion.tr>
+                      );
+                    })}
+                  </motion.tbody>
+                  </LayoutGroup>
                 </table>
+                <p className="text-[10px] text-muted-foreground/70 px-4 pt-2 pb-1">
+                  <span className="text-[8px] align-text-top">*</span> Lead count from form submissions matched to this campaign — Meta API didn't return lead-action data, so we joined <code>meta_leads.utm_campaign</code> ↔ campaign name/id.
+                </p>
               </CardContent>
             </Card>
           )}

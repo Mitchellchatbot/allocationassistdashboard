@@ -1,4 +1,5 @@
 import { DashboardLayout } from "@/components/layout/DashboardLayout";
+import { SectionDateRange } from "@/components/SectionDateRange";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
@@ -96,6 +97,7 @@ const TeamPerformance = () => {
 
   return (
     <DashboardLayout title="Team Performance" subtitle="See how each sales consultant is performing and track active campaigns">
+      <SectionDateRange />
 
       {/* ── Recruiter table ─────────────────────────────────────────── */}
       <Card className="mb-5 shadow-sm border-border/50">

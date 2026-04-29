@@ -2,10 +2,10 @@ import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import { ChannelIcon } from "@/components/ChannelIcon";
 import { InfoIcon } from "@/components/InfoIcon";
-import { Trophy, TrendingDown, Target, Zap, ChevronRight } from "lucide-react";
+import { ChevronRight } from "lucide-react";
 import { Link, useNavigate } from "react-router-dom";
+import { useState } from "react";
 import { useChannelEconomics, useChannelWinners, type ChannelEconomicsRow } from "@/hooks/use-channel-economics";
-import { useFilters } from "@/lib/filters";
 import { useCurrency } from "@/lib/CurrencyProvider";
 import type { ChannelKey } from "@/lib/channel-mapping";
 
@@ -39,6 +39,7 @@ const CHANNEL_GROUP: Record<ChannelKey, ChannelGroup> = {
   "Influencer":    "Social",
   "WhatsApp":      "Social",
   "Go Hire":       "Job Boards",
+  "Dave":          "Other",
   "Referrals":     "Other",
   "Email":         "Other",
   "Print":         "Other",
@@ -59,121 +60,142 @@ const GROUP_DESCRIPTION: Record<ChannelGroup, string> = {
 };
 
 interface WinnerCardProps {
-  icon: React.ComponentType<{ className?: string }>;
   label: string;
   meaning?: string;
   source?: string;
-  iconColor: string;
-  iconBg: string;
   channel: string | null;
   value: string;
   sub?: string;
+  /** Color identity for the card — drives the gradient bg + value color +
+   *  top-border accent. Defaults to slate (neutral). */
+  accent?: "slate" | "emerald" | "orange" | "blue" | "violet" | "amber" | "rose";
+  /** Optional back-face content. When provided, the card becomes flippable. */
+  back?: React.ReactNode;
 }
 
-function WinnerCard({ icon: Icon, label, meaning, source, iconColor, iconBg, channel, value, sub }: WinnerCardProps) {
+const WINNER_ACCENTS = {
+  slate:   { gradient: "from-slate-50 to-card",    border: "border-slate-200",   value: "text-foreground",     barBg: "bg-slate-300"   },
+  emerald: { gradient: "from-emerald-50 to-card",  border: "border-emerald-200", value: "text-emerald-700",    barBg: "bg-emerald-400" },
+  orange:  { gradient: "from-orange-50 to-card",   border: "border-orange-200",  value: "text-orange-700",     barBg: "bg-orange-400"  },
+  blue:    { gradient: "from-blue-50 to-card",     border: "border-blue-200",    value: "text-blue-700",       barBg: "bg-blue-400"    },
+  violet:  { gradient: "from-violet-50 to-card",   border: "border-violet-200",  value: "text-violet-700",     barBg: "bg-violet-400"  },
+  amber:   { gradient: "from-amber-50 to-card",    border: "border-amber-200",   value: "text-amber-700",      barBg: "bg-amber-400"   },
+  rose:    { gradient: "from-rose-50 to-card",     border: "border-rose-200",    value: "text-rose-700",       barBg: "bg-rose-400"    },
+} as const;
+
+export function WinnerCard({ label, meaning, source, channel, value, sub, accent = "slate", back }: WinnerCardProps) {
+  const [flipped, setFlipped] = useState(false);
+  const flippable = !!back && !!channel;
+  const a = WINNER_ACCENTS[accent];
+
   return (
-    <Card className="shadow-sm border-border/50">
-      <CardContent className="p-4">
-        <div className="flex items-start justify-between mb-2">
-          <p className="inline-flex items-center gap-1 text-[10px] font-medium text-muted-foreground uppercase tracking-wide">
-            {label}
-            {meaning && <InfoIcon meaning={meaning} source={source} side="top" />}
-          </p>
-          <div className={`h-7 w-7 rounded-lg flex items-center justify-center ${iconBg}`}>
-            <Icon className={`h-3.5 w-3.5 ${iconColor}`} />
+    <div
+      className={flippable ? "cursor-pointer select-none" : "select-none"}
+      style={{
+        perspective: "1200px",
+        height: flipped ? "240px" : "150px",
+        transition: "height 0.45s cubic-bezier(0.4,0,0.2,1)",
+      }}
+      onClick={() => flippable && setFlipped(f => !f)}
+    >
+      <div
+        style={{
+          transformStyle: "preserve-3d",
+          transition: "transform 0.55s cubic-bezier(0.4,0,0.2,1)",
+          transform: flipped ? "rotateX(-180deg)" : "rotateX(0deg)",
+          position: "relative",
+          height: "100%",
+        }}
+      >
+        {/* Front */}
+        <div
+          style={{ backfaceVisibility: "hidden", WebkitBackfaceVisibility: "hidden" }}
+          className={`absolute inset-0 rounded-xl border ${a.border} bg-gradient-to-br ${a.gradient} shadow-sm hover:shadow-md hover:scale-[1.01] transition-all flex flex-col overflow-hidden`}
+        >
+          {/* Top color stripe — strong accent bar so each card reads as its own family */}
+          <div className={`h-1 ${a.barBg}`} />
+          <div className="p-4 flex-1 flex flex-col">
+            <p className="inline-flex items-center gap-1 text-[10px] font-semibold text-muted-foreground uppercase tracking-wide mb-2">
+              {label}
+              {meaning && <InfoIcon meaning={meaning} source={source} side="top" />}
+            </p>
+            {channel ? (
+              <>
+                <div className="flex items-center gap-1.5 mb-1">
+                  <ChannelIcon channel={channel} size={14} />
+                  <p className="text-base font-semibold truncate">{channel}</p>
+                </div>
+                <p className={`text-xl font-bold tabular-nums ${a.value}`}>{value}</p>
+                {sub && <p className="text-[10px] text-muted-foreground mt-0.5">{sub}</p>}
+                {flippable && (
+                  <p className="text-[9px] text-muted-foreground/60 mt-auto pt-1">click to see how this was calculated</p>
+                )}
+              </>
+            ) : (
+              <>
+                <p className="text-base font-semibold text-muted-foreground">—</p>
+                <p className="text-[10px] text-muted-foreground mt-0.5">Not enough data</p>
+              </>
+            )}
           </div>
         </div>
-        {channel ? (
-          <>
-            <div className="flex items-center gap-1.5 mb-0.5">
-              <ChannelIcon channel={channel} size={14} />
-              <p className="text-base font-semibold truncate">{channel}</p>
+
+        {/* Back */}
+        {flippable && (
+          <div
+            style={{
+              backfaceVisibility: "hidden",
+              WebkitBackfaceVisibility: "hidden",
+              transform: "rotateX(180deg)",
+            }}
+            className={`absolute inset-0 rounded-xl border ${a.border} bg-card shadow-md flex flex-col overflow-hidden`}
+          >
+            <div className={`flex items-center justify-between px-4 py-2 border-b border-border/30 bg-gradient-to-br ${a.gradient} shrink-0`}>
+              <span className="text-[11px] font-semibold truncate">{label}</span>
+              <span className="text-[9px] text-muted-foreground shrink-0 ml-2">click to close</span>
             </div>
-            <p className="text-lg font-bold tabular-nums">{value}</p>
-            {sub && <p className="text-[10px] text-muted-foreground mt-0.5">{sub}</p>}
-          </>
-        ) : (
-          <>
-            <p className="text-base font-semibold text-muted-foreground">—</p>
-            <p className="text-[10px] text-muted-foreground mt-0.5">Not enough data</p>
-          </>
+            <div className="flex-1 overflow-y-auto px-4 py-3 min-h-0 text-[11px]">
+              {back}
+            </div>
+          </div>
         )}
-      </CardContent>
-    </Card>
+      </div>
+    </div>
   );
 }
 
 export function ChannelWinnerCards() {
+  // Kept as a thin wrapper for any consumers that don't have a local
+  // channelRows array. Reads from useChannelWinners (legacy normalizer path).
   const winners = useChannelWinners();
-  const { dateRange } = useFilters();
   const { fmt: fmtAED } = useCurrency();
 
-  const dateLabel = `${dateRange.from.toLocaleDateString("en-GB", { day: "numeric", month: "short" })} – ${dateRange.to.toLocaleDateString("en-GB", { day: "numeric", month: "short", year: "numeric" })}`;
-
   return (
-    <div className="mb-3">
-      <p className="text-[10px] text-muted-foreground mb-2">Channel performance · {dateLabel}</p>
-      <div className="grid grid-cols-2 lg:grid-cols-4 gap-3">
-        {/* Headline metric — Cost per Qualified Lead. Sits first because this is
-            the metric Ammar prioritises over volume / CPL. */}
-        <WinnerCard
-          icon={Target}
-          label="Lowest Cost / Qualified ★"
-          meaning="The headline metric — cheapest channel per qualified lead (Initial Sales Call Completed or High Priority Follow up). Lower = better quality at lower cost."
-          source="Marketing-spend imports + Zoho CRM (Lead_Status)."
-          iconColor="text-orange-600" iconBg="bg-orange-50"
-          channel={winners?.lowestCPQ?.channel ?? null}
-          value={winners?.lowestCPQ ? fmtAED(winners.lowestCPQ.costPerQualified) : ""}
-          sub={winners?.lowestCPQ ? `${fmtN(winners.lowestCPQ.qualified)} qualified leads` : undefined}
-        />
-        {/* Lifetime CPC — surfaces channels that have been losing money for years. */}
-        <WinnerCard
-          icon={TrendingDown}
-          label="Best Lifetime Cost / Conv."
-          meaning="Cheapest channel per converted lead across ALL time (ignores the date filter). Tells you which channels actually pay back over their full history."
-          source="Marketing-spend imports + Zoho CRM, lifetime."
-          iconColor="text-emerald-600" iconBg="bg-emerald-50"
-          channel={winners?.bestLifetimeCPC?.channel ?? null}
-          value={winners?.bestLifetimeCPC ? fmtAED(winners.bestLifetimeCPC.lifetimeCostPerConversion) : ""}
-          sub={winners?.bestLifetimeCPC ? `${fmtN(winners.bestLifetimeCPC.lifetimeConverted)} converted lifetime` : undefined}
-        />
-        <WinnerCard
-          icon={Trophy}
-          label="Best Channel (Volume)"
-          meaning="Channel with the most leads this period (volume only, ignores cost)."
-          source="Zoho CRM (Lead_Source)."
-          iconColor="text-amber-600" iconBg="bg-amber-50"
-          channel={winners?.mostLeads?.channel ?? null}
-          value={winners?.mostLeads ? `${fmtN(winners.mostLeads.leads)} leads` : ""}
-          sub={winners?.mostLeads ? `${fmtN(winners.mostLeads.qualified)} qualified · ${winners.mostLeads.qualifiedRate.toFixed(0)}% rate` : undefined}
-        />
-        {/* Cost / Conversion in the windowed period (or fallback to highest
-            conversion rate if no spend matched). Kept as the 4th card so the
-            full-history "Best Lifetime CPC" doesn't double up. */}
-        {winners?.lowestCPC ? (
-          <WinnerCard
-            icon={Zap}
-            label="Lowest Cost / Conv. (this period)"
-            meaning="Cheapest channel per converted lead in the SELECTED date range. Compare to the lifetime card to spot windows where a channel is suddenly more expensive."
-            source="Marketing-spend imports + Zoho CRM."
-            iconColor="text-violet-600" iconBg="bg-violet-50"
-            channel={winners.lowestCPC.channel}
-            value={fmtAED(winners.lowestCPC.costPerConversion)}
-            sub={`${fmtAED(winners.lowestCPC.spend)} / ${fmtN(winners.lowestCPC.converted)} converted`}
-          />
-        ) : (
-          <WinnerCard
-            icon={Zap}
-            label="Best Conversion Rate"
-            meaning="Channel with the highest conversion rate (≥ 5 leads). Shown when no spend is recorded."
-            source="Zoho CRM (Lead_Status)."
-            iconColor="text-violet-600" iconBg="bg-violet-50"
-            channel={winners?.bestConversion?.channel ?? null}
-            value={winners?.bestConversion ? `${winners.bestConversion.conversionRate.toFixed(1)}%` : ""}
-            sub={winners?.bestConversion ? `${fmtN(winners.bestConversion.converted)} of ${fmtN(winners.bestConversion.leads)} leads` : undefined}
-          />
-        )}
-      </div>
+    <div className="grid grid-cols-1 md:grid-cols-3 gap-3 mb-4">
+      <WinnerCard
+        label="Best Cost / Conversion"
+        meaning="Cheapest channel per converted lead (Doctors on Board) in the selected date range."
+        source="Marketing-spend imports + Zoho Doctors on Board."
+        channel={winners?.lowestCPC?.channel ?? null}
+        value={winners?.lowestCPC ? fmtAED(winners.lowestCPC.costPerConversion) : ""}
+        sub={winners?.lowestCPC ? `${fmtAED(winners.lowestCPC.spend)} / ${fmtN(winners.lowestCPC.converted)} converted` : undefined}
+      />
+      <WinnerCard
+        label="Best Lead Quality"
+        meaning="Share of QUALIFIED leads that actually converted (became Doctors on Board). Higher = the channel sends prospects who actually close."
+        source="Zoho Lead_Status × Doctors on Board (converted ÷ qualified)."
+        channel={winners?.bestQuality?.channel ?? null}
+        value={winners?.bestQuality ? `${winners.bestQuality.qualityScore.toFixed(1)}%` : ""}
+        sub={winners?.bestQuality ? `${fmtN(winners.bestQuality.converted)} converted of ${fmtN(winners.bestQuality.qualified)} qualified` : undefined}
+      />
+      <WinnerCard
+        label="Best Volume"
+        meaning="Channel with the most leads in the selected period (volume only, ignores cost or quality)."
+        source="Zoho CRM (Lead_Source)."
+        channel={winners?.mostLeads?.channel ?? null}
+        value={winners?.mostLeads ? `${fmtN(winners.mostLeads.leads)} leads` : ""}
+        sub={winners?.mostLeads ? `${fmtN(winners.mostLeads.qualified)} qualified · ${winners.mostLeads.qualifiedRate.toFixed(0)}% rate` : undefined}
+      />
     </div>
   );
 }

@@ -1,8 +1,12 @@
 import { DashboardLayout } from "@/components/layout/DashboardLayout";
+import { SectionDateRange } from "@/components/SectionDateRange";
 import { ExpandableKPICard } from "@/components/ExpandableKPICard";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { useFilteredData } from "@/hooks/use-filtered-data";
+import { useFilters } from "@/lib/filters";
 import { useZohoData, displaySource } from "@/hooks/use-zoho-data";
+import { useChannelEconomics } from "@/hooks/use-channel-economics";
+import { normalizeChannelKey } from "@/lib/channel-mapping";
 import { useCurrency } from "@/lib/CurrencyProvider";
 import {
   AreaChart, Area, XAxis, YAxis, Tooltip, ResponsiveContainer,
@@ -61,50 +65,172 @@ const CHANNEL_RANGES = [
 
 const Index = () => {
   // fmtAED comes from the global currency context (AED/USD toggle in header).
-  const { kpis, timeData, funnel, stageConversion, filteredLeads, filteredDeals, zohoLoading } = useFilteredData();
+  const { kpis, timeData, funnel, stageConversion, filteredLeads, filteredDeals, placementCycles, placementDurations, zohoLoading } = useFilteredData();
+  const { dateRange } = useFilters();
   const { fmt: fmtAED } = useCurrency();
   const { data: zoho } = useZohoData();
-  const [channelDays, setChannelDays] = useState<number>(30);
-
-  // "Where Doctors Come From" — filtered by local date range
-  const filteredChannels = useMemo(() => {
-    if (!zoho?.rawLeads) return [];
-    const cutoff = Date.now() - channelDays * 86_400_000;
-    const recent = zoho.rawLeads.filter(l =>
-      new Date(l.Created_Time).getTime() >= cutoff
-    );
+  // Spend per normalized channel key — drives the efficiency leg of the
+  // composite Best-Channel score below.
+  const channelEconomics = useChannelEconomics();
+  // "Where Qualified Leads Come From" — channel breakdown of qualified leads
+  // in the selected period. Uses page-level date range via filteredLeads.
+  const QUALIFIED_SET = useMemo(() => new Set([
+    'Initial Sales Call Completed',
+    'High Priority Follow up',
+    'High Priority Follow-up',
+  ]), []);
+  const qualifiedChannels = useMemo(() => {
     const map: Record<string, number> = {};
-    for (const l of recent) {
+    for (const l of filteredLeads) {
+      if (!QUALIFIED_SET.has(l.Lead_Status)) continue;
       const ch = displaySource(l.Lead_Source);
+      map[ch] = (map[ch] ?? 0) + 1;
+    }
+    // Diagnostic: status breakdown per channel — helps explain why some
+    // channels (e.g. Dave) have conversions but no qualified leads.
+    const statusByCh: Record<string, Record<string, number>> = {};
+    for (const l of filteredLeads) {
+      const ch  = displaySource(l.Lead_Source);
+      const st  = l.Lead_Status || '(empty)';
+      statusByCh[ch] = statusByCh[ch] ?? {};
+      statusByCh[ch][st] = (statusByCh[ch][st] ?? 0) + 1;
+    }
+    console.log('[Index] Lead_Status counts by channel (in period):', statusByCh);
+    return Object.entries(map)
+      .sort((a, b) => b[1] - a[1])
+      .map(([channel, count]) => ({ channel, count }));
+  }, [filteredLeads, QUALIFIED_SET]);
+
+  // "Where Conversions Come From" — channel breakdown of DoB rows in the
+  // selected period.
+  const conversionChannels = useMemo(() => {
+    const map: Record<string, number> = {};
+    const fromMs = dateRange.from.getTime();
+    const toMs   = dateRange.to.getTime() + 86_400_000;
+    for (const d of zoho?.rawDoctorsOnBoard ?? []) {
+      if (!d.Created_Time) continue;
+      const t = new Date(d.Created_Time).getTime();
+      if (t < fromMs || t >= toMs) continue;
+      const ch = displaySource(d.Lead_Source);
       map[ch] = (map[ch] ?? 0) + 1;
     }
     return Object.entries(map)
       .sort((a, b) => b[1] - a[1])
-      .slice(0, 8)
-      .map(([channel, doctors]) => ({ channel, doctors }));
-  }, [zoho?.rawLeads, channelDays]);
+      .map(([channel, count]) => ({ channel, count }));
+  }, [zoho?.rawDoctorsOnBoard, dateRange]);
 
-  const activity = zoho?.recentActivity ?? [];
 
   // ── Expanded content for each KPI card ──────────────────────────────────────
 
-  // 1. Qualified Active → status breakdown (reuse funnel data)
-  const qualifiedActiveContent = (
-    <div className="space-y-2">
-      {funnel.length === 0
-        ? <p className="text-[11px] text-muted-foreground py-2">No data</p>
-        : funnel.slice(0, 7).map(item => (
-          <div key={item.stage}>
-            <div className="flex items-center justify-between mb-1">
-              <span className="text-[11px] text-muted-foreground truncate max-w-[130px]">{item.stage}</span>
-              <span className="text-[11px] font-semibold tabular-nums">{item.count.toLocaleString()}</span>
-            </div>
-            <div className="h-1.5 rounded-full bg-muted overflow-hidden">
-              <div className="h-full rounded-full bg-primary transition-all" style={{ width: `${item.pct}%` }} />
-            </div>
-          </div>
-        ))
-      }
+  // 1. Best Channel → composite score across volume, efficiency, and rate.
+  // Each sub-score is normalized 0–100 against the best channel on that
+  // dimension; the headline is the equal-weighted average of the three.
+  // Channels need ≥25 leads, ≥1 conversion, AND have spend (for efficiency).
+  // If no channel qualifies (e.g. no spend recorded), we fall back to ranking
+  // by raw conversion rate so the card always has something to show.
+  const bestChannelData = useMemo(() => {
+    const fromMs = dateRange.from.getTime();
+    const toMs   = dateRange.to.getTime() + 86_400_000;
+    const leadsByCh = new Map<string, number>();
+    for (const l of filteredLeads) {
+      const ch = displaySource(l.Lead_Source);
+      if (ch === 'Undefined') continue;
+      leadsByCh.set(ch, (leadsByCh.get(ch) ?? 0) + 1);
+    }
+    const convByCh = new Map<string, number>();
+    for (const d of zoho?.rawDoctorsOnBoard ?? []) {
+      if (!d.Created_Time) continue;
+      const t = new Date(d.Created_Time).getTime();
+      if (t < fromMs || t >= toMs) continue;
+      const ch = displaySource(d.Lead_Source);
+      if (ch === 'Undefined') continue;
+      convByCh.set(ch, (convByCh.get(ch) ?? 0) + 1);
+    }
+    // Spend lookup via normalizeChannelKey (matches useChannelEconomics buckets).
+    const spendByCh = new Map<string, number>();
+    for (const r of channelEconomics) spendByCh.set(r.channel, r.spend);
+    const getSpend = (ch: string) => spendByCh.get(normalizeChannelKey(ch)) ?? 0;
+
+    type Row = {
+      channel: string; leads: number; conversions: number; spend: number;
+      rate: number; cpc: number;
+      volScore: number; rateScore: number; effScore: number; score: number;
+    };
+    const candidates: Row[] = Array.from(leadsByCh.entries())
+      .filter(([, n]) => n >= 25)
+      .map(([channel, leads]): Row => {
+        const conversions = convByCh.get(channel) ?? 0;
+        const spend       = getSpend(channel);
+        const rate        = leads > 0 ? Math.min(100, (conversions / leads) * 100) : 0;
+        const cpc         = conversions > 0 && spend > 0 ? spend / conversions : 0;
+        return {
+          channel, leads, conversions, spend, rate, cpc,
+          volScore: 0, rateScore: 0, effScore: 0, score: 0,
+        };
+      });
+    const scoreables = candidates.filter(r => r.conversions > 0 && r.spend > 0 && r.cpc > 0);
+    let ranked: Row[] = [];
+    if (scoreables.length > 0) {
+      const maxConv = Math.max(...scoreables.map(r => r.conversions));
+      const maxRate = Math.max(...scoreables.map(r => r.rate));
+      const minCpc  = Math.min(...scoreables.map(r => r.cpc));
+      ranked = scoreables.map(r => ({
+        ...r,
+        volScore:  maxConv > 0 ? (r.conversions / maxConv) * 100 : 0,
+        rateScore: maxRate > 0 ? (r.rate / maxRate) * 100 : 0,
+        effScore:  r.cpc   > 0 ? (minCpc / r.cpc) * 100 : 0,
+        score:     0,
+      })).map(r => ({ ...r, score: (r.volScore + r.rateScore + r.effScore) / 3 }))
+        .sort((a, b) => b.score - a.score);
+    } else {
+      // Fallback: rank by raw conversion rate when no channel has both spend
+      // and conversions. Score = rate so the headline still reads as a %.
+      ranked = candidates
+        .filter(r => r.conversions > 0)
+        .map(r => ({ ...r, rateScore: r.rate, score: r.rate }))
+        .sort((a, b) => b.score - a.score);
+    }
+    return { ranked, isComposite: scoreables.length > 0 };
+  }, [filteredLeads, zoho?.rawDoctorsOnBoard, dateRange, channelEconomics]);
+
+  const winner = bestChannelData.ranked[0];
+
+  const bestChannelContent = (
+    <div className="space-y-3">
+      <p className="text-[10px] text-muted-foreground/80 leading-relaxed">
+        {bestChannelData.isComposite
+          ? <>Composite score (0–100) averages three sub-scores: <strong>volume</strong> (conversions ÷ best), <strong>rate</strong> (conv. rate ÷ best), and <strong>efficiency</strong> (best CPC ÷ this CPC). Channels need ≥25 leads, ≥1 conversion, and recorded spend to qualify.</>
+          : <>Showing channels by conversion rate (Doctors on Board ÷ leads) — no channel has both spend and conversions in this period yet, so the composite score isn't computable.</>
+        }
+      </p>
+      <div>
+        <p className="text-[10px] uppercase tracking-wide font-semibold text-muted-foreground/70 mb-1">Top 5 channels</p>
+        <div className="space-y-1.5">
+          {bestChannelData.ranked.length === 0
+            ? <p className="text-[11px] text-muted-foreground py-2">No qualifying channels in this period</p>
+            : bestChannelData.ranked.slice(0, 5).map(r => (
+                <div key={r.channel} className="space-y-0.5">
+                  <div className="flex items-center justify-between gap-2">
+                    <span className="text-[11px] font-semibold truncate">{r.channel}</span>
+                    <span className="text-[11px] font-bold tabular-nums shrink-0">{r.score.toFixed(0)}{bestChannelData.isComposite ? '' : '%'}</span>
+                  </div>
+                  {bestChannelData.isComposite && (
+                    <div className="text-[10px] text-muted-foreground tabular-nums grid grid-cols-3 gap-x-3">
+                      <span>Vol {r.volScore.toFixed(0)} <span className="opacity-60">({r.conversions})</span></span>
+                      <span>Rate {r.rateScore.toFixed(0)} <span className="opacity-60">({r.rate.toFixed(1)}%)</span></span>
+                      <span>Eff {r.effScore.toFixed(0)} <span className="opacity-60">({fmtAED(r.cpc)})</span></span>
+                    </div>
+                  )}
+                  {!bestChannelData.isComposite && (
+                    <div className="text-[10px] text-muted-foreground tabular-nums">
+                      {r.conversions} of {r.leads} leads
+                    </div>
+                  )}
+                </div>
+              ))
+          }
+        </div>
+      </div>
     </div>
   );
 
@@ -196,28 +322,60 @@ const Index = () => {
     </div>
   );
 
-  // 5. Avg. Time to Place → individual cycle times
-  const dealsWithCycle = filteredDeals
-    .filter(d => d.Stage === 'Closed Won' && d.Created_Time && d.Closing_Date)
-    .map(d => ({
-      name: d.Deal_Name,
-      days: Math.round((new Date(d.Closing_Date).getTime() - new Date(d.Created_Time).getTime()) / 86_400_000),
-    }))
-    .sort((a, b) => a.days - b.days)
-    .slice(0, 5);
-  const cycleContent = (
-    <div className="divide-y divide-border/30">
-      {dealsWithCycle.length === 0
-        ? <p className="text-[11px] text-muted-foreground py-2">No completed deal data</p>
-        : dealsWithCycle.map(d => (
-          <div key={d.name} className="flex items-center justify-between py-1.5 gap-2">
-            <p className="text-[11px] font-medium truncate">{d.name}</p>
-            <span className="text-[11px] font-semibold tabular-nums shrink-0 text-warning">{d.days} days</span>
+  // 5. Time to Placement → avg DoB-record cycle duration. Drill-down shows
+  // the 5 placements CLOSEST TO the average — the most "typical" sample so
+  // users see what the headline number actually represents (not the
+  // outliers).
+  const cycleContent = (() => {
+    const durations = placementDurations ?? [];
+    const avgDays   = durations.length > 0
+      ? Math.round(durations.reduce((s, d) => s + d.days, 0) / durations.length)
+      : 0;
+    // Rank by |days − avgDays| asc → take 5 most representative
+    const representative = durations
+      .slice()
+      .sort((a, b) => Math.abs(a.days - avgDays) - Math.abs(b.days - avgDays))
+      .slice(0, 5)
+      // Then re-sort by days asc so the list reads cleanly
+      .sort((a, b) => a.days - b.days);
+    return (
+      <div className="space-y-3">
+        <p className="text-[10px] text-muted-foreground/80 leading-relaxed">
+          Average days each Doctors on Board record was active before its last status change (<code>Modified_Time − Created_Time</code>). A proxy for time-from-first-touch to placement — exact lead-to-placement cycle isn't computable because converted leads disappear from Zoho's API after conversion.
+        </p>
+        <div>
+          <p className="text-[10px] uppercase tracking-wide font-semibold text-muted-foreground/70 mb-1">5 most-typical placements (closest to avg)</p>
+          <div className="divide-y divide-border/30">
+            {representative.length === 0
+              ? <p className="text-[11px] text-muted-foreground py-2">No placements with measurable cycle in this period</p>
+              : <>
+                  {representative.map((d, i) => {
+                    const delta = d.days - avgDays;
+                    return (
+                      <div key={`${d.name}-${i}`} className="flex items-center justify-between py-1.5 gap-2">
+                        <p className="text-[11px] font-medium truncate">{d.name}</p>
+                        <div className="flex items-center gap-2 shrink-0">
+                          <span className="text-[11px] font-semibold tabular-nums text-warning">{d.days} days</span>
+                          {delta !== 0 && (
+                            <span className={`text-[9px] font-medium tabular-nums ${delta > 0 ? "text-rose-600/80" : "text-emerald-600/80"}`}>
+                              {delta > 0 ? "+" : ""}{delta}d
+                            </span>
+                          )}
+                        </div>
+                      </div>
+                    );
+                  })}
+                  <div className="flex items-center justify-between py-1.5 gap-2 pt-2">
+                    <p className="text-[11px] font-semibold">Avg. across {durations.length.toLocaleString()} placements</p>
+                    <span className="text-[11px] font-bold tabular-nums shrink-0 text-primary">{avgDays} days</span>
+                  </div>
+                </>
+            }
           </div>
-        ))
-      }
-    </div>
-  );
+        </div>
+      </div>
+    );
+  })();
 
   // 6. Qualification Rate → qualified vs unqualified breakdown.
   // Strict qualified definition: Initial Sales Call Completed + High Priority Follow up.
@@ -255,19 +413,23 @@ const Index = () => {
   // ── KPI card definitions ─────────────────────────────────────────────────────
   const kpiDefs = kpis.length > 0 ? [
     {
-      title: kpis[0]?.label ?? 'Qualified Active',
-      value: kpis[0]?.value ?? '—',
-      icon: Users, color: 'text-primary', bg: 'bg-primary/10',
-      frontExtra: kpis[0]?.period,
-      hintMeaning: "Qualified leads still active in the pipeline. Excludes converted doctors, Contact in Future, and unqualified leads.",
-      hintSource:  "Zoho CRM (Lead_Status).",
-      expandedContent: qualifiedActiveContent,
-      expandedHeight: 270,
+      title: 'Best Channel',
+      value: winner ? winner.channel : '—',
+      icon: Users, color: 'text-blue-600', bg: 'bg-blue-50',
+      frontExtra: winner
+        ? bestChannelData.isComposite
+          ? `Score ${winner.score.toFixed(0)}/100 · ${winner.conversions} conv · ${fmtAED(winner.cpc)}/conv`
+          : `${winner.rate.toFixed(1)}% conversion · ${winner.conversions}/${winner.leads}`
+        : 'no qualifying channel',
+      hintMeaning: "Composite ranking blending three signals — volume (conversions), rate (conversion %), and efficiency (cost per conversion). Each sub-score is normalized 0-100 against the leader on that dimension; headline is the equal-weighted average. Channels need ≥25 leads, ≥1 conversion, and recorded spend to qualify. Falls back to plain conversion rate when no channel has both spend and conversions.",
+      hintSource:  "Zoho Leads + Doctors on Board + marketing_expenses.",
+      expandedContent: bestChannelContent,
+      expandedHeight: 320,
     },
     {
       title: kpis[1]?.label ?? 'Lead → Conversion',
       value: kpis[1]?.value ?? '—',
-      icon: TrendingUp, color: 'text-success', bg: 'bg-success/10',
+      icon: TrendingUp, color: 'text-emerald-600', bg: 'bg-emerald-50',
       frontExtra: kpis[1]?.period,
       hintMeaning: "Share of leads that became a converted doctor — i.e. show up in the Zoho Doctors on Board module. NOT derived from Closed Won deals or lead status.",
       hintSource:  "Zoho Doctors on Board module (api_name: Contacts).",
@@ -277,7 +439,7 @@ const Index = () => {
     {
       title: kpis[2]?.label ?? 'Pipeline Value',
       value: kpis[2]?.value ?? '—',
-      icon: DollarSign, color: 'text-info', bg: 'bg-info/10',
+      icon: DollarSign, color: 'text-violet-600', bg: 'bg-violet-50',
       frontExtra: kpis[2]?.period,
       hintMeaning: "Total $ value of open deals. Weighted figure applies stage probability.",
       hintSource:  "Zoho CRM (Deals — Amount).",
@@ -287,7 +449,7 @@ const Index = () => {
     {
       title: kpis[3]?.label ?? 'Qualified Leads',
       value: kpis[3]?.value ?? '—',
-      icon: CheckCircle, color: 'text-success', bg: 'bg-success/10',
+      icon: CheckCircle, color: 'text-amber-600', bg: 'bg-amber-50',
       frontExtra: kpis[3]?.period,
       hintMeaning: "Leads at Initial Sales Call Completed or High Priority Follow up. Conversions are tracked separately via the Doctors on Board module.",
       hintSource:  "Zoho CRM (Lead_Status).",
@@ -295,19 +457,19 @@ const Index = () => {
       expandedHeight: 250,
     },
     {
-      title: kpis[4]?.label ?? 'Avg. Time to Place',
+      title: kpis[4]?.label ?? 'Time to Placement',
       value: kpis[4]?.value ?? '—',
-      icon: Clock, color: 'text-warning', bg: 'bg-warning/10',
+      icon: Clock, color: 'text-rose-600', bg: 'bg-rose-50',
       frontExtra: kpis[4]?.period,
-      hintMeaning: "Average days from lead creation to a Closed Won deal. Falls back to active-lead age when no deals closed.",
-      hintSource:  "Zoho CRM (Created_Time → Closing_Date).",
+      hintMeaning: "Average days each Doctors on Board record was active before its last status change (Modified_Time − Created_Time). Proxy for time-from-first-touch to placement — exact lead→placement cycle isn't computable because converted leads disappear from Zoho's API after conversion.",
+      hintSource:  "Zoho Doctors on Board (Modified_Time − Created_Time).",
       expandedContent: cycleContent,
-      expandedHeight: 230,
+      expandedHeight: 280,
     },
     {
       title: kpis[5]?.label ?? 'Qualification Rate',
       value: kpis[5]?.value ?? '—',
-      icon: CheckCircle, color: 'text-primary', bg: 'bg-primary/10',
+      icon: CheckCircle, color: 'text-sky-600', bg: 'bg-sky-50',
       frontExtra: kpis[5]?.period,
       hintMeaning: "Qualified leads ÷ total leads in the period.",
       hintSource:  "Zoho CRM (Lead_Status).",
@@ -318,6 +480,7 @@ const Index = () => {
 
   return (
     <DashboardLayout title="Dashboard" subtitle="A quick look at how doctor placements and operations are performing">
+      <SectionDateRange />
       {/* KPI Grid */}
       <div className="grid grid-cols-2 sm:grid-cols-3 gap-4 mb-6">
         {zohoLoading
@@ -420,94 +583,91 @@ const Index = () => {
       </div>
 
       <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-        {/* Where Doctors Come From — with date filter */}
+        {/* Where Qualified Leads Come From — raw counts only, page date range */}
         <Card className="shadow-sm border-border/50 hover:shadow-md transition-shadow">
           <CardHeader className="pb-1 pt-4 px-4">
-            <div className="flex items-center justify-between">
-              <CardTitle className="inline-flex items-center gap-1 text-[14px] font-semibold text-foreground">
-                Where Doctors Come From
-                <InfoIcon meaning="Top channels by number of new leads in the selected window." source="Zoho CRM (Lead_Source)." size={13} side="bottom" />
-              </CardTitle>
-              <div className="flex gap-0.5">
-                {CHANNEL_RANGES.map(r => (
-                  <button
-                    key={r.label}
-                    onClick={() => setChannelDays(r.days)}
-                    className={`px-2 py-0.5 rounded text-[9px] font-medium transition-colors ${
-                      channelDays === r.days
-                        ? "bg-primary text-white"
-                        : "text-muted-foreground hover:bg-secondary"
-                    }`}
-                  >
-                    {r.label}
-                  </button>
-                ))}
-              </div>
-            </div>
+            <CardTitle className="inline-flex items-center gap-1 text-[14px] font-semibold text-foreground">
+              Where Qualified Leads Come From
+              <InfoIcon meaning="Channel breakdown of qualified leads (Lead_Status = Initial Sales Call Completed or High Priority Follow up) in the selected period." source="Zoho CRM (Lead_Source × Lead_Status)." size={13} side="bottom" />
+            </CardTitle>
           </CardHeader>
           <CardContent className="px-4 pb-4">
             {zohoLoading ? (
               <div className="space-y-2">
                 {Array.from({ length: 5 }).map((_, i) => (
-                  <div key={i} className="h-10 bg-muted/30 rounded-lg animate-pulse" />
+                  <div key={i} className="h-7 bg-muted/30 rounded animate-pulse" />
                 ))}
               </div>
-            ) : filteredChannels.length === 0 ? (
-              <p className="text-[11px] text-muted-foreground text-center py-8">No data for this period</p>
-            ) : (
-              <div className="space-y-2">
-                {filteredChannels.map((ch) => (
-                  <div key={ch.channel} className="flex items-center gap-2.5 p-2.5 rounded-lg bg-secondary/50 hover:bg-secondary transition-colors">
-                    <ChannelIcon channel={ch.channel} size={14} />
-                    <div className="flex-1 min-w-0">
-                      <p className="text-[13px] font-medium text-foreground">{ch.channel}</p>
-                      <div className="h-2 rounded-full bg-muted mt-1 overflow-hidden">
+            ) : qualifiedChannels.length === 0 ? (
+              <p className="text-[11px] text-muted-foreground text-center py-8">No qualified leads in period</p>
+            ) : (() => {
+              const maxQ = qualifiedChannels[0]?.count ?? 1;
+              return (
+                <div className="divide-y divide-border/30">
+                  {qualifiedChannels.map(ch => (
+                    <div key={ch.channel} className="py-2">
+                      <div className="flex items-center justify-between mb-1">
+                        <div className="flex items-center gap-2">
+                          <ChannelIcon channel={ch.channel} size={14} />
+                          <span className="text-[13px] font-medium text-foreground">{ch.channel}</span>
+                        </div>
+                        <span className="text-[14px] font-semibold tabular-nums">{ch.count.toLocaleString()}</span>
+                      </div>
+                      <div className="h-1 bg-muted/60 rounded-full overflow-hidden">
                         <div
-                          className="h-full rounded-full bg-primary transition-all"
-                          style={{ width: `${Math.round((ch.doctors / Math.max(...filteredChannels.map(c => c.doctors))) * 100)}%` }}
+                          className="h-full bg-primary rounded-full transition-all"
+                          style={{ width: `${maxQ > 0 ? (ch.count / maxQ) * 100 : 0}%` }}
                         />
                       </div>
                     </div>
-                    <span className="text-[15px] font-semibold text-foreground tabular-nums">{ch.doctors}</span>
-                  </div>
-                ))}
-              </div>
-            )}
+                  ))}
+                </div>
+              );
+            })()}
           </CardContent>
         </Card>
 
-        {/* Recent Activity */}
+        {/* Where Conversions Come From — DoB rows by channel, raw counts only */}
         <Card className="shadow-sm border-border/50 hover:shadow-md transition-shadow">
           <CardHeader className="pb-1 pt-4 px-4">
             <CardTitle className="inline-flex items-center gap-1 text-[14px] font-semibold text-foreground">
-              Recent Activity
-              <InfoIcon meaning="Latest pipeline events — new leads, status changes, deal updates." source="Zoho CRM." size={13} side="bottom" />
+              Where Conversions Come From
+              <InfoIcon meaning="Channel breakdown of Doctors on Board rows in the selected period (Created_Time within range)." source="Zoho Doctors on Board (Lead_Source)." size={13} side="bottom" />
             </CardTitle>
           </CardHeader>
           <CardContent className="px-4 pb-4">
             {zohoLoading ? (
-              <div className="flex items-center justify-center gap-2 py-8 text-muted-foreground">
-                <Loader2 className="h-3 w-3 animate-spin" />
-                <span className="text-[11px]">Loading activity…</span>
-              </div>
-            ) : activity.length === 0 ? (
-              <p className="text-[11px] text-muted-foreground text-center py-8">No recent activity</p>
-            ) : (
               <div className="space-y-2">
-                {activity.slice(0, 6).map((item, i) => (
-                  <div key={i} className="flex items-start gap-2.5 pb-2 border-b border-border/40 last:border-0 last:pb-0 hover:bg-muted/30 rounded px-1 -mx-1 transition-colors">
-                    <div className="mt-0.5 flex h-6 w-6 shrink-0 items-center justify-center rounded-md bg-muted">
-                      {activityIcons[item.type] ?? activityIcons.call}
-                    </div>
-                    <div className="min-w-0 flex-1">
-                      <p className="text-[12px] font-medium text-foreground leading-tight">{item.action}</p>
-                      <p className="text-[11px] text-muted-foreground truncate">{item.detail}</p>
-                    </div>
-                    <span className="text-[11px] text-muted-foreground shrink-0 mt-0.5">{item.time}</span>
-                  </div>
+                {Array.from({ length: 5 }).map((_, i) => (
+                  <div key={i} className="h-7 bg-muted/30 rounded animate-pulse" />
                 ))}
               </div>
-            )}
+            ) : conversionChannels.length === 0 ? (
+              <p className="text-[11px] text-muted-foreground text-center py-8">No conversions in period</p>
+            ) : (() => {
+              const maxC = conversionChannels[0]?.count ?? 1;
+              return (
+                <div className="divide-y divide-border/30">
+                  {conversionChannels.map(ch => (
+                    <div key={ch.channel} className="py-2">
+                      <div className="flex items-center justify-between mb-1">
+                        <div className="flex items-center gap-2">
+                          <ChannelIcon channel={ch.channel} size={14} />
+                          <span className="text-[13px] font-medium text-foreground">{ch.channel}</span>
+                        </div>
+                        <span className="text-[14px] font-semibold tabular-nums">{ch.count.toLocaleString()}</span>
+                      </div>
+                      <div className="h-1 bg-muted/60 rounded-full overflow-hidden">
+                        <div
+                          className="h-full bg-success rounded-full transition-all"
+                          style={{ width: `${maxC > 0 ? (ch.count / maxC) * 100 : 0}%` }}
+                        />
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              );
+            })()}
           </CardContent>
         </Card>
       </div>
