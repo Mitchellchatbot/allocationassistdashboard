@@ -5,9 +5,8 @@ import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { useFilteredData } from "@/hooks/use-filtered-data";
 import { useFilters } from "@/lib/filters";
 import { useZohoData, displaySource } from "@/hooks/use-zoho-data";
-import { useChannelEconomics } from "@/hooks/use-channel-economics";
-import { normalizeChannelKey } from "@/lib/channel-mapping";
 import { useCurrency } from "@/lib/CurrencyProvider";
+import { REVENUE_PER_CONVERSION_AED } from "@/lib/revenue";
 import {
   AreaChart, Area, XAxis, YAxis, Tooltip, ResponsiveContainer,
   CartesianGrid, Line,
@@ -69,9 +68,6 @@ const Index = () => {
   const { dateRange } = useFilters();
   const { fmt: fmtAED } = useCurrency();
   const { data: zoho } = useZohoData();
-  // Spend per normalized channel key — drives the efficiency leg of the
-  // composite Best-Channel score below.
-  const channelEconomics = useChannelEconomics();
   // "Where Qualified Leads Come From" — channel breakdown of qualified leads
   // in the selected period. Uses page-level date range via filteredLeads.
   const QUALIFIED_SET = useMemo(() => new Set([
@@ -122,21 +118,13 @@ const Index = () => {
 
   // ── Expanded content for each KPI card ──────────────────────────────────────
 
-  // 1. Best Channel → composite score across volume, efficiency, and rate.
-  // Each sub-score is normalized 0–100 against the best channel on that
-  // dimension; the headline is the equal-weighted average of the three.
-  // Channels need ≥25 leads, ≥1 conversion, AND have spend (for efficiency).
-  // If no channel qualifies (e.g. no spend recorded), we fall back to ranking
-  // by raw conversion rate so the card always has something to show.
+  // 1. Best Channel → simply the channel with the most converted doctors
+  // (DoB rows) in the period. Headline value = revenue (conversions × per-
+  // doctor fee) so the card answers "which channel is making us the most
+  // money right now?"
   const bestChannelData = useMemo(() => {
     const fromMs = dateRange.from.getTime();
     const toMs   = dateRange.to.getTime() + 86_400_000;
-    const leadsByCh = new Map<string, number>();
-    for (const l of filteredLeads) {
-      const ch = displaySource(l.Lead_Source);
-      if (ch === 'Undefined') continue;
-      leadsByCh.set(ch, (leadsByCh.get(ch) ?? 0) + 1);
-    }
     const convByCh = new Map<string, number>();
     for (const d of zoho?.rawDoctorsOnBoard ?? []) {
       if (!d.Created_Time) continue;
@@ -146,86 +134,35 @@ const Index = () => {
       if (ch === 'Undefined') continue;
       convByCh.set(ch, (convByCh.get(ch) ?? 0) + 1);
     }
-    // Spend lookup via normalizeChannelKey (matches useChannelEconomics buckets).
-    const spendByCh = new Map<string, number>();
-    for (const r of channelEconomics) spendByCh.set(r.channel, r.spend);
-    const getSpend = (ch: string) => spendByCh.get(normalizeChannelKey(ch)) ?? 0;
-
-    type Row = {
-      channel: string; leads: number; conversions: number; spend: number;
-      rate: number; cpc: number;
-      volScore: number; rateScore: number; effScore: number; score: number;
-    };
-    const candidates: Row[] = Array.from(leadsByCh.entries())
-      .filter(([, n]) => n >= 25)
-      .map(([channel, leads]): Row => {
-        const conversions = convByCh.get(channel) ?? 0;
-        const spend       = getSpend(channel);
-        const rate        = leads > 0 ? Math.min(100, (conversions / leads) * 100) : 0;
-        const cpc         = conversions > 0 && spend > 0 ? spend / conversions : 0;
-        return {
-          channel, leads, conversions, spend, rate, cpc,
-          volScore: 0, rateScore: 0, effScore: 0, score: 0,
-        };
-      });
-    const scoreables = candidates.filter(r => r.conversions > 0 && r.spend > 0 && r.cpc > 0);
-    let ranked: Row[] = [];
-    if (scoreables.length > 0) {
-      const maxConv = Math.max(...scoreables.map(r => r.conversions));
-      const maxRate = Math.max(...scoreables.map(r => r.rate));
-      const minCpc  = Math.min(...scoreables.map(r => r.cpc));
-      ranked = scoreables.map(r => ({
-        ...r,
-        volScore:  maxConv > 0 ? (r.conversions / maxConv) * 100 : 0,
-        rateScore: maxRate > 0 ? (r.rate / maxRate) * 100 : 0,
-        effScore:  r.cpc   > 0 ? (minCpc / r.cpc) * 100 : 0,
-        score:     0,
-      })).map(r => ({ ...r, score: (r.volScore + r.rateScore + r.effScore) / 3 }))
-        .sort((a, b) => b.score - a.score);
-    } else {
-      // Fallback: rank by raw conversion rate when no channel has both spend
-      // and conversions. Score = rate so the headline still reads as a %.
-      ranked = candidates
-        .filter(r => r.conversions > 0)
-        .map(r => ({ ...r, rateScore: r.rate, score: r.rate }))
-        .sort((a, b) => b.score - a.score);
-    }
-    return { ranked, isComposite: scoreables.length > 0 };
-  }, [filteredLeads, zoho?.rawDoctorsOnBoard, dateRange, channelEconomics]);
+    const ranked = Array.from(convByCh.entries())
+      .map(([channel, conversions]) => ({
+        channel,
+        conversions,
+        revenue: conversions * REVENUE_PER_CONVERSION_AED,
+      }))
+      .sort((a, b) => b.conversions - a.conversions);
+    return { ranked };
+  }, [zoho?.rawDoctorsOnBoard, dateRange]);
 
   const winner = bestChannelData.ranked[0];
 
   const bestChannelContent = (
     <div className="space-y-3">
       <p className="text-[10px] text-muted-foreground/80 leading-relaxed">
-        {bestChannelData.isComposite
-          ? <>Composite score (0–100) averages three sub-scores: <strong>volume</strong> (conversions ÷ best), <strong>rate</strong> (conv. rate ÷ best), and <strong>efficiency</strong> (best CPC ÷ this CPC). Channels need ≥25 leads, ≥1 conversion, and recorded spend to qualify.</>
-          : <>Showing channels by conversion rate (Doctors on Board ÷ leads) — no channel has both spend and conversions in this period yet, so the composite score isn't computable.</>
-        }
+        Channel with the most converted doctors (Doctors on Board rows) in the selected period. Headline shows the revenue that channel produced (conversions × {fmtAED(REVENUE_PER_CONVERSION_AED)} per doctor).
       </p>
       <div>
-        <p className="text-[10px] uppercase tracking-wide font-semibold text-muted-foreground/70 mb-1">Top 5 channels</p>
-        <div className="space-y-1.5">
+        <p className="text-[10px] uppercase tracking-wide font-semibold text-muted-foreground/70 mb-1">Top 5 channels by conversions</p>
+        <div className="divide-y divide-border/30">
           {bestChannelData.ranked.length === 0
-            ? <p className="text-[11px] text-muted-foreground py-2">No qualifying channels in this period</p>
+            ? <p className="text-[11px] text-muted-foreground py-2">No conversions in this period</p>
             : bestChannelData.ranked.slice(0, 5).map(r => (
-                <div key={r.channel} className="space-y-0.5">
-                  <div className="flex items-center justify-between gap-2">
-                    <span className="text-[11px] font-semibold truncate">{r.channel}</span>
-                    <span className="text-[11px] font-bold tabular-nums shrink-0">{r.score.toFixed(0)}{bestChannelData.isComposite ? '' : '%'}</span>
+                <div key={r.channel} className="flex items-center justify-between gap-2 py-1.5">
+                  <span className="text-[11px] font-medium truncate">{r.channel}</span>
+                  <div className="text-right tabular-nums shrink-0">
+                    <span className="text-[11px] font-bold">{fmtAED(r.revenue)}</span>
+                    <span className="text-[10px] text-muted-foreground ml-2">{r.conversions} conv</span>
                   </div>
-                  {bestChannelData.isComposite && (
-                    <div className="text-[10px] text-muted-foreground tabular-nums grid grid-cols-3 gap-x-3">
-                      <span>Vol {r.volScore.toFixed(0)} <span className="opacity-60">({r.conversions})</span></span>
-                      <span>Rate {r.rateScore.toFixed(0)} <span className="opacity-60">({r.rate.toFixed(1)}%)</span></span>
-                      <span>Eff {r.effScore.toFixed(0)} <span className="opacity-60">({fmtAED(r.cpc)})</span></span>
-                    </div>
-                  )}
-                  {!bestChannelData.isComposite && (
-                    <div className="text-[10px] text-muted-foreground tabular-nums">
-                      {r.conversions} of {r.leads} leads
-                    </div>
-                  )}
                 </div>
               ))
           }
@@ -417,14 +354,12 @@ const Index = () => {
       value: winner ? winner.channel : '—',
       icon: Users, color: 'text-blue-600', bg: 'bg-blue-50',
       frontExtra: winner
-        ? bestChannelData.isComposite
-          ? `Score ${winner.score.toFixed(0)}/100 · ${winner.conversions} conv · ${fmtAED(winner.cpc)}/conv`
-          : `${winner.rate.toFixed(1)}% conversion · ${winner.conversions}/${winner.leads}`
-        : 'no qualifying channel',
-      hintMeaning: "Composite ranking blending three signals — volume (conversions), rate (conversion %), and efficiency (cost per conversion). Each sub-score is normalized 0-100 against the leader on that dimension; headline is the equal-weighted average. Channels need ≥25 leads, ≥1 conversion, and recorded spend to qualify. Falls back to plain conversion rate when no channel has both spend and conversions.",
-      hintSource:  "Zoho Leads + Doctors on Board + marketing_expenses.",
+        ? `${fmtAED(winner.revenue)} · ${winner.conversions} conversion${winner.conversions === 1 ? "" : "s"}`
+        : 'no conversions in period',
+      hintMeaning: "Channel with the most converted doctors (Doctors on Board rows) in the selected period. Headline is the revenue that channel produced — conversions × per-doctor fee.",
+      hintSource:  "Zoho Doctors on Board × revenue per conversion.",
       expandedContent: bestChannelContent,
-      expandedHeight: 320,
+      expandedHeight: 280,
     },
     {
       title: kpis[1]?.label ?? 'Lead → Conversion',
