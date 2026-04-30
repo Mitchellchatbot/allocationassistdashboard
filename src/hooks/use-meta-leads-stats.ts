@@ -62,13 +62,26 @@ const CONVERTED_STAGES = new Set([
   "closed won",
 ]);
 
-// Normalize utm_source values into clean platform names
+// Normalize utm_source values into clean platform names. Empty / "xxxxx" /
+// other placeholder values are treated as Website (direct organic traffic
+// without a UTM tag — i.e. someone landed on the site without clicking
+// through an ad).
 function normalizePlatform(raw: string): string {
-  const s = raw.toLowerCase().trim();
+  const s = (raw ?? "").toLowerCase().trim();
+  if (!s || s === "xxxxx" || s === "none" || s === "null" || s === "n/a"
+      || s.includes("website") || s === "web" || s === "direct"
+      || s.includes("seo") || s.includes("organic"))
+    return "Website";
   if (s === "meta" || s === "fb" || s.startsWith("facebook")) return "Facebook";
-  if (s === "ig"   || s.startsWith("instagram")) return "Instagram";
-  if (s === "google") return "Google";
-  if (s === "youtube") return "YouTube";
+  if (s === "ig"   || s.startsWith("instagram"))             return "Instagram";
+  if (s === "google" || s.startsWith("google") || s === "g"
+      || s.includes("googleads") || s.includes("google_ads")
+      || s.includes("googleadwords") || s.includes("adwords"))
+    return "Google";
+  if (s === "youtube" || s === "yt")                          return "YouTube";
+  if (s === "tiktok")                                          return "TikTok";
+  if (s === "linkedin" || s.includes("linkedin"))              return "LinkedIn";
+  if (s.includes("whatsapp"))                                  return "WhatsApp";
   return "Other";
 }
 
@@ -79,8 +92,12 @@ function groupByField(
 ): GroupedStat[] {
   const map: Record<string, number> = {};
   for (const row of rows) {
-    let val = (row[field] ?? "").toString().trim();
-    if (!val || val === "xxxxx") continue;
+    const val = (row[field] ?? "").toString().trim();
+    const isEmpty = !val || val === "xxxxx";
+    // Without a normalizer, drop empty/xxxxx rows — caller didn't tell us
+    // how to bucket them. With a normalizer (e.g. utm_source → Website),
+    // pass the empty value through so the normalizer can map it to a label.
+    if (isEmpty && !opts.normalize) continue;
     if (opts.skipNumeric && /^\d+$/.test(val)) continue;
 
     const values = opts.splitComma

@@ -8,7 +8,7 @@ import { DashboardLayout } from "@/components/layout/DashboardLayout";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { CampaignWinnerCards } from "@/components/CampaignWinners";
 import { useMetaLeadsStats, type GroupedStat } from "@/hooks/use-meta-leads-stats";
-import { useMetaAdsApi, useMetaCampaignAds, useMetaAdsByName, useMetaTopAds, type MetaTopAd, getMetaToken, META_TOKEN_LS_KEY } from "@/hooks/use-meta-ads-api";
+import { useMetaAdsApi, useMetaCampaignAds, useMetaAdsByName, useMetaTopAds, useMetaTopAdsets, type MetaTopAd, getMetaToken, META_TOKEN_LS_KEY } from "@/hooks/use-meta-ads-api";
 import { useZohoData, displaySource } from "@/hooks/use-zoho-data";
 import { useFilters } from "@/lib/filters";
 import { useQueryClient } from "@tanstack/react-query";
@@ -794,6 +794,31 @@ const MetaAds = () => {
   const allAccountIds = api?.accounts?.map(a => a.id) ?? [];
 
   const { data: topAds = [], isLoading: topAdsLoading } = useMetaTopAds(allAccountIds, since, until);
+  const { data: topAdsets = [] } = useMetaTopAdsets(allAccountIds, since, until);
+  // Per-Adset table sort + render-cap
+  type AdsetSortKey = "spend" | "impressions" | "clicks" | "ctr" | "leads";
+  const [adsetSortKey, setAdsetSortKey] = useState<AdsetSortKey>("spend");
+  const [adsetSortDir, setAdsetSortDir] = useState<"asc" | "desc">("desc");
+  const handleAdsetSort = (k: AdsetSortKey) => {
+    if (adsetSortKey === k) setAdsetSortDir(d => d === "asc" ? "desc" : "asc");
+    else { setAdsetSortKey(k); setAdsetSortDir("desc"); }
+  };
+  const sortedAdsets = useMemo(() => {
+    const sign = adsetSortDir === "asc" ? 1 : -1;
+    const get = (a: typeof topAdsets[number]): number => {
+      switch (adsetSortKey) {
+        case "spend":       return a.spend;
+        case "impressions": return a.impressions;
+        case "clicks":      return a.clicks;
+        case "ctr":         return a.ctr;
+        case "leads":       return a.leads;
+      }
+    };
+    return [...topAdsets].sort((a, b) => (get(a) - get(b)) * sign);
+  }, [topAdsets, adsetSortKey, adsetSortDir]);
+  const ADSETS_INITIAL = 20;
+  const ADSETS_STEP    = 20;
+  const [visibleAdsets, setVisibleAdsets] = useState(ADSETS_INITIAL);
   const summary  = api?.summary;
   // Meta returns AED amounts; we display in the user-selected currency.
   const currency = displayCurrency;
@@ -1451,19 +1476,13 @@ const MetaAds = () => {
               then surfaces qualified + placement counts and the cost-per metrics
               (CPQL / cost per placement) per creative. Video ads are badged. */}
           {videoPerformance.length > 0 && (
-            <Card className="mb-4 shadow-sm border-border/50">
-              <CardHeader className="pb-1 pt-4 px-4">
+            <Card className="mb-4 shadow-md border-border/60">
+              <CardHeader className="pb-2 pt-4 px-5">
                 <div className="flex items-start justify-between gap-3 flex-wrap">
                   <div>
-                    <CardTitle className="text-[12px] font-medium text-muted-foreground uppercase tracking-wide">
-                      Per-Creative Performance
-                    </CardTitle>
-                    <p className="text-[10px] text-muted-foreground/70 mt-0.5">
-                      spend from Meta API · qualified/placed from Zoho via utm_content match · video badge where confirmed
-                    </p>
-                    <p className="text-[10px] text-primary/80 mt-1 inline-flex items-center gap-1">
-                      <ChevronsUpDown className="h-3 w-3" />
-                      Click any column header to sort
+                    <CardTitle className="text-[14px] font-semibold text-foreground">Per-Creative Performance</CardTitle>
+                    <p className="text-[11px] text-muted-foreground/80 mt-0.5">
+                      Spend from Meta API · qualified/placed from Zoho via utm_content match · click any column to sort
                     </p>
                   </div>
                   {/* View-mode toggle — swaps which columns are shown */}
@@ -1487,29 +1506,29 @@ const MetaAds = () => {
                   </div>
                 </div>
               </CardHeader>
-              <CardContent className="px-0 pb-2 overflow-x-auto">
-                <table className="w-full text-left">
-                  <thead>
-                    <tr className="border-b border-border/40">
-                      <th className="py-2 px-3 text-[10px] font-medium text-muted-foreground uppercase tracking-wide w-8">#</th>
-                      <th className="py-2 px-3 text-[10px] font-medium text-muted-foreground uppercase tracking-wide w-12">Ad</th>
-                      <th className="py-2 px-3 text-[10px] font-medium text-muted-foreground uppercase tracking-wide">Name</th>
-                      <SortableTH sortKey="spend" current={sortKey} dir={sortDir} onSort={handleSort}
+              <CardContent className="px-0 pb-3 overflow-x-auto">
+                <table className="w-full text-left border-collapse">
+                  <thead className="bg-muted/40 border-y border-border/60">
+                    <tr>
+                      <th className="py-3 px-3 text-[12px] font-semibold text-muted-foreground uppercase tracking-wide w-8">#</th>
+                      <th className="py-3 px-3 text-[12px] font-semibold text-muted-foreground uppercase tracking-wide w-12">Ad</th>
+                      <th className="py-3 px-3 text-[12px] font-semibold text-muted-foreground uppercase tracking-wide">Name</th>
+                      <SortableTH sortKey="spend" current={sortKey} dir={sortDir} onSort={handleSort} size="md"
                         info={{ meaning: "Meta Ads spend on this creative in the period.", source: "Meta Marketing API." }}>
                         Spend
                       </SortableTH>
 
                       {/* Performance view: Leads → Qualified → CPQL */}
                       {creativeView === "performance" && <>
-                        <SortableTH sortKey="leads" current={sortKey} dir={sortDir} onSort={handleSort}
+                        <SortableTH sortKey="leads" current={sortKey} dir={sortDir} onSort={handleSort} size="md"
                           info={{ meaning: "Form leads matched to this creative by ad-id or ad-name ↔ utm_content.", source: "Supabase meta_leads." }}>
                           Leads
                         </SortableTH>
-                        <SortableTH sortKey="qualified" current={sortKey} dir={sortDir} onSort={handleSort}
+                        <SortableTH sortKey="qualified" current={sortKey} dir={sortDir} onSort={handleSort} size="md"
                           info={{ meaning: 'How many of those leads reached qualified status. "Contact in Future" excluded.', source: "meta_leads × Zoho Lead_Status." }}>
                           Qualified
                         </SortableTH>
-                        <SortableTH sortKey="cpql" current={sortKey} dir={sortDir} onSort={handleSort}
+                        <SortableTH sortKey="cpql" current={sortKey} dir={sortDir} onSort={handleSort} size="md"
                           info={{ meaning: "Cost per Qualified Lead = Meta spend ÷ qualified leads for this creative.", source: "Meta API + Zoho." }}>
                           CPQL
                         </SortableTH>
@@ -1517,15 +1536,15 @@ const MetaAds = () => {
 
                       {/* Cost view: CPL → CPQL → Cost / Conversion */}
                       {creativeView === "cost" && <>
-                        <SortableTH sortKey="leads" current={sortKey} dir={sortDir} onSort={handleSort}
+                        <SortableTH sortKey="leads" current={sortKey} dir={sortDir} onSort={handleSort} size="md"
                           info={{ meaning: "Meta spend ÷ form leads for this creative. Sort by lead volume.", source: "Meta API + Supabase meta_leads." }}>
                           Cost / Lead
                         </SortableTH>
-                        <SortableTH sortKey="cpql" current={sortKey} dir={sortDir} onSort={handleSort}
+                        <SortableTH sortKey="cpql" current={sortKey} dir={sortDir} onSort={handleSort} size="md"
                           info={{ meaning: "Cost per Qualified Lead = Meta spend ÷ qualified leads for this creative.", source: "Meta API + Zoho Lead_Status." }}>
                           CPQL
                         </SortableTH>
-                        <SortableTH sortKey="cpp" current={sortKey} dir={sortDir} onSort={handleSort}
+                        <SortableTH sortKey="cpp" current={sortKey} dir={sortDir} onSort={handleSort} size="md"
                           info={{ meaning: "Meta spend ÷ conversions for this creative.", source: "Meta API + Zoho Doctors on Board." }}>
                           Cost / Conversion
                         </SortableTH>
@@ -1533,21 +1552,21 @@ const MetaAds = () => {
 
                       {/* Reach view: Impressions → Clicks → CTR */}
                       {creativeView === "reach" && <>
-                        <SortableTH sortKey="impressions" current={sortKey} dir={sortDir} onSort={handleSort}
+                        <SortableTH sortKey="impressions" current={sortKey} dir={sortDir} onSort={handleSort} size="md"
                           info={{ meaning: "Times this creative was shown in the period.", source: "Meta Marketing API." }}>
                           Impressions
                         </SortableTH>
-                        <SortableTH sortKey="clicks" current={sortKey} dir={sortDir} onSort={handleSort}
+                        <SortableTH sortKey="clicks" current={sortKey} dir={sortDir} onSort={handleSort} size="md"
                           info={{ meaning: "Link clicks on this creative.", source: "Meta Marketing API." }}>
                           Clicks
                         </SortableTH>
-                        <SortableTH sortKey="ctr" current={sortKey} dir={sortDir} onSort={handleSort}
+                        <SortableTH sortKey="ctr" current={sortKey} dir={sortDir} onSort={handleSort} size="md"
                           info={{ meaning: "Click-through rate = clicks ÷ impressions.", source: "Meta Marketing API." }}>
                           CTR
                         </SortableTH>
                       </>}
 
-                      <th className="py-2 px-3 text-[10px] font-medium text-muted-foreground uppercase tracking-wide text-center">Preview</th>
+                      <th className="py-3 px-3 text-[12px] font-semibold text-muted-foreground uppercase tracking-wide text-center">Preview</th>
                     </tr>
                   </thead>
                   <LayoutGroup>
@@ -1559,8 +1578,8 @@ const MetaAds = () => {
                         transition={{ type: "spring", stiffness: 380, damping: 32 }}
                         className="border-b border-border/30 hover:bg-muted/30"
                       >
-                        <motion.td layout="position" className="py-2.5 px-3 text-[11px] text-muted-foreground">{i + 1}</motion.td>
-                        <td className="py-2.5 px-3">
+                        <motion.td layout="position" className="py-3 px-3 text-[12px] text-muted-foreground tabular-nums">{i + 1}</motion.td>
+                        <td className="py-3 px-3">
                           {v.thumbnail ? (
                             <div className="relative h-9 w-14 rounded overflow-hidden bg-muted shrink-0">
                               <img src={v.thumbnail} alt="" className="h-full w-full object-cover" />
@@ -1576,63 +1595,63 @@ const MetaAds = () => {
                             </div>
                           )}
                         </td>
-                        <td className="py-2.5 px-3">
+                        <td className="py-3 px-3">
                           <div className="flex items-center gap-1.5">
                             <span className={`h-1.5 w-1.5 rounded-full shrink-0 ${v.status === "ACTIVE" ? "bg-success" : "bg-muted-foreground/30"}`} />
-                            <span className="text-[11px] font-medium truncate max-w-[200px]" title={v.name}>{v.name}</span>
+                            <span className="text-[13px] font-semibold truncate max-w-[260px]" title={v.name}>{v.name}</span>
                           </div>
                         </td>
-                        <td className="py-2.5 px-3 text-right text-[11px] font-semibold text-primary tabular-nums">
-                          {v.spend > 0 ? fmtC(toDisplay(v.spend), currency) : <span className="text-muted-foreground/40">—</span>}
+                        <td className="py-3 px-3 text-right text-[13px] font-bold tabular-nums text-blue-700">
+                          {v.spend > 0 ? fmtC(toDisplay(v.spend), currency) : <span className="text-muted-foreground/40 font-normal">—</span>}
                         </td>
 
                         {/* Performance: Leads / Qualified / CPQL */}
                         {creativeView === "performance" && <>
-                          <td className="py-2.5 px-3 text-right text-[12px] tabular-nums">
-                            {v.formLeads > 0 ? v.formLeads.toLocaleString() : <span className="text-muted-foreground/40">—</span>}
+                          <td className="py-3 px-3 text-right text-[13px] tabular-nums text-foreground/90 font-semibold">
+                            {v.formLeads > 0 ? v.formLeads.toLocaleString() : <span className="text-muted-foreground/40 font-normal">—</span>}
                           </td>
-                          <td className="py-2.5 px-3 text-right text-[12px] tabular-nums">
+                          <td className="py-3 px-3 text-right text-[13px] tabular-nums">
                             {v.qualified > 0 ? (
                               <>
-                                <span className="font-semibold text-success">{v.qualified.toLocaleString()}</span>
-                                <span className="text-[10px] font-normal ml-1 opacity-70">({v.qualRate.toFixed(0)}%)</span>
+                                <span className="font-bold text-emerald-700">{v.qualified.toLocaleString()}</span>
+                                <span className="text-[11px] font-normal text-muted-foreground ml-1.5">({v.qualRate.toFixed(0)}%)</span>
                               </>
                             ) : <span className="text-muted-foreground/40">—</span>}
                           </td>
-                          <td className="py-2.5 px-3 text-right text-[12px] font-semibold tabular-nums">
+                          <td className="py-3 px-3 text-right text-[13px] font-semibold tabular-nums text-orange-700">
                             {v.cpql > 0 ? fmtC(toDisplay(v.cpql), currency) : <span className="text-muted-foreground/40 font-normal">—</span>}
                           </td>
                         </>}
 
                         {/* Cost: CPL / CPQL / CPP */}
                         {creativeView === "cost" && <>
-                          <td className="py-2.5 px-3 text-right text-[12px] font-semibold tabular-nums">
+                          <td className="py-3 px-3 text-right text-[13px] font-semibold tabular-nums text-orange-700">
                             {(v.spend > 0 && v.formLeads > 0)
                               ? fmtC(toDisplay(v.spend / v.formLeads), currency)
                               : <span className="text-muted-foreground/40 font-normal">—</span>}
                           </td>
-                          <td className="py-2.5 px-3 text-right text-[12px] font-semibold tabular-nums">
+                          <td className="py-3 px-3 text-right text-[13px] font-semibold tabular-nums text-orange-700">
                             {v.cpql > 0 ? fmtC(toDisplay(v.cpql), currency) : <span className="text-muted-foreground/40 font-normal">—</span>}
                           </td>
-                          <td className="py-2.5 px-3 text-right text-[12px] font-semibold tabular-nums">
+                          <td className="py-3 px-3 text-right text-[13px] font-semibold tabular-nums text-violet-700">
                             {v.cpp > 0 ? fmtC(toDisplay(v.cpp), currency) : <span className="text-muted-foreground/40 font-normal">—</span>}
                           </td>
                         </>}
 
                         {/* Reach: Impressions / Clicks / CTR */}
                         {creativeView === "reach" && <>
-                          <td className="py-2.5 px-3 text-right text-[11px] text-muted-foreground tabular-nums">
+                          <td className="py-3 px-3 text-right text-[12px] text-foreground/80 tabular-nums">
                             {v.impressions > 0 ? fmtN(v.impressions) : <span className="text-muted-foreground/40">—</span>}
                           </td>
-                          <td className="py-2.5 px-3 text-right text-[12px] tabular-nums">
+                          <td className="py-3 px-3 text-right text-[12px] tabular-nums text-foreground/80">
                             {v.ad.clicks > 0 ? fmtN(v.ad.clicks) : <span className="text-muted-foreground/40">—</span>}
                           </td>
-                          <td className="py-2.5 px-3 text-right text-[11px] tabular-nums">
-                            {v.ad.ctr > 0 ? `${v.ad.ctr.toFixed(2)}%` : <span className="text-muted-foreground/40">—</span>}
+                          <td className="py-3 px-3 text-right text-[12px] tabular-nums text-violet-700 font-semibold">
+                            {v.ad.ctr > 0 ? `${v.ad.ctr.toFixed(2)}%` : <span className="text-muted-foreground/40 font-normal">—</span>}
                           </td>
                         </>}
 
-                        <td className="py-2.5 px-3 text-center">
+                        <td className="py-3 px-3 text-center">
                           <button
                             type="button"
                             onClick={() => setDirectPreviewAd(v.ad)}
@@ -1679,44 +1698,137 @@ const MetaAds = () => {
             </Card>
           )}
 
-          {/* Campaigns — with big "View Ads" button */}
-          {campaigns.length > 0 && (
-            <Card className="mb-4 shadow-sm border-border/50">
-              <CardHeader className="pb-1 pt-4 px-4">
-                <CardTitle className="text-[12px] font-medium text-muted-foreground uppercase tracking-wide">
-                  Campaigns
-                  <span className="ml-2 normal-case font-normal text-muted-foreground/40">
-                    · click <Play className="h-2.5 w-2.5 inline" /> to preview ads
-                  </span>
-                </CardTitle>
-                <p className="text-[10px] text-primary/80 mt-1 inline-flex items-center gap-1">
-                  <ChevronsUpDown className="h-3 w-3" />
-                  Click any column header to sort
+          {/* ── Per-Adset Performance ──────────────────────────────────
+              One row per ad set (a level above ads, below campaign) with
+              spend / impressions / clicks / CTR / leads. Sortable + animated
+              + same shape as the per-creative table. */}
+          {topAdsets.length > 0 && (
+            <Card className="mb-4 shadow-md border-border/60">
+              <CardHeader className="pb-2 pt-4 px-5">
+                <CardTitle className="text-[14px] font-semibold text-foreground">Per-Adset Performance</CardTitle>
+                <p className="text-[11px] text-muted-foreground/80 mt-0.5">
+                  Spend &amp; reach per ad set · sorted by spend by default · click any column to sort
                 </p>
               </CardHeader>
-              <CardContent className="px-0 pb-2 overflow-x-auto">
-                <table className="w-full text-left">
-                  <thead>
-                    <tr className="border-b border-border/40">
-                      <th className="py-2 px-3 text-[10px] font-medium text-muted-foreground uppercase tracking-wide">Campaign</th>
-                      <th className="py-2 px-3 text-[10px] font-medium text-muted-foreground uppercase tracking-wide">Objective</th>
-                      <SortableTH sortKey="spend" current={campSortKey} dir={campSortDir} onSort={handleCampSort}
-                        info={{ meaning: "Total Meta Ads spend on this campaign in the period.", source: "Meta Marketing API." }}>
+              <CardContent className="px-0 pb-3 overflow-x-auto">
+                <table className="w-full text-left border-collapse">
+                  <thead className="bg-muted/40 border-y border-border/60">
+                    <tr>
+                      <th className="py-3 px-3 text-[12px] font-semibold text-muted-foreground uppercase tracking-wide w-8">#</th>
+                      <th className="py-3 px-3 text-[12px] font-semibold text-muted-foreground uppercase tracking-wide">Adset · Campaign</th>
+                      <SortableTH sortKey="spend" current={adsetSortKey} dir={adsetSortDir} onSort={handleAdsetSort} size="md"
+                        info={{ meaning: "Total Meta Ads spend on this ad set in the period.", source: "Meta Marketing API." }}>
                         Spend
                       </SortableTH>
-                      <SortableTH sortKey="impressions" current={campSortKey} dir={campSortDir} onSort={handleCampSort}
-                        info={{ meaning: "Times any ad in this campaign was shown.", source: "Meta Marketing API." }}>
+                      <SortableTH sortKey="impressions" current={adsetSortKey} dir={adsetSortDir} onSort={handleAdsetSort} size="md"
+                        info={{ meaning: "Times any ad in this set was shown.", source: "Meta Marketing API." }}>
                         Impr.
                       </SortableTH>
-                      <SortableTH sortKey="ctr" current={campSortKey} dir={campSortDir} onSort={handleCampSort}
+                      <SortableTH sortKey="clicks" current={adsetSortKey} dir={adsetSortDir} onSort={handleAdsetSort} size="md"
+                        info={{ meaning: "Link clicks on ads in this set.", source: "Meta Marketing API." }}>
+                        Clicks
+                      </SortableTH>
+                      <SortableTH sortKey="ctr" current={adsetSortKey} dir={adsetSortDir} onSort={handleAdsetSort} size="md"
                         info={{ meaning: "Click-through rate = clicks ÷ impressions.", source: "Meta Marketing API." }}>
                         CTR
                       </SortableTH>
-                      <SortableTH sortKey="leads" current={campSortKey} dir={campSortDir} onSort={handleCampSort}
+                      <SortableTH sortKey="leads" current={adsetSortKey} dir={adsetSortDir} onSort={handleAdsetSort} size="md"
+                        info={{ meaning: "Lead actions Meta attributed to this ad set's ads.", source: "Meta Marketing API." }}>
+                        Leads
+                      </SortableTH>
+                    </tr>
+                  </thead>
+                  <LayoutGroup>
+                    <motion.tbody layout>
+                      {sortedAdsets.slice(0, visibleAdsets).map((s, i) => (
+                        <motion.tr
+                          key={s.id}
+                          layout
+                          transition={{ type: "spring", stiffness: 380, damping: 32 }}
+                          className="border-b border-border/30 hover:bg-muted/30"
+                        >
+                          <motion.td layout="position" className="py-3 px-3 text-[12px] text-muted-foreground tabular-nums">{i + 1}</motion.td>
+                          <td className="py-3 px-3">
+                            <div className="flex items-center gap-1.5">
+                              <span className={`h-1.5 w-1.5 rounded-full shrink-0 ${s.status === "ACTIVE" ? "bg-success" : "bg-muted-foreground/30"}`} />
+                              <span className="text-[13px] font-semibold truncate max-w-[260px]" title={s.name}>{s.name}</span>
+                            </div>
+                            <p className="text-[10px] text-muted-foreground truncate max-w-[260px] ml-3.5" title={s.campaignName}>{s.campaignName}</p>
+                          </td>
+                          <td className="py-3 px-3 text-right text-[13px] font-bold tabular-nums text-blue-700">
+                            {s.spend > 0 ? fmtC(toDisplay(s.spend), currency) : <span className="text-muted-foreground/40 font-normal">—</span>}
+                          </td>
+                          <td className="py-3 px-3 text-right text-[12px] tabular-nums text-foreground/80">
+                            {s.impressions > 0 ? fmtN(s.impressions) : <span className="text-muted-foreground/40">—</span>}
+                          </td>
+                          <td className="py-3 px-3 text-right text-[12px] tabular-nums text-foreground/80">
+                            {s.clicks > 0 ? fmtN(s.clicks) : <span className="text-muted-foreground/40">—</span>}
+                          </td>
+                          <td className="py-3 px-3 text-right text-[12px] tabular-nums text-violet-700 font-semibold">
+                            {s.ctr > 0 ? `${s.ctr.toFixed(2)}%` : <span className="text-muted-foreground/40 font-normal">—</span>}
+                          </td>
+                          <td className="py-3 px-3 text-right text-[13px] font-bold tabular-nums text-emerald-700">
+                            {s.leads > 0 ? fmtN(s.leads) : <span className="text-muted-foreground/40 font-normal">—</span>}
+                          </td>
+                        </motion.tr>
+                      ))}
+                    </motion.tbody>
+                  </LayoutGroup>
+                </table>
+                {sortedAdsets.length > visibleAdsets && (
+                  <div className="flex flex-col items-center gap-1 px-4 pt-3 pb-1">
+                    <button
+                      type="button"
+                      onClick={() => setVisibleAdsets(n => n + ADSETS_STEP)}
+                      className="inline-flex items-center gap-1.5 rounded-lg bg-primary/10 hover:bg-primary hover:text-white text-primary px-3 py-1.5 text-[11px] font-semibold transition-colors"
+                    >
+                      <ChevronDown className="h-3 w-3" />
+                      Show {Math.min(ADSETS_STEP, sortedAdsets.length - visibleAdsets)} more
+                    </button>
+                    <span className="text-[9px] text-muted-foreground/60">
+                      Showing {visibleAdsets} of {sortedAdsets.length} ad sets
+                    </span>
+                  </div>
+                )}
+              </CardContent>
+            </Card>
+          )}
+
+          {/* Campaigns — with big "View Ads" button */}
+          {campaigns.length > 0 && (
+            <Card className="mb-4 shadow-md border-border/60">
+              <CardHeader className="pb-2 pt-4 px-5">
+                <CardTitle className="text-[14px] font-semibold text-foreground">
+                  Campaigns
+                  <span className="ml-2 text-[11px] font-normal text-muted-foreground/70">· click <Play className="h-2.5 w-2.5 inline" /> to preview ads</span>
+                </CardTitle>
+                <p className="text-[11px] text-muted-foreground/80 mt-0.5">
+                  Total spend, reach &amp; lead attribution per campaign · click any column to sort
+                </p>
+              </CardHeader>
+              <CardContent className="px-0 pb-3 overflow-x-auto">
+                <table className="w-full text-left border-collapse">
+                  <thead className="bg-muted/40 border-y border-border/60">
+                    <tr>
+                      <th className="py-3 px-3 text-[12px] font-semibold text-muted-foreground uppercase tracking-wide">Campaign</th>
+                      <th className="py-3 px-3 text-[12px] font-semibold text-muted-foreground uppercase tracking-wide">Objective</th>
+                      <SortableTH sortKey="spend" current={campSortKey} dir={campSortDir} onSort={handleCampSort} size="md"
+                        info={{ meaning: "Total Meta Ads spend on this campaign in the period.", source: "Meta Marketing API." }}>
+                        Spend
+                      </SortableTH>
+                      <SortableTH sortKey="impressions" current={campSortKey} dir={campSortDir} onSort={handleCampSort} size="md"
+                        info={{ meaning: "Times any ad in this campaign was shown.", source: "Meta Marketing API." }}>
+                        Impr.
+                      </SortableTH>
+                      <SortableTH sortKey="ctr" current={campSortKey} dir={campSortDir} onSort={handleCampSort} size="md"
+                        info={{ meaning: "Click-through rate = clicks ÷ impressions.", source: "Meta Marketing API." }}>
+                        CTR
+                      </SortableTH>
+                      <SortableTH sortKey="leads" current={campSortKey} dir={campSortDir} onSort={handleCampSort} size="md"
                         info={{ meaning: "Form leads attributed to this campaign. Meta API first; falls back to meta_leads.utm_campaign join when API returns no lead actions (marked *).", source: "Meta API + Supabase meta_leads." }}>
                         Leads
                       </SortableTH>
-                      <th className="py-2 px-3 text-[10px] font-medium text-muted-foreground uppercase tracking-wide text-center">Preview</th>
+                      <th className="py-3 px-3 text-[12px] font-semibold text-muted-foreground uppercase tracking-wide text-center">Preview</th>
                     </tr>
                   </thead>
                   <LayoutGroup>
@@ -1733,25 +1845,25 @@ const MetaAds = () => {
                         transition={{ type: "spring", stiffness: 380, damping: 32 }}
                         className="border-b border-border/30 hover:bg-muted/30"
                       >
-                        <td className="py-2.5 px-3">
+                        <td className="py-3 px-3">
                           <div className="flex items-center gap-1.5">
                             <span className={`h-1.5 w-1.5 rounded-full shrink-0 ${c.status === "ACTIVE" ? "bg-success" : "bg-muted-foreground/40"}`} />
-                            <span className="text-[11px] font-medium truncate max-w-[200px]">{c.name}</span>
+                            <span className="text-[13px] font-semibold truncate max-w-[260px]" title={c.name}>{c.name}</span>
                           </div>
                         </td>
-                        <td className="py-2.5 px-3 text-[10px] text-muted-foreground capitalize">{c.objective.toLowerCase()}</td>
-                        <td className="py-2.5 px-3 text-right text-[11px] font-semibold tabular-nums text-primary">{fmtC(toDisplay(c.spend), currency)}</td>
-                        <td className="py-2.5 px-3 text-right text-[11px] tabular-nums text-muted-foreground">{fmtN(c.impressions)}</td>
-                        <td className="py-2.5 px-3 text-right text-[11px] tabular-nums">{c.ctr.toFixed(2)}%</td>
-                        <td className="py-2.5 px-3 text-right text-[11px] tabular-nums font-semibold text-success">
+                        <td className="py-3 px-3 text-[11px] text-muted-foreground capitalize">{c.objective.toLowerCase()}</td>
+                        <td className="py-3 px-3 text-right text-[13px] font-bold tabular-nums text-blue-700">{fmtC(toDisplay(c.spend), currency)}</td>
+                        <td className="py-3 px-3 text-right text-[12px] tabular-nums text-foreground/80">{fmtN(c.impressions)}</td>
+                        <td className="py-3 px-3 text-right text-[12px] tabular-nums text-violet-700 font-semibold">{c.ctr.toFixed(2)}%</td>
+                        <td className="py-3 px-3 text-right text-[13px] tabular-nums font-bold text-emerald-700">
                           {displayLeads > 0 ? (
                             <span title={fromForms ? "Sourced from form submissions (Meta API didn't report lead actions for this campaign)" : "Sourced from Meta API"}>
                               {displayLeads}
                               {fromForms && <span className="ml-0.5 text-[8px] text-muted-foreground/60 font-normal">*</span>}
                             </span>
-                          ) : "—"}
+                          ) : <span className="text-muted-foreground/40 font-normal">—</span>}
                         </td>
-                        <td className="py-2.5 px-3 text-center">
+                        <td className="py-3 px-3 text-center">
                           <button
                             type="button"
                             onClick={() => setPreviewCampaign({ id: c.id, name: c.name })}

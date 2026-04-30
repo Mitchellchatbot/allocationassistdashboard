@@ -4,7 +4,8 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
 import { useZohoData, type ZohoLead } from "@/hooks/use-zoho-data";
-import { Printer, Search, FileText } from "lucide-react";
+import { Printer, Search, FileText, Send, Loader2 } from "lucide-react";
+import html2pdf from "html2pdf.js";
 import logoSrc from "@/assets/logo.png";
 import signatureSrc from "@/assets/signature-emilie.png";
 import stampSrc from "@/assets/stamp-allocation.png";
@@ -279,6 +280,58 @@ const Contracts = () => {
     setTimeout(() => { win.print(); }, 400);
   };
 
+  // ── PDF generation: captures the rendered contract preview into a real
+  // PDF Blob using html2pdf.js (html2canvas + jsPDF under the hood). Used
+  // by the BoldSign send flow — we need an actual file to attach to the
+  // signing request, not a print dialog.
+  const generateContractPdf = async (): Promise<Blob | null> => {
+    if (!previewRef.current || !selectedLead) return null;
+    // Clone the preview into an offscreen container so html2canvas can
+    // measure it at full size without being affected by the screen
+    // viewport / scroll position.
+    const filename = `Service Agreement — ${clientName(selectedLead)}.pdf`;
+    const opts = {
+      margin:       [22, 28, 22, 28],   // mm — matches @page margin in print
+      filename,
+      image:        { type: "jpeg", quality: 0.95 },
+      html2canvas:  { scale: 2, useCORS: true, backgroundColor: "#ffffff" },
+      jsPDF:        { unit: "mm", format: "a4", orientation: "portrait" as const },
+      pagebreak:    { mode: ["avoid-all", "css", "legacy"] as ("avoid-all" | "css" | "legacy")[] },
+    };
+    return html2pdf().from(previewRef.current).set(opts).outputPdf("blob") as Promise<Blob>;
+  };
+
+  // ── Send for Signature: stub — wires up to the BoldSign Edge Function
+  // in the next step. For now generates the PDF + downloads it locally
+  // so we can verify the rendering before plugging into the API.
+  const [sending, setSending] = useState(false);
+  const handleSendForSignature = async () => {
+    if (!selectedLead) return;
+    setSending(true);
+    try {
+      const pdfBlob = await generateContractPdf();
+      if (!pdfBlob) {
+        alert("Could not generate the contract PDF. Try selecting a doctor first.");
+        return;
+      }
+      // Step 1 placeholder: download the PDF locally so we can verify the
+      // generated file looks right before wiring up the BoldSign Edge
+      // Function. Replaced in Step 2.
+      const url = URL.createObjectURL(pdfBlob);
+      const a = document.createElement("a");
+      a.href = url;
+      a.download = `Service Agreement — ${clientName(selectedLead)}.pdf`;
+      a.click();
+      URL.revokeObjectURL(url);
+      alert(`PDF generated (${(pdfBlob.size / 1024).toFixed(0)} KB). Once the BoldSign sender identity is verified, this same PDF will be sent to ${selectedLead.Email ?? "the doctor's email"} for signature instead of downloading.`);
+    } catch (err) {
+      console.error("[Contracts] PDF generation failed:", err);
+      alert(`PDF generation failed: ${err instanceof Error ? err.message : String(err)}`);
+    } finally {
+      setSending(false);
+    }
+  };
+
   return (
     <DashboardLayout title="Contract Builder" subtitle="Search a doctor, edit fees and dates, then print">
 
@@ -360,11 +413,22 @@ const Contracts = () => {
 
         <Button
           onClick={handlePrint}
+          variant="outline"
           className="h-9 gap-1.5 text-[12px] shrink-0"
           disabled={!selectedLead}
         >
           <Printer className="h-3.5 w-3.5" />
           Print / Save PDF
+        </Button>
+        <Button
+          onClick={handleSendForSignature}
+          className="h-9 gap-1.5 text-[12px] shrink-0"
+          disabled={!selectedLead || sending}
+        >
+          {sending
+            ? <Loader2 className="h-3.5 w-3.5 animate-spin" />
+            : <Send className="h-3.5 w-3.5" />}
+          {sending ? "Generating PDF…" : "Send for Signature"}
         </Button>
       </div>
 

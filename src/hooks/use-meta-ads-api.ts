@@ -912,3 +912,91 @@ export function useMetaTopAds(accountIds: string[], since: string, until: string
     },
   });
 }
+
+// ── useMetaTopAdsets — fetch all ad sets across all accounts with insights ───
+// One row per ad set with spend / impressions / clicks / leads / CTR + the
+// parent campaign name. Same pattern as useMetaTopAds: 50 per account, capped
+// to last 90 days for the Development tier, ARCHIVED/DELETED dropped.
+
+export interface MetaTopAdset {
+  id:           string;
+  name:         string;
+  status:       string;
+  campaignId:   string;
+  campaignName: string;
+  dailyBudget:  number;
+  spend:        number;
+  impressions:  number;
+  clicks:       number;
+  ctr:          number;
+  leads:        number;
+}
+
+export function useMetaTopAdsets(accountIds: string[], since: string, until: string) {
+  const key = accountIds.join(",");
+  return useQuery<MetaTopAdset[]>({
+    queryKey: ["meta-top-adsets-v1", key, since, until],
+    enabled:  accountIds.length > 0 && !!getMetaToken(),
+    staleTime: 5 * 60 * 1000,
+    refetchOnWindowFocus: false,
+
+    queryFn: async () => {
+      if (accountIds.length === 0) return [];
+
+      const MAX_DAYS = 90;
+      const untilD = new Date(`${until}T00:00:00Z`);
+      const sinceD = new Date(`${since}T00:00:00Z`);
+      const earliest = new Date(untilD.getTime() - MAX_DAYS * 86_400_000);
+      const sinceClamped = sinceD < earliest ? ymdLocal(earliest) : since;
+      const TIME_RANGE = JSON.stringify({ since: sinceClamped, until });
+      const SAFE_STATUSES = JSON.stringify(["ACTIVE", "PAUSED"]);
+      const FIELDS = `id,name,status,daily_budget,campaign{id,name},insights.time_range(${TIME_RANGE}){spend,impressions,clicks,ctr,actions}`;
+
+      const perAccount = await Promise.all(accountIds.map(accountId =>
+        gql(`${accountId}/adsets`, {
+          fields: FIELDS,
+          effective_status: SAFE_STATUSES,
+          limit: "50",
+        }).catch(() => ({ data: [] }))
+      )) as { data: {
+        id: string; name: string; status: string;
+        daily_budget?: string;
+        campaign?: { id: string; name: string };
+        insights?: { data: (Record<string, string> & { actions?: { action_type: string; value: string }[] })[] };
+      }[] }[];
+
+      const seen = new Set<string>();
+      const adsets: MetaTopAdset[] = [];
+
+      for (const resp of perAccount) {
+        for (const s of resp.data ?? []) {
+          if (seen.has(s.id)) continue;
+          seen.add(s.id);
+          const ins = s.insights?.data?.[0] ?? {};
+          const leads  = sumLeads(ins.actions);
+          const spend  = n(ins.spend);
+          const impressions = n(ins.impressions);
+          // Skip rows with no activity at all
+          if (leads === 0 && spend === 0 && impressions === 0) continue;
+          adsets.push({
+            id:           s.id,
+            name:         s.name,
+            status:       s.status,
+            campaignId:   s.campaign?.id   ?? "",
+            campaignName: s.campaign?.name ?? "—",
+            // Meta returns `daily_budget` in the smallest currency unit (fils
+            // for AED). Divide by 100 to get the real number.
+            dailyBudget:  n(s.daily_budget) / 100,
+            spend,
+            impressions,
+            clicks:       n(ins.clicks),
+            ctr:          n(ins.ctr),
+            leads,
+          });
+        }
+      }
+
+      return adsets.sort((a, b) => b.spend - a.spend || b.leads - a.leads);
+    },
+  });
+}
