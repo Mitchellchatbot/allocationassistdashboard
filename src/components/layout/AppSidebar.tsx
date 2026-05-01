@@ -13,6 +13,7 @@ import {
   Upload,
   FileSignature,
   BellRing,
+  PhoneCall,
 } from "lucide-react";
 import logo from "@/assets/logo.png";
 import { NavLink } from "@/components/NavLink";
@@ -37,6 +38,7 @@ const mainNav = [
   { title: "Sales Tracker", url: "/sales", icon: TrendingUp },
   { title: "Marketing", url: "/marketing", icon: Megaphone },
   { title: "Doctor Progress", url: "/leads-pipeline", icon: GitBranch },
+  { title: "Calls", url: "/calls", icon: PhoneCall },
   { title: "Team Performance", url: "/team", icon: UsersIcon },
   { title: "Finance", url: "/finance", icon: DollarSign },
   { title: "Meta Ads", url: "/meta-ads", icon: Image },

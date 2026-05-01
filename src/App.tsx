@@ -26,6 +26,7 @@ const WorkerDashboard = lazy(() => import("./pages/WorkerDashboard"));
 const CallLogImport   = lazy(() => import("./pages/CallLogImport"));
 const Contracts       = lazy(() => import("./pages/Contracts"));
 const FollowUps       = lazy(() => import("./pages/FollowUps"));
+const Calls           = lazy(() => import("./pages/Calls"));
 const NotFound        = lazy(() => import("./pages/NotFound"));
 
 const queryClient = new QueryClient();
@@ -67,6 +68,7 @@ const App = () => (
               <Route path="/import"         element={<ProtectedRoute requiredPage="/"><FilterProvider><CallLogImport /></FilterProvider></ProtectedRoute>} />
               <Route path="/contracts"      element={<ProtectedRoute requiredPage="/"><FilterProvider><Contracts /></FilterProvider></ProtectedRoute>} />
               <Route path="/follow-ups"     element={<ProtectedRoute requiredPage="/follow-ups"><FilterProvider><FollowUps /></FilterProvider></ProtectedRoute>} />
+              <Route path="/calls"          element={<ProtectedRoute requiredPage="/calls"><FilterProvider><Calls /></FilterProvider></ProtectedRoute>} />
 
               <Route path="*" element={<NotFound />} />
             </Routes>
