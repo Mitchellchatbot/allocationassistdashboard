@@ -4,8 +4,11 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
 import { useZohoData, type ZohoLead } from "@/hooks/use-zoho-data";
-import { Printer, Search, FileText, Send, Loader2 } from "lucide-react";
+import { supabase } from "@/lib/supabase";
+import { Printer, Search, FileText, Send, Loader2, ExternalLink, Download as DownloadIcon, RefreshCw } from "lucide-react";
 import html2pdf from "html2pdf.js";
+import { useContractActivity, boldsignTrackingUrl, downloadContractPdf, type ContractStatus, type ContractSendRow } from "@/hooks/use-contract-activity";
+import { toast } from "sonner";
 import logoSrc from "@/assets/logo.png";
 import signatureSrc from "@/assets/signature-emilie.png";
 import stampSrc from "@/assets/stamp-allocation.png";
@@ -234,6 +237,10 @@ const Contracts = () => {
   const [selectedLead, setSelectedLead] = useState<ZohoLead | null>(null);
   const [showDropdown, setShowDropdown] = useState(false);
   const [fields, setFields]             = useState<ContractFields>(DEFAULT_FIELDS);
+  // Recipient email — defaults to the lead's Zoho email but the recruiter
+  // can override (e.g. if Zoho has a stale address or the lead was created
+  // without one). Falls back to empty string when no lead is selected.
+  const [signerEmail, setSignerEmail]   = useState("");
   const previewRef = useRef<HTMLDivElement>(null);
 
   function setF(key: keyof ContractFields, val: string) {
@@ -284,49 +291,86 @@ const Contracts = () => {
   // PDF Blob using html2pdf.js (html2canvas + jsPDF under the hood). Used
   // by the BoldSign send flow — we need an actual file to attach to the
   // signing request, not a print dialog.
-  const generateContractPdf = async (): Promise<Blob | null> => {
+  const generateContractPdf = async (): Promise<{ blob: Blob; pageCount: number } | null> => {
     if (!previewRef.current || !selectedLead) return null;
-    // Clone the preview into an offscreen container so html2canvas can
-    // measure it at full size without being affected by the screen
-    // viewport / scroll position.
     const filename = `Service Agreement — ${clientName(selectedLead)}.pdf`;
     const opts = {
-      margin:       [22, 28, 22, 28],   // mm — matches @page margin in print
+      margin:       [22, 28, 22, 28],
       filename,
-      image:        { type: "jpeg", quality: 0.95 },
-      html2canvas:  { scale: 2, useCORS: true, backgroundColor: "#ffffff" },
-      jsPDF:        { unit: "mm", format: "a4", orientation: "portrait" as const },
-      pagebreak:    { mode: ["avoid-all", "css", "legacy"] as ("avoid-all" | "css" | "legacy")[] },
+      image:        { type: "jpeg", quality: 0.85 },
+      html2canvas:  { scale: 1.5, useCORS: true, backgroundColor: "#ffffff" },
+      jsPDF:        { unit: "mm", format: "a4", orientation: "portrait" as const, compress: true },
+      // "css" + "legacy" only — "avoid-all" tries to keep every element
+      // unbroken, which causes huge empty stretches when a long list (like
+      // the Schedule 1 services <ol>) doesn't fit at the bottom of a page.
+      // The explicit pageBreakBefore rules on Schedule 1 / 2 still fire via
+      // the "css" mode.
+      pagebreak:    { mode: ["css", "legacy"] as ("avoid-all" | "css" | "legacy")[] },
     };
-    return html2pdf().from(previewRef.current).set(opts).outputPdf("blob") as Promise<Blob>;
+    // We need the page count so the Edge Function can place the signature
+    // field on the LAST page (where "THE CLIENT" line lives), not page 1.
+    // html2pdf().toPdf() resolves to a worker with the underlying jsPDF
+    // instance, which exposes internal.getNumberOfPages().
+    const worker = html2pdf().from(previewRef.current).set(opts).toPdf();
+    const pdf: any = await worker.get("pdf");
+    const pageCount: number = pdf.internal.getNumberOfPages();
+    const blob: Blob = pdf.output("blob");
+    return { blob, pageCount };
   };
 
-  // ── Send for Signature: stub — wires up to the BoldSign Edge Function
-  // in the next step. For now generates the PDF + downloads it locally
-  // so we can verify the rendering before plugging into the API.
+  // ── Send for Signature: generates the PDF, base64-encodes it, posts to
+  // the boldsign-send Supabase Edge Function which forwards to BoldSign
+  // sandbox. Returns a tracking URL we open in a new tab.
   const [sending, setSending] = useState(false);
   const handleSendForSignature = async () => {
     if (!selectedLead) return;
+    if (!signerEmail || !/.+@.+\..+/.test(signerEmail)) {
+      alert("Please enter a valid recipient email before sending.");
+      return;
+    }
     setSending(true);
     try {
-      const pdfBlob = await generateContractPdf();
-      if (!pdfBlob) {
+      const pdfResult = await generateContractPdf();
+      if (!pdfResult) {
         alert("Could not generate the contract PDF. Try selecting a doctor first.");
         return;
       }
-      // Step 1 placeholder: download the PDF locally so we can verify the
-      // generated file looks right before wiring up the BoldSign Edge
-      // Function. Replaced in Step 2.
-      const url = URL.createObjectURL(pdfBlob);
-      const a = document.createElement("a");
-      a.href = url;
-      a.download = `Service Agreement — ${clientName(selectedLead)}.pdf`;
-      a.click();
-      URL.revokeObjectURL(url);
-      alert(`PDF generated (${(pdfBlob.size / 1024).toFixed(0)} KB). Once the BoldSign sender identity is verified, this same PDF will be sent to ${selectedLead.Email ?? "the doctor's email"} for signature instead of downloading.`);
+      const { blob: pdfBlob, pageCount } = pdfResult;
+
+      // Convert Blob → base64 (FileReader → strip "data:application/pdf;base64,")
+      const pdfBase64: string = await new Promise((resolve, reject) => {
+        const r = new FileReader();
+        r.onloadend = () => {
+          const result = typeof r.result === "string" ? r.result : "";
+          const idx = result.indexOf("base64,");
+          resolve(idx >= 0 ? result.slice(idx + 7) : "");
+        };
+        r.onerror = () => reject(r.error);
+        r.readAsDataURL(pdfBlob);
+      });
+
+      const name = clientName(selectedLead);
+      const { data, error } = await supabase.functions.invoke("boldsign-send", {
+        body: {
+          pdfBase64,
+          pageCount,
+          leadId:        selectedLead.id,
+          doctorEmail:   signerEmail.trim(),
+          doctorName:    name,
+          contractTitle: `Service Agreement — ${name}`,
+          message:       `Hi ${selectedLead.First_Name ?? "Doctor"}, please review and sign your service agreement with Allocation Assist. If you have any questions, just reply to this email.`,
+        },
+      });
+      if (error) throw new Error(error.message);
+      if (!data?.ok) throw new Error(data?.error ?? "Unknown BoldSign error");
+
+      // Success — show the tracking URL + open in a new tab so the recruiter
+      // can see the BoldSign envelope status page.
+      window.open(data.trackingUrl, "_blank");
+      alert(`Sent to ${signerEmail} for signature. Tracking ID: ${data.documentId}`);
     } catch (err) {
-      console.error("[Contracts] PDF generation failed:", err);
-      alert(`PDF generation failed: ${err instanceof Error ? err.message : String(err)}`);
+      console.error("[Contracts] Send for Signature failed:", err);
+      alert(`Send failed: ${err instanceof Error ? err.message : String(err)}`);
     } finally {
       setSending(false);
     }
@@ -390,7 +434,7 @@ const Contracts = () => {
                   <button
                     key={lead.id}
                     className="w-full text-left px-3 py-2 hover:bg-muted/50 transition-colors border-b border-border/30 last:border-0"
-                    onMouseDown={() => { setSelectedLead(lead); setSearch(name); setShowDropdown(false); }}
+                    onMouseDown={() => { setSelectedLead(lead); setSearch(name); setShowDropdown(false); setSignerEmail(lead.Email ?? ""); }}
                   >
                     <p className="text-[12px] font-medium">{name}</p>
                     <p className="text-[10px] text-muted-foreground">
@@ -404,11 +448,23 @@ const Contracts = () => {
         </div>
 
         {selectedLead && (
-          <div className="flex items-center gap-2 text-[11px] bg-primary/5 border border-primary/20 rounded-lg px-3 py-1.5">
-            <FileText className="h-3.5 w-3.5 text-primary" />
-            <span className="font-medium">{clientName(selectedLead)}</span>
-            <span className="text-muted-foreground">· {selectedLead.Specialty ?? selectedLead.Specialty_New ?? "—"}</span>
-          </div>
+          <>
+            <div className="flex items-center gap-2 text-[11px] bg-primary/5 border border-primary/20 rounded-lg px-3 py-1.5">
+              <FileText className="h-3.5 w-3.5 text-primary" />
+              <span className="font-medium">{clientName(selectedLead)}</span>
+              <span className="text-muted-foreground">· {selectedLead.Specialty ?? selectedLead.Specialty_New ?? "—"}</span>
+            </div>
+            <div className="flex items-center gap-1.5 text-[11px]">
+              <span className="text-muted-foreground whitespace-nowrap">Send to:</span>
+              <Input
+                type="email"
+                value={signerEmail}
+                onChange={e => setSignerEmail(e.target.value)}
+                placeholder={selectedLead.Email ? "" : "doctor@email.com"}
+                className="h-8 text-[11px] w-[220px]"
+              />
+            </div>
+          </>
         )}
 
         <Button
@@ -432,6 +488,9 @@ const Contracts = () => {
         </Button>
       </div>
 
+      {/* ── Sent Contracts (BoldSign envelopes we've initiated) ── */}
+      <SentContractsSection />
+
       {/* ── Contract preview ── */}
       <div
         className={`rounded-xl border border-border/40 bg-white shadow-sm p-10 transition-opacity ${!selectedLead ? "opacity-50" : ""}`}
@@ -450,5 +509,130 @@ const Contracts = () => {
     </DashboardLayout>
   );
 };
+
+// ── Status badge styling for Sent Contracts table ───────────────────────────
+const STATUS_STYLES: Record<ContractStatus, { label: string; cls: string }> = {
+  sent:     { label: "Sent",     cls: "bg-blue-50 text-blue-700 border-blue-200" },
+  viewed:   { label: "Viewed",   cls: "bg-amber-50 text-amber-700 border-amber-200" },
+  signed:   { label: "Signed",   cls: "bg-emerald-50 text-emerald-700 border-emerald-200" },
+  declined: { label: "Declined", cls: "bg-rose-50 text-rose-700 border-rose-200" },
+  expired:  { label: "Expired",  cls: "bg-slate-100 text-slate-600 border-slate-200" },
+  failed:   { label: "Failed",   cls: "bg-rose-50 text-rose-700 border-rose-200" },
+};
+
+function fmtDateTime(iso: string | null): string {
+  if (!iso) return "—";
+  const d = new Date(iso);
+  return d.toLocaleString("en-GB", {
+    day: "2-digit", month: "short", year: "numeric", hour: "2-digit", minute: "2-digit",
+  });
+}
+
+function SentContractsSection() {
+  // The DashboardLayout already subscribes with onSigned to fire the global
+  // toast — passing onSigned here too would double-fire on the Contracts page.
+  const { data, isLoading, refetch, isFetching } = useContractActivity();
+  const [downloadingId, setDownloadingId] = useState<string | null>(null);
+
+  const handleDownload = async (row: ContractSendRow) => {
+    setDownloadingId(row.id);
+    try {
+      await downloadContractPdf(row);
+    } catch (e) {
+      toast.error("Download failed", { description: e instanceof Error ? e.message : String(e) });
+    } finally {
+      setDownloadingId(null);
+    }
+  };
+
+  return (
+    <div className="rounded-xl border border-border/60 bg-card shadow-sm mb-6">
+      <div className="flex items-center justify-between px-4 py-3 border-b border-border/40 bg-muted/30">
+        <div>
+          <h2 className="text-[13px] font-semibold">Sent Contracts</h2>
+          <p className="text-[11px] text-muted-foreground">Track signing status, view, and download signed PDFs</p>
+        </div>
+        <Button
+          variant="ghost" size="sm"
+          className="h-7 text-[11px]"
+          onClick={() => refetch()}
+          disabled={isFetching}
+        >
+          <RefreshCw className={`h-3 w-3 mr-1.5 ${isFetching ? "animate-spin" : ""}`} />
+          Refresh
+        </Button>
+      </div>
+      <div className="overflow-auto">
+        {isLoading ? (
+          <div className="px-4 py-6 text-center text-[11px] text-muted-foreground">Loading…</div>
+        ) : !data || data.length === 0 ? (
+          <div className="px-4 py-6 text-center text-[11px] text-muted-foreground">
+            No contracts sent yet. Use the form below to send your first one.
+          </div>
+        ) : (
+          <table className="w-full text-[12px]">
+            <thead>
+              <tr className="text-[10px] uppercase tracking-wide text-muted-foreground border-b border-border/40">
+                <th className="text-left font-semibold py-2.5 px-4">Doctor</th>
+                <th className="text-left font-semibold py-2.5 px-3">Sent</th>
+                <th className="text-left font-semibold py-2.5 px-3">Status</th>
+                <th className="text-left font-semibold py-2.5 px-3">Signed</th>
+                <th className="text-right font-semibold py-2.5 px-4">Actions</th>
+              </tr>
+            </thead>
+            <tbody>
+              {data.map((row) => {
+                const s = STATUS_STYLES[row.status] ?? STATUS_STYLES.sent;
+                return (
+                  <tr key={row.id} className="border-b border-border/30 last:border-0 hover:bg-muted/30">
+                    <td className="py-2.5 px-4">
+                      <div className="font-medium text-foreground">{row.doctor_name}</div>
+                      <div className="text-[10px] text-muted-foreground">{row.doctor_email}</div>
+                    </td>
+                    <td className="py-2.5 px-3 text-muted-foreground">{fmtDateTime(row.created_at)}</td>
+                    <td className="py-2.5 px-3">
+                      <span className={`inline-flex items-center px-2 py-0.5 rounded-full text-[10px] font-medium border ${s.cls}`}>
+                        {s.label}
+                      </span>
+                      {row.zoho_error && (
+                        <div className="text-[9px] text-rose-600 mt-0.5 truncate max-w-[200px]" title={row.zoho_error}>
+                          Zoho: {row.zoho_error}
+                        </div>
+                      )}
+                    </td>
+                    <td className="py-2.5 px-3 text-muted-foreground">{fmtDateTime(row.signed_at)}</td>
+                    <td className="py-2.5 px-4">
+                      <div className="flex justify-end gap-1.5">
+                        <Button
+                          variant="outline" size="sm"
+                          className="h-7 text-[11px] gap-1"
+                          onClick={() => window.open(boldsignTrackingUrl(row.boldsign_document_id), "_blank")}
+                        >
+                          <ExternalLink className="h-3 w-3" />
+                          View
+                        </Button>
+                        <Button
+                          variant="outline" size="sm"
+                          className="h-7 text-[11px] gap-1"
+                          onClick={() => handleDownload(row)}
+                          disabled={downloadingId === row.id}
+                        >
+                          {downloadingId === row.id
+                            ? <Loader2 className="h-3 w-3 animate-spin" />
+                            : <DownloadIcon className="h-3 w-3" />}
+                          PDF
+                        </Button>
+                      </div>
+                    </td>
+                  </tr>
+                );
+              })}
+            </tbody>
+          </table>
+        )}
+      </div>
+    </div>
+  );
+}
 
 export default Contracts;

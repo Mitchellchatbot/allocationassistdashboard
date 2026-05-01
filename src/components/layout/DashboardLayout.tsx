@@ -1,7 +1,7 @@
 import { SidebarProvider, SidebarTrigger, useSidebar } from "@/components/ui/sidebar";
 import { AppSidebar } from "./AppSidebar";
 import { PageTransition } from "./PageTransition";
-import { Bell, Download, AlertTriangle, ChevronRight, Home, Sparkles, RefreshCw, Info, CheckCircle2, Send, RotateCcw, X, Search } from "lucide-react";
+import { Bell, Download, AlertTriangle, ChevronRight, Home, Sparkles, RefreshCw, Info, CheckCircle2, Send, RotateCcw, X, Search, FileSignature } from "lucide-react";
 import { ChatChart, parseCharts } from "@/components/ChatChart";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
@@ -20,6 +20,8 @@ import remarkGfm from "remark-gfm";
 import { useMutation, useQueryClient } from "@tanstack/react-query";
 import { zohoSync } from "@/lib/zoho";
 import { WEEKLY_SALES_QUERY_KEY, fetchWeeklySalesRaw } from "@/hooks/use-weekly-sales";
+import { useContractActivity } from "@/hooks/use-contract-activity";
+import { toast } from "sonner";
 
 const SUPABASE_URL      = import.meta.env.VITE_SUPABASE_URL as string;
 const SUPABASE_ANON_KEY = import.meta.env.VITE_SUPABASE_ANON_KEY as string;
@@ -126,17 +128,57 @@ export function DashboardLayout({ children, title, subtitle }: DashboardLayoutPr
     return () => clearTimeout(t);
   }, [queryClient]);
 
-  // Build notification objects from real alerts
+  // Subscribe to contract activity. Realtime channel inside this hook
+  // refetches contract_sends whenever it changes, and onSigned fires once
+  // per row when its status flips to "signed" — surfaces a toast on
+  // whichever page the user is on.
+  const { data: contractActivity } = useContractActivity({
+    onSigned: (row) => {
+      toast.success(`${row.doctor_name} signed their contract`, {
+        description: row.zoho_contact_id
+          ? "Doctors on Board record created and lead marked Closed Won."
+          : "Awaiting Zoho automation — refresh in a moment.",
+      });
+    },
+  });
+
+  // Build notification objects from real alerts + recent contract signings.
+  // Contract events get priority placement (top of the list) since they're
+  // time-sensitive and actionable.
   const notifications = useMemo(() => {
-    if (!rawAlerts || rawAlerts.length === 0) return [];
-    return rawAlerts.slice(0, 5).map((a, i) => ({
-      id: i,
-      ...ALERT_ICON_MAP[a.type],
-      title: a.message,
-      detail: '',
-      time: 'Live data',
-    }));
-  }, [rawAlerts]);
+    const items: Array<{ icon: any; color: string; title: string; detail: string; time: string }> = [];
+
+    // Recent signed contracts (last 7 days) → at the top.
+    if (contractActivity) {
+      const cutoff = Date.now() - 7 * 24 * 60 * 60 * 1000;
+      const recentlySigned = contractActivity
+        .filter(r => r.status === "signed" && r.signed_at && new Date(r.signed_at).getTime() > cutoff)
+        .slice(0, 3);
+      for (const r of recentlySigned) {
+        items.push({
+          icon:   FileSignature,
+          color:  "text-emerald-600",
+          title:  `${r.doctor_name} signed their contract`,
+          detail: r.zoho_contact_id ? "Added to Doctors on Board" : "Zoho automation pending",
+          time:   new Date(r.signed_at!).toLocaleDateString("en-GB", { day: "numeric", month: "short" }),
+        });
+      }
+    }
+
+    // Existing data alerts → after.
+    if (rawAlerts && rawAlerts.length > 0) {
+      for (const a of rawAlerts.slice(0, 5 - items.length)) {
+        items.push({
+          ...ALERT_ICON_MAP[a.type],
+          title:  a.message,
+          detail: "",
+          time:   "Live data",
+        });
+      }
+    }
+
+    return items;
+  }, [rawAlerts, contractActivity]);
 
   // Lead count for AI panel subtitle
   const compactLeads = useMemo(() => filteredLeads, [filteredLeads]);
