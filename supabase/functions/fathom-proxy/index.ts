@@ -76,12 +76,27 @@ function asObj(v: unknown): Record<string, unknown> | null {
   return v && typeof v === 'object' && !Array.isArray(v) ? v as Record<string, unknown> : null;
 }
 
+// Strings only — does NOT coerce numbers (used for non-id fields).
 function asStr(v: unknown): string | null {
   return typeof v === 'string' && v ? v : null;
 }
 
+// Accepts strings AND numbers (Fathom returns numeric ids like 657945804).
+// Coerces to string to keep fathom_id stable across syncs.
+function asId(v: unknown): string | null {
+  if (typeof v === 'string' && v) return v;
+  if (typeof v === 'number' && Number.isFinite(v)) return String(v);
+  return null;
+}
+
+// Accepts numbers AND numeric strings (Fathom sometimes serialises floats as strings).
 function asNum(v: unknown): number | null {
-  return typeof v === 'number' && Number.isFinite(v) ? v : null;
+  if (typeof v === 'number' && Number.isFinite(v)) return v;
+  if (typeof v === 'string' && v) {
+    const n = Number(v);
+    if (Number.isFinite(n)) return n;
+  }
+  return null;
 }
 
 function meetingToRow(m: FathomMeeting) {
@@ -91,13 +106,24 @@ function meetingToRow(m: FathomMeeting) {
   const recordedBy = asObj(m.recorded_by) ?? asObj(m.fathom_user) ?? asObj(m.host) ?? {};
 
   // ── ID ──
+  // Use asId so numeric ids (Fathom returns 657945804 as a number) are coerced
+  // to string. Falling back to share_url would mint a different id than the
+  // numeric one and create duplicate rows on re-sync — so we extract the
+  // numeric id from the call URL instead, which is the same value Fathom uses
+  // internally and matches what the OLD mapper produced.
+  const idFromUrl = ((): string | null => {
+    const u = asStr(m.url) ?? asStr(recording.url) ?? asStr(m.share_url) ?? asStr(recording.share_url);
+    if (!u) return null;
+    const match = u.match(/\/calls\/(\d+)/) ?? u.match(/\/share\/([A-Za-z0-9_-]+)/);
+    return match ? match[1] : null;
+  })();
+
   const fathomId = pick(
-    asStr(m.id),
-    asStr(m.recording_id),
-    asStr(recording.id),
-    asStr(recording.recording_id),
-    asStr(m.share_url),     // share URL is unique per recording — usable as last-resort id
-    asStr(recording.share_url),
+    asId(m.id),
+    asId(m.recording_id),
+    asId(recording.id),
+    asId(recording.recording_id),
+    idFromUrl,
   );
   if (!fathomId) return null;
 
@@ -246,9 +272,11 @@ async function actionSync(since: string | null) {
   const rows: Array<ReturnType<typeof meetingToRow>> = [];
   let cursor: string | null = null;
   let pages = 0;
+  let raw   = 0;
 
-  // Fathom paginates with `cursor` on most accounts, `page` on others.
-  // We try cursor-style first; if the response has neither, we stop after one page.
+  // Cursor-based pagination. We stop ONLY when no next cursor is returned
+  // (or after 200 pages = 10,000 records as a safety cap). The has_more
+  // flag is unreliable across Fathom API versions, so we don't trust it.
   while (true) {
     const params: Record<string, string> = { limit: '50' };
     if (since)  params.created_after = since;
@@ -258,22 +286,26 @@ async function actionSync(since: string | null) {
       items?: FathomMeeting[];
       data?:  FathomMeeting[];
       meetings?: FathomMeeting[];
+      recordings?: FathomMeeting[];
+      results?: FathomMeeting[];
       next_cursor?: string;
-      has_more?: boolean;
+      cursor?: string;
+      next?: string;
     };
 
-    const items = data.items ?? data.data ?? data.meetings ?? [];
+    const items = data.items ?? data.data ?? data.meetings ?? data.recordings ?? data.results ?? [];
+    raw += items.length;
     for (const m of items) {
       const row = meetingToRow(m);
       if (row) rows.push(row);
     }
 
-    cursor = data.next_cursor ?? null;
+    cursor = data.next_cursor ?? data.cursor ?? data.next ?? null;
     pages += 1;
-    if (!cursor || !data.has_more || pages > 100) break;  // 100×50 = 5000 cap, safety
+    if (!cursor || pages > 200) break;
   }
 
-  if (rows.length === 0) return { synced: 0, pages };
+  if (rows.length === 0) return { synced: 0, pages, raw };
 
   // Chunked upsert (Postgres has param limits)
   const CHUNK = 100;
@@ -285,7 +317,52 @@ async function actionSync(since: string | null) {
     if (error) throw new Error(`upsert failed: ${error.message}`);
   }
 
-  return { synced: rows.length, pages };
+  return { synced: rows.length, pages, raw };
+}
+
+/** Diagnostic: returns the first page from Fathom unmodified so we can see
+ *  the actual field shape (used when the mapper still produces empty rows). */
+async function actionDebug() {
+  const data = await fathomGet('/meetings', { limit: '1' });
+  return { raw_response: data };
+}
+
+/** Re-runs the mapper on every existing row's stored `raw` payload. Useful
+ *  after a mapper bugfix — fixes already-stored rows without re-hitting Fathom. */
+async function actionRebuild() {
+  const { data, error } = await supabase
+    .from('fathom_calls')
+    .select('id, fathom_id, raw');
+  if (error) throw new Error(error.message);
+
+  const rows: Array<{ old_id: string; new: ReturnType<typeof meetingToRow> }> = [];
+  for (const r of data ?? []) {
+    const row = meetingToRow((r.raw ?? {}) as FathomMeeting);
+    if (row) rows.push({ old_id: r.fathom_id, new: row });
+  }
+
+  // Dedupe: if rebuild produces a different fathom_id than the row's current one,
+  // the old row will be deleted; the new mapped row is upserted.
+  const idsToDelete = rows.filter(r => r.new!.fathom_id !== r.old_id).map(r => r.old_id);
+  if (idsToDelete.length > 0) {
+    const { error: delErr } = await supabase
+      .from('fathom_calls')
+      .delete()
+      .in('fathom_id', idsToDelete);
+    if (delErr) throw new Error(`delete failed: ${delErr.message}`);
+  }
+
+  const upserts = rows.map(r => r.new!);
+  const CHUNK = 100;
+  for (let i = 0; i < upserts.length; i += CHUNK) {
+    const slice = upserts.slice(i, i + CHUNK);
+    const { error: upErr } = await supabase
+      .from('fathom_calls')
+      .upsert(slice, { onConflict: 'fathom_id' });
+    if (upErr) throw new Error(`upsert failed: ${upErr.message}`);
+  }
+
+  return { rebuilt: rows.length, deleted_old_ids: idsToDelete.length };
 }
 
 async function actionResync(fathomId: string) {
@@ -349,10 +426,16 @@ serve(async (req: Request) => {
         if (!id) return json({ error: 'id required' }, 400);
         return json(await actionTranscript(id));
       }
+      case 'debug': {
+        return json(await actionDebug());
+      }
+      case 'rebuild': {
+        return json(await actionRebuild());
+      }
       default:
         return json({
           error: 'Unknown action',
-          actions: ['sync', 'resync', 'transcript'],
+          actions: ['sync', 'resync', 'transcript', 'debug', 'rebuild'],
         }, 400);
     }
   } catch (e) {

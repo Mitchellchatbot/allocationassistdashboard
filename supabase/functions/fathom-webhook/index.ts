@@ -82,8 +82,18 @@ function asObj(v: unknown): Record<string, unknown> | null {
 function asStr(v: unknown): string | null {
   return typeof v === 'string' && v ? v : null;
 }
+function asId(v: unknown): string | null {
+  if (typeof v === 'string' && v) return v;
+  if (typeof v === 'number' && Number.isFinite(v)) return String(v);
+  return null;
+}
 function asNum(v: unknown): number | null {
-  return typeof v === 'number' && Number.isFinite(v) ? v : null;
+  if (typeof v === 'number' && Number.isFinite(v)) return v;
+  if (typeof v === 'string' && v) {
+    const n = Number(v);
+    if (Number.isFinite(n)) return n;
+  }
+  return null;
 }
 
 function meetingToRow(m: FathomMeeting) {
@@ -91,10 +101,19 @@ function meetingToRow(m: FathomMeeting) {
   const meeting    = asObj(m.meeting)     ?? {};
   const recordedBy = asObj(m.recorded_by) ?? asObj(m.fathom_user) ?? asObj(m.host) ?? {};
 
+  // Coerce numeric ids to strings so this matches what the proxy produces.
+  // Falling back to share_url would mint a different id and create dupes; we
+  // extract the numeric id from the call URL as a stable last resort.
+  const idFromUrl = ((): string | null => {
+    const u = asStr(m.url) ?? asStr(recording.url) ?? asStr(m.share_url) ?? asStr(recording.share_url);
+    if (!u) return null;
+    const match = u.match(/\/calls\/(\d+)/) ?? u.match(/\/share\/([A-Za-z0-9_-]+)/);
+    return match ? match[1] : null;
+  })();
   const fathomId = pick(
-    asStr(m.id), asStr(m.recording_id),
-    asStr(recording.id), asStr(recording.recording_id),
-    asStr(m.share_url), asStr(recording.share_url),
+    asId(m.id), asId(m.recording_id),
+    asId(recording.id), asId(recording.recording_id),
+    idFromUrl,
   );
   if (!fathomId) return null;
 
