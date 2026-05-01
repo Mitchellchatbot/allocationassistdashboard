@@ -6,9 +6,13 @@ const SUPABASE_URL      = import.meta.env.VITE_SUPABASE_URL      as string;
 const SUPABASE_ANON_KEY = import.meta.env.VITE_SUPABASE_ANON_KEY as string;
 
 // Re-run a backfill sync this often while the page is open (silent).
-const AUTO_SYNC_MS = 2 * 60_000;
+// Set high to stay well under Fathom's per-key rate limit.
+const AUTO_SYNC_MS = 10 * 60_000;
 // Re-read the table this often (catches webhook inserts even without a sync).
 const AUTO_REFETCH_MS = 30_000;
+// Skip the initial-mount auto-sync if the table already has this many rows
+// — webhooks keep things fresh without us hammering the REST API.
+const SKIP_INITIAL_SYNC_THRESHOLD = 1;
 
 // ─── Types ───────────────────────────────────────────────────────────────────
 
@@ -220,16 +224,25 @@ export function useFathomAutoSync(): {
       }
     };
 
-    run();
+    // Skip the initial sync if the table already has data — webhooks keep
+    // it fresh in normal operation, and a needless sync just burns rate
+    // limit (which is what 429'd us during development).
+    (async () => {
+      const { count } = await supabase
+        .from("fathom_calls")
+        .select("id", { head: true, count: "exact" });
+      if ((count ?? 0) < SKIP_INITIAL_SYNC_THRESHOLD) {
+        run();
+      }
+    })();
+
     const timer = setInterval(run, AUTO_SYNC_MS);
 
-    const onVisible = () => { if (!document.hidden) run(); };
-    document.addEventListener("visibilitychange", onVisible);
+    // No more on-visibility re-fire — that was contributing to the 429.
 
     return () => {
       alive = false;
       clearInterval(timer);
-      document.removeEventListener("visibilitychange", onVisible);
     };
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);

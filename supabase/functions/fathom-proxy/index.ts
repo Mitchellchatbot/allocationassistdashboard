@@ -43,7 +43,13 @@ function json(data: unknown, status = 200) {
 
 // ─── Fathom API helpers ──────────────────────────────────────────────────────
 
-async function fathomGet(path: string, params: Record<string, string> = {}): Promise<unknown> {
+const sleep = (ms: number) => new Promise(r => setTimeout(r, ms));
+
+async function fathomGet(
+  path: string,
+  params: Record<string, string> = {},
+  retriesLeft = 1,
+): Promise<unknown> {
   const url = new URL(`${FATHOM_BASE}${path}`);
   for (const [k, v] of Object.entries(params)) url.searchParams.set(k, v);
 
@@ -51,11 +57,24 @@ async function fathomGet(path: string, params: Record<string, string> = {}): Pro
     headers: { 'X-Api-Key': FATHOM_API_KEY, 'Accept': 'application/json' },
   });
 
+  // Handle rate-limit with one polite retry honouring Retry-After.
+  if (r.status === 429 && retriesLeft > 0) {
+    const ra = r.headers.get('retry-after');
+    const waitSec = ra ? Math.min(60, parseInt(ra, 10) || 5) : 5;
+    console.warn(`[fathom-proxy] 429 — sleeping ${waitSec}s then retrying ${path}`);
+    await sleep(waitSec * 1000);
+    return fathomGet(path, params, retriesLeft - 1);
+  }
+
   const text = await r.text();
   let body: unknown;
   try { body = text ? JSON.parse(text) : null; } catch { body = text; }
 
   if (!r.ok) {
+    if (r.status === 429) {
+      const ra = r.headers.get('retry-after');
+      throw new Error(`Fathom rate limit (429) — wait ${ra ?? '60'}s before next sync`);
+    }
     const snippet = typeof body === 'string'
       ? body.slice(0, 200)
       : JSON.stringify(body).slice(0, 200);
@@ -311,6 +330,8 @@ async function actionSync(since: string | null) {
     cursor = nextCursor;
     pages += 1;
     if (!cursor || pages > 200) break;
+    // Polite throttle between pages — keeps us under Fathom's rate cap.
+    await sleep(400);
   }
 
   if (rows.length === 0) return { synced: 0, pages, raw };
