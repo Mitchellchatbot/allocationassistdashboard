@@ -43,7 +43,7 @@ function json(data: unknown, status = 200) {
 
 // ─── Fathom API helpers ──────────────────────────────────────────────────────
 
-async function fathomGet(path: string, params: Record<string, string> = {}) {
+async function fathomGet(path: string, params: Record<string, string> = {}): Promise<unknown> {
   const url = new URL(`${FATHOM_BASE}${path}`);
   for (const [k, v] of Object.entries(params)) url.searchParams.set(k, v);
 
@@ -56,9 +56,12 @@ async function fathomGet(path: string, params: Record<string, string> = {}) {
   try { body = text ? JSON.parse(text) : null; } catch { body = text; }
 
   if (!r.ok) {
-    throw new Error(`Fathom ${r.status} on ${path}: ${typeof body === 'string' ? body : JSON.stringify(body)}`);
+    const snippet = typeof body === 'string'
+      ? body.slice(0, 200)
+      : JSON.stringify(body).slice(0, 200);
+    throw new Error(`Fathom ${r.status} on ${path}: ${snippet}`);
   }
-  return body as Record<string, unknown>;
+  return body;
 }
 
 // ─── Row mapping (mirrors fathom-webhook) ───────────────────────────────────
@@ -282,25 +285,30 @@ async function actionSync(since: string | null) {
     if (since)  params.created_after = since;
     if (cursor) params.cursor        = cursor;
 
-    const data = await fathomGet('/meetings', params) as {
-      items?: FathomMeeting[];
-      data?:  FathomMeeting[];
-      meetings?: FathomMeeting[];
-      recordings?: FathomMeeting[];
-      results?: FathomMeeting[];
-      next_cursor?: string;
-      cursor?: string;
-      next?: string;
-    };
+    const data = await fathomGet('/meetings', params);
 
-    const items = data.items ?? data.data ?? data.meetings ?? data.recordings ?? data.results ?? [];
+    // Fathom has shipped both bare-array and wrapped-object responses.
+    // Handle both shapes.
+    let items: FathomMeeting[] = [];
+    let nextCursor: string | null = null;
+    if (Array.isArray(data)) {
+      items = data as FathomMeeting[];
+    } else if (data && typeof data === 'object') {
+      const d = data as Record<string, unknown>;
+      items = (d.items ?? d.data ?? d.meetings ?? d.recordings ?? d.results ?? []) as FathomMeeting[];
+      nextCursor = (d.next_cursor as string | undefined)
+                ?? (d.cursor      as string | undefined)
+                ?? (d.next        as string | undefined)
+                ?? null;
+    }
+
     raw += items.length;
     for (const m of items) {
       const row = meetingToRow(m);
       if (row) rows.push(row);
     }
 
-    cursor = data.next_cursor ?? data.cursor ?? data.next ?? null;
+    cursor = nextCursor;
     pages += 1;
     if (!cursor || pages > 200) break;
   }

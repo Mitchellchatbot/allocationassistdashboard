@@ -10,12 +10,14 @@ import {
   Select, SelectContent, SelectItem, SelectTrigger, SelectValue,
 } from "@/components/ui/select";
 import {
-  useFathomCalls, useFathomCall, useFathomAutoSync,
+  useFathomCalls, useFathomCall, useFathomAutoSync, useFathomSync,
   type FathomCall,
 } from "@/hooks/use-fathom-calls";
+import { useAuth } from "@/hooks/use-auth";
+import { Button } from "@/components/ui/button";
 import {
   PhoneCall, Loader2, Search, ExternalLink, Clock,
-  Users as UsersIcon, X, Mic, FileText, RefreshCw, CheckCircle2,
+  Users as UsersIcon, X, Mic, FileText, RefreshCw, CheckCircle2, AlertCircle,
 } from "lucide-react";
 
 // ─── Candy palette ───────────────────────────────────────────────────────────
@@ -99,6 +101,9 @@ export default function Calls() {
 
   const { data: calls, isLoading, error, isFetching } = useFathomCalls(filters);
   const { lastSyncAt, syncing } = useFathomAutoSync();
+  const manualSync = useFathomSync();
+  const { role } = useAuth();
+  const isAdmin = role === "admin";
   const now = useNowTick(1000);
 
   const hosts = useMemo(() => {
@@ -151,8 +156,39 @@ export default function Calls() {
           </Select>
         </div>
 
-        <AutoSyncPill syncing={syncing || isFetching} lastSyncAt={lastSyncAt} now={now} />
+        <div className="flex items-center gap-2 shrink-0">
+          {isAdmin && (
+            <Button
+              variant="outline"
+              size="sm"
+              onClick={() => manualSync.mutate(undefined)}
+              disabled={manualSync.isPending}
+              className="h-8 text-[12px]"
+            >
+              <RefreshCw className={`h-3.5 w-3.5 mr-1.5 ${manualSync.isPending ? "animate-spin" : ""}`} />
+              {manualSync.isPending ? "Syncing…" : "Sync now"}
+            </Button>
+          )}
+          <AutoSyncPill syncing={syncing || isFetching} lastSyncAt={lastSyncAt} now={now} />
+        </div>
       </div>
+
+      {/* Manual sync feedback so we can see what Fathom returned */}
+      {manualSync.isError && (
+        <div className="mb-3 flex items-center gap-2 px-3 py-2 rounded-md bg-rose-50 text-rose-700 text-[11px] border border-rose-200">
+          <AlertCircle className="h-3.5 w-3.5 shrink-0" />
+          <span className="font-mono break-all">{(manualSync.error as Error)?.message ?? "Sync failed"}</span>
+        </div>
+      )}
+      {manualSync.isSuccess && manualSync.data && (
+        <div className="mb-3 flex items-center gap-2 px-3 py-2 rounded-md bg-emerald-50 text-emerald-700 text-[11px] border border-emerald-200">
+          <CheckCircle2 className="h-3.5 w-3.5 shrink-0" />
+          Synced {manualSync.data.synced} call{manualSync.data.synced === 1 ? "" : "s"} across {manualSync.data.pages} page{manualSync.data.pages === 1 ? "" : "s"}
+          {typeof (manualSync.data as unknown as { raw?: number }).raw === "number" && (
+            <span className="text-emerald-600"> · {(manualSync.data as unknown as { raw: number }).raw} returned by Fathom</span>
+          )}
+        </div>
+      )}
 
       {/* ── KPI tiles (match dashboard ExpandableKPICard) ─────────────────── */}
       <div className="grid grid-cols-2 sm:grid-cols-4 gap-4 mb-6">
