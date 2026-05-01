@@ -13,7 +13,6 @@ import {
   useFathomCalls, useFathomCall, useFathomAutoSync, useFathomSync,
   type FathomCall,
 } from "@/hooks/use-fathom-calls";
-import { useAuth } from "@/hooks/use-auth";
 import { Button } from "@/components/ui/button";
 import {
   PhoneCall, Loader2, Search, ExternalLink, Clock,
@@ -100,10 +99,8 @@ export default function Calls() {
   }), [search, hostFilter]);
 
   const { data: calls, isLoading, error, isFetching } = useFathomCalls(filters);
-  const { lastSyncAt, syncing } = useFathomAutoSync();
+  const { lastSyncAt, syncing, lastError } = useFathomAutoSync();
   const manualSync = useFathomSync();
-  const { role } = useAuth();
-  const isAdmin = role === "admin";
   const now = useNowTick(1000);
 
   const hosts = useMemo(() => {
@@ -157,21 +154,27 @@ export default function Calls() {
         </div>
 
         <div className="flex items-center gap-2 shrink-0">
-          {isAdmin && (
-            <Button
-              variant="outline"
-              size="sm"
-              onClick={() => manualSync.mutate(undefined)}
-              disabled={manualSync.isPending}
-              className="h-8 text-[12px]"
-            >
-              <RefreshCw className={`h-3.5 w-3.5 mr-1.5 ${manualSync.isPending ? "animate-spin" : ""}`} />
-              {manualSync.isPending ? "Syncing…" : "Sync now"}
-            </Button>
-          )}
+          <Button
+            variant="outline"
+            size="sm"
+            onClick={() => manualSync.mutate(undefined)}
+            disabled={manualSync.isPending}
+            className="h-8 text-[12px]"
+          >
+            <RefreshCw className={`h-3.5 w-3.5 mr-1.5 ${manualSync.isPending ? "animate-spin" : ""}`} />
+            {manualSync.isPending ? "Syncing…" : "Sync now"}
+          </Button>
           <AutoSyncPill syncing={syncing || isFetching} lastSyncAt={lastSyncAt} now={now} />
         </div>
       </div>
+
+      {/* Auto-sync background error — surface so we don't silently fail */}
+      {lastError && !manualSync.isError && (
+        <div className="mb-3 flex items-center gap-2 px-3 py-2 rounded-md bg-rose-50 text-rose-700 text-[11px] border border-rose-200">
+          <AlertCircle className="h-3.5 w-3.5 shrink-0" />
+          <span className="font-mono break-all">Auto-sync error: {lastError}</span>
+        </div>
+      )}
 
       {/* Manual sync feedback so we can see what Fathom returned */}
       {manualSync.isError && (

@@ -189,10 +189,12 @@ export function useFathomSync() {
 export function useFathomAutoSync(): {
   lastSyncAt: number | null;
   syncing:    boolean;
+  lastError:  string | null;
 } {
   const qc = useQueryClient();
   const [lastSyncAt, setLastSyncAt] = useState<number | null>(null);
   const [syncing,    setSyncing]    = useState(false);
+  const [lastError,  setLastError]  = useState<string | null>(null);
 
   useEffect(() => {
     let alive   = true;
@@ -207,9 +209,11 @@ export function useFathomAutoSync(): {
         await callSync();
         if (!alive) return;
         setLastSyncAt(Date.now());
+        setLastError(null);
         qc.invalidateQueries({ queryKey: FATHOM_CALLS_KEY });
       } catch (e) {
         console.warn("[fathom auto-sync]", e);
+        if (alive) setLastError((e as Error).message);
       } finally {
         running = false;
         if (alive) setSyncing(false);
@@ -230,5 +234,5 @@ export function useFathomAutoSync(): {
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
-  return { lastSyncAt, syncing };
+  return { lastSyncAt, syncing, lastError };
 }
