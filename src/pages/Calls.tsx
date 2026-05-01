@@ -99,7 +99,7 @@ export default function Calls() {
   }), [search, hostFilter]);
 
   const { data: calls, isLoading, error, isFetching } = useFathomCalls(filters);
-  const { lastSyncAt, syncing, lastError } = useFathomAutoSync();
+  const { lastSyncAt, syncing, lastError, enriching } = useFathomAutoSync();
   const manualSync = useFathomSync();
   const now = useNowTick(1000);
 
@@ -237,7 +237,6 @@ export default function Calls() {
                     <TableHead className="text-[10px] uppercase tracking-wide h-8">Host</TableHead>
                     <TableHead className="text-[10px] uppercase tracking-wide h-8 hidden md:table-cell text-right">Participants</TableHead>
                     <TableHead className="text-[10px] uppercase tracking-wide h-8 text-right">Duration</TableHead>
-                    <TableHead className="text-[10px] uppercase tracking-wide h-8 hidden lg:table-cell">Transcript</TableHead>
                     <TableHead className="text-[10px] uppercase tracking-wide h-8 text-right"></TableHead>
                   </TableRow>
                 </TableHeader>
@@ -268,16 +267,13 @@ export default function Calls() {
                         {c.invitees?.length ?? 0}
                       </TableCell>
                       <TableCell className="text-[12px] text-foreground py-2.5 whitespace-nowrap text-right tabular-nums">
-                        {fmtDuration(c.duration_seconds)}
-                      </TableCell>
-                      <TableCell className="py-2.5 hidden lg:table-cell">
-                        {c.transcript_plaintext ? (
-                          <span className={`inline-flex items-center gap-1 rounded-full px-1.5 py-0.5 text-[9px] font-medium ${CANDY.mint.chip} ${CANDY.mint.fg}`}>
-                            <CheckCircle2 className="h-2.5 w-2.5" />
-                            Available
+                        {c.duration_seconds === null && enriching ? (
+                          <span className="inline-flex items-center gap-1 text-muted-foreground text-[11px]">
+                            <Loader2 className="h-3 w-3 animate-spin" />
+                            <span className="text-[10px]">fetching</span>
                           </span>
                         ) : (
-                          <span className="text-muted-foreground text-[10px]">—</span>
+                          fmtDuration(c.duration_seconds)
                         )}
                       </TableCell>
                       <TableCell className="py-2.5 text-right">

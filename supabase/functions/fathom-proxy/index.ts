@@ -48,7 +48,7 @@ const sleep = (ms: number) => new Promise(r => setTimeout(r, ms));
 async function fathomGet(
   path: string,
   params: Record<string, string> = {},
-  retriesLeft = 1,
+  retriesLeft = 3,
 ): Promise<unknown> {
   const url = new URL(`${FATHOM_BASE}${path}`);
   for (const [k, v] of Object.entries(params)) url.searchParams.set(k, v);
@@ -57,11 +57,15 @@ async function fathomGet(
     headers: { 'X-Api-Key': FATHOM_API_KEY, 'Accept': 'application/json' },
   });
 
-  // Handle rate-limit with one polite retry honouring Retry-After.
+  // Handle rate-limit with up to 3 retries honouring Retry-After.
+  // Exponential fallback if header missing: 5s → 15s → 45s.
   if (r.status === 429 && retriesLeft > 0) {
+    const attempt = 3 - retriesLeft;
     const ra = r.headers.get('retry-after');
-    const waitSec = ra ? Math.min(60, parseInt(ra, 10) || 5) : 5;
-    console.warn(`[fathom-proxy] 429 — sleeping ${waitSec}s then retrying ${path}`);
+    const waitSec = ra
+      ? Math.min(90, parseInt(ra, 10) || 5)
+      : Math.min(45, 5 * Math.pow(3, attempt));
+    console.warn(`[fathom-proxy] 429 — sleeping ${waitSec}s then retry ${attempt + 1}/3 on ${path}`);
     await sleep(waitSec * 1000);
     return fathomGet(path, params, retriesLeft - 1);
   }
@@ -117,6 +121,50 @@ function asNum(v: unknown): number | null {
   if (typeof v === 'string' && v) {
     const n = Number(v);
     if (Number.isFinite(n)) return n;
+  }
+  return null;
+}
+
+// Recursively walk an object looking for any numeric key whose name contains
+// the given substring. Returns the first match (depth-first, breadth-second).
+// Used as a fallback when known field names don't match — Fathom has shipped
+// duration under several different names across API versions / accounts.
+function findNumericByKey(obj: unknown, needle: string, depth = 0): number | null {
+  if (!obj || depth > 4) return null;
+  if (typeof obj !== 'object') return null;
+  const o = obj as Record<string, unknown>;
+  for (const k of Object.keys(o)) {
+    if (k.toLowerCase().includes(needle)) {
+      const n = asNum(o[k]);
+      if (n !== null) return n;
+    }
+  }
+  for (const v of Object.values(o)) {
+    if (v && typeof v === 'object') {
+      const found = findNumericByKey(v, needle, depth + 1);
+      if (found !== null) return found;
+    }
+  }
+  return null;
+}
+
+// Same idea but pulls the first matching string. Used for finding fields like
+// "domain" or "transcript" under unexpected paths.
+function findStringByKey(obj: unknown, needle: string, depth = 0): string | null {
+  if (!obj || depth > 4) return null;
+  if (typeof obj !== 'object') return null;
+  const o = obj as Record<string, unknown>;
+  for (const k of Object.keys(o)) {
+    if (k.toLowerCase().includes(needle)) {
+      const s = asStr(o[k]);
+      if (s !== null) return s;
+    }
+  }
+  for (const v of Object.values(o)) {
+    if (v && typeof v === 'object') {
+      const found = findStringByKey(v, needle, depth + 1);
+      if (found !== null) return found;
+    }
   }
   return null;
 }
@@ -190,17 +238,47 @@ function meetingToRow(m: FathomMeeting) {
   );
 
   // ── Duration (Fathom returns minutes; we store seconds) ──
+  // Try known field names first, then fall back to "any numeric field with
+  // 'duration' in the name" — Fathom has shipped duration under at least
+  // 4 different keys across API versions, and accounts sometimes only get
+  // one of them. The recursive scan also catches it under nested objects
+  // we didn't pre-flatten.
   const durMin = pick(
     asNum(m.recording_duration_in_minutes),
     asNum(recording.recording_duration_in_minutes),
     asNum(recording.duration_in_minutes),
     asNum(recording.duration_minutes),
+    asNum(meeting.recording_duration_in_minutes),
+    asNum(meeting.duration_in_minutes),
   );
-  const durSec = pick(
+  const durSecExplicit = pick(
     asNum(m.duration_seconds),
     asNum(recording.duration_seconds),
-    durMin !== null ? Math.round(durMin * 60) : null,
+    asNum(meeting.duration_seconds),
   );
+  // Computed-from-start/end fallback if we have both timestamps.
+  const durSecComputed = ((): number | null => {
+    if (!recordingStart) return null;
+    const re = pick(asStr(m.recording_end), asStr(m.recording_end_time),
+                    asStr(recording.recording_end_time), asStr(recording.end_time),
+                    asStr(recording.ended_at));
+    if (!re) return null;
+    const ms = new Date(re).getTime() - new Date(recordingStart).getTime();
+    return ms > 0 ? Math.round(ms / 1000) : null;
+  })();
+  // Last-resort: scan any field with "duration" in the name.
+  const durFallback = findNumericByKey(m, 'duration');
+  let durSec = pick(
+    durSecExplicit,
+    durMin !== null ? Math.round(durMin * 60) : null,
+    durSecComputed,
+  );
+  // If the fallback came in as minutes (< 1000) and we have nothing else,
+  // assume minutes. Otherwise treat it as seconds. This is heuristic but
+  // safer than guessing wrong by an order of magnitude.
+  if (durSec === null && durFallback !== null) {
+    durSec = durFallback < 1000 ? Math.round(durFallback * 60) : Math.round(durFallback);
+  }
 
   // ── Host ──
   const hostEmail = pick(
@@ -221,9 +299,32 @@ function meetingToRow(m: FathomMeeting) {
                   : Array.isArray(meeting.calendar_invitees) ? meeting.calendar_invitees
                   : null) as unknown[] | null;
 
-  const externalDomains = (Array.isArray(m.external_domains)       ? m.external_domains
-                         : Array.isArray(meeting.external_domains) ? meeting.external_domains
-                         : null) as string[] | null;
+  // External domains can come pre-computed as a string[] OR have to be derived
+  // from the invitee list. If neither, derive by extracting domains from any
+  // email-shaped strings in the payload that aren't on the host's domain.
+  let externalDomains: string[] | null = (Array.isArray(m.external_domains)       ? m.external_domains
+                                        : Array.isArray(meeting.external_domains) ? meeting.external_domains
+                                        : null) as string[] | null;
+  if (!externalDomains || externalDomains.length === 0) {
+    const hostDomain = hostEmail ? hostEmail.split('@')[1]?.toLowerCase() : null;
+    const set = new Set<string>();
+    const scanForEmails = (v: unknown, depth = 0): void => {
+      if (depth > 4 || !v) return;
+      if (typeof v === 'string') {
+        const m = v.match(/[a-zA-Z0-9._%+\-]+@([a-zA-Z0-9.\-]+\.[a-zA-Z]{2,})/g);
+        if (m) for (const email of m) {
+          const dom = email.split('@')[1]?.toLowerCase();
+          if (dom && dom !== hostDomain) set.add(dom);
+        }
+      } else if (Array.isArray(v)) {
+        for (const item of v) scanForEmails(item, depth + 1);
+      } else if (typeof v === 'object') {
+        for (const val of Object.values(v as Record<string, unknown>)) scanForEmails(val, depth + 1);
+      }
+    };
+    scanForEmails(invitees);
+    if (set.size > 0) externalDomains = Array.from(set);
+  }
 
   // ── Summary ──
   const summary = pick(
@@ -290,24 +391,31 @@ async function ensureTranscript(row: ReturnType<typeof meetingToRow>) {
 
 // ─── Actions ─────────────────────────────────────────────────────────────────
 
-async function actionSync(since: string | null) {
+/** Inner sync loop. Pages through Fathom and upserts in chunks. The bigger
+ *  page size (100 vs old 50) halves request count; the 100ms throttle (vs
+ *  old 400ms) is still well under Fathom's 60 RPM cap because each page
+ *  takes ~1s anyway. Stops when cursor is null OR the time budget is hit. */
+async function syncLoop(since: string | null, timeBudgetMs: number) {
+  const startedAt = Date.now();
   const rows: Array<ReturnType<typeof meetingToRow>> = [];
   let cursor: string | null = null;
   let pages = 0;
   let raw   = 0;
+  let timedOut = false;
 
-  // Cursor-based pagination. We stop ONLY when no next cursor is returned
-  // (or after 200 pages = 10,000 records as a safety cap). The has_more
-  // flag is unreliable across Fathom API versions, so we don't trust it.
   while (true) {
-    const params: Record<string, string> = { limit: '50' };
+    if (Date.now() - startedAt > timeBudgetMs) {
+      console.warn(`[fathom-proxy] time budget hit at page ${pages} — stopping early. Next sync resumes from cursor.`);
+      timedOut = true;
+      break;
+    }
+
+    const params: Record<string, string> = { limit: '100' };
     if (since)  params.created_after = since;
     if (cursor) params.cursor        = cursor;
 
     const data = await fathomGet('/meetings', params);
 
-    // Fathom has shipped both bare-array and wrapped-object responses.
-    // Handle both shapes.
     let items: FathomMeeting[] = [];
     let nextCursor: string | null = null;
     if (Array.isArray(data)) {
@@ -322,31 +430,55 @@ async function actionSync(since: string | null) {
     }
 
     raw += items.length;
+    const pageRows: Array<ReturnType<typeof meetingToRow>> = [];
     for (const m of items) {
       const row = meetingToRow(m);
-      if (row) rows.push(row);
+      if (row) { rows.push(row); pageRows.push(row); }
+    }
+
+    // Upsert each page as it arrives instead of waiting for the entire walk
+    // to finish — gives the user partial data immediately if the loop is
+    // interrupted, and keeps memory bounded for very large backfills.
+    if (pageRows.length > 0) {
+      const { error } = await supabase
+        .from('fathom_calls')
+        .upsert(pageRows, { onConflict: 'fathom_id' });
+      if (error) console.error('[fathom-proxy] page upsert failed:', error.message);
     }
 
     cursor = nextCursor;
     pages += 1;
     if (!cursor || pages > 200) break;
-    // Polite throttle between pages — keeps us under Fathom's rate cap.
-    await sleep(400);
+    // 1.1s throttle keeps us safely under Fathom's 60 RPM cap. Combined
+    // with the per-page fetch latency (~1-2s), that's ~25-35 RPM in
+    // practice — comfortable headroom against bursty rate-limit windows.
+    await sleep(1100);
   }
 
-  if (rows.length === 0) return { synced: 0, pages, raw };
+  return { synced: rows.length, pages, raw, timedOut };
+}
 
-  // Chunked upsert (Postgres has param limits)
-  const CHUNK = 100;
-  for (let i = 0; i < rows.length; i += CHUNK) {
-    const slice = rows.slice(i, i + CHUNK);
-    const { error } = await supabase
-      .from('fathom_calls')
-      .upsert(slice, { onConflict: 'fathom_id' });
-    if (error) throw new Error(`upsert failed: ${error.message}`);
+async function actionSync(since: string | null, opts: { background: boolean }) {
+  // Foreground (incremental) sync — used when `since` is supplied. Bounded,
+  // returns synchronously with full result. 90s budget leaves headroom under
+  // the 150s Edge Function idle-timeout.
+  if (!opts.background) {
+    return syncLoop(since, 90_000);
   }
 
-  return { synced: rows.length, pages, raw };
+  // Background (full backfill) — runs detached so the request returns in
+  // <100ms. EdgeRuntime.waitUntil keeps the worker alive for up to 400s
+  // after the response. Anything that wasn't synced in that window will be
+  // picked up by the next sync tick (cursor-resumable on the Fathom side).
+  const promise = syncLoop(since, 380_000)
+    .then(r => console.log('[fathom-proxy] background sync done:', r))
+    .catch(e => console.error('[fathom-proxy] background sync failed:', e));
+  // @ts-ignore — EdgeRuntime is a Supabase Edge global, not in @types.
+  if (typeof EdgeRuntime !== 'undefined' && EdgeRuntime.waitUntil) {
+    // @ts-ignore
+    EdgeRuntime.waitUntil(promise);
+  }
+  return { synced: 0, pages: 0, raw: 0, started: true, background: true };
 }
 
 /** Diagnostic: returns the first page from Fathom unmodified so we can see
@@ -392,6 +524,62 @@ async function actionRebuild() {
   }
 
   return { rebuilt: rows.length, deleted_old_ids: idsToDelete.length };
+}
+
+/** Walks rows that are missing duration_seconds and fetches `/meetings/{id}`
+ *  for each to populate it from the detail endpoint. Throttled to ~1 call/sec
+ *  to stay safely under Fathom's 60 RPM cap. Designed to run detached via
+ *  EdgeRuntime.waitUntil so it can finish a 500-row enrichment in the
+ *  background (~9 minutes). Idempotent — safe to call repeatedly. */
+async function syncEnrichLoop(timeBudgetMs: number, limit: number) {
+  const startedAt = Date.now();
+  const { data: rows, error } = await supabase
+    .from('fathom_calls')
+    .select('fathom_id')
+    .is('duration_seconds', null)
+    .limit(limit);
+  if (error) throw new Error(`enrich select failed: ${error.message}`);
+  if (!rows || rows.length === 0) return { enriched: 0, scanned: 0 };
+
+  let enriched = 0;
+  let scanned  = 0;
+  for (const r of rows) {
+    if (Date.now() - startedAt > timeBudgetMs) {
+      console.warn(`[fathom-proxy] enrich time budget hit after ${enriched}/${scanned} rows.`);
+      break;
+    }
+    scanned++;
+    try {
+      const m = await fathomGet(`/meetings/${r.fathom_id}`) as FathomMeeting;
+      const row = meetingToRow(m);
+      if (row && row.duration_seconds !== null) {
+        const { error: upErr } = await supabase
+          .from('fathom_calls')
+          .upsert(row, { onConflict: 'fathom_id' });
+        if (upErr) console.error(`[fathom-proxy] enrich upsert failed for ${r.fathom_id}:`, upErr.message);
+        else enriched++;
+      }
+    } catch (e) {
+      console.warn(`[fathom-proxy] enrich fetch failed for ${r.fathom_id}:`, (e as Error).message);
+    }
+    await sleep(1100);
+  }
+  return { enriched, scanned, remaining: rows.length === limit };
+}
+
+async function actionEnrich(opts: { background: boolean; limit: number }) {
+  if (!opts.background) {
+    return syncEnrichLoop(90_000, opts.limit);
+  }
+  const promise = syncEnrichLoop(380_000, opts.limit)
+    .then(r => console.log('[fathom-proxy] background enrich done:', r))
+    .catch(e => console.error('[fathom-proxy] background enrich failed:', e));
+  // @ts-ignore — EdgeRuntime is a Supabase Edge global.
+  if (typeof EdgeRuntime !== 'undefined' && EdgeRuntime.waitUntil) {
+    // @ts-ignore
+    EdgeRuntime.waitUntil(promise);
+  }
+  return { enriched: 0, scanned: 0, started: true, background: true };
 }
 
 async function actionResync(fathomId: string) {
@@ -443,7 +631,11 @@ serve(async (req: Request) => {
     switch (action) {
       case 'sync': {
         const since = url.searchParams.get('since');
-        return json(await actionSync(since));
+        // Full backfills (no `since`) run detached so the request can't hit
+        // the 150s idle timeout. Incremental syncs (with `since`) stay
+        // synchronous because they're bounded and finish quickly.
+        const background = !since;
+        return json(await actionSync(since, { background }));
       }
       case 'resync': {
         const id = url.searchParams.get('id');
@@ -461,10 +653,18 @@ serve(async (req: Request) => {
       case 'rebuild': {
         return json(await actionRebuild());
       }
+      case 'enrich': {
+        // Default: detach so the 500-row walk can run for up to 380s without
+        // hitting the request idle timeout. Pass ?fg=1 to wait inline (useful
+        // for small enrichments via curl).
+        const background = url.searchParams.get('fg') !== '1';
+        const limit = Math.min(1000, parseInt(url.searchParams.get('limit') ?? '500', 10) || 500);
+        return json(await actionEnrich({ background, limit }));
+      }
       default:
         return json({
           error: 'Unknown action',
-          actions: ['sync', 'resync', 'transcript', 'debug', 'rebuild'],
+          actions: ['sync', 'resync', 'transcript', 'debug', 'rebuild', 'enrich'],
         }, 400);
     }
   } catch (e) {

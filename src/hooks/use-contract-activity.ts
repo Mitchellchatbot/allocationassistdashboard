@@ -67,9 +67,15 @@ export function useContractActivity(opts?: { onSigned?: (row: ContractSendRow) =
 
   // Realtime: any insert/update on contract_sends → invalidate the query so
   // we refetch and the effect above can compare statuses + fire onSigned.
+  // The channel name is suffixed with a random id so multiple components
+  // calling this hook (e.g. DashboardLayout + SentContractsSection) each get
+  // their own channel — supabase-js de-dupes channels by name, and reusing
+  // a name after the first subscribe() throws "cannot add postgres_changes
+  // callbacks after subscribe()".
   useEffect(() => {
+    const channelName = `contract_sends_activity_${Math.random().toString(36).slice(2, 10)}`;
     const channel = supabase
-      .channel("contract_sends_activity")
+      .channel(channelName)
       .on(
         "postgres_changes",
         { event: "*", schema: "public", table: "contract_sends" },
