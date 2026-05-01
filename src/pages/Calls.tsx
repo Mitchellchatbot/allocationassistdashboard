@@ -19,15 +19,19 @@ import {
 } from "lucide-react";
 
 // ─── Candy palette ───────────────────────────────────────────────────────────
-// Five soft pastel pairs used for the KPI tiles & badges. Tailwind is configured
-// with all the standard color stops so these classes work out of the box.
+// Mirrors the dashboard's ExpandableKPICard look:
+//   bg = soft pastel card fill (e.g. bg-blue-50)
+//   fg = saturated text colour (e.g. text-blue-600)
+//   stripe = top color accent bar (e.g. bg-blue-600)
+// Tailwind ships every {color}-50/600 stop so all classes work out of the box.
 
 const CANDY = {
-  pink:   { bg: "bg-pink-100",     fg: "text-pink-600",     border: "border-t-pink-400",     ring: "from-pink-200/60   to-pink-50"   },
-  mint:   { bg: "bg-emerald-100",  fg: "text-emerald-600",  border: "border-t-emerald-400",  ring: "from-emerald-200/60 to-emerald-50" },
-  sky:    { bg: "bg-sky-100",      fg: "text-sky-600",      border: "border-t-sky-400",      ring: "from-sky-200/60    to-sky-50"    },
-  peach:  { bg: "bg-orange-100",   fg: "text-orange-600",   border: "border-t-orange-400",   ring: "from-orange-200/60 to-orange-50" },
-  lilac:  { bg: "bg-purple-100",   fg: "text-purple-600",   border: "border-t-purple-400",   ring: "from-purple-200/60 to-purple-50" },
+  pink:    { bg: "bg-pink-50",    fg: "text-pink-600",    stripe: "bg-pink-600",    chip: "bg-pink-100" },
+  mint:    { bg: "bg-emerald-50", fg: "text-emerald-600", stripe: "bg-emerald-600", chip: "bg-emerald-100" },
+  sky:     { bg: "bg-sky-50",     fg: "text-sky-600",     stripe: "bg-sky-600",     chip: "bg-sky-100" },
+  peach:   { bg: "bg-amber-50",   fg: "text-amber-600",   stripe: "bg-amber-600",   chip: "bg-amber-100" },
+  lilac:   { bg: "bg-violet-50",  fg: "text-violet-600",  stripe: "bg-violet-600",  chip: "bg-violet-100" },
+  rose:    { bg: "bg-rose-50",    fg: "text-rose-600",    stripe: "bg-rose-600",    chip: "bg-rose-100" },
 } as const;
 
 // ─── Helpers ─────────────────────────────────────────────────────────────────
@@ -150,44 +154,24 @@ export default function Calls() {
         <AutoSyncPill syncing={syncing || isFetching} lastSyncAt={lastSyncAt} now={now} />
       </div>
 
-      {/* ── Candy KPI tiles ──────────────────────────────────────────────── */}
-      <div className="grid grid-cols-2 lg:grid-cols-4 gap-3 mb-4">
-        <CandyKpi
-          palette={CANDY.pink}
-          icon={<PhoneCall className="h-4 w-4" />}
-          label="Total calls"
-          value={String(stats.count)}
-        />
-        <CandyKpi
-          palette={CANDY.sky}
-          icon={<Clock className="h-4 w-4" />}
-          label="Total talk time"
-          value={stats.totalHrs}
-        />
-        <CandyKpi
-          palette={CANDY.peach}
-          icon={<Mic className="h-4 w-4" />}
-          label="Avg call length"
-          value={stats.avgMins}
-        />
-        <CandyKpi
-          palette={CANDY.mint}
-          icon={<UsersIcon className="h-4 w-4" />}
-          label="With external guests"
-          value={String(stats.externals)}
-        />
+      {/* ── KPI tiles (match dashboard ExpandableKPICard) ─────────────────── */}
+      <div className="grid grid-cols-2 sm:grid-cols-4 gap-4 mb-6">
+        <CandyKpi palette={CANDY.sky}    icon={<PhoneCall className="h-3.5 w-3.5" />}  label="Total calls"          value={String(stats.count)}    />
+        <CandyKpi palette={CANDY.mint}   icon={<Clock     className="h-3.5 w-3.5" />}  label="Total talk time"      value={stats.totalHrs}         />
+        <CandyKpi palette={CANDY.peach}  icon={<Mic       className="h-3.5 w-3.5" />}  label="Avg call length"      value={stats.avgMins}          />
+        <CandyKpi palette={CANDY.rose}   icon={<UsersIcon className="h-3.5 w-3.5" />}  label="With external guests" value={String(stats.externals)} />
       </div>
 
       {/* ── Calls table (matches LeadsPipeline / Marketing styling) ──────── */}
       <Card className="shadow-sm border-border/60">
         <CardHeader className="py-3 px-4 border-b border-border/40">
           <CardTitle className="text-[14px] font-semibold flex items-center gap-2">
-            <span className={`flex h-7 w-7 items-center justify-center rounded-md ${CANDY.lilac.bg} ${CANDY.lilac.fg}`}>
+            <span className={`flex h-7 w-7 items-center justify-center rounded-md ${CANDY.lilac.chip} ${CANDY.lilac.fg}`}>
               <PhoneCall className="h-3.5 w-3.5" />
             </span>
             All calls
             {calls && (
-              <Badge variant="secondary" className={`ml-1 text-[10px] ${CANDY.lilac.bg} ${CANDY.lilac.fg} border-0`}>
+              <Badge variant="secondary" className={`ml-1 text-[10px] ${CANDY.lilac.chip} ${CANDY.lilac.fg} border-0`}>
                 {calls.length}
               </Badge>
             )}
@@ -233,7 +217,7 @@ export default function Calls() {
                       </TableCell>
                       <TableCell className="py-2.5">
                         <div className="flex items-center gap-2">
-                          <div className={`h-6 w-6 rounded-full ${CANDY.pink.bg} ${CANDY.pink.fg} flex items-center justify-center text-[10px] font-semibold shrink-0`}>
+                          <div className={`h-6 w-6 rounded-full ${CANDY.pink.chip} ${CANDY.pink.fg} flex items-center justify-center text-[10px] font-semibold shrink-0`}>
                             {hostInitials(c)}
                           </div>
                           <span className="text-[11px] text-foreground truncate max-w-[140px]">
@@ -249,7 +233,7 @@ export default function Calls() {
                       </TableCell>
                       <TableCell className="py-2.5 hidden lg:table-cell">
                         {c.transcript_plaintext ? (
-                          <span className={`inline-flex items-center gap-1 rounded-full px-1.5 py-0.5 text-[9px] font-medium ${CANDY.mint.bg} ${CANDY.mint.fg}`}>
+                          <span className={`inline-flex items-center gap-1 rounded-full px-1.5 py-0.5 text-[9px] font-medium ${CANDY.mint.chip} ${CANDY.mint.fg}`}>
                             <CheckCircle2 className="h-2.5 w-2.5" />
                             Available
                           </span>
@@ -287,29 +271,28 @@ export default function Calls() {
 // ─── Sub-components ──────────────────────────────────────────────────────────
 
 interface CandyPalette {
-  bg: string; fg: string; border: string; ring: string;
+  bg: string;     // card fill
+  fg: string;     // value + icon
+  stripe: string; // top accent
+  chip: string;   // misc accent (used elsewhere)
 }
 
 function CandyKpi({
   palette, icon, label, value,
 }: { palette: CandyPalette; icon: React.ReactNode; label: string; value: string }) {
   return (
-    <Card
-      className={`shadow-sm bg-card border-border/60 border-t-2 ${palette.border} hover:shadow-md hover:scale-[1.01] transition-all duration-200 cursor-default overflow-hidden`}
-    >
-      <CardContent className="p-4 relative">
-        <div className={`absolute -top-8 -right-8 h-24 w-24 rounded-full bg-gradient-to-br ${palette.ring} opacity-60 pointer-events-none`} />
-        <div className="flex items-start justify-between gap-2 mb-3 relative">
-          <div className={`flex h-9 w-9 items-center justify-center rounded-lg ${palette.bg} ${palette.fg} shrink-0`}>
-            {icon}
-          </div>
+    <div className={`rounded-xl border border-kpi/60 ${palette.bg} shadow-sm transition-all duration-200 hover:shadow-md hover:scale-[1.01] overflow-hidden flex flex-col`}>
+      <div className={`h-1 shrink-0 ${palette.stripe}`} />
+      <div className="px-4 py-3 flex items-start justify-between flex-1 min-h-[64px]">
+        <div className="min-w-0">
+          <p className="text-[11px] font-medium text-muted-foreground truncate mb-1">{label}</p>
+          <p className={`text-[24px] font-bold tabular-nums leading-none ${palette.fg}`}>{value}</p>
         </div>
-        <p className="text-[27px] font-semibold text-foreground tracking-tight leading-none mb-1.5 tabular-nums relative">
-          {value}
-        </p>
-        <span className="text-[12px] font-medium text-foreground/70 relative">{label}</span>
-      </CardContent>
-    </Card>
+        <div className="h-7 w-7 rounded-lg bg-card/70 flex items-center justify-center shrink-0 ml-2">
+          <span className={palette.fg}>{icon}</span>
+        </div>
+      </div>
+    </div>
   );
 }
 
@@ -366,7 +349,7 @@ function CallDetailDrawer({ fathomId, onClose }: { fathomId: string; onClose: ()
       <div className="w-full max-w-[640px] bg-background border-l border-border flex flex-col shadow-xl">
         <div className="flex items-center justify-between px-5 py-3 border-b border-border/50 bg-gradient-to-r from-pink-50 via-purple-50 to-sky-50">
           <div className="flex items-center gap-2 min-w-0">
-            <span className={`flex h-7 w-7 items-center justify-center rounded-md ${CANDY.lilac.bg} ${CANDY.lilac.fg} shrink-0`}>
+            <span className={`flex h-7 w-7 items-center justify-center rounded-md ${CANDY.lilac.chip} ${CANDY.lilac.fg} shrink-0`}>
               <PhoneCall className="h-3.5 w-3.5" />
             </span>
             <h3 className="text-[14px] font-semibold truncate">
@@ -414,7 +397,7 @@ function CallDetailDrawer({ fathomId, onClose }: { fathomId: string; onClose: ()
                   <ul className="space-y-1.5">
                     {call.action_items.map((a, i) => (
                       <li key={i} className="flex items-start gap-2 text-[12px] text-foreground">
-                        <span className="mt-1.5 h-1.5 w-1.5 rounded-full bg-orange-400 shrink-0" />
+                        <span className="mt-1.5 h-1.5 w-1.5 rounded-full bg-amber-500 shrink-0" />
                         <span>
                           {a.text ?? JSON.stringify(a)}
                           {a.assignee && <span className="ml-2 text-muted-foreground">— {a.assignee}</span>}
@@ -485,7 +468,7 @@ function Section({
   return (
     <div>
       <div className={`flex items-center gap-1.5 mb-2 text-[11px] font-semibold uppercase tracking-wide ${palette.fg}`}>
-        <span className={`flex h-5 w-5 items-center justify-center rounded ${palette.bg}`}>{icon}</span>
+        <span className={`flex h-5 w-5 items-center justify-center rounded ${palette.chip}`}>{icon}</span>
         {title}
       </div>
       {children}

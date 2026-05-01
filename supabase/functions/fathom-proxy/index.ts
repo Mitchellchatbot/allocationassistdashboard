@@ -63,54 +63,162 @@ async function fathomGet(path: string, params: Record<string, string> = {}) {
 
 // ─── Row mapping (mirrors fathom-webhook) ───────────────────────────────────
 
-interface FathomMeeting {
-  id?: string; recording_id?: string;
-  share_url?: string; url?: string;
-  title?: string;
-  scheduled_start?: string; scheduled_start_time?: string;
-  recording_start?: string; recording_start_time?: string;
-  recording_end?: string;   recording_end_time?: string;
-  duration_seconds?: number;
-  host?: { email?: string; name?: string };
-  invitees?: Array<{ name?: string; email?: string; domain?: string }>;
-  external_domains?: string[];
-  summary?: string; ai_summary?: string;
-  action_items?: Array<unknown>;
-  transcript?: string | { segments?: unknown[]; plaintext?: string };
-}
+// Fathom's external API has shipped two shapes (flat and nested) plus
+// per-account variations. We accept all reasonable spellings.
+type FathomMeeting = Record<string, unknown>;
 
 function pick<T>(...vals: (T | undefined | null)[]): T | null {
   for (const v of vals) if (v !== undefined && v !== null && v !== '') return v as T;
   return null;
 }
 
+function asObj(v: unknown): Record<string, unknown> | null {
+  return v && typeof v === 'object' && !Array.isArray(v) ? v as Record<string, unknown> : null;
+}
+
+function asStr(v: unknown): string | null {
+  return typeof v === 'string' && v ? v : null;
+}
+
+function asNum(v: unknown): number | null {
+  return typeof v === 'number' && Number.isFinite(v) ? v : null;
+}
+
 function meetingToRow(m: FathomMeeting) {
-  const fathomId = pick(m.id, m.recording_id);
+  // Sub-objects in the new shape
+  const recording  = asObj(m.recording)   ?? {};
+  const meeting    = asObj(m.meeting)     ?? {};
+  const recordedBy = asObj(m.recorded_by) ?? asObj(m.fathom_user) ?? asObj(m.host) ?? {};
+
+  // ── ID ──
+  const fathomId = pick(
+    asStr(m.id),
+    asStr(m.recording_id),
+    asStr(recording.id),
+    asStr(recording.recording_id),
+    asStr(m.share_url),     // share URL is unique per recording — usable as last-resort id
+    asStr(recording.share_url),
+  );
   if (!fathomId) return null;
 
+  // ── URLs ──
+  const shareUrl = pick(
+    asStr(m.share_url),
+    asStr(m.url),
+    asStr(recording.share_url),
+    asStr(recording.recording_share_url),
+    asStr(recording.url),
+    asStr(recording.recording_url),
+  );
+
+  // ── Title ──
+  const title = pick(
+    asStr(m.title),
+    asStr(m.meeting_title),
+    asStr(meeting.title),
+  );
+
+  // ── Times (try flat, then nested) ──
+  const scheduledStart = pick(
+    asStr(m.scheduled_start),
+    asStr(m.scheduled_start_time),
+    asStr(meeting.scheduled_start_time),
+    asStr(meeting.scheduled_start),
+  );
+  const recordingStart = pick(
+    asStr(m.recording_start),
+    asStr(m.recording_start_time),
+    asStr(recording.recording_start_time),
+    asStr(recording.start_time),
+    asStr(recording.started_at),
+    scheduledStart,
+  );
+  const recordingEnd = pick(
+    asStr(m.recording_end),
+    asStr(m.recording_end_time),
+    asStr(recording.recording_end_time),
+    asStr(recording.end_time),
+    asStr(recording.ended_at),
+  );
+
+  // ── Duration (Fathom returns minutes; we store seconds) ──
+  const durMin = pick(
+    asNum(m.recording_duration_in_minutes),
+    asNum(recording.recording_duration_in_minutes),
+    asNum(recording.duration_in_minutes),
+    asNum(recording.duration_minutes),
+  );
+  const durSec = pick(
+    asNum(m.duration_seconds),
+    asNum(recording.duration_seconds),
+    durMin !== null ? Math.round(durMin * 60) : null,
+  );
+
+  // ── Host ──
+  const hostEmail = pick(
+    asStr(recordedBy.email),
+    asStr(m.fathom_user_email),
+    asStr(m.host_email),
+  );
+  const hostName = pick(
+    asStr(recordedBy.name),
+    asStr(m.fathom_user_name),
+    asStr(m.host_name),
+  );
+
+  // ── Invitees ──
+  const invitees = (Array.isArray(m.invitees)            ? m.invitees
+                  : Array.isArray(m.calendar_invitees)   ? m.calendar_invitees
+                  : Array.isArray(meeting.invitees)      ? meeting.invitees
+                  : Array.isArray(meeting.calendar_invitees) ? meeting.calendar_invitees
+                  : null) as unknown[] | null;
+
+  const externalDomains = (Array.isArray(m.external_domains)       ? m.external_domains
+                         : Array.isArray(meeting.external_domains) ? meeting.external_domains
+                         : null) as string[] | null;
+
+  // ── Summary ──
+  const summary = pick(
+    asStr(m.default_summary),
+    asStr(m.summary),
+    asStr(m.ai_summary),
+    typeof m.ai_summary === 'object'
+      ? asStr((asObj(m.ai_summary) ?? {}).markdown_formatted) ?? asStr((asObj(m.ai_summary) ?? {}).text)
+      : null,
+  );
+
+  // ── Action items ──
+  const actionItems = (Array.isArray(m.default_action_items) ? m.default_action_items
+                     : Array.isArray(m.action_items)         ? m.action_items
+                     : null) as unknown[] | null;
+
+  // ── Transcript ──
   let transcriptPlain: string | null = null;
   let transcriptSegs: unknown        = null;
-  if (typeof m.transcript === 'string') {
-    transcriptPlain = m.transcript;
-  } else if (m.transcript && typeof m.transcript === 'object') {
-    transcriptPlain = (m.transcript as { plaintext?: string }).plaintext ?? null;
-    transcriptSegs  = (m.transcript as { segments?: unknown[] }).segments ?? null;
+  const t = m.transcript;
+  if (typeof t === 'string') {
+    transcriptPlain = t;
+  } else if (t && typeof t === 'object') {
+    transcriptPlain = asStr((asObj(t) ?? {}).plaintext);
+    const segs      = (asObj(t) ?? {}).segments;
+    transcriptSegs  = Array.isArray(segs) ? segs : null;
   }
+  transcriptPlain = transcriptPlain ?? asStr(m.transcript_plaintext);
 
   return {
     fathom_id:            fathomId,
-    share_url:            pick(m.share_url, m.url),
-    title:                m.title ?? null,
-    scheduled_start:      pick(m.scheduled_start, m.scheduled_start_time),
-    recording_start:      pick(m.recording_start, m.recording_start_time),
-    recording_end:        pick(m.recording_end,   m.recording_end_time),
-    duration_seconds:     m.duration_seconds ?? null,
-    host_email:           m.host?.email ?? null,
-    host_name:            m.host?.name  ?? null,
-    invitees:             m.invitees ?? null,
-    external_domains:     m.external_domains ?? null,
-    summary:              pick(m.summary, m.ai_summary),
-    action_items:         m.action_items ?? null,
+    share_url:            shareUrl,
+    title:                title,
+    scheduled_start:      scheduledStart,
+    recording_start:      recordingStart,
+    recording_end:        recordingEnd,
+    duration_seconds:     durSec,
+    host_email:           hostEmail,
+    host_name:            hostName,
+    invitees:             invitees,
+    external_domains:     externalDomains,
+    summary:              summary,
+    action_items:         actionItems,
     transcript_plaintext: transcriptPlain,
     transcript_segments:  transcriptSegs,
     raw:                  m,
