@@ -39,6 +39,7 @@ const breadcrumbMap: Record<string, string> = {
   "/finance": "Finance",
   "/settings": "Settings",
   "/follow-ups": "Follow-ups",
+  "/calls": "Calls",
 };
 
 interface DashboardLayoutProps {
