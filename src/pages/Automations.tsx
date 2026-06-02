@@ -212,18 +212,22 @@ export default function Automations() {
           return (
             <>
               <div className="flex flex-wrap items-center gap-3">
-                <AnimatedTabsList
-                  items={flowItems}
-                  value={activeFlow}
-                  onChange={v => setActiveFlow(v as TabKey)}
-                  groupId="automation-flows"
-                />
-                <AnimatedTabsList
-                  items={adminItems}
-                  value={activeFlow}
-                  onChange={v => setActiveFlow(v as TabKey)}
-                  groupId="automation-admin"
-                />
+                <div data-tour="automations-flows">
+                  <AnimatedTabsList
+                    items={flowItems}
+                    value={activeFlow}
+                    onChange={v => setActiveFlow(v as TabKey)}
+                    groupId="automation-flows"
+                  />
+                </div>
+                <div data-tour="automations-admin">
+                  <AnimatedTabsList
+                    items={adminItems}
+                    value={activeFlow}
+                    onChange={v => setActiveFlow(v as TabKey)}
+                    groupId="automation-admin"
+                  />
+                </div>
               </div>
 
               <AnimatedTabContent active={activeFlow}>

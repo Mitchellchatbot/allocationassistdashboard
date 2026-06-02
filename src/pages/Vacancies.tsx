@@ -178,7 +178,7 @@ export default function Vacancies() {
               )
             )}
             {!isLoading && filtered.length > 0 && (
-              <Table>
+              <Table data-tour="vacancies-table">
                 <TableHeader>
                   <TableRow>
                     <TableHead className="text-[11px]">Hospital</TableHead>

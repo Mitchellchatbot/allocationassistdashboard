@@ -435,7 +435,7 @@ function ProfileEditor({ doctor }: { doctor: DoctorRow }) {
   };
 
   return (
-    <Card>
+    <Card data-tour="doctor-profile-card">
       <CardHeader className="pb-3">
         <div className="flex items-start justify-between gap-3">
           <div>

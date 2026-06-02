@@ -108,7 +108,7 @@ export default function MyWorkspace() {
         </div>
 
         {/* ── Tasks ──────────────────────────────────────────────── */}
-        <Card>
+        <Card data-tour="workspace-tasks">
           <CardHeader className="pb-3">
             <div className="flex items-start justify-between gap-3 flex-wrap">
               <div>
@@ -161,7 +161,7 @@ export default function MyWorkspace() {
         </Card>
 
         {/* ── Two-column: doctors + vacancies ───────────────────── */}
-        <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
+        <div className="grid grid-cols-1 lg:grid-cols-2 gap-4" data-tour="workspace-grid">
           <Card>
             <CardHeader className="pb-3">
               <CardTitle className="text-base flex items-center gap-2">

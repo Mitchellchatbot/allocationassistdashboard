@@ -148,7 +148,7 @@ function FilterBar({ rangeDays, setRangeDays, hospital, setHospital, teamMember,
   options: { hospitals: string[]; teamMembers: string[]; specialties: string[] };
 }) {
   return (
-    <div className="flex flex-wrap items-center gap-2">
+    <div className="flex flex-wrap items-center gap-2" data-tour="reports-filters">
       <div className="inline-flex rounded-md border bg-white">
         {[7, 30, 90].map(n => (
           <button

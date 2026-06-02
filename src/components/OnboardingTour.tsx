@@ -12,6 +12,7 @@
  *     the tour any time.
  */
 import { useEffect, useLayoutEffect, useState, useCallback, useRef, createContext, useContext, type ReactNode } from "react";
+import { useNavigate, useLocation } from "react-router-dom";
 import { Sparkles, X, ChevronLeft, ChevronRight, Check } from "lucide-react";
 import { Button } from "@/components/ui/button";
 
@@ -26,6 +27,10 @@ export interface TourStep {
   placement?: "top" | "bottom" | "left" | "right" | "auto" | "center";
   /** Padding around the spotlight rectangle, in pixels. */
   padding?: number;
+  /** Optional route to navigate to before showing this step. The overlay
+   *  retries `getTargetRect` until the target appears (capped at ~2s) so
+   *  page mount + lazy-load delays don't break the spotlight. */
+  route?: string;
 }
 
 interface TourContextValue {
@@ -44,6 +49,19 @@ export function OnboardingTourProvider({ children }: { children: ReactNode }) {
   const [stepIdx, setStepIdx] = useState(0);
   const [active, setActive] = useState(false);
   const [tourId, setTourId] = useState<string | null>(null);
+  const navigate = useNavigate();
+  const location = useLocation();
+
+  // When entering a step that wants a different route, navigate there.
+  // The overlay's retry-until-mounted logic then waits for the target.
+  useEffect(() => {
+    if (!active) return;
+    const step = steps[stepIdx];
+    if (!step?.route) return;
+    if (location.pathname === step.route) return;
+    navigate(step.route);
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [active, stepIdx]);
 
   const close = useCallback((markSeen = true) => {
     if (markSeen && tourId) {
@@ -139,7 +157,12 @@ function TourOverlay({ step, stepIdx, total, onPrev, onNext, onSkip }: {
   const [tooltipPos, setTooltipPos] = useState<{ top: number; left: number; arrow: "up" | "down" | "left" | "right" | "none" }>({ top: 0, left: 0, arrow: "none" });
 
   // Recompute the spotlight + tooltip position when step / window changes.
+  // When the step navigated to a new route, the target element may not be
+  // mounted yet — retry on a short interval until it shows up or we give up.
   useLayoutEffect(() => {
+    let retryCount = 0;
+    let retryTimer: ReturnType<typeof setTimeout> | null = null;
+
     const place = () => {
       if (step.placement === "center" || !step.target) {
         setRect(null);
@@ -148,9 +171,14 @@ function TourOverlay({ step, stepIdx, total, onPrev, onNext, onSkip }: {
         return;
       }
       const r = getTargetRect(step.target, padding);
+      if (!r && retryCount < 30) {        // ~2s total (30 × 70ms)
+        retryCount++;
+        retryTimer = setTimeout(place, 70);
+        return;
+      }
       setRect(r);
       if (!r) {
-        // Target missing — show centered so the tour can still progress.
+        // Target missing after retries — show centered so the tour can still progress.
         const vw = window.innerWidth, vh = window.innerHeight;
         setTooltipPos({ top: vh / 2 - 110, left: vw / 2 - 200, arrow: "none" });
         return;
@@ -201,6 +229,7 @@ function TourOverlay({ step, stepIdx, total, onPrev, onNext, onSkip }: {
     window.addEventListener("resize", onChange);
     window.addEventListener("scroll", onChange, true);
     return () => {
+      if (retryTimer) clearTimeout(retryTimer);
       window.removeEventListener("resize", onChange);
       window.removeEventListener("scroll", onChange, true);
     };

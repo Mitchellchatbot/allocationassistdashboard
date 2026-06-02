@@ -355,7 +355,7 @@ function SpecialtyRotationCard({ rotation }: { rotation: ReturnType<typeof useSp
   };
 
   return (
-    <Card>
+    <Card data-tour="batches-rotation">
       <CardHeader className="pb-3">
         <div className="flex items-start justify-between gap-3 flex-wrap">
           <div>
