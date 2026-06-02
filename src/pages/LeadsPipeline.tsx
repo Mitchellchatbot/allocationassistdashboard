@@ -5,7 +5,11 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@
 import { useFilteredData } from "@/hooks/use-filtered-data";
 import { useZohoLeads, useDebounce, type LeadsFilters } from "@/hooks/use-zoho-leads";
 import { useZohoData } from "@/hooks/use-zoho-data";
-import { ArrowRight, AlertTriangle, CheckCircle, Clock, Search, Loader2, Check, X, ChevronDown, Phone, Calendar } from "lucide-react";
+import { ArrowRight, AlertTriangle, CheckCircle, Clock, Search, Loader2, Check, X, ChevronDown, Phone, Calendar, Filter, GitBranch, ClipboardList } from "lucide-react";
+import { Button } from "@/components/ui/button";
+import { EmptyState } from "@/components/ui/empty-state";
+import { TableSkeleton } from "@/components/ui/data-skeleton";
+import { LinkToVacancyDialog, type LinkLeadInput } from "@/components/sales/LinkToVacancyDialog";
 import { Input } from "@/components/ui/input";
 import { InfoIcon } from "@/components/InfoIcon";
 import { useState, useRef, useEffect, useMemo, Fragment } from "react";
@@ -205,6 +209,7 @@ const LeadsPipeline = () => {
   const [pendingId,  setPendingId]  = useState<string | null>(null);
   const [errorMsg,   setErrorMsg]   = useState<string | null>(null);
   const [expandedId, setExpandedId] = useState<string | null>(null);
+  const [linkLead, setLinkLead] = useState<LinkLeadInput | null>(null);
 
   const setFilter = <K extends keyof LeadsFilters>(key: K, value: LeadsFilters[K]) =>
     setFilters(prev => ({ ...prev, [key]: value || undefined }));
@@ -467,11 +472,23 @@ const LeadsPipeline = () => {
             </div>
           )}
           {isLoading ? (
-            <p className="text-[12px] text-muted-foreground py-8 text-center">Loading leads…</p>
+            <TableSkeleton rows={6} cols={6} />
           ) : doctors.length === 0 ? (
-            <p className="text-[12px] text-muted-foreground py-8 text-center">
-              {hasActiveFilters ? "No doctors match your filters" : "No leads found"}
-            </p>
+            hasActiveFilters ? (
+              <EmptyState
+                icon={Filter}
+                title="No doctors match your filters"
+                body="Try clearing one of the active filters above."
+                size="md"
+              />
+            ) : (
+              <EmptyState
+                icon={GitBranch}
+                title="No leads in the pipeline"
+                body="Once Zoho syncs, new leads will show here. Run a sync from the Dashboard if you're not seeing recent activity."
+                size="md"
+              />
+            )
           ) : (
             <>
               <div className="overflow-x-auto -mx-4 px-4">
@@ -555,6 +572,21 @@ const LeadsPipeline = () => {
                           {expandedId === (doc.zohoId ?? doc.id) && (
                             <TableRow className="hover:bg-transparent">
                               <TableCell colSpan={9} className="p-0 border-b border-border/30">
+                                <div className="border-b border-border/30 px-3 py-2 flex items-center justify-end gap-2 bg-muted/20">
+                                  <Button
+                                    size="sm"
+                                    variant="outline"
+                                    className="h-7 text-[11px]"
+                                    onClick={() => setLinkLead({
+                                      doctor_id:         doc.zohoId ?? doc.id,
+                                      doctor_name:       doc.name,
+                                      doctor_speciality: doc.specialty ?? null,
+                                    })}
+                                  >
+                                    <ClipboardList className="h-3 w-3 mr-1 text-orange-600" />
+                                    Link to vacancy
+                                  </Button>
+                                </div>
                                 <CallLogPanel doctorName={doc.name} />
                               </TableCell>
                             </TableRow>
@@ -585,6 +617,12 @@ const LeadsPipeline = () => {
           )}
         </CardContent>
       </Card>
+
+      <LinkToVacancyDialog
+        open={!!linkLead}
+        onClose={() => setLinkLead(null)}
+        lead={linkLead}
+      />
     </DashboardLayout>
   );
 };

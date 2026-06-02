@@ -7,6 +7,8 @@ import { Button } from "@/components/ui/button";
 import { Label } from "@/components/ui/label";
 import { Badge } from "@/components/ui/badge";
 import { UserSquare, Search, Save, Sparkles, Eye, CheckCircle2, Mail, FileText, RefreshCw, AlertCircle, Clock, ChevronDown, ChevronRight, Send, Workflow } from "lucide-react";
+import { EmptyState } from "@/components/ui/empty-state";
+import { CardListSkeleton } from "@/components/ui/data-skeleton";
 import { toast } from "sonner";
 import { useZohoData, type ZohoDoctorOnBoard, type ZohoLead } from "@/hooks/use-zoho-data";
 import {
@@ -223,9 +225,9 @@ export default function DoctorProfiles() {
             </CardHeader>
             <CardContent className="p-0">
               <div className="max-h-[640px] overflow-y-auto">
-                {zohoLoading && <div className="px-3 py-4 text-[11px] text-muted-foreground">Loading doctors...</div>}
+                {zohoLoading && <div className="px-3 py-2"><CardListSkeleton rows={5} /></div>}
                 {!zohoLoading && filtered.length === 0 && (
-                  <div className="px-3 py-4 text-[11px] text-muted-foreground">No doctors match.</div>
+                  <EmptyState icon={Search} title="No doctors match" body="Try clearing the search or specialty filter." size="sm" />
                 )}
                 {filtered.map(d => {
                   const p = profileMap.get(d.id);
@@ -272,8 +274,12 @@ export default function DoctorProfiles() {
           )}
           {!selectedDoctor && (
             <Card>
-              <CardContent className="py-12 text-center text-[12px] text-muted-foreground">
-                Select a doctor on the left to edit their profile.
+              <CardContent className="py-0">
+                <EmptyState
+                  icon={UserSquare}
+                  title="Select a doctor to edit"
+                  body="Pick someone from the list on the left to start filling in their profile, attach a CV, or build the hospital introduction email."
+                />
               </CardContent>
             </Card>
           )}
@@ -487,7 +493,7 @@ function ProfileEditor({ doctor }: { doctor: DoctorRow }) {
         )}
       </CardHeader>
       <CardContent className="space-y-5">
-        {isLoading && <div className="text-[11px] text-muted-foreground">Loading profile...</div>}
+        {isLoading && <CardListSkeleton rows={3} />}
 
         <DoctorLifecycleCard doctorId={doctor.id} doctorName={doctor.name} />
 

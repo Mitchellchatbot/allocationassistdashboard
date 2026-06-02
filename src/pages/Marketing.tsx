@@ -5,7 +5,8 @@ import {
   BarChart, Bar, XAxis, YAxis, Tooltip, ResponsiveContainer, CartesianGrid, Cell, LabelList,
 } from "recharts";
 import { InfoIcon } from "@/components/InfoIcon";
-import { User, ArrowLeft, X } from "lucide-react";
+import { User, ArrowLeft, X, UserX } from "lucide-react";
+import { EmptyState } from "@/components/ui/empty-state";
 import { ChannelIcon } from "@/components/ChannelIcon";
 import { motion, LayoutGroup } from "framer-motion";
 import { SortableTH } from "@/components/SortableTH";
@@ -644,7 +645,7 @@ const Marketing = () => {
             </div>
             <div className="overflow-y-auto" style={{ maxHeight: '240px' }}>
               {kpiPanelDoctors.length === 0 ? (
-                <p className="text-[12px] text-muted-foreground text-center py-6">No doctors found in this period</p>
+                <EmptyState icon={UserX} title="No doctors in this period" body="Widen the date range or pick a different channel." size="sm" />
               ) : (
                 <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-1.5">
                   {kpiPanelDoctors.map((d, i) => (
@@ -724,7 +725,7 @@ const Marketing = () => {
               </CardHeader>
               <CardContent className="px-4 pb-4 overflow-y-auto" style={{ maxHeight: '256px' }}>
                 {acquiredDoctors.length === 0 ? (
-                  <p className="text-[12px] text-muted-foreground text-center py-8">No doctors found</p>
+                  <EmptyState icon={UserX} title="No doctors found" body="None matched the current channel + date window." size="sm" />
                 ) : (
                   <div className="space-y-1.5">
                     {acquiredDoctors.map((d, i) => (
