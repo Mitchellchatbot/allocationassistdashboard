@@ -1,4 +1,4 @@
-import { useMemo, useState, useMemo as useMemoReact } from "react";
+import { useEffect, useMemo, useState, useMemo as useMemoReact } from "react";
 import { DashboardLayout } from "@/components/layout/DashboardLayout";
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
@@ -563,9 +563,33 @@ function SpecialtyRotationCard({ rotation }: { rotation: ReturnType<typeof useSp
                         : "Not currently in Zoho — pick doctors manually"}
                     </div>
                   </div>
-                  <div className="text-right shrink-0">
-                    <div className="text-[9px] uppercase tracking-wider text-violet-700/70">Day</div>
-                    <div className="text-[14px] font-semibold text-violet-900 tabular-nums">{cursor + 1}<span className="text-[10px] text-violet-700/60">/{queue.length}</span></div>
+                  <div className="text-right shrink-0 flex flex-col items-end gap-2">
+                    <div>
+                      <div className="text-[9px] uppercase tracking-wider text-violet-700/70">Day</div>
+                      <div className="text-[14px] font-semibold text-violet-900 tabular-nums">{cursor + 1}<span className="text-[10px] text-violet-700/60">/{queue.length}</span></div>
+                    </div>
+                    {/* Manual advance — the scheduler advances after every
+                        successful specialty_of_day send, but the team
+                        sometimes wants to skip a day (e.g. weekends, gaps
+                        in the cycle). One click moves the cursor forward. */}
+                    <Button
+                      size="sm"
+                      variant="outline"
+                      className="h-6 text-[10px] gap-1 border-violet-300 text-violet-800 hover:bg-violet-100"
+                      onClick={async () => {
+                        const next = (cursor + 1) % queue.length;
+                        try {
+                          await update.mutateAsync({ cursor_index: next });
+                          toast.success(`Advanced to ${queue[next]}`);
+                        } catch (e) {
+                          toast.error(e instanceof Error ? e.message : "Advance failed");
+                        }
+                      }}
+                      disabled={update.isPending || queue.length === 0}
+                      title="Skip to the next specialty"
+                    >
+                      <ChevronRight className="h-2.5 w-2.5" /> Advance
+                    </Button>
                   </div>
                 </div>
               ) : null;
@@ -654,8 +678,21 @@ function BatchDialog({ target, onTargetChange, batches, suggestedSpecialty }: {
 
   // Editor-only state.
   const [search, setSearch] = useState("");
-  const [specialtyOnly, setSpecialtyOnly] = useState(true);
+  // specialtyOnly defaults TRUE for specialty_of_day (batch.specialty is
+  // the whole point of the send) and FALSE for daily_duo / tuesday_top_15
+  // — those kinds aren't specialty-bound, so we only score-boost the
+  // rotation match instead of filtering by it.
+  const [specialtyOnly, setSpecialtyOnly] = useState(false);
   const [sourceFilter, setSourceFilter] = useState<"all" | "lead" | "dob">("all");
+
+  // When the dialog swaps to a different batch, default specialtyOnly to
+  // ON for specialty_of_day (batch is explicitly that specialty) and OFF
+  // for the open-ended kinds (rotation hint still ranks doctors but
+  // doesn't hard-filter).
+  useEffect(() => {
+    if (!editingBatch) return;
+    setSpecialtyOnly(!!editingBatch.specialty);
+  }, [editingBatch?.id, editingBatch?.specialty]);
 
   const close = () => {
     onTargetChange(null);
@@ -713,15 +750,23 @@ function BatchDialog({ target, onTargetChange, batches, suggestedSpecialty }: {
   // Pool of eligible candidates, ranked by score so the strongest profiles
   // surface first. When the user types, we also filter by the query. When
   // they don't, we still show the top 20 so the editor isn't empty.
+  //
+  // For daily_duo / tuesday_top_15 (no explicit specialty on the batch),
+  // we still bias toward TODAY's rotation specialty so the team sees
+  // relevant doctors first. The team can switch off "X only" if they
+  // want the full pool ranked by readiness alone.
+  const effectiveSpecialty = batch?.specialty
+    ?? (batch && batch.kind !== "specialty_of_day" ? suggestedSpecialty : null);
+
   const q = search.trim().toLowerCase();
   const candidatePool = !batch ? [] : (() => {
-    const batchGroup = batch.specialty ? (groupSpecialty(batch.specialty) ?? batch.specialty) : null;
+    const batchGroup = effectiveSpecialty ? (groupSpecialty(effectiveSpecialty) ?? effectiveSpecialty) : null;
     const base = allDoctors.filter(d => d.eligible && !batch.doctor_ids.includes(d.id));
 
-    // When the batch has a specialty + the user opts in, restrict to doctors
-    // whose specialty falls in the SAME canonical bucket (so a "Cardio
-    // Consultant" lead is included for a Cardiology batch). Off by default
-    // for daily_duo / tuesday_top_15 batches where specialty isn't set.
+    // When the batch (or today's rotation) has a specialty + the user opts
+    // in, restrict to doctors whose specialty falls in the SAME canonical
+    // bucket (so a "Cardio Consultant" lead is included for a Cardiology
+    // batch). User can toggle off to see the full pool.
     const specialtyFiltered = specialtyOnly && batchGroup
       ? base.filter(d => {
           if (!d.speciality) return false;
@@ -739,7 +784,7 @@ function BatchDialog({ target, onTargetChange, batches, suggestedSpecialty }: {
       (d.speciality ?? "").toLowerCase().includes(q) ||
       (d.email ?? "").toLowerCase().includes(q)
     );
-    const scored = filtered.map(d => ({ ...d, _score: scoreDoctor(d, batch) }));
+    const scored = filtered.map(d => ({ ...d, _score: scoreDoctor(d, batch, effectiveSpecialty) }));
     scored.sort((a, b) => b._score.total - a._score.total);
     return scored.slice(0, 30);
   })();
@@ -772,7 +817,7 @@ function BatchDialog({ target, onTargetChange, batches, suggestedSpecialty }: {
     const pool = allDoctors
       .filter(d => d.eligible && !batch.doctor_ids.includes(d.id))
       .filter(d => sourceFilter === "all" || d.source === sourceFilter)
-      .map(d => ({ d, score: scoreDoctor(d, batch).total }))
+      .map(d => ({ d, score: scoreDoctor(d, batch, effectiveSpecialty).total }))
       .sort((a, b) => b.score - a.score)
       .slice(0, need)
       .map(x => x.d.id);
@@ -865,7 +910,7 @@ function BatchDialog({ target, onTargetChange, batches, suggestedSpecialty }: {
                 <div className="text-[11px] text-muted-foreground italic">Nothing queued yet. Search below, or use Auto-pick top {expectedCount} above.</div>
               )}
               {picked.map((d, idx) => {
-                const s = scoreDoctor(d, batch);
+                const s = scoreDoctor(d, batch, effectiveSpecialty);
                 return (
                   <div key={d.id} className="flex items-center gap-2 rounded-md border bg-white px-2.5 py-1.5">
                     <span className="text-[10px] tabular-nums text-muted-foreground w-5 text-right">{idx + 1}.</span>
@@ -924,13 +969,16 @@ function BatchDialog({ target, onTargetChange, batches, suggestedSpecialty }: {
                       </button>
                     ))}
                   </div>
-                  {batch.specialty && (
+                  {effectiveSpecialty && (
                     <label className="flex items-center gap-1.5 text-[10px] text-muted-foreground cursor-pointer">
                       <Checkbox
                         checked={specialtyOnly}
                         onCheckedChange={(v) => setSpecialtyOnly(!!v)}
                       />
-                      {batch.specialty} only
+                      {effectiveSpecialty} only
+                      {!batch.specialty && (
+                        <span className="text-[9px] text-violet-600 ml-0.5">(today's rotation)</span>
+                      )}
                     </label>
                   )}
                 </div>
@@ -961,9 +1009,9 @@ function BatchDialog({ target, onTargetChange, batches, suggestedSpecialty }: {
                     ))}
                   </div>
                 )}
-                {!q && candidatePool.length === 0 && specialtyOnly && batch.specialty && (
+                {!q && candidatePool.length === 0 && specialtyOnly && effectiveSpecialty && (
                   <div className="text-[11px] text-muted-foreground italic px-1">
-                    No doctors in the <strong>{batch.specialty}</strong> bucket. Uncheck "{batch.specialty} only" to see all candidates.
+                    No doctors in the <strong>{effectiveSpecialty}</strong> bucket. Uncheck "{effectiveSpecialty} only" to see all candidates.
                   </div>
                 )}
                 {q && candidatePool.length === 0 && (
@@ -1073,18 +1121,26 @@ interface DoctorScore {
  *
  *  Numbers are deliberately small + bounded so users still recognise the
  *  rank order intuitively. Score caps at 100. */
-function scoreDoctor(d: DoctorOption, batch: ScheduledBatch): DoctorScore {
+function scoreDoctor(d: DoctorOption, batch: ScheduledBatch, effectiveSpecialty?: string | null): DoctorScore {
   const reasons: string[] = [];
   let total = 0;
 
-  if (batch.specialty && d.speciality) {
+  // Prefer the batch's own specialty (specialty_of_day) when set; otherwise
+  // fall back to the caller's hint (typically today's rotation specialty,
+  // so even daily_duo / tuesday_top_15 ranks rotation-matching doctors up).
+  const targetSpecialty = batch.specialty ?? effectiveSpecialty ?? null;
+  if (targetSpecialty && d.speciality) {
     const docGroup   = groupSpecialty(d.speciality);
-    const batchGroup = groupSpecialty(batch.specialty) ?? batch.specialty;
-    const directHit  = normaliseSpec(d.speciality) === normaliseSpec(batch.specialty);
+    const batchGroup = groupSpecialty(targetSpecialty) ?? targetSpecialty;
+    const directHit  = normaliseSpec(d.speciality) === normaliseSpec(targetSpecialty);
     const bucketHit  = !!docGroup && normaliseSpec(docGroup) === normaliseSpec(batchGroup);
     if (directHit || bucketHit) {
-      total += 40;
-      reasons.push(`+40 specialty matches "${batch.specialty}"${bucketHit && !directHit ? ` (via ${docGroup} bucket)` : ""}`);
+      // Full boost when this batch is explicitly that specialty;
+      // half-boost when it's just today's rotation hint (still want
+      // sub-specialty exact matches to win).
+      const pts = batch.specialty ? 40 : 20;
+      total += pts;
+      reasons.push(`+${pts} ${batch.specialty ? "specialty matches" : "rotation pick"} "${targetSpecialty}"${bucketHit && !directHit ? ` (via ${docGroup} bucket)` : ""}`);
     }
   }
   if (d.source === "dob") {
