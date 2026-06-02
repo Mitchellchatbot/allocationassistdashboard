@@ -19,10 +19,9 @@ FROM node:20-alpine
 WORKDIR /app
 RUN npm install -g serve
 COPY --from=builder /app/dist ./dist
-# serve picks up dist/serve.json for routing + cache headers:
-#   index.html = no-store (users always fetch the latest entrypoint, so
-#                stale builds don't keep pointing at deleted chunks)
-#   /assets/*  = immutable, 1yr (safe — Vite hashes every filename)
-COPY serve.json ./dist/serve.json
+# Stale-asset recovery is handled at runtime in src/main.tsx — when the
+# browser fails to fetch a hashed chunk (old index.html cached after a
+# new deploy), main.tsx triggers a one-shot hard reload to pull the
+# fresh entrypoint. No serve.json needed (it crashed serve on startup).
 EXPOSE 3000
 CMD sh -c "serve -s dist -l ${PORT:-3000}"
