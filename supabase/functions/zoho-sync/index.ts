@@ -214,10 +214,15 @@ serve(async (req: Request) => {
     // FALLBACK: This org renamed the Contacts module and the custom layout
     // may not expose Email/Phone/Mobile to the API user. If the full field
     // list returns zero rows, retry with the minimal set that worked before.
+    // Zoho's Contacts module uses British spelling — `Speciality`, NOT
+    // `Specialty`. Probed via /Contacts?per_page=1: every row has
+    // Speciality + Specialty_New + Country_of_Specialty_training set.
     const DOB_FULL_FIELDS = ['Full_Name', 'First_Name', 'Last_Name', 'Email', 'Phone', 'Mobile',
-      'Owner', 'Account_Name', 'Created_Time', 'Modified_Time', 'Lead_Source'];
+      'Owner', 'Account_Name', 'Created_Time', 'Modified_Time', 'Lead_Source',
+      'Speciality', 'Specialty_New', 'Country_of_Specialty_training'];
     const DOB_MINIMAL_FIELDS = ['Full_Name', 'First_Name', 'Last_Name',
-      'Owner', 'Account_Name', 'Created_Time', 'Modified_Time', 'Lead_Source'];
+      'Owner', 'Account_Name', 'Created_Time', 'Modified_Time', 'Lead_Source',
+      'Speciality', 'Specialty_New', 'Country_of_Specialty_training'];
     let doctorsOnBoard = await fetchAllPages(token, 'Contacts', DOB_FULL_FIELDS, 50)
       .catch((err) => { console.warn('[zoho-sync] Contacts (DoB) full fields failed:', err); return []; });
     if (doctorsOnBoard.length === 0) {

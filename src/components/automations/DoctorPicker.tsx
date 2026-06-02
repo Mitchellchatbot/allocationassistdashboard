@@ -30,7 +30,7 @@ export function DoctorPicker({ onPick, autoFocus = true, maxResults = 50 }: {
     for (const d of z?.rawDoctorsOnBoard ?? []) {
       const name = d.Full_Name || `${d.First_Name ?? ""} ${d.Last_Name ?? ""}`.trim();
       if (!name) continue;
-      opts.push({ id: `dob:${d.id}`, name, email: d.Email, phone: d.Phone ?? d.Mobile, speciality: d.Specialty, source: "dob" });
+      opts.push({ id: `dob:${d.id}`, name, email: d.Email, phone: d.Phone ?? d.Mobile, speciality: d.Specialty_New ?? d.Speciality, source: "dob" });
     }
     for (const l of z?.rawLeads ?? []) {
       const name = l.Full_Name || `${l.First_Name ?? ""} ${l.Last_Name ?? ""}`.trim();

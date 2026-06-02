@@ -273,10 +273,11 @@ function SpecialtyRotationCard({ rotation }: { rotation: ReturnType<typeof useSp
     }
     for (const d of z?.rawDoctorsOnBoard ?? []) {
       const m = new Map<string, string[]>();
-      if (d.Specialty) {
-        const g = groupSpecialty(d.Specialty);
-        if (g) m.set(g, [d.Specialty]);
-        else noteUnmapped(d.Specialty);
+      const dobSpec = d.Specialty_New || d.Speciality || null;
+      if (dobSpec) {
+        const g = groupSpecialty(dobSpec);
+        if (g) m.set(g, [dobSpec]);
+        else noteUnmapped(dobSpec);
       }
       bumpDoctor(m);
     }
@@ -1195,14 +1196,44 @@ function useMemoDoctors(zoho: unknown, lifecycleMap: Record<string, { eligible_f
       const t = new Date(s).getTime();
       return Number.isFinite(t) ? t : null;
     };
+
+    // Build lookup tables from Leads so DoB rows missing their own
+    // Specialty field can fall back to the matching Lead's specialty.
+    // Match by email, phone (digits only), or normalised name.
+    const leadSpecByEmail = new Map<string, string>();
+    const leadSpecByPhone = new Map<string, string>();
+    const leadSpecByName  = new Map<string, string>();
+    const normPhone = (p: string | null | undefined) => (p ?? "").replace(/\D/g, "");
+    const normName  = (n: string | null | undefined) => (n ?? "").toLowerCase().trim();
+    for (const l of z?.rawLeads ?? []) {
+      const sp = l.Specialty || l.Specialty_New;
+      if (!sp) continue;
+      if (l.Email) leadSpecByEmail.set(l.Email.toLowerCase().trim(), sp);
+      const ph = normPhone(l.Phone ?? l.Mobile);
+      if (ph) leadSpecByPhone.set(ph, sp);
+      const nm = normName(l.Full_Name || `${l.First_Name ?? ""} ${l.Last_Name ?? ""}`);
+      if (nm) leadSpecByName.set(nm, sp);
+    }
+
     for (const d of z?.rawDoctorsOnBoard ?? []) {
       const name = d.Full_Name || `${d.First_Name ?? ""} ${d.Last_Name ?? ""}`.trim();
       if (!name) continue;
       const id = `dob:${d.id}`;
+      // Prefer the DoB's own Specialty fields (Zoho uses British spelling
+      // `Speciality` + a `Specialty_New` override), then cross-reference a
+      // matching Lead. Without this fallback the picker shows "—" for
+      // older DoB rows that have no specialty set.
+      const dobSpec = d.Specialty_New || d.Speciality || null;
+      const fallbackSpec = dobSpec ? null : (
+        (d.Email && leadSpecByEmail.get(d.Email.toLowerCase().trim())) ||
+        (() => { const p = normPhone(d.Phone ?? d.Mobile); return p ? leadSpecByPhone.get(p) : null; })() ||
+        leadSpecByName.get(normName(name)) ||
+        null
+      );
       out.push({
         id, name,
         email:       d.Email,
-        speciality:  d.Specialty,
+        speciality:  dobSpec ?? fallbackSpec,
         eligible:    eligibleOf(id),
         source:      "dob",
         // DoB rows don't carry license fields — but being a DoB at all is

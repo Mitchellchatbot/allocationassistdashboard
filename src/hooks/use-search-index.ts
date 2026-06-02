@@ -192,8 +192,8 @@ export function useSearchIndex(): SearchEntity[] {
         id:       `dob:${d.id ?? name}`,
         kind:     "Doctor",
         label:    name,
-        sublabel: [d.Specialty ?? "", d.Account_Name?.name ? `Hospital: ${d.Account_Name.name}` : ""].filter(Boolean).join(" · ") || "Doctor on Board",
-        keywords: `doctor on board placed dob ${d.Specialty ?? ""} ${d.Email ?? ""} ${d.Phone ?? ""} ${d.Mobile ?? ""} ${d.Account_Name?.name ?? ""}`,
+        sublabel: [(d.Specialty_New ?? d.Speciality) ?? "", d.Account_Name?.name ? `Hospital: ${d.Account_Name.name}` : ""].filter(Boolean).join(" · ") || "Doctor on Board",
+        keywords: `doctor on board placed dob ${d.Specialty_New ?? d.Speciality ?? ""} ${d.Email ?? ""} ${d.Phone ?? ""} ${d.Mobile ?? ""} ${d.Account_Name?.name ?? ""}`,
         route:    `/doctor-profiles?id=dob:${d.id}`,
       });
     }

@@ -38,7 +38,9 @@ export function useDoctorSpecialties(): SpecialtyOption[] {
       bump(l.Specialty_New ?? l.Specialty);
     }
     for (const d of z?.rawDoctorsOnBoard ?? []) {
-      bump(d.Specialty);
+      // Zoho's Contacts module uses British `Speciality` plus a
+      // `Specialty_New` override. Read both with override-first precedence.
+      bump(d.Specialty_New ?? d.Speciality);
     }
 
     const out: SpecialtyOption[] = [];

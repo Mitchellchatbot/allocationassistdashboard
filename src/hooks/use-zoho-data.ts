@@ -97,8 +97,12 @@ export interface ZohoDoctorOnBoard {
   Email: string | null;
   Phone: string | null;
   Mobile: string | null;
-  Specialty: string | null;
-  Specialty_Details: string | null;
+  // Zoho's Contacts module uses British spelling (`Speciality`) plus a
+  // `Specialty_New` override field. Read both — older rows only have
+  // Speciality, newer rows often have Specialty_New populated.
+  Speciality: string | null;
+  Specialty_New: string | null;
+  Country_of_Specialty_training: string | null;
   Lead_Source: string | null;
   Owner: { name: string; email: string } | null;
   Account_Name: { name: string; id: string } | null;   // linked Hospital

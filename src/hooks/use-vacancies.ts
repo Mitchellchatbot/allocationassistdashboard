@@ -153,10 +153,11 @@ export function buildDoctorCandidate(
   profile: DoctorProfile | null,
 ): MatchCandidateDoctor | null {
   if (!lead && !dob && !profile) return null;
-  // Specialty: prefer lead (which has Specialty_New + Specialty), fall back to
-  // DOB (which has just Specialty), then the profile shouldn't have it.
+  // Specialty: prefer lead (which has Specialty_New + Specialty), fall
+  // back to DOB (Zoho's Contacts module uses British `Speciality` plus a
+  // `Specialty_New` override).
   const speciality =
-    lead?.Specialty_New ?? lead?.Specialty ?? dob?.Specialty ?? null;
+    lead?.Specialty_New ?? lead?.Specialty ?? dob?.Specialty_New ?? dob?.Speciality ?? null;
   // License flags only exist on leads. DOB doctors are already placed, so
   // most license signal isn't relevant — but the profile may still carry a
   // free-text license that we can pattern-match.

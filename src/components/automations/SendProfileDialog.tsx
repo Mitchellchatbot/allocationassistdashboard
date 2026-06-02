@@ -83,7 +83,7 @@ export function SendProfileDialog({ open, onClose }: Props) {
       if (!name) continue;
       const id = `dob:${d.id}`;
       if (!eligible(id)) continue;
-      opts.push({ id, name, email: d.Email, phone: d.Phone ?? d.Mobile, speciality: d.Specialty, source: "dob" });
+      opts.push({ id, name, email: d.Email, phone: d.Phone ?? d.Mobile, speciality: d.Specialty_New ?? d.Speciality, source: "dob" });
     }
     for (const l of z?.rawLeads ?? []) {
       const name = l.Full_Name || `${l.First_Name ?? ""} ${l.Last_Name ?? ""}`.trim();
