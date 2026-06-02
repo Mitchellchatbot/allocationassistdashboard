@@ -10,7 +10,7 @@
  * Admins land here too if they navigate to it manually — the page falls
  * back to team-wide data so it doubles as a command center.
  */
-import { useMemo } from "react";
+import { useEffect, useMemo } from "react";
 import { useNavigate } from "react-router-dom";
 import { DashboardLayout } from "@/components/layout/DashboardLayout";
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "@/components/ui/card";
@@ -26,6 +26,8 @@ import { groupRunsIntoBuckets } from "@/lib/flow-buckets";
 import { FLOW_DEFINITIONS, type FlowKey } from "@/lib/automation-flows";
 import type { FlowRun } from "@/hooks/use-automation-flows";
 import { Inbox, ClipboardList, UserSquare, Sparkles, ChevronRight, Mail, FileSignature, MapPin, Bell, Clock, AlertCircle, Workflow, CalendarCheck, ArrowRight } from "lucide-react";
+import { useTour, hasSeenTour } from "@/components/OnboardingTour";
+import { HI_TOUR_ID, HI_TOUR_STEPS } from "@/lib/hi-onboarding-tour";
 
 function greetingFor(d = new Date()): string {
   const h = d.getHours();
@@ -47,6 +49,17 @@ const FLOW_ICON: Record<FlowKey, typeof Mail> = {
 
 export default function MyWorkspace() {
   const navigate = useNavigate();
+  const tour = useTour();
+
+  // Auto-launch the HI onboarding tour the first time a user lands here.
+  // Delay slightly so the sidebar + header are fully painted before the
+  // overlay tries to measure their bounding boxes for the spotlight.
+  useEffect(() => {
+    if (hasSeenTour(HI_TOUR_ID)) return;
+    const t = setTimeout(() => tour.start(HI_TOUR_STEPS, { id: HI_TOUR_ID }), 350);
+    return () => clearTimeout(t);
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
   const { user } = useAuth();
   const { myEmail, scoped, isLoading, tasks, doctors, vacancies, events } = useMyWorkspace();
 

@@ -368,12 +368,16 @@ function CollapsibleHeader({
 
 function NavRow({ item, collapsed, badgeCtx, accent }: { item: NavItem; collapsed: boolean; badgeCtx: BadgeContext; accent: string }) {
   const badge = item.badge ? item.badge(badgeCtx) : 0;
+  // Onboarding-tour hook so HI_TOUR_STEPS can spotlight each sidebar entry.
+  // e.g. /my-workspace → data-tour="sidebar-my-workspace".
+  const tourId = `sidebar-${item.url.replace(/^\//, "").replace(/\//g, "-") || "dashboard"}`;
   return (
     <SidebarMenuItem>
       <SidebarMenuButton asChild>
         <NavLink
           to={item.url}
           end={item.url === "/"}
+          data-tour={tourId}
           className="rounded-xl px-3 py-1.5 text-[13px] text-sidebar-foreground/75 hover:bg-sidebar-accent hover:text-sidebar-accent-foreground transition-colors"
           activeClassName="bg-sidebar-accent text-sidebar-primary font-medium"
         >

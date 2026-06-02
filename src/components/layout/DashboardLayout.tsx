@@ -1,7 +1,14 @@
 import { SidebarProvider, SidebarTrigger, useSidebar } from "@/components/ui/sidebar";
 import { AppSidebar } from "./AppSidebar";
 import { PageTransition } from "./PageTransition";
-import { Bell, Download, AlertTriangle, ChevronRight, Home, Sparkles, RefreshCw, Info, CheckCircle2, Send, RotateCcw, X, Search, FileSignature, Copy } from "lucide-react";
+import { Bell, Download, AlertTriangle, ChevronRight, Home, Sparkles, RefreshCw, Info, CheckCircle2, Send, RotateCcw, X, Search, FileSignature, Copy, GraduationCap } from "lucide-react";
+import { useTour } from "@/components/OnboardingTour";
+import { HI_TOUR_ID, HI_TOUR_STEPS } from "@/lib/hi-onboarding-tour";
+
+const HI_PAGES = new Set([
+  "/", "/my-workspace", "/automations", "/doctor-profiles",
+  "/vacancies", "/batches", "/reports",
+]);
 import { ChatChart, parseCharts } from "@/components/ChatChart";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
@@ -153,6 +160,11 @@ export function DashboardLayout({ children, title: pageTitle, subtitle: pageSubt
   const location = useLocation();
   const currentPath = location.pathname;
   const { pageData } = useAIPageContext();
+  const tour = useTour();
+  const showTourButton = HI_PAGES.has(currentPath);
+  const startHiTour = useCallback(() => {
+    tour.start(HI_TOUR_STEPS, { id: HI_TOUR_ID });
+  }, [tour]);
   const breadcrumbEntry  = lookupRoute(currentPath);
   const breadcrumbLabel  = breadcrumbEntry?.label ?? title;
   const breadcrumbSection = breadcrumbEntry?.section && breadcrumbEntry.section !== "Overview"
@@ -410,10 +422,28 @@ export function DashboardLayout({ children, title: pageTitle, subtitle: pageSubt
                   }
                 </TooltipContent>
               </Tooltip>
+              {showTourButton && (
+                <Tooltip>
+                  <TooltipTrigger asChild>
+                    <button
+                      onClick={startHiTour}
+                      className="hidden md:flex items-center gap-1.5 h-8 px-3 text-[11px] font-medium rounded-full border border-teal-200 bg-teal-50 text-teal-800 hover:bg-teal-100 hover:border-teal-300 transition-all duration-150 shadow-sm"
+                      aria-label="Replay Hospital Introduction onboarding tour"
+                    >
+                      <GraduationCap className="h-3 w-3 shrink-0" />
+                      Tour
+                    </button>
+                  </TooltipTrigger>
+                  <TooltipContent side="bottom" className="text-[10px]">
+                    Simulate onboarding — replay the guided walkthrough of the HI module.
+                  </TooltipContent>
+                </Tooltip>
+              )}
               <Tooltip>
                 <TooltipTrigger asChild>
                   <button
                     onClick={() => setSearchOpen(true)}
+                    data-tour="topbar-search"
                     className="hidden sm:flex items-center gap-1.5 h-8 px-3 text-[11px] font-medium rounded-full border border-border/60 bg-card text-muted-foreground hover:text-foreground hover:border-border hover:bg-muted/50 transition-all duration-150 shadow-sm"
                   >
                     <Search className="h-3 w-3 shrink-0" />
@@ -770,6 +800,7 @@ export function DashboardLayout({ children, title: pageTitle, subtitle: pageSubt
       {!aiOpen && (
         <button
           onClick={() => setAiOpen(true)}
+          data-tour="ai-floating-button"
           className="fixed bottom-5 right-5 z-50 flex items-center gap-1.5 rounded-full bg-primary px-3.5 py-2 text-white shadow-lg hover:bg-primary/90 active:scale-95 transition-all duration-150 text-[11px] font-medium"
         >
           <Sparkles className="h-3 w-3" />

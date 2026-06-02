@@ -7,6 +7,7 @@ import { TooltipProvider } from "@/components/ui/tooltip";
 import { FilterProvider } from "@/lib/FilterProvider";
 import { ProtectedRoute } from "@/components/ProtectedRoute";
 import { AIPageContextProvider } from "@/lib/ai-page-context";
+import { OnboardingTourProvider } from "@/components/OnboardingTour";
 import { CurrencyProvider } from "@/lib/CurrencyProvider";
 import { DashboardLayout, ViewportSpinner } from "@/components/layout/DashboardLayout";
 
@@ -105,6 +106,7 @@ const App = () => (
     <TooltipProvider>
       <AIPageContextProvider>
       <CurrencyProvider>
+        <OnboardingTourProvider>
         <Toaster />
         <Sonner />
         <BrowserRouter>
@@ -145,6 +147,7 @@ const App = () => (
             </Routes>
           </Suspense>
         </BrowserRouter>
+        </OnboardingTourProvider>
       </CurrencyProvider>
       </AIPageContextProvider>
     </TooltipProvider>
