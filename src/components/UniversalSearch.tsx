@@ -8,9 +8,10 @@ import {
   Users, DollarSign, Megaphone, User as UserIcon,
   LayoutDashboard, Receipt, BarChart3,
   UserSquare, Workflow, ClipboardList, Building2, Mailbox, Mail,
-  Tag, Bell, FileText,
+  Tag, Bell, FileText, Clock, SearchX, CornerDownLeft,
 } from "lucide-react";
 import { useSearchIndex, type SearchKind, type SearchEntity } from "@/hooks/use-search-index";
+import { useRecentItems } from "@/hooks/use-recent-items";
 
 // Visual identity per kind: icon, group heading, sort order in results, and
 // the colored pill we render on the right of each row so the searcher can see
@@ -56,13 +57,17 @@ export function UniversalSearch({ open, onOpenChange }: UniversalSearchProps) {
     <CommandDialog open={open} onOpenChange={onOpenChange}>
       {hasOpened
         ? <SearchContents open={open} onClose={() => onOpenChange(false)} />
-        : <div className="px-3 py-2 text-[11px] text-muted-foreground">Loading...</div>}
+        : <div className="flex items-center gap-2 px-4 py-6 text-[12px] text-muted-foreground">
+            <div className="h-3.5 w-3.5 rounded-full border-2 border-primary/30 border-t-primary animate-spin" />
+            Loading search index…
+          </div>}
     </CommandDialog>
   );
 }
 
 function SearchContents({ open, onClose }: { open: boolean; onClose: () => void }) {
-  const index = useSearchIndex();
+  const index   = useSearchIndex();
+  const recent  = useRecentItems();
   const navigate = useNavigate();
   const [query, setQuery] = useState("");
 
@@ -105,16 +110,48 @@ function SearchContents({ open, onClose }: { open: boolean; onClose: () => void 
         autoFocus
       />
       {!query && (
-        <div className="px-3 py-2 text-[10px] text-muted-foreground border-b">
-          Searching {total.toLocaleString()} entities across every page. Each result is tagged by source. Start typing to narrow.
+        <div className="px-3 py-2 text-[10px] text-muted-foreground border-b flex items-center justify-between gap-3">
+          <span>Searching <strong>{total.toLocaleString()}</strong> entities. Start typing to narrow.</span>
+          <span className="hidden sm:flex items-center gap-1">
+            <kbd className="px-1 py-0.5 rounded border border-border bg-muted/60 font-mono text-[9px]">↑</kbd>
+            <kbd className="px-1 py-0.5 rounded border border-border bg-muted/60 font-mono text-[9px]">↓</kbd>
+            <span>navigate</span>
+            <kbd className="px-1 py-0.5 rounded border border-border bg-muted/60 font-mono text-[9px] ml-1">↵</kbd>
+            <span>open</span>
+          </span>
         </div>
       )}
       <CommandList>
         <CommandEmpty>
-          <div className="py-4 text-center text-[12px] text-muted-foreground">
-            No results found. Try a doctor name, hospital, specialty, or flow stage.
+          <div className="py-8 px-4 flex flex-col items-center text-center">
+            <SearchX className="h-6 w-6 text-muted-foreground/50 mb-2" />
+            <p className="text-[12px] font-medium">No matches for "{query}"</p>
+            <p className="text-[11px] text-muted-foreground mt-1">Try a doctor name, hospital, specialty, or flow stage.</p>
           </div>
         </CommandEmpty>
+
+        {/* Recent items — shown when no query so the dialog feels useful
+            even with empty input. Caps at 6 to stay scannable. */}
+        {!query && recent.length > 0 && (
+          <CommandGroup heading="Recent">
+            {recent.slice(0, 6).map(r => (
+              <CommandItem
+                key={`recent:${r.path}`}
+                value={`recent ${r.label} ${r.path}`}
+                onSelect={() => handleSelect(r.path)}
+                className="gap-2"
+              >
+                <Clock className="h-3.5 w-3.5 text-muted-foreground/70 shrink-0" />
+                <div className="min-w-0 flex-1">
+                  <p className="text-[12px] font-medium truncate">{r.label}</p>
+                  <p className="text-[10px] text-muted-foreground truncate">{r.path}</p>
+                </div>
+                <CornerDownLeft className="h-3 w-3 text-muted-foreground/40 shrink-0 opacity-0 group-data-[selected=true]:opacity-100" />
+              </CommandItem>
+            ))}
+          </CommandGroup>
+        )}
+
         {grouped.map(([kind, items]) => {
           const meta = KIND_META[kind];
           const Icon = meta.icon;
@@ -160,4 +197,4 @@ function SearchContents({ open, onClose }: { open: boolean; onClose: () => void 
   );
 }
 
-void FileText;
+void FileText; void Users;

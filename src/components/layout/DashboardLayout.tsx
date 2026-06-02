@@ -1,7 +1,7 @@
 import { SidebarProvider, SidebarTrigger, useSidebar } from "@/components/ui/sidebar";
 import { AppSidebar } from "./AppSidebar";
 import { PageTransition } from "./PageTransition";
-import { Bell, Download, AlertTriangle, ChevronRight, Home, Sparkles, RefreshCw, Info, CheckCircle2, Send, RotateCcw, X, Search, FileSignature } from "lucide-react";
+import { Bell, Download, AlertTriangle, ChevronRight, Home, Sparkles, RefreshCw, Info, CheckCircle2, Send, RotateCcw, X, Search, FileSignature, Copy } from "lucide-react";
 import { ChatChart, parseCharts } from "@/components/ChatChart";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
@@ -149,7 +149,7 @@ export function DashboardLayout({ children, title: pageTitle, subtitle: pageSubt
   const [chatLoading, setChatLoading] = useState(false);
   const [chatStreaming, setChatStreaming] = useState('');
   const chatEndRef = useRef<HTMLDivElement>(null);
-  const inputRef = useRef<HTMLInputElement>(null);
+  const inputRef = useRef<HTMLTextAreaElement>(null);
   const location = useLocation();
   const currentPath = location.pathname;
   const { pageData } = useAIPageContext();
@@ -326,8 +326,14 @@ export function DashboardLayout({ children, title: pageTitle, subtitle: pageSubt
       while (!done) {
         const { value, done: d } = await reader.read();
         done = d;
-        // Collect silently — no incremental setChatStreaming so we can post-process
-        if (value) full += decoder.decode(value, { stream: !d });
+        if (value) {
+          full += decoder.decode(value, { stream: !d });
+          // Strip <chart>…</chart> blocks during streaming so the user
+          // doesn't see raw JSON before the chart renders. The final
+          // setChatMessages below keeps the full text including charts
+          // for the persisted message render.
+          setChatStreaming(full.replace(/<chart\b[^>]*>[\s\S]*?<\/chart>/gi, ""));
+        }
       }
 
       setChatMessages(prev => [...prev, { role: 'assistant', content: full, isInsights: isInsightsRequest }]);
@@ -618,7 +624,17 @@ export function DashboardLayout({ children, title: pageTitle, subtitle: pageSubt
                       return (
                         <div className="space-y-2">
                           {cleanText && (
-                            <div className="rounded-2xl rounded-bl-sm bg-card border border-border/50 px-4 py-3">
+                            <div className="group relative rounded-2xl rounded-bl-sm bg-card border border-border/50 px-4 py-3">
+                              <button
+                                onClick={() => {
+                                  navigator.clipboard.writeText(cleanText);
+                                  toast.success("Copied");
+                                }}
+                                title="Copy"
+                                className="absolute top-2 right-2 h-6 w-6 rounded-md flex items-center justify-center opacity-0 group-hover:opacity-100 transition-opacity hover:bg-muted/80 text-muted-foreground hover:text-foreground"
+                              >
+                                <Copy className="h-3 w-3" />
+                              </button>
                               <ReactMarkdown
                                 remarkPlugins={[remarkGfm]}
                                 components={{
@@ -674,7 +690,28 @@ export function DashboardLayout({ children, title: pageTitle, subtitle: pageSubt
                 </div>
               ))}
 
-              {/* Thinking dots */}
+              {/* Streaming assistant bubble — shown while tokens arrive.
+                  Once the stream completes, the full message is appended to
+                  chatMessages and this block clears. */}
+              {chatLoading && chatStreaming && (
+                <div className="flex gap-3">
+                  <div className="h-7 w-7 rounded-full bg-primary/10 flex items-center justify-center shrink-0 ring-1 ring-primary/20">
+                    <Sparkles className="h-3.5 w-3.5 text-primary" />
+                  </div>
+                  <div className="flex-1 min-w-0">
+                    <div className="prose prose-sm max-w-none text-[13px] leading-relaxed text-foreground/90 [&_p]:my-1 [&_h2]:text-[14px] [&_h2]:font-semibold [&_h2]:mt-3 [&_h2]:mb-1 [&_ul]:my-1 [&_li]:my-0.5 [&_strong]:font-semibold [&_strong]:text-foreground [&_table]:text-[11px] [&_table]:my-2 [&_th]:px-2 [&_th]:py-1 [&_td]:px-2 [&_td]:py-1">
+                      <ReactMarkdown remarkPlugins={[remarkGfm]}>{chatStreaming}</ReactMarkdown>
+                    </div>
+                    <div className="inline-flex items-center gap-1 mt-1">
+                      <span className="h-1 w-1 rounded-full bg-primary/60 animate-bounce [animation-delay:0ms]" />
+                      <span className="h-1 w-1 rounded-full bg-primary/60 animate-bounce [animation-delay:150ms]" />
+                      <span className="h-1 w-1 rounded-full bg-primary/60 animate-bounce [animation-delay:300ms]" />
+                    </div>
+                  </div>
+                </div>
+              )}
+
+              {/* Thinking dots — only when stream hasn't started */}
               {chatLoading && !chatStreaming && (
                 <div className="flex items-center gap-2 pl-10">
                   <span className="h-2 w-2 rounded-full bg-primary/60 animate-bounce [animation-delay:0ms]" />
@@ -687,25 +724,37 @@ export function DashboardLayout({ children, title: pageTitle, subtitle: pageSubt
             </div>
             </div>
 
-            {/* Input bar */}
+            {/* Input bar — textarea so multi-line prompts work. Shift+Enter
+                inserts a newline; Enter alone sends. Auto-grows up to 5
+                rows, then scrolls. */}
             <div className="shrink-0 border-t border-border/40 bg-card px-5 py-4">
-              <div className="flex items-center gap-3 rounded-xl border border-border bg-background px-4 py-3 focus-within:ring-1 focus-within:ring-primary/40 focus-within:border-primary/50 transition-all">
-                <input
+              <div className="flex items-end gap-3 rounded-xl border border-border bg-background px-4 py-3 focus-within:ring-1 focus-within:ring-primary/40 focus-within:border-primary/50 transition-all">
+                <textarea
                   ref={inputRef}
-                  type="text"
+                  rows={1}
                   value={chatInput}
-                  onChange={e => setChatInput(e.target.value)}
-                  onKeyDown={(e: KeyboardEvent<HTMLInputElement>) => {
-                    if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); sendChat(); }
+                  onChange={e => {
+                    setChatInput(e.target.value);
+                    // Auto-grow up to 5 lines.
+                    const el = e.currentTarget;
+                    el.style.height = "auto";
+                    el.style.height = `${Math.min(el.scrollHeight, 5 * 22)}px`;
                   }}
-                  placeholder="Ask about your data…"
+                  onKeyDown={(e: KeyboardEvent<HTMLTextAreaElement>) => {
+                    if (e.key === 'Enter' && !e.shiftKey) {
+                      e.preventDefault();
+                      sendChat();
+                    }
+                  }}
+                  placeholder="Ask about your data…   (Shift+Enter for newline)"
                   disabled={chatLoading}
-                  className="flex-1 text-[13px] bg-transparent outline-none placeholder:text-muted-foreground/40 disabled:opacity-50"
+                  className="flex-1 text-[13px] bg-transparent outline-none placeholder:text-muted-foreground/40 disabled:opacity-50 resize-none leading-[22px] max-h-[110px]"
                 />
                 <button
                   onClick={() => sendChat()}
                   disabled={!chatInput.trim() || chatLoading}
                   className="h-7 w-7 flex items-center justify-center rounded-lg bg-primary text-white transition-all disabled:opacity-25 hover:bg-primary/85 active:scale-95 shrink-0"
+                  title="Send (Enter)"
                 >
                   <Send className="h-3.5 w-3.5" />
                 </button>

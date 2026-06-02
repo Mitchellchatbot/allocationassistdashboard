@@ -3,7 +3,8 @@ import { useQuery } from "@tanstack/react-query";
 import { useNavigate } from "react-router-dom";
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
-import { Bell, Clock, Mail, FileSignature, MapPin, ChevronRight, ChevronDown, AlertCircle, ClipboardList, Sparkles, X, CheckCheck, Trash2, CalendarCheck, UserCheck } from "lucide-react";
+import { Bell, Clock, Mail, FileSignature, MapPin, ChevronRight, ChevronDown, AlertCircle, ClipboardList, Sparkles, X, CheckCheck, Trash2, CalendarCheck, UserCheck, Eye, EyeOff, Inbox } from "lucide-react";
+import { EmptyState } from "@/components/ui/empty-state";
 import { supabase } from "@/lib/supabase";
 import { FLOW_DEFINITIONS, type FlowKey } from "@/lib/automation-flows";
 import type { FlowRun } from "@/hooks/use-automation-flows";
@@ -159,10 +160,19 @@ function NotificationsBucket({ notifications, unreadCount, onDismiss, onDismissA
   onMarkAllRead:       () => void;
   onJump:              (path: string) => void;
 }) {
+  // "Unread only" toggle — when on, hides notifications with a read_at
+  // timestamp so the team can focus on what's new without dismissing
+  // anything. Persists for the session via React state only.
+  const [unreadOnly, setUnreadOnly] = useState(false);
+  const filtered = useMemo(
+    () => unreadOnly ? notifications.filter(n => !n.read_at) : notifications,
+    [notifications, unreadOnly],
+  );
+
   // Group notifications by kind, preserving created_at desc within each.
   const groups = useMemo(() => {
     const byKind = new Map<string, AppNotification[]>();
-    for (const n of notifications) {
+    for (const n of filtered) {
       const arr = byKind.get(n.kind) ?? [];
       arr.push(n);
       byKind.set(n.kind, arr);
@@ -175,7 +185,7 @@ function NotificationsBucket({ notifications, unreadCount, onDismiss, onDismissA
       return ai - bi;
     });
     return keys.map(k => ({ kind: k, items: byKind.get(k)! }));
-  }, [notifications]);
+  }, [filtered]);
 
   // Everything collapses by default. The panel stays small until the user
   // explicitly opens a group — then it grows to fit, capped by viewport.
@@ -202,18 +212,44 @@ function NotificationsBucket({ notifications, unreadCount, onDismiss, onDismissA
         <span className="text-[10px] text-muted-foreground hidden md:inline">
           · grouped by kind
         </span>
-        {unreadCount > 0 && (
-          <Button
-            variant="ghost"
-            size="sm"
-            className="h-6 ml-auto text-[10px] text-emerald-700 hover:bg-emerald-100"
-            onClick={onMarkAllRead}
+        <div className="ml-auto flex items-center gap-1.5">
+          {/* Unread-only filter — single click swaps the list to just new
+              items. Disabled when nothing is unread, since the filter
+              would empty the list. */}
+          <button
+            type="button"
+            onClick={() => setUnreadOnly(v => !v)}
+            disabled={unreadCount === 0 && !unreadOnly}
+            className={`inline-flex items-center gap-1 rounded-full border px-2 py-0.5 text-[10px] font-medium transition-colors disabled:opacity-40 disabled:cursor-not-allowed ${
+              unreadOnly
+                ? "bg-emerald-100 text-emerald-800 border-emerald-300"
+                : "bg-white text-slate-600 border-slate-200 hover:bg-slate-50"
+            }`}
           >
-            <CheckCheck className="h-3 w-3 mr-1" /> Mark all read
-          </Button>
-        )}
+            {unreadOnly ? <Eye className="h-2.5 w-2.5" /> : <EyeOff className="h-2.5 w-2.5" />}
+            Unread only
+          </button>
+          {unreadCount > 0 && (
+            <Button
+              variant="ghost"
+              size="sm"
+              className="h-6 text-[10px] text-emerald-700 hover:bg-emerald-100"
+              onClick={onMarkAllRead}
+            >
+              <CheckCheck className="h-3 w-3 mr-1" /> Mark all read
+            </Button>
+          )}
+        </div>
       </div>
       <div className="divide-y divide-emerald-200/40 bg-white">
+        {groups.length === 0 && unreadOnly && (
+          <EmptyState
+            icon={Inbox}
+            title="All caught up"
+            body="Nothing unread right now. Toggle off Unread-only to see the rest."
+            size="sm"
+          />
+        )}
         {groups.map(g => (
           <NotificationGroup
             key={g.kind}
