@@ -34,28 +34,40 @@ type Contract = Record<string, unknown>;
 // ── Page metadata ─────────────────────────────────────────────────────────────
 
 const PAGE_LABELS: Record<string, string> = {
-  '/':               'Dashboard (Overview)',
-  '/sales':          'Sales Tracker',
-  '/marketing':      'Marketing',
-  '/leads-pipeline': 'Doctor Progress',
-  '/team':           'Team Performance',
-  '/finance':        'Finance',
-  '/operations':     'Operations & Roadmap',
-  '/meta-ads':       'Meta Ads',
-  '/contracts':      'Contracts',
-  '/settings':       'Settings',
+  '/':                 'Dashboard (Overview)',
+  '/my-workspace':     'My Workspace',
+  '/sales':            'Sales Tracker',
+  '/marketing':        'Marketing',
+  '/leads-pipeline':   'Doctor Progress',
+  '/team':             'Team Performance',
+  '/finance':          'Finance',
+  '/operations':       'Operations & Roadmap',
+  '/meta-ads':         'Meta Ads',
+  '/contracts':        'Contracts',
+  '/settings':         'Settings',
+  '/automations':      'Automations (HI flows)',
+  '/doctor-profiles':  'Doctor Profiles',
+  '/vacancies':        'Vacancies',
+  '/batches':          'Batch Sends',
+  '/reports':          'HI Reports',
 };
 
 const PAGE_FOCUS: Record<string, string> = {
-  '/':               'Summarise overall pipeline health, top KPIs, and the most urgent items across all areas.',
-  '/sales':          'Focus on recruiter performance — lead ownership, contact rates, high-priority follow-ups, and pipeline progress per recruiter.',
-  '/marketing':      'Focus on lead sources and channel performance — which sources bring the most and best-quality doctors.',
-  '/leads-pipeline': 'Focus on individual doctor progress — which stage each is at, license status (DOH/DHA/MOH), and bottlenecks.',
-  '/team':           'Focus on recruiter workload — who has the most leads, highest contact rate, and most high-priority follow-ups.',
-  '/finance':        'Focus on revenue and deal stages — Closed Won revenue, open pipeline value, and deal progression.',
-  '/operations':     'Focus on the license pipeline (DOH/DHA/MOH status) and operational bottlenecks in the recruitment process.',
-  '/meta-ads':       'Focus on Meta advertising performance — spend, CPL, campaign ROI, top-performing ads. Prioritise the Meta Ads data section.',
-  '/contracts':      'Focus on contract status, parties, values, and upcoming renewals using the Contracts data below.',
+  '/':                 'Summarise overall pipeline health, top KPIs, and the most urgent items across all areas.',
+  '/my-workspace':     'Focus on what is assigned to the current HI team member — tasks waiting, doctors they own, vacancies they own, recent activity. Use the HI WORKFLOW section.',
+  '/sales':            'Focus on recruiter performance — lead ownership, contact rates, high-priority follow-ups, and pipeline progress per recruiter.',
+  '/marketing':        'Focus on lead sources and channel performance — which sources bring the most and best-quality doctors.',
+  '/leads-pipeline':   'Focus on individual doctor progress — which stage each is at, license status (DOH/DHA/MOH), and bottlenecks.',
+  '/team':             'Focus on recruiter workload — who has the most leads, highest contact rate, and most high-priority follow-ups.',
+  '/finance':          'Focus on revenue and deal stages — Closed Won revenue, open pipeline value, and deal progression.',
+  '/operations':       'Focus on the license pipeline (DOH/DHA/MOH status) and operational bottlenecks in the recruitment process.',
+  '/meta-ads':         'Focus on Meta advertising performance — spend, CPL, campaign ROI, top-performing ads. Prioritise the Meta Ads data section.',
+  '/contracts':        'Focus on contract status, parties, values, and upcoming renewals using the Contracts data below.',
+  '/automations':      'Focus on active flow runs across the 7 HI automation flows — what is stuck, what is overdue, what is pending team action. Use the HI WORKFLOW section.',
+  '/doctor-profiles':  'Focus on doctor profile completeness, CV upload status, and which doctors are ready to be sent to hospitals. Use the HI WORKFLOW section.',
+  '/vacancies':        'Focus on open vacancies by priority, days open, and which doctors match each. Use the HI WORKFLOW section.',
+  '/batches':          'Focus on recurring batch sends — Daily duo, Tuesday top 15, Specialty of the day. Recent history and what is queued. Use the HI WORKFLOW section.',
+  '/reports':          'Focus on HI team KPIs per member + hospital relationship health. Use the HI WORKFLOW section.',
 };
 
 // ── Data loaders ──────────────────────────────────────────────────────────────
@@ -80,6 +92,105 @@ async function loadContracts(): Promise<Contract[]> {
     .order('created_at', { ascending: false })
     .limit(150);
   return data ?? [];
+}
+
+// ── Hospital Introduction workflow data ─────────────────────────────────
+// These power the AI's awareness of the automation engine — what's stuck,
+// who owns what, which hospitals are warming, what's in the send queue.
+
+interface FlowRun {
+  id: string; flow_key: string; doctor_name: string | null;
+  hospital: string | null; current_stage: string; status: string;
+  started_at: string; last_event_at: string; completed_at: string | null;
+  created_by: string | null; assigned_to: string | null;
+}
+
+interface Vacancy {
+  id: string; hospital_name: string; specialty: string;
+  priority: string; status: string; opened_at: string;
+  opened_by: string | null; city: string | null;
+}
+
+interface BatchSend {
+  id: string; kind: string; status: string;
+  scheduled_for: string; specialty: string | null;
+  doctor_ids: string[] | null; hospital_count: number | null;
+  sent_at: string | null; created_by: string | null;
+}
+
+interface NotificationRow {
+  id: string; kind: string; title: string;
+  related_run_id: string | null; related_vacancy_id: string | null;
+  for_user: string | null; read_at: string | null;
+  created_at: string;
+}
+
+interface HospitalRow {
+  name: string; city: string | null; country: string | null;
+  active: boolean | null; owner_email: string | null;
+  health_score: number | null; primary_recruiter_email: string | null;
+}
+
+interface DoctorLifecycle {
+  doctor_id: string; doctor_name: string | null;
+  signed_at: string | null; joined_at: string | null;
+  approved_at: string | null; paid_at: string | null;
+  unavailable: boolean | null;
+}
+
+async function loadFlowRuns(): Promise<FlowRun[]> {
+  const { data } = await supabase
+    .from('automation_flow_runs')
+    .select('id, flow_key, doctor_name, hospital, current_stage, status, started_at, last_event_at, completed_at, created_by, assigned_to')
+    .order('last_event_at', { ascending: false })
+    .limit(500);
+  return (data ?? []) as FlowRun[];
+}
+
+async function loadVacancies(): Promise<Vacancy[]> {
+  const { data } = await supabase
+    .from('vacancies')
+    .select('id, hospital_name, specialty, priority, status, opened_at, opened_by, city')
+    .order('opened_at', { ascending: false })
+    .limit(200);
+  return (data ?? []) as Vacancy[];
+}
+
+async function loadBatchSends(): Promise<BatchSend[]> {
+  const { data } = await supabase
+    .from('scheduled_batch_sends')
+    .select('id, kind, status, scheduled_for, specialty, doctor_ids, hospital_count, sent_at, created_by')
+    .order('scheduled_for', { ascending: false })
+    .limit(60);
+  return (data ?? []) as BatchSend[];
+}
+
+async function loadOpenNotifications(): Promise<NotificationRow[]> {
+  const { data } = await supabase
+    .from('notifications')
+    .select('id, kind, title, related_run_id, related_vacancy_id, for_user, read_at, created_at')
+    .is('dismissed_at', null)
+    .order('created_at', { ascending: false })
+    .limit(200);
+  return (data ?? []) as NotificationRow[];
+}
+
+async function loadHospitalsSummary(): Promise<HospitalRow[]> {
+  const { data } = await supabase
+    .from('hospitals')
+    .select('name, city, country, active, owner_email, health_score, primary_recruiter_email')
+    .order('updated_at', { ascending: false })
+    .limit(300);
+  return (data ?? []) as HospitalRow[];
+}
+
+async function loadDoctorLifecycles(): Promise<DoctorLifecycle[]> {
+  const { data } = await supabase
+    .from('doctor_lifecycle')
+    .select('doctor_id, doctor_name, signed_at, joined_at, approved_at, paid_at, unavailable')
+    .order('updated_at', { ascending: false })
+    .limit(300);
+  return (data ?? []) as DoctorLifecycle[];
 }
 
 // ── Filter detection ──────────────────────────────────────────────────────────
@@ -264,9 +375,24 @@ Deno.serve(async (req: Request) => {
     .map(m => m.content);
 
   // ── Load all data in parallel ─────────────────────────────────────────────
-  const [{ leads: allLeads, deals: allDeals }, contracts] = await Promise.all([
+  const [
+    { leads: allLeads, deals: allDeals },
+    contracts,
+    flowRuns,
+    vacancies,
+    batches,
+    notifications,
+    hospitals,
+    lifecycles,
+  ] = await Promise.all([
     loadZohoCache(),
     loadContracts(),
+    loadFlowRuns(),
+    loadVacancies(),
+    loadBatchSends(),
+    loadOpenNotifications(),
+    loadHospitalsSummary(),
+    loadDoctorLifecycles(),
   ]);
 
   // ── Detect filters ────────────────────────────────────────────────────────
@@ -324,6 +450,149 @@ Deno.serve(async (req: Request) => {
     `${c.doctor_name ?? '—'} | ${c.hospital_name ?? '—'} | ${c.status ?? '—'} | AED ${c.contract_value ?? 0} | ${c.specialty ?? '—'} | ${String(c.start_date ?? '—').slice(0, 10)} → ${String(c.end_date ?? '—').slice(0, 10)}`
   ).join('\n');
 
+  // ── Hospital Introduction workflow summary ──────────────────────────────
+  // Compact text rep of every signal that drives the HI module so the AI
+  // can answer questions like:
+  //   "Who has the most stale runs?"
+  //   "Which hospitals are warming?"
+  //   "What's in the next batch send?"
+  //   "How many doctors need a city picked?"
+  // Reuse the outer `now` (Date) declared above for monthly counts —
+  // JS coerces Date to ms in arithmetic so `now - ms` works.
+  const active   = flowRuns.filter(r => r.status === 'active');
+  const completed = flowRuns.filter(r => r.status === 'completed');
+  const failed   = flowRuns.filter(r => r.status === 'failed');
+  const stale    = active.filter(r => now - new Date(r.last_event_at).getTime() > 7 * 86_400_000);
+
+  // Per-flow breakdown
+  const byFlow: Record<string, { active: number; stale: number; completed: number; failed: number }> = {};
+  for (const r of flowRuns) {
+    const k = r.flow_key;
+    if (!byFlow[k]) byFlow[k] = { active: 0, stale: 0, completed: 0, failed: 0 };
+    if (r.status === 'active')    byFlow[k].active++;
+    if (r.status === 'completed') byFlow[k].completed++;
+    if (r.status === 'failed')    byFlow[k].failed++;
+  }
+  for (const r of stale) byFlow[r.flow_key].stale++;
+
+  // Per HI team member
+  const HI_ROSTER = [
+    { name: 'Rodaina Thabit',  email: 'rodaina@allocationassist.com' },
+    { name: 'Mohamed Othman',  email: 'mohamed.othman@allocationassist.com' },
+    { name: 'Sohaila Mohamed', email: 'sohaila@allocationassist.com' },
+    { name: 'Ishak Boulaat',   email: 'ishak@allocationassist.com' },
+  ];
+  const perMember = HI_ROSTER.map(m => {
+    const mine = active.filter(r => (r.assigned_to ?? '').toLowerCase() === m.email);
+    const mineStale = mine.filter(r => now - new Date(r.last_event_at).getTime() > 7 * 86_400_000);
+    const mineHospitals = hospitals.filter(h => (h.owner_email ?? '').toLowerCase() === m.email).length;
+    const myVacancies = vacancies.filter(v =>
+      v.status === 'open' && (v.opened_by ?? '').toLowerCase() === m.email
+    ).length;
+    return { name: m.name, active: mine.length, stale: mineStale.length, hospitals: mineHospitals, openVacancies: myVacancies };
+  });
+
+  // Vacancy stats
+  const openVacancies = vacancies.filter(v => v.status === 'open');
+  const vacByPriority = {
+    high:   openVacancies.filter(v => v.priority === 'high').length,
+    medium: openVacancies.filter(v => v.priority === 'medium').length,
+    low:    openVacancies.filter(v => v.priority === 'low').length,
+  };
+  const staleVacancies = openVacancies.filter(v => now - new Date(v.opened_at).getTime() > 7 * 86_400_000);
+
+  // Batch send stats
+  const today = new Date().toISOString().slice(0, 10);
+  const upcomingBatches = batches.filter(b => b.scheduled_for >= today && b.status !== 'cancelled');
+  const sentBatches     = batches.filter(b => b.status === 'sent');
+  const draftBatches    = batches.filter(b => b.status === 'draft');
+
+  // Notification stats
+  const unreadNotifs = notifications.filter(n => !n.read_at);
+  const notifByKind: Record<string, number> = {};
+  for (const n of notifications) notifByKind[n.kind] = (notifByKind[n.kind] ?? 0) + 1;
+
+  // Hospital stats
+  const activeHospitals   = hospitals.filter(h => h.active !== false);
+  const pausedHospitals   = hospitals.filter(h => h.active === false);
+  const withRecruiter     = hospitals.filter(h => !!h.primary_recruiter_email).length;
+  const topHealth = hospitals
+    .filter(h => h.health_score != null)
+    .sort((a, b) => (b.health_score ?? 0) - (a.health_score ?? 0))
+    .slice(0, 5);
+  const bottomHealth = hospitals
+    .filter(h => h.health_score != null)
+    .sort((a, b) => (a.health_score ?? 0) - (b.health_score ?? 0))
+    .slice(0, 5);
+
+  // Lifecycle: signed-not-joined, joined-not-approved counters
+  const signedNotJoined = lifecycles.filter(l => l.signed_at && !l.joined_at).length;
+  const joinedNotApproved = lifecycles.filter(l => l.joined_at && !l.approved_at).length;
+  const unavailableCount = lifecycles.filter(l => l.unavailable).length;
+
+  // Compact text rep — kept tight so we don't blow the token budget.
+  const FLOW_LABELS: Record<string, string> = {
+    onboarding:       'Onboarding (welcome + form)',
+    profile_sent:     'Profile sent to hospital',
+    shortlist:        'Shortlist confirmation',
+    interview:        'Interview tips + confirmation',
+    contract_signing: 'Contract signing (BoldSign)',
+    relocation:       'Relocation guide + attestation',
+    second_payment:   'Second payment invoice + reminders',
+  };
+
+  const hiWorkflowText = [
+    '=== HI WORKFLOW: AUTOMATION FLOWS ===',
+    `Total runs tracked: ${flowRuns.length} (${active.length} active, ${completed.length} completed, ${failed.length} failed, ${stale.length} stale 7d+)`,
+    '',
+    'Per-flow breakdown — flow | active | stale | completed | failed:',
+    ...Object.entries(byFlow).map(([k, s]) =>
+      `  ${FLOW_LABELS[k] ?? k} | ${s.active} | ${s.stale} | ${s.completed} | ${s.failed}`),
+    '',
+    '=== HI TEAM ASSIGNMENT ===',
+    'name | active runs | stale 7d+ | hospitals owned | open vacancies owned',
+    ...perMember.map(m => `  ${m.name} | ${m.active} | ${m.stale} | ${m.hospitals} | ${m.openVacancies}`),
+    '',
+    '=== ACTIVE RUNS NEEDING ATTENTION (top 30 by oldest activity) ===',
+    'doctor | hospital | flow | stage | days_since | assigned_to',
+    ...active
+      .sort((a, b) => new Date(a.last_event_at).getTime() - new Date(b.last_event_at).getTime())
+      .slice(0, 30)
+      .map(r => {
+        const days = Math.floor((now - new Date(r.last_event_at).getTime()) / 86_400_000);
+        return `  ${r.doctor_name ?? '—'} | ${r.hospital ?? '—'} | ${r.flow_key} | ${r.current_stage} | ${days}d | ${r.assigned_to ?? 'unassigned'}`;
+      }),
+    '',
+    '=== VACANCIES ===',
+    `Open: ${openVacancies.length} (${vacByPriority.high} high, ${vacByPriority.medium} medium, ${vacByPriority.low} low). Stale 7d+: ${staleVacancies.length}.`,
+    'hospital | specialty | priority | days_open | city',
+    ...openVacancies.slice(0, 25).map(v => {
+      const days = Math.floor((now - new Date(v.opened_at).getTime()) / 86_400_000);
+      return `  ${v.hospital_name} | ${v.specialty} | ${v.priority} | ${days}d | ${v.city ?? '—'}`;
+    }),
+    '',
+    '=== BATCH SENDS ===',
+    `Total: ${batches.length}. Upcoming: ${upcomingBatches.length}. Sent: ${sentBatches.length}. Drafts: ${draftBatches.length}.`,
+    'date | kind | status | doctors | hospitals | specialty',
+    ...batches.slice(0, 15).map(b =>
+      `  ${b.scheduled_for} | ${b.kind} | ${b.status} | ${b.doctor_ids?.length ?? 0} | ${b.hospital_count ?? '—'} | ${b.specialty ?? '—'}`),
+    '',
+    '=== NOTIFICATIONS ===',
+    `Open: ${notifications.length} (${unreadNotifs.length} unread). By kind: ${Object.entries(notifByKind).map(([k, n]) => `${k}=${n}`).join(', ')}.`,
+    '',
+    '=== HOSPITALS ===',
+    `Total tracked: ${hospitals.length}. Active: ${activeHospitals.length}. Paused: ${pausedHospitals.length}. With recruiter email: ${withRecruiter}.`,
+    'Top 5 by health score: ' + (topHealth.length > 0
+      ? topHealth.map(h => `${h.name} (${h.health_score})`).join(', ')
+      : '(no scores yet)'),
+    'Bottom 5 by health score: ' + (bottomHealth.length > 0
+      ? bottomHealth.map(h => `${h.name} (${h.health_score})`).join(', ')
+      : '(no scores yet)'),
+    '',
+    '=== DOCTOR LIFECYCLE ===',
+    `Signed but not joined yet: ${signedNotJoined}. Joined but not approved: ${joinedNotApproved}. Marked unavailable: ${unavailableCount}.`,
+  ].join('\n');
+
   const contextBlock = [
     `CURRENT PAGE: ${pageLabel}`,
     `PAGE FOCUS: ${pageFocus}`,
@@ -360,6 +629,9 @@ Deno.serve(async (req: Request) => {
       contractsText,
     ] : []),
 
+    '',
+    hiWorkflowText,
+
     ...(pageData ? [
       '',
       `=== META ADS (live Facebook Marketing API) ===`,
@@ -388,6 +660,17 @@ Rules:
 - For recruiter questions: use the RECRUITER PERFORMANCE table and the ALL LEADS section filtered by that recruiter.
 - For financial questions: use the DEALS section.
 - For license questions: combine LICENSE PIPELINE counts with individual lead records.
+
+Hospital Introduction (HI) workflow context — when the question is about
+automations, vacancies, batches, hospital relationships, or "what's waiting":
+- The HI module has 7 flows: onboarding → profile_sent → shortlist → interview → contract_signing → relocation → second_payment.
+- "Stale" means an active flow run with no event for 7+ days — flag these as needing attention.
+- The 4 HI team members are Rodaina Thabit, Mohamed Othman, Sohaila Mohamed, Ishak Boulaat. Use HI TEAM ASSIGNMENT for workload questions.
+- "Active runs needing attention" shows the oldest 30 — use these for "what's stuck" / "what needs a chase" questions.
+- For vacancy questions: prioritise high-priority + stale (>7d) ones; mention which doctors might match if data supports it.
+- For batch send questions: the kinds are daily_duo (Mon-Fri, 2 doctors), tuesday_top_15 (15 doctors mixed), specialty_of_day (Wed-Fri, rotates ~60 specialties).
+- For hospital health: top/bottom 5 by health_score live in the HI WORKFLOW section. A "cooling" hospital = dropping score over time; "warming" = rising.
+- "Doctors on the way" = signed but not yet joined (HI WORKFLOW > DOCTOR LIFECYCLE).
 
 CHARTS: When visualising distribution, comparison, or trends include ONE chart after your text:
 <chart type="TYPE" title="TITLE">VALID_JSON</chart>
