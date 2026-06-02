@@ -115,10 +115,13 @@ const App = () => (
     <TooltipProvider>
       <AIPageContextProvider>
       <CurrencyProvider>
-        <OnboardingTourProvider>
         <Toaster />
         <Sonner />
+        {/* BrowserRouter must wrap OnboardingTourProvider — the tour
+            provider calls useNavigate/useLocation to drive route-bound
+            steps, and those hooks need a Router ancestor. */}
         <BrowserRouter>
+          <OnboardingTourProvider>
           <Suspense fallback={<PageSkeleton />}>
             <Routes>
               {/* Public */}
@@ -155,8 +158,8 @@ const App = () => (
               <Route path="*" element={<NotFound />} />
             </Routes>
           </Suspense>
+          </OnboardingTourProvider>
         </BrowserRouter>
-        </OnboardingTourProvider>
       </CurrencyProvider>
       </AIPageContextProvider>
     </TooltipProvider>
