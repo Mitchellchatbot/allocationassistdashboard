@@ -1,3 +1,4 @@
+import React from "react";
 import {
   BarChart, Bar,
   PieChart, Pie, Cell,
@@ -26,23 +27,45 @@ const COLORS = [
 
 const TICK_STYLE = { fontSize: 10, fill: "hsl(var(--muted-foreground))" };
 
-/** Parse all complete <chart ...>...</chart> blocks out of a string. */
+/** Parse all complete <chart ...>...</chart> blocks out of a string.
+ *  Tolerates JSON bodies that contain `<` (e.g. inequality labels) and
+ *  defensively drops specs with malformed data — recharts crashes hard
+ *  on null values / empty arrays / type mismatches, and the AI sometimes
+ *  emits any of those. Better to swallow the chart than blow up the
+ *  whole assistant panel. */
 export function parseCharts(text: string): { text: string; charts: ChartSpec[] } {
   const charts: ChartSpec[] = [];
   const cleaned = text.replace(
-    /<chart\s+type="([^"]+)"\s+title="([^"]+)">([^<]*)<\/chart>/g,
+    /<chart\s+type="([^"]+)"\s+title="([^"]+)">([\s\S]*?)<\/chart>/g,
     (_, type, title, json) => {
       try {
         const data = JSON.parse(json.trim());
-        charts.push({ type, title, ...data });
+        const spec: ChartSpec = { type, title, ...data };
+        if (validateChart(spec)) charts.push(spec);
       } catch {
-        // malformed — skip
+        // malformed JSON — skip silently
       }
       return "";
     },
   ).trim();
 
   return { text: cleaned, charts };
+}
+
+/** Reject specs that would make recharts throw at render-time. */
+function validateChart(spec: ChartSpec): boolean {
+  if (!["bar", "pie", "line"].includes(spec.type)) return false;
+  if (spec.type === "line") {
+    if (!Array.isArray(spec.labels) || spec.labels.length === 0) return false;
+    if (!Array.isArray(spec.series) || spec.series.length === 0) return false;
+    return spec.series.every(s =>
+      s && typeof s.name === "string" &&
+      Array.isArray(s.values) && s.values.every(v => Number.isFinite(v))
+    );
+  }
+  if (!Array.isArray(spec.labels) || spec.labels.length === 0) return false;
+  if (!Array.isArray(spec.values) || spec.values.length !== spec.labels.length) return false;
+  return spec.values.every(v => Number.isFinite(v));
 }
 
 function BarChartBlock({ spec }: { spec: ChartSpec }) {
@@ -164,9 +187,38 @@ export function ChatChart({ spec }: { spec: ChartSpec }) {
           {spec.title}
         </p>
       )}
-      {spec.type === "bar"  && <BarChartBlock  spec={spec} />}
-      {spec.type === "pie"  && <PieChartBlock  spec={spec} />}
-      {spec.type === "line" && <LineChartBlock spec={spec} />}
+      <ChartErrorBoundary>
+        {spec.type === "bar"  && <BarChartBlock  spec={spec} />}
+        {spec.type === "pie"  && <PieChartBlock  spec={spec} />}
+        {spec.type === "line" && <LineChartBlock spec={spec} />}
+      </ChartErrorBoundary>
     </div>
   );
+}
+
+/** Catches render-time recharts crashes (bad spec, dom-zero-size, …) so
+ *  one broken chart can't take down the whole assistant panel or the
+ *  page it's mounted on. Renders a tiny fallback row instead. */
+class ChartErrorBoundary extends React.Component<
+  { children: React.ReactNode },
+  { hasError: boolean }
+> {
+  constructor(props: { children: React.ReactNode }) {
+    super(props);
+    this.state = { hasError: false };
+  }
+  static getDerivedStateFromError() { return { hasError: true }; }
+  componentDidCatch(err: Error) {
+    console.warn("[ChatChart] render failed, falling back:", err.message);
+  }
+  render() {
+    if (this.state.hasError) {
+      return (
+        <p className="text-[11px] text-muted-foreground italic py-3 text-center">
+          Chart unavailable for this answer.
+        </p>
+      );
+    }
+    return this.props.children;
+  }
 }
