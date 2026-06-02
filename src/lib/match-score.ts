@@ -126,9 +126,14 @@ export function scoreMatch(d: MatchCandidateDoctor, v: Vacancy, h: MatchCandidat
   const total = factors.reduce((s, f) => s + f.points, 0);
   const clamped = Math.max(0, Math.min(MAX_SCORE, total));
   const pct = Math.round((clamped / MAX_SCORE) * 100);
+  // Tier thresholds calibrated against real Zoho data. License coverage in
+  // Saudi/Qatar is rare; many otherwise-good candidates score in the 35–60
+  // range from specialty + partial training/experience alone. Old cutoffs
+  // (80/50) sent almost everyone to "Long shots" — which is collapsed by
+  // default → user saw "50 matches" but no rows.
   const tier: MatchScore["tier"] =
-    clamped >= 80 ? "strong" :
-    clamped >= 50 ? "decent" :
+    clamped >= 65 ? "strong" :
+    clamped >= 35 ? "decent" :
     clamped > 0   ? "weak"   : "none";
 
   return {

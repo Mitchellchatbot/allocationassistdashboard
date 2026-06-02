@@ -178,7 +178,10 @@ export function VacancyDetailSheet({ vacancy, open, onClose }: Props) {
               linkedIds={linkedIds}
               busyId={busyId}
               onLink={doLink}
-              collapsible
+              // Only collapsible WHEN there's a stronger group above. If
+              // every match landed in "weak", we render them expanded so
+              // the user sees actual rows instead of just a count.
+              collapsible={strongMatches.length + decentMatches.length > 0}
             />
           )}
         </section>
