@@ -20,6 +20,11 @@ export default defineConfig(({ mode }) => ({
     dedupe: ["react", "react-dom", "react/jsx-runtime", "react/jsx-dev-runtime", "@tanstack/react-query", "@tanstack/query-core"],
   },
   build: {
+    // Emit source maps so prod crash stacks point at the original code
+    // (single-letter minified names are useless for debugging recharts
+    // crashes). Costs ~7MB of extra files but they sit alongside the
+    // bundle, only downloaded if the user opens devtools.
+    sourcemap: true,
     // Split heavy dependencies into their own chunks so the initial JS
     // download is leaner and pages that don't need them (e.g. Dashboard)
     // don't pay the recharts / html2pdf tax.

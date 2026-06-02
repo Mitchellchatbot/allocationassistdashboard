@@ -10,7 +10,7 @@ import { useZohoData, displaySource } from "@/hooks/use-zoho-data";
 import { useCurrency } from "@/lib/CurrencyProvider";
 import { REVENUE_PER_CONVERSION_AED } from "@/lib/revenue";
 import {
-  AreaChart, Area, XAxis, YAxis, Tooltip, ResponsiveContainer,
+  ComposedChart, Area, XAxis, YAxis, Tooltip, ResponsiveContainer,
   CartesianGrid, Line,
 } from "recharts";
 import { InfoIcon } from "@/components/InfoIcon";
@@ -452,7 +452,11 @@ const Index = () => {
               <div className="h-[240px] bg-muted/30 rounded-lg animate-pulse" />
             ) : (
               <ResponsiveContainer width="100%" height={240}>
-                <AreaChart data={timeData}>
+                {/* ComposedChart — was AreaChart, which doesn't allow
+                    <Line> children. Recharts threw at render time with
+                    a minified invariant. Switched to ComposedChart so
+                    the Area + two Line series can coexist. */}
+                <ComposedChart data={timeData}>
                   <defs>
                     <linearGradient id="docFill" x1="0" y1="0" x2="0" y2="1">
                       <stop offset="5%" stopColor="hsl(170,55%,45%)" stopOpacity={0.12} />
@@ -466,7 +470,7 @@ const Index = () => {
                   <Area type="monotone" dataKey="doctors" stroke="hsl(170,55%,45%)" strokeWidth={2} fill="url(#docFill)" name="Applied" />
                   <Line type="monotone" dataKey="qualified" stroke="hsl(210,75%,52%)" strokeWidth={1.5} dot={false} name="Qualified" />
                   <Line type="monotone" dataKey="placed" stroke="hsl(158,50%,42%)" strokeWidth={1.5} dot={false} name="Placed" />
-                </AreaChart>
+                </ComposedChart>
               </ResponsiveContainer>
             )}
             <div className="flex gap-4 mt-2 justify-center">

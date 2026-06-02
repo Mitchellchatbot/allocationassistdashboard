@@ -29,8 +29,27 @@ function maybeReload(e: unknown) {
   setTimeout(() => window.location.reload(), 100);
 }
 
-window.addEventListener("error", (event) => maybeReload(event.error ?? event.message));
-window.addEventListener("unhandledrejection", (event) => maybeReload(event.reason));
+window.addEventListener("error", (event) => {
+  maybeReload(event.error ?? event.message);
+  // Surface the actual error message in the console with FULL stack so
+  // even minified prod builds give us something to act on. Without this
+  // a recharts crash just dumps a wall of single-letter function names.
+  const err = event.error;
+  if (err instanceof Error) {
+    console.error("[GlobalError]", err.message);
+    if (err.stack) console.error("[GlobalError.stack]", err.stack);
+  }
+});
+window.addEventListener("unhandledrejection", (event) => {
+  maybeReload(event.reason);
+  const r = event.reason;
+  if (r instanceof Error) {
+    console.error("[UnhandledRejection]", r.message);
+    if (r.stack) console.error("[UnhandledRejection.stack]", r.stack);
+  } else {
+    console.error("[UnhandledRejection]", r);
+  }
+});
 
 // Clear the reload flag on a successful first paint so the next deploy
 // gets its own one-shot recovery attempt.
