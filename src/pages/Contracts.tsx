@@ -6,9 +6,10 @@ import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover
 import { useZohoData, type ZohoLead } from "@/hooks/use-zoho-data";
 import { useHospitals } from "@/hooks/use-hospitals";
 import { supabase } from "@/lib/supabase";
-import { Printer, Search, FileText, Send, Loader2, ExternalLink, Download as DownloadIcon, RefreshCw } from "lucide-react";
+import { Printer, Search, FileText, Send, Loader2, ExternalLink, Download as DownloadIcon, RefreshCw, Sparkles, UserCheck } from "lucide-react";
 import html2pdf from "html2pdf.js";
 import { useContractActivity, boldsignTrackingUrl, downloadContractPdf, type ContractStatus, type ContractSendRow } from "@/hooks/use-contract-activity";
+import { useAutomationFlowRuns, type FlowRun } from "@/hooks/use-automation-flows";
 import { useAuth } from "@/hooks/use-auth";
 import { toast } from "sonner";
 import logoSrc from "@/assets/logo.png";
@@ -289,6 +290,69 @@ const Contracts = ({ embedded = false, initialLead = null, testRecipient }: Cont
       .slice(0, 10);
   }, [zoho, search]);
 
+  // ── Suggested next contracts ─────────────────────────────────────────────
+  // Surface doctors who just finished a forward-progress stage (onboarding,
+  // profile_sent, shortlist, interview) but DON'T yet have a contract sent.
+  // The HI team's most common "what's next" — clicking one pre-fills the
+  // form and warms up the contract.
+  const flowRunsQ = useAutomationFlowRuns();
+  const { data: contractActivity } = useContractActivity();
+
+  const suggestions = useMemo(() => {
+    const allRuns = (flowRunsQ.data ?? []) as FlowRun[];
+    const allLeads = ((zoho as { rawLeadsAll?: ZohoLead[] } | undefined)?.rawLeadsAll ?? zoho?.rawLeads ?? []);
+
+    // Doctors who already have a contract row — exclude them.
+    const haveContract = new Set<string>();
+    for (const c of (contractActivity ?? [])) {
+      const n = (c.doctor_name ?? "").toLowerCase().trim();
+      if (n) haveContract.add(n);
+    }
+    // Doctors who already have an active contract_signing run — exclude too.
+    for (const r of allRuns) {
+      if (r.flow_key === "contract_signing" && r.status === "active") {
+        const n = (r.doctor_name ?? "").toLowerCase().trim();
+        if (n) haveContract.add(n);
+      }
+    }
+
+    // Rank by which flow they last completed — interview > shortlist >
+    // profile_sent > onboarding (closer to "ready to sign" is higher).
+    const FLOW_SCORE: Record<string, number> = {
+      interview:    4,
+      shortlist:    3,
+      profile_sent: 2,
+      onboarding:   1,
+    };
+    type Cand = { run: FlowRun; lead: ZohoLead | null; score: number; lastAt: number };
+    const byDoctor = new Map<string, Cand>();
+    for (const r of allRuns) {
+      const score = FLOW_SCORE[r.flow_key];
+      if (!score) continue;
+      // Eligible: completed runs OR any active run that's moved past trigger.
+      const eligible = r.status === "completed"
+                    || (r.status === "active" && !r.current_stage.startsWith("trigger_"));
+      if (!eligible) continue;
+
+      const key = (r.doctor_name ?? "").toLowerCase().trim();
+      if (!key || haveContract.has(key)) continue;
+      const lastAt = new Date(r.completed_at ?? r.last_event_at).getTime();
+      const existing = byDoctor.get(key);
+      if (!existing || score > existing.score || (score === existing.score && lastAt > existing.lastAt)) {
+        // Resolve to a Zoho lead so clicking pre-fills the form properly.
+        const lead = allLeads.find(l => {
+          const ln = (l.Full_Name || `${l.First_Name ?? ""} ${l.Last_Name ?? ""}`).toLowerCase().trim();
+          return ln === key;
+        }) ?? null;
+        byDoctor.set(key, { run: r, lead, score, lastAt });
+      }
+    }
+
+    return Array.from(byDoctor.values())
+      .sort((a, b) => b.score - a.score || b.lastAt - a.lastAt)
+      .slice(0, 5);
+  }, [flowRunsQ.data, contractActivity, zoho]);
+
   const handlePrint = () => {
     const win = window.open("", "_blank");
     if (!win) return;
@@ -497,6 +561,59 @@ const Contracts = ({ embedded = false, initialLead = null, testRecipient }: Cont
           </div>
         ))}
       </div>
+
+      {/* ── Suggested next contracts ──
+          Doctors who just completed interview / shortlist / profile_sent /
+          onboarding but don't have a contract yet. Clicking one pre-fills
+          the form so the team's most likely next-step is a single click. */}
+      {suggestions.length > 0 && (
+        <div className="mb-4 rounded-lg border border-teal-200 bg-gradient-to-br from-teal-50 to-white px-4 py-3">
+          <div className="flex items-center gap-1.5 text-[10px] uppercase tracking-[0.12em] text-teal-700/80 font-semibold mb-2">
+            <Sparkles className="h-3 w-3" />
+            Suggested next contracts
+            <span className="text-muted-foreground font-normal normal-case tracking-normal ml-1">
+              · pipeline-ready doctors without a contract yet
+            </span>
+          </div>
+          <div className="flex flex-wrap gap-1.5">
+            {suggestions.map(s => {
+              const isSelected = selectedLead?.id === s.lead?.id;
+              const flowLabel =
+                s.run.flow_key === "interview"    ? "interview done"   :
+                s.run.flow_key === "shortlist"    ? "shortlisted"      :
+                s.run.flow_key === "profile_sent" ? "profile sent"     :
+                s.run.flow_key === "onboarding"   ? "onboarded"        :
+                s.run.flow_key;
+              return (
+                <button
+                  key={s.run.id}
+                  onClick={() => {
+                    const name = s.run.doctor_name ?? "";
+                    if (s.lead) {
+                      setSelectedLead(s.lead);
+                      setSignerEmail(testRecipient ?? s.lead.Email ?? "");
+                    }
+                    setSearch(name);
+                    setShowDropdown(false);
+                  }}
+                  className={`group inline-flex items-center gap-2 px-2.5 py-1.5 rounded-full border text-[11px] transition-colors ${
+                    isSelected
+                      ? "bg-teal-600 text-white border-teal-600"
+                      : "bg-white border-teal-200 text-slate-800 hover:border-teal-400 hover:bg-teal-50"
+                  }`}
+                  title={`${s.run.doctor_name} — ${flowLabel}${s.run.hospital ? ` at ${s.run.hospital}` : ""}`}
+                >
+                  <UserCheck className={`h-3 w-3 shrink-0 ${isSelected ? "text-white" : "text-teal-600"}`} />
+                  <span className="font-medium">{s.run.doctor_name}</span>
+                  <span className={`text-[9px] uppercase tracking-wider ${isSelected ? "text-white/80" : "text-muted-foreground"}`}>
+                    {flowLabel}
+                  </span>
+                </button>
+              );
+            })}
+          </div>
+        </div>
+      )}
 
       {/* ── Top bar: search + print ── */}
       <div className="flex flex-col sm:flex-row gap-3 items-start sm:items-center mb-5">
