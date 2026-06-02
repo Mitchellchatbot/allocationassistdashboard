@@ -20,7 +20,18 @@ export interface ChannelEconomicsRow {
   lifetimeSpend:           number;
   lifetimeConverted:       number;
   lifetimeCostPerConversion: number; // 0 when no spend or no conversions ever
+  // Legacy = channel hasn't received a new lead in over LEGACY_THRESHOLD_MS
+  // (180 days). Used to exclude phased-out Zoho lead sources (e.g. "Referrals"
+  // before the rebrand) from winner cards in All-Time views — otherwise they
+  // dominate rankings with stale data and confuse the AA team.
+  isLegacy:        boolean;
+  lastLeadAtMs:    number; // epoch ms of most recent lead (0 if none seen)
 }
+
+// A channel becomes "legacy" if there's been no new lead from this source
+// for 180 days. Tunable — kept conservative so we don't flag a real-but-quiet
+// channel (e.g. one that goes dormant during summer) as legacy.
+const LEGACY_THRESHOLD_MS = 180 * 24 * 60 * 60 * 1000;
 
 // Qualified = Initial Sales Call Completed + High Priority Follow up.
 // Contact in Future is excluded (deferred conversation, not a pass).
@@ -54,6 +65,7 @@ export function useChannelEconomics() {
           spend: 0, costPerLead: 0, costPerQualified: 0, costPerConversion: 0,
           qualifiedRate: 0, conversionRate: 0,
           lifetimeSpend: 0, lifetimeConverted: 0, lifetimeCostPerConversion: 0,
+          isLegacy: false, lastLeadAtMs: 0,
         };
         map.set(k, cur);
       }
@@ -94,6 +106,18 @@ export function useChannelEconomics() {
       ensure(normalizeChannelKey(dob.Lead_Source)).lifetimeConverted++;
     }
 
+    // ── Legacy detection — find the most recent lead per channel across
+    // ALL TIME (independent of the active date filter), so a phased-out
+    // source like "Referrals" stays flagged even when the user toggles to
+    // the "All time" view.
+    for (const l of zoho?.rawLeads ?? []) {
+      const t = l.Created_Time ? new Date(l.Created_Time).getTime() : NaN;
+      if (isNaN(t)) continue;
+      const row = ensure(normalizeChannelKey(l.Lead_Source));
+      if (t > row.lastLeadAtMs) row.lastLeadAtMs = t;
+    }
+    const legacyCutoff = Date.now() - LEGACY_THRESHOLD_MS;
+
     const rows = Array.from(map.values());
     for (const r of rows) {
       // Qualified ≥ converted by definition — anything in DoB has progressed
@@ -108,6 +132,7 @@ export function useChannelEconomics() {
       r.lifetimeCostPerConversion = r.lifetimeConverted > 0 && r.lifetimeSpend > 0
         ? r.lifetimeSpend / r.lifetimeConverted
         : 0;
+      r.isLegacy = r.lastLeadAtMs > 0 && r.lastLeadAtMs < legacyCutoff;
     }
 
     return rows
@@ -131,23 +156,23 @@ export function useChannelWinners() {
   return useMemo(() => {
     if (rows.length === 0) return null;
 
-    // BEST VOLUME — most leads in the period.
-    const mostLeads = [...rows].sort((a, b) => b.leads - a.leads)[0];
+    // Legacy channels are excluded from winner cards — a phased-out source
+    // like "Referrals" with old high-quality data should NOT win "Best
+    // Closing Rate" in an All-Time view. They still appear in the channel
+    // table marked "(legacy)" so the data isn't hidden.
+    const active = rows.filter(r => !r.isLegacy);
 
-    // BEST LEAD QUALITY — share of qualified leads that actually converted.
-    // qualityScore = converted ÷ qualified. Tells you "of the leads from this
-    // channel that we deemed worth pursuing, how many became Doctors on Board?"
-    // Higher = better quality leads (the channel sends prospects who close).
-    // Min 5 qualified to avoid 1-of-1 noise.
+    // BEST VOLUME — most leads in the period.
+    const mostLeads = [...active].sort((a, b) => b.leads - a.leads)[0];
+
+    // BEST CLOSING RATE — share of qualified leads that actually converted.
+    // qualityScore = converted ÷ qualified. Min 5 qualified to avoid noise.
     const QUALITY_MIN_QUALIFIED = 5;
     type WithQuality = ChannelEconomicsRow & { qualityScore: number };
-    const qualityCandidates: WithQuality[] = rows
+    const qualityCandidates: WithQuality[] = active
       .filter(r => r.qualified >= QUALITY_MIN_QUALIFIED)
       .map(r => ({
         ...r,
-        // Cap at 100% — for the few channels (e.g. Dave) where DoB count
-        // exceeds the qualified count due to leads that bypass the qualified
-        // status entirely, we'd otherwise see >100%.
         qualityScore: Math.min(100, (r.converted / r.qualified) * 100),
       }))
       .sort((a, b) => b.qualityScore - a.qualityScore);
@@ -155,7 +180,7 @@ export function useChannelWinners() {
 
     // BEST COST / CONVERSION — cheapest channel per converted lead, in the
     // active date range. Only channels that have BOTH spend and converted leads.
-    const cpcCandidates = rows.filter(r => r.spend > 0 && r.converted > 0);
+    const cpcCandidates = active.filter(r => r.spend > 0 && r.converted > 0);
     const lowestCPC = cpcCandidates.length
       ? [...cpcCandidates].sort((a, b) => a.costPerConversion - b.costPerConversion)[0]
       : null;

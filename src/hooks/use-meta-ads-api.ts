@@ -169,6 +169,12 @@ export interface MetaTopAd {
   id:          string;
   name:        string;
   status:      string;
+  // Parent adset / campaign. Used to roll up ad-level lead counts (derived
+  // from meta_leads.utm_content) to the adset and campaign tables, since
+  // Meta Insights' `actions` field doesn't reliably return lead counts at
+  // the adset level for AA's account configuration.
+  adsetId:     string;
+  campaignId:  string;
   thumbnail:   string | undefined;
   title:       string | undefined;
   body:        string | undefined;
@@ -813,7 +819,7 @@ export function useMetaAdsByName(adName: string | null, accountIds: string[]) {
 // preview is instant — no secondary search needed.
 
 const TOP_AD_FIELDS =
-  "id,name,status," +
+  "id,name,status,adset_id,campaign_id," +
   "creative{thumbnail_url,image_url,title,body,call_to_action_type," +
     "object_story_spec{" +
       "link_data{description,caption,message,call_to_action{type}}," +
@@ -824,7 +830,10 @@ const TOP_AD_FIELDS =
 export function useMetaTopAds(accountIds: string[], since: string, until: string) {
   const key = accountIds.join(",");
   return useQuery<MetaTopAd[]>({
-    queryKey: ["meta-top-ads-v2", key, since, until],
+    // v3: added adset_id + campaign_id to TOP_AD_FIELDS so per-adset
+    // rollups in MetaAds.tsx can resolve which adset each ad belongs to.
+    // Bumping the cache key invalidates the v2 entries that lacked them.
+    queryKey: ["meta-top-ads-v3", key, since, until],
     enabled:  accountIds.length > 0 && !!getMetaToken(),
     staleTime: 5 * 60 * 1000,
     refetchOnWindowFocus: false,
@@ -853,6 +862,7 @@ export function useMetaTopAds(accountIds: string[], since: string, until: string
         }).catch(() => ({ data: [] }))
       )) as { data: {
         id: string; name: string; status: string;
+        adset_id?: string; campaign_id?: string;
         creative?: {
           thumbnail_url?: string; image_url?: string; title?: string; body?: string;
           call_to_action_type?: string; effective_object_story_id?: string;
@@ -890,6 +900,8 @@ export function useMetaTopAds(accountIds: string[], since: string, until: string
             id:          ad.id,
             name:        ad.name,
             status:      ad.status,
+            adsetId:     ad.adset_id    ?? "",
+            campaignId:  ad.campaign_id ?? "",
             thumbnail:   thumb,
             title,
             body,

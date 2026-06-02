@@ -1,0 +1,4 @@
+# Netlify SPA fallback — any path that doesn't match a static file falls back
+# to index.html so React Router can handle the route. Without this, deep links
+# like /upload-cv/<token> return Netlify's 404 instead of loading the app.
+/*    /index.html   200

@@ -1,4 +1,6 @@
 import { DashboardLayout } from "@/components/layout/DashboardLayout";
+import { PendingActionsCard } from "@/components/PendingActionsCard";
+import { DashboardGreeting } from "@/components/DashboardGreeting";
 import { SectionDateRange } from "@/components/SectionDateRange";
 import { ExpandableKPICard } from "@/components/ExpandableKPICard";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
@@ -415,7 +417,15 @@ const Index = () => {
 
   return (
     <DashboardLayout title="Dashboard" subtitle="A quick look at how doctor placements and operations are performing">
+      <DashboardGreeting />
+
       <SectionDateRange />
+
+      {/* Pending Actions — surfaces flows that need a click before they go
+          stale. Quiet/celebratory when there's nothing to do; surfaces stale
+          and blocking work otherwise. */}
+      <PendingActionsCard />
+
       {/* KPI Grid */}
       <div className="grid grid-cols-2 sm:grid-cols-3 gap-4 mb-6">
         {zohoLoading

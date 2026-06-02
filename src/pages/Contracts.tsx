@@ -4,10 +4,12 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
 import { useZohoData, type ZohoLead } from "@/hooks/use-zoho-data";
+import { useHospitals } from "@/hooks/use-hospitals";
 import { supabase } from "@/lib/supabase";
 import { Printer, Search, FileText, Send, Loader2, ExternalLink, Download as DownloadIcon, RefreshCw } from "lucide-react";
 import html2pdf from "html2pdf.js";
 import { useContractActivity, boldsignTrackingUrl, downloadContractPdf, type ContractStatus, type ContractSendRow } from "@/hooks/use-contract-activity";
+import { useAuth } from "@/hooks/use-auth";
 import { toast } from "sonner";
 import logoSrc from "@/assets/logo.png";
 import signatureSrc from "@/assets/signature-emilie.png";
@@ -231,32 +233,61 @@ function ContractBody({ lead, f }: { lead: ZohoLead | null; f: ContractFields })
 }
 
 // ── Page ──────────────────────────────────────────────────────────────────────
-const Contracts = () => {
+interface ContractsProps {
+  /** When true, render the form/preview/send UI inline without the
+   *  DashboardLayout chrome — used to embed Contract Builder inside a
+   *  Sheet from the Automations Contract Signing tab. */
+  embedded?: boolean;
+  /** Optional lead to pre-select on mount. Saves the user from re-picking
+   *  a doctor they've already chosen elsewhere (e.g. from the pipeline). */
+  initialLead?: ZohoLead | null;
+  /** When set, every contract send routes to this email regardless of which
+   *  doctor is selected. The Automations Sheet passes this so the team can
+   *  test the full pipeline without accidentally emailing real doctors. The
+   *  direct /contracts page leaves it null → uses each lead's actual email. */
+  testRecipient?: string;
+}
+
+const Contracts = ({ embedded = false, initialLead = null, testRecipient }: ContractsProps = {}) => {
   const { data: zoho } = useZohoData();
+  const { user } = useAuth();
+  const currentUserEmail = user?.email ?? "";
   const [search, setSearch]             = useState("");
-  const [selectedLead, setSelectedLead] = useState<ZohoLead | null>(null);
+  const [selectedLead, setSelectedLead] = useState<ZohoLead | null>(initialLead);
   const [showDropdown, setShowDropdown] = useState(false);
   const [fields, setFields]             = useState<ContractFields>(DEFAULT_FIELDS);
   // Recipient email — defaults to the lead's Zoho email but the recruiter
   // can override (e.g. if Zoho has a stale address or the lead was created
   // without one). Falls back to empty string when no lead is selected.
-  const [signerEmail, setSignerEmail]   = useState("");
+  const [signerEmail, setSignerEmail]   = useState(testRecipient ?? "");
+  // Which hospital the doctor is being placed at. Captured here so the
+  // boldsign-webhook can read hospital.city and skip the manual city pick
+  // when auto-creating the Relocation flow on signing.
+  const [hospitalId, setHospitalId]     = useState<string>("");
+  const { data: hospitals = [] }        = useHospitals();
   const previewRef = useRef<HTMLDivElement>(null);
 
   function setF(key: keyof ContractFields, val: string) {
     setFields(f => ({ ...f, [key]: val }));
   }
 
+  // Use the UNFILTERED lead list here so test rows ("TEST TEST" etc.) can
+  // still be selected and have contracts sent to them. The metric paths use
+  // the filtered `rawLeads`; operational paths like this one use the raw
+  // unfiltered list.
   const doctorOptions = useMemo(() => {
-    if (!zoho?.rawLeads || search.trim().length < 2) return [];
+    const source = (zoho as { rawLeadsAll?: ZohoLead[] } | undefined)?.rawLeadsAll
+                ?? zoho?.rawLeads
+                ?? [];
+    if (search.trim().length < 2) return [];
     const q = search.toLowerCase();
-    return zoho.rawLeads
+    return source
       .filter(l => {
         const name = (l.Full_Name || `${l.First_Name ?? ""} ${l.Last_Name ?? ""}`.trim()).toLowerCase();
         return name.includes(q);
       })
       .slice(0, 10);
-  }, [zoho?.rawLeads, search]);
+  }, [zoho, search]);
 
   const handlePrint = () => {
     const win = window.open("", "_blank");
@@ -328,6 +359,38 @@ const Contracts = () => {
       alert("Please enter a valid recipient email before sending.");
       return;
     }
+
+    // Duplicate-send warning. If this lead already has one or more rows in
+    // contract_sends, surface the most-recent status + date so the user can
+    // decide whether to send again. Avoids accidental double-sends, but
+    // still lets them through (e.g. resending after a doctor lost the
+    // email or signed the wrong version).
+    try {
+      const { data: existingSends, error: lookupErr } = await supabase
+        .from("contract_sends")
+        .select("status, signed_at, created_at")
+        .eq("zoho_lead_id", selectedLead.id)
+        .order("created_at", { ascending: false });
+      if (lookupErr) {
+        console.warn("[Contracts] duplicate-check lookup failed (proceeding anyway):", lookupErr.message);
+      } else if (existingSends && existingSends.length > 0) {
+        const latest = existingSends[0];
+        const dateStr = new Date(latest.created_at).toLocaleString("en-GB", {
+          day: "numeric", month: "short", year: "numeric", hour: "2-digit", minute: "2-digit",
+        });
+        const statusLabel = latest.status === "signed"
+          ? `signed on ${new Date(latest.signed_at ?? latest.created_at).toLocaleDateString("en-GB", { day: "numeric", month: "short", year: "numeric" })}`
+          : `currently "${latest.status}" (sent ${dateStr})`;
+        const ok = window.confirm(
+          `${clientName(selectedLead)} already has ${existingSends.length} contract${existingSends.length === 1 ? "" : "s"} on file.\n\nLatest: ${statusLabel}.\n\nSend another contract anyway?`
+        );
+        if (!ok) return;
+      }
+    } catch (e) {
+      // Don't block sending on a lookup failure — log and continue.
+      console.warn("[Contracts] duplicate-check threw (proceeding):", e);
+    }
+
     setSending(true);
     try {
       const pdfResult = await generateContractPdf();
@@ -359,25 +422,56 @@ const Contracts = () => {
           doctorName:    name,
           contractTitle: `Service Agreement — ${name}`,
           message:       `Hi ${selectedLead.First_Name ?? "Doctor"}, please review and sign your service agreement with Allocation Assist. If you have any questions, just reply to this email.`,
+          // When the team picks a hospital here, boldsign-send stores it on
+          // the contract_signing run metadata. boldsign-webhook then reads
+          // hospital.city when auto-creating the Relocation run, so the
+          // city-specific guide can fire immediately on signing — no manual
+          // city pick needed downstream.
+          hospitalId:    hospitalId || undefined,
+          createdBy:     currentUserEmail || undefined,
         },
       });
       if (error) throw new Error(error.message);
       if (!data?.ok) throw new Error(data?.error ?? "Unknown BoldSign error");
 
-      // Success — show the tracking URL + open in a new tab so the recruiter
-      // can see the BoldSign envelope status page.
-      window.open(data.trackingUrl, "_blank");
-      alert(`Sent to ${signerEmail} for signature. Tracking ID: ${data.documentId}`);
+      // Success. We deliberately DO NOT auto-open the BoldSign tracking URL
+      // — it requires a BoldSign login that the AA team often doesn't have
+      // set up, and dumping them at a login wall right after a successful
+      // send is confusing. Instead show a toast with the tracking URL as an
+      // optional action they can click if they want to monitor the envelope.
+      // The DOCTOR's signing link (the actual contract) doesn't require login
+      // and lands in their inbox separately via BoldSign.
+      toast.success(`Contract emailed to ${signerEmail}`, {
+        description: `BoldSign envelope created · doc ${data.documentId}. They'll receive a signing request — no login required to sign.`,
+        duration: 10000,
+        action: {
+          label: "Track on BoldSign",
+          onClick: () => window.open(data.trackingUrl, "_blank"),
+        },
+      });
     } catch (err) {
       console.error("[Contracts] Send for Signature failed:", err);
-      alert(`Send failed: ${err instanceof Error ? err.message : String(err)}`);
+      toast.error("Send failed", {
+        description: err instanceof Error ? err.message : String(err),
+        duration: 10000,
+      });
     } finally {
       setSending(false);
     }
   };
 
-  return (
-    <DashboardLayout title="Contract Builder" subtitle="Search a doctor, edit fees and dates, then print">
+  const body = (
+    <>
+
+      {/* ── Test-mode banner ── */}
+      {testRecipient && (
+        <div className="rounded-md border border-amber-200 bg-amber-50 px-3 py-2 mb-3 flex items-start gap-2 text-[11px] text-amber-900">
+          <span className="text-amber-600 leading-none mt-[1px]">⚠</span>
+          <div>
+            <strong>Test mode.</strong> Contract will be sent to <code className="bg-amber-100 px-1 py-0.5 rounded text-[10px]">{testRecipient}</code> instead of the doctor's actual email. The selected doctor's name still appears in the contract — only the recipient is rerouted.
+          </div>
+        </div>
+      )}
 
       {/* ── Editable fields strip ── */}
       <div className="rounded-xl border border-border/50 bg-muted/30 px-4 py-3 mb-5 grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-5 gap-x-4 gap-y-3">
@@ -434,7 +528,7 @@ const Contracts = () => {
                   <button
                     key={lead.id}
                     className="w-full text-left px-3 py-2 hover:bg-muted/50 transition-colors border-b border-border/30 last:border-0"
-                    onMouseDown={() => { setSelectedLead(lead); setSearch(name); setShowDropdown(false); setSignerEmail(lead.Email ?? ""); }}
+                    onMouseDown={() => { setSelectedLead(lead); setSearch(name); setShowDropdown(false); setSignerEmail(testRecipient ?? lead.Email ?? ""); }}
                   >
                     <p className="text-[12px] font-medium">{name}</p>
                     <p className="text-[10px] text-muted-foreground">
@@ -463,6 +557,22 @@ const Contracts = () => {
                 placeholder={selectedLead.Email ? "" : "doctor@email.com"}
                 className="h-8 text-[11px] w-[220px]"
               />
+            </div>
+            {/* Hospital placement — feeds the Relocation auto-trigger so the
+                city-specific guide fires on signing without manual pick. */}
+            <div className="flex items-center gap-1.5 text-[11px]">
+              <span className="text-muted-foreground whitespace-nowrap">Placement at:</span>
+              <select
+                value={hospitalId}
+                onChange={e => setHospitalId(e.target.value)}
+                className="h-8 text-[11px] rounded-md border border-input bg-background px-2 w-[220px]"
+                title="Which hospital the doctor is being placed at. Used to pick the right relocation guide automatically."
+              >
+                <option value="">— pick hospital (optional) —</option>
+                {hospitals.map(h => (
+                  <option key={h.id} value={h.id}>{h.name}{h.city ? ` · ${h.city}` : ""}</option>
+                ))}
+              </select>
             </div>
           </>
         )}
@@ -506,6 +616,13 @@ const Contracts = () => {
           Search for a doctor above — their name will appear in the client signature section
         </p>
       )}
+    </>
+  );
+
+  if (embedded) return body;
+  return (
+    <DashboardLayout title="Contract Builder" subtitle="Search a doctor, edit fees and dates, then print">
+      {body}
     </DashboardLayout>
   );
 };
@@ -588,6 +705,16 @@ function SentContractsSection() {
                     <td className="py-2.5 px-4">
                       <div className="font-medium text-foreground">{row.doctor_name}</div>
                       <div className="text-[10px] text-muted-foreground">{row.doctor_email}</div>
+                      {row.cc_emails && row.cc_emails.length > 0 && (
+                        <div
+                          className="text-[9px] text-muted-foreground/70 mt-0.5 truncate max-w-[260px]"
+                          title={`CC'd: ${row.cc_emails.join(", ")}`}
+                        >
+                          CC: {row.cc_emails.length === 1
+                            ? row.cc_emails[0]
+                            : `${row.cc_emails[0]} +${row.cc_emails.length - 1} more`}
+                        </div>
+                      )}
                     </td>
                     <td className="py-2.5 px-3 text-muted-foreground">{fmtDateTime(row.created_at)}</td>
                     <td className="py-2.5 px-3">

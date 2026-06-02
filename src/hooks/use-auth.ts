@@ -23,7 +23,7 @@ export const WORKER_EMAIL_TO_NAME: Record<string, string> = {
 };
 
 // All pages that exist in the app (used for admin fallback)
-export const ALL_PAGES = ["/", "/sales", "/marketing", "/leads-pipeline", "/team", "/finance", "/meta-ads", "/settings", "/worker", "/calls", "/follow-ups"];
+export const ALL_PAGES = ["/", "/sales", "/marketing", "/leads-pipeline", "/team", "/finance", "/meta-ads", "/settings", "/worker", "/calls", "/follow-ups", "/automations", "/doctor-profiles", "/vacancies", "/reports", "/batches", "/import-bulk", "/connections"];
 
 // Role presets — selected in the Add User dialog
 export const ROLE_PRESETS: Record<string, string[]> = {

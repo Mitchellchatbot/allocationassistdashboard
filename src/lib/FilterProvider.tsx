@@ -2,7 +2,10 @@ import { useState, ReactNode } from "react";
 import { FilterContext, type TimeRangePreset, type DateRange, getPresetRange } from "./filters";
 
 export function FilterProvider({ children }: { children: ReactNode }) {
-  const [preset, setPresetState] = useState<TimeRangePreset>("year");
+  // Default to "last 3 months" — covers the typical "what's been happening
+  // lately?" question without pulling in a full year of stale data.
+  // Rolls with today's date so 25 May → 1 Mar–25 May, 4 Jun → 1 Apr–4 Jun.
+  const [preset, setPresetState] = useState<TimeRangePreset>("last3months");
   const [customRange, setCustomRangeState] = useState<DateRange | null>(null);
 
   const dateRange: DateRange =

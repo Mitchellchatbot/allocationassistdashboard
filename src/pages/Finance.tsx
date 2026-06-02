@@ -68,7 +68,7 @@ function FlipKpiCard({
   icon: React.ElementType;
   label: string;
   value: string;
-  sub?: string;
+  sub?: React.ReactNode;
   /** Signal tone — colors the VALUE. Use sparingly for true positive/negative signals. */
   tone?: "neutral" | "good" | "bad" | "pending";
   /** Decorative tint for the icon chip only — gives each KPI a category color
@@ -560,6 +560,28 @@ const Finance = () => {
 
   const costPerQualified  = leadStats.qualified  > 0 ? spend / leadStats.qualified  : 0;
 
+  // Per Islam (2026-05-04 onboarding): Meta spend is so high it skews the
+  // blended Cost per Conversion. Allow excluding Meta from the average to
+  // see what other channels look like in isolation. Meta is identified via
+  // normalizeChannelKey on the marketing_expenses category column AND on
+  // Doctors on Board's Lead_Source.
+  const [cpcExcludeMeta, setCpcExcludeMeta] = useState(false);
+  const metaSpend = useMemo(() => {
+    return byCategory
+      .filter(c => normalizeChannelKey(c.category) === "Meta")
+      .reduce((s, c) => s + c.amount, 0);
+  }, [byCategory]);
+  const metaConversions = useMemo(() => {
+    const dob = (zoho as { rawDoctorsOnBoard?: { Created_Time: string; Lead_Source: string | null }[] } | undefined)?.rawDoctorsOnBoard ?? [];
+    const fromMs = dateRange.from.getTime();
+    const toMs   = dateRange.to.getTime() + 86_400_000;
+    return dob.filter(d => {
+      if (normalizeChannelKey(d.Lead_Source) !== "Meta") return false;
+      const t = d.Created_Time ? new Date(d.Created_Time).getTime() : NaN;
+      return !isNaN(t) && t >= fromMs && t < toMs;
+    }).length;
+  }, [zoho, dateRange]);
+
   // Monthly P&L series — revenue, spend, and resulting profit per month.
   // Drives the chart at the bottom of the page so it tells the same story as
   // the P&L table above (Conversions × per-doctor fee − Marketing spend).
@@ -634,17 +656,19 @@ const Finance = () => {
   // until the new accountant delivers numbers. Structure shipped now so we
   // only have to fill in values when they land.
   const profitRows = useMemo(() => {
-    const months = monthlySpendByChannel.months;
     const marketingByMonth: Record<string, number> = {};
     let marketingTotal = 0;
     for (const c of monthlySpendByChannel.channels) {
-      for (const m of months) {
+      for (const m of monthlySpendByChannel.months) {
         marketingByMonth[m.key] = (marketingByMonth[m.key] ?? 0) + c.perMonth[m.key];
       }
       marketingTotal += c.total;
     }
-    // Conversions from Zoho "Doctors on Board" module — the SOLE source of
-    // truth for converted doctors. Bucketed by Created_Time per month.
+    // Conversions from Zoho "Doctors on Board" — bucket by Created_Time per
+    // month. We use this to BOTH compute revenue AND to extend the column
+    // set, because the team often closes deals in months where there's no
+    // marketing spend on record (back-dated transactions, fee-only periods,
+    // etc.) and they still want to see the conversions land.
     const conversionsByMonth: Record<string, number> = {};
     let conversionsTotal = 0;
     for (const dob of (zoho as { rawDoctorsOnBoard?: { Created_Time: string }[] } | undefined)?.rawDoctorsOnBoard ?? []) {
@@ -655,8 +679,17 @@ const Finance = () => {
       conversionsByMonth[key] = (conversionsByMonth[key] ?? 0) + 1;
       conversionsTotal += 1;
     }
-    // Revenue = conversions × fee per placement (5,000 AED). Computed per
-    // month so the P&L lines up cleanly with marketing spend per month.
+    // Union of spend-months + conversion-months so the table never hides
+    // a month that has revenue but no spend (or vice versa).
+    const allKeys = new Set<string>();
+    for (const m of monthlySpendByChannel.months)   allKeys.add(m.key);
+    for (const k of Object.keys(conversionsByMonth)) allKeys.add(k);
+    const months = Array.from(allKeys).sort().map(k => ({
+      key:   k,
+      label: new Date(`${k}-01`).toLocaleDateString("en-GB", { month: "short", year: "2-digit" }),
+    }));
+
+    // Revenue = conversions × fee per placement (5,000 AED).
     const revenueByMonth: Record<string, number> = {};
     for (const m of months) {
       revenueByMonth[m.key] = (conversionsByMonth[m.key] ?? 0) * REVENUE_PER_CONVERSION_AED;
@@ -766,22 +799,57 @@ const Finance = () => {
           />
         )}
         {profitRows.conversionsTotal > 0 && spend > 0 && (() => {
-          const cpc = spend / profitRows.conversionsTotal;
+          // When the "exclude Meta" toggle is on, subtract Meta's spend AND
+          // Meta's conversions from the totals — gives a clearer view of what
+          // every other channel costs per placement, since Meta's spend is so
+          // high it tends to dominate the blended figure.
+          const effSpend       = cpcExcludeMeta ? Math.max(0, spend - metaSpend)         : spend;
+          const effConversions = cpcExcludeMeta ? Math.max(0, profitRows.conversionsTotal - metaConversions) : profitRows.conversionsTotal;
+          const cpc            = effConversions > 0 ? effSpend / effConversions : 0;
+          if (effConversions === 0 || effSpend === 0) return null;
           return (
             <FlipKpiCard
-              icon={Target} label="Cost Per Conversion" accent="orange"
+              icon={Target}
+              label={cpcExcludeMeta ? "Cost Per Conversion (excl. Meta)" : "Cost Per Conversion"}
+              accent="orange"
               value={fmtAED(cpc)}
-              sub={`${fmtAED(spend)} / ${fmtN(profitRows.conversionsTotal)} doctors`}
+              sub={
+                <span className="flex items-center justify-between gap-2">
+                  <span>{`${fmtAED(effSpend)} / ${fmtN(effConversions)} doctors`}</span>
+                  <button
+                    type="button"
+                    onClick={(e) => { e.stopPropagation(); setCpcExcludeMeta(v => !v); }}
+                    className={`text-[9px] px-1.5 py-0.5 rounded border font-semibold transition-colors ${
+                      cpcExcludeMeta
+                        ? "bg-orange-100 text-orange-700 border-orange-200 hover:bg-orange-200"
+                        : "bg-muted/50 text-muted-foreground border-border/50 hover:bg-muted"
+                    }`}
+                    title={cpcExcludeMeta
+                      ? "Currently excluding Meta. Click to include all channels."
+                      : "Meta is the highest-spend channel — exclude it to see what other channels look like in isolation."}
+                  >
+                    {cpcExcludeMeta ? "Excl. Meta ✓" : "Excl. Meta"}
+                  </button>
+                </span>
+              }
               back={
                 <div className="space-y-2">
-                  <div className="flex justify-between"><span className="text-muted-foreground">Marketing spend</span><span className="font-semibold tabular-nums">{fmtAED(spend)}</span></div>
-                  <div className="flex justify-between"><span className="text-muted-foreground">Doctors onboarded</span><span className="font-semibold tabular-nums">{fmtN(profitRows.conversionsTotal)}</span></div>
+                  <div className="flex justify-between"><span className="text-muted-foreground">Marketing spend{cpcExcludeMeta ? " (excl. Meta)" : ""}</span><span className="font-semibold tabular-nums">{fmtAED(effSpend)}</span></div>
+                  <div className="flex justify-between"><span className="text-muted-foreground">Doctors onboarded{cpcExcludeMeta ? " (excl. Meta)" : ""}</span><span className="font-semibold tabular-nums">{fmtN(effConversions)}</span></div>
+                  {cpcExcludeMeta && (
+                    <div className="flex justify-between text-[10px] text-muted-foreground">
+                      <span>Excluded — Meta</span>
+                      <span className="tabular-nums">{fmtAED(metaSpend)} · {fmtN(metaConversions)} doctors</span>
+                    </div>
+                  )}
                   <div className="pt-2 border-t border-border/40 flex justify-between">
                     <span className="font-semibold">Cost per conversion</span>
                     <span className="font-bold tabular-nums">{fmtAED(cpc)}</span>
                   </div>
                   <p className="text-[10px] text-muted-foreground pt-1">
-                    The single ROI number across all channels. Lower = more efficient marketing spend per placement. Source: Zoho Doctors on Board × marketing_expenses.
+                    {cpcExcludeMeta
+                      ? "Excluding Meta. Useful when Meta's high spend skews the blended figure and you want to see what other channels cost per placement on their own."
+                      : "Blended ROI across all channels. Lower = more efficient marketing spend per placement. Toggle 'Excl. Meta' on the front to remove Meta from the average."}
                   </p>
                 </div>
               }
@@ -920,8 +988,10 @@ const Finance = () => {
         </Card>
       )}
 
-      {/* ── Profit P&L (structure shipped, numbers fill in as data arrives) ─ */}
-      {monthlySpendByChannel.months.length > 0 && (
+      {/* ── Profit P&L (structure shipped, numbers fill in as data arrives) ─
+          Render if EITHER spend or conversions exist in the window. Otherwise
+          a month with revenue-only data would never be displayed. */}
+      {profitRows.months.length > 0 && (
         <Card className="shadow-md border-border/60 mb-5">
           <CardHeader className="pb-2 pt-4 px-5">
             <CardTitle className="text-[14px] font-semibold text-foreground">

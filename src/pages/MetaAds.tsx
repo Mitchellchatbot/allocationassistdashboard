@@ -9,6 +9,9 @@ import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { CampaignWinnerCards } from "@/components/CampaignWinners";
 import { useMetaLeadsStats, type GroupedStat } from "@/hooks/use-meta-leads-stats";
 import { useMetaAdsApi, useMetaCampaignAds, useMetaAdsByName, useMetaTopAds, useMetaTopAdsets, type MetaTopAd, getMetaToken, META_TOKEN_LS_KEY } from "@/hooks/use-meta-ads-api";
+import { useMetaCampaignLeads } from "@/hooks/use-meta-campaign-leads";
+import { useMetaLeadAttribution, type MetaLeadRow } from "@/hooks/use-meta-lead-attribution";
+import { MetaLeadsModal } from "@/components/MetaLeadsModal";
 import { useZohoData, displaySource } from "@/hooks/use-zoho-data";
 import { useFilters } from "@/lib/filters";
 import { useQueryClient } from "@tanstack/react-query";
@@ -150,7 +153,13 @@ function AdPreviewModal({
   const { data, isLoading } = useMetaCampaignAds(campaignId, since, until);
   const ads    = data?.ads    ?? [];
   const adsets = data?.adsets ?? [];
-  const [tab, setTab] = useState<"ads" | "targeting">("ads");
+  const [tab, setTab] = useState<"ads" | "targeting" | "leads">("ads");
+  // Per Islam (2026-05-04): be able to see the actual lead names attributed
+  // to a campaign — not just the count. Hook joins meta_leads → zoho via
+  // email/phone so we also surface qualified/converted status here.
+  const { data: campaignLeads, isLoading: leadsLoading } = useMetaCampaignLeads(
+    campaignId, campaignName, since, until,
+  );
 
   const modal = (
     <div
@@ -185,7 +194,7 @@ function AdPreviewModal({
 
         {/* Tabs */}
         <div className="flex border-b border-border/60 shrink-0 px-2">
-          {(["ads", "targeting"] as const).map(t => (
+          {(["ads", "targeting", "leads"] as const).map(t => (
             <button
               key={t}
               onClick={() => setTab(t)}
@@ -195,7 +204,11 @@ function AdPreviewModal({
                   : "text-muted-foreground hover:text-foreground"
               }`}
             >
-              {t === "ads" ? `Ads (${ads.length})` : `Ad Sets & Targeting (${adsets.length})`}
+              {t === "ads"
+                ? `Ads (${ads.length})`
+                : t === "targeting"
+                  ? `Ad Sets & Targeting (${adsets.length})`
+                  : `Leads (${campaignLeads?.length ?? 0})`}
             </button>
           ))}
         </div>
@@ -321,7 +334,7 @@ function AdPreviewModal({
                 })}
               </div>
             )
-          ) : (
+          ) : tab === "targeting" ? (
             // Targeting tab
             adsets.length === 0 ? (
               <p className="text-[12px] text-muted-foreground text-center py-16">No ad sets found.</p>
@@ -365,6 +378,58 @@ function AdPreviewModal({
                           <span className="text-[8px] text-muted-foreground uppercase tracking-wide">{m.l}</span>
                         </div>
                       ))}
+                    </div>
+                  </div>
+                ))}
+              </div>
+            )
+          ) : (
+            // Leads tab — actual people who submitted Meta lead-form responses
+            // attributed to this campaign. Joined to Zoho client-side so we
+            // can show qualification + conversion status alongside each row.
+            leadsLoading ? (
+              <div className="flex items-center justify-center gap-2 py-16 text-muted-foreground">
+                <Loader2 className="h-5 w-5 animate-spin" />
+                <span className="text-[13px]">Loading leads…</span>
+              </div>
+            ) : !campaignLeads || campaignLeads.length === 0 ? (
+              <p className="text-[12px] text-muted-foreground text-center py-16">
+                No Meta lead-form submissions matched to this campaign in the selected period.
+              </p>
+            ) : (
+              <div className="space-y-1.5">
+                <p className="text-[10px] uppercase tracking-wide text-muted-foreground mb-2">
+                  {campaignLeads.length} lead{campaignLeads.length === 1 ? "" : "s"} ·
+                  {" "}{campaignLeads.filter(l => l.qualified).length} qualified ·
+                  {" "}{campaignLeads.filter(l => l.converted).length} converted
+                </p>
+                {campaignLeads.map(l => (
+                  <div key={l.id} className="rounded-lg border border-border/50 bg-card px-3 py-2 hover:bg-muted/30 transition-colors">
+                    <div className="flex items-start justify-between gap-3">
+                      <div className="min-w-0 flex-1">
+                        <p className="text-[13px] font-semibold truncate">{l.fullName}</p>
+                        <p className="text-[10px] text-muted-foreground truncate">
+                          {l.email ?? "no email"}{l.speciality ? ` · ${l.speciality}` : ""}{l.location ? ` · ${l.location}` : ""}
+                        </p>
+                      </div>
+                      <div className="flex flex-col items-end shrink-0 gap-1">
+                        {l.converted ? (
+                          <span className="text-[9px] px-1.5 py-0.5 rounded-full font-semibold bg-emerald-50 text-emerald-700 border border-emerald-200">Converted</span>
+                        ) : l.qualified ? (
+                          <span className="text-[9px] px-1.5 py-0.5 rounded-full font-semibold bg-blue-50 text-blue-700 border border-blue-200">Qualified</span>
+                        ) : l.zohoStatus ? (
+                          <span className="text-[9px] px-1.5 py-0.5 rounded-full font-medium bg-muted text-muted-foreground border border-border/50" title={l.zohoStatus}>
+                            {l.zohoStatus.length > 24 ? l.zohoStatus.slice(0, 22) + "…" : l.zohoStatus}
+                          </span>
+                        ) : (
+                          <span className="text-[9px] px-1.5 py-0.5 rounded-full font-medium bg-amber-50 text-amber-700 border border-amber-200">Not in Zoho</span>
+                        )}
+                        {l.submittedAt && (
+                          <span className="text-[9px] text-muted-foreground tabular-nums">
+                            {new Date(l.submittedAt).toLocaleDateString("en-GB", { day: "numeric", month: "short" })}
+                          </span>
+                        )}
+                      </div>
                     </div>
                   </div>
                 ))}
@@ -794,7 +859,69 @@ const MetaAds = () => {
   const allAccountIds = api?.accounts?.map(a => a.id) ?? [];
 
   const { data: topAds = [], isLoading: topAdsLoading } = useMetaTopAds(allAccountIds, since, until);
-  const { data: topAdsets = [] } = useMetaTopAdsets(allAccountIds, since, until);
+  const { data: topAdsetsRaw = [] } = useMetaTopAdsets(allAccountIds, since, until);
+
+  // Cross-reference meta_leads with the ad/adset/campaign hierarchy so we
+  // can populate per-adset lead counts even when Meta Insights returns 0
+  // for `actions.leadgen` (which is most of the time for AA's setup).
+  // AA stores utm_content as the creative NAME ("Apr'26 - Static 1") not
+  // the Meta ad ID, so we pass topAds in for the hook to do name-based
+  // resolution before rolling up via topAds[].adsetId.
+  const attribution = useMetaLeadAttribution(since, until, topAds);
+  const adsByAdset = useMemo(() => {
+    const m = new Map<string, string[]>();
+    let withAdsetId = 0;
+    for (const ad of topAds) {
+      if (!ad.adsetId) continue;
+      withAdsetId++;
+      const list = m.get(ad.adsetId) ?? [];
+      list.push(ad.id);
+      m.set(ad.adsetId, list);
+    }
+    console.log(`[MetaAds] topAds=${topAds.length}, withAdsetId=${withAdsetId}, uniqueAdsets=${m.size}`);
+    if (topAds.length > 0 && withAdsetId === 0) {
+      console.warn("[MetaAds] No ads have adsetId populated — Meta API response is missing adset_id field. Cache may be stale; try hard-refresh + clear localStorage.");
+    }
+    return m;
+  }, [topAds]);
+  // Build an ad-id → ad lookup so we can sum per-ad leads up to adset.
+  // Meta's `actions.leadgen` field is inconsistent: per-AD it returns
+  // sane numbers, but the same field on the parent ADSET often under-
+  // counts (or returns 0). Summing the children is the only way to get
+  // the adset total to agree with what users see in the Per-Creative view.
+  const adById = useMemo(() => {
+    const m = new Map<string, typeof topAds[number]>();
+    for (const ad of topAds) m.set(ad.id, ad);
+    return m;
+  }, [topAds]);
+
+  // Drill-down modal state — opened when a user clicks a leads/qualified/
+  // converted number on any of the per-ad / per-adset / per-campaign tables.
+  // The modal renders the actual MetaLeadRow[] for that scope.
+  const [leadsModal, setLeadsModal] = useState<{
+    title:    string;
+    subtitle: string;
+    leads:    MetaLeadRow[];
+    filter:   "all" | "qualified" | "converted";
+  } | null>(null);
+
+  // For each adset:
+  //   - leads = max(Meta adset-level, sum of its ads' Meta leads, attribution rollup)
+  //     The max is defensive — whichever source picks up the most signal wins.
+  //   - qualified / converted come from attribution (Meta doesn't report these)
+  const topAdsets = useMemo(() => {
+    return topAdsetsRaw.map(s => {
+      const adIds = adsByAdset.get(s.id) ?? [];
+      const adLevelLeadSum = adIds.reduce((sum, id) => sum + (adById.get(id)?.leads ?? 0), 0);
+      const c = attribution.forAdset(adIds);
+      return {
+        ...s,
+        leads:     Math.max(s.leads, adLevelLeadSum, c.leads),
+        qualified: c.qualified,
+        converted: c.converted,
+      };
+    });
+  }, [topAdsetsRaw, adsByAdset, adById, attribution]);
   // Per-Adset table sort + render-cap
   type AdsetSortKey = "spend" | "impressions" | "clicks" | "ctr" | "leads";
   const [adsetSortKey, setAdsetSortKey] = useState<AdsetSortKey>("spend");
@@ -1608,14 +1735,44 @@ const MetaAds = () => {
                         {/* Performance: Leads / Qualified / CPQL */}
                         {creativeView === "performance" && <>
                           <td className="py-3 px-3 text-right text-[13px] tabular-nums text-foreground/90 font-semibold">
-                            {v.formLeads > 0 ? v.formLeads.toLocaleString() : <span className="text-muted-foreground/40 font-normal">—</span>}
+                            {v.formLeads > 0 ? (
+                              <button
+                                type="button"
+                                onClick={(e) => {
+                                  e.stopPropagation();
+                                  setLeadsModal({
+                                    title:    v.name,
+                                    subtitle: `Creative · ${v.ad?.adsetId ? "ad" : "creative"}`,
+                                    leads:    attribution.leadsForAd(v.id),
+                                    filter:   "all",
+                                  });
+                                }}
+                                className="hover:underline cursor-pointer"
+                                title="Click to view the leads from this creative"
+                              >
+                                {v.formLeads.toLocaleString()}
+                              </button>
+                            ) : <span className="text-muted-foreground/40 font-normal">—</span>}
                           </td>
                           <td className="py-3 px-3 text-right text-[13px] tabular-nums">
                             {v.qualified > 0 ? (
-                              <>
+                              <button
+                                type="button"
+                                onClick={(e) => {
+                                  e.stopPropagation();
+                                  setLeadsModal({
+                                    title:    v.name,
+                                    subtitle: `Creative · qualified leads only`,
+                                    leads:    attribution.leadsForAd(v.id),
+                                    filter:   "qualified",
+                                  });
+                                }}
+                                className="hover:underline cursor-pointer"
+                                title="Click to view qualified leads from this creative"
+                              >
                                 <span className="font-bold text-emerald-700">{v.qualified.toLocaleString()}</span>
                                 <span className="text-[11px] font-normal text-muted-foreground ml-1.5">({v.qualRate.toFixed(0)}%)</span>
-                              </>
+                              </button>
                             ) : <span className="text-muted-foreground/40">—</span>}
                           </td>
                           <td className="py-3 px-3 text-right text-[13px] font-semibold tabular-nums text-orange-700">
@@ -1768,7 +1925,25 @@ const MetaAds = () => {
                             {s.ctr > 0 ? `${s.ctr.toFixed(2)}%` : <span className="text-muted-foreground/40 font-normal">—</span>}
                           </td>
                           <td className="py-3 px-3 text-right text-[13px] font-bold tabular-nums text-emerald-700">
-                            {s.leads > 0 ? fmtN(s.leads) : <span className="text-muted-foreground/40 font-normal">—</span>}
+                            {s.leads > 0 ? (
+                              <button
+                                type="button"
+                                onClick={(e) => {
+                                  e.stopPropagation();
+                                  const adIds = adsByAdset.get(s.id) ?? [];
+                                  setLeadsModal({
+                                    title:    s.name,
+                                    subtitle: `Adset · ${s.campaignName}`,
+                                    leads:    attribution.leadsForAdset(adIds),
+                                    filter:   "all",
+                                  });
+                                }}
+                                className="hover:underline cursor-pointer"
+                                title="View the actual leads for this adset"
+                              >
+                                {fmtN(s.leads)}
+                              </button>
+                            ) : <span className="text-muted-foreground/40 font-normal">—</span>}
                           </td>
                         </motion.tr>
                       ))}
@@ -1857,10 +2032,27 @@ const MetaAds = () => {
                         <td className="py-3 px-3 text-right text-[12px] tabular-nums text-violet-700 font-semibold">{c.ctr.toFixed(2)}%</td>
                         <td className="py-3 px-3 text-right text-[13px] tabular-nums font-bold text-emerald-700">
                           {displayLeads > 0 ? (
-                            <span title={fromForms ? "Sourced from form submissions (Meta API didn't report lead actions for this campaign)" : "Sourced from Meta API"}>
+                            <button
+                              type="button"
+                              onClick={(e) => {
+                                e.stopPropagation();
+                                // Try id first; if no rows, fall back to campaign name (utm_campaign
+                                // sometimes carries the readable name instead of the id).
+                                let rows = attribution.leadsForCampaign(c.id);
+                                if (rows.length === 0) rows = attribution.leadsForCampaign(c.name);
+                                setLeadsModal({
+                                  title:    c.name,
+                                  subtitle: `Campaign · ${c.objective}`,
+                                  leads:    rows,
+                                  filter:   "all",
+                                });
+                              }}
+                              className="hover:underline cursor-pointer"
+                              title={fromForms ? "Click to view leads (sourced from form submissions; Meta API didn't report lead actions)" : "Click to view leads"}
+                            >
                               {displayLeads}
                               {fromForms && <span className="ml-0.5 text-[8px] text-muted-foreground/60 font-normal">*</span>}
-                            </span>
+                            </button>
                           ) : <span className="text-muted-foreground/40 font-normal">—</span>}
                         </td>
                         <td className="py-3 px-3 text-center">
@@ -2021,6 +2213,16 @@ const MetaAds = () => {
         />
       )}
 
+      {/* Per-row leads drill-down — opened from any clickable Leads /
+          Qualified / Converted cell in the creative / adset / campaign tables */}
+      <MetaLeadsModal
+        open={!!leadsModal}
+        onClose={() => setLeadsModal(null)}
+        title={leadsModal?.title ?? ""}
+        subtitle={leadsModal?.subtitle}
+        leads={leadsModal?.leads ?? []}
+        initialFilter={leadsModal?.filter ?? "all"}
+      />
 
     </DashboardLayout>
   );

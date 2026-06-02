@@ -181,8 +181,8 @@ export function ChannelWinnerCards() {
         sub={winners?.lowestCPC ? `${fmtAED(winners.lowestCPC.spend)} / ${fmtN(winners.lowestCPC.converted)} converted` : undefined}
       />
       <WinnerCard
-        label="Best Lead Quality"
-        meaning="Share of QUALIFIED leads that actually converted (became Doctors on Board). Higher = the channel sends prospects who actually close."
+        label="Best Closing Rate"
+        meaning="Of leads that reached qualified status, what share actually closed into a placement (Converted ÷ Qualified). Measures how strong the post-qualification pipeline is — NOT how many of a channel's leads start out qualified."
         source="Zoho Lead_Status × Doctors on Board (converted ÷ qualified)."
         channel={winners?.bestQuality?.channel ?? null}
         value={winners?.bestQuality ? `${winners.bestQuality.qualityScore.toFixed(1)}%` : ""}

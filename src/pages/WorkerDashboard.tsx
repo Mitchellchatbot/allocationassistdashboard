@@ -451,12 +451,13 @@ function OverviewTab({ isAdmin, userId }: { isAdmin: boolean; userId?: string })
 // 1:1 with Team Performance for the same period.
 
 const PERF_PRESETS: { label: string; preset: TimeRangePreset | "all" }[] = [
-  { label: "Today",        preset: "today"   },
-  { label: "This Week",    preset: "week"    },
-  { label: "This Month",   preset: "month"   },
-  { label: "This Quarter", preset: "quarter" },
-  { label: "This Year",    preset: "year"    },
-  { label: "All Time",     preset: "all"     },
+  { label: "Today",          preset: "today"        },
+  { label: "This Week",      preset: "week"         },
+  { label: "This Month",     preset: "month"        },
+  { label: "Last 3 Months",  preset: "last3months"  },
+  { label: "This Quarter",   preset: "quarter"      },
+  { label: "This Year",      preset: "year"         },
+  { label: "All Time",       preset: "all"          },
 ];
 
 function parseDDMMYYYY(s: string): number {

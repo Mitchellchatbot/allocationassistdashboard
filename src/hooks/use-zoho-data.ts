@@ -15,6 +15,7 @@
 import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { zohoFetchAll, zohoGetEmailCounts, zohoSync } from '@/lib/zoho';
 import { supabase } from '@/lib/supabase';
+import { stripTestRows } from '@/lib/test-data';
 
 const CACHE_MAX_AGE_MS = 60 * 60 * 1000; // 1 hour
 
@@ -1011,12 +1012,24 @@ const CAMPAIGN_FIELDS = [
 ];
 
 function parseCacheRow(row: { data: unknown; synced_at: string }) {
-  const { leads, deals, calls, accounts, campaigns, doctorsOnBoard, emailData } = row.data as {
+  const { leads: leadsRaw, deals, calls, accounts, campaigns, doctorsOnBoard: dobRaw, emailData } = row.data as {
     leads: ZohoLead[]; deals: ZohoDeal[]; calls: ZohoCall[];
     accounts: ZohoAccount[]; campaigns: ZohoCampaign[];
     doctorsOnBoard?: ZohoDoctorOnBoard[];
     emailData?: { total: number; bySender: Record<string, number>; sampled: number };
   };
+
+  // Strip test rows ("TEST TEST", test@…, etc.) for METRIC computation only.
+  // The unfiltered arrays are still exposed as `rawLeadsAll` / `rawDoctorsOnBoardAll`
+  // below so operational pages (Contracts, Leads list) can still find and act
+  // on test rows — the filter is purely about not polluting conversion KPIs.
+  const leads = stripTestRows(leadsRaw);
+  const doctorsOnBoard = stripTestRows(dobRaw);
+  const droppedLeads = (leadsRaw?.length ?? 0) - leads.length;
+  const droppedDoB   = (dobRaw?.length   ?? 0) - doctorsOnBoard.length;
+  if (droppedLeads > 0 || droppedDoB > 0) {
+    console.log(`[ZohoData] stripped test rows for metrics — leads: ${droppedLeads}, doctorsOnBoard: ${droppedDoB}`);
+  }
   // Quick visibility for the new module — print Lead_Source distribution as
   // a table, with the normalized channel each value resolves to.
   // Pass the RAW value (including null) through displaySource so the log
@@ -1053,10 +1066,16 @@ function parseCacheRow(row: { data: unknown; synced_at: string }) {
   console.table(dobRawTable);
   const aggregated = aggregateZohoData(leads, deals, calls, accounts, campaigns,
     emailData ?? { total: 0, bySender: {} as Record<string, number>, sampled: 0 },
-    doctorsOnBoard ?? []);
+    doctorsOnBoard);
   const result = {
     ...aggregated,
-    rawDoctorsOnBoard: doctorsOnBoard ?? [],
+    rawDoctorsOnBoard: doctorsOnBoard,
+    // Unfiltered arrays — used by operational pages (Contracts builder,
+    // Leads pipeline) where we DO want to show test rows so the user can
+    // still send/edit contracts for them. Metric-computing hooks should
+    // continue using `rawLeads` / `rawDoctorsOnBoard` (the filtered ones).
+    rawLeadsAll:           leadsRaw ?? [],
+    rawDoctorsOnBoardAll:  dobRaw ?? [],
     syncedAt: row.synced_at,
   };
   console.log(`[ZohoData] parseCacheRow returning — rawLeads:${(result as { rawLeads?: unknown[] }).rawLeads?.length ?? 'MISSING'} keys:[${Object.keys(result).join(', ')}]`);

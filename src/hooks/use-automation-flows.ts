@@ -1,0 +1,158 @@
+import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
+import { useCallback } from "react";
+import { supabase } from "@/lib/supabase";
+import { useTableSubscription } from "@/lib/realtime-registry";
+import type { FlowKey } from "@/lib/automation-flows";
+
+export type RunStatus = "active" | "completed" | "paused" | "failed";
+
+export interface FlowRun {
+  id:             string;
+  flow_key:       FlowKey;
+  doctor_id:      string | null;
+  doctor_name:    string;
+  doctor_email:   string | null;
+  doctor_phone:   string | null;
+  current_stage:  string;
+  status:         RunStatus;
+  hospital:       string | null;
+  started_at:     string;
+  last_event_at:  string;
+  completed_at:   string | null;
+  metadata:       Record<string, unknown>;
+}
+
+export interface FlowEvent {
+  id:           string;
+  run_id:       string;
+  stage_key:    string;
+  event_type:   "entered" | "email_sent" | "email_opened" | "reminder_sent" | "note" | "error" | "completed";
+  message:      string | null;
+  payload:      Record<string, unknown>;
+  occurred_at:  string;
+}
+
+export interface StageOverride {
+  subject?:    string;
+  delayDays?:  number;
+  enabled?:    boolean;
+  notes?:      string;
+}
+
+export interface FlowConfig {
+  flow_key:        FlowKey;
+  name:            string;
+  description:     string | null;
+  enabled:         boolean;
+  stage_overrides: Record<string, StageOverride>;
+  updated_at:      string;
+  updated_by:      string | null;
+}
+
+const RUNS_KEY    = ["automation-flow-runs"] as const;
+const EVENTS_KEY  = (runId: string) => ["automation-flow-events", runId] as const;
+const CONFIGS_KEY = ["automation-flow-configs"] as const;
+
+/** All flow runs across all flows. Filtering by flow_key happens client-side
+ *  since the volume is small (hundreds, not thousands) and lets the page
+ *  switch tabs without refetching. */
+export function useAutomationFlowRuns() {
+  const qc = useQueryClient();
+  const query = useQuery({
+    queryKey: RUNS_KEY,
+    queryFn: async (): Promise<FlowRun[]> => {
+      const { data, error } = await supabase
+        .from("automation_flow_runs")
+        .select("*")
+        .order("last_event_at", { ascending: false })
+        .limit(500);
+      if (error) throw error;
+      return (data ?? []) as FlowRun[];
+    },
+    staleTime: 30_000,
+  });
+
+  // Realtime: when the sender inserts/updates a run, refresh. Subscription
+  // is deduped across the app via the realtime registry.
+  useTableSubscription("automation_flow_runs", useCallback(() => {
+    qc.invalidateQueries({ queryKey: RUNS_KEY });
+  }, [qc]));
+
+  return query;
+}
+
+/** Per-run event timeline for the n8n-style detail view. */
+export function useFlowRunEvents(runId: string | null) {
+  return useQuery({
+    queryKey: runId ? EVENTS_KEY(runId) : ["automation-flow-events", "none"],
+    enabled: !!runId,
+    queryFn: async (): Promise<FlowEvent[]> => {
+      if (!runId) return [];
+      const { data, error } = await supabase
+        .from("automation_flow_events")
+        .select("*")
+        .eq("run_id", runId)
+        .order("occurred_at", { ascending: true });
+      if (error) throw error;
+      return (data ?? []) as FlowEvent[];
+    },
+    staleTime: 15_000,
+  });
+}
+
+/** Editable per-flow default config (subject lines, delays, on/off). */
+export function useFlowConfigs() {
+  return useQuery({
+    queryKey: CONFIGS_KEY,
+    queryFn: async (): Promise<FlowConfig[]> => {
+      const { data, error } = await supabase
+        .from("automation_flow_configs")
+        .select("*")
+        .order("flow_key");
+      if (error) throw error;
+      return (data ?? []) as FlowConfig[];
+    },
+    staleTime: 60_000,
+  });
+}
+
+export function useUpdateFlowConfig() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: async (patch: { flow_key: FlowKey; enabled?: boolean; stage_overrides?: Record<string, StageOverride> }) => {
+      const { error } = await supabase
+        .from("automation_flow_configs")
+        .update({
+          ...(patch.enabled !== undefined ? { enabled: patch.enabled } : {}),
+          ...(patch.stage_overrides !== undefined ? { stage_overrides: patch.stage_overrides } : {}),
+          updated_at: new Date().toISOString(),
+        })
+        .eq("flow_key", patch.flow_key);
+      if (error) throw error;
+    },
+    onSuccess: () => { qc.invalidateQueries({ queryKey: CONFIGS_KEY }); },
+  });
+}
+
+/** Append a freeform note event to a run's timeline (used by the side panel
+ *  in the run-detail drawer). */
+export function useAddRunNote() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: async (input: { run_id: string; stage_key: string; message: string }) => {
+      const { error } = await supabase
+        .from("automation_flow_events")
+        .insert({
+          run_id:     input.run_id,
+          stage_key:  input.stage_key,
+          event_type: "note",
+          message:    input.message,
+        });
+      if (error) throw error;
+    },
+    onSuccess: (_, vars) => {
+      qc.invalidateQueries({ queryKey: EVENTS_KEY(vars.run_id) });
+      qc.invalidateQueries({ queryKey: RUNS_KEY });
+    },
+  });
+}

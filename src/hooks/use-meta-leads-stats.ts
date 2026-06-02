@@ -62,17 +62,18 @@ const CONVERTED_STAGES = new Set([
   "closed won",
 ]);
 
-// Normalize utm_source values into clean platform names. Empty / "xxxxx" /
-// other placeholder values are treated as Website (direct organic traffic
+// Normalize utm_source values into clean platform names. Empty / "none" /
+// other null-ish placeholders are treated as Website (direct organic traffic
 // without a UTM tag — i.e. someone landed on the site without clicking
-// through an ad).
+// through an ad). "xxxxx" is bucketed as Meta — Yamima confirmed that
+// Meta campaign leads land with utm_source="xxxxx" rather than empty.
 function normalizePlatform(raw: string): string {
   const s = (raw ?? "").toLowerCase().trim();
-  if (!s || s === "xxxxx" || s === "none" || s === "null" || s === "n/a"
+  if (s === "xxxxx" || s === "meta" || s === "fb" || s.startsWith("facebook")) return "Facebook";
+  if (!s || s === "none" || s === "null" || s === "n/a"
       || s.includes("website") || s === "web" || s === "direct"
       || s.includes("seo") || s.includes("organic"))
     return "Website";
-  if (s === "meta" || s === "fb" || s.startsWith("facebook")) return "Facebook";
   if (s === "ig"   || s.startsWith("instagram"))             return "Instagram";
   if (s === "google" || s.startsWith("google") || s === "g"
       || s.includes("googleads") || s.includes("google_ads")
@@ -121,10 +122,10 @@ export interface DateRangeInput {
 }
 
 // Normalize email/phone/name for cross-reference against Zoho leads.
-function normalizeEmail(s: string | undefined | null): string {
+export function normalizeEmail(s: string | undefined | null): string {
   return (s ?? "").trim().toLowerCase();
 }
-function normalizePhone(s: string | undefined | null): string {
+export function normalizePhone(s: string | undefined | null): string {
   return (s ?? "").replace(/\D/g, "");   // digits only — handles "+44…" vs "0044…" etc.
 }
 function normalizeName(first: string | undefined | null, last: string | undefined | null): string {

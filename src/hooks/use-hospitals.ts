@@ -1,0 +1,73 @@
+import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
+import { supabase } from "@/lib/supabase";
+
+export interface Hospital {
+  id:                      string;
+  name:                    string;
+  city:                    string | null;
+  country:                 string | null;
+  primary_recruiter_email: string | null;
+  primary_contact_name:    string | null;
+  recruiter_phone:         string | null;
+  template_key:            string | null;
+  notes:                   string | null;
+  health_score:            number | null;
+  created_at:              string;
+  updated_at:              string;
+}
+
+export type HospitalInput = Partial<Omit<Hospital, "id" | "created_at" | "updated_at">> & { name: string };
+
+const KEY = ["hospitals"] as const;
+
+export function useHospitals() {
+  return useQuery({
+    queryKey: KEY,
+    queryFn: async (): Promise<Hospital[]> => {
+      const { data, error } = await supabase
+        .from("hospitals")
+        .select("*")
+        .order("name", { ascending: true });
+      if (error) throw error;
+      return (data ?? []) as Hospital[];
+    },
+    staleTime: 60_000,
+  });
+}
+
+export function useCreateHospital() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: async (input: HospitalInput) => {
+      const { error } = await supabase.from("hospitals").insert(input);
+      if (error) throw error;
+    },
+    onSuccess: () => { qc.invalidateQueries({ queryKey: KEY }); },
+  });
+}
+
+export function useUpdateHospital() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: async (input: { id: string } & HospitalInput) => {
+      const { id, ...patch } = input;
+      const { error } = await supabase
+        .from("hospitals")
+        .update({ ...patch, updated_at: new Date().toISOString() })
+        .eq("id", id);
+      if (error) throw error;
+    },
+    onSuccess: () => { qc.invalidateQueries({ queryKey: KEY }); },
+  });
+}
+
+export function useDeleteHospital() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: async (id: string) => {
+      const { error } = await supabase.from("hospitals").delete().eq("id", id);
+      if (error) throw error;
+    },
+    onSuccess: () => { qc.invalidateQueries({ queryKey: KEY }); },
+  });
+}

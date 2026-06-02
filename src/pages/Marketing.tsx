@@ -16,7 +16,7 @@ import { useZohoData, displaySource } from "@/hooks/use-zoho-data";
 import { useChannelEconomics } from "@/hooks/use-channel-economics";
 import { useMarketingExpenses } from "@/hooks/use-marketing-expenses";
 import { useMetaAdsApi } from "@/hooks/use-meta-ads-api";
-import { useMetaLeadsStats } from "@/hooks/use-meta-leads-stats";
+import { useMetaLeadsStats, normalizeEmail, normalizePhone } from "@/hooks/use-meta-leads-stats";
 import { useCurrency } from "@/lib/CurrencyProvider";
 import { normalizeChannelKey } from "@/lib/channel-mapping";
 import { useFilters } from "@/lib/filters";
@@ -85,8 +85,26 @@ const Marketing = () => {
       'Initial Sales Call Completed', 'High Priority Follow up',
     ]);
 
+    // Meta attribution override (Ammar 2026-06-02). A doctor whose email/phone
+    // appears in meta_leads (form submissions captured directly from Meta
+    // campaigns) gets attributed to Meta regardless of what the recruiter
+    // typed into Lead_Source. This fixes the "XXXX → Meta" miscategorisation
+    // — currently 9 DoB rows get filed under Website/SEO when they actually
+    // came in from Meta forms.
+    const metaEmails = metaStats?.metaLeadEmails ?? new Set<string>();
+    const metaPhones = metaStats?.metaLeadPhones ?? new Set<string>();
+    const isMetaSourced = (email: string | null | undefined, phone: string | null | undefined): boolean => {
+      const e = normalizeEmail(email);
+      if (e && metaEmails.has(e)) return true;
+      const p = normalizePhone(phone);
+      if (p && metaPhones.has(p)) return true;
+      return false;
+    };
+
     for (const l of recentLeads) {
-      const ch = displaySource(l.Lead_Source);
+      const ch = isMetaSourced(l.Email, l.Phone ?? l.Mobile)
+        ? "Meta"
+        : displaySource(l.Lead_Source);
       leadsByChannel[ch] = (leadsByChannel[ch] ?? 0) + 1;
       if (activeStatuses.has(l.Lead_Status)) {
         activeByChannel[ch] = (activeByChannel[ch] ?? 0) + 1;
@@ -99,11 +117,14 @@ const Marketing = () => {
       }
     }
 
-    // Conversions from Doctors on Board, attributed to channel via Lead_Source.
+    // Conversions from Doctors on Board, attributed to channel via
+    // meta_leads cross-reference first, then Lead_Source as fallback.
     for (const dob of zoho.rawDoctorsOnBoard ?? []) {
       const t = dob.Created_Time ? new Date(dob.Created_Time).getTime() : NaN;
       if (isNaN(t) || t < fromMs || t >= toMs) continue;
-      const ch = displaySource(dob.Lead_Source);
+      const ch = isMetaSourced(dob.Email, dob.Phone ?? dob.Mobile)
+        ? "Meta"
+        : displaySource(dob.Lead_Source);
       convertedByChannel[ch] = (convertedByChannel[ch] ?? 0) + 1;
     }
 
@@ -142,28 +163,38 @@ const Marketing = () => {
         const conversionRate = doctors > 0 ? Math.round((converted  / doctors) * 100) : 0;
         return { channel, doctors, contacted, uncontacted, qualified, converted, contactRate, qualifiedRate, conversionRate };
       });
-  }, [zoho?.rawLeads, dateRange]);
+  }, [zoho?.rawLeads, zoho?.rawDoctorsOnBoard, dateRange, metaStats?.metaLeadEmails, metaStats?.metaLeadPhones]);
 
   const bestChannel = marketing.length > 0
     ? marketing.reduce((a, b) => (a.doctors > b.doctors ? a : b))
     : null;
 
-  // Hide low-volume channels (< 10 leads) AND the "Undefined" bucket by default
-  // so the grid stays scannable. Two independent toggles let users opt in to
-  // either group.
-  const MIN_LEADS_THRESHOLD = 10;
+  // Hide low-volume channels AND the "Undefined" bucket by default so the
+  // grid stays scannable. Two independent toggles let users opt in.
+  //
+  // The threshold scales with total volume in the window so a short range
+  // (e.g. "just June" on June 2nd, with ~9 total leads) doesn't hide every
+  // channel and leave the user staring at an empty table. Specifically:
+  // 5% of total leads, capped at 10. Tiny windows effectively get a
+  // threshold of 0 — show everything; big "all-time" windows still hide
+  // the noisy long tail.
+  const totalLeadsInWindow = useMemo(
+    () => marketing.reduce((s, c) => s + c.doctors, 0),
+    [marketing],
+  );
+  const minLeadsThreshold = Math.min(10, Math.floor(totalLeadsInWindow * 0.05));
   const [showAllChannels, setShowAllChannels] = useState(false);
   const [showUndefined,   setShowUndefined]   = useState(false);
   const visibleMarketing = useMemo(() => {
     return marketing.filter(c => {
       if (!showUndefined && c.channel === "Undefined") return false;
-      if (!showAllChannels && c.doctors < MIN_LEADS_THRESHOLD) return false;
+      if (!showAllChannels && c.doctors < minLeadsThreshold) return false;
       return true;
     });
-  }, [marketing, showAllChannels, showUndefined]);
+  }, [marketing, showAllChannels, showUndefined, minLeadsThreshold]);
   const undefinedRow         = marketing.find(c => c.channel === "Undefined");
   const undefinedLeads       = undefinedRow?.doctors ?? 0;
-  const hiddenLowVolumeCount = marketing.filter(c => c.doctors < MIN_LEADS_THRESHOLD && c.channel !== "Undefined").length;
+  const hiddenLowVolumeCount = marketing.filter(c => c.doctors < minLeadsThreshold && c.channel !== "Undefined").length;
 
   // KPI card expand panel
   const [selectedKpiChannel, setSelectedKpiChannel] = useState<string | null>(null);
@@ -178,6 +209,23 @@ const Marketing = () => {
     if (chSortKey === k) setChSortDir(d => d === "asc" ? "desc" : "asc");
     else { setChSortKey(k); setChSortDir(k === "channel" ? "asc" : "desc"); }
   };
+  // Most recent lead per channel across ALL TIME (independent of the date
+  // filter). Used to flag phased-out lead sources — e.g. "Referrals" before
+  // the rebrand — so they don't dominate winner cards in All-Time views.
+  // Threshold: 180 days without a new lead = legacy.
+  const LEGACY_THRESHOLD_MS = 180 * 24 * 60 * 60 * 1000;
+  const lastLeadByChannel = useMemo(() => {
+    const map = new Map<string, number>();
+    for (const l of zoho?.rawLeads ?? []) {
+      const t = l.Created_Time ? new Date(l.Created_Time).getTime() : NaN;
+      if (isNaN(t)) continue;
+      const ch = normalizeChannelKey(l.Lead_Source);
+      if (t > (map.get(ch) ?? 0)) map.set(ch, t);
+    }
+    return map;
+  }, [zoho?.rawLeads]);
+  const legacyCutoff = Date.now() - LEGACY_THRESHOLD_MS;
+
   // Enriched rows: marketing channel data + Meta overrides + cost-per metrics
   const channelRows = useMemo(() => {
     return visibleMarketing.map(ch => {
@@ -191,16 +239,18 @@ const Marketing = () => {
       const qualifiedRate = ch.doctors > 0 ? Math.round((qualified / ch.doctors) * 100) : ch.qualifiedRate;
       const cpq = qualified    > 0 && spend > 0 ? spend / qualified    : 0;
       const cpc = ch.converted > 0 && spend > 0 ? spend / ch.converted : 0;
-      // Lead quality = share of QUALIFIED leads that converted. Same metric
-      // the "Best Lead Quality" KPI card uses, so the two views agree.
+      // Closing rate = share of QUALIFIED leads that converted. Same metric
+      // the "Best Closing Rate" KPI card uses, so the two views agree.
       // Cap at 100% — rare cases (e.g. Dave) where DoB exceeds qualified
       // because leads bypass the qualified status entirely.
       const quality = qualified > 0
         ? Math.min(100, (ch.converted / qualified) * 100)
         : 0;
-      return { ...ch, qualified, qualifiedRate, spend, cpq, cpc, quality };
+      const lastLeadAt = lastLeadByChannel.get(normalizeChannelKey(ch.channel)) ?? 0;
+      const isLegacy   = lastLeadAt > 0 && lastLeadAt < legacyCutoff;
+      return { ...ch, qualified, qualifiedRate, spend, cpq, cpc, quality, isLegacy };
     });
-  }, [visibleMarketing, metaApiSpend, metaFormQualified, spendByChannel]);
+  }, [visibleMarketing, metaApiSpend, metaFormQualified, spendByChannel, lastLeadByChannel, legacyCutoff]);
   const sortedChannelRows = useMemo(() => {
     const sign = chSortDir === "asc" ? 1 : -1;
     // For cost columns, rows with no cost (0) go to the bottom regardless of dir.
@@ -228,19 +278,25 @@ const Marketing = () => {
   // collapsed many channels into an "Other" bucket the table didn't have.)
   const channelWinners = useMemo(() => {
     if (channelRows.length === 0) return null;
+    // Legacy channels are excluded from winner candidates — a phased-out
+    // source like "Referrals" with old high-quality data should NOT win
+    // "Best Closing Rate" in an All-Time view. They still appear in the
+    // table below, marked "(legacy)", so the data isn't hidden — just
+    // demoted from misleading top-line rankings.
+    const activeRows = channelRows.filter(r => !r.isLegacy);
     // Most Revenue Generated — channel that produced the most revenue
     // (converted doctors × per-doctor fee). Ranks channels on actual money
     // delivered, not raw lead volume.
-    const mostRevenue = [...channelRows]
+    const mostRevenue = [...activeRows]
       .filter(r => r.converted > 0)
       .sort((a, b) => b.converted - a.converted)[0] ?? null;
-    // Best Lead Quality — converted ÷ qualified, min 5 qualified to avoid noise
+    // Best Closing Rate — converted ÷ qualified, min 5 qualified to avoid noise
     const QUAL_MIN = 5;
-    const bestQuality = [...channelRows]
+    const bestQuality = [...activeRows]
       .filter(r => r.qualified >= QUAL_MIN && r.quality > 0)
       .sort((a, b) => b.quality - a.quality)[0] ?? null;
     // Best Cost / Conversion — needs both spend AND a converted lead
-    const lowestCPC = [...channelRows]
+    const lowestCPC = [...activeRows]
       .filter(r => r.spend > 0 && r.converted > 0 && r.cpc > 0)
       .sort((a, b) => a.cpc - b.cpc)[0] ?? null;
     return { mostRevenue, bestQuality, lowestCPC };
@@ -302,6 +358,11 @@ const Marketing = () => {
           Computed from the SAME channelRows array the table below uses, so
           the two views always agree. Click any card to flip and see the top
           3 contenders + the formula used. */}
+      {/* Note: "Best Lead Quality" was renamed to "Best Closing Rate" on
+          2026-05-04 after the AA onboarding meeting — Yemima read "Lead
+          Quality" as "lead source quality" (qualified÷leads) but the metric
+          actually measures converted÷qualified, i.e. how well qualified leads
+          close. The rename makes the label match what's measured. */}
       <div className="grid grid-cols-1 md:grid-cols-3 gap-3 mb-4">
         <WinnerCard
           accent="emerald"
@@ -382,8 +443,8 @@ const Marketing = () => {
         />
         <WinnerCard
           accent="blue"
-          label="Best Lead Quality"
-          meaning="Share of QUALIFIED leads that actually converted (became Doctors on Board). Higher = the channel sends prospects who actually close. Min 5 qualified leads to avoid 1-of-1 noise."
+          label="Best Closing Rate"
+          meaning="Of leads that reached qualified status, what share actually closed into a placement (Converted ÷ Qualified). Measures how strong the post-qualification pipeline is for each channel — NOT how many of its leads start out qualified. Min 5 qualified leads to avoid 1-of-1 noise."
           source="Zoho Lead_Status × Doctors on Board (converted ÷ qualified)."
           channel={channelWinners?.bestQuality?.channel ?? null}
           value={channelWinners?.bestQuality ? `${channelWinners.bestQuality.quality.toFixed(1)}%` : ""}
@@ -476,8 +537,8 @@ const Marketing = () => {
                   Qualified
                 </SortableTH>
                 <SortableTH sortKey="quality" current={chSortKey} dir={chSortDir} onSort={handleChSort} size="md"
-                  info={{ meaning: "Share of QUALIFIED leads that actually converted (Converted ÷ Qualified). Same definition as the 'Best Lead Quality' KPI card. Higher = stronger leads — they progress to placement instead of stalling.", source: "Computed (Converted ÷ Qualified)." }}>
-                  Lead Quality
+                  info={{ meaning: "Of qualified leads, the share that actually closed into a placement (Converted ÷ Qualified). Same definition as the 'Best Closing Rate' KPI card. Higher = qualified leads from this channel actually close instead of stalling. NOT a measure of whether the channel sends in good leads — for that, see the Qualified column's % in parens.", source: "Computed (Converted ÷ Qualified)." }}>
+                  Closing Rate
                 </SortableTH>
                 <SortableTH sortKey="cpq" current={chSortKey} dir={chSortDir} onSort={handleChSort} size="md"
                   info={{ meaning: "Spend ÷ qualified leads. — when no spend record. For Meta, spend from Meta API.", source: "Marketing-spend imports + Meta API." }}>
@@ -509,6 +570,14 @@ const Marketing = () => {
                             <ChannelIcon channel={ch.channel} size={15} />
                           </div>
                           <span className="text-[14px] font-semibold text-foreground">{ch.channel}</span>
+                          {ch.isLegacy && (
+                            <span
+                              className="text-[9px] uppercase tracking-wide font-semibold px-1.5 py-0.5 rounded bg-amber-50 text-amber-700 border border-amber-200"
+                              title="No new leads in over 180 days. Excluded from winner cards to prevent stale data dominating rankings."
+                            >
+                              Legacy
+                            </span>
+                          )}
                           {isSelected && <X className="h-3.5 w-3.5 text-primary shrink-0" />}
                         </div>
                       </motion.td>

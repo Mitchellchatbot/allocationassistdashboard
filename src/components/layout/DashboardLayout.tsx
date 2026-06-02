@@ -7,12 +7,15 @@ import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { CurrencyToggle } from "@/components/CurrencyToggle";
 import { UniversalSearch } from "@/components/UniversalSearch";
+import { UniversalSearchContext } from "@/lib/universal-search-context";
+import { lookupRoute } from "@/lib/route-labels";
+import { useRecentItemsTracker } from "@/hooks/use-recent-items";
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
 import { useFilters } from "@/lib/filters";
 import { useAIPageContext } from "@/lib/ai-page-context";
 import { useFilteredData } from "@/hooks/use-filtered-data";
-import { useState, useEffect, useRef, useCallback, useMemo, KeyboardEvent } from "react";
+import { useState, useEffect, useRef, useCallback, useMemo, useContext, createContext, KeyboardEvent } from "react";
 import { Link, useLocation } from "react-router-dom";
 import { useZohoData } from "@/hooks/use-zoho-data";
 import ReactMarkdown from "react-markdown";
@@ -32,23 +35,43 @@ const ALERT_ICON_MAP = {
   success: { icon: CheckCircle2,  color: "text-success" },
 } as const;
 
-const breadcrumbMap: Record<string, string> = {
-  "/": "Dashboard",
-  "/sales": "Sales Tracker",
-  "/marketing": "Marketing",
-  "/leads-pipeline": "Doctor Progress",
-  "/team": "Team Performance",
-  "/finance": "Finance",
-  "/settings": "Settings",
-  "/follow-ups": "Follow-ups",
-  "/calls": "Calls",
-};
+// Breadcrumb map is shared with the sidebar + recent-items widget — single
+// source of truth lives in src/lib/route-labels.ts.
 
 interface DashboardLayoutProps {
   children: React.ReactNode;
-  title: string;
+  title?: string;
   subtitle?: string;
 }
+
+/**
+ * Persistent layout pattern.
+ *
+ * The Suspense fallback used to wrap the WHOLE app, so every lazy route
+ * transition replaced the sidebar + topbar + AI panel with a full-screen
+ * spinner — felt like a hard reload. To keep the chrome persistent, App.tsx
+ * now renders DashboardLayout ONCE around an <Outlet/>, and each page still
+ * does <DashboardLayout title="..."> on the inside.
+ *
+ * This context lets the inner DashboardLayout detect it's already nested and
+ * just pass children through (no second copy of the chrome), while still
+ * pushing its title/subtitle up to the outer instance so the page header
+ * updates correctly.
+ */
+const LayoutContext = createContext<{
+  mounted:     boolean;
+  setTitle:    (s: string) => void;
+  setSubtitle: (s: string | undefined) => void;
+} | null>(null);
+
+function ViewportSpinner() {
+  return (
+    <div className="flex h-full w-full items-center justify-center py-24">
+      <div className="h-6 w-6 rounded-full border-2 border-primary border-t-transparent animate-spin" />
+    </div>
+  );
+}
+export { ViewportSpinner };
 
 function formatSyncedAt(iso: string): string {
   const diffMs = Date.now() - new Date(iso).getTime();
@@ -74,7 +97,26 @@ function SidebarCloser({ aiOpen }: { aiOpen: boolean }) {
   return null;
 }
 
-export function DashboardLayout({ children, title, subtitle }: DashboardLayoutProps) {
+export function DashboardLayout({ children, title: pageTitle, subtitle: pageSubtitle }: DashboardLayoutProps) {
+
+  // If an outer DashboardLayout has already rendered the chrome, just pass
+  // children through and push the page title up to the outer instance via
+  // setTitle/setSubtitle. This is the no-op path for nested mounts — the
+  // shell stays put while the Outlet swaps.
+  const outerCtx = useContext(LayoutContext);
+  useEffect(() => {
+    if (outerCtx?.mounted) {
+      outerCtx.setTitle(pageTitle ?? "");
+      outerCtx.setSubtitle(pageSubtitle);
+    }
+  }, [outerCtx, pageTitle, pageSubtitle]);
+  if (outerCtx?.mounted) return <>{children}</>;
+
+  // Outer layout owns the title/subtitle state so nested pages can push
+  // updates into it as they mount. Initial values come from whatever the
+  // outer caller passed (App.tsx passes nothing, so falls back to "").
+  const [title, setTitleState]       = useState<string>(pageTitle ?? "");
+  const [subtitle, setSubtitleState] = useState<string | undefined>(pageSubtitle);
 
   const { alerts: rawAlerts, filteredLeads, filteredDeals } = useFilteredData();
   const [readIdxs, setReadIdxs] = useState<number[]>([]);
@@ -111,7 +153,14 @@ export function DashboardLayout({ children, title, subtitle }: DashboardLayoutPr
   const location = useLocation();
   const currentPath = location.pathname;
   const { pageData } = useAIPageContext();
-  const breadcrumbLabel = breadcrumbMap[currentPath] || title;
+  const breadcrumbEntry  = lookupRoute(currentPath);
+  const breadcrumbLabel  = breadcrumbEntry?.label ?? title;
+  const breadcrumbSection = breadcrumbEntry?.section && breadcrumbEntry.section !== "Overview"
+    ? breadcrumbEntry.section
+    : null;
+  // Track the current route into recent-items localStorage (consumed by the
+  // sidebar widget).
+  useRecentItemsTracker(lookupRoute);
   const { data: zoho } = useZohoData();
   const syncedAt = zoho?.syncedAt;
   const queryClient = useQueryClient();
@@ -294,6 +343,8 @@ export function DashboardLayout({ children, title, subtitle }: DashboardLayoutPr
 
 
   return (
+    <LayoutContext.Provider value={{ mounted: true, setTitle: setTitleState, setSubtitle: setSubtitleState }}>
+    <UniversalSearchContext.Provider value={{ open: () => setSearchOpen(true) }}>
     <SidebarProvider>
       <style>{`
         @keyframes msgSlideUp {
@@ -308,14 +359,21 @@ export function DashboardLayout({ children, title, subtitle }: DashboardLayoutPr
           {/* Top header bar */}
           <header className="h-[52px] flex items-center justify-between border-b bg-card px-3 sm:px-4 lg:px-5 shrink-0">
             <div className="flex items-center gap-2 sm:gap-3 min-w-0">
-              <SidebarTrigger className="text-muted-foreground hover:text-foreground shrink-0" />
+              <SidebarTrigger className="text-muted-foreground hover:text-foreground hover:bg-muted/60 shrink-0 rounded-full h-8 w-8" />
               <div className="h-4 w-px bg-border/60 hidden sm:block shrink-0" />
               
-              {/* Breadcrumb */}
+              {/* Breadcrumb — shows section context now that the sidebar groups
+                  pages (Home › Hospital Introduction › Vacancies). */}
               <nav className="flex items-center gap-1 text-[11px] min-w-0">
                 <Link to="/" className="text-muted-foreground hover:text-foreground transition-colors shrink-0">
                   <Home className="h-3 w-3" />
                 </Link>
+                {breadcrumbSection && (
+                  <>
+                    <ChevronRight className="h-3 w-3 text-muted-foreground/50 shrink-0" />
+                    <span className="text-muted-foreground truncate">{breadcrumbSection}</span>
+                  </>
+                )}
                 <ChevronRight className="h-3 w-3 text-muted-foreground/50 shrink-0" />
                 <span className="font-medium text-foreground truncate">{breadcrumbLabel}</span>
               </nav>
@@ -326,7 +384,7 @@ export function DashboardLayout({ children, title, subtitle }: DashboardLayoutPr
                   <button
                     onClick={() => !sync.isPending && sync.mutate()}
                     disabled={sync.isPending}
-                    className="hidden sm:flex items-center gap-1.5 h-7 px-2.5 text-[11px] font-medium rounded-md border border-border/60 bg-card text-muted-foreground hover:text-foreground hover:border-border hover:bg-muted/50 transition-all duration-150 disabled:opacity-50 shadow-sm"
+                    className="hidden sm:flex items-center gap-1.5 h-8 px-3 text-[11px] font-medium rounded-full border border-border/60 bg-card text-muted-foreground hover:text-foreground hover:border-border hover:bg-muted/50 transition-all duration-150 disabled:opacity-50 shadow-sm"
                   >
                     <RefreshCw className={`h-3 w-3 shrink-0 ${sync.isPending ? "animate-spin" : ""}`} />
                     {sync.isPending
@@ -350,11 +408,11 @@ export function DashboardLayout({ children, title, subtitle }: DashboardLayoutPr
                 <TooltipTrigger asChild>
                   <button
                     onClick={() => setSearchOpen(true)}
-                    className="hidden sm:flex items-center gap-1.5 h-7 px-2.5 text-[11px] font-medium rounded-md border border-border/60 bg-card text-muted-foreground hover:text-foreground hover:border-border hover:bg-muted/50 transition-all duration-150 shadow-sm"
+                    className="hidden sm:flex items-center gap-1.5 h-8 px-3 text-[11px] font-medium rounded-full border border-border/60 bg-card text-muted-foreground hover:text-foreground hover:border-border hover:bg-muted/50 transition-all duration-150 shadow-sm"
                   >
                     <Search className="h-3 w-3 shrink-0" />
                     Search
-                    <kbd className="ml-1 hidden md:inline-flex items-center gap-0.5 rounded bg-muted/60 px-1 py-0.5 text-[9px] font-mono text-muted-foreground">
+                    <kbd className="ml-1 hidden md:inline-flex items-center gap-0.5 rounded-md bg-muted/60 px-1.5 py-0.5 text-[9px] font-mono text-muted-foreground">
                       ⌘K
                     </kbd>
                   </button>
@@ -364,7 +422,7 @@ export function DashboardLayout({ children, title, subtitle }: DashboardLayoutPr
               <CurrencyToggle />
 <Tooltip>
                 <TooltipTrigger asChild>
-                  <Button variant="ghost" size="sm" className="h-7 text-[11px] text-muted-foreground hidden sm:flex px-2">
+                  <Button variant="ghost" size="sm" className="h-8 text-[11px] text-muted-foreground hidden sm:flex px-3 rounded-full">
                     <Download className="h-3 w-3 mr-1" />Export
                   </Button>
                 </TooltipTrigger>
@@ -372,7 +430,7 @@ export function DashboardLayout({ children, title, subtitle }: DashboardLayoutPr
               </Tooltip>
               <Popover>
                 <PopoverTrigger asChild>
-                  <Button variant="ghost" size="icon" className="relative h-7 w-7">
+                  <Button variant="ghost" size="icon" className="relative h-8 w-8 rounded-full">
                     <Bell className="h-3.5 w-3.5 text-muted-foreground" />
                     {unreadCount > 0 && (
                       <Badge className="absolute -top-0.5 -right-0.5 h-3.5 min-w-[14px] p-0 flex items-center justify-center text-[8px] animate-pulse">
@@ -427,9 +485,14 @@ export function DashboardLayout({ children, title, subtitle }: DashboardLayoutPr
             </div>
           </header>
 
-          {/* Page title section */}
+          {/* Page title section. Falls back to the breadcrumb label so newer
+              pages (Vacancies / Reports / Batches / etc) that wrap themselves
+              in <DashboardLayout> without a `title` prop still get a nice
+              header. */}
           <div className="px-4 lg:px-5 pt-5 pb-3 border-b border-border/40 bg-card">
-            <h1 className="text-[20px] sm:text-[22px] font-semibold text-foreground leading-tight">{title}</h1>
+            <h1 className="text-[20px] sm:text-[22px] font-semibold text-foreground leading-tight">
+              {title || breadcrumbLabel}
+            </h1>
             {subtitle && <p className="text-[13px] text-muted-foreground mt-1">{subtitle}</p>}
           </div>
 
@@ -458,7 +521,7 @@ export function DashboardLayout({ children, title, subtitle }: DashboardLayoutPr
                 onClick={() => runEmbedChunked(false)}
                 disabled={indexing}
                 title="Re-index all leads for AI search"
-                className="flex items-center gap-1.5 h-7 px-2.5 rounded-md text-[11px] font-medium border border-border/60 text-muted-foreground hover:text-foreground hover:bg-muted/50 transition-colors disabled:opacity-50"
+                className="flex items-center gap-1.5 h-7 px-3 rounded-full text-[11px] font-medium border border-border/60 text-muted-foreground hover:text-foreground hover:bg-muted/50 transition-colors disabled:opacity-50"
               >
                 <RefreshCw className={`h-3 w-3 ${indexing ? 'animate-spin' : ''}`} />
                 {indexStatus || 'Index leads'}
@@ -468,7 +531,7 @@ export function DashboardLayout({ children, title, subtitle }: DashboardLayoutPr
                   <button
                     onClick={() => { setChatMessages([]); setChatInput(''); setChatStreaming(''); }}
                     title="Clear chat"
-                    className="flex h-7 w-7 items-center justify-center rounded-md text-muted-foreground hover:text-foreground hover:bg-muted/60 transition-colors"
+                    className="flex h-7 w-7 items-center justify-center rounded-full text-muted-foreground hover:text-foreground hover:bg-muted/60 transition-colors"
                   >
                     <RotateCcw className="h-3.5 w-3.5" />
                   </button>
@@ -476,7 +539,7 @@ export function DashboardLayout({ children, title, subtitle }: DashboardLayoutPr
                 <button
                   onClick={() => setAiOpen(false)}
                   title="Close"
-                  className="flex h-7 w-7 items-center justify-center rounded-md text-muted-foreground hover:text-foreground hover:bg-muted/60 transition-colors"
+                  className="flex h-7 w-7 items-center justify-center rounded-full text-muted-foreground hover:text-foreground hover:bg-muted/60 transition-colors"
                 >
                   <X className="h-4 w-4" />
                 </button>
@@ -668,5 +731,7 @@ export function DashboardLayout({ children, title, subtitle }: DashboardLayoutPr
       {/* Universal search (Cmd+K) — fuzzy-matches across leads, deals, channels, recruiters, pages */}
       <UniversalSearch open={searchOpen} onOpenChange={setSearchOpen} />
     </SidebarProvider>
+    </UniversalSearchContext.Provider>
+    </LayoutContext.Provider>
   );
 }

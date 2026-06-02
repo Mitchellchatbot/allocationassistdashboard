@@ -14,6 +14,7 @@ export interface ContractSendRow {
   signed_at:            string | null;
   zoho_contact_id:      string | null;
   zoho_error:           string | null;
+  cc_emails:            string[] | null; // who BoldSign CC'd on send
   created_at:           string;
   updated_at:           string;
 }
@@ -88,9 +89,13 @@ export function useContractActivity(opts?: { onSigned?: (row: ContractSendRow) =
   return query;
 }
 
-/** Build the BoldSign tracking URL (read-only viewer in BoldSign's app). */
+/** Build the BoldSign tracking URL (read-only viewer in BoldSign's app).
+ *  Documents sent OnBehalfOf the AA sender identity live under "Behalf
+ *  Documents", and the per-document detail page uses a query-string ID
+ *  (NOT a path segment): /documents/behalfdocuments/overview/?documentId=<id>
+ *  Confirmed by inspection of BoldSign's web app on 2026-05-04. */
 export function boldsignTrackingUrl(documentId: string): string {
-  return `https://app.boldsign.com/document/${documentId}`;
+  return `https://app.boldsign.com/documents/behalfdocuments/overview/?documentId=${documentId}`;
 }
 
 /**

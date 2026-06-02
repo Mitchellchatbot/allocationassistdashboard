@@ -6,12 +6,13 @@ import { useFilters, type TimeRangePreset, type DateRange, formatDateRangeLabel 
 import type { DateRange as DayPickerRange } from "react-day-picker";
 
 const PRESETS: { label: string; value: TimeRangePreset }[] = [
-  { label: "Today",        value: "today"   },
-  { label: "This Week",    value: "week"    },
-  { label: "This Month",   value: "month"   },
-  { label: "This Quarter", value: "quarter" },
-  { label: "This Year",    value: "year"    },
-  { label: "All Time",     value: "all"     },
+  { label: "Today",          value: "today"        },
+  { label: "This Week",      value: "week"         },
+  { label: "This Month",     value: "month"        },
+  { label: "Last 3 Months",  value: "last3months"  },
+  { label: "This Quarter",   value: "quarter"      },
+  { label: "This Year",      value: "year"         },
+  { label: "All Time",       value: "all"          },
 ];
 
 export function DateRangePicker() {

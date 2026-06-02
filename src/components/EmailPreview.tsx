@@ -1,0 +1,110 @@
+import { useState, type ReactNode } from "react";
+import { ChevronDown, ChevronRight, Mail } from "lucide-react";
+import { cn } from "@/lib/utils";
+
+interface EmailPreviewProps {
+  /** Pre-rendered subject (tokens already substituted). */
+  subject: string;
+  /** Pre-rendered HTML body (tokens already substituted + escaped). */
+  html: string;
+  /** Optional plain-text body, shown collapsed beneath the HTML preview. */
+  text?: string;
+  /** From address — display only. */
+  from?: string;
+  /** To recipient — display only. */
+  to?: string;
+  /** Template key for the small label at top, e.g. "profile_sent_hospital". */
+  templateKey?: string;
+  /** Optional extra slot rendered above the email body — e.g. a "this is a preview, not sent" warning. */
+  banner?: ReactNode;
+  className?: string;
+}
+
+/**
+ * Shared inbox-style email preview. Wraps the rendered HTML in a Mac-style
+ * window chrome + recipient header so it looks like an actual email rather
+ * than raw HTML dumped on the page. Used by:
+ *   - Doctor Profiles editor (preview of profile_sent_hospital)
+ *   - Templates tab editor (preview of whatever template is selected)
+ *
+ * The HTML body is rendered via dangerouslySetInnerHTML — safe because:
+ *   1. Template HTML is admin-authored only (no untrusted input)
+ *   2. Token values inserted via renderTemplate({ html: true }) are escaped
+ */
+export function EmailPreview({
+  subject, html, text, from, to, templateKey, banner, className,
+}: EmailPreviewProps) {
+  const [showPlainText, setShowPlainText] = useState(false);
+
+  return (
+    <div className={cn(
+      "rounded-xl border border-slate-200 bg-white overflow-hidden",
+      "shadow-[0_4px_24px_-8px_rgba(20,47,76,0.08)]",
+      className,
+    )}>
+      {/* Window chrome — decorative traffic lights + template key label */}
+      <div className="px-4 py-2.5 bg-slate-50 border-b border-slate-200 flex items-center gap-3">
+        <div className="flex gap-1.5">
+          <div className="h-2.5 w-2.5 rounded-full bg-rose-300/80" />
+          <div className="h-2.5 w-2.5 rounded-full bg-amber-300/80" />
+          <div className="h-2.5 w-2.5 rounded-full bg-emerald-400/80" />
+        </div>
+        <div className="text-[10px] uppercase tracking-[0.1em] text-muted-foreground flex items-center gap-1.5">
+          <Mail className="h-3 w-3" />
+          Email preview
+          {templateKey && <code className="bg-slate-200/60 text-slate-600 px-1 py-0.5 rounded text-[9px] font-mono">{templateKey}</code>}
+        </div>
+      </div>
+
+      {/* Recipient header */}
+      <div className="px-6 py-4 bg-white border-b border-slate-100">
+        <div className="text-[15px] font-semibold text-slate-900 leading-snug mb-2">{subject || <span className="text-muted-foreground italic">No subject</span>}</div>
+        <div className="space-y-0.5 text-[11px] text-slate-500">
+          {from && (
+            <div className="flex gap-3">
+              <span className="font-medium text-slate-600 uppercase tracking-wider text-[9px] w-9 pt-[2px]">From</span>
+              <span className="text-slate-700">{from}</span>
+            </div>
+          )}
+          {to && (
+            <div className="flex gap-3">
+              <span className="font-medium text-slate-600 uppercase tracking-wider text-[9px] w-9 pt-[2px]">To</span>
+              <span className="text-slate-700">{to}</span>
+            </div>
+          )}
+          <div className="flex gap-3">
+            <span className="font-medium text-slate-600 uppercase tracking-wider text-[9px] w-9 pt-[2px]">When</span>
+            <span className="text-slate-700">Now (preview only — not sent)</span>
+          </div>
+        </div>
+      </div>
+
+      {banner && <div className="px-6 py-2 bg-amber-50 border-b border-amber-200 text-[11px] text-amber-900">{banner}</div>}
+
+      {/* Body — sits on a light grey "viewport" so the email's own card shows through visually */}
+      <div className="bg-slate-100/60 px-4 py-5">
+        <div
+          className="bg-white rounded-md shadow-sm overflow-x-auto text-[13px] leading-relaxed text-slate-800 [&_a]:text-teal-600 [&_a:hover]:underline [&_p]:my-3 [&_h2]:font-semibold [&_h2]:my-3 [&_h3]:font-semibold [&_h3]:my-2 [&_ul]:list-disc [&_ul]:pl-5 [&_ol]:list-decimal [&_ol]:pl-5 [&_li]:my-1 [&_table]:text-[11px] [&_pre]:whitespace-pre-wrap [&_pre]:font-sans"
+          dangerouslySetInnerHTML={{ __html: html }}
+        />
+      </div>
+
+      {/* Plain text fallback (collapsed) */}
+      {text && (
+        <div className="border-t border-slate-200 bg-slate-50/40">
+          <button
+            type="button"
+            onClick={() => setShowPlainText(s => !s)}
+            className="w-full px-5 py-2 flex items-center gap-2 text-[10px] uppercase tracking-wider text-muted-foreground hover:bg-slate-50 transition-colors"
+          >
+            {showPlainText ? <ChevronDown className="h-3 w-3" /> : <ChevronRight className="h-3 w-3" />}
+            Plain-text fallback
+          </button>
+          {showPlainText && (
+            <pre className="px-5 pb-4 text-[11px] text-slate-600 whitespace-pre-wrap font-mono leading-relaxed">{text}</pre>
+          )}
+        </div>
+      )}
+    </div>
+  );
+}

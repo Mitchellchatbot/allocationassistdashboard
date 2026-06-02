@@ -1,6 +1,6 @@
 import { Suspense, lazy } from "react";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
-import { BrowserRouter, Route, Routes } from "react-router-dom";
+import { BrowserRouter, Route, Routes, Outlet, useLocation } from "react-router-dom";
 import { Toaster as Sonner } from "@/components/ui/sonner";
 import { Toaster } from "@/components/ui/toaster";
 import { TooltipProvider } from "@/components/ui/tooltip";
@@ -8,6 +8,7 @@ import { FilterProvider } from "@/lib/FilterProvider";
 import { ProtectedRoute } from "@/components/ProtectedRoute";
 import { AIPageContextProvider } from "@/lib/ai-page-context";
 import { CurrencyProvider } from "@/lib/CurrencyProvider";
+import { DashboardLayout, ViewportSpinner } from "@/components/layout/DashboardLayout";
 
 // Login stays eagerly loaded — it's the first thing unauthenticated users see
 import Login from "./pages/Login";
@@ -27,17 +28,75 @@ const CallLogImport   = lazy(() => import("./pages/CallLogImport"));
 const Contracts       = lazy(() => import("./pages/Contracts"));
 const FollowUps       = lazy(() => import("./pages/FollowUps"));
 const Calls           = lazy(() => import("./pages/Calls"));
+const Automations     = lazy(() => import("./pages/Automations"));
+const DoctorProfiles  = lazy(() => import("./pages/DoctorProfiles"));
+const Vacancies       = lazy(() => import("./pages/Vacancies"));
+const Reports         = lazy(() => import("./pages/Reports"));
+const Batches         = lazy(() => import("./pages/Batches"));
+const BulkImport      = lazy(() => import("./pages/BulkImport"));
+const Connections     = lazy(() => import("./pages/Connections"));
+const UploadCV        = lazy(() => import("./pages/UploadCV"));
 const NotFound        = lazy(() => import("./pages/NotFound"));
 
-const queryClient = new QueryClient();
+// Global react-query defaults tuned for this dashboard:
+//   - 60s staleTime cuts refetch chatter when navigating between tabs that
+//     share queries (Notifications, Hospitals, Lifecycle, Vacancies, etc.)
+//   - refetchOnWindowFocus off — the team often alt-tabs; we don't need a
+//     full refetch every time they come back. Realtime subscriptions handle
+//     "fresh data on change" already.
+//   - 1 retry instead of the default 3 — failures show up faster.
+const queryClient = new QueryClient({
+  defaultOptions: {
+    queries: {
+      staleTime: 60_000,
+      refetchOnWindowFocus: false,
+      retry: 1,
+    },
+  },
+});
 
-// Minimal full-page skeleton shown while a lazy chunk loads (<200ms on fast connections)
+// Minimal full-page skeleton — only shown for the very first chunk load (Login).
+// In-app navigation uses ViewportSpinner from DashboardLayout, which preserves
+// the sidebar / topbar / AI panel.
 function PageSkeleton() {
   return (
     <div className="flex h-screen w-full items-center justify-center bg-background">
       <div className="h-8 w-8 rounded-full border-2 border-primary border-t-transparent animate-spin" />
     </div>
   );
+}
+
+/**
+ * Protected layout route — renders the dashboard chrome ONCE around an
+ * <Outlet/> with its own Suspense. Page chunks loading mid-navigation only
+ * blank out the main content area, never the sidebar/topbar/AI panel.
+ *
+ * Each page still does `<DashboardLayout title="X">` on the inside; the
+ * inner DashboardLayout detects it's nested (via LayoutContext) and just
+ * passes children through after syncing title/subtitle up to this outer
+ * instance.
+ */
+function ProtectedShell() {
+  const location = useLocation();
+  return (
+    <ProtectedRoute requiredPage={requiredPageForPath(location.pathname)}>
+      <FilterProvider key={location.pathname}>
+        <DashboardLayout>
+          <Suspense fallback={<ViewportSpinner />}>
+            <Outlet />
+          </Suspense>
+        </DashboardLayout>
+      </FilterProvider>
+    </ProtectedRoute>
+  );
+}
+
+/** Map current path to its requiredPage gate. Most routes are 1:1; a few
+ *  utility routes share the dashboard gate ("/" — admin-only) since they
+ *  don't have their own row in the user_pages config. */
+function requiredPageForPath(pathname: string): string {
+  if (pathname === "/import" || pathname === "/contracts" || pathname === "/import-bulk" || pathname === "/connections") return "/";
+  return pathname;
 }
 
 const App = () => (
@@ -52,23 +111,33 @@ const App = () => (
             <Routes>
               {/* Public */}
               <Route path="/login" element={<Login />} />
+              <Route path="/upload-cv/:token" element={<UploadCV />} />
 
-              {/* Protected — page-level role gating via requiredPage.
-                  FilterProvider wraps each route element so every page mount
-                  gets its own date-range scope (state resets on navigation). */}
-              <Route path="/"               element={<ProtectedRoute requiredPage="/"><FilterProvider><Index /></FilterProvider></ProtectedRoute>} />
-              <Route path="/sales"          element={<ProtectedRoute requiredPage="/sales"><FilterProvider><Sales /></FilterProvider></ProtectedRoute>} />
-              <Route path="/marketing"      element={<ProtectedRoute requiredPage="/marketing"><FilterProvider><Marketing /></FilterProvider></ProtectedRoute>} />
-              <Route path="/leads-pipeline" element={<ProtectedRoute requiredPage="/leads-pipeline"><FilterProvider><LeadsPipeline /></FilterProvider></ProtectedRoute>} />
-              <Route path="/team"           element={<ProtectedRoute requiredPage="/team"><FilterProvider><TeamPerformance /></FilterProvider></ProtectedRoute>} />
-              <Route path="/finance"        element={<ProtectedRoute requiredPage="/finance"><FilterProvider><Finance /></FilterProvider></ProtectedRoute>} />
-              <Route path="/settings"       element={<ProtectedRoute requiredPage="/settings"><FilterProvider><Settings /></FilterProvider></ProtectedRoute>} />
-              <Route path="/meta-ads"       element={<ProtectedRoute requiredPage="/meta-ads"><FilterProvider><MetaAds /></FilterProvider></ProtectedRoute>} />
-              <Route path="/worker"         element={<ProtectedRoute requiredPage="/worker"><FilterProvider><WorkerDashboard /></FilterProvider></ProtectedRoute>} />
-              <Route path="/import"         element={<ProtectedRoute requiredPage="/"><FilterProvider><CallLogImport /></FilterProvider></ProtectedRoute>} />
-              <Route path="/contracts"      element={<ProtectedRoute requiredPage="/"><FilterProvider><Contracts /></FilterProvider></ProtectedRoute>} />
-              <Route path="/follow-ups"     element={<ProtectedRoute requiredPage="/follow-ups"><FilterProvider><FollowUps /></FilterProvider></ProtectedRoute>} />
-              <Route path="/calls"          element={<ProtectedRoute requiredPage="/calls"><FilterProvider><Calls /></FilterProvider></ProtectedRoute>} />
+              {/* Protected — one shell, many children. The shell renders the
+                  dashboard chrome (sidebar/topbar/AI panel) just once; the
+                  Outlet swaps page content with a viewport-scoped Suspense. */}
+              <Route element={<ProtectedShell />}>
+                <Route path="/"               element={<Index />} />
+                <Route path="/sales"          element={<Sales />} />
+                <Route path="/marketing"      element={<Marketing />} />
+                <Route path="/leads-pipeline" element={<LeadsPipeline />} />
+                <Route path="/team"           element={<TeamPerformance />} />
+                <Route path="/finance"        element={<Finance />} />
+                <Route path="/settings"       element={<Settings />} />
+                <Route path="/meta-ads"       element={<MetaAds />} />
+                <Route path="/worker"         element={<WorkerDashboard />} />
+                <Route path="/import"         element={<CallLogImport />} />
+                <Route path="/contracts"      element={<Contracts />} />
+                <Route path="/follow-ups"     element={<FollowUps />} />
+                <Route path="/calls"          element={<Calls />} />
+                <Route path="/automations"    element={<Automations />} />
+                <Route path="/doctor-profiles" element={<DoctorProfiles />} />
+                <Route path="/vacancies"      element={<Vacancies />} />
+                <Route path="/reports"        element={<Reports />} />
+                <Route path="/batches"        element={<Batches />} />
+                <Route path="/import-bulk"    element={<BulkImport />} />
+                <Route path="/connections"    element={<Connections />} />
+              </Route>
 
               <Route path="*" element={<NotFound />} />
             </Routes>

@@ -59,6 +59,11 @@ interface SendRequest {
   pageCount?:    number;
   leadId?:       string;   // Zoho Lead ID — used by boldsign-webhook to
                            // copy the lead to Doctors on Board on signing
+  hospitalId?:   string;   // AA Hospitals table id — captured at send time
+  createdBy?:    string;   // email of the team member who triggered the send
+                           // so the boldsign-webhook can look up hospital.city
+                           // and skip the manual city pick on the auto-created
+                           // Relocation run.
 }
 
 Deno.serve(async (req: Request) => {
@@ -84,7 +89,7 @@ Deno.serve(async (req: Request) => {
     return jsonResponse({ ok: false, error: "Invalid JSON body" }, 400);
   }
 
-  const { pdfBase64, doctorEmail, doctorName, contractTitle, message, pageCount, leadId } = body;
+  const { pdfBase64, doctorEmail, doctorName, contractTitle, message, pageCount, leadId, hospitalId, createdBy } = body;
   console.log("[boldsign-send] parsed body. pdfBase64 length:", pdfBase64?.length, "doctorEmail:", doctorEmail, "pageCount:", pageCount, "leadId:", leadId);
   if (!pdfBase64 || !doctorEmail || !doctorName || !contractTitle) {
     return jsonResponse({
@@ -152,6 +157,60 @@ Deno.serve(async (req: Request) => {
     console.log("[boldsign-send] OnBehalfOf:", BOLDSIGN_SENDER_EMAIL);
     form.append("OnBehalfOf", BOLDSIGN_SENDER_EMAIL);
   }
+
+  // Build the CC list. Three sources, deduped:
+  //   1. Every admin from user_profiles (role='admin') — so the moment you
+  //      promote/demote someone in the dashboard, their CC inclusion follows
+  //   2. The OnBehalfOf sender (Islam) — guaranteed even if not yet in profiles
+  //   3. BOLDSIGN_CC_EMAILS env var — for non-dashboard mailboxes (ops@, finance@, etc.)
+  // Each CC'd email gets the doctor-signed notification + signed PDF without
+  // needing to sign anything themselves. This is BoldSign's own email
+  // delivery — no Resend, no DNS, can't bounce because of unverified domain.
+  const ccSet = new Set<string>();
+  try {
+    const supabase = createClient(
+      Deno.env.get("SUPABASE_URL")!,
+      Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!,
+    );
+    const { data: admins, error: adminErr } = await supabase
+      .from("user_profiles")
+      .select("email")
+      .eq("role", "admin");
+    if (adminErr) {
+      console.warn("[boldsign-send] could not load admin profiles for CC list:", adminErr.message);
+    } else {
+      for (const row of admins ?? []) {
+        if (row.email) ccSet.add(String(row.email).trim().toLowerCase());
+      }
+      console.log(`[boldsign-send] loaded ${admins?.length ?? 0} admin profiles for CC`);
+    }
+  } catch (e) {
+    console.warn("[boldsign-send] admin lookup threw — CC list will fall back to env vars only:", e);
+  }
+  if (BOLDSIGN_SENDER_EMAIL) {
+    ccSet.add(BOLDSIGN_SENDER_EMAIL.trim().toLowerCase());
+  }
+  for (const e of (Deno.env.get("BOLDSIGN_CC_EMAILS") ?? "").split(",")) {
+    const trimmed = e.trim().toLowerCase();
+    if (trimmed) ccSet.add(trimmed);
+  }
+  // Filter out the doctor's own address — they're already a Signer, no point
+  // CC'ing them too (BoldSign would reject this anyway as a duplicate).
+  ccSet.delete(doctorEmail.trim().toLowerCase());
+
+  const ccList = Array.from(ccSet);
+  if (ccList.length > 0) {
+    // BoldSign accepts multi-CC the same way it accepts multi-Signer:
+    // append `CcDetails` once per recipient with a JSON OBJECT value.
+    // (Wrapping all of them in a single array here also works, but the
+    // per-recipient append form is what the docs show.)
+    for (const email of ccList) {
+      form.append("CcDetails", JSON.stringify({ emailAddress: email }));
+    }
+    console.log(`[boldsign-send] CCing ${ccList.length} recipients:`, ccList.join(", "));
+  } else {
+    console.warn("[boldsign-send] no CC recipients — admins won't receive completion email");
+  }
   // BrandId — applies a Brand from Settings → Branding (logo, colors, button
   // styling, optional "hide BoldSign branding" toggle on higher plans). The
   // Brand ID is a UUID shown in the BoldSign UI after creating a brand.
@@ -199,9 +258,11 @@ Deno.serve(async (req: Request) => {
   }
 
   // Record this send so the boldsign-webhook function can map an incoming
-  // "Completed" event back to the originating Zoho lead. Failure to record
-  // is non-fatal for the user — the document is already sent — but we log
-  // loudly so we know post-sign automation won't fire.
+  // "Completed" event back to the originating Zoho lead. Also store the
+  // resolved CC list so the dashboard can prove, per-document, that admins
+  // received the completion email — without having to dig through BoldSign's
+  // audit trail. Failure to record is non-fatal for the user — the
+  // document is already sent — but we log loudly.
   if (leadId) {
     try {
       const supabase = createClient(
@@ -214,11 +275,57 @@ Deno.serve(async (req: Request) => {
         doctor_email:         doctorEmail,
         doctor_name:          doctorName,
         status:               "sent",
+        cc_emails:            ccList,   // ← who BoldSign will email on signing
       });
       if (insertErr) {
         console.error("[boldsign-send] contract_sends insert failed:", insertErr.message);
       } else {
-        console.log("[boldsign-send] tracked send for lead", leadId, "doc", documentId);
+        console.log("[boldsign-send] tracked send for lead", leadId, "doc", documentId, "ccs:", ccList.length);
+      }
+
+      // ── Make this envelope visible in the Automations timeline ──────────
+      // Insert a `contract_signing` flow run + initial events. The
+      // boldsign-webhook function advances this run as BoldSign reports
+      // viewed/signed events. Failure is non-fatal — the contract has
+      // already been sent successfully.
+      try {
+        const { data: runRow, error: runErr } = await supabase
+          .from("automation_flow_runs")
+          .insert({
+            flow_key:      "contract_signing",
+            doctor_id:     `lead:${leadId}`,
+            doctor_name:   doctorName,
+            doctor_email:  doctorEmail,
+            current_stage: "awaiting_view",
+            status:        "active",
+            created_by:    createdBy ?? null,
+            metadata: {
+              boldsign_document_id: documentId,
+              zoho_lead_id:         leadId,
+              contract_title:       contractTitle,
+              cc_list:              ccList,
+              triggered_via:        "contract_builder_send",
+              ...(hospitalId ? { hospital_id: hospitalId } : {}),
+            },
+          })
+          .select("id")
+          .single();
+        if (runErr || !runRow) {
+          console.warn("[boldsign-send] automation_flow_runs insert failed:", runErr?.message);
+        } else {
+          await supabase.from("automation_flow_events").insert([
+            { run_id: runRow.id, stage_key: "trigger_offer_extended", event_type: "entered",
+              message: `Contract initiated for ${doctorName} via Contract Builder.` },
+            { run_id: runRow.id, stage_key: "send_contract",          event_type: "email_sent",
+              message: `BoldSign envelope sent (doc ${documentId}).`,
+              payload: { boldsign_document_id: documentId, contract_title: contractTitle } },
+            { run_id: runRow.id, stage_key: "awaiting_view",          event_type: "entered",
+              message: "BoldSign: envelope delivered. Waiting for doctor to open." },
+          ]);
+          console.log("[boldsign-send] contract_signing flow run created:", runRow.id);
+        }
+      } catch (e) {
+        console.warn("[boldsign-send] flow run insert threw (non-fatal):", e);
       }
     } catch (e) {
       console.error("[boldsign-send] contract_sends insert threw:", e);
@@ -230,7 +337,9 @@ Deno.serve(async (req: Request) => {
   return jsonResponse({
     ok:          true,
     documentId,
-    trackingUrl: `${BOLDSIGN_APP_BASE}/document/${documentId}`,
+    // OnBehalfOf documents live under /documents/behalfdocuments/overview/
+    // with the document id passed as a query param. Confirmed 2026-05-04.
+    trackingUrl: `${BOLDSIGN_APP_BASE}/documents/behalfdocuments/overview/?documentId=${documentId}`,
   }, 200);
 });
 

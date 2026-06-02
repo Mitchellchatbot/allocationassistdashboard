@@ -45,9 +45,12 @@ export function ExpandableKPICard({
         style={{
           transformStyle: "preserve-3d",
           transition: "transform 0.55s cubic-bezier(0.4,0,0.2,1)",
-          transform: flipped ? "rotateX(-180deg)" : "rotateX(0deg)",
+          transform: flipped ? "rotateX(-180deg) translateZ(0)" : "rotateX(0deg) translateZ(0)",
           position: "relative",
           height: "100%",
+          // GPU-promote the flipping layer so 60fps rotation doesn't fight
+          // with the back-face content rerendering during animation.
+          willChange: "transform",
         }}
       >
         {/* ── Front ── */}

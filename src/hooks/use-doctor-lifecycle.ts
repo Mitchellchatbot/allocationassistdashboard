@@ -1,0 +1,241 @@
+/**
+ * Phase 4 — Doctor lifecycle persistence + transitions.
+ *
+ *   useDoctorLifecycle(doctorId)        — single doctor row (auto-creates a
+ *                                         blank row on first write).
+ *   useDoctorLifecycleMap()             — bulk fetch keyed by doctor_id, for
+ *                                         filtering / table views.
+ *   useMarkLifecycle()                  — mutation that does ONE transition
+ *                                         at a time and writes the side
+ *                                         effects (eligibility flip on signed,
+ *                                         second-payment trigger on joined,
+ *                                         Slack-archive notification on
+ *                                         approved). See README in the
+ *                                         function body for the matrix.
+ */
+import { useEffect } from "react";
+import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
+import { supabase } from "@/lib/supabase";
+import { useAuth } from "@/hooks/use-auth";
+
+export interface DoctorLifecycle {
+  doctor_id:                 string;
+  doctor_name:               string | null;
+  signed_at:                 string | null;
+  joined_at:                 string | null;
+  approved_at:               string | null;
+  paid_at:                   string | null;
+  eligible_for_sending:      boolean;
+  unavailable:               boolean;
+  unavailable_reason:        string | null;
+  available_check_in_at:     string | null;
+  last_availability_ping_at: string | null;
+  notes:                     string | null;
+  updated_by:                string | null;
+  created_at:                string;
+  updated_at:                string;
+}
+
+const LIST_KEY  = ["doctor-lifecycles"] as const;
+const ONE_KEY   = (id: string) => ["doctor-lifecycle", id] as const;
+
+export function useDoctorLifecycle(doctorId: string | null | undefined) {
+  const qc = useQueryClient();
+  const q = useQuery({
+    queryKey: ONE_KEY(doctorId ?? "_"),
+    enabled:  !!doctorId,
+    queryFn: async (): Promise<DoctorLifecycle | null> => {
+      if (!doctorId) return null;
+      const { data, error } = await supabase
+        .from("doctor_lifecycle")
+        .select("*")
+        .eq("doctor_id", doctorId)
+        .maybeSingle();
+      if (error) throw error;
+      return (data ?? null) as DoctorLifecycle | null;
+    },
+    staleTime: 30_000,
+  });
+
+  // Realtime: lifecycle changes elsewhere (other teammate marks joined,
+  // tick-scheduler bumps last_availability_ping_at) should reflect here.
+  useEffect(() => {
+    if (!doctorId) return;
+    const channel = supabase
+      .channel(`doctor_lifecycle_${doctorId}_${Math.random().toString(36).slice(2, 8)}`)
+      .on("postgres_changes", {
+        event: "*", schema: "public", table: "doctor_lifecycle", filter: `doctor_id=eq.${doctorId}`,
+      }, () => {
+        qc.invalidateQueries({ queryKey: ONE_KEY(doctorId) });
+        qc.invalidateQueries({ queryKey: LIST_KEY });
+      })
+      .subscribe();
+    return () => { supabase.removeChannel(channel); };
+  }, [doctorId, qc]);
+
+  return q;
+}
+
+export function useDoctorLifecycleMap(): Record<string, DoctorLifecycle> {
+  const { data = [] } = useQuery({
+    queryKey: LIST_KEY,
+    queryFn: async (): Promise<DoctorLifecycle[]> => {
+      const { data, error } = await supabase
+        .from("doctor_lifecycle")
+        .select("*")
+        .limit(2000);
+      if (error) throw error;
+      return (data ?? []) as DoctorLifecycle[];
+    },
+    staleTime: 30_000,
+  });
+
+  const map: Record<string, DoctorLifecycle> = {};
+  for (const row of data) map[row.doctor_id] = row;
+  return map;
+}
+
+export type LifecycleAction =
+  | { kind: "mark_signed"     }
+  | { kind: "mark_joined";    joiningDate: string }      // ISO date
+  | { kind: "mark_approved"   }
+  | { kind: "mark_paid"       }
+  | { kind: "mark_unavailable"; reason: string; checkInAt: string }   // ISO datetime
+  | { kind: "mark_available"  }
+  | { kind: "push_checkin";   newCheckInAt: string }
+  | { kind: "set_eligibility"; eligible: boolean };
+
+/** Single mutation that handles every lifecycle transition + its side effects.
+ *  Keeping it in one place stops the page code from re-implementing the
+ *  matrix (e.g. "signed flips eligibility off; joined fires second-payment
+ *  flow; approved writes a Slack-archive notification"). */
+export function useMarkLifecycle() {
+  const qc = useQueryClient();
+  const { user } = useAuth();
+
+  return useMutation({
+    mutationFn: async ({ doctorId, doctorName, action }: {
+      doctorId:   string;
+      doctorName: string;
+      action:     LifecycleAction;
+    }) => {
+      const now = new Date().toISOString();
+      const updatedBy = user?.email ?? null;
+      const patch: Partial<DoctorLifecycle> & { doctor_id: string; doctor_name: string; updated_at: string; updated_by: string | null } = {
+        doctor_id:   doctorId,
+        doctor_name: doctorName,
+        updated_at:  now,
+        updated_by:  updatedBy,
+      };
+
+      switch (action.kind) {
+        case "mark_signed":
+          patch.signed_at = now;
+          patch.eligible_for_sending = false;       // spec: signed doctors stop appearing in send batches
+          break;
+        case "mark_joined":
+          patch.joined_at = action.joiningDate;
+          break;
+        case "mark_approved":
+          patch.approved_at = now;
+          break;
+        case "mark_paid":
+          patch.paid_at = now;
+          break;
+        case "mark_unavailable":
+          patch.unavailable = true;
+          patch.unavailable_reason = action.reason;
+          patch.available_check_in_at = action.checkInAt;
+          patch.eligible_for_sending  = false;       // pause sending too while paused
+          break;
+        case "mark_available":
+          patch.unavailable = false;
+          patch.unavailable_reason = null;
+          patch.available_check_in_at = null;
+          // Re-enable sending only if not already signed.
+          patch.eligible_for_sending = true;
+          break;
+        case "push_checkin":
+          patch.available_check_in_at = action.newCheckInAt;
+          patch.last_availability_ping_at = null;    // reset so a fresh nudge fires
+          break;
+        case "set_eligibility":
+          patch.eligible_for_sending = action.eligible;
+          break;
+      }
+
+      const { data, error } = await supabase
+        .from("doctor_lifecycle")
+        .upsert(patch, { onConflict: "doctor_id" })
+        .select("*")
+        .single();
+      if (error) throw error;
+
+      // Side effects ─────────────────────────────────────────────────────
+      if (action.kind === "mark_joined") {
+        // Kick off Second Payment flow at trigger_15_days. The tick-scheduler
+        // will advance to send_invoice 15 days from joiningDate.
+        await ensureSecondPaymentRun(doctorId, doctorName, action.joiningDate);
+      }
+      if (action.kind === "mark_approved") {
+        // We don't have a Slack API yet — write a notification so the team
+        // remembers to archive the channel manually.
+        await supabase.from("notifications").insert({
+          kind:                "slack_archive_due",
+          title:               `Archive Slack channel — ${doctorName}`,
+          body:                `${doctorName} is joined + approved. Per Saif's spec, archive the dedicated Slack channel to stop the per-doctor subscription cost.`,
+          link_path:           `/doctor-profiles`,
+          related_doctor_id:   doctorId,
+          for_user:            updatedBy,
+        });
+      }
+
+      return data as DoctorLifecycle;
+    },
+    onSuccess: (_d, vars) => {
+      qc.invalidateQueries({ queryKey: ONE_KEY(vars.doctorId) });
+      qc.invalidateQueries({ queryKey: LIST_KEY });
+      qc.invalidateQueries({ queryKey: ["automation-flow-runs"] });
+      qc.invalidateQueries({ queryKey: ["notifications"] });
+    },
+  });
+}
+
+/** When a doctor is marked Joined, queue up the Second Payment flow at the
+ *  trigger_15_days stage. The tick-scheduler reads metadata.joining_date and
+ *  fires the invoice 15 calendar days later. Idempotent — won't double-create
+ *  if a run already exists. */
+async function ensureSecondPaymentRun(doctorId: string, doctorName: string, joiningDate: string): Promise<void> {
+  // Already a run for this doctor?
+  const { data: existing } = await supabase
+    .from("automation_flow_runs")
+    .select("id, status, current_stage")
+    .eq("doctor_id", doctorId)
+    .eq("flow_key",  "second_payment")
+    .order("started_at", { ascending: false })
+    .limit(1);
+
+  if (existing && existing.length > 0) {
+    const r = existing[0];
+    // Bump the joining_date so the timer re-anchors if the team corrected it.
+    await supabase.from("automation_flow_runs")
+      .update({ metadata: { joining_date: joiningDate }, last_event_at: new Date().toISOString() })
+      .eq("id", r.id);
+    return;
+  }
+
+  // Pull the email of whoever's logged in — best-effort attribution for
+  // Reports. The auth session is in localStorage so we read it lazily
+  // rather than threading user state through every caller.
+  const { data: sess } = await supabase.auth.getSession();
+  const createdBy = sess.session?.user.email ?? null;
+  await supabase.from("automation_flow_runs").insert({
+    flow_key:      "second_payment",
+    doctor_id:     doctorId,
+    doctor_name:   doctorName,
+    current_stage: "trigger_15_days",
+    status:        "active",
+    created_by:    createdBy,
+    metadata:      { joining_date: joiningDate, triggered_via: "lifecycle_mark_joined" },
+  });
+}

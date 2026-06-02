@@ -3,6 +3,7 @@ import { createContext, useContext } from "react";
 export type TimeRangePreset =
   | "today" | "week"
   | "month" | "lastMonth" | "last30days"
+  | "last3months"
   | "quarter" | "lastQuarter"
   | "year" | "lastYear" | "last12months"
   | "all" | "custom";
@@ -73,6 +74,16 @@ export function getPresetRange(preset: TimeRangePreset): DateRange {
       return { from, to: today };
     }
 
+    case "last3months": {
+      // Start of the calendar month that is 2 months before the current one,
+      // running through today. So on 25 May we get 1 Mar → 25 May — three
+      // months of activity (Mar, Apr, May). This is the dashboard default;
+      // covers the recurring "what did we do recently" question without
+      // pulling in stale data from a year ago.
+      const from = new Date(now.getFullYear(), now.getMonth() - 2, 1);
+      return { from, to: today };
+    }
+
     case "quarter": {
       const qStartMonth = Math.floor(now.getMonth() / 3) * 3;
       return { from: new Date(now.getFullYear(), qStartMonth, 1), to: today };
@@ -120,6 +131,7 @@ const PRESET_LABELS: Record<TimeRangePreset, string> = {
   month:        "This Month",
   lastMonth:    "Last Month",
   last30days:   "Last 30 Days",
+  last3months:  "Last 3 Months",
   quarter:      "This Quarter",
   lastQuarter:  "Last Quarter",
   year:         "This Year",
@@ -158,6 +170,7 @@ export function getTimeLabel(preset: TimeRangePreset, range?: DateRange): string
       month:        "this month",
       lastMonth:    "last month",
       last30days:   "last 30 days",
+      last3months:  "last 3 months",
       quarter:      "this quarter",
       lastQuarter:  "last quarter",
       year:         "this year",

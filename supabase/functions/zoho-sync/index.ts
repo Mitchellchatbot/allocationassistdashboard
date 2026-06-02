@@ -128,6 +128,23 @@ serve(async (req: Request) => {
   try {
     const token = await getAccessToken();
 
+    // ?debug=modules — return the full module list as JSON without doing
+    // any actual sync work. Useful when wiring up a new custom module and
+    // we need to know its api_name.
+    const urlD = new URL(req.url);
+    if (urlD.searchParams.get('debug') === 'modules') {
+      const modulesRes = await fetch(`${API_DOMAIN}/crm/v2/settings/modules`, {
+        headers: { Authorization: `Zoho-oauthtoken ${token}` },
+      });
+      const modulesJson = await modulesRes.json();
+      const moduleList = (modulesJson?.modules ?? []).map((m: { api_name: string; module_name: string; plural_label: string }) => ({
+        api_name: m.api_name, plural: m.plural_label, module_name: m.module_name,
+      }));
+      return new Response(JSON.stringify({ modules: moduleList }), {
+        status: 200, headers: { ...CORS, 'Content-Type': 'application/json' },
+      });
+    }
+
     // Dump every module API name in this Zoho org (including custom modules)
     // so we can find the right name for "Doctors on Board". One-time noise in
     // the logs, but invaluable when guessing-by-name fails.
@@ -171,8 +188,18 @@ serve(async (req: Request) => {
       .catch((err) => { console.warn('[zoho-sync] Calls failed:', err); return []; });
 
     const accounts = await fetchAllPages(token, 'Accounts',
-      ['Account_Name', 'Industry', 'Owner'], 25)
+      ['Account_Name', 'Industry', 'Owner', 'Billing_City', 'Billing_State', 'Billing_Country', 'Phone', 'Website'], 25)
       .catch(() => []);
+
+    // Hospital Contacts — custom related module. Despite the confusing
+    // api_name (`Hospitals`), this is the *contacts list* (plural_label
+    // "Hospital Contacts"); the actual hospitals live in Accounts. Each
+    // contact has a `Hospital` lookup to the parent Account, a `Contact_Type`
+    // (Primary/Secondary), Email, Name, Phone, Emirate.
+    const hospitalContacts = await fetchAllPages(token, 'Hospitals',
+      ['Name', 'Email', 'Phone', 'Contact_Type', 'Hospital', 'Emirate', 'Owner', 'Created_Time'], 25)
+      .catch((err) => { console.warn('[zoho-sync] Hospital Contacts (module=Hospitals) failed:', err); return []; });
+    console.log(`[zoho-sync] hospitalContacts: ${hospitalContacts.length} rows`);
 
     const campaigns = await fetchAllPages(token, 'Campaigns',
       ['Campaign_Name', 'Type', 'Status', 'Start_Date', 'End_Date', 'Budgeted_Cost', 'Actual_Cost', 'Owner'], 10)
@@ -219,7 +246,7 @@ serve(async (req: Request) => {
     if (r1.error) throw r1.error;
 
     const r2 = await supabase.from('zoho_cache').upsert({
-      id: 2, data: { deals, calls, accounts, campaigns, doctorsOnBoard }, synced_at: syncedAt,
+      id: 2, data: { deals, calls, accounts, campaigns, doctorsOnBoard, hospitalContacts }, synced_at: syncedAt,
     });
     if (r2.error) throw r2.error;
 

@@ -44,7 +44,10 @@
     --input: 220 14% 90%;
     --ring: 170 55% 45%;
 
-    --radius: 0.75rem;
+    /* Bumped from 0.75rem → 1rem so the whole UI feels rounder + friendlier.
+       Flows through every shadcn primitive that reads `--radius`: cards,
+       buttons, inputs, popovers, dialogs, select menus, etc. */
+    --radius: 1rem;
 
     --chart-1: 170 55% 45%;
     --chart-2: 210 75% 52%;
@@ -75,4 +78,22 @@
     @apply bg-background text-foreground antialiased;
     font-family: 'Poppins', -apple-system, BlinkMacSystemFont, sans-serif;
   }
+}
+
+/* Stagger fade-up animation. Apply `.aa-fade-up` to a list child and set
+   `style={{ animationDelay: \`${index * 40}ms\` }}` to make rows cascade in.
+   60fps friendly — transform/opacity only, will-change hint included.
+   Falls back to no animation when prefers-reduced-motion is set. */
+@keyframes aa-fade-up {
+  from { opacity: 0; transform: translateY(8px); }
+  to   { opacity: 1; transform: translateY(0); }
+}
+
+.aa-fade-up {
+  animation: aa-fade-up 0.35s cubic-bezier(0.4, 0, 0.2, 1) both;
+  will-change: transform, opacity;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .aa-fade-up { animation: none; }
 }

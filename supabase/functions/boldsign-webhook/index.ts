@@ -160,19 +160,115 @@ async function createZohoContact(token: string, lead: Record<string, any>): Prom
   return { error: row?.message ?? `HTTP ${res.status}` };
 }
 
-// ── Zoho: flip Lead_Status to "Closed Won" ──────────────────────────────────
-async function markLeadClosedWon(token: string, leadId: string): Promise<string | null> {
-  const res = await fetch(`${ZOHO_API_DOMAIN}/crm/v2/Leads/${leadId}`, {
-    method:  "PUT",
-    headers: { Authorization: `Zoho-oauthtoken ${token}`, "Content-Type": "application/json" },
-    body:    JSON.stringify({ data: [{ Lead_Status: "Closed Won" }], trigger: [] }),
+// ── Resend: notify admins on contract signing ───────────────────────────────
+// Per AA onboarding meeting (2026-05-04): signing alone shouldn't flip the
+// Zoho Lead_Status to "Closed Won" because doctors sometimes ghost on the
+// VOB payment. Rather than introduce a new picklist value (which would
+// require AA to extend their Zoho config), we just email all dashboard
+// admins when a contract gets signed and let them decide when to flip the
+// status manually after payment lands.
+//
+// Recipient list = every row in user_profiles where role='admin', plus any
+// extras configured via BOLDSIGN_NOTIFY_EMAILS (comma-separated). Falls back
+// to BOLDSIGN_SENDER_EMAIL if no admins are configured yet.
+const RESEND_API_KEY    = Deno.env.get("RESEND_API_KEY") ?? "";
+// Default to Resend's pre-verified shared sender so you can ship without
+// adding DNS records. Override with a domain-verified sender (e.g.
+// "notifications@allocationassist.com") once you're ready to brand it —
+// the rest of the integration doesn't change.
+const RESEND_FROM_EMAIL = Deno.env.get("RESEND_FROM_EMAIL") ?? "onboarding@resend.dev";
+
+async function getAdminEmails(): Promise<string[]> {
+  const set = new Set<string>();
+  // Admin profiles
+  const { data, error } = await supabase
+    .from("user_profiles")
+    .select("email")
+    .eq("role", "admin");
+  if (error) {
+    console.warn("[boldsign-webhook] could not load admin profiles:", error.message);
+  } else {
+    for (const row of data ?? []) {
+      if (row.email) set.add(String(row.email).trim().toLowerCase());
+    }
+  }
+  // Extra static recipients via env var (e.g. shared ops mailbox)
+  const extras = (Deno.env.get("BOLDSIGN_NOTIFY_EMAILS") ?? "")
+    .split(",").map(s => s.trim().toLowerCase()).filter(Boolean);
+  for (const e of extras) set.add(e);
+  // Final fallback so we never silently fail to notify anyone
+  if (set.size === 0 && Deno.env.get("BOLDSIGN_SENDER_EMAIL")) {
+    set.add(Deno.env.get("BOLDSIGN_SENDER_EMAIL")!.trim().toLowerCase());
+  }
+  return Array.from(set);
+}
+
+async function notifyAdminsOfSigning(row: {
+  doctor_name: string;
+  doctor_email: string;
+  boldsign_document_id: string;
+  zoho_contact_id: string | null;
+}): Promise<string | null> {
+  if (!RESEND_API_KEY) {
+    console.warn("[boldsign-webhook] RESEND_API_KEY not set — skipping admin email");
+    return null;
+  }
+  const recipients = await getAdminEmails();
+  if (recipients.length === 0) {
+    console.warn("[boldsign-webhook] no admin recipients configured");
+    return null;
+  }
+
+  const trackingUrl = `https://app.boldsign.com/documents/behalfdocuments/overview/?documentId=${row.boldsign_document_id}`;
+  const html = `<!DOCTYPE html>
+<html><body style="font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Helvetica, Arial, sans-serif; color: #111; line-height: 1.5; padding: 24px; max-width: 560px; margin: 0 auto;">
+  <div style="border-left: 4px solid #14a098; padding: 6px 0 6px 14px; margin-bottom: 18px;">
+    <h2 style="margin: 0; font-size: 16px; color: #111;">A doctor just signed their contract</h2>
+  </div>
+  <p style="margin: 0 0 14px;">
+    <strong>${escapeHtml(row.doctor_name)}</strong> (${escapeHtml(row.doctor_email)}) has signed their service agreement.
+  </p>
+  ${row.zoho_contact_id
+    ? `<p style="margin: 0 0 14px; color: #2c7a55;">✓ A Doctors on Board record was automatically created in Zoho.</p>`
+    : `<p style="margin: 0 0 14px; color: #a06000;">⚠ Zoho Contact creation pending — check the dashboard if it doesn't appear shortly.</p>`}
+  <p style="margin: 0 0 20px; color: #555; font-size: 13px;">
+    The lead's Zoho status has <strong>NOT</strong> been changed automatically. Once VOB payment is received, please update the lead to "Closed Won" manually.
+  </p>
+  <a href="${trackingUrl}" style="display: inline-block; background: #14a098; color: white; text-decoration: none; padding: 9px 18px; border-radius: 6px; font-size: 13px; font-weight: 600;">
+    View signed document on BoldSign
+  </a>
+  <p style="margin: 24px 0 0; font-size: 11px; color: #888;">
+    Sent automatically by the AA dashboard. Document ID: ${row.boldsign_document_id}
+  </p>
+</body></html>`;
+
+  const res = await fetch("https://api.resend.com/emails", {
+    method: "POST",
+    headers: {
+      Authorization: `Bearer ${RESEND_API_KEY}`,
+      "Content-Type": "application/json",
+    },
+    body: JSON.stringify({
+      from:    `Allocation Assist <${RESEND_FROM_EMAIL}>`,
+      to:      recipients,
+      subject: `${row.doctor_name} signed their contract`,
+      html,
+    }),
   });
-  const json = await res.json();
-  const row = json?.data?.[0];
-  if (row?.code === "SUCCESS") return null;
-  const err = `Lead status update failed: ${row?.message ?? `HTTP ${res.status}`}`;
-  console.error("[boldsign-webhook]", err, JSON.stringify(json));
-  return err;
+  if (!res.ok) {
+    const text = await res.text().catch(() => "");
+    const err = `Resend ${res.status}: ${text.slice(0, 200)}`;
+    console.error("[boldsign-webhook] Resend send failed:", err);
+    return err;
+  }
+  console.log("[boldsign-webhook] admin notification sent to", recipients.join(", "));
+  return null;
+}
+
+function escapeHtml(s: string): string {
+  return s.replace(/[&<>"']/g, c => ({
+    "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;",
+  })[c]!);
 }
 
 // ── Map BoldSign event type → contract_sends.status ─────────────────────────
@@ -185,6 +281,199 @@ function bsEventToStatus(eventType: string): string | null {
   if (norm.includes("view"))                            return "viewed";
   if (norm.includes("sent"))                            return "sent";
   return null;
+}
+
+// ── Sync the BoldSign event into the contract_signing flow_run ──────────────
+// Idempotent: re-deliveries don't double-advance because we only update when
+// the current_stage matches the expected "before" stage for each transition.
+// On signed, ALSO inserts a Relocation flow run (Flow 6) so the post-signing
+// guide + attestation sequence kicks off automatically.
+async function mirrorBoldSignEventToFlowRun(documentId: string, newStatus: string): Promise<void> {
+  // Find the contract_signing run for this envelope. `metadata->>boldsign_document_id`
+  // is the PostgREST JSON-text accessor.
+  const { data: runs, error: findErr } = await supabase
+    .from("automation_flow_runs")
+    .select("*")
+    .eq("flow_key", "contract_signing")
+    .filter("metadata->>boldsign_document_id", "eq", documentId);
+  if (findErr) {
+    console.warn("[boldsign-webhook] flow_run lookup failed:", findErr.message);
+    return;
+  }
+  const run = (runs ?? [])[0];
+  if (!run) {
+    console.log("[boldsign-webhook] no contract_signing run for doc", documentId, "— skipping mirror (probably sent before flow integration shipped)");
+    return;
+  }
+  if (run.status !== "active") {
+    console.log("[boldsign-webhook] run", run.id, "is", run.status, "— skipping further updates");
+    return;
+  }
+
+  const nowIso = new Date().toISOString();
+  if (newStatus === "viewed") {
+    if (run.current_stage !== "awaiting_view") {
+      console.log("[boldsign-webhook] run", run.id, "already past awaiting_view (stage =", run.current_stage + ") — skipping");
+      return;
+    }
+    await supabase.from("automation_flow_runs").update({
+      current_stage: "awaiting_signature",
+      last_event_at: nowIso,
+    }).eq("id", run.id);
+    await supabase.from("automation_flow_events").insert([
+      { run_id: run.id, stage_key: "awaiting_view",      event_type: "email_opened",
+        message: "BoldSign: doctor opened the envelope." },
+      { run_id: run.id, stage_key: "awaiting_signature", event_type: "entered",
+        message: "Waiting for signature. BoldSign auto-reminders every 3 days." },
+    ]);
+    console.log("[boldsign-webhook] mirrored viewed → run", run.id);
+    return;
+  }
+
+  if (newStatus === "declined" || newStatus === "expired") {
+    await supabase.from("automation_flow_runs").update({
+      status:        "failed",
+      last_event_at: nowIso,
+    }).eq("id", run.id);
+    await supabase.from("automation_flow_events").insert({
+      run_id:     run.id,
+      stage_key:  run.current_stage,
+      event_type: "error",
+      message:    `BoldSign: ${newStatus}. Flow stopped.`,
+    });
+    console.log("[boldsign-webhook] mirrored", newStatus, "→ run", run.id);
+    return;
+  }
+
+  if (newStatus === "signed") {
+    if (run.current_stage === "contract_signed") {
+      console.log("[boldsign-webhook] run", run.id, "already signed — skipping");
+      return;
+    }
+    await supabase.from("automation_flow_runs").update({
+      current_stage: "contract_signed",
+      status:        "completed",
+      completed_at:  nowIso,
+      last_event_at: nowIso,
+    }).eq("id", run.id);
+    await supabase.from("automation_flow_events").insert({
+      run_id:     run.id,
+      stage_key:  "contract_signed",
+      event_type: "completed",
+      message:    "Doctor signed. Zoho updates triggered; Relocation flow firing.",
+    });
+    console.log("[boldsign-webhook] mirrored signed → run", run.id);
+
+    // ── Auto-trigger Relocation flow ──────────────────────────────────────
+    // Signing is the explicit trigger for Relocation in Saif's process.
+    // If the Contract Builder captured a hospital_id, we look up the city
+    // and skip past `select_city_guide` directly to `send_relocation_email`
+    // — guide + attestation then auto-chain via send-flow-email's
+    // auto_continue. Net effect: zero manual clicks between signing and the
+    // doctor receiving both relocation emails.
+    try {
+      const md = (run.metadata ?? {}) as Record<string, unknown>;
+      const hospitalId = md.hospital_id as string | undefined;
+
+      // Try to resolve the city from the captured hospital_id.
+      let resolvedCity: string | null = null;
+      let resolvedHospital: string | null = run.hospital;
+      if (hospitalId) {
+        const { data: h } = await supabase
+          .from("hospitals")
+          .select("name, city")
+          .eq("id", hospitalId)
+          .maybeSingle();
+        if (h?.city) {
+          resolvedCity = h.city;
+          resolvedHospital = h.name ?? resolvedHospital;
+          console.log("[boldsign-webhook] auto-resolved relocation city:", h.city, "from hospital:", h.name);
+        }
+      }
+
+      // If we know the city, skip the wait stage and start at the email send.
+      // Otherwise fall back to the original behavior (wait at select_city_guide
+      // for the team to manually pick).
+      const startStage   = resolvedCity ? "send_relocation_email" : "select_city_guide";
+      const relMetadata: Record<string, unknown> = {
+        triggered_via:        "boldsign_signed",
+        source_contract_run:  run.id,
+        boldsign_document_id: documentId,
+        zoho_lead_id:         md.zoho_lead_id ?? null,
+      };
+      if (hospitalId) relMetadata.hospital_id = hospitalId;
+      if (resolvedCity) relMetadata.city = resolvedCity;
+
+      const { data: relRun, error: relErr } = await supabase
+        .from("automation_flow_runs")
+        .insert({
+          flow_key:      "relocation",
+          doctor_id:     run.doctor_id,
+          doctor_name:   run.doctor_name,
+          doctor_email:  run.doctor_email,
+          doctor_phone:  run.doctor_phone,
+          hospital:      resolvedHospital,
+          current_stage: startStage,
+          status:        "active",
+          metadata:      relMetadata,
+        })
+        .select("id")
+        .single();
+
+      if (relErr || !relRun) {
+        console.warn("[boldsign-webhook] relocation auto-trigger failed:", relErr?.message);
+      } else {
+        // Seed the timeline. trigger_offer_signed always; then either:
+        //   - city known → skipped select_city_guide as a completed step + entered send_relocation_email
+        //   - city unknown → entered select_city_guide (manual pick needed)
+        const events: Array<{ run_id: string; stage_key: string; event_type: string; message: string }> = [
+          { run_id: relRun.id, stage_key: "trigger_offer_signed", event_type: "entered",
+            message: `Auto-triggered by signed contract (doc ${documentId}).` },
+        ];
+        if (resolvedCity) {
+          events.push(
+            { run_id: relRun.id, stage_key: "select_city_guide", event_type: "completed",
+              message: `City auto-resolved from hospital: ${resolvedCity}. Skipping manual pick.` },
+            { run_id: relRun.id, stage_key: "send_relocation_email", event_type: "entered",
+              message: "Queued for sending." },
+          );
+        } else {
+          events.push(
+            { run_id: relRun.id, stage_key: "select_city_guide", event_type: "entered",
+              message: run.hospital
+                ? `Resolving city guide for ${run.hospital}.`
+                : "Hospital not set on contract run — Hospital Intro team needs to set city before guide goes out." },
+          );
+        }
+        await supabase.from("automation_flow_events").insert(events);
+
+        // If we skipped to the email send stage, fire it immediately.
+        // send-flow-email's auto_continue then chains to send_attestation_email.
+        if (resolvedCity) {
+          fetch(`${Deno.env.get("SUPABASE_URL")}/functions/v1/send-flow-email`, {
+            method: "POST",
+            headers: {
+              "Content-Type":  "application/json",
+              "Authorization": `Bearer ${Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")}`,
+            },
+            body: JSON.stringify({ run_id: relRun.id }),
+          }).catch(e => console.error("[boldsign-webhook] relocation send invoke threw:", e));
+          console.log("[boldsign-webhook] relocation run auto-created + relocation guide email queued:", relRun.id);
+        } else {
+          console.log("[boldsign-webhook] relocation run auto-created (awaiting city pick):", relRun.id);
+        }
+      }
+    } catch (e) {
+      console.warn("[boldsign-webhook] relocation auto-trigger threw (non-fatal):", e);
+    }
+    return;
+  }
+
+  // "sent" arrives shortly after envelope creation; the run is already at
+  // awaiting_view so we just log.
+  if (newStatus === "sent") {
+    console.log("[boldsign-webhook] sent event for run", run.id, "— already at awaiting_view, no-op");
+  }
 }
 
 // ── Main handler ────────────────────────────────────────────────────────────
@@ -246,6 +535,16 @@ Deno.serve(async (req: Request) => {
     updated_at: new Date().toISOString(),
   }).eq("boldsign_document_id", documentId);
 
+  // Mirror the event into the Automations timeline. Runs on every status,
+  // not just signed — viewed/declined/expired all need to advance the
+  // contract_signing flow. Wrapped so a flow_run failure can't kill the
+  // critical Zoho path below.
+  try {
+    await mirrorBoldSignEventToFlowRun(documentId, newStatus);
+  } catch (e) {
+    console.warn("[boldsign-webhook] flow_run mirror threw (non-fatal):", e);
+  }
+
   // Only the "signed" event triggers Zoho automation. Bail early on the rest.
   if (newStatus !== "signed") {
     return new Response(JSON.stringify({ ok: true, note: `Status updated to ${newStatus}` }), { status: 200 });
@@ -269,16 +568,30 @@ Deno.serve(async (req: Request) => {
         zohoError = contactRes.error;
       } else {
         contactId = contactRes.id;
-        const statusErr = await markLeadClosedWon(token, existing.zoho_lead_id);
-        // Don't fail the whole flow if status update alone fails — the
-        // Contact exists, which is the more important record for ops.
-        if (statusErr) zohoError = statusErr;
+        // We deliberately DON'T touch Lead_Status here — AA's Zoho config
+        // doesn't have a "signed but unpaid" picklist value, and signing
+        // alone isn't a real conversion (some doctors ghost on VOB
+        // payment). Admins are notified via Resend instead and can flip
+        // the status manually once payment lands.
       }
     }
   } catch (e) {
     zohoError = String(e);
     console.error("[boldsign-webhook] Zoho automation threw:", e);
   }
+
+  // Notify admins via Resend. Done regardless of Zoho outcome — we don't
+  // want a Contact-creation error to prevent the team from learning that a
+  // contract got signed.
+  const emailErr = await notifyAdminsOfSigning({
+    doctor_name:          existing.doctor_name,
+    doctor_email:         existing.doctor_email,
+    boldsign_document_id: documentId,
+    zoho_contact_id:      contactId,
+  }).catch(e => {
+    console.error("[boldsign-webhook] notifyAdminsOfSigning threw:", e);
+    return String(e);
+  });
 
   await supabase.from("contract_sends").update({
     status:           "signed",
@@ -289,7 +602,7 @@ Deno.serve(async (req: Request) => {
   }).eq("boldsign_document_id", documentId);
 
   return new Response(JSON.stringify({
-    ok:        !zohoError,
-    contactId, zohoError,
+    ok:        !zohoError && !emailErr,
+    contactId, zohoError, emailErr,
   }), { status: 200, headers: { "Content-Type": "application/json" } });
 });
