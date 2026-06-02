@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription, DialogFooter } from "@/components/ui/dialog";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -257,9 +257,9 @@ export function SendProfileDialog({ open, onClose }: Props) {
             hospitals={selectedHospitals}
             customMessage={customMessage}
             hospitalSubject={hospitalTemplate?.subject ?? "Candidate introduction — {{doctor_name}}"}
-            hospitalBody={hospitalTemplate?.body_text ?? ""}
+            hospitalBody={hospitalTemplate?.body_html ?? hospitalTemplate?.body_text ?? ""}
             doctorSubject={doctorTemplate?.subject ?? "Your profile has been sent to {{hospital_name}}"}
-            doctorBody={doctorTemplate?.body_text ?? ""}
+            doctorBody={doctorTemplate?.body_html ?? doctorTemplate?.body_text ?? ""}
             onBack={() => setStep("pick-hospitals")}
             onConfirm={handleConfirm}
             submitting={submitting}
@@ -448,15 +448,27 @@ function PreviewConfirm({
   const profileCompletion = profile ? calcCompletion(profile) : 0;
   const sampleHospital = hospitals[0];
 
+  // Strip any redundant "Dr." prefix so templates that hard-code "Hi Dr.
+  // {{doctor_name}}" don't render "Hi Dr. Dr. Louise Denjean".
+  const cleanedDoctorName = doctor.name.replace(/^\s*Dr\.?\s+/i, "");
   const vars: Record<string, string> = {
     ...profileToTokens(profile),
-    doctor_name:        doctor.name,
+    doctor_name:        cleanedDoctorName,
     doctor_email:       doctor.email ?? "",
     doctor_phone:       doctor.phone ?? "",
     doctor_speciality:  doctor.speciality ?? "",
     hospital_name:      sampleHospital?.name ?? "",
-    hospital_contact_name: sampleHospital?.primary_contact_name ?? "",
+    hospital_contact_name: sampleHospital?.primary_contact_name ?? "Team",
+    // city / country come from the hospital record so the doctor email's
+    // "Working Opportunity in {{city}}" line resolves in the preview.
+    city:               sampleHospital?.city ?? "",
+    country:            sampleHospital?.country ?? "",
     profile_link:       `https://aa.example/profiles/${doctor.id}`,
+    // The {{signature}} token is injected by send-flow-email at send time;
+    // for the preview we render the same Allocation Assist branded block
+    // inline so the doctor-side preview shows it too.
+    signature:          PREVIEW_SIGNATURE_HTML,
+    signature_text:     PREVIEW_SIGNATURE_TEXT,
   };
 
   return (
@@ -507,7 +519,41 @@ function PreviewConfirm({
   );
 }
 
+// Branded signature mirror — kept in sync with the HTML in
+// send-flow-email + send-batch edge functions. Used in the preview so
+// the doctor-side body shows the same closing block the recipient will
+// see, instead of a literal `{{signature}}` token.
+const PREVIEW_SIGNATURE_HTML = `
+<div style="margin-top:32px;font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Helvetica,Arial,sans-serif;color:#1a2332;">
+  <p style="margin:0 0 4px;color:#14b8a6;font-weight:700;font-size:15px;">Warmest Regards,</p>
+  <p style="margin:0 0 4px;color:#14b8a6;font-weight:700;font-size:15px;">The Allocation Assist team,</p>
+  <p style="margin:0 0 14px;color:#14b8a6;font-weight:700;font-size:15px;">Allocation Assist</p>
+  <p style="margin:0 0 4px;color:#475569;font-size:14px;">
+    <span style="display:inline-block;width:14px;color:#14b8a6;">&#9737;</span>
+    <strong style="color:#475569;font-weight:600;">Jumeirah Lakes Towers, Dubai, UAE</strong>
+  </p>
+  <p style="margin:0 0 12px;font-size:14px;">
+    <a href="https://www.allocationassist.com" style="color:#1d4ed8;text-decoration:underline;">www.allocationassist.com</a>
+  </p>
+</div>`;
+const PREVIEW_SIGNATURE_TEXT = `
+
+Warmest Regards,
+The Allocation Assist team
+
+Jumeirah Lakes Towers, Dubai, UAE
+www.allocationassist.com
+`;
+
+/** True when the string is recognisably HTML (has at least one tag). The
+ *  preview block flips into iframe-render mode for these so we don't
+ *  show raw `<p>` tags in monospace. */
+function looksLikeHtml(s: string): boolean {
+  return /<\/?[a-z][\s\S]*?>/i.test(s);
+}
+
 function PreviewBlock({ label, subject, body }: { label: string; subject: string; body: string }) {
+  const isHtml = looksLikeHtml(body);
   return (
     <div className="rounded-md border">
       <div className="px-3 py-1.5 border-b bg-slate-50/50 text-[10px] uppercase tracking-wider text-muted-foreground flex items-center gap-1.5">
@@ -519,12 +565,59 @@ function PreviewBlock({ label, subject, body }: { label: string; subject: string
           <div className="text-[12px] font-medium">{subject}</div>
         </div>
         <div>
-          <div className="text-[10px] uppercase tracking-wider text-muted-foreground">Body</div>
-          <pre className="text-[11px] whitespace-pre-wrap font-mono text-slate-700 bg-slate-50/40 p-2 rounded border max-h-[160px] overflow-y-auto">
-            {body || "(no body — set in the Email Templates tab)"}
-          </pre>
+          <div className="text-[10px] uppercase tracking-wider text-muted-foreground mb-1">Body</div>
+          {isHtml
+            ? <HtmlPreview html={body} />
+            : <pre className="text-[11px] whitespace-pre-wrap font-mono text-slate-700 bg-slate-50/40 p-2 rounded border max-h-[160px] overflow-y-auto">
+                {body || "(no body — set in the Email Templates tab)"}
+              </pre>}
         </div>
       </div>
     </div>
+  );
+}
+
+/** Renders the templated body as the actual styled HTML the recipient
+ *  will see. Sandboxed in an iframe so the email's inline styles don't
+ *  fight with Tailwind, and any stray scripts (admin-controlled but
+ *  still — defense in depth) can't touch the parent page. */
+function HtmlPreview({ html }: { html: string }) {
+  const iframeRef = useRef<HTMLIFrameElement | null>(null);
+  const [height, setHeight] = useState(280);
+
+  useEffect(() => {
+    const iframe = iframeRef.current;
+    if (!iframe) return;
+    const doc = iframe.contentDocument;
+    if (!doc) return;
+    const full = `<!doctype html><html><head><meta charset="utf-8"><meta name="viewport" content="width=device-width">
+      <style>
+        body { font-family: -apple-system,BlinkMacSystemFont,'Segoe UI',Helvetica,Arial,sans-serif; color:#1a2332; margin:0; padding:16px; font-size:14px; line-height:1.55; background:#ffffff; }
+        a { color:#1d4ed8; }
+        table { border-collapse: collapse; }
+        img { max-width: 100%; height: auto; }
+      </style>
+    </head><body>${html}</body></html>`;
+    doc.open();
+    doc.write(full);
+    doc.close();
+    // Resize iframe to fit the email content, capped so a long invoice
+    // letter doesn't push the modal off-screen.
+    const measure = () => {
+      const h = doc.body?.scrollHeight ?? 280;
+      setHeight(Math.min(Math.max(h + 8, 140), 480));
+    };
+    measure();
+    const t = setTimeout(measure, 80);   // re-measure after fonts/images
+    return () => clearTimeout(t);
+  }, [html]);
+
+  return (
+    <iframe
+      ref={iframeRef}
+      title="Email preview"
+      sandbox="allow-same-origin"
+      style={{ width: "100%", height, border: "1px solid hsl(var(--border))", borderRadius: 6, background: "#fff" }}
+    />
   );
 }
