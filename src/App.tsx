@@ -5,6 +5,7 @@ import { Toaster as Sonner } from "@/components/ui/sonner";
 import { Toaster } from "@/components/ui/toaster";
 import { TooltipProvider } from "@/components/ui/tooltip";
 import { FilterProvider } from "@/lib/FilterProvider";
+import { PageErrorBoundary } from "@/components/PageErrorBoundary";
 import { ProtectedRoute } from "@/components/ProtectedRoute";
 import { AIPageContextProvider } from "@/lib/ai-page-context";
 import { OnboardingTourProvider } from "@/components/OnboardingTour";
@@ -85,7 +86,15 @@ function ProtectedShell() {
       <FilterProvider key={location.pathname}>
         <DashboardLayout>
           <Suspense fallback={<ViewportSpinner />}>
-            <Outlet />
+            {/* Page-level error boundary — one render crash on /reports
+                (e.g. a chart with bad data) used to take down the whole
+                shell + nuked the AI panel + tour overlay. Now it just
+                replaces the page body with a recovery card; navigation
+                still works. Re-keyed on pathname so leaving the broken
+                page auto-recovers. */}
+            <PageErrorBoundary resetKey={location.pathname}>
+              <Outlet />
+            </PageErrorBoundary>
           </Suspense>
         </DashboardLayout>
       </FilterProvider>
