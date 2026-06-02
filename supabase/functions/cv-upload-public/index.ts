@@ -95,6 +95,41 @@ Deno.serve(async (req: Request) => {
     status:      "extracting",
   }).eq("id", row.id);
 
+  // Advance any active onboarding flow run for this doctor from
+  // `wait_for_form` (or its reminder) to `form_received` + complete the
+  // run. Without this, Phase-1 flow #1 sits at "Wait for Form Completion"
+  // forever even after the doctor uploads the CV.
+  try {
+    const { data: stuckRuns } = await supabase
+      .from("automation_flow_runs")
+      .select("id, current_stage")
+      .eq("flow_key", "onboarding")
+      .eq("doctor_id", row.doctor_id)
+      .eq("status", "active")
+      .in("current_stage", ["wait_for_form", "reminder_form"]);
+
+    for (const r of (stuckRuns ?? []) as Array<{ id: string; current_stage: string }>) {
+      const nowIso = new Date().toISOString();
+      await supabase.from("automation_flow_runs").update({
+        current_stage: "form_received",
+        status:        "completed",
+        completed_at:  nowIso,
+        last_event_at: nowIso,
+      }).eq("id", r.id);
+      await supabase.from("automation_flow_events").insert({
+        run_id:     r.id,
+        stage_key:  "form_received",
+        event_type: "completed",
+        message:    "Doctor uploaded their CV — onboarding flow complete.",
+      });
+    }
+    if ((stuckRuns ?? []).length > 0) {
+      console.log(`[cv-upload-public] advanced ${stuckRuns!.length} onboarding run(s) for doctor ${row.doctor_id}`);
+    }
+  } catch (e) {
+    console.error("[cv-upload-public] failed to advance onboarding flow:", e);
+  }
+
   // Fire-and-forget invoke of cv-extract. Done after the upload status flip
   // so even if extraction never returns, the row reflects the uploaded state.
   // We don't await — the response to the doctor is immediate; extraction
