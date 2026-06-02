@@ -23,7 +23,7 @@ import {
 } from "@/hooks/use-automation-flows";
 import {
   Workflow, Mail, AlertTriangle, Clock, ChevronRight, Settings, Save, StickyNote,
-  Hospital as HospitalIcon, Send, Zap, FileSignature, RefreshCw, Inbox,
+  Hospital as HospitalIcon, Send, Zap, FileSignature, RefreshCw, Inbox, CalendarCheck,
 } from "lucide-react";
 import { toast } from "sonner";
 import { useQueryClient } from "@tanstack/react-query";
@@ -711,6 +711,12 @@ function RunDetailSheet({ run, open, onClose }: { run: FlowRun | null; open: boo
           </div>
         )}
 
+        {/* Interview-time coordinator. Shown on profile_sent runs where
+            the hospital reply classifier extracted proposed times. The
+            team picks one, the system creates the Interview run pre-
+            filled with the chosen slot and fires the tips email. */}
+        <InterviewTimePicker run={run} />
+
         {showClassifyReply && (
           <ClassifyReplyDialog
             open={classifyOpen}
@@ -967,5 +973,148 @@ function FlowConfigCard({ flow, enabled, overrides }: { flow: FlowDefinition; en
         })}
       </CardContent>
     </Card>
+  );
+}
+
+interface ProposedTime { iso: string; label: string; format: "in_person" | "video" | "phone" | "unknown" }
+
+/** Coordinator panel that surfaces interview times the hospital proposed
+ *  in their reply (extracted by classify-hospital-reply). The team picks
+ *  one — the system creates an `interview` run pre-filled with that slot
+ *  + the format, then fires the tips/confirmation email to the doctor.
+ *
+ *  Hidden when the run has no `proposed_interview_times` metadata.
+ *  Re-renders the picker if a NEW reply arrives with revised times. */
+function InterviewTimePicker({ run }: { run: FlowRun }) {
+  const md = (run.metadata as Record<string, unknown>) ?? {};
+  const proposed = (md.proposed_interview_times as ProposedTime[] | undefined) ?? [];
+  const [pickedIso, setPickedIso] = useState<string | null>(null);
+  const [confirming, setConfirming] = useState(false);
+  const qc = useQueryClient();
+
+  if (proposed.length === 0) return null;
+
+  const handleConfirm = async (slot: ProposedTime) => {
+    setConfirming(true);
+    setPickedIso(slot.iso);
+    try {
+      const nowIso = new Date().toISOString();
+
+      // Mark the profile_sent run completed (introduction succeeded).
+      await supabase.from("automation_flow_runs").update({
+        current_stage: "introduction_complete",
+        status:        "completed",
+        completed_at:  nowIso,
+        last_event_at: nowIso,
+        metadata:      { ...md, picked_interview_time: slot.iso, picked_interview_label: slot.label },
+      }).eq("id", run.id);
+
+      // Create the Interview run pre-filled with the picked slot.
+      const { data: interviewRun, error: createErr } = await supabase
+        .from("automation_flow_runs")
+        .insert({
+          flow_key:      "interview",
+          doctor_id:     run.doctor_id,
+          doctor_name:   run.doctor_name,
+          doctor_email:  run.doctor_email,
+          doctor_phone:  run.doctor_phone,
+          hospital:      run.hospital,
+          current_stage: "send_interview_email",
+          status:        "active",
+          metadata: {
+            triggered_via:        "hospital_proposed_time_picker",
+            source_profile_run:   run.id,
+            interview_datetime:   slot.label,
+            interview_iso:        slot.iso,
+            interview_format:     slot.format === "unknown" ? "" : slot.format,
+          },
+        })
+        .select("id")
+        .single();
+      if (createErr) throw createErr;
+      if (!interviewRun) throw new Error("Interview run insert returned no row");
+
+      await supabase.from("automation_flow_events").insert([
+        { run_id: run.id, stage_key: "awaiting_response", event_type: "completed",
+          message: `Interview time confirmed: ${slot.label}. Created interview run + queued tips email.` },
+        { run_id: interviewRun.id, stage_key: "trigger_interview_confirmed", event_type: "entered",
+          message: `Auto-triggered: ${run.hospital ?? "hospital"} proposed ${slot.label}, team confirmed.` },
+        { run_id: interviewRun.id, stage_key: "send_interview_email", event_type: "entered",
+          message: "Queued for sending." },
+      ]);
+
+      // Fire the tips + confirmation email to the doctor.
+      const { error: sendErr } = await supabase.functions.invoke("send-flow-email", {
+        body: { run_id: interviewRun.id },
+      });
+      if (sendErr) throw sendErr;
+
+      toast.success(`Interview locked for ${slot.label}. Tips + confirmation sent to ${run.doctor_name}.`);
+      qc.invalidateQueries({ queryKey: ["automation-flow-runs"] });
+      qc.invalidateQueries({ queryKey: ["automation-flow-events", run.id] });
+    } catch (e) {
+      toast.error(e instanceof Error ? e.message : "Failed to confirm time");
+      setPickedIso(null);
+    } finally {
+      setConfirming(false);
+    }
+  };
+
+  const formatLabel = (s: ProposedTime) => {
+    try {
+      const d = new Date(s.iso);
+      if (!isNaN(d.getTime())) {
+        return d.toLocaleString(undefined, {
+          weekday: "short", month: "short", day: "numeric",
+          hour: "numeric", minute: "2-digit", hour12: true,
+        });
+      }
+    } catch { /* fall through */ }
+    return s.label;
+  };
+
+  return (
+    <div className="rounded-md border-2 border-violet-200 bg-violet-50/40 p-4 mt-4">
+      <div className="flex items-start gap-2 mb-3">
+        <CalendarCheck className="h-4 w-4 text-violet-600 mt-0.5 shrink-0" />
+        <div className="text-[12px] text-violet-900 leading-relaxed">
+          <strong>{run.hospital ?? "Hospital"} proposed {proposed.length} interview time{proposed.length === 1 ? "" : "s"}.</strong>
+          {" "}Pick one and we'll send the tips + confirmation email to <strong>{run.doctor_name}</strong>. The Interview flow auto-fires with the chosen slot.
+        </div>
+      </div>
+      <div className="space-y-1.5">
+        {proposed.map((slot, i) => {
+          const isPicked = pickedIso === slot.iso;
+          const isDisabled = confirming && !isPicked;
+          return (
+            <button
+              key={`${slot.iso}-${i}`}
+              onClick={() => handleConfirm(slot)}
+              disabled={confirming}
+              className={`w-full flex items-center gap-3 px-3 py-2 rounded-md border text-left transition-colors ${
+                isPicked
+                  ? "border-violet-400 bg-violet-100"
+                  : isDisabled
+                    ? "border-slate-200 bg-white opacity-50"
+                    : "border-violet-200 bg-white hover:border-violet-400 hover:bg-violet-50"
+              }`}
+            >
+              <Clock className="h-3.5 w-3.5 text-violet-600 shrink-0" />
+              <div className="flex-1 min-w-0">
+                <div className="text-[12px] font-medium text-slate-900">{formatLabel(slot)}</div>
+                {slot.label !== formatLabel(slot) && (
+                  <div className="text-[10px] text-muted-foreground italic">From reply: "{slot.label}"</div>
+                )}
+              </div>
+              {slot.format !== "unknown" && (
+                <Badge variant="outline" className="text-[9px] bg-white">{slot.format.replace("_", " ")}</Badge>
+              )}
+              {isPicked && confirming && <span className="text-[10px] text-violet-700 italic">confirming…</span>}
+              {!confirming && <ChevronRight className="h-3.5 w-3.5 text-slate-300 shrink-0" />}
+            </button>
+          );
+        })}
+      </div>
+    </div>
   );
 }

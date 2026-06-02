@@ -41,11 +41,18 @@ const CORS = {
   "Access-Control-Allow-Methods": "POST, OPTIONS",
 };
 
+interface ProposedTime {
+  iso:    string;   // 2026-07-02T14:00:00+04:00
+  label:  string;   // "Wed 2 July at 14:00 UAE"
+  format: "in_person" | "video" | "phone" | "unknown";
+}
+
 interface ClassificationResult {
-  classification: "shortlisted" | "declined" | "needs_more_info" | "unclear" | "wrong_doctor";
+  classification: "shortlisted" | "proposing_interview" | "declined" | "needs_more_info" | "unclear" | "wrong_doctor";
   confidence:     number;
   summary:        string;
   asked_for:      string | null;
+  proposed_times: ProposedTime[] | null;
   next_steps:     string;
 }
 
@@ -91,6 +98,7 @@ Classify their response. Return a JSON object with these exact keys:
 {
   "classification": one of:
     - "shortlisted": hospital wants to proceed with this specific doctor (asking for interview, "we'd like to see them", "yes please send more about Dr. X", "let's set up a meeting", etc.)
+    - "proposing_interview": hospital is offering one or more specific date/time slots for the interview (e.g. "Can the doctor do Tuesday 3pm or Thursday 11am?", "I'm available next Monday at 10am UAE time", "Let's book Wed 2 July at 14:00"). Use this whenever the reply contains concrete time(s) — even if it also functions as a shortlist. The team will pick a slot, confirm with the doctor, then trigger the Interview flow.
     - "declined": hospital is not interested in this doctor ("thanks but not at this time", "doesn't fit our needs", "no open positions", "we'll keep on file")
     - "needs_more_info": hospital wants additional information before deciding (more about the CV, references, specific clinical experience questions, salary expectations, availability)
     - "unclear": you cannot confidently classify — autoresponder, out-of-office, off-topic, conversation about something else entirely
@@ -98,6 +106,9 @@ Classify their response. Return a JSON object with these exact keys:
   "confidence": float 0.0-1.0 reflecting how sure you are
   "summary": one-sentence plain-English summary of what the hospital said
   "asked_for": if needs_more_info, a short string of what specifically they asked for; otherwise null
+  "proposed_times": if proposing_interview, an array of objects:
+    [{ "iso": ISO-8601 timestamp WITH timezone offset (assume UAE/+04:00 if none specified), "label": human-readable string from the reply like "Tuesday 3pm UAE", "format": "in_person" | "video" | "phone" | "unknown" }, ...]
+    Otherwise null. Resolve relative dates ("next Tuesday", "tomorrow") against TODAY = ${new Date().toISOString().slice(0, 10)}.
   "next_steps": one sentence advising what the AA Hospital Intro team should do next
 }
 
@@ -221,6 +232,29 @@ Output ONLY the JSON object. No markdown fences, no commentary, no preamble.`;
     } else {
       action_taken = "Profile Sent completed; failed to create Shortlist run";
     }
+  } else if (parsedResult.classification === "proposing_interview") {
+    // Hospital is offering specific time(s). Store on the run's metadata
+    // so the RunDetailSheet can render a "pick a time + confirm with the
+    // doctor" UI. We DON'T auto-create the interview run yet — the team
+    // needs to bounce the slot off the doctor first.
+    const times = parsedResult.proposed_times ?? [];
+    const existingMd = (run.metadata as Record<string, unknown>) ?? {};
+    await supabase.from("automation_flow_runs").update({
+      last_event_at: nowIso,
+      metadata: {
+        ...existingMd,
+        proposed_interview_times: times,
+        proposed_times_source:    "hospital_reply_classifier",
+        proposed_times_reply_id:  replyRow?.id ?? null,
+        proposed_times_at:        nowIso,
+      },
+    }).eq("id", run_id);
+
+    await supabase.from("automation_flow_events").insert({
+      run_id, stage_key: "awaiting_response", event_type: "note",
+      message: `${run.hospital ?? "Hospital"} proposed ${times.length} interview time${times.length === 1 ? "" : "s"} (confidence ${parsedResult.confidence.toFixed(2)}): ${times.map(t => t.label).join(" · ") || "(could not parse specific times)"}. ${parsedResult.summary}`,
+    });
+    action_taken = `Stored ${times.length} proposed interview times on run metadata`;
   } else if (parsedResult.classification === "declined") {
     await supabase.from("automation_flow_runs").update({
       current_stage: "introduction_complete",
