@@ -1,4 +1,5 @@
 import { useEffect, useMemo, useState } from "react";
+import { useSearchParams } from "react-router-dom";
 import { DashboardLayout } from "@/components/layout/DashboardLayout";
 import { AnimatedTabsList, AnimatedTabContent, AnimatedTabPanel, type AnimatedTabItem } from "@/components/AnimatedTabs";
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "@/components/ui/card";
@@ -22,13 +23,15 @@ import {
 } from "@/hooks/use-automation-flows";
 import {
   Workflow, Mail, AlertTriangle, Clock, ChevronRight, Settings, Save, StickyNote,
-  Hospital as HospitalIcon, Send, Zap, FileSignature, RefreshCw,
+  Hospital as HospitalIcon, Send, Zap, FileSignature, RefreshCw, Inbox,
 } from "lucide-react";
 import { toast } from "sonner";
 import { useQueryClient } from "@tanstack/react-query";
 import { supabase } from "@/lib/supabase";
 import { HospitalsTab } from "@/components/automations/HospitalsTab";
 import { EmailTemplatesTab } from "@/components/automations/EmailTemplatesTab";
+import { ApprovalQueues } from "@/components/automations/ApprovalQueues";
+import { ReassignButton } from "@/components/automations/ReassignButton";
 import { SendProfileDialog } from "@/components/automations/SendProfileDialog";
 import { TriggerFlowDialog } from "@/components/automations/TriggerFlowDialog";
 import { ClassifyReplyDialog } from "@/components/automations/ClassifyReplyDialog";
@@ -61,11 +64,35 @@ function statusBadge(status: FlowRun["status"]) {
   return <Badge variant="outline" className={`${map[status]} text-[10px] uppercase tracking-wider`}>{status}</Badge>;
 }
 
-type TabKey = FlowKey | "settings" | "hospitals" | "templates";
+type TabKey = FlowKey | "settings" | "hospitals" | "templates" | "queues";
 
 export default function Automations() {
-  const [activeFlow, setActiveFlow] = useState<TabKey>("onboarding");
-  const [selectedRunId, setSelectedRunId] = useState<string | null>(null);
+  const [searchParams, setSearchParams] = useSearchParams();
+  const initialFlow = (searchParams.get("flow") as TabKey | null) ?? "onboarding";
+  const initialRunId = searchParams.get("run");
+  const [activeFlow, setActiveFlow] = useState<TabKey>(initialFlow);
+  const [selectedRunId, setSelectedRunId] = useState<string | null>(initialRunId);
+
+  // Sync url param ↔ open run so deep-links from /my-workspace land on
+  // the right detail sheet and the URL stays shareable.
+  useEffect(() => {
+    const urlRunId = searchParams.get("run");
+    if (urlRunId !== selectedRunId) setSelectedRunId(urlRunId);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [searchParams]);
+  useEffect(() => {
+    const urlRunId = searchParams.get("run");
+    if (selectedRunId && selectedRunId !== urlRunId) {
+      const next = new URLSearchParams(searchParams);
+      next.set("run", selectedRunId);
+      setSearchParams(next, { replace: true });
+    } else if (!selectedRunId && urlRunId) {
+      const next = new URLSearchParams(searchParams);
+      next.delete("run");
+      setSearchParams(next, { replace: true });
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [selectedRunId]);
   const [sendProfileOpen, setSendProfileOpen] = useState(false);
   const [triggerFlow, setTriggerFlow] = useState<FlowKey | null>(null);
   const [contractOpen, setContractOpen] = useState(false);
@@ -177,6 +204,7 @@ export default function Automations() {
             count: runsByFlow[key]?.length ?? 0,
           }));
           const adminItems: AnimatedTabItem[] = [
+            { value: "queues",    label: <><Inbox        className="h-3.5 w-3.5" /> Queues</> },
             { value: "hospitals", label: <><HospitalIcon className="h-3.5 w-3.5" /> Hospitals</> },
             { value: "templates", label: <><Mail         className="h-3.5 w-3.5" /> Templates</> },
             { value: "settings",  label: <><Settings     className="h-3.5 w-3.5" /> Default Flow Editor</> },
@@ -216,6 +244,9 @@ export default function Automations() {
                     />
                   </AnimatedTabPanel>
                 ))}
+                <AnimatedTabPanel value="queues" active={activeFlow}>
+                  <ApprovalQueues onSelectRun={setSelectedRunId} />
+                </AnimatedTabPanel>
                 <AnimatedTabPanel value="hospitals" active={activeFlow}>
                   <HospitalsTab />
                 </AnimatedTabPanel>
@@ -609,6 +640,7 @@ function RunDetailSheet({ run, open, onClose }: { run: FlowRun | null; open: boo
               </div>
             </div>
             <div className="flex items-center gap-2 shrink-0">
+              <ReassignButton runId={run.id} currentAssignee={run.assigned_to} />
               {showClassifyReply && (
                 <Button
                   size="sm"

@@ -33,6 +33,7 @@ const DoctorProfiles  = lazy(() => import("./pages/DoctorProfiles"));
 const Vacancies       = lazy(() => import("./pages/Vacancies"));
 const Reports         = lazy(() => import("./pages/Reports"));
 const Batches         = lazy(() => import("./pages/Batches"));
+const MyWorkspace     = lazy(() => import("./pages/MyWorkspace"));
 const BulkImport      = lazy(() => import("./pages/BulkImport"));
 const Connections     = lazy(() => import("./pages/Connections"));
 const UploadCV        = lazy(() => import("./pages/UploadCV"));
@@ -130,6 +131,7 @@ const App = () => (
                 <Route path="/contracts"      element={<Contracts />} />
                 <Route path="/follow-ups"     element={<FollowUps />} />
                 <Route path="/calls"          element={<Calls />} />
+                <Route path="/my-workspace"   element={<MyWorkspace />} />
                 <Route path="/automations"    element={<Automations />} />
                 <Route path="/doctor-profiles" element={<DoctorProfiles />} />
                 <Route path="/vacancies"      element={<Vacancies />} />

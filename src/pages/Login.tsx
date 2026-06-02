@@ -35,11 +35,16 @@ const Login = () => {
 
   useEffect(() => { setMounted(true); }, []);
 
-  // Redirect once both session and profile are loaded — uses actual allowedPages
-  // so every role lands on the correct first page (not hardcoded /worker)
+  // Redirect once both session and profile are loaded. Role-specific
+  // landing where helpful (HI members get their workspace), otherwise
+  // fall back to allowedPages[0].
   useEffect(() => {
     if (session && profile) {
-      navigate(allowedPages[0] ?? "/", { replace: true });
+      const role = (profile as { role?: string } | null)?.role;
+      const landing =
+        role === "hi_member" ? "/my-workspace" :
+        (allowedPages[0] ?? "/");
+      navigate(landing, { replace: true });
     }
   }, [session, profile, allowedPages, navigate]);
 

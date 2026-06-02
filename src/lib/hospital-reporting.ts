@@ -217,7 +217,7 @@ export function computeHospitalRows(
       const sp = (r.metadata as Record<string, unknown> | null)?.doctor_speciality as string | undefined;
       if (!sp || !sp.toLowerCase().includes(filters.specialty.toLowerCase())) continue;
     }
-    if (filters.teamMember && r.created_by !== filters.teamMember) continue;
+    if (filters.teamMember && (r.created_by ?? "").toLowerCase() !== filters.teamMember.toLowerCase()) continue;
     if (filters.doctorId   && r.doctor_id  !== filters.doctorId)   continue;
 
     const row = ensure(r.hospital);

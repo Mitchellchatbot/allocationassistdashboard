@@ -11,7 +11,9 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
 import { Command, CommandEmpty, CommandGroup, CommandInput, CommandItem, CommandList } from "@/components/ui/command";
-import { ClipboardList, Plus, Building2, CheckCircle2, X, AlertTriangle, Search, ChevronDown, ChevronUp, Sparkles, Check } from "lucide-react";
+import { ClipboardList, Plus, Building2, CheckCircle2, X, AlertTriangle, Search, ChevronDown, ChevronUp, Sparkles, Check, Filter } from "lucide-react";
+import { EmptyState } from "@/components/ui/empty-state";
+import { TableSkeleton } from "@/components/ui/data-skeleton";
 import { useDoctorSpecialties } from "@/hooks/use-doctor-specialties";
 import { toast } from "sonner";
 import { useAuth } from "@/hooks/use-auth";
@@ -157,13 +159,23 @@ export default function Vacancies() {
             </div>
           </CardHeader>
           <CardContent className="p-0">
-            {isLoading && <div className="px-4 py-8 text-center text-[12px] text-muted-foreground">Loading vacancies...</div>}
+            {isLoading && <TableSkeleton rows={5} cols={6} />}
             {!isLoading && filtered.length === 0 && (
-              <div className="px-4 py-12 text-center text-[12px] text-muted-foreground">
-                {vacancies.length === 0
-                  ? "No vacancies logged yet. Click \"New vacancy\" to add the first one."
-                  : "No vacancies match the current filters."}
-              </div>
+              vacancies.length === 0 ? (
+                <EmptyState
+                  icon={ClipboardList}
+                  title="No vacancies yet"
+                  body="Log the first hospital request so the team can start matching doctors against it."
+                  size="md"
+                />
+              ) : (
+                <EmptyState
+                  icon={Filter}
+                  title="No vacancies match your filters"
+                  body="Try widening the date range or clearing the priority filter."
+                  size="md"
+                />
+              )
             )}
             {!isLoading && filtered.length > 0 && (
               <Table>

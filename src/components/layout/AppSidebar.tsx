@@ -20,6 +20,7 @@ import {
   UserSquare,
   Search,
   ChevronRight,
+  Inbox,
   type LucideIcon,
 } from "lucide-react";
 import { useCallback, useEffect, useState } from "react";
@@ -81,6 +82,7 @@ const NAV_SECTIONS: NavSection[] = [
     label: "Hospital Introduction",
     accent: "#fb923c",  // vivid orange
     items: [
+      { title: "My Workspace",    url: "/my-workspace",    icon: Inbox },
       { title: "Doctor Profiles", url: "/doctor-profiles", icon: UserSquare },
       { title: "Automations",     url: "/automations",     icon: Workflow },
       { title: "Vacancies",       url: "/vacancies",       icon: ClipboardList },

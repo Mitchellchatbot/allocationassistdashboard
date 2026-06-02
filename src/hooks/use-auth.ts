@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState } from "react";
 import { supabase } from "@/lib/supabase";
 import type { Session, User } from "@supabase/supabase-js";
+import { isHiTeamMember, findHiMemberByEmail } from "@/lib/hi-team";
 
 // Map short usernames → Supabase emails for convenient login
 export const USERNAME_MAP: Record<string, string> = {
@@ -23,14 +24,28 @@ export const WORKER_EMAIL_TO_NAME: Record<string, string> = {
 };
 
 // All pages that exist in the app (used for admin fallback)
-export const ALL_PAGES = ["/", "/sales", "/marketing", "/leads-pipeline", "/team", "/finance", "/meta-ads", "/settings", "/worker", "/calls", "/follow-ups", "/automations", "/doctor-profiles", "/vacancies", "/reports", "/batches", "/import-bulk", "/connections"];
+export const ALL_PAGES = ["/", "/my-workspace", "/sales", "/marketing", "/leads-pipeline", "/team", "/finance", "/meta-ads", "/settings", "/worker", "/calls", "/follow-ups", "/automations", "/doctor-profiles", "/vacancies", "/reports", "/batches", "/import-bulk", "/connections"];
+
+// Hospital Introduction team page set. They land on /my-workspace and
+// only see the surfaces that matter for moving doctors through the
+// pipeline. Marketing/Sales/Finance/Admin tabs are hidden.
+export const HI_MEMBER_PAGES = [
+  "/",
+  "/my-workspace",
+  "/automations",
+  "/doctor-profiles",
+  "/vacancies",
+  "/batches",
+  "/reports",
+];
 
 // Role presets — selected in the Add User dialog
 export const ROLE_PRESETS: Record<string, string[]> = {
-  admin:   ALL_PAGES,
-  sales:   ["/", "/sales", "/marketing", "/leads-pipeline", "/team", "/calls"],
-  finance: ["/", "/finance"],
-  worker:  ["/worker"],
+  admin:     ALL_PAGES,
+  sales:     ["/", "/sales", "/marketing", "/leads-pipeline", "/team", "/calls"],
+  finance:   ["/", "/finance"],
+  worker:    ["/worker"],
+  hi_member: HI_MEMBER_PAGES,
 };
 
 interface UserProfile {
@@ -65,9 +80,16 @@ export function useAuth() {
       if (email.endsWith("@sales.com")) {
         const name = WORKER_EMAIL_TO_NAME[email] ?? email.split("@")[0];
         applyProfile({ role: "worker", allowedPages: ["/worker"], fullName: name });
-      } else {
-        applyProfile({ role: "admin", allowedPages: ALL_PAGES, fullName: null });
+        return;
       }
+      // Hospital Introduction team — restricted to their workspace + the
+      // tabs they actually work in. Falls through to admin for anyone else.
+      const hi = findHiMemberByEmail(email);
+      if (hi) {
+        applyProfile({ role: "hi_member", allowedPages: HI_MEMBER_PAGES, fullName: hi.name });
+        return;
+      }
+      applyProfile({ role: "admin", allowedPages: ALL_PAGES, fullName: null });
     }
     try {
       const { data } = await Promise.race([
@@ -131,10 +153,14 @@ export function useAuth() {
 
   // Use cached profile if current profile is null (prevents nav flashing empty during re-fetches)
   const effectiveProfile = profile ?? profileCache.current;
-  // Default to worker for @sales.com emails so they don't briefly see admin nav
-  const emailBasedDefault = (user?.email ?? "").toLowerCase().endsWith("@sales.com")
-    ? { role: "worker", pages: ["/worker"] }
-    : { role: "admin",  pages: ALL_PAGES };
+  // Default by email pattern so users don't briefly see admin nav before
+  // the profile fetch resolves.
+  const lowerEmail = (user?.email ?? "").toLowerCase();
+  const emailBasedDefault = lowerEmail.endsWith("@sales.com")
+    ? { role: "worker",    pages: ["/worker"] }
+    : isHiTeamMember(lowerEmail)
+      ? { role: "hi_member", pages: HI_MEMBER_PAGES }
+      : { role: "admin",     pages: ALL_PAGES };
   const role         = effectiveProfile?.role         ?? emailBasedDefault.role;
   const allowedPages = effectiveProfile?.allowedPages ?? emailBasedDefault.pages;
 

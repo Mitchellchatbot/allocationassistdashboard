@@ -7,6 +7,7 @@ import { useCallback } from "react";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { supabase } from "@/lib/supabase";
 import { useTableSubscription } from "@/lib/realtime-registry";
+import { useAuth } from "@/hooks/use-auth";
 
 export type NotificationKind = "vacancy_match" | "interview_followup" | string;
 
@@ -33,19 +34,30 @@ export function useNotifications(): {
   isLoading: boolean;
 } {
   const qc = useQueryClient();
+  const { user, role } = useAuth();
+  const myEmail = (user?.email ?? "").toLowerCase();
+
   const q = useQuery({
-    queryKey: KEY,
+    // Cache key includes the user email so switching accounts re-fetches
+    // (otherwise the previous user's filtered list would be served stale).
+    queryKey: [...KEY, myEmail, role] as const,
     queryFn: async (): Promise<AppNotification[]> => {
       // Bumped from 50 → 500 so the sidebar badge reflects reality and the
-      // panel can group + paginate through hundreds. Beyond 500 we'd want
-      // server-side pagination, but at that volume the team should bulk-
-      // dismiss before scrolling anyway.
-      const { data, error } = await supabase
+      // panel can group + paginate through hundreds.
+      //
+      // HI team members only see notifications addressed to them (for_user
+      // matches their email) OR team-wide ones (for_user is null). Admins
+      // still see everything so they can audit the whole queue.
+      let query = supabase
         .from("notifications")
         .select("*")
         .is("dismissed_at", null)
         .order("created_at", { ascending: false })
         .limit(500);
+      if (role === "hi_member" && myEmail) {
+        query = query.or(`for_user.is.null,for_user.eq.${myEmail}`);
+      }
+      const { data, error } = await query;
       if (error) throw error;
       return (data ?? []) as AppNotification[];
     },
@@ -54,6 +66,7 @@ export function useNotifications(): {
   });
 
   useTableSubscription("notifications", useCallback(() => {
+    // Invalidate every per-user variant — easier than reconstructing exact key
     qc.invalidateQueries({ queryKey: KEY });
   }, [qc]));
 

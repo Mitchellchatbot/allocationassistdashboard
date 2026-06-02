@@ -429,13 +429,13 @@ async function runInterviewFollowupSweep(
     const cutoff = new Date(now.getTime() - 72 * 3_600_000).toISOString();
     const { data: runs, error } = await supabase
       .from("automation_flow_runs")
-      .select("id, doctor_name, hospital, completed_at, flow_key, status")
+      .select("id, doctor_name, hospital, completed_at, flow_key, status, assigned_to")
       .eq("flow_key", "interview")
       .eq("status",   "completed")
       .lt("completed_at", cutoff);
     if (error) throw error;
 
-    for (const r of (runs ?? []) as Array<{ id: string; doctor_name: string; hospital: string | null; completed_at: string }>) {
+    for (const r of (runs ?? []) as Array<{ id: string; doctor_name: string; hospital: string | null; completed_at: string; assigned_to: string | null }>) {
       const hoursSince = Math.floor((now.getTime() - new Date(r.completed_at).getTime()) / 3_600_000);
       const { error: insErr } = await supabase.from("notifications").insert({
         kind:           "interview_followup",
@@ -443,6 +443,7 @@ async function runInterviewFollowupSweep(
         body:           `Interview wrapped ${hoursSince}h ago. Spec says nudge the hospital at 72h. No reply logged yet — time to follow up.`,
         link_path:      `/automations?flow=interview`,
         related_run_id: r.id,
+        for_user:       r.assigned_to,
       });
       if (insErr && !/duplicate key/i.test(insErr.message)) {
         console.error("[tick-scheduler] interview_followup insert failed:", insErr.message);

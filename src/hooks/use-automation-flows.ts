@@ -20,6 +20,16 @@ export interface FlowRun {
   last_event_at:  string;
   completed_at:   string | null;
   metadata:       Record<string, unknown>;
+  /** Email of the HI team member who triggered this run. Stamped at
+   *  insert time; never moves. Use this for "who started this work" UI. */
+  created_by:     string | null;
+  /** Email of the HI team member currently responsible. Auto-derived
+   *  from the hospital's owner_email by a DB trigger, or set explicitly
+   *  via the Reassign button. Use this for "who needs to take the next
+   *  action" UI — My Workspace, Approval Queues, scoped notifications. */
+  assigned_to:    string | null;
+  reassigned_at:  string | null;
+  reassigned_by:  string | null;
 }
 
 export interface FlowEvent {
@@ -149,6 +159,42 @@ export function useAddRunNote() {
           message:    input.message,
         });
       if (error) throw error;
+    },
+    onSuccess: (_, vars) => {
+      qc.invalidateQueries({ queryKey: EVENTS_KEY(vars.run_id) });
+      qc.invalidateQueries({ queryKey: RUNS_KEY });
+    },
+  });
+}
+
+/** Reassign a flow run to a new HI team member. Used by the Reassign
+ *  dropdown on RunDetailSheet + Approval Queue rows. Logs the handoff
+ *  on the run row (reassigned_at, reassigned_by) and emits a note event
+ *  so the timeline shows who moved it and when. */
+export function useReassignRun() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: async (input: { run_id: string; to_email: string | null; current_user_email: string | null }) => {
+      const now = new Date().toISOString();
+      const { error: updateErr } = await supabase
+        .from("automation_flow_runs")
+        .update({
+          assigned_to:   input.to_email,
+          reassigned_at: now,
+          reassigned_by: input.current_user_email,
+        })
+        .eq("id", input.run_id);
+      if (updateErr) throw updateErr;
+
+      const message = input.to_email
+        ? `Reassigned to ${input.to_email}${input.current_user_email ? ` by ${input.current_user_email}` : ""}`
+        : `Unassigned${input.current_user_email ? ` by ${input.current_user_email}` : ""}`;
+      await supabase.from("automation_flow_events").insert({
+        run_id:     input.run_id,
+        stage_key:  "reassign",
+        event_type: "note",
+        message,
+      });
     },
     onSuccess: (_, vars) => {
       qc.invalidateQueries({ queryKey: EVENTS_KEY(vars.run_id) });

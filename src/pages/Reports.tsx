@@ -5,7 +5,8 @@ import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
-import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue, SelectGroup, SelectLabel, SelectSeparator } from "@/components/ui/select";
+import { HI_TEAM_MEMBERS, findHiMemberByEmail } from "@/lib/hi-team";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import {
   BarChart3, Users, Building2, TrendingUp, TrendingDown, Minus,
@@ -167,10 +168,30 @@ function FilterBar({ rangeDays, setRangeDays, hospital, setHospital, teamMember,
         </SelectContent>
       </Select>
       <Select value={teamMember} onValueChange={setTeamMember}>
-        <SelectTrigger className="h-8 w-[180px] text-[11px]"><SelectValue placeholder="Team member" /></SelectTrigger>
+        <SelectTrigger className="h-8 w-[200px] text-[11px]"><SelectValue placeholder="Team member" /></SelectTrigger>
         <SelectContent>
           <SelectItem value="__all">All team members</SelectItem>
-          {options.teamMembers.map(m => <SelectItem key={m} value={m}>{m}</SelectItem>)}
+          {/* HI roster pinned at the top — surfaced as full names so the
+              filter reads "Rodaina Thabit" rather than the raw email. */}
+          <SelectGroup>
+            <SelectLabel className="text-[9px] uppercase tracking-wider text-muted-foreground">Hospital Introduction</SelectLabel>
+            {HI_TEAM_MEMBERS.map(m => (
+              <SelectItem key={m.email} value={m.email}>{m.name}</SelectItem>
+            ))}
+          </SelectGroup>
+          {/* Everyone else who's ever stamped a created_by (sales / admin
+              recruiters). Excludes anyone already in the HI group. */}
+          {options.teamMembers.filter(m => !findHiMemberByEmail(m)).length > 0 && (
+            <>
+              <SelectSeparator />
+              <SelectGroup>
+                <SelectLabel className="text-[9px] uppercase tracking-wider text-muted-foreground">Other</SelectLabel>
+                {options.teamMembers
+                  .filter(m => !findHiMemberByEmail(m))
+                  .map(m => <SelectItem key={m} value={m}>{m}</SelectItem>)}
+              </SelectGroup>
+            </>
+          )}
         </SelectContent>
       </Select>
       <Select value={specialty} onValueChange={setSpecialty}>
@@ -201,7 +222,7 @@ function KpiStrip({ bundle }: { bundle: ReturnType<typeof useReportingMetrics> }
     const passesRunFilters = (r: FlowRun): boolean => {
       if (filters.hospital   && r.hospital   !== filters.hospital)   return false;
       if (filters.doctorId   && r.doctor_id  !== filters.doctorId)   return false;
-      if (filters.teamMember && r.created_by !== filters.teamMember) return false;
+      if (filters.teamMember && (r.created_by ?? "").toLowerCase() !== filters.teamMember.toLowerCase()) return false;
       if (filters.specialty) {
         const sp = (r.metadata as Record<string, unknown> | null)?.doctor_speciality as string | undefined;
         if (!sp || !sp.toLowerCase().includes(filters.specialty.toLowerCase())) return false;
