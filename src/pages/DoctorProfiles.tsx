@@ -495,13 +495,17 @@ function ProfileEditor({ doctor }: { doctor: DoctorRow }) {
       <CardContent className="space-y-5">
         {isLoading && <CardListSkeleton rows={3} />}
 
-        <DoctorLifecycleCard doctorId={doctor.id} doctorName={doctor.name} />
+        <div data-tour="doctor-lifecycle">
+          <DoctorLifecycleCard doctorId={doctor.id} doctorName={doctor.name} />
+        </div>
 
-        <DoctorVacancyMatches
-          doctorId={doctor.id}
-          doctorName={doctor.name}
-          doctorSpeciality={doctor.speciality}
-        />
+        <div data-tour="doctor-matches">
+          <DoctorVacancyMatches
+            doctorId={doctor.id}
+            doctorName={doctor.name}
+            doctorSpeciality={doctor.speciality}
+          />
+        </div>
 
         {/* Quick actions: prominent at the top so the team finds them. */}
         <div className="flex items-center gap-2 flex-wrap">

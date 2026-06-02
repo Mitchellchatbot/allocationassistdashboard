@@ -427,6 +427,7 @@ export function DashboardLayout({ children, title: pageTitle, subtitle: pageSubt
                   <TooltipTrigger asChild>
                     <button
                       onClick={startHiTour}
+                      data-tour="topbar-tour-button"
                       className="hidden md:flex items-center gap-1.5 h-8 px-3 text-[11px] font-medium rounded-full border border-teal-200 bg-teal-50 text-teal-800 hover:bg-teal-100 hover:border-teal-300 transition-all duration-150 shadow-sm"
                       aria-label="Replay Hospital Introduction onboarding tour"
                     >
@@ -466,7 +467,7 @@ export function DashboardLayout({ children, title: pageTitle, subtitle: pageSubt
               </Tooltip>
               <Popover>
                 <PopoverTrigger asChild>
-                  <Button variant="ghost" size="icon" className="relative h-8 w-8 rounded-full">
+                  <Button variant="ghost" size="icon" data-tour="topbar-notifications" className="relative h-8 w-8 rounded-full">
                     <Bell className="h-3.5 w-3.5 text-muted-foreground" />
                     {unreadCount > 0 && (
                       <Badge className="absolute -top-0.5 -right-0.5 h-3.5 min-w-[14px] p-0 flex items-center justify-center text-[8px] animate-pulse">

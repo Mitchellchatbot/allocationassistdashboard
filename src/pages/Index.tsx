@@ -424,10 +424,12 @@ const Index = () => {
       {/* Pending Actions — surfaces flows that need a click before they go
           stale. Quiet/celebratory when there's nothing to do; surfaces stale
           and blocking work otherwise. */}
-      <PendingActionsCard />
+      <div data-tour="dashboard-pending">
+        <PendingActionsCard />
+      </div>
 
       {/* KPI Grid */}
-      <div className="grid grid-cols-2 sm:grid-cols-3 gap-4 mb-6">
+      <div className="grid grid-cols-2 sm:grid-cols-3 gap-4 mb-6" data-tour="dashboard-kpis">
         {zohoLoading
           ? Array.from({ length: 6 }).map((_, i) => (
               <div key={i} className="h-[88px] rounded-xl bg-muted/40 animate-pulse" />

@@ -73,12 +73,18 @@ export function OnboardingTourProvider({ children }: { children: ReactNode }) {
     setTourId(null);
   }, [tourId]);
 
+  // Guard against re-entry: when a tour step uses `route` to navigate to a
+  // page that ALSO auto-launches this same tour (e.g. step 3 navigates to
+  // /my-workspace, MyWorkspace's mount-effect calls start again because
+  // hasSeenTour is still false mid-tour). Without this guard the tour
+  // restarted from step 0 every time it crossed into /my-workspace.
   const start = useCallback((nextSteps: TourStep[], opts?: { id?: string }) => {
+    if (active && tourId && tourId === (opts?.id ?? null)) return;
     setSteps(nextSteps);
     setStepIdx(0);
     setTourId(opts?.id ?? null);
     setActive(true);
-  }, []);
+  }, [active, tourId]);
 
   // ESC to dismiss.
   useEffect(() => {
