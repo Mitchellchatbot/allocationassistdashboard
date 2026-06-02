@@ -33,6 +33,97 @@ type Contract = Record<string, unknown>;
 
 // ── Page metadata ─────────────────────────────────────────────────────────────
 
+// ── Static system reference ─────────────────────────────────────────────
+// Plain-English description of every page, flow, action, and term in the
+// dashboard. Cached with the rest of the system prompt (ephemeral cache)
+// so the AI can answer "how do I do X" / "what does this button do"
+// questions without us paying tokens for the same text on every request.
+//
+// Whenever a new page or flow ships, update this — the AI's "manual"
+// stays accurate with one edit.
+const SYSTEM_REFERENCE = `
+=== SYSTEM REFERENCE: HOW THE DASHBOARD WORKS ===
+
+WHO USES IT
+- HI (Hospital Introduction) team — 4 people: Rodaina Thabit, Mohamed Othman, Sohaila Mohamed, Ishak Boulaat. They move doctors from "applied" to "joined hospital".
+- Sales team — talks to incoming leads. Logs calls, qualifies, hands over to HI.
+- Admins — operations leadership. See everything.
+- Workers — narrow sales-tracker view only.
+
+ROLE-BASED ACCESS
+- hi_member: lands on /my-workspace. Pages allowed: /, /my-workspace, /automations, /doctor-profiles, /vacancies, /batches, /reports.
+- admin: every page.
+- sales: dashboard + sales + marketing + leads-pipeline + team + calls.
+- worker: only /worker.
+- finance: dashboard + /finance.
+
+PAGES
+- /                  Dashboard. Top KPIs, lead funnel, channel breakdown, pending-actions card.
+- /my-workspace      HI team member's home base. Tasks assigned to them, their doctors, their vacancies, recent activity, scoped notifications. Default landing for hi_member role.
+- /automations       The 7 HI flows. "Flow" tabs show active runs per flow. "Queues" admin tab surfaces every active run sitting at a manual-action stage. "Hospitals", "Templates", "Default Flow Editor" tabs configure the engine.
+- /doctor-profiles   Editor for doctor profile records — bio, specialty, license info, CV upload. Profile completion % drives readiness to send. CV parsing happens via Claude.
+- /vacancies         Open hospital roles with priority (high/medium/low). Click any row to see matching doctors. Link leads to vacancies from the Sales side.
+- /batches           Recurring sends: Daily duo (Mon-Fri, 2 profiles to all hospitals), Tuesday top 15 (mixed specialties), Specialty of the day (Wed-Fri, rotates ~60 specialties).
+- /reports           HI KPIs per team member, hospital relationship health (warming/cooling), per-flow funnel, doctors-on-the-way.
+- /contracts         Build + send contracts to doctors via BoldSign. Real recipients (not test mode).
+- /sales             Sales tracker with recruiter performance + lead pipeline + SLA breach indicators.
+- /leads-pipeline    Per-doctor stage view across the full pipeline. License status (DOH/DHA/MOH). Click "Link to vacancy" in expanded row to attach to an open role.
+- /marketing         Channel attribution (Meta / Website / LinkedIn / Referrals / etc.). Meta override cross-references emails to fix XXXX → Meta mis-tagging.
+- /meta-ads          Live Facebook Marketing API: spend, CPL, campaign ROI.
+- /finance           Revenue tracker — Closed Won deals, pipeline value, deal stages.
+- /team              Recruiter workload — who has the most leads + contact rate + high-priority follow-ups.
+- /connections       Wire Google Sheets / Excel files to dashboard tables. Pulls every hour via tick-scheduler.
+- /import-bulk       One-shot CSV imports for the 6 sheet types.
+- /settings          User management — invite users, set roles, set allowed pages.
+
+THE 7 AUTOMATION FLOWS
+1. onboarding — fires when finance confirms first payment. Sends qualification form + doc upload request to the doctor. 3-day reminder if incomplete.
+2. profile_sent — fires when team clicks "Send Profile" on a doctor. BCCs the chosen hospitals using the hospital-specific template. Also notifies the doctor that they were introduced. 7-day wait for hospital reply, then flagged for chase.
+3. shortlist — fires when team logs "hospital shortlisted this doctor". Sends shortlist-confirmation email to the doctor.
+4. interview — fires when team logs interview confirmed (with date/time/format). Sends combined tips + confirmation email to the doctor. 72h post-interview, system flags a chase reminder.
+5. contract_signing — fires when offer is extended. Opens Contract Builder (BoldSign envelope). When the doctor signs, boldsign-webhook auto-fires the relocation flow.
+6. relocation — fires after contract signed. Team picks the doctor's city → system sends the right city-specific relocation guide + attestation info.
+7. second_payment — fires +15d after joining_date is logged. Sends Plinky's welcome + invoice. Reminder cadence: 25 working days, day-before-due, weekly post-due until paid (escalates to FINAL letter with debt-collection threat).
+
+KEY ACTIONS / BUTTONS
+- "New batch" (Batches): creates a new daily/Tuesday/specialty batch and immediately swaps into the doctor-picker. Auto-pick top N ranks by readiness (CV uploaded, license info, recency).
+- "Resend" (Batches, past sends): re-fires the same batch to the same hospitals. Asks for confirmation.
+- "Cancel" (Batches, draft): deletes the batch outright. Tick-scheduler won't fire it.
+- "Send Profile" (Automations): 3-step wizard — pick doctor → select hospital(s) → preview → send. Multi-hospital uses BCC.
+- "Hospital replied?" (Run detail sheet, profile_sent): paste the hospital's reply text. Claude classifies (shortlisted / declined / wants more info) and advances the run.
+- "Pick city" (Run detail sheet, relocation): chooses which city's relocation guide to send.
+- "Reassign" (Run detail sheet, queue rows): dropdown with the 4 HI members + Unassigned. Updates assigned_to and logs a note in the timeline.
+- "Link to vacancy" (Leads Pipeline expanded row): attach this lead to an open vacancy. Inserts into vacancy_lead_links so HI sees the candidate.
+- "Sync now" (Connections row): force-re-pull a Google Sheet immediately, ignoring the cadence.
+- "Connect Google" (Connections): OAuth flow that grants Sheets + Drive read access. Once connected, sheets can be wired via the searchable picker.
+- "Run scheduler" (Automations header): manually fires the same job pg_cron runs every 5 min. Useful when you've just made a change and want to see it advance immediately.
+
+GLOSSARY
+- "stale" — an active flow run with no event in 7+ days. Surfaced in PendingActionsCard / My Workspace.
+- "assigned_to" — who's responsible for the next action on a run. Auto-derived from the hospital's owner_email when the run is created, falls back to created_by. Editable via Reassign.
+- "created_by" — who started the run. Never changes once set.
+- "doctors on the way" — signed but not joined yet. Per-doctor reminders + weekly digest (in progress).
+- "active runs" — status = 'active'. The run is in flight; tick-scheduler may still advance it.
+- "queue" — UI view of runs at a manual-action stage. Distinct from flow tab, which shows all runs for that flow.
+- "Mine / All team" toggle (Queues) — defaults to "Mine" for hi_member, "All" for admins.
+- "Daily duo" — Mon-Fri 10:30 AM batch: 2 doctors → all ~95 hospitals via BCC.
+- "Specialty of the day" — Wed-Fri batch rotating through ~60 specialties (cursor auto-advances after each send).
+- "Hospital health score" — 0–100 number per hospital. Warming = trending up. Cooling = trending down. Triggers relationship-health flags in Reports.
+- "Test recipient override" — MAIL_TEST_RECIPIENT_OVERRIDE env var on send-batch + send-flow-email. When set, all emails route to that address instead of real recipients. Currently shaheerkhosa6@gmail.com (test mode). Contracts via BoldSign do NOT honor the override — they go to real doctors.
+
+NAVIGATION TIPS
+- Cmd/Ctrl+K opens Universal Search across all entities (doctors, vacancies, flows, hospitals, batches, templates, pages).
+- Floating AI button (bottom right) opens this assistant. Closes via the X in the panel header.
+- Sidebar groups: Overview, Hospital Introduction, Sales, Growth, Admin. Each header is collapsible; HI/Admin collapsed by default.
+- The user is on the page: ${`{currentPage}`}. Tailor answers to that page when possible.
+
+WHEN USERS ASK "HOW DO I..."
+- Answer concretely: "Go to /vacancies, click the row, hit 'Link to vacancy' in the candidates panel."
+- Reference exact button labels, not paraphrases.
+- If a feature isn't built yet, say so plainly and point at the closest existing affordance.
+- If access is gated by role, mention it: "Only admins see this — you're on hi_member."
+`;
+
 const PAGE_LABELS: Record<string, string> = {
   '/':                 'Dashboard (Overview)',
   '/my-workspace':     'My Workspace',
@@ -594,6 +685,12 @@ Deno.serve(async (req: Request) => {
   ].join('\n');
 
   const contextBlock = [
+    // Static manual first — Anthropic's prompt cache treats the full
+    // systemText as one block, so placing the reference up top keeps the
+    // dynamic data below where it belongs while everything still benefits
+    // from the same cache.
+    SYSTEM_REFERENCE.replace('{currentPage}', pageLabel),
+    '',
     `CURRENT PAGE: ${pageLabel}`,
     `PAGE FOCUS: ${pageFocus}`,
     '',
@@ -660,6 +757,14 @@ Rules:
 - For recruiter questions: use the RECRUITER PERFORMANCE table and the ALL LEADS section filtered by that recruiter.
 - For financial questions: use the DEALS section.
 - For license questions: combine LICENSE PIPELINE counts with individual lead records.
+
+How-to questions / confused users — when the user asks "how do I…", "what does this button do", "where do I find X", or sounds lost:
+- Use the SYSTEM REFERENCE section as your manual. It documents every page, flow, button label, glossary term, and role-based access rule.
+- Answer concretely with exact button labels and page paths. Example: "Go to /vacancies, open the row, click Link to vacancy."
+- If a feature is gated by role, mention it. Example: "Only admins see /settings — you're on hi_member."
+- If a feature doesn't exist yet, say so plainly and point at the closest existing affordance.
+- For procedural questions, give numbered steps (1, 2, 3) — not prose paragraphs.
+- Keep how-to answers short. Most should fit in 3–6 lines.
 
 Hospital Introduction (HI) workflow context — when the question is about
 automations, vacancies, batches, hospital relationships, or "what's waiting":
