@@ -58,16 +58,11 @@ const QUEUE_DEFS: QueueDef[] = [
               && (r.current_stage === "awaiting_view" || r.current_stage === "awaiting_signature")
               && r.status === "active",
   },
-  {
-    key:   "forms-overdue",
-    title: "Onboarding forms outstanding",
-    blurb: "Welcome email sent — doctor hasn't completed the form yet",
-    icon:  AlarmClock,
-    accentBg: "bg-amber-50/50 border-amber-200",
-    match: r => r.flow_key === "onboarding"
-              && (r.current_stage === "wait_for_form" || r.current_stage === "reminder_form")
-              && r.status === "active",
-  },
+  // 'Onboarding forms outstanding' queue removed (Ammar 2026-06-03):
+  // Sales sends the intake form from Zoho now; HI team doesn't track
+  // form completion anymore. Any in-flight onboarding runs from before
+  // this change drain silently via cv-upload-public when the doctor
+  // uploads — they just don't surface in queues.
   {
     key:   "interviews-pending",
     title: "Interviews scheduled — chase 72h post-interview",
@@ -145,7 +140,7 @@ export function ApprovalQueues({ onSelectRun }: { onSelectRun: (runId: string) =
               onClick={() => setFlowFilter("all")}
               className={`px-2.5 py-1 rounded-full font-medium transition-colors ${flowFilter === "all" ? "bg-white text-slate-800 shadow-sm" : "text-slate-500 hover:text-slate-700"}`}
             >All flows</button>
-            {(["profile_sent", "relocation", "contract_signing", "onboarding", "interview"] as FlowKey[]).map(fk => (
+            {(["profile_sent", "relocation", "contract_signing", "interview"] as FlowKey[]).map(fk => (
               <button
                 key={fk}
                 type="button"

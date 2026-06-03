@@ -68,7 +68,10 @@ type TabKey = FlowKey | "settings" | "hospitals" | "templates" | "queues";
 
 export default function Automations() {
   const [searchParams, setSearchParams] = useSearchParams();
-  const initialFlow = (searchParams.get("flow") as TabKey | null) ?? "onboarding";
+  // Default tab is profile_sent now that Onboarding is hidden (Ammar
+  // 2026-06-03: Sales already sends the intake form from Zoho when a
+  // lead converts to Doctor on Board; our duplicate is removed).
+  const initialFlow = (searchParams.get("flow") as TabKey | null) ?? "profile_sent";
   const initialRunId = searchParams.get("run");
   const [activeFlow, setActiveFlow] = useState<TabKey>(initialFlow);
   const [selectedRunId, setSelectedRunId] = useState<string | null>(initialRunId);
@@ -240,8 +243,11 @@ export default function Automations() {
                       onSendProfile={key === "profile_sent" ? () => setSendProfileOpen(true) : undefined}
                       onSendContract={key === "contract_signing" ? () => setContractOpen(true) : undefined}
                       onTriggerFlow={
-                        key === "onboarding"     || key === "shortlist" ||
-                        key === "interview"      || key === "second_payment"
+                        // 'onboarding' intentionally absent — Sales sends
+                        // the intake email from Zoho now; we don't trigger
+                        // a duplicate from here (Ammar 2026-06-03).
+                        key === "shortlist" ||
+                        key === "interview" || key === "second_payment"
                           ? () => setTriggerFlow(key)
                           : undefined
                       }

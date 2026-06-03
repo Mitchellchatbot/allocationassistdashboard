@@ -248,8 +248,14 @@ export const FLOW_DEFINITIONS: Record<FlowKey, FlowDefinition> = {
   second_payment:   secondPayment,
 };
 
+// Onboarding is INTENTIONALLY excluded from FLOW_ORDER (Ammar 2026-06-03):
+// Sales already sends the intake form via Zoho on lead→Doctor-on-Board
+// conversion, so our parallel onboarding email was a duplicate. Removing
+// the flow from FLOW_ORDER hides the tab on the Automations page and
+// drops it from per-doctor lifecycle UIs. FLOW_DEFINITIONS still includes
+// it so any in-flight onboarding runs (created before this cleanup) still
+// render their stage diagram correctly while they drain to completion.
 export const FLOW_ORDER: FlowKey[] = [
-  "onboarding",
   "profile_sent",
   "shortlist",
   "interview",
