@@ -24,7 +24,7 @@ import {
 import {
   Workflow, Mail, AlertTriangle, Clock, ChevronRight, Settings, Save, StickyNote,
   Hospital as HospitalIcon, Send, Zap, FileSignature, RefreshCw, Inbox, CalendarCheck,
-  Sparkles, X as XIcon, CheckCircle2,
+  Sparkles, X as XIcon, CheckCircle2, Briefcase,
 } from "lucide-react";
 import { toast } from "sonner";
 import { useQueryClient } from "@tanstack/react-query";
@@ -652,6 +652,21 @@ function RunDetailSheet({ run, open, onClose }: { run: FlowRun | null; open: boo
             </div>
             <div className="flex items-center gap-2 shrink-0">
               <ReassignButton runId={run.id} currentAssignee={run.assigned_to} />
+              {/* Track placement — deep-links to Reports → Placements
+                  with this doctor's editor pre-opened. Useful when a
+                  hospital reply confirms an offer or a join date; the
+                  team can log the milestone without losing context. */}
+              <Button
+                size="sm"
+                variant="outline"
+                onClick={() => {
+                  window.location.href = `/reports?placement=${encodeURIComponent(run.doctor_id ?? "")}`;
+                }}
+                title="Jump to Placements with this doctor's milestones open"
+              >
+                <Briefcase className="h-3.5 w-3.5 mr-1.5 text-emerald-600" />
+                Track placement
+              </Button>
               {showClassifyReply && (
                 <Button
                   size="sm"

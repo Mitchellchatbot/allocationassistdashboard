@@ -17,8 +17,9 @@
  * Surfaces as the right-most status pill so the team can spot rows
  * that need a payment chase.
  */
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { useQuery } from "@tanstack/react-query";
+import { useSearchParams } from "react-router-dom";
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "@/components/ui/card";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import { Badge } from "@/components/ui/badge";
@@ -91,7 +92,54 @@ function PaymentStatus({ row }: { row: PlacementRow }) {
 export function PlacementsCard() {
   const { data: rows = [], isLoading } = usePlacements();
   const [editingId, setEditingId] = useState<string | null>(null);
-  const editing = useMemo(() => rows.find(r => r.doctor_id === editingId) ?? null, [rows, editingId]);
+  const [searchParams, setSearchParams] = useSearchParams();
+
+  // Deep-link: /reports?placement=<doctor_id> opens the milestone
+  // editor for that doctor (used from the Run Detail Sheet's
+  // "Track placement" button). If the doctor has no lifecycle row yet
+  // (no milestones logged), the editor still opens via a synthetic
+  // empty placement row so the team can log the FIRST milestone.
+  useEffect(() => {
+    const queryId = searchParams.get("placement");
+    if (queryId && queryId !== editingId) {
+      setEditingId(queryId);
+      // Strip the query so reload-after-close doesn't reopen.
+      const next = new URLSearchParams(searchParams);
+      next.delete("placement");
+      setSearchParams(next, { replace: true });
+    }
+  }, [searchParams, editingId, setSearchParams]);
+
+  const editing = useMemo<PlacementRow | null>(() => {
+    if (!editingId) return null;
+    const existing = rows.find(r => r.doctor_id === editingId);
+    if (existing) return existing;
+    // Synthetic empty row for first-time milestone logging from a
+    // deep-link.
+    return {
+      doctor_id:               editingId,
+      doctor_name:             null,
+      shortlisted_at:          null,
+      interviewed_at:          null,
+      offered_at:              null,
+      signed_at:               null,
+      start_date:              null,
+      joined_at:               null,
+      approved_at:             null,
+      paid_at:                 null,
+      placement_hospital_id:   null,
+      placement_hospital_name: null,
+      eligible_for_sending:    true,
+      unavailable:             false,
+      unavailable_reason:      null,
+      available_check_in_at:   null,
+      last_availability_ping_at: null,
+      notes:                   null,
+      updated_by:              null,
+      created_at:              new Date().toISOString(),
+      updated_at:              new Date().toISOString(),
+    };
+  }, [rows, editingId]);
 
   return (
     <Card>
