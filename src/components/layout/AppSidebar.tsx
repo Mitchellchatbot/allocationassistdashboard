@@ -88,6 +88,7 @@ const NAV_SECTIONS: NavSection[] = [
       { title: "Vacancies",       url: "/vacancies",       icon: ClipboardList },
       { title: "Batch Sends",     url: "/batches",         icon: Mailbox },
       { title: "Reports",         url: "/reports",         icon: BarChart3 },
+      { title: "Forms",           url: "/forms",           icon: ClipboardList },
     ],
   },
   {
@@ -117,7 +118,6 @@ const ADMIN_SECTION: NavSection = {
   label: "Admin",
   accent: "#fb7185",  // vivid rose
   items: [
-    { title: "Forms",        url: "/forms",       icon: ClipboardList },
     { title: "Connections",  url: "/connections", icon: Link2 },
     { title: "Bulk Import",  url: "/import-bulk", icon: Upload },
     { title: "Import Data",  url: "/import",      icon: Upload },

@@ -37,6 +37,7 @@ export const HI_MEMBER_PAGES = [
   "/vacancies",
   "/batches",
   "/reports",
+  "/forms",
 ];
 
 // Role presets — selected in the Add User dialog

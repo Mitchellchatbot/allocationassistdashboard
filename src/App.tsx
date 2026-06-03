@@ -108,7 +108,7 @@ function ProtectedShell() {
  *  utility routes share the dashboard gate ("/" — admin-only) since they
  *  don't have their own row in the user_pages config. */
 function requiredPageForPath(pathname: string): string {
-  if (pathname === "/import" || pathname === "/contracts" || pathname === "/import-bulk" || pathname === "/connections" || pathname === "/forms") return "/";
+  if (pathname === "/import" || pathname === "/contracts" || pathname === "/import-bulk" || pathname === "/connections") return "/";
   return pathname;
 }
 

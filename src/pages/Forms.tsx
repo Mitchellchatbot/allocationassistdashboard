@@ -1,15 +1,20 @@
 /**
- * Forms page — manage external forms (Typeform now, others later)
- * and view their submissions inline.
+ * Forms page — tabbed view, one tab per registered form.
  *
- * Left column: list of registered forms. Click one → right column
- * shows submission history with each answer rendered as a key/value
- * row.
+ * Each tab shows for that form:
+ *   - Headline KPIs (total responses, this week, last 7d trend)
+ *   - Submission timeline (live; realtime sub on form_responses)
+ *   - Per-question response distribution for choice-type fields
+ *   - Webhook URL + secret for the form (so it can be re-pasted into
+ *     Elementor / Typeform if the webhook ever gets deleted)
  *
- * "Connect form" button opens a dialog that captures the Typeform
- * URL + display name, extracts the form_id from the URL, mints a
- * webhook secret, then shows the exact webhook URL + secret to paste
- * into Typeform's webhook settings.
+ * Per-provider action buttons:
+ *   - Typeform: "Sync historical responses" — requires a PAT.
+ *   - Elementor: nothing automatic; just shows the webhook URL to
+ *     paste into Elementor's webhook action.
+ *
+ * Last tab is "+ Connect new" which opens the dialog to add a fresh
+ * Typeform / Elementor form.
  */
 import { useMemo, useState } from "react";
 import { DashboardLayout } from "@/components/layout/DashboardLayout";
@@ -18,20 +23,29 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Badge } from "@/components/ui/badge";
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from "@/components/ui/dialog";
-import { ClipboardList, Plus, ExternalLink, Copy, CheckCircle2, AlertCircle, Trash2, Inbox, ChevronRight } from "lucide-react";
+import { Tabs, TabsList, TabsTrigger, TabsContent } from "@/components/ui/tabs";
 import {
-  useForms, useFormResponses, useCreateForm, useDeleteForm, generateWebhookSecret,
+  ClipboardList, Plus, ExternalLink, Copy, CheckCircle2, AlertCircle,
+  Trash2, Inbox, ChevronRight, History, Sparkles, Mail, User as UserIcon, RefreshCw,
+} from "lucide-react";
+import {
+  useForms, useFormResponses, useCreateForm, useUpdateForm, useDeleteForm,
+  useSyncTypeformHistory, generateWebhookSecret,
   type Form, type FormResponse,
 } from "@/hooks/use-forms";
 import { toast } from "sonner";
+import { supabase } from "@/lib/supabase";
 
 const supabaseUrl = (import.meta.env.VITE_SUPABASE_URL as string) ?? "";
-const WEBHOOK_URL = `${supabaseUrl}/functions/v1/typeform-webhook`;
 
-/** Extract a Typeform form ID from a URL like:
- *    https://form.typeform.com/to/AbCdEfGh
- *    https://yourname.typeform.com/to/AbCdEfGh
- *  Returns null if the URL doesn't match. */
+function webhookUrlFor(form: Form): string {
+  if (form.provider === "typeform") {
+    return `${supabaseUrl}/functions/v1/typeform-webhook`;
+  }
+  // Elementor / generic: identifies the form by webhook_secret in URL.
+  return `${supabaseUrl}/functions/v1/form-webhook?key=${form.webhook_secret ?? ""}`;
+}
+
 function extractTypeformId(url: string): string | null {
   const m = url.trim().match(/typeform\.com\/to\/([a-zA-Z0-9]+)/);
   return m ? m[1] : null;
@@ -39,16 +53,16 @@ function extractTypeformId(url: string): string | null {
 
 export default function Forms() {
   const { data: forms = [], isLoading } = useForms();
-  const [selectedId, setSelectedId] = useState<string | null>(null);
+  const [activeId, setActiveId] = useState<string | null>(null);
   const [createOpen, setCreateOpen] = useState(false);
 
-  const selected = useMemo(() => forms.find(f => f.id === selectedId) ?? null, [forms, selectedId]);
+  // Default to first form; ensure activeId is always one that exists.
+  const safeActiveId = useMemo(() => {
+    if (activeId && forms.some(f => f.id === activeId)) return activeId;
+    return forms[0]?.id ?? null;
+  }, [forms, activeId]);
 
-  // Auto-select first form so the page never shows an empty right
-  // pane after the initial load.
-  if (!selectedId && forms.length > 0) {
-    setSelectedId(forms[0].id);
-  }
+  const active = useMemo(() => forms.find(f => f.id === safeActiveId) ?? null, [forms, safeActiveId]);
 
   return (
     <DashboardLayout>
@@ -60,76 +74,45 @@ export default function Forms() {
               Forms
             </h1>
             <p className="text-sm text-muted-foreground mt-1">
-              Typeform + future external forms wired into the dashboard. Each form submission lands here as a row; emails matched to a Zoho lead/DoB get linked automatically.
+              Live form submissions from Typeform + Elementor. Each tab shows analytics + every response for one form. Emails matched to a Zoho lead/DoB get linked automatically.
             </p>
           </div>
           <Button size="sm" onClick={() => setCreateOpen(true)}>
-            <Plus className="h-3.5 w-3.5 mr-1" /> Connect a Typeform
+            <Plus className="h-3.5 w-3.5 mr-1" /> Connect new form
           </Button>
         </div>
 
-        <div className="grid grid-cols-1 lg:grid-cols-3 gap-4">
-          {/* Left: list of forms */}
-          <Card className="lg:col-span-1">
-            <CardHeader className="pb-2">
-              <CardTitle className="text-[13px] flex items-center justify-between">
-                <span>Connected forms</span>
-                <Badge variant="outline" className="text-[10px] bg-slate-50">{forms.length}</Badge>
-              </CardTitle>
-            </CardHeader>
-            <CardContent className="p-0">
-              {isLoading ? (
-                <div className="px-4 py-6 text-[11px] text-muted-foreground">Loading…</div>
-              ) : forms.length === 0 ? (
-                <div className="px-4 py-8 text-center text-[12px] text-muted-foreground">
-                  <ClipboardList className="h-5 w-5 mx-auto mb-2 text-muted-foreground/60" />
-                  <p>No forms connected yet.</p>
-                  <Button size="sm" variant="outline" onClick={() => setCreateOpen(true)} className="mt-3">
-                    <Plus className="h-3.5 w-3.5 mr-1" /> Connect your first form
-                  </Button>
-                </div>
-              ) : (
-                <div className="divide-y">
-                  {forms.map(f => (
-                    <button
-                      key={f.id}
-                      onClick={() => setSelectedId(f.id)}
-                      className={`w-full text-left px-4 py-3 hover:bg-slate-50 transition-colors ${selectedId === f.id ? "bg-teal-50/40 border-l-2 border-teal-500" : ""}`}
-                    >
-                      <div className="flex items-center justify-between gap-2">
-                        <div className="text-[12px] font-medium text-slate-800 truncate">{f.name}</div>
-                        <Badge variant="outline" className="text-[9px] bg-white shrink-0">
-                          {f.response_count}
-                        </Badge>
-                      </div>
-                      <div className="text-[10px] text-muted-foreground mt-0.5 truncate">
-                        {f.description ?? `${f.provider} · ${f.form_type}`}
-                      </div>
-                      {f.last_response_at && (
-                        <div className="text-[10px] text-muted-foreground/80 mt-0.5">
-                          Last submission · {relativeTime(f.last_response_at)}
-                        </div>
-                      )}
-                    </button>
-                  ))}
-                </div>
-              )}
+        {isLoading ? (
+          <Card><CardContent className="py-8 text-[12px] text-muted-foreground">Loading forms…</CardContent></Card>
+        ) : forms.length === 0 ? (
+          <Card>
+            <CardContent className="py-12 text-center text-[12px] text-muted-foreground">
+              <ClipboardList className="h-6 w-6 mx-auto mb-2 text-muted-foreground/60" />
+              <p>No forms connected yet.</p>
+              <Button size="sm" onClick={() => setCreateOpen(true)} className="mt-3">
+                <Plus className="h-3.5 w-3.5 mr-1" /> Connect your first form
+              </Button>
             </CardContent>
           </Card>
+        ) : (
+          <Tabs value={safeActiveId ?? undefined} onValueChange={setActiveId}>
+            <TabsList className="flex w-full overflow-x-auto h-auto py-1 bg-slate-100 justify-start">
+              {forms.map(f => (
+                <TabsTrigger key={f.id} value={f.id} className="text-[12px] px-3 py-1.5 flex items-center gap-1.5">
+                  <ProviderDot provider={f.provider} />
+                  {f.name}
+                  <Badge variant="outline" className="ml-1 bg-white border-slate-200 text-[9px]">{f.response_count}</Badge>
+                </TabsTrigger>
+              ))}
+            </TabsList>
 
-          {/* Right: selected form's responses */}
-          <div className="lg:col-span-2">
-            {selected ? (
-              <FormDetail form={selected} />
-            ) : (
-              <Card>
-                <CardContent className="py-12 text-center text-[12px] text-muted-foreground">
-                  Select a form on the left to see its submissions.
-                </CardContent>
-              </Card>
-            )}
-          </div>
-        </div>
+            {forms.map(f => (
+              <TabsContent key={f.id} value={f.id} className="mt-3">
+                {active?.id === f.id && <FormDetail form={f} />}
+              </TabsContent>
+            ))}
+          </Tabs>
+        )}
 
         <ConnectFormDialog open={createOpen} onClose={() => setCreateOpen(false)} />
       </div>
@@ -137,13 +120,22 @@ export default function Forms() {
   );
 }
 
+function ProviderDot({ provider }: { provider: string }) {
+  const cls =
+    provider === "typeform"   ? "bg-purple-500" :
+    provider === "elementor"  ? "bg-pink-500"   :
+                                "bg-slate-400";
+  return <span className={`inline-block h-1.5 w-1.5 rounded-full ${cls}`} title={provider} />;
+}
+
 /* ────────────────────────────────────────────────────────────────────
- * FormDetail — header + response timeline.
+ * FormDetail — analytics + submission feed for one form.
  * ──────────────────────────────────────────────────────────────────── */
 function FormDetail({ form }: { form: Form }) {
   const { data: responses = [], isLoading } = useFormResponses(form.id);
   const del = useDeleteForm();
-  const [secretShown, setSecretShown] = useState(false);
+
+  const analytics = useMemo(() => computeAnalytics(responses), [responses]);
 
   const handleDelete = async () => {
     if (!confirm(`Delete "${form.name}"? All ${form.response_count} response${form.response_count === 1 ? "" : "s"} will be lost.`)) return;
@@ -156,70 +148,239 @@ function FormDetail({ form }: { form: Form }) {
   };
 
   return (
-    <Card>
-      <CardHeader className="pb-2">
-        <div className="flex items-start justify-between gap-3 flex-wrap">
-          <div>
-            <CardTitle className="text-[14px] flex items-center gap-2">
-              {form.name}
-              {form.active ? null : <Badge variant="outline" className="text-[9px] bg-amber-50 text-amber-700 border-amber-200">Inactive</Badge>}
-            </CardTitle>
-            <CardDescription className="text-[11px]">
-              {form.description ?? "—"} · {form.provider} · form id <code className="text-[10px] bg-slate-100 px-1 rounded">{form.provider_form_id}</code>
-            </CardDescription>
+    <div className="space-y-3">
+      {/* Header row */}
+      <Card>
+        <CardHeader className="pb-3">
+          <div className="flex items-start justify-between gap-3 flex-wrap">
+            <div>
+              <CardTitle className="text-[14px] flex items-center gap-2">
+                <ProviderDot provider={form.provider} />
+                {form.name}
+                <Badge variant="outline" className="text-[9px] uppercase tracking-wider bg-slate-50">{form.provider}</Badge>
+              </CardTitle>
+              <CardDescription className="text-[11px]">
+                {form.description ?? "—"}
+                {form.provider_form_id && <> · form id <code className="text-[10px] bg-slate-100 px-1 rounded">{form.provider_form_id}</code></>}
+              </CardDescription>
+            </div>
+            <div className="flex items-center gap-2 flex-wrap">
+              {form.public_url && (
+                <a href={form.public_url} target="_blank" rel="noreferrer">
+                  <Button size="sm" variant="outline">
+                    <ExternalLink className="h-3.5 w-3.5 mr-1" /> Open form
+                  </Button>
+                </a>
+              )}
+              {form.provider === "typeform" && <TypeformSyncButton form={form} />}
+              <Button size="sm" variant="outline" onClick={handleDelete} className="text-rose-600 hover:bg-rose-50 hover:text-rose-700" title="Delete this form and all its submissions">
+                <Trash2 className="h-3.5 w-3.5" />
+              </Button>
+            </div>
           </div>
-          <div className="flex items-center gap-2">
-            {form.public_url && (
-              <a href={form.public_url} target="_blank" rel="noreferrer">
-                <Button size="sm" variant="outline">
-                  <ExternalLink className="h-3.5 w-3.5 mr-1" /> Open form
-                </Button>
-              </a>
-            )}
-            <Button size="sm" variant="outline" onClick={handleDelete} className="text-rose-600 hover:bg-rose-50 hover:text-rose-700">
-              <Trash2 className="h-3.5 w-3.5" />
-            </Button>
-          </div>
-        </div>
-      </CardHeader>
-      <CardContent className="space-y-3">
-        {/* Webhook hint — surfaces the URL + secret on every form so
-            the team can re-paste into Typeform if they ever recreate
-            the webhook. */}
-        <div className="rounded-md border bg-slate-50/50 px-3 py-2 text-[11px]">
-          <div className="flex items-center justify-between">
-            <span className="font-medium text-slate-700">Webhook details</span>
-            <button onClick={() => setSecretShown(s => !s)} className="text-[10px] text-teal-700 hover:underline">
-              {secretShown ? "Hide" : "Show"} secret
-            </button>
-          </div>
-          <div className="mt-1 grid grid-cols-1 sm:grid-cols-[100px_1fr] gap-x-3 gap-y-1 items-center">
-            <span className="text-muted-foreground">URL</span>
-            <CopyableCode value={WEBHOOK_URL} />
-            <span className="text-muted-foreground">Secret</span>
-            <CopyableCode value={secretShown ? (form.webhook_secret ?? "(not set)") : "••••••••••••••••"} canCopy={secretShown && !!form.webhook_secret} />
-          </div>
-        </div>
+        </CardHeader>
+      </Card>
 
-        {/* Responses */}
-        <div className="text-[11px] font-medium text-slate-700">
-          Submissions · {responses.length}
-        </div>
-        {isLoading ? (
-          <div className="text-[11px] text-muted-foreground py-3">Loading submissions…</div>
-        ) : responses.length === 0 ? (
-          <div className="rounded-md border border-dashed py-8 text-center">
-            <Inbox className="h-5 w-5 mx-auto mb-2 text-muted-foreground/60" />
-            <p className="text-[12px] text-muted-foreground">No submissions yet.</p>
-            <p className="text-[10px] text-muted-foreground/80 mt-1">When someone fills out the form, it'll land here within seconds.</p>
+      {/* Analytics strip */}
+      <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
+        <Kpi label="Total submissions"     value={analytics.total}      tone="slate" />
+        <Kpi label="This week"              value={analytics.thisWeek}   tone="emerald" />
+        <Kpi label="Last 7 days"            value={analytics.last7Days}  tone="sky"     hint={`vs ${analytics.priorWindow} prior 7d`} />
+        <Kpi label="Auto-linked to Zoho"    value={analytics.linkedCount} tone="indigo" hint={`${Math.round((analytics.linkedCount / Math.max(analytics.total, 1)) * 100)}% matched`} />
+      </div>
+
+      {/* Top questions / answer distributions */}
+      <div className="grid grid-cols-1 lg:grid-cols-2 gap-3">
+        <Card>
+          <CardHeader className="pb-2">
+            <CardTitle className="text-[13px]">Top questions</CardTitle>
+            <CardDescription className="text-[11px]">Questions with the most answers, by frequency of distinct values.</CardDescription>
+          </CardHeader>
+          <CardContent>
+            {analytics.questions.length === 0 ? (
+              <p className="text-[11px] text-muted-foreground">No questions detected yet.</p>
+            ) : (
+              <div className="space-y-2">
+                {analytics.questions.slice(0, 6).map(q => (
+                  <div key={q.question} className="text-[11px]">
+                    <div className="flex items-center justify-between gap-2">
+                      <span className="font-medium truncate text-slate-800">{q.question}</span>
+                      <span className="text-muted-foreground shrink-0">{q.answeredCount} answered</span>
+                    </div>
+                    {q.topAnswers.length > 0 && (
+                      <div className="flex flex-wrap gap-1 mt-1">
+                        {q.topAnswers.slice(0, 5).map(a => (
+                          <Badge key={a.value} variant="outline" className="text-[9px] bg-slate-50 truncate max-w-[180px]">
+                            {a.value} · {a.count}
+                          </Badge>
+                        ))}
+                        {q.distinct > 5 && (
+                          <Badge variant="outline" className="text-[9px] bg-white text-muted-foreground">+{q.distinct - 5} more</Badge>
+                        )}
+                      </div>
+                    )}
+                  </div>
+                ))}
+              </div>
+            )}
+          </CardContent>
+        </Card>
+
+        {/* Webhook details */}
+        <Card>
+          <CardHeader className="pb-2">
+            <CardTitle className="text-[13px]">Webhook</CardTitle>
+            <CardDescription className="text-[11px]">
+              {form.provider === "typeform"
+                ? "Paste this URL + secret into Typeform → Connect → Webhooks if you ever recreate the webhook."
+                : "Paste this URL into the Elementor form's 'Webhook' action. The key in the URL identifies this form — keep it secret."}
+            </CardDescription>
+          </CardHeader>
+          <CardContent className="space-y-1.5 text-[11px]">
+            <FieldRow label="URL"    value={webhookUrlFor(form)} />
+            {form.provider === "typeform" && (
+              <FieldRow label="Secret" value={form.webhook_secret ?? "(none)"} masked />
+            )}
+          </CardContent>
+        </Card>
+      </div>
+
+      {/* Submission feed */}
+      <Card>
+        <CardHeader className="pb-2">
+          <CardTitle className="text-[13px]">Submissions · {responses.length}</CardTitle>
+          <CardDescription className="text-[11px]">Newest first. Click any row to expand the full answer set.</CardDescription>
+        </CardHeader>
+        <CardContent className="space-y-2">
+          {isLoading ? (
+            <p className="text-[11px] text-muted-foreground py-2">Loading submissions…</p>
+          ) : responses.length === 0 ? (
+            <div className="rounded-md border border-dashed py-8 text-center">
+              <Inbox className="h-5 w-5 mx-auto mb-2 text-muted-foreground/60" />
+              <p className="text-[12px] text-muted-foreground">No submissions yet.</p>
+              <p className="text-[10px] text-muted-foreground/80 mt-1">
+                {form.provider === "typeform"
+                  ? "Once the webhook is active in Typeform, submissions appear here within seconds. Or click 'Sync history' to backfill past responses."
+                  : "Once the webhook URL is wired into Elementor, submissions appear here within seconds."}
+              </p>
+            </div>
+          ) : (
+            responses.map(r => <ResponseRow key={r.id} response={r} />)
+          )}
+        </CardContent>
+      </Card>
+    </div>
+  );
+}
+
+/** "Sync historical responses" button — Typeform only. Asks for a PAT
+ *  on first use, stores it on forms.api_token. */
+function TypeformSyncButton({ form }: { form: Form }) {
+  const sync   = useSyncTypeformHistory();
+  const update = useUpdateForm();
+  const [open, setOpen] = useState(false);
+  const [token, setToken] = useState("");
+
+  const hasToken = !!form.api_token;
+
+  const handleStart = () => {
+    if (!hasToken) {
+      setOpen(true);
+      return;
+    }
+    runSync();
+  };
+
+  const runSync = async () => {
+    try {
+      const r = await sync.mutateAsync(form.id);
+      toast.success(`Synced — fetched ${r.fetched}, ${r.inserted} new${r.skipped > 0 ? `, ${r.skipped} skipped` : ""}.`);
+    } catch (e) {
+      toast.error(e instanceof Error ? e.message : "Sync failed");
+    }
+  };
+
+  const handleSaveToken = async () => {
+    if (!token.trim()) return;
+    try {
+      await update.mutateAsync({ id: form.id, patch: { api_token: token.trim() } });
+      setOpen(false);
+      setToken("");
+      // Auto-run the sync now that the token is in place.
+      await runSync();
+    } catch (e) {
+      toast.error(e instanceof Error ? e.message : "Couldn't save token");
+    }
+  };
+
+  return (
+    <>
+      <Button size="sm" variant="outline" onClick={handleStart} disabled={sync.isPending}>
+        {sync.isPending ? <RefreshCw className="h-3.5 w-3.5 mr-1 animate-spin" /> : <History className="h-3.5 w-3.5 mr-1" />}
+        {sync.isPending ? "Syncing…" : "Sync history"}
+      </Button>
+
+      <Dialog open={open} onOpenChange={v => !v && setOpen(false)}>
+        <DialogContent className="sm:max-w-[480px]">
+          <DialogHeader>
+            <DialogTitle className="flex items-center gap-2 text-[14px]">
+              <History className="h-4 w-4 text-teal-600" />
+              Typeform Personal Access Token
+            </DialogTitle>
+            <p className="text-[11px] text-muted-foreground">
+              To pull historical responses we call Typeform's API. Generate a token at <a href="https://admin.typeform.com/account#/section/tokens" target="_blank" rel="noreferrer" className="text-teal-700 hover:underline">admin.typeform.com → Personal tokens</a> and paste it below. Stored encrypted-at-rest in our DB.
+            </p>
+          </DialogHeader>
+          <div className="space-y-2 py-1">
+            <label className="text-[11px] font-medium text-muted-foreground">Personal Access Token</label>
+            <Input value={token} onChange={e => setToken(e.target.value)} placeholder="tfp_..." type="password" />
+            <p className="text-[10px] text-muted-foreground/80">Only the "Responses → Read" scope is needed.</p>
           </div>
-        ) : (
-          <div className="space-y-2">
-            {responses.map(r => <ResponseRow key={r.id} response={r} />)}
-          </div>
+          <DialogFooter>
+            <Button variant="outline" onClick={() => setOpen(false)}>Cancel</Button>
+            <Button onClick={handleSaveToken} disabled={!token.trim()}>Save & sync</Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+    </>
+  );
+}
+
+function FieldRow({ label, value, masked = false }: { label: string; value: string; masked?: boolean }) {
+  const [shown, setShown] = useState(false);
+  const display = masked && !shown ? "•".repeat(Math.min(32, value.length)) : value;
+  const handleCopy = () => { navigator.clipboard.writeText(value); toast.success("Copied."); };
+  return (
+    <div className="grid grid-cols-[80px_1fr] gap-2 items-center">
+      <span className="text-muted-foreground text-[10px] uppercase tracking-wider">{label}</span>
+      <div className="flex items-center gap-1">
+        <code className="flex-1 truncate text-[10px] bg-slate-100 px-2 py-1 rounded">{display}</code>
+        {masked && (
+          <button onClick={() => setShown(s => !s)} className="text-[10px] text-teal-700 hover:underline shrink-0">
+            {shown ? "Hide" : "Show"}
+          </button>
         )}
-      </CardContent>
-    </Card>
+        <button onClick={handleCopy} className="text-slate-500 hover:text-slate-800 shrink-0">
+          <Copy className="h-3 w-3" />
+        </button>
+      </div>
+    </div>
+  );
+}
+
+function Kpi({ label, value, tone, hint }: { label: string; value: number; tone: "slate" | "emerald" | "sky" | "indigo"; hint?: string }) {
+  const cls = {
+    slate:   "bg-slate-50 text-slate-700",
+    emerald: "bg-emerald-50 text-emerald-700",
+    sky:     "bg-sky-50 text-sky-700",
+    indigo:  "bg-indigo-50 text-indigo-700",
+  }[tone];
+  return (
+    <div className={`rounded-md border ${cls} px-3 py-3`}>
+      <div className="text-[10px] uppercase tracking-wider opacity-80">{label}</div>
+      <div className="text-[24px] font-semibold mt-1 leading-none">{value}</div>
+      {hint && <div className="text-[10px] opacity-70 mt-1">{hint}</div>}
+    </div>
   );
 }
 
@@ -236,11 +397,17 @@ function ResponseRow({ response }: { response: FormResponse }) {
       >
         <ChevronRight className={`h-3.5 w-3.5 text-slate-400 shrink-0 transition-transform ${open ? "rotate-90" : ""}`} />
         <div className="flex-1 min-w-0">
-          <div className="text-[12px] font-medium text-slate-800 truncate">
+          <div className="text-[12px] font-medium text-slate-800 truncate flex items-center gap-1">
+            {response.respondent_name ? <UserIcon className="h-3 w-3 text-slate-400 shrink-0" /> : response.respondent_email ? <Mail className="h-3 w-3 text-slate-400 shrink-0" /> : null}
             {response.respondent_name ?? response.respondent_email ?? "Anonymous submission"}
           </div>
           <div className="text-[10px] text-muted-foreground truncate">{summary || "—"}</div>
         </div>
+        {response.doctor_id && (
+          <Badge variant="outline" className="text-[9px] bg-emerald-50 text-emerald-700 border-emerald-200 shrink-0">
+            <Sparkles className="h-2.5 w-2.5 mr-0.5" /> Zoho linked
+          </Badge>
+        )}
         <div className="text-[10px] text-muted-foreground shrink-0">{relativeTime(response.submitted_at)}</div>
       </button>
       {open && (
@@ -256,9 +423,9 @@ function ResponseRow({ response }: { response: FormResponse }) {
             ))
           )}
           {response.doctor_id && (
-            <div className="text-[10px] text-teal-700 mt-2 inline-flex items-center gap-1">
+            <div className="text-[10px] text-emerald-700 mt-2 inline-flex items-center gap-1">
               <CheckCircle2 className="h-3 w-3" />
-              Linked to <code className="text-[10px] bg-teal-50 px-1 rounded">{response.doctor_id}</code>
+              Linked to <code className="text-[10px] bg-emerald-50 px-1 rounded">{response.doctor_id}</code>
             </div>
           )}
         </div>
@@ -267,52 +434,37 @@ function ResponseRow({ response }: { response: FormResponse }) {
   );
 }
 
-function CopyableCode({ value, canCopy = true }: { value: string; canCopy?: boolean }) {
-  const handleCopy = () => {
-    navigator.clipboard.writeText(value);
-    toast.success("Copied.");
-  };
-  return (
-    <div className="inline-flex items-center gap-1 bg-white border rounded px-2 py-1 text-[10px] font-mono">
-      <span className="truncate max-w-[360px]">{value}</span>
-      {canCopy && (
-        <button type="button" onClick={handleCopy} className="text-slate-500 hover:text-slate-800">
-          <Copy className="h-3 w-3" />
-        </button>
-      )}
-    </div>
-  );
-}
-
 /* ────────────────────────────────────────────────────────────────────
- * Connect form dialog.
+ * Connect a new form dialog — Typeform or Elementor.
  * ──────────────────────────────────────────────────────────────────── */
 function ConnectFormDialog({ open, onClose }: { open: boolean; onClose: () => void }) {
   const create = useCreateForm();
-  const [name, setName]               = useState("");
+  const [provider, setProvider] = useState<"typeform" | "elementor">("typeform");
+  const [name, setName]         = useState("");
   const [description, setDescription] = useState("");
-  const [url, setUrl]                 = useState("");
-  const [formType, setFormType]       = useState("custom");
-  const [done, setDone]               = useState<Form | null>(null);
+  const [url, setUrl]           = useState("");
+  const [formType, setFormType] = useState("custom");
+  const [done, setDone]         = useState<Form | null>(null);
 
   const reset = () => {
-    setName(""); setDescription(""); setUrl(""); setFormType("custom"); setDone(null);
+    setProvider("typeform"); setName(""); setDescription(""); setUrl(""); setFormType("custom"); setDone(null);
   };
   const handleClose = () => { reset(); onClose(); };
 
-  const formId = extractTypeformId(url);
+  const formId = provider === "typeform" ? extractTypeformId(url) : null;
+  const canCreate = name.trim() && (provider === "elementor" || !!formId);
 
   const handleCreate = async () => {
-    if (!name.trim() || !formId) return;
+    if (!canCreate) return;
     const secret = generateWebhookSecret();
     try {
       const created = await create.mutateAsync({
         name: name.trim(),
         description: description.trim() || null,
         form_type: formType.trim() || "custom",
-        provider: "typeform",
+        provider,
         provider_form_id: formId,
-        public_url: url.trim(),
+        public_url: url.trim() || null,
         webhook_secret: secret,
       });
       setDone(created);
@@ -327,71 +479,66 @@ function ConnectFormDialog({ open, onClose }: { open: boolean; onClose: () => vo
         <DialogHeader>
           <DialogTitle className="flex items-center gap-2 text-[14px]">
             <ClipboardList className="h-4 w-4 text-teal-600" />
-            {done ? "Form connected — finish setup in Typeform" : "Connect a Typeform"}
+            {done ? "Form connected — finish setup with the form provider" : "Connect a form"}
           </DialogTitle>
           <p className="text-[11px] text-muted-foreground">
             {done
-              ? "Last step: open Typeform's webhook settings for this form, paste the URL + secret below, and you're done."
-              : "Paste the Typeform URL — we extract the form ID, mint a webhook secret, and give you the exact URL to wire up."}
+              ? "Last step: paste the webhook URL into the form provider's webhook settings. We'll catch every submission and surface it here."
+              : "Typeform or Elementor. We'll generate the webhook URL + secret and walk you through where to paste them."}
           </p>
         </DialogHeader>
 
         {!done ? (
           <div className="space-y-3 py-1">
             <div className="space-y-1">
-              <label className="text-[11px] font-medium text-muted-foreground">Typeform URL</label>
-              <Input value={url} onChange={e => setUrl(e.target.value)} placeholder="https://form.typeform.com/to/AbCdEfGh" />
-              {url && !formId && (
-                <p className="text-[10px] text-rose-600">Couldn't find a Typeform form ID in that URL. It should look like <code>typeform.com/to/...</code>.</p>
-              )}
-              {formId && <p className="text-[10px] text-emerald-700">✓ Form ID: <code>{formId}</code></p>}
+              <label className="text-[11px] font-medium text-muted-foreground">Provider</label>
+              <div className="flex gap-2">
+                {(["typeform", "elementor"] as const).map(p => (
+                  <button
+                    key={p}
+                    type="button"
+                    onClick={() => setProvider(p)}
+                    className={`text-[11px] px-3 py-1.5 rounded-full border transition-colors ${provider === p ? "bg-teal-600 text-white border-teal-600" : "bg-white text-slate-700 border-slate-300 hover:bg-slate-50"}`}
+                  >
+                    <ProviderDot provider={p} /> {p.charAt(0).toUpperCase() + p.slice(1)}
+                  </button>
+                ))}
+              </div>
             </div>
+
             <div className="space-y-1">
               <label className="text-[11px] font-medium text-muted-foreground">Display name</label>
-              <Input value={name} onChange={e => setName(e.target.value)} placeholder="e.g. Doctor intake form" />
+              <Input value={name} onChange={e => setName(e.target.value)} placeholder={provider === "typeform" ? "e.g. Doctor intake form" : "e.g. Consultation form"} />
             </div>
+
+            <div className="space-y-1">
+              <label className="text-[11px] font-medium text-muted-foreground">{provider === "typeform" ? "Typeform URL" : "Form page URL (optional)"}</label>
+              <Input value={url} onChange={e => setUrl(e.target.value)} placeholder={provider === "typeform" ? "https://form.typeform.com/to/AbCdEfGh" : "https://www.allocationassist.com/consultation"} />
+              {provider === "typeform" && url && !formId && (
+                <p className="text-[10px] text-rose-600">Couldn't find a Typeform form ID. URL should look like <code>typeform.com/to/...</code>.</p>
+              )}
+              {provider === "typeform" && formId && <p className="text-[10px] text-emerald-700">✓ Form ID: <code>{formId}</code></p>}
+            </div>
+
             <div className="space-y-1">
               <label className="text-[11px] font-medium text-muted-foreground">Description (optional)</label>
               <Input value={description} onChange={e => setDescription(e.target.value)} placeholder="What this form is for" />
             </div>
+
             <div className="space-y-1">
-              <label className="text-[11px] font-medium text-muted-foreground">Type</label>
-              <Input value={formType} onChange={e => setFormType(e.target.value)} placeholder="doctor_intake / hospital_feedback / custom" />
+              <label className="text-[11px] font-medium text-muted-foreground">Type tag</label>
+              <Input value={formType} onChange={e => setFormType(e.target.value)} placeholder="doctor_intake / consultation / doctors_finder / custom" />
             </div>
           </div>
         ) : (
-          <div className="space-y-3 py-1">
-            <ol className="text-[12px] text-slate-800 space-y-3 list-decimal pl-5">
-              <li>
-                Open your Typeform → click <strong>Connect</strong> → <strong>Webhooks</strong> → <strong>Add a webhook</strong>.
-              </li>
-              <li>
-                Paste this URL as the endpoint:
-                <CopyableCode value={WEBHOOK_URL} />
-              </li>
-              <li>
-                Open <strong>View details</strong> → <strong>Secret</strong> and paste:
-                <CopyableCode value={done.webhook_secret ?? ""} />
-                <p className="text-[10px] text-muted-foreground mt-1">This validates every submission really came from Typeform.</p>
-              </li>
-              <li>
-                Toggle the webhook <strong>on</strong>. Submit a test response on the form — it should appear in the dashboard within a few seconds.
-              </li>
-            </ol>
-            <div className="rounded-md border border-emerald-200 bg-emerald-50/40 px-3 py-2 flex items-start gap-2">
-              <CheckCircle2 className="h-3.5 w-3.5 text-emerald-700 mt-[2px] shrink-0" />
-              <div className="text-[11px] text-emerald-900">
-                Form registered as <strong>{done.name}</strong>. Submissions will appear under "Connected forms".
-              </div>
-            </div>
-          </div>
+          <DoneInstructions form={done} />
         )}
 
         <DialogFooter>
           {!done ? (
             <>
               <Button variant="outline" onClick={handleClose}>Cancel</Button>
-              <Button onClick={handleCreate} disabled={!name.trim() || !formId || create.isPending}>
+              <Button onClick={handleCreate} disabled={!canCreate || create.isPending}>
                 {create.isPending ? "Connecting…" : "Connect form"}
               </Button>
             </>
@@ -402,6 +549,98 @@ function ConnectFormDialog({ open, onClose }: { open: boolean; onClose: () => vo
       </DialogContent>
     </Dialog>
   );
+}
+
+function DoneInstructions({ form }: { form: Form }) {
+  const url = webhookUrlFor(form);
+  if (form.provider === "typeform") {
+    return (
+      <div className="space-y-3 py-1">
+        <ol className="text-[12px] text-slate-800 space-y-2 list-decimal pl-5">
+          <li>In Typeform: <strong>Connect</strong> → <strong>Webhooks</strong> → <strong>Add a webhook</strong>.</li>
+          <li>Paste this URL:<FieldRow label="URL" value={url} /></li>
+          <li>Set the secret:<FieldRow label="Secret" value={form.webhook_secret ?? ""} masked /></li>
+          <li>Toggle the webhook <strong>on</strong>. Submit a test response → it'll appear in this tab within seconds.</li>
+        </ol>
+      </div>
+    );
+  }
+  // Elementor
+  return (
+    <div className="space-y-3 py-1">
+      <ol className="text-[12px] text-slate-800 space-y-2 list-decimal pl-5">
+        <li>Open the form in Elementor editor → click the form widget → <strong>Actions After Submit</strong>.</li>
+        <li>Add the <strong>Webhook</strong> action.</li>
+        <li>
+          Paste this URL into the <strong>Webhook URL</strong> field:
+          <FieldRow label="URL" value={url} />
+        </li>
+        <li>Save the page. Submit a test response → it'll appear in this tab within seconds. The key in the URL is the form's secret — keep it private.</li>
+      </ol>
+    </div>
+  );
+}
+
+/* ────────────────────────────────────────────────────────────────────
+ * Lightweight analytics
+ * ──────────────────────────────────────────────────────────────────── */
+interface Analytics {
+  total:        number;
+  thisWeek:     number;
+  last7Days:    number;
+  priorWindow:  number;
+  linkedCount:  number;
+  questions:    Array<{
+    question:     string;
+    answeredCount: number;
+    distinct:     number;
+    topAnswers:   Array<{ value: string; count: number }>;
+  }>;
+}
+
+function computeAnalytics(responses: FormResponse[]): Analytics {
+  const now = Date.now();
+  const startOfWeek = (d => { const date = new Date(d); const day = (date.getDay() + 6) % 7; date.setDate(date.getDate() - day); date.setHours(0,0,0,0); return date; })(new Date());
+  const cutoff7   = now - 7  * 86_400_000;
+  const cutoff14  = now - 14 * 86_400_000;
+
+  let thisWeek = 0;
+  let last7    = 0;
+  let prior7   = 0;
+  let linked   = 0;
+  const questionCounts = new Map<string, Map<string, number>>();
+
+  for (const r of responses) {
+    const t = new Date(r.submitted_at).getTime();
+    if (t >= startOfWeek.getTime()) thisWeek++;
+    if (t >= cutoff7)               last7++;
+    else if (t >= cutoff14)         prior7++;
+    if (r.doctor_id)                linked++;
+    for (const [k, v] of Object.entries(r.answers ?? {})) {
+      let m = questionCounts.get(k);
+      if (!m) { m = new Map(); questionCounts.set(k, m); }
+      m.set(v, (m.get(v) ?? 0) + 1);
+    }
+  }
+
+  const questions = Array.from(questionCounts.entries())
+    .map(([question, valueMap]) => {
+      const totalAnswers = Array.from(valueMap.values()).reduce((a, b) => a + b, 0);
+      const top = Array.from(valueMap.entries())
+        .sort((a, b) => b[1] - a[1])
+        .map(([value, count]) => ({ value, count }));
+      return { question, answeredCount: totalAnswers, distinct: valueMap.size, topAnswers: top };
+    })
+    .sort((a, b) => b.answeredCount - a.answeredCount);
+
+  return {
+    total:        responses.length,
+    thisWeek,
+    last7Days:    last7,
+    priorWindow:  prior7,
+    linkedCount:  linked,
+    questions,
+  };
 }
 
 function relativeTime(iso: string | null | undefined): string {
@@ -416,6 +655,4 @@ function relativeTime(iso: string | null | undefined): string {
   return d.toLocaleDateString();
 }
 
-/** Unused export marker — keep TypeScript happy when nothing else imports
- *  AlertCircle from this file. */
-export const _AlertCircle = AlertCircle;
+export const _silence = { AlertCircle, supabase };

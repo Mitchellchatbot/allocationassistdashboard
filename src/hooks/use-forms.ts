@@ -21,9 +21,14 @@ export interface Form {
   description:       string | null;
   form_type:         string;
   provider:          string;
-  provider_form_id:  string;
+  /** Typeform's form id (from URL). NULL for Elementor / generic
+   *  webhook sources that don't have a provider-side stable id. */
+  provider_form_id:  string | null;
   webhook_secret:    string | null;
   public_url:        string | null;
+  /** Typeform Personal Access Token — required for historical sync.
+   *  Stored encrypted at the Postgres-row level by Supabase. */
+  api_token:         string | null;
   response_count:    number;
   last_response_at:  string | null;
   active:            boolean;
@@ -95,9 +100,10 @@ export interface CreateFormInput {
   description?:      string | null;
   form_type?:        string;
   provider?:         string;
-  provider_form_id:  string;
+  provider_form_id?: string | null;
   public_url?:       string | null;
   webhook_secret?:   string | null;
+  api_token?:        string | null;
 }
 
 export function useCreateForm() {
@@ -155,4 +161,26 @@ export function generateWebhookSecret(): string {
   const buf = new Uint8Array(16);
   crypto.getRandomValues(buf);
   return Array.from(buf).map(b => b.toString(16).padStart(2, "0")).join("");
+}
+
+/** Call the typeform-historical-sync edge function for a Typeform.
+ *  Requires forms.api_token to be set on the row. Returns
+ *  { fetched, inserted, skipped }. */
+export function useSyncTypeformHistory() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: async (formId: string) => {
+      const { data, error } = await supabase.functions.invoke("typeform-historical-sync", {
+        body: { form_id: formId },
+      });
+      if (error) throw error;
+      const resp = data as { ok: boolean; error?: string; fetched: number; inserted: number; skipped: number };
+      if (!resp.ok) throw new Error(resp.error ?? "Sync failed");
+      return resp;
+    },
+    onSuccess: (_, formId) => {
+      qc.invalidateQueries({ queryKey: RESP_KEY(formId) });
+      qc.invalidateQueries({ queryKey: FORMS_KEY });
+    },
+  });
 }
