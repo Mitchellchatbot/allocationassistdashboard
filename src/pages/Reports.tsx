@@ -22,6 +22,7 @@ import { useNavigate } from "react-router-dom";
 import type { FlowRun } from "@/hooks/use-automation-flows";
 import type { DoctorLifecycle } from "@/hooks/use-doctor-lifecycle";
 import { PlacementsCard } from "@/components/reports/PlacementsCard";
+import { RecapCard } from "@/components/reports/RecapCard";
 
 /**
  * Phase 5 — Hospital Introduction Department reporting page.
@@ -73,6 +74,12 @@ export default function Reports() {
         </div>
 
         <KpiStrip bundle={bundle} />
+
+        {/* This week vs last week + this month vs last month, per
+            placement milestone (Mitchell asked on the 2026-06-03 call:
+            'so we could see the KPIs trending here week to week and
+            month to month'). Reads doctor_lifecycle directly. */}
+        <RecapCard />
 
         <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
           <Card className="lg:col-span-2">
