@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { DashboardLayout } from "@/components/layout/DashboardLayout";
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
@@ -6,7 +6,7 @@ import { Textarea } from "@/components/ui/textarea";
 import { Button } from "@/components/ui/button";
 import { Label } from "@/components/ui/label";
 import { Badge } from "@/components/ui/badge";
-import { UserSquare, Search, Save, Sparkles, Eye, CheckCircle2, Mail, FileText, RefreshCw, AlertCircle, Clock, ChevronDown, ChevronRight, Send, Workflow } from "lucide-react";
+import { UserSquare, Search, Save, Sparkles, Eye, CheckCircle2, Mail, FileText, RefreshCw, AlertCircle, Clock, ChevronDown, ChevronRight, Send, Workflow, FileUp } from "lucide-react";
 import { EmptyState } from "@/components/ui/empty-state";
 import { CardListSkeleton } from "@/components/ui/data-skeleton";
 import { toast } from "sonner";
@@ -15,7 +15,7 @@ import {
   useDoctorProfiles, useDoctorProfile, useUpsertDoctorProfile, calcCompletion, profileToTokens,
   type DoctorProfile, type DoctorProfileInput,
 } from "@/hooks/use-doctor-profiles";
-import { useDoctorCvUploads, useSendCvUploadLink, useReExtractCv, usePendingCvUploads, type CvUpload } from "@/hooks/use-cv-uploads";
+import { useDoctorCvUploads, useSendCvUploadLink, useTeamUploadCv, useReExtractCv, usePendingCvUploads, type CvUpload } from "@/hooks/use-cv-uploads";
 import { DoctorJourneyDialog } from "@/components/automations/DoctorJourneyDialog";
 import { DoctorStatusBadge } from "@/components/DoctorStatusBadge";
 import { useDoctorStatus, useDoctorStatusMap } from "@/hooks/use-doctor-status";
@@ -309,8 +309,10 @@ function ProfileEditor({ doctor }: { doctor: DoctorRow }) {
   const { data: templates = [] } = useEmailTemplates();
   const { data: uploads = [] } = useDoctorCvUploads(doctor.id);
   const sendCvLink = useSendCvUploadLink();
+  const teamUpload = useTeamUploadCv();
   const reExtract  = useReExtractCv();
   const [journeyOpen, setJourneyOpen] = useState(false);
+  const cvFileRef = useRef<HTMLInputElement | null>(null);
 
   // Was this profile last touched by the CV extractor? If yes, surface a
   // "review extraction" badge so the team knows to give it a once-over
@@ -514,6 +516,42 @@ function ProfileEditor({ doctor }: { doctor: DoctorRow }) {
           </Button>
           <Button size="sm" variant="outline" onClick={handleAutoFillZoho}>
             <Sparkles className="h-3.5 w-3.5 mr-1.5 text-violet-600" /> Pre-fill from Zoho
+          </Button>
+          {/* Direct team upload — Ammar 2026-06-03 spec: HI often gets
+              CVs via WhatsApp / direct email and re-authors them as AA
+              profile CVs. This bypasses the doctor-clicks-the-link
+              path. Uses the same cv-upload-public extraction pipeline
+              under the hood. */}
+          <input
+            ref={cvFileRef}
+            type="file"
+            accept=".pdf,.doc,.docx,application/pdf,application/msword,application/vnd.openxmlformats-officedocument.wordprocessingml.document"
+            className="hidden"
+            onChange={async e => {
+              const file = e.target.files?.[0];
+              if (!file) return;
+              e.target.value = ""; // reset so picking the same file twice re-fires
+              try {
+                await teamUpload.mutateAsync({
+                  doctor_id:    doctor.id,
+                  doctor_name:  doctor.name,
+                  doctor_email: doctor.email,
+                  file,
+                });
+                toast.success(`CV uploaded. Claude is extracting — refresh in a few seconds to see fields populate.`);
+              } catch (err) {
+                toast.error(err instanceof Error ? err.message : "Upload failed");
+              }
+            }}
+          />
+          <Button
+            size="sm"
+            variant="outline"
+            disabled={teamUpload.isPending}
+            onClick={() => cvFileRef.current?.click()}
+            title="Upload a CV you've already received (WhatsApp, email, etc). Claude auto-fills this profile from it."
+          >
+            <FileUp className="h-3.5 w-3.5 mr-1.5 text-teal-600" /> {teamUpload.isPending ? "Uploading..." : "Upload CV"}
           </Button>
           <Button
             size="sm"

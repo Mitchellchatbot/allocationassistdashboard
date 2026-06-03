@@ -99,6 +99,63 @@ export function useSendCvUploadLink() {
   });
 }
 
+/** Direct team upload — Ammar 2026-06-03: HI team often receives a
+ *  CV from the doctor via WhatsApp or a direct email, then re-authors
+ *  it as AA's profile-sent CV. This bypasses the email-the-doctor-a-
+ *  link path: the team picks the file in-app, we mint a fresh
+ *  cv_uploads token, POST it to cv-upload-public, and Claude extracts
+ *  on the other side. Same plumbing as the doctor-uploads-themselves
+ *  flow, just initiated by the team. */
+export function useTeamUploadCv() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: async (input: {
+      doctor_id:    string;
+      doctor_name:  string;
+      doctor_email: string | null;
+      file:         File;
+    }) => {
+      const { data: sess } = await supabase.auth.getSession();
+      const createdBy = sess.session?.user.email ?? "team_upload";
+
+      // Mint a fresh token. Reuses the existing cv_uploads table so
+      // the per-doctor upload history surfaces both team + doctor
+      // uploads in one timeline.
+      const token = crypto.randomUUID().replace(/-/g, "");
+      const { error: insertErr } = await supabase.from("cv_uploads").insert({
+        doctor_id:    input.doctor_id,
+        doctor_name:  input.doctor_name,
+        doctor_email: input.doctor_email,
+        token,
+        status:       "pending_upload",
+        created_by:   createdBy,
+      });
+      if (insertErr) throw insertErr;
+
+      // POST file to the public endpoint with the freshly-minted token.
+      const supabaseUrl = import.meta.env.VITE_SUPABASE_URL as string;
+      const fd = new FormData();
+      fd.append("token", token);
+      fd.append("file",  input.file);
+      const res = await fetch(`${supabaseUrl}/functions/v1/cv-upload-public`, {
+        method: "POST",
+        body:   fd,
+      });
+      const body = await res.json().catch(() => ({}));
+      if (!res.ok || !body?.ok) {
+        throw new Error(body?.error ?? `Upload failed (HTTP ${res.status})`);
+      }
+      return body as { ok: true };
+    },
+    onSuccess: (_, vars) => {
+      qc.invalidateQueries({ queryKey: PER_DOCTOR_KEY(vars.doctor_id) });
+      qc.invalidateQueries({ queryKey: PENDING_KEY });
+      qc.invalidateQueries({ queryKey: ["doctor-profile", vars.doctor_id] });
+      qc.invalidateQueries({ queryKey: ["doctor-profiles"] });
+    },
+  });
+}
+
 /** Re-runs the cv-extract edge function for an existing upload. Used for
  *  retries after a transient failure or when Claude misread the CV. */
 export function useReExtractCv() {
