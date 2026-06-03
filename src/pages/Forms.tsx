@@ -16,7 +16,7 @@
  * Last tab is "+ Connect new" which opens the dialog to add a fresh
  * Typeform / Elementor form.
  */
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { DashboardLayout } from "@/components/layout/DashboardLayout";
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
@@ -27,6 +27,7 @@ import { Tabs, TabsList, TabsTrigger, TabsContent } from "@/components/ui/tabs";
 import {
   ClipboardList, Plus, ExternalLink, Copy, CheckCircle2, AlertCircle,
   Trash2, Inbox, ChevronRight, History, Sparkles, Mail, User as UserIcon, RefreshCw, Settings,
+  Search, Download,
 } from "lucide-react";
 import {
   useForms, useFormResponses, useCreateForm, useUpdateForm, useDeleteForm,
@@ -131,7 +132,77 @@ function FormDetail({ form }: { form: Form }) {
   const del = useDeleteForm();
   const [setupOpen, setSetupOpen] = useState(false);
 
+  // ── Search + filter + sort state ──────────────────────────────────
+  const [searchRaw, setSearchRaw] = useState("");
+  const search = useDebounce(searchRaw, 120);
+  const [dateFilter, setDateFilter] = useState<"all" | "7d" | "30d" | "90d">("all");
+  const [linkFilter, setLinkFilter] = useState<"all" | "linked" | "unlinked">("all");
+  const [sortDir, setSortDir]   = useState<"newest" | "oldest">("newest");
+  const [renderLimit, setRenderLimit] = useState(100);   // virtualisation-lite: only render the first N rows; "Load more" reveals more
+
   const analytics = useMemo(() => computeAnalytics(responses), [responses]);
+
+  // Pre-stringify each response into a single search-corpus to make
+  // the per-keystroke filter loop fast even at 20k+ rows.
+  const corpus = useMemo(() => responses.map(r => {
+    const parts: string[] = [];
+    if (r.respondent_name)  parts.push(r.respondent_name);
+    if (r.respondent_email) parts.push(r.respondent_email);
+    if (r.doctor_id)        parts.push(r.doctor_id);
+    for (const [k, v] of Object.entries(r.answers ?? {})) {
+      parts.push(k, v);
+    }
+    return parts.join(" \n ").toLowerCase();
+  }), [responses]);
+
+  const filtered = useMemo(() => {
+    const q = search.trim().toLowerCase();
+    const tokens = q ? q.split(/\s+/).filter(Boolean) : [];
+    const cutoffMs =
+      dateFilter === "7d"  ? Date.now() - 7  * 86_400_000 :
+      dateFilter === "30d" ? Date.now() - 30 * 86_400_000 :
+      dateFilter === "90d" ? Date.now() - 90 * 86_400_000 : 0;
+
+    const out: FormResponse[] = [];
+    for (let i = 0; i < responses.length; i++) {
+      const r = responses[i];
+      if (cutoffMs && new Date(r.submitted_at).getTime() < cutoffMs) continue;
+      if (linkFilter === "linked"   && !r.doctor_id) continue;
+      if (linkFilter === "unlinked" &&  r.doctor_id) continue;
+      if (tokens.length > 0) {
+        const hay = corpus[i];
+        let allHit = true;
+        for (const t of tokens) {
+          if (!hay.includes(t)) { allHit = false; break; }
+        }
+        if (!allHit) continue;
+      }
+      out.push(r);
+    }
+    out.sort((a, b) => {
+      const ta = new Date(a.submitted_at).getTime();
+      const tb = new Date(b.submitted_at).getTime();
+      return sortDir === "newest" ? tb - ta : ta - tb;
+    });
+    return out;
+  }, [responses, corpus, search, dateFilter, linkFilter, sortDir]);
+
+  // Reset the render limit whenever the filter narrows the list so
+  // "Load more" doesn't reveal stale offsets.
+  useEffect(() => { setRenderLimit(100); }, [search, dateFilter, linkFilter, sortDir]);
+
+  // ⌘K / Ctrl+K to focus the search bar from anywhere on the page.
+  const searchRef = useRef<HTMLInputElement | null>(null);
+  useEffect(() => {
+    const onKey = (e: KeyboardEvent) => {
+      if ((e.metaKey || e.ctrlKey) && e.key.toLowerCase() === "f" && document.activeElement?.tagName !== "INPUT" && document.activeElement?.tagName !== "TEXTAREA") {
+        e.preventDefault();
+        searchRef.current?.focus();
+      }
+    };
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, []);
 
   const handleDelete = async () => {
     if (!confirm(`Delete "${form.name}"? All ${form.response_count} response${form.response_count === 1 ? "" : "s"} will be lost.`)) return;
@@ -141,6 +212,39 @@ function FormDetail({ form }: { form: Form }) {
     } catch (e) {
       toast.error(e instanceof Error ? e.message : "Delete failed");
     }
+  };
+
+  const handleExportCsv = () => {
+    if (filtered.length === 0) { toast.error("Nothing to export."); return; }
+    // Gather all distinct question keys across the filtered set so
+    // the CSV has a stable column for every question, even ones some
+    // responses didn't answer.
+    const keys = new Set<string>();
+    for (const r of filtered) for (const k of Object.keys(r.answers ?? {})) keys.add(k);
+    const headers = ["submitted_at", "respondent_name", "respondent_email", "doctor_id", ...Array.from(keys)];
+    const esc = (s: string | null | undefined) => {
+      const v = s == null ? "" : String(s);
+      return /[",\n]/.test(v) ? `"${v.replace(/"/g, '""')}"` : v;
+    };
+    const lines = [headers.join(",")];
+    for (const r of filtered) {
+      const row = [
+        r.submitted_at,
+        r.respondent_name ?? "",
+        r.respondent_email ?? "",
+        r.doctor_id ?? "",
+        ...Array.from(keys).map(k => esc((r.answers ?? {})[k] ?? "")),
+      ];
+      lines.push(row.map(esc).join(","));
+    }
+    const blob = new Blob([lines.join("\n")], { type: "text/csv;charset=utf-8" });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement("a");
+    a.href = url;
+    a.download = `${form.name.replace(/[^a-z0-9]+/gi, "_")}-${new Date().toISOString().slice(0, 10)}.csv`;
+    document.body.appendChild(a); a.click(); a.remove();
+    URL.revokeObjectURL(url);
+    toast.success(`Exported ${filtered.length} responses.`);
   };
 
   return (
@@ -168,6 +272,9 @@ function FormDetail({ form }: { form: Form }) {
                   </Button>
                 </a>
               )}
+              <Button size="sm" variant="outline" onClick={handleExportCsv} title={`Export filtered responses (${filtered.length}) to CSV`}>
+                <Download className="h-3.5 w-3.5 mr-1" /> Export
+              </Button>
               {form.provider === "typeform" && <TypeformSyncButton form={form} />}
               <Button size="sm" variant="outline" onClick={() => setSetupOpen(true)} title="View webhook URL + setup instructions">
                 <Settings className="h-3.5 w-3.5 mr-1" /> Setup
@@ -188,50 +295,71 @@ function FormDetail({ form }: { form: Form }) {
         <Kpi label="Auto-linked to Zoho"    value={analytics.linkedCount} tone="indigo" hint={`${Math.round((analytics.linkedCount / Math.max(analytics.total, 1)) * 100)}% matched`} />
       </div>
 
-      {/* Top questions / answer distributions — full width now that
-          webhook details have moved into the Setup dialog. */}
+      {/* Supercharged search + filters bar */}
       <Card>
-        <CardHeader className="pb-2">
-          <CardTitle className="text-[13px]">Top questions</CardTitle>
-          <CardDescription className="text-[11px]">Questions with the most answers, by frequency of distinct values.</CardDescription>
-        </CardHeader>
-        <CardContent>
-          {analytics.questions.length === 0 ? (
-            <p className="text-[11px] text-muted-foreground">No questions detected yet.</p>
-          ) : (
-            <div className="space-y-2">
-              {analytics.questions.slice(0, 6).map(q => (
-                <div key={q.question} className="text-[11px]">
-                  <div className="flex items-center justify-between gap-2">
-                    <span className="font-medium truncate text-slate-800">{q.question}</span>
-                    <span className="text-muted-foreground shrink-0">{q.answeredCount} answered</span>
-                  </div>
-                  {q.topAnswers.length > 0 && (
-                    <div className="flex flex-wrap gap-1 mt-1">
-                      {q.topAnswers.slice(0, 5).map(a => (
-                        <Badge key={a.value} variant="outline" className="text-[9px] bg-slate-50 truncate max-w-[180px]">
-                          {a.value} · {a.count}
-                        </Badge>
-                      ))}
-                      {q.distinct > 5 && (
-                        <Badge variant="outline" className="text-[9px] bg-white text-muted-foreground">+{q.distinct - 5} more</Badge>
-                      )}
-                    </div>
-                  )}
-                </div>
-              ))}
-            </div>
-          )}
+        <CardContent className="pt-3 pb-3 space-y-2">
+          <div className="relative">
+            <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" />
+            <Input
+              ref={searchRef}
+              value={searchRaw}
+              onChange={e => setSearchRaw(e.target.value)}
+              placeholder="Search anything — name, email, answer to any question, Zoho ID, phone…  (⌘F)"
+              className="pl-10 pr-24 h-10 text-[13px]"
+            />
+            {searchRaw && (
+              <button
+                type="button"
+                onClick={() => setSearchRaw("")}
+                className="absolute right-3 top-1/2 -translate-y-1/2 text-[11px] text-muted-foreground hover:text-slate-800"
+              >
+                Clear
+              </button>
+            )}
+          </div>
+          <div className="flex items-center gap-2 flex-wrap text-[11px]">
+            {/* Date chips */}
+            <FilterChipGroup
+              value={dateFilter}
+              onChange={(v) => setDateFilter(v as typeof dateFilter)}
+              options={[
+                { value: "all", label: "All time" },
+                { value: "7d",  label: "Last 7d" },
+                { value: "30d", label: "Last 30d" },
+                { value: "90d", label: "Last 90d" },
+              ]}
+            />
+            <span className="text-muted-foreground/40">·</span>
+            {/* Zoho link chips */}
+            <FilterChipGroup
+              value={linkFilter}
+              onChange={(v) => setLinkFilter(v as typeof linkFilter)}
+              options={[
+                { value: "all",      label: "All" },
+                { value: "linked",   label: "Zoho-linked" },
+                { value: "unlinked", label: "Unlinked" },
+              ]}
+            />
+            <span className="text-muted-foreground/40">·</span>
+            {/* Sort */}
+            <FilterChipGroup
+              value={sortDir}
+              onChange={(v) => setSortDir(v as typeof sortDir)}
+              options={[
+                { value: "newest", label: "Newest first" },
+                { value: "oldest", label: "Oldest first" },
+              ]}
+            />
+            <span className="ml-auto text-[11px] text-muted-foreground tabular-nums">
+              {filtered.length === responses.length ? `${responses.length} responses` : `${filtered.length} of ${responses.length}`}
+            </span>
+          </div>
         </CardContent>
       </Card>
 
       {/* Submission feed */}
       <Card>
-        <CardHeader className="pb-2">
-          <CardTitle className="text-[13px]">Submissions · {responses.length}</CardTitle>
-          <CardDescription className="text-[11px]">Newest first. Click any row to expand the full answer set.</CardDescription>
-        </CardHeader>
-        <CardContent className="space-y-2">
+        <CardContent className="pt-3 space-y-2">
           {isLoading ? (
             <p className="text-[11px] text-muted-foreground py-2">Loading submissions…</p>
           ) : responses.length === 0 ? (
@@ -244,8 +372,29 @@ function FormDetail({ form }: { form: Form }) {
                   : "Once the webhook URL is wired into Elementor, submissions appear here within seconds."}
               </p>
             </div>
+          ) : filtered.length === 0 ? (
+            <div className="rounded-md border border-dashed py-8 text-center">
+              <Search className="h-5 w-5 mx-auto mb-2 text-muted-foreground/60" />
+              <p className="text-[12px] text-muted-foreground">No matches for the current filter.</p>
+              <button onClick={() => { setSearchRaw(""); setDateFilter("all"); setLinkFilter("all"); }} className="text-[11px] text-teal-700 hover:underline mt-1">
+                Clear filters
+              </button>
+            </div>
           ) : (
-            responses.map(r => <ResponseRow key={r.id} response={r} />)
+            <>
+              {filtered.slice(0, renderLimit).map(r => (
+                <ResponseRow key={r.id} response={r} highlight={search.trim().toLowerCase()} />
+              ))}
+              {filtered.length > renderLimit && (
+                <button
+                  type="button"
+                  onClick={() => setRenderLimit(n => n + 200)}
+                  className="w-full py-2 text-[11px] text-teal-700 hover:bg-slate-50 rounded-md border border-dashed"
+                >
+                  Show {Math.min(200, filtered.length - renderLimit)} more · {filtered.length - renderLimit} remaining
+                </button>
+              )}
+            </>
           )}
         </CardContent>
       </Card>
@@ -253,6 +402,45 @@ function FormDetail({ form }: { form: Form }) {
       <SetupDialog form={form} open={setupOpen} onClose={() => setSetupOpen(false)} />
     </div>
   );
+}
+
+/* A small pill group: one active value at a time, rest are
+ * neutral-styled. Used for date / linked / sort filters. */
+function FilterChipGroup<T extends string>({ value, onChange, options }: {
+  value:   T;
+  onChange: (v: T) => void;
+  options: Array<{ value: T; label: string }>;
+}) {
+  return (
+    <div className="inline-flex items-center gap-1">
+      {options.map(o => (
+        <button
+          key={o.value}
+          type="button"
+          onClick={() => onChange(o.value)}
+          className={`px-2.5 py-1 rounded-full transition-colors ${
+            value === o.value
+              ? "bg-teal-600 text-white"
+              : "bg-white text-slate-700 border border-slate-300 hover:bg-slate-50"
+          }`}
+        >
+          {o.label}
+        </button>
+      ))}
+    </div>
+  );
+}
+
+/** Debounce hook — postpones the returned value until `delay` ms
+ *  after the input stops changing. Used to keep search responsive
+ *  even when the underlying filter runs over 20k rows. */
+function useDebounce<T>(value: T, delay: number): T {
+  const [v, setV] = useState(value);
+  useEffect(() => {
+    const id = setTimeout(() => setV(value), delay);
+    return () => clearTimeout(id);
+  }, [value, delay]);
+  return v;
 }
 
 /** Tucked-away webhook configuration. Opens from the FormDetail
@@ -432,9 +620,21 @@ function Kpi({ label, value, tone, hint }: { label: string; value: number; tone:
   );
 }
 
-function ResponseRow({ response }: { response: FormResponse }) {
+function ResponseRow({ response, highlight = "" }: { response: FormResponse; highlight?: string }) {
   const [open, setOpen] = useState(false);
   const entries = Object.entries(response.answers ?? {});
+  // Auto-expand when the search term hits something INSIDE this
+  // response's answers (rather than just the header) — saves the user
+  // clicking each row to verify what matched.
+  const matchesInBody = useMemo(() => {
+    if (!highlight) return false;
+    const tokens = highlight.split(/\s+/).filter(Boolean);
+    if (tokens.length === 0) return false;
+    const headerHay = `${response.respondent_name ?? ""} ${response.respondent_email ?? ""}`.toLowerCase();
+    // Any token NOT in the header => must have matched in the body.
+    return tokens.some(t => !headerHay.includes(t));
+  }, [highlight, response.respondent_name, response.respondent_email]);
+  const effectivelyOpen = open || matchesInBody;
   const summary = entries.slice(0, 2).map(([k, v]) => `${k}: ${v}`).join(" · ");
   return (
     <div className="rounded-md border bg-white">
@@ -443,13 +643,15 @@ function ResponseRow({ response }: { response: FormResponse }) {
         onClick={() => setOpen(o => !o)}
         className="w-full flex items-center gap-2 px-3 py-2 text-left hover:bg-slate-50"
       >
-        <ChevronRight className={`h-3.5 w-3.5 text-slate-400 shrink-0 transition-transform ${open ? "rotate-90" : ""}`} />
+        <ChevronRight className={`h-3.5 w-3.5 text-slate-400 shrink-0 transition-transform ${effectivelyOpen ? "rotate-90" : ""}`} />
         <div className="flex-1 min-w-0">
           <div className="text-[12px] font-medium text-slate-800 truncate flex items-center gap-1">
             {response.respondent_name ? <UserIcon className="h-3 w-3 text-slate-400 shrink-0" /> : response.respondent_email ? <Mail className="h-3 w-3 text-slate-400 shrink-0" /> : null}
-            {response.respondent_name ?? response.respondent_email ?? "Anonymous submission"}
+            <Hl text={response.respondent_name ?? response.respondent_email ?? "Anonymous submission"} q={highlight} />
           </div>
-          <div className="text-[10px] text-muted-foreground truncate">{summary || "—"}</div>
+          <div className="text-[10px] text-muted-foreground truncate">
+            <Hl text={summary || "—"} q={highlight} />
+          </div>
         </div>
         {response.doctor_id && (
           <Badge variant="outline" className="text-[9px] bg-emerald-50 text-emerald-700 border-emerald-200 shrink-0">
@@ -458,7 +660,7 @@ function ResponseRow({ response }: { response: FormResponse }) {
         )}
         <div className="text-[10px] text-muted-foreground shrink-0">{relativeTime(response.submitted_at)}</div>
       </button>
-      {open && (
+      {effectivelyOpen && (
         <div className="border-t bg-slate-50/30 px-3 py-2 space-y-1">
           {entries.length === 0 ? (
             <p className="text-[11px] text-muted-foreground italic">No answers captured.</p>
@@ -466,7 +668,7 @@ function ResponseRow({ response }: { response: FormResponse }) {
             entries.map(([k, v]) => (
               <div key={k} className="grid grid-cols-1 sm:grid-cols-[180px_1fr] gap-x-3 gap-y-0.5 text-[11px]">
                 <span className="text-muted-foreground">{k}</span>
-                <span className="text-slate-800 break-words">{v}</span>
+                <span className="text-slate-800 break-words"><Hl text={v} q={highlight} /></span>
               </div>
             ))
           )}
@@ -479,6 +681,27 @@ function ResponseRow({ response }: { response: FormResponse }) {
         </div>
       )}
     </div>
+  );
+}
+
+/** Highlight matched search tokens inside arbitrary text. Renders
+ *  unchanged text when q is empty. Cheap; runs per cell on render. */
+function Hl({ text, q }: { text: string; q: string }) {
+  if (!q) return <>{text}</>;
+  const tokens = q.trim().split(/\s+/).filter(t => t.length > 0);
+  if (tokens.length === 0) return <>{text}</>;
+  // Build a single regex that matches any token, case-insensitively.
+  const escaped = tokens.map(t => t.replace(/[.*+?^${}()|[\]\\]/g, "\\$&"));
+  const re = new RegExp(`(${escaped.join("|")})`, "gi");
+  const parts = text.split(re);
+  return (
+    <>
+      {parts.map((p, i) =>
+        re.test(p)
+          ? <mark key={i} className="bg-amber-100 text-amber-900 px-0.5 rounded">{p}</mark>
+          : <span key={i}>{p}</span>
+      )}
+    </>
   );
 }
 
