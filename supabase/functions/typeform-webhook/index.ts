@@ -126,7 +126,7 @@ Deno.serve(async (req: Request) => {
   // UUID, which is what the user reported.
   const fieldTitles = new Map<string, string>();
   for (const f of fr.definition?.fields ?? []) {
-    if (f.id && f.title?.trim()) fieldTitles.set(f.id, f.title.trim());
+    if (f.id && f.title?.trim()) fieldTitles.set(f.id, cleanQuestionTitle(f.title));
   }
 
   const flat: Record<string, string> = {};
@@ -205,4 +205,20 @@ function json(payload: unknown, status: number): Response {
     status,
     headers: { ...CORS, "Content-Type": "application/json" },
   });
+}
+
+/** Strip Typeform's {{field:<uuid>}} / {{hidden:foo}} placeholder
+ *  tokens from a question title so column headers are readable.
+ *  Typeform uses these placeholders to inline earlier answers in
+ *  subsequent question text (e.g. "Nice to meet you {{field:abc}} —
+ *  what's your email?"). The placeholder is only resolved when the
+ *  form is being filled out; in the form definition it stays as raw
+ *  text, which is useless as a column header. */
+function cleanQuestionTitle(raw: string): string {
+  return raw
+    .replace(/\{\{[^}]*\}\}/g, "")  // strip {{...}} placeholders
+    .replace(/\s+/g, " ")            // collapse multi-line / repeated whitespace
+    .replace(/\s+([.,!?;:])/g, "$1") // tighten spacing before punctuation
+    .replace(/[-–—\s]+([.,!?;:])/g, "$1") // 'X - ?' → 'X?'
+    .trim();
 }

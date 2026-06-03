@@ -98,7 +98,7 @@ Deno.serve(async (req: Request) => {
     if (defRes.ok) {
       const def = await defRes.json() as { fields?: Array<{ id: string; ref?: string; title?: string }> };
       for (const f of def.fields ?? []) {
-        if (f.id && f.title?.trim()) fieldTitles.set(f.id, f.title.trim());
+        if (f.id && f.title?.trim()) fieldTitles.set(f.id, cleanQuestionTitle(f.title));
       }
       console.log(`[typeform-historical-sync] loaded ${fieldTitles.size} field titles from form definition`);
     } else {
@@ -235,4 +235,17 @@ function json(payload: unknown, status: number): Response {
     status,
     headers: { ...CORS, "Content-Type": "application/json" },
   });
+}
+
+/** Strip Typeform's {{field:<uuid>}} / {{hidden:foo}} placeholder tokens
+ *  from a question title so column headers are readable. Mirrors the
+ *  helper in typeform-webhook so live + historical produce identical
+ *  question keys. */
+function cleanQuestionTitle(raw: string): string {
+  return raw
+    .replace(/\{\{[^}]*\}\}/g, "")
+    .replace(/\s+/g, " ")
+    .replace(/\s+([.,!?;:])/g, "$1")
+    .replace(/[-–—\s]+([.,!?;:])/g, "$1")
+    .trim();
 }
