@@ -7,6 +7,7 @@ import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { useFilteredData } from "@/hooks/use-filtered-data";
 import { useFilters } from "@/lib/filters";
 import { useZohoData, displaySource } from "@/hooks/use-zoho-data";
+import { usePlacementsByMonth } from "@/hooks/use-placements-by-month";
 import { useCurrency } from "@/lib/CurrencyProvider";
 import { REVENUE_PER_CONVERSION_AED } from "@/lib/revenue";
 import {
@@ -70,6 +71,24 @@ const Index = () => {
   const { dateRange } = useFilters();
   const { fmt: fmtAED } = useCurrency();
   const { data: zoho } = useZohoData();
+  // Placements come from doctor_lifecycle.joined_at (the portal mirror
+  // of Ammar's Hammad sheet), NOT Zoho's Closed Won deals — Zoho only
+  // has ~4 closed-won records and isn't representative. The hook emits
+  // "MMM YY" keys; timeData has the year stripped off row.month, so
+  // reconstruct it from the row's position (last row = current month,
+  // each step back = one month earlier — handles year boundaries).
+  const { data: placementsByMonth } = usePlacementsByMonth();
+  const timeDataWithRealPlacements = useMemo(() => {
+    if (!placementsByMonth) return timeData;
+    const now = new Date();
+    const total = timeData.length;
+    return timeData.map((row, i) => {
+      const monthsBack = total - 1 - i;
+      const d = new Date(now.getFullYear(), now.getMonth() - monthsBack, 1);
+      const key = d.toLocaleString("default", { month: "short", year: "2-digit" });
+      return { ...row, placed: placementsByMonth[key] ?? 0 };
+    });
+  }, [timeData, placementsByMonth]);
   // "Where Qualified Leads Come From" — channel breakdown of qualified leads
   // in the selected period. Uses page-level date range via filteredLeads.
   const QUALIFIED_SET = useMemo(() => new Set([
@@ -458,7 +477,7 @@ const Index = () => {
                     <Line> children. Recharts threw at render time with
                     a minified invariant. Switched to ComposedChart so
                     the Area + two Line series can coexist. */}
-                <ComposedChart data={timeData}>
+                <ComposedChart data={timeDataWithRealPlacements}>
                   <defs>
                     <linearGradient id="docFill" x1="0" y1="0" x2="0" y2="1">
                       <stop offset="5%" stopColor="hsl(170,55%,45%)" stopOpacity={0.12} />
