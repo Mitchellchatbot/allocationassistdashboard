@@ -32,6 +32,10 @@ export function HospitalsTab() {
   const filtered = useMemo(() => {
     const q = search.trim().toLowerCase();
     if (!q) return hospitals;
+    // Special filter: a literal em-dash search shows rows missing a
+    // country (matches the placeholder rendered in the country cell).
+    // Used by the "Show them" banner above.
+    if (q === "—") return hospitals.filter(h => !h.country);
     return hospitals.filter(h =>
       h.name.toLowerCase().includes(q) ||
       h.city?.toLowerCase().includes(q) ||
@@ -75,6 +79,26 @@ export function HospitalsTab() {
           </div>
         </CardHeader>
         <CardContent className="space-y-3">
+          {/* Banner: country-scoped batches require every hospital to
+              have a country set. Surface the count + a 1-click filter
+              so the team can fix them in-place. */}
+          {(() => {
+            const needsCountry = hospitals.filter(h => !h.country).length;
+            if (needsCountry === 0) return null;
+            return (
+              <div className="rounded-md border border-amber-200 bg-amber-50/50 px-3 py-2 flex items-center gap-2">
+                <span className="text-[11px] text-amber-900 flex-1">
+                  <strong>{needsCountry}</strong> hospital{needsCountry === 1 ? "" : "s"} {needsCountry === 1 ? "is" : "are"} missing a country — country-scoped batch sends (UAE / KSA / etc.) skip these. Search "—" to filter, then edit each row.
+                </span>
+                <button
+                  onClick={() => setSearch("—")}
+                  className="text-[11px] font-medium text-amber-900 hover:underline"
+                >
+                  Show them
+                </button>
+              </div>
+            );
+          })()}
           <div className="flex items-center gap-3">
             <div className="relative flex-1 max-w-md">
               <Search className="absolute left-2 top-1/2 -translate-y-1/2 h-3.5 w-3.5 text-muted-foreground" />
