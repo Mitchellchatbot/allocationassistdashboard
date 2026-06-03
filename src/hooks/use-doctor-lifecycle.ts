@@ -89,12 +89,21 @@ export function useDoctorLifecycleMap(): Record<string, DoctorLifecycle> {
   const { data = [] } = useQuery({
     queryKey: LIST_KEY,
     queryFn: async (): Promise<DoctorLifecycle[]> => {
-      const { data, error } = await supabase
-        .from("doctor_lifecycle")
-        .select("*")
-        .limit(20_000);
-      if (error) throw error;
-      return (data ?? []) as DoctorLifecycle[];
+      // Supabase API gateway caps responses at 1000 rows server-side
+      // regardless of .limit(). Paginate via .range() to get them all.
+      const PAGE = 1000;
+      const all: DoctorLifecycle[] = [];
+      for (let from = 0; from < 50_000; from += PAGE) {
+        const { data, error } = await supabase
+          .from("doctor_lifecycle")
+          .select("*")
+          .range(from, from + PAGE - 1);
+        if (error) throw error;
+        const batch = (data ?? []) as DoctorLifecycle[];
+        all.push(...batch);
+        if (batch.length < PAGE) break;
+      }
+      return all;
     },
     staleTime: 30_000,
   });

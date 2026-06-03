@@ -34,40 +34,65 @@ export interface ReportingBundle {
 }
 
 export function useReportingMetrics(filters: ReportingFilters): ReportingBundle {
+  // All three of these paginate via .range() — Supabase API gateway
+  // hard-caps at 1000 rows server-side regardless of .limit(). Without
+  // pagination the Reports page would silently undercount once any of
+  // these tables crosses 1000 rows.
   const { data: runs = [], isLoading: runsLoading } = useQuery({
     queryKey: ["reporting-runs"],
     queryFn: async (): Promise<FlowRun[]> => {
-      const { data, error } = await supabase
-        .from("automation_flow_runs")
-        .select("*")
-        .order("started_at", { ascending: false })
-        .limit(5000);
-      if (error) throw error;
-      return (data ?? []) as FlowRun[];
+      const PAGE = 1000;
+      const all: FlowRun[] = [];
+      for (let from = 0; from < 50_000; from += PAGE) {
+        const { data, error } = await supabase
+          .from("automation_flow_runs")
+          .select("*")
+          .order("started_at", { ascending: false })
+          .range(from, from + PAGE - 1);
+        if (error) throw error;
+        const batch = (data ?? []) as FlowRun[];
+        all.push(...batch);
+        if (batch.length < PAGE) break;
+      }
+      return all;
     },
     staleTime: 60_000,
   });
   const { data: lifecycles = [], isLoading: lifeLoading } = useQuery({
     queryKey: ["reporting-lifecycles"],
     queryFn: async (): Promise<DoctorLifecycle[]> => {
-      const { data, error } = await supabase
-        .from("doctor_lifecycle")
-        .select("*")
-        .limit(5000);
-      if (error) throw error;
-      return (data ?? []) as DoctorLifecycle[];
+      const PAGE = 1000;
+      const all: DoctorLifecycle[] = [];
+      for (let from = 0; from < 50_000; from += PAGE) {
+        const { data, error } = await supabase
+          .from("doctor_lifecycle")
+          .select("*")
+          .range(from, from + PAGE - 1);
+        if (error) throw error;
+        const batch = (data ?? []) as DoctorLifecycle[];
+        all.push(...batch);
+        if (batch.length < PAGE) break;
+      }
+      return all;
     },
     staleTime: 60_000,
   });
   const { data: vacancies = [], isLoading: vacLoading } = useQuery({
     queryKey: ["reporting-vacancies"],
     queryFn: async (): Promise<Vacancy[]> => {
-      const { data, error } = await supabase
-        .from("vacancies")
-        .select("*")
-        .limit(2000);
-      if (error) throw error;
-      return (data ?? []) as Vacancy[];
+      const PAGE = 1000;
+      const all: Vacancy[] = [];
+      for (let from = 0; from < 20_000; from += PAGE) {
+        const { data, error } = await supabase
+          .from("vacancies")
+          .select("*")
+          .range(from, from + PAGE - 1);
+        if (error) throw error;
+        const batch = (data ?? []) as Vacancy[];
+        all.push(...batch);
+        if (batch.length < PAGE) break;
+      }
+      return all;
     },
     staleTime: 60_000,
   });

@@ -144,23 +144,41 @@ export interface DoctorTableProps {
 }
 
 export function DoctorTable({ rangeDays, hospital, specialty }: DoctorTableProps = {}) {
+  // Paginate both queries — Supabase API gateway caps at 1000 server-
+  // side regardless of .limit().
   const { data: runs = [], isLoading: rl } = useQuery<FlowRun[]>({
     queryKey: ["doctor-table-runs"],
     queryFn: async () => {
-      const { data, error } = await supabase
-        .from("automation_flow_runs").select("*")
-        .order("started_at", { ascending: false }).limit(5000);
-      if (error) throw error;
-      return (data ?? []) as FlowRun[];
+      const PAGE = 1000;
+      const all: FlowRun[] = [];
+      for (let from = 0; from < 50_000; from += PAGE) {
+        const { data, error } = await supabase
+          .from("automation_flow_runs").select("*")
+          .order("started_at", { ascending: false })
+          .range(from, from + PAGE - 1);
+        if (error) throw error;
+        const batch = (data ?? []) as FlowRun[];
+        all.push(...batch);
+        if (batch.length < PAGE) break;
+      }
+      return all;
     },
     staleTime: 60_000,
   });
   const { data: lifecycles = [], isLoading: ll } = useQuery<DoctorLifecycle[]>({
     queryKey: ["doctor-table-lifecycles"],
     queryFn: async () => {
-      const { data, error } = await supabase.from("doctor_lifecycle").select("*").limit(5000);
-      if (error) throw error;
-      return (data ?? []) as DoctorLifecycle[];
+      const PAGE = 1000;
+      const all: DoctorLifecycle[] = [];
+      for (let from = 0; from < 50_000; from += PAGE) {
+        const { data, error } = await supabase.from("doctor_lifecycle").select("*")
+          .range(from, from + PAGE - 1);
+        if (error) throw error;
+        const batch = (data ?? []) as DoctorLifecycle[];
+        all.push(...batch);
+        if (batch.length < PAGE) break;
+      }
+      return all;
     },
     staleTime: 60_000,
   });

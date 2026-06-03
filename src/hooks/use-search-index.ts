@@ -168,22 +168,32 @@ export function useSearchIndex(): SearchEntity[] {
   // Indexed as a "Placement" kind so ⌘K results include them alongside
   // doctors, runs, vacancies. One row per attempt, so a doctor at 4
   // hospitals = 4 result entries.
+  // Paginate — Supabase caps at 1000/page server-side. Placement
+  // history will cross that threshold quickly.
   const { data: placements = [] } = useQuery({
     queryKey: ["search-placements"],
     queryFn: async () => {
-      const { data, error } = await supabase
-        .from("placement_attempts")
-        .select("id, doctor_id, doctor_name, doctor_specialty, hospital_name, joined_at, signed_at, offered_at, shortlisted_at, paid_at")
-        .limit(20_000);
-      if (error) throw error;
-      return (data ?? []) as Array<{
+      type Row = {
         id: string; doctor_id: string; doctor_name: string;
         doctor_specialty: string | null;
         hospital_name: string;
         joined_at: string | null; signed_at: string | null;
         offered_at: string | null; shortlisted_at: string | null;
         paid_at: string | null;
-      }>;
+      };
+      const PAGE = 1000;
+      const all: Row[] = [];
+      for (let from = 0; from < 50_000; from += PAGE) {
+        const { data, error } = await supabase
+          .from("placement_attempts")
+          .select("id, doctor_id, doctor_name, doctor_specialty, hospital_name, joined_at, signed_at, offered_at, shortlisted_at, paid_at")
+          .range(from, from + PAGE - 1);
+        if (error) throw error;
+        const batch = (data ?? []) as Row[];
+        all.push(...batch);
+        if (batch.length < PAGE) break;
+      }
+      return all;
     },
     staleTime: 60_000,
   });

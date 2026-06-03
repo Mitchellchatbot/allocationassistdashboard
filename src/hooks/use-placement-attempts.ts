@@ -42,16 +42,26 @@ export function usePlacementAttempts() {
   return useQuery<PlacementAttempt[]>({
     queryKey: KEY,
     queryFn: async () => {
-      // Supabase silently caps at 1000 rows without an explicit limit.
-      // The Hammad sheet is ~300/month; bumping to 20k gives us a
-      // year+ of headroom before we need real pagination.
-      const { data, error } = await supabase
-        .from("placement_attempts")
-        .select("*")
-        .order("updated_at", { ascending: false })
-        .limit(20_000);
-      if (error) throw error;
-      return (data ?? []) as PlacementAttempt[];
+      // Supabase API gateway has a hard 1000-row cap that .limit() can't
+      // override (the cap is enforced server-side regardless of client
+      // request). Paginate via .range() in 1000-row pages until we've
+      // pulled everything. ~12 months of CSV history at ~300/month
+      // = ~3.6k rows so 4 round-trips, still well under a second.
+      const PAGE = 1000;
+      const all: PlacementAttempt[] = [];
+      for (let from = 0; ; from += PAGE) {
+        const { data, error } = await supabase
+          .from("placement_attempts")
+          .select("*")
+          .order("updated_at", { ascending: false })
+          .range(from, from + PAGE - 1);
+        if (error) throw error;
+        const batch = (data ?? []) as PlacementAttempt[];
+        all.push(...batch);
+        if (batch.length < PAGE) break;     // last page reached
+        if (all.length >= 50_000) break;    // sanity stop — shouldn't hit this
+      }
+      return all;
     },
     staleTime: 30_000,
   });
