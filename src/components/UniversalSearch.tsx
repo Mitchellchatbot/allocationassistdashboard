@@ -8,7 +8,7 @@ import {
   Users, DollarSign, Megaphone, User as UserIcon,
   LayoutDashboard, Receipt, BarChart3,
   UserSquare, Workflow, ClipboardList, Building2, Mailbox, Mail,
-  Tag, Bell, FileText, Clock, SearchX, CornerDownLeft,
+  Tag, Bell, FileText, Clock, SearchX, CornerDownLeft, Briefcase,
 } from "lucide-react";
 import { useSearchIndex, type SearchKind, type SearchEntity } from "@/hooks/use-search-index";
 import { useRecentItems } from "@/hooks/use-recent-items";
@@ -22,7 +22,8 @@ const KIND_META: Record<SearchKind, { icon: React.ElementType; heading: string; 
   Lead:         { icon: UserSquare,      heading: "Doctors · Leads",           order: 2,  badge: "bg-indigo-100 text-indigo-700 border-indigo-200" },
   Doctor:       { icon: UserSquare,      heading: "Doctors · On Board",        order: 3,  badge: "bg-emerald-100 text-emerald-700 border-emerald-200" },
   Profile:      { icon: UserSquare,      heading: "Doctor profiles",           order: 4,  badge: "bg-violet-100 text-violet-700 border-violet-200" },
-  Flow:         { icon: Workflow,        heading: "Active flow runs",          order: 5,  badge: "bg-teal-100 text-teal-700 border-teal-200" },
+  Placement:    { icon: Briefcase,       heading: "Placements (milestones)",   order: 5,  badge: "bg-emerald-100 text-emerald-800 border-emerald-300" },
+  Flow:         { icon: Workflow,        heading: "Active flow runs",          order: 6,  badge: "bg-teal-100 text-teal-700 border-teal-200" },
   Vacancy:      { icon: ClipboardList,   heading: "Vacancies",                 order: 6,  badge: "bg-amber-100 text-amber-700 border-amber-200" },
   Hospital:     { icon: Building2,       heading: "Hospitals",                 order: 7,  badge: "bg-cyan-100 text-cyan-700 border-cyan-200" },
   Batch:        { icon: Mailbox,         heading: "Batch sends",               order: 8,  badge: "bg-purple-100 text-purple-700 border-purple-200" },

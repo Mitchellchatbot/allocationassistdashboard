@@ -29,6 +29,7 @@ export type SearchKind =
   | "Lead"
   | "Doctor"
   | "Profile"
+  | "Placement"
   | "Deal"
   | "Vacancy"
   | "Hospital"
@@ -163,6 +164,29 @@ export function useSearchIndex(): SearchEntity[] {
     staleTime: 60_000,
   });
 
+  // Placements — doctor_lifecycle rows with any milestone logged.
+  // Indexed as a "Placement" kind so ⌘K results include them alongside
+  // doctors, runs, vacancies. Route deep-links to the milestone editor.
+  const { data: placements = [] } = useQuery({
+    queryKey: ["search-placements"],
+    queryFn: async () => {
+      const { data, error } = await supabase
+        .from("doctor_lifecycle")
+        .select("doctor_id, doctor_name, placement_hospital_name, joined_at, signed_at, offered_at, shortlisted_at, paid_at")
+        .or("joined_at.not.is.null,signed_at.not.is.null,offered_at.not.is.null,shortlisted_at.not.is.null")
+        .limit(500);
+      if (error) throw error;
+      return (data ?? []) as Array<{
+        doctor_id: string; doctor_name: string | null;
+        placement_hospital_name: string | null;
+        joined_at: string | null; signed_at: string | null;
+        offered_at: string | null; shortlisted_at: string | null;
+        paid_at: string | null;
+      }>;
+    },
+    staleTime: 60_000,
+  });
+
   return useMemo(() => {
     const out: SearchEntity[] = [...METRICS, ...PAGES];
 
@@ -210,6 +234,30 @@ export function useSearchIndex(): SearchEntity[] {
         sublabel: [p.title, p.nationality, p.country_training, p.years_experience ? `${p.years_experience}y exp` : null].filter(Boolean).join(" · ") || "Doctor profile",
         keywords: `profile cv ${p.title ?? ""} ${p.nationality ?? ""} ${p.country_training ?? ""} ${p.license ?? ""} ${p.area_of_interest ?? ""} ${p.bio ?? ""}`,
         route:    `/doctor-profiles?id=${encodeURIComponent(p.doctor_id)}`,
+      });
+    }
+
+    // ── Placements (lifecycle milestones) ─────────────────────────────────
+    for (const p of placements) {
+      if (!p.doctor_id) continue;
+      // Pick the latest milestone label for the sublabel preview so
+      // the search result shows "Joined · Burjeel Royal · Apr 12" etc.
+      const stage =
+        p.paid_at        ? "Paid"        :
+        p.joined_at      ? "Joined"      :
+        p.signed_at      ? "Signed"      :
+        p.offered_at     ? "Offered"     :
+                           "Shortlisted";
+      const latestDate = p.paid_at || p.joined_at || p.signed_at || p.offered_at || p.shortlisted_at;
+      const sublabel = [stage, p.placement_hospital_name, latestDate ? new Date(latestDate).toLocaleDateString(undefined, { month: "short", day: "numeric" }) : null]
+        .filter(Boolean).join(" · ");
+      out.push({
+        id:       `placement:${p.doctor_id}`,
+        kind:     "Placement",
+        label:    p.doctor_name ?? p.doctor_id,
+        sublabel: sublabel || "Placement",
+        keywords: `placement milestone ${stage.toLowerCase()} ${p.placement_hospital_name ?? ""} ${p.doctor_name ?? ""} joined signed offered shortlisted paid invoice`,
+        route:    `/reports?placement=${encodeURIComponent(p.doctor_id)}`,
       });
     }
 
@@ -362,7 +410,7 @@ export function useSearchIndex(): SearchEntity[] {
   }, [
     zoho?.rawLeads, zoho?.rawDeals, zoho?.rawDoctorsOnBoard,
     channelEcon, byCategory,
-    hospitals, vacancies, batches, templates, profiles, runs, specialties, notifications,
+    hospitals, vacancies, batches, templates, profiles, placements, runs, specialties, notifications,
   ]);
 }
 
