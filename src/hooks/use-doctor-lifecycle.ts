@@ -21,10 +21,19 @@ import { useAuth } from "@/hooks/use-auth";
 export interface DoctorLifecycle {
   doctor_id:                 string;
   doctor_name:               string | null;
+  // Placement milestones (Ammar 2026-06-03 — replaces Hammad sheet).
+  // shortlisted_at / interviewed_at / offered_at / start_date were
+  // added on 20260603000005_placements.sql.
+  shortlisted_at:            string | null;
+  interviewed_at:            string | null;
+  offered_at:                string | null;
   signed_at:                 string | null;
+  start_date:                string | null;
   joined_at:                 string | null;
   approved_at:               string | null;
   paid_at:                   string | null;
+  placement_hospital_id:     string | null;
+  placement_hospital_name:   string | null;
   eligible_for_sending:      boolean;
   unavailable:               boolean;
   unavailable_reason:        string | null;
@@ -96,10 +105,18 @@ export function useDoctorLifecycleMap(): Record<string, DoctorLifecycle> {
 }
 
 export type LifecycleAction =
-  | { kind: "mark_signed"     }
-  | { kind: "mark_joined";    joiningDate: string }      // ISO date
+  // Placement milestones (Ammar 2026-06-03 — replaces Hammad sheet).
+  // Each takes the date the team is logging, so backdated entries work
+  // (the team often logs days after the event by phone).
+  | { kind: "mark_shortlisted"; date: string }
+  | { kind: "mark_interviewed"; date: string }
+  | { kind: "mark_offered";     date: string }
+  | { kind: "mark_signed"; date?: string }
+  | { kind: "mark_start_date";  date: string }
+  | { kind: "mark_joined";      joiningDate: string }      // ISO date
   | { kind: "mark_approved"   }
-  | { kind: "mark_paid"       }
+  | { kind: "mark_paid"; date?: string }
+  | { kind: "set_placement_hospital"; hospitalId: string | null; hospitalName: string | null }
   | { kind: "mark_unavailable"; reason: string; checkInAt: string }   // ISO datetime
   | { kind: "mark_available"  }
   | { kind: "push_checkin";   newCheckInAt: string }
@@ -129,9 +146,21 @@ export function useMarkLifecycle() {
       };
 
       switch (action.kind) {
+        case "mark_shortlisted":
+          patch.shortlisted_at = action.date;
+          break;
+        case "mark_interviewed":
+          patch.interviewed_at = action.date;
+          break;
+        case "mark_offered":
+          patch.offered_at = action.date;
+          break;
         case "mark_signed":
-          patch.signed_at = now;
+          patch.signed_at = action.date ?? now;
           patch.eligible_for_sending = false;       // spec: signed doctors stop appearing in send batches
+          break;
+        case "mark_start_date":
+          patch.start_date = action.date;
           break;
         case "mark_joined":
           patch.joined_at = action.joiningDate;
@@ -140,7 +169,11 @@ export function useMarkLifecycle() {
           patch.approved_at = now;
           break;
         case "mark_paid":
-          patch.paid_at = now;
+          patch.paid_at = action.date ?? now;
+          break;
+        case "set_placement_hospital":
+          patch.placement_hospital_id = action.hospitalId;
+          patch.placement_hospital_name = action.hospitalName;
           break;
         case "mark_unavailable":
           patch.unavailable = true;

@@ -21,6 +21,7 @@ import { Skeleton } from "@/components/ui/skeleton";
 import { useNavigate } from "react-router-dom";
 import type { FlowRun } from "@/hooks/use-automation-flows";
 import type { DoctorLifecycle } from "@/hooks/use-doctor-lifecycle";
+import { PlacementsCard } from "@/components/reports/PlacementsCard";
 
 /**
  * Phase 5 — Hospital Introduction Department reporting page.
@@ -119,6 +120,11 @@ export default function Reports() {
             <TeamTable rows={bundle.team} loading={bundle.isLoading} />
           </CardContent>
         </Card>
+
+        {/* Placements (Ammar 2026-06-03) — replaces the Hammad sheet.
+            Per-doctor milestones + 45-day payment clock. Click any row
+            to edit milestone dates inline. */}
+        <PlacementsCard />
 
         <Card>
           <CardHeader className="pb-2">
