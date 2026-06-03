@@ -348,22 +348,52 @@ function TypeformSyncButton({ form }: { form: Form }) {
 
 function FieldRow({ label, value, masked = false }: { label: string; value: string; masked?: boolean }) {
   const [shown, setShown] = useState(false);
+  const [copied, setCopied] = useState(false);
   const display = masked && !shown ? "•".repeat(Math.min(32, value.length)) : value;
-  const handleCopy = () => { navigator.clipboard.writeText(value); toast.success("Copied."); };
+  const handleCopy = async () => {
+    try {
+      await navigator.clipboard.writeText(value);
+      setCopied(true);
+      setTimeout(() => setCopied(false), 1500);
+    } catch {
+      toast.error("Copy failed");
+    }
+  };
   return (
-    <div className="grid grid-cols-[80px_1fr] gap-2 items-center">
-      <span className="text-muted-foreground text-[10px] uppercase tracking-wider">{label}</span>
-      <div className="flex items-center gap-1">
-        <code className="flex-1 truncate text-[10px] bg-slate-100 px-2 py-1 rounded">{display}</code>
-        {masked && (
-          <button onClick={() => setShown(s => !s)} className="text-[10px] text-teal-700 hover:underline shrink-0">
-            {shown ? "Hide" : "Show"}
+    <div className="space-y-1.5">
+      <div className="flex items-center justify-between gap-2">
+        <span className="text-muted-foreground text-[10px] uppercase tracking-wider font-medium">{label}</span>
+        <div className="flex items-center gap-1.5 shrink-0">
+          {masked && (
+            <button
+              type="button"
+              onClick={() => setShown(s => !s)}
+              className="text-[10px] text-teal-700 hover:underline"
+            >
+              {shown ? "Hide" : "Show"}
+            </button>
+          )}
+          <button
+            type="button"
+            onClick={handleCopy}
+            className={`inline-flex items-center gap-1 text-[10px] px-2 py-1 rounded-md border transition-colors ${
+              copied
+                ? "bg-emerald-50 text-emerald-700 border-emerald-300"
+                : "bg-white text-slate-700 border-slate-300 hover:bg-slate-50"
+            }`}
+            title="Copy to clipboard"
+          >
+            {copied ? <CheckCircle2 className="h-3 w-3" /> : <Copy className="h-3 w-3" />}
+            {copied ? "Copied" : "Copy"}
           </button>
-        )}
-        <button onClick={handleCopy} className="text-slate-500 hover:text-slate-800 shrink-0">
-          <Copy className="h-3 w-3" />
-        </button>
+        </div>
       </div>
+      {/* URL goes on its own row underneath the label so it has the
+          full card width to wrap into. break-all lets long URLs flow
+          across multiple lines instead of clipping behind the buttons. */}
+      <code className="block text-[10.5px] bg-slate-100 px-2.5 py-2 rounded font-mono break-all leading-relaxed">
+        {display}
+      </code>
     </div>
   );
 }
