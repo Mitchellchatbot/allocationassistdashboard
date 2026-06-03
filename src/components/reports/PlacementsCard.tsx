@@ -26,10 +26,11 @@ import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from "@/components/ui/dialog";
-import { Briefcase, ListChecks, Calendar, AlertCircle, CheckCircle2 } from "lucide-react";
+import { Briefcase, ListChecks, Calendar, AlertCircle, CheckCircle2, Plus, Search, UserSquare } from "lucide-react";
 import { supabase } from "@/lib/supabase";
 import { useMarkLifecycle, type DoctorLifecycle } from "@/hooks/use-doctor-lifecycle";
 import { useHospitals } from "@/hooks/use-hospitals";
+import { useZohoData } from "@/hooks/use-zoho-data";
 import { toast } from "sonner";
 
 interface PlacementRow extends DoctorLifecycle {
@@ -92,6 +93,8 @@ function PaymentStatus({ row }: { row: PlacementRow }) {
 export function PlacementsCard() {
   const { data: rows = [], isLoading } = usePlacements();
   const [editingId, setEditingId] = useState<string | null>(null);
+  const [editingName, setEditingName] = useState<string | null>(null); // for synthetic rows
+  const [pickerOpen, setPickerOpen] = useState(false);
   const [searchParams, setSearchParams] = useSearchParams();
 
   // Deep-link: /reports?placement=<doctor_id> opens the milestone
@@ -114,11 +117,13 @@ export function PlacementsCard() {
     if (!editingId) return null;
     const existing = rows.find(r => r.doctor_id === editingId);
     if (existing) return existing;
-    // Synthetic empty row for first-time milestone logging from a
-    // deep-link.
+    // Synthetic empty row for first-time milestone logging — either
+    // from a deep-link (E1) or from the "New placement" picker (the
+    // doctor's name is carried in editingName so the editor header
+    // doesn't render as a raw ID).
     return {
       doctor_id:               editingId,
-      doctor_name:             null,
+      doctor_name:             editingName,
       shortlisted_at:          null,
       interviewed_at:          null,
       offered_at:              null,
@@ -139,18 +144,25 @@ export function PlacementsCard() {
       created_at:              new Date().toISOString(),
       updated_at:              new Date().toISOString(),
     };
-  }, [rows, editingId]);
+  }, [rows, editingId, editingName]);
 
   return (
     <Card>
       <CardHeader className="pb-2">
-        <CardTitle className="text-base flex items-center gap-2">
-          <Briefcase className="h-4 w-4 text-emerald-600" />
-          Placements
-        </CardTitle>
-        <CardDescription className="text-[11px]">
-          Every doctor with at least one milestone logged. Replaces the Hammad sheet — click any row to update dates. The right-most pill counts down the 45-day window from joining to AA invoice payment.
-        </CardDescription>
+        <div className="flex items-start justify-between gap-3">
+          <div>
+            <CardTitle className="text-base flex items-center gap-2">
+              <Briefcase className="h-4 w-4 text-emerald-600" />
+              Placements
+            </CardTitle>
+            <CardDescription className="text-[11px]">
+              Replaces the Hammad sheet. Stored in our portal (not Zoho — Zoho doesn't have these date fields). Click any row to update milestones; click <strong>New placement</strong> to start tracking a doctor not on this list yet.
+            </CardDescription>
+          </div>
+          <Button size="sm" onClick={() => setPickerOpen(true)}>
+            <Plus className="h-3.5 w-3.5 mr-1" /> New placement
+          </Button>
+        </div>
       </CardHeader>
       <CardContent className="p-0">
         {isLoading ? (
@@ -158,7 +170,10 @@ export function PlacementsCard() {
         ) : rows.length === 0 ? (
           <div className="px-4 py-8 text-center text-[12px] text-muted-foreground">
             <ListChecks className="h-5 w-5 mx-auto mb-2 text-muted-foreground/60" />
-            No placements logged yet. Click any doctor in <strong>Doctor Profiles</strong> to start tracking their milestones.
+            <p>No placements logged yet.</p>
+            <Button size="sm" variant="outline" onClick={() => setPickerOpen(true)} className="mt-3">
+              <Plus className="h-3.5 w-3.5 mr-1" /> Start tracking a placement
+            </Button>
           </div>
         ) : (
           <div className="overflow-x-auto">
@@ -204,10 +219,146 @@ export function PlacementsCard() {
         <PlacementEditDialog
           row={editing}
           open={!!editing}
-          onClose={() => setEditingId(null)}
+          onClose={() => { setEditingId(null); setEditingName(null); }}
         />
       )}
+
+      <NewPlacementDialog
+        open={pickerOpen}
+        existingDoctorIds={new Set(rows.map(r => r.doctor_id))}
+        onClose={() => setPickerOpen(false)}
+        onPicked={(id, name) => {
+          setPickerOpen(false);
+          setEditingName(name);
+          setEditingId(id);
+        }}
+      />
     </Card>
+  );
+}
+
+/* ────────────────────────────────────────────────────────────────────
+ * NewPlacementDialog — pick a doctor (Zoho lead or Doctor on Board)
+ * who doesn't have a placement row yet. The list is the live Zoho
+ * roster; type to filter by name / email / specialty. Doctors who
+ * already have a placement row are flagged so the team doesn't double-
+ * track. Picking opens the milestone editor with that doctor pre-loaded.
+ * ──────────────────────────────────────────────────────────────────── */
+function NewPlacementDialog({ open, existingDoctorIds, onClose, onPicked }: {
+  open:    boolean;
+  existingDoctorIds: Set<string>;
+  onClose: () => void;
+  onPicked: (doctorId: string, doctorName: string) => void;
+}) {
+  const { data: zoho } = useZohoData();
+  const [search, setSearch] = useState("");
+
+  // Merge Zoho leads + DoB into one searchable list. Same id-prefix
+  // scheme the rest of the app uses (`lead:` / `dob:`) so the doctor
+  // id we hand off to the editor lines up with how other components
+  // reference doctors.
+  const candidates = useMemo(() => {
+    const out: Array<{ id: string; name: string; specialty: string; subtitle: string; source: "lead" | "dob" }> = [];
+    for (const l of zoho?.rawLeads ?? []) {
+      const name = (l.Full_Name || `${l.First_Name ?? ""} ${l.Last_Name ?? ""}`).trim();
+      if (!name) continue;
+      out.push({
+        id:        `lead:${l.id}`,
+        name,
+        specialty: (l.Specialty_New ?? l.Specialty ?? "").toString(),
+        subtitle:  [l.Email, l.Phone ?? l.Mobile].filter(Boolean).join(" · ") || "",
+        source:    "lead",
+      });
+    }
+    for (const d of zoho?.rawDoctorsOnBoard ?? []) {
+      const name = (d.Full_Name || `${d.First_Name ?? ""} ${d.Last_Name ?? ""}`).trim();
+      if (!name) continue;
+      out.push({
+        id:        `dob:${d.id}`,
+        name,
+        specialty: (d.Specialty_New ?? d.Speciality ?? "").toString(),
+        subtitle:  [d.Email, d.Phone ?? d.Mobile, d.Account_Name?.name && `→ ${d.Account_Name.name}`].filter(Boolean).join(" · ") || "Doctor on Board",
+        source:    "dob",
+      });
+    }
+    return out.sort((a, b) => a.name.localeCompare(b.name));
+  }, [zoho?.rawLeads, zoho?.rawDoctorsOnBoard]);
+
+  const filtered = useMemo(() => {
+    const q = search.trim().toLowerCase();
+    if (!q) return candidates.slice(0, 50);
+    return candidates.filter(c =>
+      c.name.toLowerCase().includes(q) ||
+      c.specialty.toLowerCase().includes(q) ||
+      c.subtitle.toLowerCase().includes(q),
+    ).slice(0, 50);
+  }, [candidates, search]);
+
+  return (
+    <Dialog open={open} onOpenChange={v => !v && onClose()}>
+      <DialogContent className="sm:max-w-[560px]">
+        <DialogHeader>
+          <DialogTitle className="flex items-center gap-2 text-[14px]">
+            <Briefcase className="h-4 w-4 text-emerald-600" />
+            Start tracking a placement
+          </DialogTitle>
+          <p className="text-[11px] text-muted-foreground">
+            Pick a doctor from Zoho (leads + Doctors on Board). Then set the milestone dates that already happened — shortlisted, interviewed, offered, signed, joined.
+          </p>
+        </DialogHeader>
+
+        <div className="relative mt-2">
+          <Search className="absolute left-2.5 top-1/2 -translate-y-1/2 h-3.5 w-3.5 text-muted-foreground" />
+          <Input
+            value={search}
+            onChange={e => setSearch(e.target.value)}
+            placeholder="Search by name, specialty, email…"
+            className="pl-8 h-9 text-[12px]"
+            autoFocus
+          />
+        </div>
+
+        <div className="mt-2 max-h-[360px] overflow-y-auto rounded-md border bg-slate-50/40">
+          {filtered.length === 0 ? (
+            <div className="px-4 py-6 text-center text-[12px] text-muted-foreground">
+              No matches in Zoho. Try a different name or specialty.
+            </div>
+          ) : (
+            filtered.map(c => {
+              const alreadyTracked = existingDoctorIds.has(c.id);
+              return (
+                <button
+                  key={c.id}
+                  type="button"
+                  onClick={() => onPicked(c.id, c.name)}
+                  className="w-full text-left px-3 py-2 hover:bg-white flex items-center gap-2 border-b border-slate-200/60 last:border-b-0"
+                >
+                  <UserSquare className="h-3.5 w-3.5 text-slate-500 shrink-0" />
+                  <div className="flex-1 min-w-0">
+                    <div className="text-[12px] font-medium text-slate-800 truncate">
+                      {c.name}
+                      {alreadyTracked && (
+                        <Badge variant="outline" className="ml-1.5 bg-amber-50 text-amber-700 border-amber-200 text-[9px]">already tracked</Badge>
+                      )}
+                    </div>
+                    <div className="text-[10px] text-muted-foreground truncate">
+                      {[c.specialty || null, c.subtitle || null].filter(Boolean).join(" · ") || (c.source === "lead" ? "Lead" : "Doctor on Board")}
+                    </div>
+                  </div>
+                  <Badge variant="outline" className={`text-[9px] uppercase tracking-wider shrink-0 ${c.source === "lead" ? "bg-indigo-50 text-indigo-700 border-indigo-200" : "bg-emerald-50 text-emerald-700 border-emerald-200"}`}>
+                    {c.source === "lead" ? "Lead" : "DoB"}
+                  </Badge>
+                </button>
+              );
+            })
+          )}
+        </div>
+
+        <DialogFooter className="mt-2">
+          <Button variant="outline" onClick={onClose}>Cancel</Button>
+        </DialogFooter>
+      </DialogContent>
+    </Dialog>
   );
 }
 
