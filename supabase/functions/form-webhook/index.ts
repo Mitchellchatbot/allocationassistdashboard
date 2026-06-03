@@ -83,23 +83,79 @@ Deno.serve(async (req: Request) => {
   }
 
   // ── 3. Flatten + extract respondent name/email heuristically ────────
-  // Elementor sends top-level key/value pairs by default. Some
-  // configurations nest under `fields`. We try both. Field names from
-  // the Elementor form are preserved verbatim in answers.
+  // Different sources ship different shapes:
+  //   - Elementor: top-level key/value, sometimes under `fields`
+  //   - WooCommerce: deeply nested objects (billing.email, shipping.phone)
+  //   - Generic webhooks: arbitrary JSON
+  // Recursively flatten objects to depth 3 with dot notation so nested
+  // structures render as clean key/value rows in the UI. Skip arrays
+  // and overly-deep nesting (stringified as JSON fallback).
   const flat: Record<string, string> = {};
-  const source = (raw && typeof raw === "object" && "fields" in raw) ? (raw as { fields: Record<string, unknown> }).fields : raw;
-  for (const [k, v] of Object.entries(source ?? {})) {
-    if (v == null) continue;
-    flat[k] = typeof v === "string" ? v : JSON.stringify(v);
-  }
+  const source = (raw && typeof raw === "object" && "fields" in raw && typeof (raw as Record<string, unknown>).fields === "object")
+    ? (raw as { fields: Record<string, unknown> }).fields
+    : raw;
 
+  function flatten(obj: unknown, prefix: string, depth: number) {
+    if (obj == null) return;
+    if (depth > 3) {
+      flat[prefix] = JSON.stringify(obj).slice(0, 200);
+      return;
+    }
+    if (typeof obj !== "object") {
+      flat[prefix] = String(obj);
+      return;
+    }
+    if (Array.isArray(obj)) {
+      // Arrays stringify — most form payloads don't have meaningful
+      // arrays at this level (and when they do — e.g. line items in a
+      // WC order — the team can drill into the raw_payload).
+      flat[prefix] = obj.map(x => typeof x === "string" ? x : JSON.stringify(x)).join(", ");
+      return;
+    }
+    for (const [k, v] of Object.entries(obj as Record<string, unknown>)) {
+      // Skip noisy WooCommerce-internal fields that pollute the answers
+      // view with stuff the team doesn't care about.
+      if (depth === 0 && (k === "_links" || k === "meta_data" || k === "links")) continue;
+      const path = prefix ? `${prefix}.${k}` : k;
+      flatten(v, path, depth + 1);
+    }
+  }
+  flatten(source, "", 0);
+
+  // ── Heuristic respondent capture ────────────────────────────────────
+  // Prefer top-level fields, fall back to billing.* / shipping.* which
+  // WooCommerce uses on customer/order payloads.
   let respondentName  = "";
   let respondentEmail = "";
-  for (const [k, v] of Object.entries(flat)) {
-    const lc = k.toLowerCase();
-    if (!respondentEmail && /email|e-?mail/.test(lc)) respondentEmail = v;
-    if (!respondentName  && /\bname|full[\s_-]?name|your[\s_-]?name/.test(lc)) respondentName = v;
-  }
+
+  const pickEmail = (...keys: string[]) => {
+    for (const k of keys) if (flat[k] && /@/.test(flat[k])) return flat[k];
+    return "";
+  };
+  const pickName = (...keyPairs: Array<string | [string, string]>) => {
+    for (const k of keyPairs) {
+      if (typeof k === "string" && flat[k]?.trim()) return flat[k].trim();
+      if (Array.isArray(k)) {
+        const f = flat[k[0]]?.trim() ?? "";
+        const l = flat[k[1]]?.trim() ?? "";
+        if (f || l) return [f, l].filter(Boolean).join(" ");
+      }
+    }
+    return "";
+  };
+
+  respondentEmail =
+    pickEmail("email", "Email", "your-email", "billing.email")
+    || (Object.entries(flat).find(([k, v]) => /email|e-?mail/i.test(k) && /@/.test(v))?.[1] ?? "");
+
+  respondentName =
+    pickName(
+      "name", "full_name", "your_name", "Name", "Full Name",
+      ["first_name", "last_name"],
+      ["billing.first_name", "billing.last_name"],
+      ["shipping.first_name", "shipping.last_name"],
+    )
+    || (Object.entries(flat).find(([k]) => /\bname|full[\s_-]?name|your[\s_-]?name/i.test(k))?.[1] ?? "");
 
   // ── 4. Idempotent response_id ──────────────────────────────────────
   // Elementor doesn't ship one; derive a stable id from the payload so
