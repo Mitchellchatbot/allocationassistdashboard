@@ -39,6 +39,7 @@ const MyWorkspace     = lazy(() => import("./pages/MyWorkspace"));
 const BulkImport      = lazy(() => import("./pages/BulkImport"));
 const Connections     = lazy(() => import("./pages/Connections"));
 const UploadCV        = lazy(() => import("./pages/UploadCV"));
+const SharedProfile   = lazy(() => import("./pages/SharedProfile"));
 const NotFound        = lazy(() => import("./pages/NotFound"));
 
 // Global react-query defaults tuned for this dashboard:
@@ -127,6 +128,7 @@ const App = () => (
               {/* Public */}
               <Route path="/login" element={<Login />} />
               <Route path="/upload-cv/:token" element={<UploadCV />} />
+              <Route path="/shared-profile/:token" element={<SharedProfile />} />
 
               {/* Protected — one shell, many children. The shell renders the
                   dashboard chrome (sidebar/topbar/AI panel) just once; the

@@ -261,6 +261,44 @@ Deno.serve(async (req: Request) => {
     }
   }
 
+  // ── Mint shared-profile token for profile_sent_hospital sends ───────────
+  // Each hospital recipient gets their own tokenised URL pointing at the
+  // dashboard's /shared-profile/:token route (Ammar 2026-06-03 — hospitals
+  // can't see profiles on the AA website without a login, so the email
+  // CTA links here instead). Token persists 90d by default.
+  let mintedProfileUrl = "";
+  if (run.current_stage === "email_hospital" && run.doctor_id) {
+    try {
+      // Reuse an existing non-revoked token for this run if there is one,
+      // so re-sends don't proliferate tokens.
+      const { data: existingTok } = await supabase
+        .from("shared_profile_tokens")
+        .select("token, expires_at, revoked_at")
+        .eq("run_id", run.id)
+        .is("revoked_at", null)
+        .gt("expires_at", new Date().toISOString())
+        .order("created_at", { ascending: false })
+        .limit(1)
+        .maybeSingle();
+      let token = existingTok?.token ?? "";
+      if (!token) {
+        token = crypto.randomUUID().replace(/-/g, "");
+        await supabase.from("shared_profile_tokens").insert({
+          token,
+          doctor_id:   run.doctor_id,
+          doctor_name: run.doctor_name,
+          hospital:    run.hospital,
+          run_id:      run.id,
+          created_by:  "send-flow-email",
+        });
+      }
+      mintedProfileUrl = `${APP_ORIGIN.replace(/\/+$/, "")}/shared-profile/${token}`;
+      console.log("[send-flow-email] minted shared-profile URL:", mintedProfileUrl);
+    } catch (e) {
+      console.warn("[send-flow-email] could not mint shared-profile token (non-fatal):", e);
+    }
+  }
+
   // ── Generate CV upload link for the onboarding welcome email ─────────────
   // The onboarding_welcome template references `{{upload_link}}` — without
   // a real URL it renders as the literal "{{upload_link}}" in the doctor's
@@ -321,12 +359,11 @@ Deno.serve(async (req: Request) => {
     // back to whatever was set in metadata.
     upload_link:        bundledUploadLink || String(md.upload_link ?? ""),
     profile_link:       String(md.profile_link ?? ""),
-    // profile_url drives the "View full profile online" CTA in the
-    // redesigned profile_sent_hospital template (Ammar 2026-06-03
-    // — website-style email). B5 will swap this for a tokenised AA-
-    // site URL; until then it falls back to the homepage so the
-    // button isn't broken.
-    profile_url:        String(md.profile_url ?? "https://www.allocationassist.com"),
+    // profile_url drives the "View full profile online" CTA. Prefer
+    // the per-run minted shared-profile token (B5) over any pre-set
+    // metadata; final fallback is the AA homepage so the button isn't
+    // dead-on-arrival if minting failed.
+    profile_url:        mintedProfileUrl || String(md.profile_url ?? "https://www.allocationassist.com"),
     guide_link:         String(md.guide_link ?? ""),
     payment_link:       String(md.payment_link ?? ""),
     hospital_profile_url:  String(md.hospital_profile_url ?? ""),
