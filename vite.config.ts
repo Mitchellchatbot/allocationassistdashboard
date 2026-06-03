@@ -33,6 +33,7 @@ export default defineConfig(({ mode }) => ({
         manualChunks: {
           "vendor-charts":   ["recharts"],
           "vendor-pdf":      ["html2pdf.js"],
+          "vendor-xlsx":     ["xlsx"],
           "vendor-supabase": ["@supabase/supabase-js"],
           "vendor-radix":    [
             "@radix-ui/react-dialog",

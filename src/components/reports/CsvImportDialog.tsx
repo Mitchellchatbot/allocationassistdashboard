@@ -16,7 +16,8 @@ import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from "
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { Upload, AlertCircle, CheckCircle2, FileText } from "lucide-react";
-import { parseHammadCsv, doctorSlug, type ParsedRow } from "@/lib/parse-hammad-csv";
+import { parseHammadCsv, doctorSlug } from "@/lib/parse-hammad-csv";
+import { readTabularFile, type ReadResult } from "@/lib/read-tabular-file";
 import { useBulkInsertPlacementAttempts, type UpsertAttemptInput } from "@/hooks/use-placement-attempts";
 import { useZohoData } from "@/hooks/use-zoho-data";
 import { useHospitals } from "@/hooks/use-hospitals";
@@ -29,6 +30,7 @@ interface Props {
 
 export function CsvImportDialog({ open, onClose }: Props) {
   const [csvText, setCsvText]   = useState("");
+  const [readMeta, setReadMeta] = useState<ReadResult | null>(null);
   const [step, setStep]         = useState<"input" | "preview" | "done">("input");
   const [importing, setImporting] = useState(false);
   const [result, setResult]     = useState<{ inserted: number; skipped: number } | null>(null);
@@ -85,9 +87,18 @@ export function CsvImportDialog({ open, onClose }: Props) {
   }, [parsed, nameToZohoId, hospitals]);  // eslint-disable-line react-hooks/exhaustive-deps
 
   const handleFile = async (file: File) => {
-    const text = await file.text();
-    setCsvText(text);
-    setStep("preview");
+    try {
+      // readTabularFile handles BOTH .csv and .xlsx — for xlsx it
+      // concatenates every tab into a single CSV-text representation
+      // with blank-line separators, which the parser treats as new
+      // sections (same as a multi-section monthly sheet).
+      const result = await readTabularFile(file);
+      setReadMeta(result);
+      setCsvText(result.text);
+      setStep("preview");
+    } catch (e) {
+      toast.error(e instanceof Error ? e.message : "Couldn't read file");
+    }
   };
 
   const handleImport = async () => {
@@ -121,6 +132,7 @@ export function CsvImportDialog({ open, onClose }: Props) {
 
   const handleClose = () => {
     setCsvText("");
+    setReadMeta(null);
     setStep("input");
     setResult(null);
     onClose();
@@ -135,10 +147,10 @@ export function CsvImportDialog({ open, onClose }: Props) {
         <DialogHeader>
           <DialogTitle className="flex items-center gap-2 text-[14px]">
             <Upload className="h-4 w-4 text-emerald-600" />
-            Import the Hammad placement CSV
+            Import placements (CSV or XLSX)
           </DialogTitle>
           <p className="text-[11px] text-muted-foreground">
-            Paste or upload Ammar's weekly placement spreadsheet export. The parser handles the multi-section / summary-row format. Doctors are matched to Zoho leads + DoB by name; hospitals are matched to the hospitals table by name (case-insensitive contains). Unmatched rows still import — they'll just live as free-text references until linked manually.
+            Drop the whole Hammad workbook (.xlsx — every tab gets imported in one shot) or a single-tab CSV. The parser handles Ammar's multi-section weekly format. Doctors are matched to Zoho leads + DoB by name; hospitals are matched to the hospitals table. Unmatched rows still import as free-text references.
           </p>
         </DialogHeader>
 
@@ -147,16 +159,16 @@ export function CsvImportDialog({ open, onClose }: Props) {
             <div className="rounded-md border-2 border-dashed border-slate-200 px-4 py-6 text-center">
               <FileText className="h-5 w-5 text-muted-foreground mx-auto mb-2" />
               <label htmlFor="csv-file-input" className="cursor-pointer text-[12px] font-medium text-teal-700 hover:underline">
-                Pick a .csv file
+                Pick a .csv or .xlsx file
               </label>
               <input
                 id="csv-file-input"
                 type="file"
-                accept=".csv,text/csv"
+                accept=".csv,.xlsx,.xls,.xlsm,text/csv,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet,application/vnd.ms-excel"
                 className="hidden"
                 onChange={e => { const f = e.target.files?.[0]; if (f) handleFile(f); e.target.value = ""; }}
               />
-              <p className="text-[10px] text-muted-foreground mt-1">or paste the CSV text below</p>
+              <p className="text-[10px] text-muted-foreground mt-1">.xlsx imports every tab in one shot · or paste CSV text below</p>
             </div>
             <textarea
               value={csvText}
@@ -169,6 +181,24 @@ export function CsvImportDialog({ open, onClose }: Props) {
 
         {step === "preview" && parsed && (
           <div className="space-y-3">
+            {/* When source was an xlsx workbook, show which tabs we
+                read. Helpful if the user expected N tabs but the parser
+                only found M. */}
+            {readMeta && readMeta.format === "xlsx" && readMeta.sheets.length > 0 && (
+              <div className="rounded-md border bg-sky-50/30 px-3 py-2">
+                <div className="text-[11px] font-medium text-sky-900 mb-1">
+                  Read {readMeta.sheets.length} sheet{readMeta.sheets.length === 1 ? "" : "s"} from the workbook:
+                </div>
+                <div className="flex flex-wrap gap-1">
+                  {readMeta.sheets.map(s => (
+                    <Badge key={s.name} variant="outline" className="text-[9px] bg-white border-sky-200 text-sky-800">
+                      {s.name} · {s.rows}
+                    </Badge>
+                  ))}
+                </div>
+              </div>
+            )}
+
             <div className="grid grid-cols-2 sm:grid-cols-4 gap-2 text-center">
               <Stat label="Rows parsed"        value={parsed.rows.length} tone="emerald" />
               <Stat label="Skipped"            value={parsed.skippedRows} tone="slate" />

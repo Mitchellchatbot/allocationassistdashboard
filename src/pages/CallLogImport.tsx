@@ -590,11 +590,33 @@ function useImporter<T extends object>(
   const [done, setDone]           = useState(0);
   const [error, setError]         = useState("");
 
-  const handleFile = useCallback((file: File) => {
+  const handleFile = useCallback(async (file: File) => {
     setFileName(file.name);
     setRows([]);
     setDone(0);
     setError("");
+
+    // Support both CSV/TSV and XLSX. For xlsx we read the first sheet
+    // and serialise to CSV, then feed it through Papa.parse the same
+    // way the original CSV path does. Multi-tab workbooks are taken at
+    // the first sheet — call logs are typically a single table so
+    // that's the right default.
+    const lowerName = file.name.toLowerCase();
+    const isXlsx = lowerName.endsWith(".xlsx") || lowerName.endsWith(".xls") || lowerName.endsWith(".xlsm");
+    if (isXlsx) {
+      try {
+        const { readTabularFile } = await import("@/lib/read-tabular-file");
+        const result = await readTabularFile(file);
+        const csvText = result.sheets[0]?.text ?? "";
+        const parsedCsv = Papa.parse<string[]>(csvText, { header: false, skipEmptyLines: false });
+        const rowsOut = parser(parsedCsv.data as string[][]);
+        setRows(rowsOut);
+      } catch (e) {
+        setError(e instanceof Error ? e.message : String(e));
+      }
+      return;
+    }
+
     Papa.parse<string[]>(file, {
       header: false,
       skipEmptyLines: false,
@@ -706,12 +728,18 @@ function ImportSection<T extends object>({
           <div className="flex h-14 w-14 items-center justify-center rounded-full bg-primary/10">
             <Upload className="h-6 w-6 text-primary" />
           </div>
-          <p className="text-[14px] font-medium text-foreground">Drop your CSV file here</p>
+          <p className="text-[14px] font-medium text-foreground">Drop your CSV or XLSX file here</p>
           <p className="text-[12px] text-muted-foreground text-center max-w-sm">{emptyHint}</p>
           <Button variant="outline" size="sm" className="mt-2 text-[12px]">
             <FileText className="h-3.5 w-3.5 mr-1.5" /> Browse file
           </Button>
-          <input id={inputId} type="file" accept=".csv,.tsv,.txt" className="hidden" onChange={onInput} />
+          <input
+            id={inputId}
+            type="file"
+            accept=".csv,.tsv,.txt,.xlsx,.xls,.xlsm,text/csv,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet,application/vnd.ms-excel"
+            className="hidden"
+            onChange={onInput}
+          />
         </CardContent>
       </Card>
     );

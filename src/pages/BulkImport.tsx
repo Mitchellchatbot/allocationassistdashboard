@@ -10,6 +10,7 @@ import { toast } from "sonner";
 import { supabase } from "@/lib/supabase";
 import { parseCsvObjects, findHeader } from "@/lib/csv-parse";
 import { buildDoctorMatcher } from "@/lib/doctor-name-matcher";
+import { readTabularFile } from "@/lib/read-tabular-file";
 import { useAuth } from "@/hooks/use-auth";
 
 /**
@@ -509,6 +510,29 @@ function ImporterShell({ title, icon: Icon, sample, instructions, processor }: {
   const [result, setResult] = useState<{ created: number; updated: number; skipped: number } | null>(null);
   const [error,  setError]  = useState<string | null>(null);
   const [preview, setPreview] = useState<{ headers: string[]; rows: Record<string, string>[] } | null>(null);
+  const [sheetPick, setSheetPick] = useState<Array<{ name: string; text: string }>>([]);
+
+  // Accept BOTH .csv and .xlsx. For xlsx with one sheet, drop straight
+  // into the textarea. For multi-sheet xlsx, present a chooser so the
+  // user picks which tab to import (each importer handles ONE table
+  // — they don't merge across tabs).
+  const onFile = async (file: File) => {
+    setError(null);
+    try {
+      const result = await readTabularFile(file);
+      if (result.sheets.length === 1) {
+        setCsv(result.sheets[0].text);
+        setSheetPick([]);
+      } else {
+        // Show the user which tab to use. They click one to load its text.
+        setSheetPick(result.sheets.map(s => ({ name: s.name, text: s.text })));
+      }
+    } catch (e) {
+      const msg = e instanceof Error ? e.message : String(e);
+      setError(msg);
+      toast.error(msg);
+    }
+  };
 
   const onParse = () => {
     setError(null);
@@ -548,6 +572,39 @@ function ImporterShell({ title, icon: Icon, sample, instructions, processor }: {
           Sample (copy from a Google Sheet → File → Download → CSV):
         </div>
         <pre className="rounded-md border bg-slate-50 px-3 py-2 text-[10px] font-mono overflow-x-auto">{sample}</pre>
+
+        {/* File picker — supports .csv and .xlsx. Multi-tab xlsx
+            surfaces a chooser since each importer handles ONE table. */}
+        <div className="flex items-center gap-2 text-[10px]">
+          <label className="cursor-pointer text-teal-700 hover:underline font-medium">
+            Or upload a .csv / .xlsx file
+            <input
+              type="file"
+              accept=".csv,.xlsx,.xls,.xlsm,text/csv,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet,application/vnd.ms-excel"
+              className="hidden"
+              onChange={e => { const f = e.target.files?.[0]; if (f) onFile(f); e.target.value = ""; }}
+            />
+          </label>
+          <span className="text-muted-foreground">— xlsx with multiple tabs lets you pick which one to import.</span>
+        </div>
+        {sheetPick.length > 0 && (
+          <div className="rounded-md border border-sky-200 bg-sky-50/40 px-3 py-2">
+            <div className="text-[11px] font-medium text-sky-900 mb-1">Workbook has multiple tabs — pick one:</div>
+            <div className="flex flex-wrap gap-1">
+              {sheetPick.map(s => (
+                <button
+                  key={s.name}
+                  type="button"
+                  onClick={() => { setCsv(s.text); setSheetPick([]); }}
+                  className="text-[10px] px-2 py-1 rounded-md border border-sky-300 bg-white hover:bg-sky-50 text-sky-800"
+                >
+                  {s.name}
+                </button>
+              ))}
+            </div>
+          </div>
+        )}
+
         <Textarea
           value={csv}
           onChange={e => setCsv(e.target.value)}
