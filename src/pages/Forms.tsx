@@ -685,19 +685,25 @@ function ResponseRow({ response, highlight = "" }: { response: FormResponse; hig
 }
 
 /** Highlight matched search tokens inside arbitrary text. Renders
- *  unchanged text when q is empty. Cheap; runs per cell on render. */
+ *  unchanged text when q is empty. Cheap; runs per cell on render.
+ *
+ *  Uses two regexes intentionally: a /g/i for splitting (which
+ *  preserves capture groups in the output array) and a fresh /i one
+ *  per match check (because RegExp.test on a /g regex is STATEFUL —
+ *  re-using the same instance between map iterations would alternate
+ *  true/false based on lastIndex). */
 function Hl({ text, q }: { text: string; q: string }) {
   if (!q) return <>{text}</>;
   const tokens = q.trim().split(/\s+/).filter(t => t.length > 0);
   if (tokens.length === 0) return <>{text}</>;
-  // Build a single regex that matches any token, case-insensitively.
   const escaped = tokens.map(t => t.replace(/[.*+?^${}()|[\]\\]/g, "\\$&"));
-  const re = new RegExp(`(${escaped.join("|")})`, "gi");
-  const parts = text.split(re);
+  const splitter = new RegExp(`(${escaped.join("|")})`, "gi");
+  const matcher  = new RegExp(`^(?:${escaped.join("|")})$`, "i");
+  const parts = text.split(splitter);
   return (
     <>
       {parts.map((p, i) =>
-        re.test(p)
+        matcher.test(p)
           ? <mark key={i} className="bg-amber-100 text-amber-900 px-0.5 rounded">{p}</mark>
           : <span key={i}>{p}</span>
       )}
