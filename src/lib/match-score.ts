@@ -23,6 +23,7 @@
  * Source: meeting with Saif Ullah, May 20 2026.
  */
 import type { Vacancy } from "@/hooks/use-vacancies";
+import { groupSpecialty, rollupSpecialty } from "@/lib/specialty-groups";
 
 export interface MatchCandidateDoctor {
   id:                 string;
@@ -97,9 +98,12 @@ export function scoreMatch(d: MatchCandidateDoctor, v: Vacancy, h: MatchCandidat
     };
   }
   factors.push({
-    label: specPts === 50
-      ? `Specialty exact: ${d.speciality}`
-      : `Specialty partial: ${d.speciality} ↔ ${v.specialty}`,
+    label:
+      specPts === 50 ? `Specialty exact: ${d.speciality}` :
+      specPts === 40 ? `Specialty group match: ${d.speciality} → ${groupSpecialty(v.specialty) ?? v.specialty}` :
+      specPts === 35 ? `Specialty partial: ${d.speciality} ↔ ${v.specialty}` :
+      specPts === 30 ? `Same parent specialty: ${d.speciality} ↔ ${v.specialty}` :
+                       `Specialty token overlap: ${d.speciality} ↔ ${v.specialty}`,
     points: specPts,
   });
 
@@ -149,10 +153,31 @@ function scoreSpecialty(doctor: string | null, vacancy: string): number {
   const a = normalize(doctor);
   const b = normalize(vacancy);
   if (!a || !b) return 0;
+
+  // Exact / substring (cheapest, catches the well-formed cases first).
   if (a === b) return 50;
   if (a.includes(b) || b.includes(a)) return 35;
-  // Token overlap (e.g. "pediatric cardiology" vs "cardiology" already caught
-  // above; this catches "interventional cardiology" vs "general cardiology").
+
+  // Canonical-group match (Ammar 2026-06-03 spec). Resolves the doctor's
+  // free-text specialty and the vacancy's to AA-website canonical buckets,
+  // then compares. Catches "Retinal Specialist" ↔ "Ophthalmology" because
+  // groupSpecialty maps the former to the latter via the keyword graph in
+  // specialty-groups.ts. Same-bucket = 40 (slightly under substring,
+  // slightly over token-overlap because canonical equivalence is a
+  // stronger signal than coincidental shared words).
+  const groupA = groupSpecialty(doctor);
+  const groupB = groupSpecialty(vacancy);
+  if (groupA && groupB && groupA === groupB) return 40;
+
+  // Parent rollup — e.g. doctor is "Pediatric Cardiology" (parent
+  // Cardiology) and vacancy is plain "Cardiology". Worth less than an
+  // exact-bucket match but more than token coincidence.
+  const parentA = rollupSpecialty(doctor);
+  const parentB = rollupSpecialty(vacancy);
+  if (parentA && parentB && parentA === parentB) return 30;
+
+  // Token overlap fallback for anything the canonical list misses
+  // (covers free-text noise like "Adult Cardiologist – cath lab fellow").
   const aToks = new Set(a.split(/\s+/).filter(t => t.length > 3));
   const bToks = new Set(b.split(/\s+/).filter(t => t.length > 3));
   let overlap = 0;
