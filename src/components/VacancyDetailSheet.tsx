@@ -3,7 +3,8 @@ import { Sheet, SheetContent, SheetHeader, SheetTitle, SheetDescription } from "
 import { Card, CardContent } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
-import { UserSquare, Mail, Phone, Plus, Link2, ClipboardList, Sparkles } from "lucide-react";
+import { UserSquare, Mail, Phone, Plus, Link2, ClipboardList, Sparkles, Inbox } from "lucide-react";
+import { Tabs, TabsList, TabsTrigger, TabsContent } from "@/components/ui/tabs";
 import { toast } from "sonner";
 import {
   useMatchingDoctors, useVacancyLinks,
@@ -102,88 +103,100 @@ export function VacancyDetailSheet({ vacancy, open, onClose }: Props) {
           </Card>
         )}
 
-        {/* Currently linked candidates */}
-        {existing.length > 0 && (
-          <section className="mt-5">
-            <h3 className="text-[11px] uppercase tracking-wider text-muted-foreground mb-2">
-              Linked candidates · {existing.length}
-            </h3>
-            <div className="space-y-1.5">
-              {existing.map(l => (
-                <div key={l.id} className="flex items-center gap-2 rounded-md border bg-teal-50/40 border-teal-200 px-2.5 py-1.5">
-                  <Link2 className="h-3 w-3 text-teal-700" />
-                  <div className="flex-1 text-[12px] truncate">
-                    <span className="font-medium">{l.doctor_name}</span>
-                    {l.doctor_speciality && <span className="text-muted-foreground"> · {l.doctor_speciality}</span>}
-                    {l.linked_by && <span className="text-[10px] text-muted-foreground"> · by {l.linked_by}</span>}
-                  </div>
-                  <Button
-                    size="sm"
-                    variant="ghost"
-                    className="h-6 text-[10px] text-rose-600 hover:bg-rose-50"
-                    disabled={busyId === l.id}
-                    onClick={() => doUnlink(l.id, l.doctor_name)}
-                  >
-                    Unlink
-                  </Button>
-                </div>
-              ))}
-            </div>
-          </section>
-        )}
-
-        {/* Top matches */}
+        {/* ── Match tabs (Ammar 2026-06-03) ────────────────────────────
+            Two separate surfaces:
+              - Onboarded doctors → auto-scored from the ~1k AA roster
+              - Leads             → manually linked by Sales (empty by
+                                    default; Sales picks lead↔vacancy
+                                    matches as their pipeline moves)
+            Both lists share the same "link/unlink" buttons and the same
+            scoring chips. */}
         <section className="mt-5">
-          <h3 className="text-[11px] uppercase tracking-wider text-muted-foreground mb-2 flex items-center gap-1.5">
-            <Sparkles className="h-3 w-3 text-emerald-600" />
-            Top matches · {matches.length}
-            {strongMatches.length > 0 && (
-              <Badge variant="outline" className="bg-emerald-50 text-emerald-700 border-emerald-200 text-[9px] ml-1">
-                {strongMatches.length} strong
-              </Badge>
-            )}
-          </h3>
+          <Tabs defaultValue="onboarded">
+            <TabsList className="grid grid-cols-2 w-full">
+              <TabsTrigger value="onboarded" className="text-[12px]">
+                Onboarded doctors
+                <Badge variant="outline" className="ml-1.5 bg-emerald-50 text-emerald-700 border-emerald-200 text-[9px]">
+                  {matches.length}
+                </Badge>
+              </TabsTrigger>
+              <TabsTrigger value="leads" className="text-[12px]">
+                Leads
+                <Badge variant="outline" className="ml-1.5 bg-sky-50 text-sky-700 border-sky-200 text-[9px]">
+                  {existing.length}
+                </Badge>
+              </TabsTrigger>
+            </TabsList>
 
-          {matches.length === 0 && (
-            <div className="rounded-md border border-dashed py-6 text-center text-[12px] text-muted-foreground">
-              No doctors match {vacancy.specialty} yet. They'll appear here as the team onboards them.
-            </div>
-          )}
+            {/* ── Onboarded matches (auto-scored from rawDoctorsOnBoard) ── */}
+            <TabsContent value="onboarded" className="mt-3 space-y-3">
+              <p className="text-[11px] text-muted-foreground inline-flex items-center gap-1.5">
+                <Sparkles className="h-3 w-3 text-emerald-600" />
+                Auto-ranked from the AA doctor roster — Strong / Decent / Long-shot, by specialty + license + city + experience.
+              </p>
 
-          {strongMatches.length > 0 && (
-            <MatchGroup
-              label="Strong fits"
-              tone="emerald"
-              matches={strongMatches}
-              linkedIds={linkedIds}
-              busyId={busyId}
-              onLink={doLink}
-            />
-          )}
-          {decentMatches.length > 0 && (
-            <MatchGroup
-              label="Decent fits"
-              tone="sky"
-              matches={decentMatches}
-              linkedIds={linkedIds}
-              busyId={busyId}
-              onLink={doLink}
-            />
-          )}
-          {weakMatches.length > 0 && (
-            <MatchGroup
-              label="Long shots"
-              tone="slate"
-              matches={weakMatches.slice(0, 10)}
-              linkedIds={linkedIds}
-              busyId={busyId}
-              onLink={doLink}
-              // Only collapsible WHEN there's a stronger group above. If
-              // every match landed in "weak", we render them expanded so
-              // the user sees actual rows instead of just a count.
-              collapsible={strongMatches.length + decentMatches.length > 0}
-            />
-          )}
+              {matches.length === 0 && (
+                <div className="rounded-md border border-dashed py-6 text-center text-[12px] text-muted-foreground">
+                  No onboarded doctors match {vacancy.specialty} yet. They'll appear here as the team onboards them.
+                </div>
+              )}
+
+              {strongMatches.length > 0 && (
+                <MatchGroup label="Strong fits" tone="emerald" matches={strongMatches} linkedIds={linkedIds} busyId={busyId} onLink={doLink} />
+              )}
+              {decentMatches.length > 0 && (
+                <MatchGroup label="Decent fits" tone="sky" matches={decentMatches} linkedIds={linkedIds} busyId={busyId} onLink={doLink} />
+              )}
+              {weakMatches.length > 0 && (
+                <MatchGroup
+                  label="Long shots" tone="slate"
+                  matches={weakMatches.slice(0, 10)}
+                  linkedIds={linkedIds} busyId={busyId} onLink={doLink}
+                  collapsible={strongMatches.length + decentMatches.length > 0}
+                />
+              )}
+            </TabsContent>
+
+            {/* ── Leads (manually linked by Sales) ──────────────────────── */}
+            <TabsContent value="leads" className="mt-3 space-y-2">
+              <p className="text-[11px] text-muted-foreground inline-flex items-center gap-1.5">
+                <Link2 className="h-3 w-3 text-sky-600" />
+                Filled by Sales as they speak with leads. HI + Sales both see this list.
+              </p>
+
+              {existing.length === 0 ? (
+                <div className="rounded-md border border-dashed py-6 text-center">
+                  <Inbox className="h-4 w-4 text-muted-foreground mx-auto mb-1" />
+                  <p className="text-[12px] text-muted-foreground">No leads linked yet.</p>
+                  <p className="text-[10px] text-muted-foreground/80 mt-0.5">
+                    Sales links leads from the Sales pipeline using <strong>Link to vacancy</strong>.
+                  </p>
+                </div>
+              ) : (
+                <div className="space-y-1.5">
+                  {existing.map(l => (
+                    <div key={l.id} className="flex items-center gap-2 rounded-md border bg-sky-50/40 border-sky-200 px-2.5 py-1.5">
+                      <Link2 className="h-3 w-3 text-sky-700" />
+                      <div className="flex-1 text-[12px] truncate">
+                        <span className="font-medium">{l.doctor_name}</span>
+                        {l.doctor_speciality && <span className="text-muted-foreground"> · {l.doctor_speciality}</span>}
+                        {l.linked_by && <span className="text-[10px] text-muted-foreground"> · linked by {l.linked_by}</span>}
+                      </div>
+                      <Button
+                        size="sm"
+                        variant="ghost"
+                        className="h-6 text-[10px] text-rose-600 hover:bg-rose-50"
+                        disabled={busyId === l.id}
+                        onClick={() => doUnlink(l.id, l.doctor_name)}
+                      >
+                        Unlink
+                      </Button>
+                    </div>
+                  ))}
+                </div>
+              )}
+            </TabsContent>
+          </Tabs>
         </section>
       </SheetContent>
     </Sheet>

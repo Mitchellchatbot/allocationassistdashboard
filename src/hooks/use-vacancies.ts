@@ -186,11 +186,18 @@ function truthyFlag(v: unknown): boolean {
   return s === "true" || s === "yes" || s === "1" || s === "y";
 }
 
-/** Reverse direction: which doctors fit THIS vacancy best?
- *  Iterates BOTH Zoho leads and Doctors-on-Board, joins to doctor_profiles
- *  by the prefixed id (`lead:<id>` / `dob:<id>`), scores everything in-memory
- *  and returns the top 50. Volume is small enough (low thousands) that this
- *  runs <50ms on the client. */
+/** Reverse direction: which Doctor-on-Board fits THIS vacancy best?
+ *
+ *  Only scores `dob:` (onboarded) doctors — leads no longer surface
+ *  here automatically per Ammar's 2026-06-03 spec ("we should have
+ *  [the leads tab] empty; the sales team can fill it"). The Leads
+ *  side of vacancy matches now comes from manual vacancy_lead_links
+ *  rows, surfaced separately via useVacancyLinks(vacancyId).
+ *
+ *  Joins onto doctor_profiles by the prefixed id (`dob:<id>`), scores
+ *  in-memory, returns top 50. Volume is small (~1k) so this is
+ *  <50ms on the client.
+ */
 export function useMatchingDoctors(vacancy: Vacancy | null | undefined): ScoredMatchingDoctor[] {
   const { data: profiles = [] } = useDoctorProfiles();
   const { data: hospitals = [] } = useHospitals();
@@ -198,8 +205,7 @@ export function useMatchingDoctors(vacancy: Vacancy | null | undefined): ScoredM
 
   return useMemo<ScoredMatchingDoctor[]>(() => {
     if (!vacancy) return [];
-    const z = zoho.data as { rawLeads?: ZohoLead[]; rawDoctorsOnBoard?: ZohoDoctorOnBoard[] } | undefined;
-    const leads = z?.rawLeads ?? [];
+    const z = zoho.data as { rawDoctorsOnBoard?: ZohoDoctorOnBoard[] } | undefined;
     const dobs  = z?.rawDoctorsOnBoard ?? [];
 
     const profileById = new Map<string, typeof profiles[number]>();
@@ -212,26 +218,6 @@ export function useMatchingDoctors(vacancy: Vacancy | null | undefined): ScoredM
       : { id: null, name: vacancy.hospital_name, city: null, country: null };
 
     const out: ScoredMatchingDoctor[] = [];
-
-    for (const lead of leads) {
-      const prefixedId = `lead:${lead.id}`;
-      const profile = profileById.get(prefixedId) ?? null;
-      const candidate = buildDoctorCandidate(prefixedId, lead, null, profile);
-      if (!candidate) continue;
-      const score = scoreMatch(candidate, vacancy, h);
-      if (score.tier === "none") continue;
-      out.push({
-        doctor_id:    prefixedId,
-        doctor_name:  lead.Full_Name,
-        doctor_email: lead.Email,
-        speciality:   candidate.speciality,
-        score,
-        has_dha:      candidate.has_dha,
-        has_doh:      candidate.has_doh,
-        has_moh:      candidate.has_moh,
-        license_text: candidate.license,
-      });
-    }
     for (const dob of dobs) {
       const name = dob.Full_Name || `${dob.First_Name ?? ""} ${dob.Last_Name ?? ""}`.trim();
       if (!name) continue;
