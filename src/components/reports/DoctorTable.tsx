@@ -135,7 +135,15 @@ function relativeShort(iso: string | null | undefined): string {
   return `${days}d ago`;
 }
 
-export function DoctorTable() {
+export interface DoctorTableProps {
+  /** Show only doctors with at least one run-event or milestone date
+   *  within the last N days. When null, no time filter (all doctors). */
+  rangeDays?: number | null;
+  hospital?:  string | null;
+  specialty?: string | null;
+}
+
+export function DoctorTable({ rangeDays, hospital, specialty }: DoctorTableProps = {}) {
   const { data: runs = [], isLoading: rl } = useQuery<FlowRun[]>({
     queryKey: ["doctor-table-runs"],
     queryFn: async () => {
@@ -183,10 +191,27 @@ export function DoctorTable() {
     return m;
   }, [zoho?.rawLeads, zoho?.rawDoctorsOnBoard]);
 
-  const rows = useMemo(
+  const allRows = useMemo(
     () => aggregateDoctorRows(runs, lifecycles, profileMap, zohoSpecMap),
     [runs, lifecycles, profileMap, zohoSpecMap],
   );
+
+  // Apply the Reports top-bar filters here so the table follows the
+  // 7/30/90-day selector + hospital/specialty pickers consistently
+  // with the rest of the page.
+  const rows = useMemo(() => {
+    if (!rangeDays && !hospital && !specialty) return allRows;
+    const cutoffMs = rangeDays ? Date.now() - rangeDays * 86_400_000 : 0;
+    return allRows.filter(r => {
+      if (rangeDays) {
+        if (!r.lastActivity) return false;
+        if (new Date(r.lastActivity).getTime() < cutoffMs) return false;
+      }
+      if (hospital  && !r.hospitals.some(h => h.toLowerCase().includes(hospital.toLowerCase()))) return false;
+      if (specialty && !(r.specialty ?? "").toLowerCase().includes(specialty.toLowerCase()))   return false;
+      return true;
+    });
+  }, [allRows, rangeDays, hospital, specialty]);
   const loading = rl || ll;
 
   return (

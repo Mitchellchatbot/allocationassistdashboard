@@ -79,8 +79,13 @@ export default function Reports() {
         {/* This week vs last week + this month vs last month, per
             placement milestone (Mitchell asked on the 2026-06-03 call:
             'so we could see the KPIs trending here week to week and
-            month to month'). Reads doctor_lifecycle directly. */}
-        <RecapCard />
+            month to month'). The recap is fixed-period by design —
+            it ignores rangeDays but DOES honour hospital + specialty
+            so the filter feels consistent. */}
+        <RecapCard
+          hospital={hospital   === "__all" ? null : hospital}
+          specialty={specialty === "__all" ? null : specialty}
+        />
 
         <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
           <Card className="lg:col-span-2">
@@ -130,14 +135,23 @@ export default function Reports() {
         </Card>
 
         {/* Placements (Ammar 2026-06-03) — replaces the Hammad sheet.
-            Per-doctor milestones + 45-day payment clock. Click any row
-            to edit milestone dates inline. */}
-        <PlacementsCard />
+            Per-(doctor, hospital) milestones + 45-day payment clock.
+            Honours the Reports top-bar filters (range / hospital /
+            specialty). */}
+        <PlacementsCard
+          rangeDays={rangeDays}
+          hospital={hospital   === "__all" ? null : hospital}
+          specialty={specialty === "__all" ? null : specialty}
+        />
 
         {/* Per-doctor breakdown — companion to the hospital table
             below. Ammar 2026-06-03: 'add another table over here for
             the individual doctors themselves'. */}
-        <DoctorTable />
+        <DoctorTable
+          rangeDays={rangeDays}
+          hospital={hospital   === "__all" ? null : hospital}
+          specialty={specialty === "__all" ? null : specialty}
+        />
 
         <Card>
           <CardHeader className="pb-2">

@@ -60,8 +60,40 @@ function PaymentStatus({ row }: { row: PlacementAttempt }) {
   return <Badge variant="outline" className="bg-sky-50 text-sky-700 border-sky-200 text-[9px]">{remaining}d left</Badge>;
 }
 
-export function PlacementsCard() {
-  const { data: rows = [], isLoading } = usePlacementAttempts();
+export interface PlacementsCardProps {
+  /** Show only attempts whose MOST RECENT milestone date falls within
+   *  the last N days. When null, no time filter applied (all rows). */
+  rangeDays?: number | null;
+  /** Hospital filter (case-insensitive substring on hospital_name). */
+  hospital?:  string | null;
+  /** Specialty filter (case-insensitive substring on doctor_specialty). */
+  specialty?: string | null;
+}
+
+/** Most recent milestone date on a placement_attempt — used to decide
+ *  whether the row "happened" in a given date window. */
+function latestMilestone(r: PlacementAttempt): string | null {
+  return r.paid_at || r.joined_at || r.start_date || r.signed_at || r.offered_at || r.interviewed_at || r.shortlisted_at;
+}
+
+export function PlacementsCard({ rangeDays, hospital, specialty }: PlacementsCardProps = {}) {
+  const { data: rawRows = [], isLoading } = usePlacementAttempts();
+  // Apply rangeDays + hospital + specialty filters from the Reports
+  // top-bar before anything else. Search-bar filtering happens on the
+  // result of this so 'find Anas in last 30d' works.
+  const rows = useMemo(() => {
+    const cutoffMs = rangeDays ? Date.now() - rangeDays * 86_400_000 : 0;
+    return rawRows.filter(r => {
+      if (rangeDays) {
+        const latest = latestMilestone(r);
+        if (!latest) return false;
+        if (new Date(latest).getTime() < cutoffMs) return false;
+      }
+      if (hospital && !(r.hospital_name ?? "").toLowerCase().includes(hospital.toLowerCase())) return false;
+      if (specialty && !(r.doctor_specialty ?? "").toLowerCase().includes(specialty.toLowerCase())) return false;
+      return true;
+    });
+  }, [rawRows, rangeDays, hospital, specialty]);
   const { data: zoho }                 = useZohoData();
   const [editingId, setEditingId] = useState<string | null>(null);
   const [pickerOpen, setPickerOpen] = useState(false);
@@ -71,9 +103,10 @@ export function PlacementsCard() {
   const [searchParams, setSearchParams] = useSearchParams();
 
   // Number of placement_attempts that still have a csv:<slug> doctor_id
-  // (imported from CSV but never linked to a Zoho lead/DoB). Drives
-  // the visibility of the 'Re-link to Zoho' button.
-  const unlinkedCount = useMemo(() => rows.filter(r => r.doctor_id.startsWith("csv:")).length, [rows]);
+  // (imported from CSV but never linked to a Zoho lead/DoB). Computed
+  // from the FULL list (not the filtered subset) so the 'Re-link to
+  // Zoho' button doesn't hide when the user narrows the time filter.
+  const unlinkedCount = useMemo(() => rawRows.filter(r => r.doctor_id.startsWith("csv:")).length, [rawRows]);
 
   const handleRelinkToZoho = async () => {
     if (relinking) return;
@@ -90,7 +123,7 @@ export function PlacementsCard() {
         const name = (d.Full_Name || `${d.First_Name ?? ""} ${d.Last_Name ?? ""}`).trim();
         if (name) map.set(norm(name), `dob:${d.id}`);
       }
-      const unlinked = rows.filter(r => r.doctor_id.startsWith("csv:"));
+      const unlinked = rawRows.filter(r => r.doctor_id.startsWith("csv:"));
       let updated = 0;
       for (const r of unlinked) {
         const zohoId = map.get(norm(r.doctor_name));
@@ -148,7 +181,9 @@ export function PlacementsCard() {
             <CardTitle className="text-base flex items-center gap-2">
               <Briefcase className="h-4 w-4 text-emerald-600" />
               Placements
-              <Badge variant="outline" className="text-[10px] bg-slate-50">{rows.length}</Badge>
+              <Badge variant="outline" className="text-[10px] bg-slate-50">
+                {rows.length === rawRows.length ? rows.length : `${rows.length} of ${rawRows.length}`}
+              </Badge>
             </CardTitle>
             <CardDescription className="text-[11px]">
               One row per (doctor, hospital) pair — the same doctor can appear multiple times (e.g. shortlisted at 4 hospitals). Replaces Ammar's Hammad Google sheet. Stored in our portal, <strong>not Zoho</strong>. 45-day clock starts on Joined.
@@ -251,7 +286,7 @@ export function PlacementsCard() {
 
       <NewPlacementDialog
         open={pickerOpen}
-        existingAttempts={rows}
+        existingAttempts={rawRows}
         preselectDoctorId={pendingNewDoctor?.doctorId ?? null}
         onClose={() => { setPickerOpen(false); setPendingNewDoctor(null); }}
         onCreated={(id) => {

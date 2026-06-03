@@ -70,13 +70,34 @@ const METRICS: Metric[] = [
   { label: "Joined",      icon: <Plane        className="h-3.5 w-3.5 text-teal-600" />,    col: "joined_at" },
 ];
 
-export function RecapCard() {
+export interface RecapCardProps {
+  /** Optional hospital + specialty filters from the Reports FilterBar.
+   *  When set, the recap counts are restricted to attempts whose
+   *  hospital_name OR doctor_specialty matches. (rangeDays is NOT
+   *  applied — the recap is inherently a fixed weekly/monthly view.) */
+  hospital?:  string | null;
+  specialty?: string | null;
+}
+
+export function RecapCard({ hospital, specialty }: RecapCardProps = {}) {
   // Counts FROM placement_attempts directly (not doctor_lifecycle).
   // The lifecycle row only holds the EARLIEST date per doctor; if a
   // doctor was shortlisted at 5 hospitals in one week, lifecycle counts
   // that as 1 placement-attempt. The Recap needs the true per-attempt
   // count, so it reads the source-of-truth table.
-  const { data: attempts = [], isLoading } = usePlacementAttempts();
+  const { data: allAttempts = [], isLoading } = usePlacementAttempts();
+
+  // Apply hospital + specialty filters before counting. Note: range
+  // doesn't apply here — recap is by design always "this/last week
+  // + this/last month."
+  const attempts = useMemo(() => {
+    if (!hospital && !specialty) return allAttempts;
+    return allAttempts.filter(a => {
+      if (hospital && !(a.hospital_name ?? "").toLowerCase().includes(hospital.toLowerCase())) return false;
+      if (specialty && !(a.doctor_specialty ?? "").toLowerCase().includes(specialty.toLowerCase())) return false;
+      return true;
+    });
+  }, [allAttempts, hospital, specialty]);
 
   const counts = useMemo(() => METRICS.map(m => ({
     label:    m.label,
