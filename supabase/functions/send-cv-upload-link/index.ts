@@ -27,9 +27,15 @@ const supabase = createClient(
 
 const RESEND_API_KEY = Deno.env.get("RESEND_API_KEY") ?? "";
 const MAIL_FROM      = Deno.env.get("MAIL_FROM") ?? "Hospital Intro <onboarding@resend.dev>";
-const TEST_OVERRIDE  = Deno.env.get("MAIL_TEST_RECIPIENT_OVERRIDE") ?? "";
+// Comma-separated test recipients — first goes on To:, rest on Cc:
+// so multiple internal addresses (Shaheer + Ammar) see test emails as
+// they go out. Mirrors the pattern in send-flow-email + send-batch.
+const TEST_OVERRIDE_LIST = (Deno.env.get("MAIL_TEST_RECIPIENT_OVERRIDE") ?? "")
+  .split(",").map(s => s.trim()).filter(Boolean);
+const TEST_OVERRIDE      = TEST_OVERRIDE_LIST[0] ?? "";
+const TEST_OVERRIDE_CC   = TEST_OVERRIDE_LIST.slice(1);
 
-console.log("[send-cv-upload-link] booted. Resend key:", !!RESEND_API_KEY, "From:", MAIL_FROM, "Test override:", TEST_OVERRIDE || "(none)");
+console.log("[send-cv-upload-link] booted. Resend key:", !!RESEND_API_KEY, "From:", MAIL_FROM, "Test override:", TEST_OVERRIDE_LIST.join(", ") || "(none)");
 
 const CORS = {
   "Access-Control-Allow-Origin":  "*",
@@ -126,6 +132,7 @@ The Allocation Assist team`;
     body: JSON.stringify({
       from:    MAIL_FROM,
       to:      [effectiveTo],
+      ...(TEST_OVERRIDE && TEST_OVERRIDE_CC.length > 0 ? { cc: TEST_OVERRIDE_CC } : {}),
       subject,
       html,
       text,
