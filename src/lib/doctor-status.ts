@@ -101,12 +101,18 @@ const CLASSES: Record<DoctorStatus, string> = {
 
 /** Lifecycle facts that override flow-derived status. */
 export interface LifecycleFacts {
-  joined_at?:             string | null;
-  approved_at?:           string | null;
-  paid_at?:               string | null;
-  unavailable?:           boolean;
-  unavailable_reason?:    string | null;
-  available_check_in_at?: string | null;
+  shortlisted_at?:           string | null;
+  interviewed_at?:           string | null;
+  offered_at?:               string | null;
+  signed_at?:                string | null;
+  start_date?:               string | null;
+  joined_at?:                string | null;
+  approved_at?:              string | null;
+  paid_at?:                  string | null;
+  placement_hospital_name?:  string | null;
+  unavailable?:              boolean;
+  unavailable_reason?:       string | null;
+  available_check_in_at?:    string | null;
 }
 
 /** Map a (flow_key, status) pair to the doctor status it implies. Active
@@ -188,11 +194,45 @@ export function deriveDoctorStatus(runs: FlowRun[], lifecycle?: LifecycleFacts |
       };
     }
     if (lifecycle.joined_at) {
+      // 45-day clock: how long until the AA invoice payment deadline?
+      // Surface as a colour cue in the detail so the team can spot
+      // overdue placements at a glance from the doctor list.
+      const daysSinceJoin = Math.floor((Date.now() - new Date(lifecycle.joined_at).getTime()) / 86_400_000);
+      const daysLeft = 45 - daysSinceJoin;
+      const at = lifecycle.placement_hospital_name ? ` @ ${lifecycle.placement_hospital_name}` : "";
+      let clockSuffix = "";
+      if (daysLeft < 0)      clockSuffix = ` · invoice ${Math.abs(daysLeft)}d overdue`;
+      else if (daysLeft <= 15) clockSuffix = ` · invoice due in ${daysLeft}d`;
       return {
         status: "joined",
         label:  LABELS.joined,
-        detail: `Joined ${shortDate(lifecycle.joined_at)} · second-payment 15d`,
+        detail: `Joined ${shortDate(lifecycle.joined_at)}${at}${clockSuffix}`,
         cls:    CLASSES.joined,
+        drivingRun: null,
+      };
+    }
+    // Below joined: surface the most-recent milestone (offered → signed →
+    // interviewed → shortlisted) as an EARLY status hint. The flow-run
+    // derivation below would also surface these but the lifecycle dates
+    // are an explicit team mark and should take precedence when set.
+    if (lifecycle.signed_at) {
+      const at = lifecycle.placement_hospital_name ? ` @ ${lifecycle.placement_hospital_name}` : "";
+      const start = lifecycle.start_date ? ` · starts ${shortDate(lifecycle.start_date)}` : "";
+      return {
+        status: "contracted",
+        label:  LABELS.contracted,
+        detail: `Signed ${shortDate(lifecycle.signed_at)}${at}${start}`,
+        cls:    CLASSES.contracted,
+        drivingRun: null,
+      };
+    }
+    if (lifecycle.offered_at) {
+      const at = lifecycle.placement_hospital_name ? ` @ ${lifecycle.placement_hospital_name}` : "";
+      return {
+        status: "offer_extended",
+        label:  LABELS.offer_extended,
+        detail: `Offered ${shortDate(lifecycle.offered_at)}${at}`,
+        cls:    CLASSES.offer_extended,
         drivingRun: null,
       };
     }
