@@ -88,7 +88,6 @@ const NAV_SECTIONS: NavSection[] = [
       { title: "Vacancies",       url: "/vacancies",       icon: ClipboardList },
       { title: "Batch Sends",     url: "/batches",         icon: Mailbox },
       { title: "Reports",         url: "/reports",         icon: BarChart3 },
-      { title: "Forms",           url: "/forms",           icon: ClipboardList },
     ],
   },
   {
@@ -108,6 +107,7 @@ const NAV_SECTIONS: NavSection[] = [
     items: [
       { title: "Marketing",         url: "/marketing",       icon: Megaphone },
       { title: "Meta Ads",          url: "/meta-ads",        icon: Image },
+      { title: "Forms",             url: "/forms",           icon: ClipboardList },
       { title: "Team Performance",  url: "/team",            icon: UsersIcon },
       { title: "Finance",           url: "/finance",         icon: DollarSign },
     ],

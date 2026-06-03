@@ -26,7 +26,7 @@ import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from "
 import { Tabs, TabsList, TabsTrigger, TabsContent } from "@/components/ui/tabs";
 import {
   ClipboardList, Plus, ExternalLink, Copy, CheckCircle2, AlertCircle,
-  Trash2, Inbox, ChevronRight, History, Sparkles, Mail, User as UserIcon, RefreshCw,
+  Trash2, Inbox, ChevronRight, History, Sparkles, Mail, User as UserIcon, RefreshCw, Settings,
 } from "lucide-react";
 import {
   useForms, useFormResponses, useCreateForm, useUpdateForm, useDeleteForm,
@@ -67,19 +67,14 @@ export default function Forms() {
   return (
     <DashboardLayout>
       <div className="space-y-4">
-        <div className="flex items-start justify-between gap-3 flex-wrap">
-          <div>
-            <h1 className="text-2xl font-semibold tracking-tight flex items-center gap-2">
-              <ClipboardList className="h-6 w-6 text-teal-600" />
-              Forms
-            </h1>
-            <p className="text-sm text-muted-foreground mt-1">
-              Live form submissions from Typeform + Elementor. Each tab shows analytics + every response for one form. Emails matched to a Zoho lead/DoB get linked automatically.
-            </p>
-          </div>
-          <Button size="sm" onClick={() => setCreateOpen(true)}>
-            <Plus className="h-3.5 w-3.5 mr-1" /> Connect new form
-          </Button>
+        <div>
+          <h1 className="text-2xl font-semibold tracking-tight flex items-center gap-2">
+            <ClipboardList className="h-6 w-6 text-teal-600" />
+            Forms
+          </h1>
+          <p className="text-sm text-muted-foreground mt-1">
+            Live form submissions from Typeform + Elementor. Each tab shows analytics + every response for one form. Emails matched to a Zoho lead/DoB get linked automatically.
+          </p>
         </div>
 
         {isLoading ? (
@@ -134,6 +129,7 @@ function ProviderDot({ provider }: { provider: string }) {
 function FormDetail({ form }: { form: Form }) {
   const { data: responses = [], isLoading } = useFormResponses(form.id);
   const del = useDeleteForm();
+  const [setupOpen, setSetupOpen] = useState(false);
 
   const analytics = useMemo(() => computeAnalytics(responses), [responses]);
 
@@ -173,6 +169,9 @@ function FormDetail({ form }: { form: Form }) {
                 </a>
               )}
               {form.provider === "typeform" && <TypeformSyncButton form={form} />}
+              <Button size="sm" variant="outline" onClick={() => setSetupOpen(true)} title="View webhook URL + setup instructions">
+                <Settings className="h-3.5 w-3.5 mr-1" /> Setup
+              </Button>
               <Button size="sm" variant="outline" onClick={handleDelete} className="text-rose-600 hover:bg-rose-50 hover:text-rose-700" title="Delete this form and all its submissions">
                 <Trash2 className="h-3.5 w-3.5" />
               </Button>
@@ -189,61 +188,42 @@ function FormDetail({ form }: { form: Form }) {
         <Kpi label="Auto-linked to Zoho"    value={analytics.linkedCount} tone="indigo" hint={`${Math.round((analytics.linkedCount / Math.max(analytics.total, 1)) * 100)}% matched`} />
       </div>
 
-      {/* Top questions / answer distributions */}
-      <div className="grid grid-cols-1 lg:grid-cols-2 gap-3">
-        <Card>
-          <CardHeader className="pb-2">
-            <CardTitle className="text-[13px]">Top questions</CardTitle>
-            <CardDescription className="text-[11px]">Questions with the most answers, by frequency of distinct values.</CardDescription>
-          </CardHeader>
-          <CardContent>
-            {analytics.questions.length === 0 ? (
-              <p className="text-[11px] text-muted-foreground">No questions detected yet.</p>
-            ) : (
-              <div className="space-y-2">
-                {analytics.questions.slice(0, 6).map(q => (
-                  <div key={q.question} className="text-[11px]">
-                    <div className="flex items-center justify-between gap-2">
-                      <span className="font-medium truncate text-slate-800">{q.question}</span>
-                      <span className="text-muted-foreground shrink-0">{q.answeredCount} answered</span>
-                    </div>
-                    {q.topAnswers.length > 0 && (
-                      <div className="flex flex-wrap gap-1 mt-1">
-                        {q.topAnswers.slice(0, 5).map(a => (
-                          <Badge key={a.value} variant="outline" className="text-[9px] bg-slate-50 truncate max-w-[180px]">
-                            {a.value} · {a.count}
-                          </Badge>
-                        ))}
-                        {q.distinct > 5 && (
-                          <Badge variant="outline" className="text-[9px] bg-white text-muted-foreground">+{q.distinct - 5} more</Badge>
-                        )}
-                      </div>
-                    )}
+      {/* Top questions / answer distributions — full width now that
+          webhook details have moved into the Setup dialog. */}
+      <Card>
+        <CardHeader className="pb-2">
+          <CardTitle className="text-[13px]">Top questions</CardTitle>
+          <CardDescription className="text-[11px]">Questions with the most answers, by frequency of distinct values.</CardDescription>
+        </CardHeader>
+        <CardContent>
+          {analytics.questions.length === 0 ? (
+            <p className="text-[11px] text-muted-foreground">No questions detected yet.</p>
+          ) : (
+            <div className="space-y-2">
+              {analytics.questions.slice(0, 6).map(q => (
+                <div key={q.question} className="text-[11px]">
+                  <div className="flex items-center justify-between gap-2">
+                    <span className="font-medium truncate text-slate-800">{q.question}</span>
+                    <span className="text-muted-foreground shrink-0">{q.answeredCount} answered</span>
                   </div>
-                ))}
-              </div>
-            )}
-          </CardContent>
-        </Card>
-
-        {/* Webhook details */}
-        <Card>
-          <CardHeader className="pb-2">
-            <CardTitle className="text-[13px]">Webhook</CardTitle>
-            <CardDescription className="text-[11px]">
-              {form.provider === "typeform"
-                ? "Paste this URL + secret into Typeform → Connect → Webhooks if you ever recreate the webhook."
-                : "Paste this URL into the Elementor form's 'Webhook' action. The key in the URL identifies this form — keep it secret."}
-            </CardDescription>
-          </CardHeader>
-          <CardContent className="space-y-1.5 text-[11px]">
-            <FieldRow label="URL"    value={webhookUrlFor(form)} />
-            {form.provider === "typeform" && (
-              <FieldRow label="Secret" value={form.webhook_secret ?? "(none)"} masked />
-            )}
-          </CardContent>
-        </Card>
-      </div>
+                  {q.topAnswers.length > 0 && (
+                    <div className="flex flex-wrap gap-1 mt-1">
+                      {q.topAnswers.slice(0, 5).map(a => (
+                        <Badge key={a.value} variant="outline" className="text-[9px] bg-slate-50 truncate max-w-[180px]">
+                          {a.value} · {a.count}
+                        </Badge>
+                      ))}
+                      {q.distinct > 5 && (
+                        <Badge variant="outline" className="text-[9px] bg-white text-muted-foreground">+{q.distinct - 5} more</Badge>
+                      )}
+                    </div>
+                  )}
+                </div>
+              ))}
+            </div>
+          )}
+        </CardContent>
+      </Card>
 
       {/* Submission feed */}
       <Card>
@@ -269,7 +249,42 @@ function FormDetail({ form }: { form: Form }) {
           )}
         </CardContent>
       </Card>
+
+      <SetupDialog form={form} open={setupOpen} onClose={() => setSetupOpen(false)} />
     </div>
+  );
+}
+
+/** Tucked-away webhook configuration. Opens from the FormDetail
+ *  header's 'Setup' button — keeps the URL + secret out of the
+ *  primary view but one click away when the team needs to re-paste
+ *  into Elementor / Typeform. */
+function SetupDialog({ form, open, onClose }: { form: Form; open: boolean; onClose: () => void }) {
+  return (
+    <Dialog open={open} onOpenChange={v => !v && onClose()}>
+      <DialogContent className="sm:max-w-[560px]">
+        <DialogHeader>
+          <DialogTitle className="flex items-center gap-2 text-[14px]">
+            <Settings className="h-4 w-4 text-teal-600" />
+            {form.name} · Webhook setup
+          </DialogTitle>
+          <p className="text-[11px] text-muted-foreground">
+            {form.provider === "typeform"
+              ? "Paste this URL + secret into Typeform → Connect → Webhooks if you ever recreate the webhook."
+              : "Paste this URL into the Elementor form's 'Webhook' action. The key in the URL identifies this form — keep it secret."}
+          </p>
+        </DialogHeader>
+        <div className="space-y-3 py-1">
+          <FieldRow label="Webhook URL" value={webhookUrlFor(form)} />
+          {form.provider === "typeform" && (
+            <FieldRow label="Secret" value={form.webhook_secret ?? "(none)"} masked />
+          )}
+        </div>
+        <DialogFooter>
+          <Button variant="outline" onClick={onClose}>Done</Button>
+        </DialogFooter>
+      </DialogContent>
+    </Dialog>
   );
 }
 
