@@ -17,7 +17,7 @@
  */
 import type { TourStep } from "@/components/OnboardingTour";
 
-export const HI_TOUR_ID = "hi-onboarding-v3";
+export const HI_TOUR_ID = "hi-onboarding-v4";
 
 export const HI_TOUR_STEPS: TourStep[] = [
   {
@@ -88,7 +88,7 @@ export const HI_TOUR_STEPS: TourStep[] = [
     route: "/doctor-profiles",
     target: "doctor-lifecycle",
     title:  "Lifecycle timeline",
-    body:   "Full per-doctor history across the 7 flows — when they were onboarded, profile-sent, shortlisted, interviewed, offered, joined. This is your 'open up a lead and see their progress' view.",
+    body:   "Full per-doctor history across the 6 flows — profile-sent, shortlisted, interviewed, offered, signed, joined. Plus an Upload CV button right above this card (use it when a doctor sends their CV via WhatsApp — Claude extracts the profile fields automatically).",
     placement: "auto",
   },
   {
@@ -103,14 +103,14 @@ export const HI_TOUR_STEPS: TourStep[] = [
   {
     target: "sidebar-automations",
     title:  "Automations — the heart of HI",
-    body:   "Seven email flows that walk a doctor from first contact to first payment. The system sends the templated emails automatically; the team only steps in at the manual-action stages. Let's go look inside.",
+    body:   "Six email flows that walk a doctor from first hospital intro to first payment. The system sends the templated emails automatically; the team only steps in at the manual-action stages. Let's go look inside.",
     placement: "right",
   },
   {
     route: "/automations",
     target: "automations-flows",
-    title:  "The 7 flows, one tab each",
-    body:   "Onboarding (CV + intake form), Profile Sent (intro to hospital), Shortlist (hospital interested), Interview (scheduling + post), Contract (BoldSign offer), Relocation (visa + flight + city pick), and Second Payment. The pill on each tab shows how many runs are live in it.",
+    title:  "The 6 flows, one tab each",
+    body:   "Profile Sent (intro to hospital), Shortlist (hospital interested), Interview (scheduling + tips), Contract (track milestones on Placements), Relocation (city-specific guide), Second Payment (45-day clock + reminders). Onboarding was removed — Sales sends the intake form from Zoho when a lead converts.",
     placement: "bottom",
   },
   {
@@ -123,12 +123,17 @@ export const HI_TOUR_STEPS: TourStep[] = [
   {
     placement: "center",
     title:  "Opening a run",
-    body:   "Clicking any row anywhere (Workspace, Queues, dashboard Pending Actions) opens the Run Detail Sheet. Inside it: the timeline of every email + reply, who it's assigned to, a Reassign button to hand it off to another HI member, and the manual-action button for the stage it's parked at (Send Profile / Pick City / Send Contract).",
+    body:   "Clicking any row anywhere (Workspace, Queues, Pending Actions) opens the Run Detail Sheet. Inside: the full timeline, the suggestion cards (e.g. 'Hospital looks interested — Mark shortlisted?'), the manual-action button for the current stage, and Reassign.",
+  },
+  {
+    placement: "center",
+    title:  "Manual shortlist",
+    body:   "Hospitals rarely write 'shortlisted' explicitly — usually a phone call. When the reply classifier thinks they're interested, a yellow card appears on the run with two buttons: Mark shortlisted / Not shortlisted. The system never advances automatically; you confirm.",
   },
   {
     placement: "center",
     title:  "Sending a profile",
-    body:   "Send Profile picks the doctor, lets you multi-select hospitals (filtered by specialty match by default), and previews the exact email each hospital will receive. Hit send and the system records one run per hospital, ready to track replies.",
+    body:   "Send Profile picks the doctor, multi-selects hospitals (filtered by specialty match), and previews the email. Each hospital recipient gets their own tokenised 'View full profile' link — they can open the AA-website profile without a login, and you see view counts.",
   },
 
   // ── Vacancies ───────────────────────────────────────────────────────
@@ -142,7 +147,7 @@ export const HI_TOUR_STEPS: TourStep[] = [
     route: "/vacancies",
     target: "vacancies-table",
     title:  "Click any row for ranked matches",
-    body:   "Each vacancy opens a side sheet with doctor matches ranked Strong / Decent / Long-shot. Same scoring as the doctor → vacancy match. 'Link doctor' here is the inverse path: it feeds the chosen doctor straight into Profile Sent for this hospital.",
+    body:   "Each vacancy opens a side sheet with TWO tabs: Onboarded doctors (auto-scored from the ~1k AA roster, Strong/Decent/Long-shot tiers) and Leads (filled by Sales as they speak with prospects — empty by default). Specialty fuzzy-matches: a 'Retinal Specialist' doctor matches an 'Ophthalmology' vacancy.",
     placement: "auto",
   },
 
@@ -150,14 +155,14 @@ export const HI_TOUR_STEPS: TourStep[] = [
   {
     target: "sidebar-batches",
     title:  "Batch Sends",
-    body:   "Three recurring broadcasts to the 95-hospital list. Daily Duo (Mon-Fri, 2 profiles). Tuesday Top 15 (mixed specialties). Specialty of the Day (Wed-Fri rotation through ranked specialty groups). The picker biases toward the rotation specialty so the daily picks stay coherent.",
+    body:   "Country-scoped broadcasts (UAE / KSA / Qatar / Oman / Kuwait / Bahrain). Daily Duo (Mon-Fri, 2 profiles per country). Tuesday Top 15 (mixed specialties). Specialty of the Day (Wed-Fri). Each batch hits ONLY its country's hospitals — create one per country per day.",
     placement: "right",
   },
   {
     route: "/batches",
     target: "batches-rotation",
     title:  "Today's specialty + the queue",
-    body:   "The rotation cursor auto-advances after every Specialty-of-day send. You can hand-pick which specialty groups cycle and edit the queue order. The same specialty also feeds into Daily Duo + Tuesday batches so a single day's sends stay on one theme.",
+    body:   "The rotation cursor cycles through the 67 canonical specialties from the AA website (not the old Zoho-bucketed list). Auto-advances after every Specialty-of-day send. The same specialty also biases Daily Duo + Tuesday picks so a day's sends stay on one theme.",
     placement: "auto",
   },
 
@@ -165,14 +170,14 @@ export const HI_TOUR_STEPS: TourStep[] = [
   {
     target: "sidebar-reports",
     title:  "Reports",
-    body:   "Per-HI-member KPIs, hospital relationship health, conversion-rate by stage. Useful for managers and for spotting which hospitals are cooling off.",
+    body:   "KPI strip, weekly + monthly recap, Placements tracker (replaces the Hammad sheet), per-doctor breakdown, hospital relationship health. Heavy page — scroll through the cards.",
     placement: "right",
   },
   {
     route: "/reports",
     target: "reports-filters",
     title:  "Slice by anything",
-    body:   "Filter by hospital, HI team member (the four of you are pinned at the top), specialty, date range. Numbers update everywhere on the page. URL params persist so you can share a filtered view with a teammate.",
+    body:   "Filter by hospital, HI team member (the four of you are pinned at the top), specialty, date range. Numbers update everywhere on the page. Below this: KPI strip → weekly/monthly recap (with delta arrows) → Trend chart → Placements (Hammad-sheet replacement, click any row to edit milestones + 45-day clock pill) → Per-doctor table → Hospital relationships.",
     placement: "bottom",
   },
 
