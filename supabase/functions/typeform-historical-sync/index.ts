@@ -85,16 +85,45 @@ Deno.serve(async (req: Request) => {
     return json({ ok: false, error: "Form has no provider_form_id" }, 400);
   }
 
+  // ── Fetch form definition once for field titles ────────────────────
+  // The Responses API does NOT include definition per-item. To resolve
+  // question titles from field IDs we have to call GET /forms/<id>
+  // separately, build a map, then apply it to every response below.
+  // Without this, every column header is the field's random UUID.
+  const fieldTitles = new Map<string, string>();
+  try {
+    const defRes = await fetch(`https://api.typeform.com/forms/${form.provider_form_id}`, {
+      headers: { Authorization: `Bearer ${form.api_token}` },
+    });
+    if (defRes.ok) {
+      const def = await defRes.json() as { fields?: Array<{ id: string; ref?: string; title?: string }> };
+      for (const f of def.fields ?? []) {
+        if (f.id && f.title?.trim()) fieldTitles.set(f.id, f.title.trim());
+      }
+      console.log(`[typeform-historical-sync] loaded ${fieldTitles.size} field titles from form definition`);
+    } else {
+      console.warn(`[typeform-historical-sync] couldn't fetch form definition: ${defRes.status}`);
+    }
+  } catch (e) {
+    console.warn(`[typeform-historical-sync] form definition fetch threw:`, e);
+    // Non-fatal — we'll fall back to field IDs in the absence of titles.
+  }
+
   // Paginate Typeform's Responses API. Their `before` param uses the
   // last item's response_id (oldest in the page) to fetch the next
-  // older page. We accumulate until they return an empty page.
+  // older page. We accumulate until they return a genuinely empty
+  // page — do NOT use 'items.length < PAGE' as an early-exit because
+  // Typeform sometimes returns smaller-than-requested pages mid-way
+  // through, especially when the requested page_size is at the max.
   let fetched = 0;
   let inserted = 0;
   let skipped  = 0;
+  let totalReported = 0;
   let beforeToken: string | null = null;
   const PAGE = 1000;
+  const MAX_PAGES = 200;  // sanity: 200 × 1000 = 200k responses
 
-  for (let page = 0; page < 50; page++) {  // sanity stop: 50 pages × 1000 = 50k responses
+  for (let page = 0; page < MAX_PAGES; page++) {
     const params = new URLSearchParams({ page_size: String(PAGE) });
     if (beforeToken) params.set("before", beforeToken);
     const apiUrl = `https://api.typeform.com/forms/${form.provider_form_id}/responses?${params}`;
@@ -107,19 +136,17 @@ Deno.serve(async (req: Request) => {
     }
     const payload = await res.json() as TypeformResponsesPayload;
     const items = payload.items ?? [];
+    if (page === 0 && typeof payload.total_items === "number") {
+      totalReported = payload.total_items;
+    }
+    console.log(`[typeform-historical-sync] page ${page}: ${items.length} items (total_items=${payload.total_items ?? "?"})`);
     if (items.length === 0) break;
 
     fetched += items.length;
 
     // Insert each item, mirroring typeform-webhook's flattening logic.
+    // Field title map was built once above from the form definition.
     for (const item of items) {
-      // Build field_id → title map from the per-response definition
-      // snapshot. Same fix as the live webhook: answers don't carry
-      // titles, only the definition does.
-      const fieldTitles = new Map<string, string>();
-      for (const f of item.definition?.fields ?? []) {
-        if (f.id && f.title?.trim()) fieldTitles.set(f.id, f.title.trim());
-      }
       const flat: Record<string, string> = {};
       let respondentName  = "";
       let respondentEmail = "";
@@ -200,7 +227,7 @@ Deno.serve(async (req: Request) => {
     beforeToken = oldestToken;
   }
 
-  return json({ ok: true, fetched, inserted, skipped }, 200);
+  return json({ ok: true, fetched, inserted, skipped, totalReported }, 200);
 });
 
 function json(payload: unknown, status: number): Response {

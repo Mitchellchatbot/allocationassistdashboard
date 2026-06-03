@@ -174,7 +174,7 @@ export function useSyncTypeformHistory() {
         body: { form_id: formId },
       });
       if (error) throw error;
-      const resp = data as { ok: boolean; error?: string; fetched: number; inserted: number; skipped: number };
+      const resp = data as { ok: boolean; error?: string; fetched: number; inserted: number; skipped: number; totalReported?: number };
       if (!resp.ok) throw new Error(resp.error ?? "Sync failed");
       return resp;
     },

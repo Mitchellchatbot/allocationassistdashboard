@@ -309,7 +309,10 @@ function TypeformSyncButton({ form }: { form: Form }) {
   const runSync = async () => {
     try {
       const r = await sync.mutateAsync(form.id);
-      toast.success(`Synced — fetched ${r.fetched}, ${r.inserted} new${r.skipped > 0 ? `, ${r.skipped} skipped` : ""}.`);
+      // Show what Typeform claims is the total so the user can spot
+      // when our sync got fewer than expected (plan caps / API throttle).
+      const totalNote = r.totalReported && r.totalReported > 0 ? ` · Typeform reports ${r.totalReported} total` : "";
+      toast.success(`Synced — fetched ${r.fetched}, ${r.inserted} stored${totalNote}.`, { duration: 8000 });
     } catch (e) {
       toast.error(e instanceof Error ? e.message : "Sync failed");
     }
