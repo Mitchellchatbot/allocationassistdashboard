@@ -45,6 +45,11 @@ interface TypeformResponseItem {
   submitted_at: string;
   hidden?:      Record<string, string>;
   answers?:     TypeformAnswer[];
+  /** Per-response definition snapshot (Typeform sends this on the
+   *  Responses API). Contains field titles which the answers array
+   *  doesn't carry — without this lookup every question column
+   *  renders as the field's random UUID. */
+  definition?:  { fields?: Array<{ id: string; ref?: string; title?: string }> };
 }
 
 interface TypeformResponsesPayload {
@@ -108,11 +113,18 @@ Deno.serve(async (req: Request) => {
 
     // Insert each item, mirroring typeform-webhook's flattening logic.
     for (const item of items) {
+      // Build field_id → title map from the per-response definition
+      // snapshot. Same fix as the live webhook: answers don't carry
+      // titles, only the definition does.
+      const fieldTitles = new Map<string, string>();
+      for (const f of item.definition?.fields ?? []) {
+        if (f.id && f.title?.trim()) fieldTitles.set(f.id, f.title.trim());
+      }
       const flat: Record<string, string> = {};
       let respondentName  = "";
       let respondentEmail = "";
       for (const a of item.answers ?? []) {
-        const title = a.field.title?.trim() || a.field.ref || a.field.id;
+        const title = fieldTitles.get(a.field.id) || a.field.title?.trim() || a.field.ref || a.field.id;
         const value =
           a.type === "text"          ? (a.text         ?? "") :
           a.type === "email"         ? (a.email        ?? "") :
@@ -150,6 +162,12 @@ Deno.serve(async (req: Request) => {
       const responseId = item.token ?? item.response_id;
       if (!responseId) { skipped++; continue; }
 
+      // True upsert (not ignoreDuplicates): re-running Sync history
+      // REPLACES the answers + raw_payload on existing rows so any
+      // parsing improvements (e.g. the field-title fix that lets
+      // question text replace random UUIDs) get applied to already-
+      // imported responses. submitted_at + provider_response_id are
+      // immutable so the upsert is safe.
       const { error: insErr, count } = await supabase
         .from("form_responses")
         .upsert({
@@ -161,15 +179,16 @@ Deno.serve(async (req: Request) => {
           respondent_name:       respondentName || null,
           respondent_email:      respondentEmail || null,
           doctor_id:             doctorId,
-        }, { onConflict: "form_id,provider_response_id", ignoreDuplicates: true, count: "exact" });
+        }, { onConflict: "form_id,provider_response_id", count: "exact" });
 
       if (insErr) {
-        console.warn("[typeform-historical-sync] insert failed for", responseId, insErr.message);
+        console.warn("[typeform-historical-sync] upsert failed for", responseId, insErr.message);
         skipped++;
-      } else if ((count ?? 0) > 0) {
-        inserted++;
       } else {
-        skipped++;  // already existed
+        // Postgres upsert with conflict update reports 1 row affected
+        // per row. We can't distinguish "newly inserted" from "updated"
+        // without an extra query — report everything as inserted/refreshed.
+        inserted += (count ?? 1);
       }
     }
 

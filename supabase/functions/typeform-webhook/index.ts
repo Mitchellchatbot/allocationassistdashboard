@@ -117,13 +117,23 @@ Deno.serve(async (req: Request) => {
 
   // ── Flatten answers ─────────────────────────────────────────────────
   // Build { questionTitle: stringValue } so the dashboard can render
-  // responses without needing the Typeform shape. Falls back to field id
-  // or ref if no title is set.
+  // responses without needing the Typeform shape.
+  //
+  // Question titles live in form_response.definition.fields[].title.
+  // The answers[].field object only has id + type (no title), so we
+  // need to look up each answer's title via the definition. Without
+  // this lookup, every column header rendered as the field's random
+  // UUID, which is what the user reported.
+  const fieldTitles = new Map<string, string>();
+  for (const f of fr.definition?.fields ?? []) {
+    if (f.id && f.title?.trim()) fieldTitles.set(f.id, f.title.trim());
+  }
+
   const flat: Record<string, string> = {};
   let respondentName:  string | null = null;
   let respondentEmail: string | null = null;
   for (const a of fr.answers ?? []) {
-    const title = a.field.title?.trim() || a.field.ref || a.field.id;
+    const title = fieldTitles.get(a.field.id) || a.field.title?.trim() || a.field.ref || a.field.id;
     const value =
       a.type === "text"      ? (a.text       ?? "") :
       a.type === "email"     ? (a.email      ?? "") :
