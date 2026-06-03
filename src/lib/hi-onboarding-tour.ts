@@ -17,7 +17,7 @@
  */
 import type { TourStep } from "@/components/OnboardingTour";
 
-export const HI_TOUR_ID = "hi-onboarding-v4";
+export const HI_TOUR_ID = "hi-onboarding-v5";
 
 export const HI_TOUR_STEPS: TourStep[] = [
   {
@@ -170,14 +170,14 @@ export const HI_TOUR_STEPS: TourStep[] = [
   {
     target: "sidebar-reports",
     title:  "Reports",
-    body:   "KPI strip, weekly + monthly recap, Placements tracker (replaces the Hammad sheet), per-doctor breakdown, hospital relationship health. Heavy page — scroll through the cards.",
+    body:   "KPI strip, weekly + monthly recap, Placements tracker (replaces the Hammad sheet — one row per (doctor, hospital) pair, so the same doctor sent to 4 hospitals = 4 rows), per-doctor breakdown, hospital relationship health.",
     placement: "right",
   },
   {
     route: "/reports",
     target: "reports-filters",
     title:  "Slice by anything",
-    body:   "Filter by hospital, HI team member (the four of you are pinned at the top), specialty, date range. Numbers update everywhere on the page. Below this: KPI strip → weekly/monthly recap (with delta arrows) → Trend chart → Placements (Hammad-sheet replacement, click any row to edit milestones + 45-day clock pill) → Per-doctor table → Hospital relationships.",
+    body:   "Filter by hospital, HI team member, specialty, date range. Below this: KPI strip → weekly/monthly recap (deltas vs prior period) → Trend chart → Placements (per doctor×hospital pair, with bulk-import-from-CSV + 'New placement' picker that pulls doctors from Zoho) → Per-doctor table → Hospital relationships.",
     placement: "bottom",
   },
 

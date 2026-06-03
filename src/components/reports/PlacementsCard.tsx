@@ -23,7 +23,8 @@ import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from "@/components/ui/dialog";
-import { Briefcase, ListChecks, Calendar, AlertCircle, CheckCircle2, Plus, Search, UserSquare, Trash2, Upload } from "lucide-react";
+import { Briefcase, ListChecks, Calendar, AlertCircle, CheckCircle2, Plus, Search, UserSquare, Trash2, Upload, Link2 } from "lucide-react";
+import { supabase } from "@/lib/supabase";
 import {
   usePlacementAttempts, useUpsertPlacementAttempt, useDeletePlacementAttempt,
   type PlacementAttempt,
@@ -61,11 +62,52 @@ function PaymentStatus({ row }: { row: PlacementAttempt }) {
 
 export function PlacementsCard() {
   const { data: rows = [], isLoading } = usePlacementAttempts();
+  const { data: zoho }                 = useZohoData();
   const [editingId, setEditingId] = useState<string | null>(null);
   const [pickerOpen, setPickerOpen] = useState(false);
   const [csvOpen, setCsvOpen] = useState(false);
+  const [relinking, setRelinking] = useState(false);
   const [search, setSearch] = useState("");
   const [searchParams, setSearchParams] = useSearchParams();
+
+  // Number of placement_attempts that still have a csv:<slug> doctor_id
+  // (imported from CSV but never linked to a Zoho lead/DoB). Drives
+  // the visibility of the 'Re-link to Zoho' button.
+  const unlinkedCount = useMemo(() => rows.filter(r => r.doctor_id.startsWith("csv:")).length, [rows]);
+
+  const handleRelinkToZoho = async () => {
+    if (relinking) return;
+    setRelinking(true);
+    try {
+      // Build name → Zoho id map. DoB wins over Lead (further down pipeline).
+      const norm = (s: string) => s.replace(/^\s*dr\.?\s+/i, "").toLowerCase().replace(/\s+/g, " ").trim();
+      const map = new Map<string, string>();
+      for (const l of zoho?.rawLeads ?? []) {
+        const name = (l.Full_Name || `${l.First_Name ?? ""} ${l.Last_Name ?? ""}`).trim();
+        if (name) map.set(norm(name), `lead:${l.id}`);
+      }
+      for (const d of zoho?.rawDoctorsOnBoard ?? []) {
+        const name = (d.Full_Name || `${d.First_Name ?? ""} ${d.Last_Name ?? ""}`).trim();
+        if (name) map.set(norm(name), `dob:${d.id}`);
+      }
+      const unlinked = rows.filter(r => r.doctor_id.startsWith("csv:"));
+      let updated = 0;
+      for (const r of unlinked) {
+        const zohoId = map.get(norm(r.doctor_name));
+        if (!zohoId) continue;
+        const { error } = await supabase
+          .from("placement_attempts")
+          .update({ doctor_id: zohoId, updated_at: new Date().toISOString() })
+          .eq("id", r.id);
+        if (!error) updated++;
+      }
+      toast.success(`Re-linked ${updated} placement${updated === 1 ? "" : "s"} to Zoho.${updated < unlinked.length ? ` ${unlinked.length - updated} couldn't be matched by name.` : ""}`);
+    } catch (e) {
+      toast.error(e instanceof Error ? e.message : "Re-link failed");
+    } finally {
+      setRelinking(false);
+    }
+  };
 
   // Deep-link: /reports?placement=<doctor_id> opens a NEW attempt
   // editor for the doctor (pre-loaded). Used by the Run Detail Sheet's
@@ -112,7 +154,14 @@ export function PlacementsCard() {
               One row per (doctor, hospital) pair — the same doctor can appear multiple times (e.g. shortlisted at 4 hospitals). Replaces Ammar's Hammad Google sheet. Stored in our portal, <strong>not Zoho</strong>. 45-day clock starts on Joined.
             </CardDescription>
           </div>
-          <div className="flex items-center gap-2">
+          <div className="flex items-center gap-2 flex-wrap">
+            {unlinkedCount > 0 && (
+              <Button size="sm" variant="outline" onClick={handleRelinkToZoho} disabled={relinking}
+                title={`${unlinkedCount} CSV-imported placement${unlinkedCount === 1 ? "" : "s"} aren't linked to Zoho yet. Click to match by doctor name.`}>
+                <Link2 className="h-3.5 w-3.5 mr-1 text-indigo-600" />
+                {relinking ? "Linking…" : `Re-link to Zoho (${unlinkedCount})`}
+              </Button>
+            )}
             <Button size="sm" variant="outline" onClick={() => setCsvOpen(true)}>
               <Upload className="h-3.5 w-3.5 mr-1" /> Import CSV
             </Button>
@@ -578,6 +627,30 @@ function NewPlacementDialog({ open, existingAttempts, preselectDoctorId, onClose
             )}
           </div>
         </div>
+
+        {/* Existing attempts for the picked doctor — context so the
+            team doesn't accidentally double-track or duplicate. */}
+        {pickedDoctor && (() => {
+          const existing = existingAttempts.filter(a => a.doctor_id === pickedDoctor.id);
+          if (existing.length === 0) return null;
+          return (
+            <div className="rounded-md border border-sky-200 bg-sky-50/40 px-3 py-2 mt-1">
+              <div className="text-[11px] font-medium text-sky-900 mb-1">
+                {pickedDoctor.name} already has {existing.length} attempt{existing.length === 1 ? "" : "s"}:
+              </div>
+              <div className="flex flex-wrap gap-1">
+                {existing.slice(0, 8).map(a => (
+                  <Badge key={a.id} variant="outline" className="text-[9px] bg-white border-sky-200 text-sky-800">
+                    {a.hospital_name}
+                  </Badge>
+                ))}
+                {existing.length > 8 && (
+                  <Badge variant="outline" className="text-[9px] bg-white border-sky-200 text-sky-800">+{existing.length - 8} more</Badge>
+                )}
+              </div>
+            </div>
+          );
+        })()}
 
         {doctorAlreadyAtHospital && (
           <div className="rounded-md border border-amber-200 bg-amber-50/40 px-3 py-2 text-[11px] text-amber-900 mt-1">

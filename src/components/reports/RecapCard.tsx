@@ -13,12 +13,10 @@
  * at a glance whether last week was up, down, or flat.
  */
 import { useMemo } from "react";
-import { useQuery } from "@tanstack/react-query";
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { CalendarRange, TrendingUp, TrendingDown, Minus, ListChecks, Calendar, CheckCircle2, Plane } from "lucide-react";
-import { supabase } from "@/lib/supabase";
-import type { DoctorLifecycle } from "@/hooks/use-doctor-lifecycle";
+import { usePlacementAttempts, type PlacementAttempt } from "@/hooks/use-placement-attempts";
 
 type Period = "this_week" | "last_week" | "this_month" | "last_month";
 
@@ -45,7 +43,7 @@ function periodRange(p: Period): { start: Date; end: Date } {
   return { start: firstLast, end: firstLastEnd };
 }
 
-function countInPeriod(rows: DoctorLifecycle[], col: keyof DoctorLifecycle, p: Period): number {
+function countInPeriod(rows: PlacementAttempt[], col: keyof PlacementAttempt, p: Period): number {
   const { start, end } = periodRange(p);
   let n = 0;
   for (const r of rows) {
@@ -61,7 +59,7 @@ function countInPeriod(rows: DoctorLifecycle[], col: keyof DoctorLifecycle, p: P
 interface Metric {
   label:   string;
   icon:    React.ReactNode;
-  col:     keyof DoctorLifecycle;
+  col:     keyof PlacementAttempt;
 }
 
 const METRICS: Metric[] = [
@@ -73,24 +71,21 @@ const METRICS: Metric[] = [
 ];
 
 export function RecapCard() {
-  const { data: lifecycles = [], isLoading } = useQuery<DoctorLifecycle[]>({
-    queryKey: ["recap-lifecycles"],
-    queryFn: async () => {
-      const { data, error } = await supabase.from("doctor_lifecycle").select("*").limit(5000);
-      if (error) throw error;
-      return (data ?? []) as DoctorLifecycle[];
-    },
-    staleTime: 60_000,
-  });
+  // Counts FROM placement_attempts directly (not doctor_lifecycle).
+  // The lifecycle row only holds the EARLIEST date per doctor; if a
+  // doctor was shortlisted at 5 hospitals in one week, lifecycle counts
+  // that as 1 placement-attempt. The Recap needs the true per-attempt
+  // count, so it reads the source-of-truth table.
+  const { data: attempts = [], isLoading } = usePlacementAttempts();
 
   const counts = useMemo(() => METRICS.map(m => ({
     label:    m.label,
     icon:     m.icon,
-    thisWeek:  countInPeriod(lifecycles, m.col, "this_week"),
-    lastWeek:  countInPeriod(lifecycles, m.col, "last_week"),
-    thisMonth: countInPeriod(lifecycles, m.col, "this_month"),
-    lastMonth: countInPeriod(lifecycles, m.col, "last_month"),
-  })), [lifecycles]);
+    thisWeek:  countInPeriod(attempts, m.col, "this_week"),
+    lastWeek:  countInPeriod(attempts, m.col, "last_week"),
+    thisMonth: countInPeriod(attempts, m.col, "this_month"),
+    lastMonth: countInPeriod(attempts, m.col, "last_month"),
+  })), [attempts]);
 
   return (
     <Card>
@@ -100,7 +95,7 @@ export function RecapCard() {
           Weekly + Monthly recap
         </CardTitle>
         <CardDescription className="text-[11px]">
-          Counts each placement milestone in this week vs last week, and this month vs last month. Joined → fires the 45-day AA-payment clock.
+          Counts each placement-attempt milestone in this week vs last week, and this month vs last month. One doctor shortlisted at 4 hospitals = 4 shortlists. Joined → fires the 45-day AA-payment clock.
         </CardDescription>
       </CardHeader>
       <CardContent>

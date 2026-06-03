@@ -72,7 +72,8 @@ export function useVacancies() {
       const { data, error } = await supabase
         .from("vacancies")
         .select("*")
-        .order("opened_at", { ascending: false });
+        .order("opened_at", { ascending: false })
+        .limit(10_000);
       if (error) throw error;
       return (data ?? []) as Vacancy[];
     },

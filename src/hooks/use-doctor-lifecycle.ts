@@ -92,7 +92,7 @@ export function useDoctorLifecycleMap(): Record<string, DoctorLifecycle> {
       const { data, error } = await supabase
         .from("doctor_lifecycle")
         .select("*")
-        .limit(2000);
+        .limit(20_000);
       if (error) throw error;
       return (data ?? []) as DoctorLifecycle[];
     },
@@ -237,8 +237,10 @@ export function useMarkLifecycle() {
 /** When a doctor is marked Joined, queue up the Second Payment flow at the
  *  trigger_15_days stage. The tick-scheduler reads metadata.joining_date and
  *  fires the invoice 15 calendar days later. Idempotent — won't double-create
- *  if a run already exists. */
-async function ensureSecondPaymentRun(doctorId: string, doctorName: string, joiningDate: string): Promise<void> {
+ *  if a run already exists. Exported so the placement_attempts editor
+ *  can fire it directly when a join date lands without going through
+ *  useMarkLifecycle (the DB trigger already syncs lifecycle.joined_at). */
+export async function ensureSecondPaymentRun(doctorId: string, doctorName: string, joiningDate: string): Promise<void> {
   // Already a run for this doctor?
   const { data: existing } = await supabase
     .from("automation_flow_runs")

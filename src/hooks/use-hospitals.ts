@@ -27,7 +27,8 @@ export function useHospitals() {
       const { data, error } = await supabase
         .from("hospitals")
         .select("*")
-        .order("name", { ascending: true });
+        .order("name", { ascending: true })
+        .limit(5000);
       if (error) throw error;
       return (data ?? []) as Hospital[];
     },

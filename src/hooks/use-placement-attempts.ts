@@ -13,6 +13,7 @@
  */
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { supabase } from "@/lib/supabase";
+import { ensureSecondPaymentRun } from "@/hooks/use-doctor-lifecycle";
 
 export interface PlacementAttempt {
   id:               string;
@@ -118,6 +119,21 @@ export function useUpsertPlacementAttempt() {
         .select("*")
         .single();
       if (error) throw error;
+
+      // Side effect: when joined_at lands (newly or updated), make sure
+      // the Second Payment flow run exists for this doctor. The DB
+      // trigger already syncs doctor_lifecycle.joined_at; this matches
+      // what useMarkLifecycle.mark_joined used to do TS-side (creates
+      // the flow run that drives the 45-day invoice clock).
+      if (input.joined_at) {
+        try {
+          await ensureSecondPaymentRun(input.doctor_id, input.doctor_name, input.joined_at);
+        } catch (e) {
+          // Non-fatal — the placement save succeeded. Surface in the
+          // console for debugging; don't break the UI.
+          console.warn("[useUpsertPlacementAttempt] ensureSecondPaymentRun failed (non-fatal):", e);
+        }
+      }
       return data as PlacementAttempt;
     },
     onSuccess: () => {
@@ -178,6 +194,18 @@ export function useBulkInsertPlacementAttempts() {
         .upsert(payload, { onConflict: "doctor_id,hospital_name", ignoreDuplicates: true })
         .select("id");
       if (error) throw error;
+
+      // Fire Second Payment flow for every row that landed with a
+      // joined_at — same side effect as the single-row upsert. Sequential
+      // (not Promise.all) so a 300-row import doesn't slam the function.
+      for (const r of rows) {
+        if (!r.joined_at) continue;
+        try {
+          await ensureSecondPaymentRun(r.doctor_id, r.doctor_name, r.joined_at);
+        } catch (e) {
+          console.warn("[useBulkInsertPlacementAttempts] ensureSecondPaymentRun failed for", r.doctor_id, e);
+        }
+      }
       return { inserted: data?.length ?? 0, skipped: rows.length - (data?.length ?? 0) };
     },
     onSuccess: () => {
