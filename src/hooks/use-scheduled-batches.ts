@@ -20,6 +20,11 @@ export interface ScheduledBatch {
   kind:             BatchKind;
   scheduled_for:    string;             // ISO date
   specialty:        string | null;
+  // ISO-or-display country name (UAE / Saudi Arabia / Qatar / Oman / etc).
+  // When set, send-batch filters hospitals to those whose country matches.
+  // Null = all hospitals (legacy / broadcast). Ammar 2026-06-03 spec is
+  // that going forward every batch picks a country at create time.
+  country:          string | null;
   status:           BatchStatus;
   doctor_ids:       string[];
   hospital_count:   number | null;
@@ -88,6 +93,7 @@ export interface UpsertBatchInput {
   kind:           BatchKind;
   scheduled_for:  string;
   specialty?:     string | null;
+  country?:       string | null;
   doctor_ids?:    string[];
   notes?:         string | null;
 }
@@ -103,6 +109,7 @@ export function useUpsertBatch() {
         kind:          input.kind,
         scheduled_for: input.scheduled_for,
         specialty:     input.specialty ?? null,
+        country:       input.country   ?? null,
         doctor_ids:    input.doctor_ids ?? [],
         notes:         input.notes ?? null,
         created_by:    createdBy,

@@ -144,6 +144,11 @@ function BatchRow({ batch, onEdit, compact = false }: { batch: ScheduledBatch; o
         <div className="flex items-center gap-2 flex-wrap">
           <span className="text-[12px] font-medium">{kindLabel}</span>
           <Badge variant="outline" className="text-[9px] bg-slate-50 uppercase tracking-wider">{dayLabel}</Badge>
+          {batch.country && (
+            <Badge variant="outline" className="text-[9px] bg-sky-50 text-sky-700 border-sky-200 uppercase tracking-wider">
+              {batch.country}
+            </Badge>
+          )}
           {batch.specialty && (
             <Badge variant="outline" className="text-[9px] bg-violet-50 text-violet-700 border-violet-200 uppercase tracking-wider">
               {batch.specialty}
@@ -675,6 +680,10 @@ function BatchDialog({ target, onTargetChange, batches, suggestedSpecialty }: {
   const [kind, setKind] = useState<BatchKind>("daily_duo");
   const [scheduledFor, setScheduledFor] = useState<string>(todayISO());
   const [specialty, setSpecialty]       = useState<string>("");
+  // Country defaults to UAE — that's the highest-volume target and matches
+  // Ammar's spec (one batch per country, sent to all hospitals in that
+  // country). Empty string = broadcast to all hospitals (legacy fallback).
+  const [country,   setCountry]         = useState<string>("UAE");
   const [creating, setCreating]         = useState(false);
 
   // Editor-only state.
@@ -697,7 +706,7 @@ function BatchDialog({ target, onTargetChange, batches, suggestedSpecialty }: {
 
   const close = () => {
     onTargetChange(null);
-    setKind("daily_duo"); setScheduledFor(todayISO()); setSpecialty(""); setSearch("");
+    setKind("daily_duo"); setScheduledFor(todayISO()); setSpecialty(""); setCountry("UAE"); setSearch("");
   };
 
   const handleCreate = async () => {
@@ -718,10 +727,11 @@ function BatchDialog({ target, onTargetChange, batches, suggestedSpecialty }: {
         b.kind === kind &&
         b.scheduled_for === scheduledFor &&
         (b.specialty ?? "") === (finalSpecialty ?? "") &&
+        (b.country   ?? "") === (country.trim() || "") &&
         b.status !== "cancelled",
       );
       if (existing) {
-        toast.info("A batch for this date already exists — opening it.");
+        toast.info("A batch for this date + country already exists — opening it.");
         onTargetChange(existing.id);
         setCreating(false); return;
       }
@@ -729,6 +739,7 @@ function BatchDialog({ target, onTargetChange, batches, suggestedSpecialty }: {
         kind,
         scheduled_for: scheduledFor,
         specialty:     finalSpecialty,
+        country:       country.trim() || null,
       });
       toast.success("Batch created. Pick doctors below.");
       // Stay in the dialog — swap into doctor-picker mode.
@@ -857,6 +868,23 @@ function BatchDialog({ target, onTargetChange, batches, suggestedSpecialty }: {
                 <Label className="text-[11px]">Date</Label>
                 <Input type="date" value={scheduledFor} onChange={e => setScheduledFor(e.target.value)} className="h-9 text-[12px]" />
               </div>
+              <div className="space-y-1">
+                <Label className="text-[11px]">Country</Label>
+                <Select value={country} onValueChange={setCountry}>
+                  <SelectTrigger className="h-9 text-[12px]"><SelectValue /></SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="UAE">UAE</SelectItem>
+                    <SelectItem value="Saudi Arabia">Saudi Arabia</SelectItem>
+                    <SelectItem value="Qatar">Qatar</SelectItem>
+                    <SelectItem value="Oman">Oman</SelectItem>
+                    <SelectItem value="Kuwait">Kuwait</SelectItem>
+                    <SelectItem value="Bahrain">Bahrain</SelectItem>
+                  </SelectContent>
+                </Select>
+                <p className="text-[10px] text-muted-foreground">
+                  This batch only sends to hospitals in the chosen country. Create one batch per country per day (Ammar 2026-06-03 spec).
+                </p>
+              </div>
               {kind === "specialty_of_day" && (
                 <div className="space-y-1">
                   <Label className="text-[11px]">Specialty</Label>
@@ -888,6 +916,7 @@ function BatchDialog({ target, onTargetChange, batches, suggestedSpecialty }: {
               <DialogTitle className="flex items-center gap-2 flex-wrap">
                 <Mailbox className="h-5 w-5 text-teal-600" />
                 {KIND_LABEL[batch.kind]} · {formatDate(batch.scheduled_for)}
+                {batch.country   && <Badge variant="outline" className="bg-sky-50 text-sky-700 border-sky-200 text-[9px] uppercase tracking-wider ml-1">{batch.country}</Badge>}
                 {batch.specialty && <Badge variant="outline" className="bg-violet-50 text-violet-700 border-violet-200 text-[9px] uppercase tracking-wider ml-1">{batch.specialty}</Badge>}
                 <StatusBadge status={batch.status} />
               </DialogTitle>

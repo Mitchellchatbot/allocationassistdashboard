@@ -103,16 +103,23 @@ Deno.serve(async (req: Request) => {
   if (doctorIds.length === 0) return json({ ok: false, error: "No doctors queued for this batch" }, 400);
 
   // ── Load hospitals (recipients) ────────────────────────────────────────
-  const { data: hospitals, error: hospErr } = await supabase
+  // batch.country (added 2026-06-03) scopes the send to one country.
+  // Ammar's spec: 'two profiles to UAE, two to KSA, two to Qatar' — one
+  // batch row per country per day. Null country = legacy/broadcast.
+  const batchCountry = (batch.country as string | null) ?? null;
+  let hospitalQuery = supabase
     .from("hospitals")
-    .select("id, name, primary_contact_name, primary_recruiter_email")
+    .select("id, name, primary_contact_name, primary_recruiter_email, country")
     .not("primary_recruiter_email", "is", null);
+  if (batchCountry) hospitalQuery = hospitalQuery.eq("country", batchCountry);
+  const { data: hospitals, error: hospErr } = await hospitalQuery;
   if (hospErr) return json({ ok: false, error: "Hospital fetch failed", detail: hospErr.message }, 500);
   const recipients = (hospitals ?? [])
     .map(h => (h.primary_recruiter_email as string)?.trim())
     .filter(Boolean);
   if (recipients.length === 0 && TEST_OVERRIDE_LIST.length === 0) {
-    return json({ ok: false, error: "No hospitals with a recruiter email on file. Add some in the Hospitals tab." }, 400);
+    const scope = batchCountry ? `in ${batchCountry}` : "on file";
+    return json({ ok: false, error: `No hospitals ${scope} with a recruiter email. Add some in the Hospitals tab or change the batch's country.` }, 400);
   }
 
   // ── Load doctor profiles + Zoho cache for the picked doctors ───────────
