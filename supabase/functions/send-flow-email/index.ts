@@ -321,6 +321,12 @@ Deno.serve(async (req: Request) => {
     // back to whatever was set in metadata.
     upload_link:        bundledUploadLink || String(md.upload_link ?? ""),
     profile_link:       String(md.profile_link ?? ""),
+    // profile_url drives the "View full profile online" CTA in the
+    // redesigned profile_sent_hospital template (Ammar 2026-06-03
+    // — website-style email). B5 will swap this for a tokenised AA-
+    // site URL; until then it falls back to the homepage so the
+    // button isn't broken.
+    profile_url:        String(md.profile_url ?? "https://www.allocationassist.com"),
     guide_link:         String(md.guide_link ?? ""),
     payment_link:       String(md.payment_link ?? ""),
     hospital_profile_url:  String(md.hospital_profile_url ?? ""),
