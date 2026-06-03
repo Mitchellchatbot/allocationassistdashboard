@@ -124,10 +124,20 @@ Deno.serve(async (req: Request) => {
   // need to look up each answer's title via the definition. Without
   // this lookup, every column header rendered as the field's random
   // UUID, which is what the user reported.
+  // Recursive walk — Typeform Group fields nest the real questions
+  // under .properties.fields[]. Without recursion, sub-questions
+  // (First name + Last name in a "Name" group, etc) fall through to
+  // their raw UUID.
+  type TFField = { id?: string; ref?: string; title?: string; type?: string; properties?: { fields?: TFField[] } };
   const fieldTitles = new Map<string, string>();
-  for (const f of fr.definition?.fields ?? []) {
-    if (f.id && f.title?.trim()) fieldTitles.set(f.id, cleanQuestionTitle(f.title));
+  function walkFields(fields: TFField[] | undefined) {
+    if (!fields) return;
+    for (const f of fields) {
+      if (f.id && f.title?.trim()) fieldTitles.set(f.id, cleanQuestionTitle(f.title));
+      if (f.properties?.fields) walkFields(f.properties.fields);
+    }
   }
+  walkFields((fr.definition?.fields as TFField[] | undefined));
 
   const flat: Record<string, string> = {};
   let respondentName:  string | null = null;

@@ -96,11 +96,23 @@ Deno.serve(async (req: Request) => {
       headers: { Authorization: `Bearer ${form.api_token}` },
     });
     if (defRes.ok) {
-      const def = await defRes.json() as { fields?: Array<{ id: string; ref?: string; title?: string }> };
-      for (const f of def.fields ?? []) {
-        if (f.id && f.title?.trim()) fieldTitles.set(f.id, cleanQuestionTitle(f.title));
+      // Walk nested groups recursively. Typeform's Group field type
+      // (used for "First name" + "Last name" + similar split inputs)
+      // has its own .properties.fields[] array with the real
+      // questions. The previous flat-only walk missed all of those,
+      // so their column headers rendered as raw UUIDs.
+      type TFField = { id?: string; ref?: string; title?: string; type?: string; properties?: { fields?: TFField[] } };
+      const def = await defRes.json() as { fields?: TFField[] };
+      function walk(fields: TFField[] | undefined) {
+        if (!fields) return;
+        for (const f of fields) {
+          if (f.id && f.title?.trim()) fieldTitles.set(f.id, cleanQuestionTitle(f.title));
+          // Group-type fields nest the real questions under .properties.fields
+          if (f.properties?.fields) walk(f.properties.fields);
+        }
       }
-      console.log(`[typeform-historical-sync] loaded ${fieldTitles.size} field titles from form definition`);
+      walk(def.fields);
+      console.log(`[typeform-historical-sync] loaded ${fieldTitles.size} field titles from form definition (recursive walk)`);
     } else {
       console.warn(`[typeform-historical-sync] couldn't fetch form definition: ${defRes.status}`);
     }
@@ -144,8 +156,20 @@ Deno.serve(async (req: Request) => {
 
     fetched += items.length;
 
-    // Insert each item, mirroring typeform-webhook's flattening logic.
-    // Field title map was built once above from the form definition.
+    // ── 1. Transform all items for this page (no DB calls) ────────────
+    type Row = {
+      form_id:               string;
+      provider_response_id:  string;
+      submitted_at:          string;
+      raw_payload:           Record<string, unknown>;
+      answers:               Record<string, string>;
+      respondent_name:       string | null;
+      respondent_email:      string | null;
+      doctor_id:             string | null;
+    };
+    const rows: Row[] = [];
+    const emails: string[] = [];
+
     for (const item of items) {
       const flat: Record<string, string> = {};
       let respondentName  = "";
@@ -172,58 +196,69 @@ Deno.serve(async (req: Request) => {
         }
       }
 
-      let doctorId: string | null = null;
-      if (respondentEmail) {
-        const { data: dobRow } = await supabase
-          .from("zoho_cache_dob").select("zoho_id")
-          .ilike("email", respondentEmail).maybeSingle();
-        if (dobRow?.zoho_id) doctorId = `dob:${dobRow.zoho_id}`;
-        if (!doctorId) {
-          const { data: leadRow } = await supabase
-            .from("zoho_cache_leads").select("zoho_id")
-            .ilike("email", respondentEmail).maybeSingle();
-          if (leadRow?.zoho_id) doctorId = `lead:${leadRow.zoho_id}`;
-        }
-      }
-
       const responseId = item.token ?? item.response_id;
       if (!responseId) { skipped++; continue; }
+      if (respondentEmail) emails.push(respondentEmail.toLowerCase());
 
-      // True upsert (not ignoreDuplicates): re-running Sync history
-      // REPLACES the answers + raw_payload on existing rows so any
-      // parsing improvements (e.g. the field-title fix that lets
-      // question text replace random UUIDs) get applied to already-
-      // imported responses. submitted_at + provider_response_id are
-      // immutable so the upsert is safe.
-      const { error: insErr, count } = await supabase
-        .from("form_responses")
-        .upsert({
-          form_id:               form.id,
-          provider_response_id:  responseId,
-          submitted_at:          item.submitted_at,
-          raw_payload:           item as unknown as Record<string, unknown>,
-          answers:               flat,
-          respondent_name:       respondentName || null,
-          respondent_email:      respondentEmail || null,
-          doctor_id:             doctorId,
-        }, { onConflict: "form_id,provider_response_id", count: "exact" });
+      rows.push({
+        form_id:               form.id,
+        provider_response_id:  responseId,
+        submitted_at:          item.submitted_at,
+        raw_payload:           item as unknown as Record<string, unknown>,
+        answers:               flat,
+        respondent_name:       respondentName || null,
+        respondent_email:      respondentEmail || null,
+        doctor_id:             null,   // filled in via batched lookup below
+      });
+    }
 
-      if (insErr) {
-        console.warn("[typeform-historical-sync] upsert failed for", responseId, insErr.message);
-        skipped++;
-      } else {
-        // Postgres upsert with conflict update reports 1 row affected
-        // per row. We can't distinguish "newly inserted" from "updated"
-        // without an extra query — report everything as inserted/refreshed.
-        inserted += (count ?? 1);
+    // ── 2. Batch Zoho lookups (one query per cache, not per row) ──────
+    // ilike doesn't combine with .in() so we fall back to lowercase
+    // exact-match against the (already lowercased) emails. zoho_cache
+    // tables store emails normalized so this matches the prior per-row
+    // .ilike behaviour for the common case.
+    const emailToDoctorId = new Map<string, string>();
+    if (emails.length > 0) {
+      const uniqueEmails = Array.from(new Set(emails));
+      const [{ data: dobRows }, { data: leadRows }] = await Promise.all([
+        supabase.from("zoho_cache_dob")  .select("zoho_id, email").in("email", uniqueEmails),
+        supabase.from("zoho_cache_leads").select("zoho_id, email").in("email", uniqueEmails),
+      ]);
+      // DoB wins over Lead (further down the pipeline) — same precedence
+      // as the live webhook.
+      for (const r of leadRows ?? []) {
+        if (r.email && r.zoho_id) emailToDoctorId.set(String(r.email).toLowerCase(), `lead:${r.zoho_id}`);
+      }
+      for (const r of dobRows ?? []) {
+        if (r.email && r.zoho_id) emailToDoctorId.set(String(r.email).toLowerCase(), `dob:${r.zoho_id}`);
+      }
+    }
+    for (const row of rows) {
+      if (row.respondent_email) {
+        const hit = emailToDoctorId.get(row.respondent_email.toLowerCase());
+        if (hit) row.doctor_id = hit;
       }
     }
 
-    // Set beforeToken to the OLDEST item's token (last in array) so the
-    // next iteration fetches even older responses.
+    // ── 3. Bulk upsert the whole page in one round-trip ───────────────
+    if (rows.length > 0) {
+      const { error: bulkErr } = await supabase
+        .from("form_responses")
+        .upsert(rows, { onConflict: "form_id,provider_response_id" });
+      if (bulkErr) {
+        console.error("[typeform-historical-sync] bulk upsert failed:", bulkErr);
+        return json({ ok: false, error: `Bulk upsert: ${bulkErr.message}`, fetched, inserted, skipped, totalReported }, 500);
+      }
+      inserted += rows.length;
+    }
+
+    // ── 4. Continue paginating until items are EMPTY (not until short
+    //      page). Typeform occasionally returns short pages mid-stream;
+    //      we keep going regardless. Stop only when the API gives us
+    //      back zero rows.
     const oldest = items[items.length - 1];
     const oldestToken = oldest.token ?? oldest.response_id;
-    if (!oldestToken || items.length < PAGE) break;
+    if (!oldestToken) break;
     beforeToken = oldestToken;
   }
 
