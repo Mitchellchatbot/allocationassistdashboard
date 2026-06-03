@@ -23,6 +23,7 @@ import type { FlowRun } from "@/hooks/use-automation-flows";
 import type { DoctorLifecycle } from "@/hooks/use-doctor-lifecycle";
 import { PlacementsCard } from "@/components/reports/PlacementsCard";
 import { RecapCard } from "@/components/reports/RecapCard";
+import { DoctorTable } from "@/components/reports/DoctorTable";
 
 /**
  * Phase 5 — Hospital Introduction Department reporting page.
@@ -132,6 +133,11 @@ export default function Reports() {
             Per-doctor milestones + 45-day payment clock. Click any row
             to edit milestone dates inline. */}
         <PlacementsCard />
+
+        {/* Per-doctor breakdown — companion to the hospital table
+            below. Ammar 2026-06-03: 'add another table over here for
+            the individual doctors themselves'. */}
+        <DoctorTable />
 
         <Card>
           <CardHeader className="pb-2">
