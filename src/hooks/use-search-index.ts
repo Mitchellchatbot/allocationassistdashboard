@@ -174,7 +174,7 @@ export function useSearchIndex(): SearchEntity[] {
         .from("doctor_lifecycle")
         .select("doctor_id, doctor_name, placement_hospital_name, joined_at, signed_at, offered_at, shortlisted_at, paid_at")
         .or("joined_at.not.is.null,signed_at.not.is.null,offered_at.not.is.null,shortlisted_at.not.is.null")
-        .limit(500);
+        .limit(20_000);
       if (error) throw error;
       return (data ?? []) as Array<{
         doctor_id: string; doctor_name: string | null;

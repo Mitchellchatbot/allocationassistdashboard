@@ -41,10 +41,14 @@ export function usePlacementAttempts() {
   return useQuery<PlacementAttempt[]>({
     queryKey: KEY,
     queryFn: async () => {
+      // Supabase silently caps at 1000 rows without an explicit limit.
+      // The Hammad sheet is ~300/month; bumping to 20k gives us a
+      // year+ of headroom before we need real pagination.
       const { data, error } = await supabase
         .from("placement_attempts")
         .select("*")
-        .order("updated_at", { ascending: false });
+        .order("updated_at", { ascending: false })
+        .limit(20_000);
       if (error) throw error;
       return (data ?? []) as PlacementAttempt[];
     },
