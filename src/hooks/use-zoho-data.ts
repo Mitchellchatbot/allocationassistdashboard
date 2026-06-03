@@ -789,13 +789,21 @@ export function aggregateZohoData(
     if (activeStatuses.has(l.Lead_Status)) monthBuckets[key].qualified++;
   });
 
+  // "Placed" = doctors who became Doctors on Board (the Zoho Contacts
+  // module — "SOLE source of truth for conversions" per the type
+  // comment above). Counting by DoB.Created_Time gives a real per-
+  // month signal; the previous source (Closed Won deals.Closing_Date)
+  // only had ~4 records ever and showed flat zero on the chart.
   const placedPerMonth = countBy(
-    closedWon,
+    doctorsOnBoard,
     d => {
-      const dt = new Date(d.Closing_Date);
+      if (!d.Created_Time) return '__skip__';
+      const dt = new Date(d.Created_Time);
+      if (isNaN(dt.getTime())) return '__skip__';
       return dt.toLocaleString('default', { month: 'short', year: '2-digit' });
     }
   );
+  delete (placedPerMonth as Record<string, number>)['__skip__'];
 
   const leadsOverTime = Object.entries(monthBuckets)
     .sort((a, b) => new Date('1 ' + a[0]).getTime() - new Date('1 ' + b[0]).getTime())
