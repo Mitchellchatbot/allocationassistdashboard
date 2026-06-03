@@ -261,6 +261,30 @@ Deno.serve(async (req: Request) => {
     }
   }
 
+  // ── Lookup per-emirate relocation guide URL ─────────────────────────────
+  // Ammar 2026-06-03: 'we sent it for Dubai Abu Dhabi and all of them'.
+  // Resolve by the hospital's city → relocation_articles.url, used to
+  // set {{guide_link}} in the relocation_guide template. Falls back to
+  // an empty string which the template renders as a generic "we'll
+  // share it with you separately" line.
+  let resolvedGuideLink = "";
+  let resolvedGuideLabel = "";
+  if (run.current_stage === "send_relocation_email" && hospital?.city) {
+    try {
+      const { data: art } = await supabase
+        .from("relocation_articles")
+        .select("url, label")
+        .eq("city", hospital.city)
+        .maybeSingle();
+      if (art?.url) {
+        resolvedGuideLink  = String(art.url);
+        resolvedGuideLabel = String(art.label ?? "");
+      }
+    } catch (e) {
+      console.warn("[send-flow-email] relocation_articles lookup failed (non-fatal):", e);
+    }
+  }
+
   // ── Mint shared-profile token for profile_sent_hospital sends ───────────
   // Each hospital recipient gets their own tokenised URL pointing at the
   // dashboard's /shared-profile/:token route (Ammar 2026-06-03 — hospitals
@@ -364,7 +388,10 @@ Deno.serve(async (req: Request) => {
     // metadata; final fallback is the AA homepage so the button isn't
     // dead-on-arrival if minting failed.
     profile_url:        mintedProfileUrl || String(md.profile_url ?? "https://www.allocationassist.com"),
-    guide_link:         String(md.guide_link ?? ""),
+    // Prefer the city-resolved guide URL (B6) over any pre-set
+    // metadata so per-emirate articles surface automatically.
+    guide_link:         resolvedGuideLink || String(md.guide_link ?? ""),
+    guide_label:        resolvedGuideLabel || `Relocating to ${String(hospital?.city ?? "your new city")}`,
     payment_link:       String(md.payment_link ?? ""),
     hospital_profile_url:  String(md.hospital_profile_url ?? ""),
     hospital_description:  String(md.hospital_description ?? ""),
