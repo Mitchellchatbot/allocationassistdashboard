@@ -40,6 +40,7 @@ const BulkImport      = lazy(() => import("./pages/BulkImport"));
 const Connections     = lazy(() => import("./pages/Connections"));
 const UploadCV        = lazy(() => import("./pages/UploadCV"));
 const SharedProfile   = lazy(() => import("./pages/SharedProfile"));
+const Forms           = lazy(() => import("./pages/Forms"));
 const NotFound        = lazy(() => import("./pages/NotFound"));
 
 // Global react-query defaults tuned for this dashboard:
@@ -107,7 +108,7 @@ function ProtectedShell() {
  *  utility routes share the dashboard gate ("/" — admin-only) since they
  *  don't have their own row in the user_pages config. */
 function requiredPageForPath(pathname: string): string {
-  if (pathname === "/import" || pathname === "/contracts" || pathname === "/import-bulk" || pathname === "/connections") return "/";
+  if (pathname === "/import" || pathname === "/contracts" || pathname === "/import-bulk" || pathname === "/connections" || pathname === "/forms") return "/";
   return pathname;
 }
 
@@ -155,6 +156,7 @@ const App = () => (
                 <Route path="/batches"        element={<Batches />} />
                 <Route path="/import-bulk"    element={<BulkImport />} />
                 <Route path="/connections"    element={<Connections />} />
+                <Route path="/forms"          element={<Forms />} />
               </Route>
 
               <Route path="*" element={<NotFound />} />

@@ -1,0 +1,198 @@
+/**
+ * Typeform webhook receiver.
+ *
+ * Wire each Typeform's "Webhooks" settings to:
+ *   https://elfkqmbwuspjaoorqggq.supabase.co/functions/v1/typeform-webhook
+ *
+ * Typeform POSTs a JSON payload of the shape:
+ *   {
+ *     event_id, event_type: "form_response",
+ *     form_response: {
+ *       form_id, token, submitted_at, hidden, definition: {...},
+ *       answers: [{ type, field: {id, ref, title, type}, ... value ... }]
+ *     }
+ *   }
+ *
+ * We:
+ *   1. Look up the `forms` row by provider_form_id (matches form_response.form_id)
+ *   2. Verify the optional HMAC signature (typeform-signature header) if the
+ *      form has a webhook_secret configured
+ *   3. Flatten the answers array into { question_title: value } and try to
+ *      pull a respondent name/email
+ *   4. Try to link to an existing AA lead / DoB by email (case-insensitive)
+ *   5. Insert into form_responses (idempotent via unique (form_id, provider_response_id))
+ *
+ * Returns 200 on success — Typeform retries on non-2xx for ~24h.
+ */
+import { createClient } from "https://esm.sh/@supabase/supabase-js@2.45.0";
+import { createHmac } from "node:crypto";
+
+const supabaseUrl = Deno.env.get("SUPABASE_URL") ?? "";
+const serviceKey  = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY") ?? "";
+const supabase    = createClient(supabaseUrl, serviceKey);
+
+const CORS = {
+  "Access-Control-Allow-Origin":  "*",
+  "Access-Control-Allow-Headers": "authorization, x-client-info, apikey, content-type, typeform-signature",
+  "Access-Control-Allow-Methods": "POST, OPTIONS",
+};
+
+interface TypeformAnswer {
+  type:  string;                          // 'text' | 'email' | 'choice' | 'number' | 'date' | 'boolean' | etc.
+  field: { id: string; ref?: string; title?: string; type: string };
+  text?: string;
+  email?: string;
+  phone_number?: string;
+  number?: number;
+  boolean?: boolean;
+  date?: string;
+  url?: string;
+  file_url?: string;
+  choice?: { label?: string; other?: string };
+  choices?: { labels?: string[]; other?: string };
+}
+
+interface TypeformPayload {
+  event_id?:   string;
+  event_type?: string;
+  form_response?: {
+    form_id:       string;
+    token:         string;
+    submitted_at?: string;
+    landed_at?:    string;
+    definition?:   { id?: string; title?: string; fields?: Array<{ id: string; ref?: string; title?: string }> };
+    answers?:      TypeformAnswer[];
+    hidden?:       Record<string, string>;
+  };
+}
+
+Deno.serve(async (req: Request) => {
+  if (req.method === "OPTIONS") return new Response(null, { headers: CORS });
+  if (req.method !== "POST")    return json({ ok: false, error: "Method not allowed" }, 405);
+
+  // Read raw body — needed for HMAC verification BEFORE parsing.
+  const rawBody = await req.text();
+  let payload: TypeformPayload;
+  try { payload = JSON.parse(rawBody); }
+  catch { return json({ ok: false, error: "Invalid JSON body" }, 400); }
+
+  const fr = payload.form_response;
+  if (!fr || !fr.form_id || !fr.token) {
+    return json({ ok: false, error: "Missing form_response.form_id / token" }, 400);
+  }
+
+  // ── Look up form row ────────────────────────────────────────────────
+  const { data: form, error: formErr } = await supabase
+    .from("forms")
+    .select("*")
+    .eq("provider", "typeform")
+    .eq("provider_form_id", fr.form_id)
+    .maybeSingle();
+  if (formErr) {
+    console.error("[typeform-webhook] forms lookup failed:", formErr);
+    return json({ ok: false, error: "DB error" }, 500);
+  }
+  if (!form) {
+    // Form not registered in our system. Acknowledge with 200 so Typeform
+    // doesn't retry forever, but log so we can wire it up.
+    console.warn("[typeform-webhook] received submission for unregistered form_id:", fr.form_id);
+    return json({ ok: true, ignored: true, reason: "form not registered in dashboard" }, 200);
+  }
+
+  // ── Optional HMAC verification ───────────────────────────────────────
+  if (form.webhook_secret) {
+    const sig = req.headers.get("typeform-signature") ?? "";
+    // Typeform format: "sha256=<base64-hmac>"
+    const m = sig.match(/^sha256=(.+)$/);
+    if (!m) {
+      console.warn("[typeform-webhook] missing or malformed typeform-signature header");
+      return json({ ok: false, error: "Missing signature" }, 401);
+    }
+    const expected = createHmac("sha256", form.webhook_secret).update(rawBody).digest("base64");
+    if (expected !== m[1]) {
+      console.warn("[typeform-webhook] HMAC mismatch — rejecting");
+      return json({ ok: false, error: "Bad signature" }, 401);
+    }
+  }
+
+  // ── Flatten answers ─────────────────────────────────────────────────
+  // Build { questionTitle: stringValue } so the dashboard can render
+  // responses without needing the Typeform shape. Falls back to field id
+  // or ref if no title is set.
+  const flat: Record<string, string> = {};
+  let respondentName:  string | null = null;
+  let respondentEmail: string | null = null;
+  for (const a of fr.answers ?? []) {
+    const title = a.field.title?.trim() || a.field.ref || a.field.id;
+    const value =
+      a.type === "text"      ? (a.text       ?? "") :
+      a.type === "email"     ? (a.email      ?? "") :
+      a.type === "phone_number" ? (a.phone_number ?? "") :
+      a.type === "number"    ? (a.number     != null ? String(a.number) : "") :
+      a.type === "boolean"   ? (a.boolean    != null ? String(a.boolean) : "") :
+      a.type === "date"      ? (a.date       ?? "") :
+      a.type === "url"       ? (a.url        ?? "") :
+      a.type === "file_url"  ? (a.file_url   ?? "") :
+      a.type === "choice"    ? (a.choice?.label ?? a.choice?.other ?? "") :
+      a.type === "choices"   ? ([...(a.choices?.labels ?? []), a.choices?.other].filter(Boolean).join(", ")) :
+                               JSON.stringify(a);
+    if (value) flat[title] = value;
+
+    // Heuristic respondent capture — first email/name we see wins.
+    if (!respondentEmail && a.type === "email" && a.email) respondentEmail = a.email;
+    const titleLc = (a.field.title ?? "").toLowerCase();
+    if (!respondentName && a.type === "text" && a.text && (titleLc.includes("name") || titleLc.includes("full name"))) {
+      respondentName = a.text;
+    }
+  }
+
+  // ── Try to link to an existing AA lead / DoB by email ───────────────
+  // The dashboard's doctor IDs are prefixed; we don't fetch Zoho here
+  // (heavy) — just check meta_leads + lead_emails_cache if available,
+  // otherwise skip linkage and let the UI offer manual linking later.
+  let doctorId: string | null = null;
+  if (respondentEmail) {
+    const { data: dobRow } = await supabase
+      .from("zoho_cache_dob")
+      .select("zoho_id")
+      .ilike("email", respondentEmail)
+      .maybeSingle();
+    if (dobRow?.zoho_id) doctorId = `dob:${dobRow.zoho_id}`;
+    if (!doctorId) {
+      const { data: leadRow } = await supabase
+        .from("zoho_cache_leads")
+        .select("zoho_id")
+        .ilike("email", respondentEmail)
+        .maybeSingle();
+      if (leadRow?.zoho_id) doctorId = `lead:${leadRow.zoho_id}`;
+    }
+  }
+
+  // ── Insert response (idempotent on (form_id, provider_response_id)) ──
+  const { error: insErr } = await supabase
+    .from("form_responses")
+    .upsert({
+      form_id:               form.id,
+      provider_response_id:  fr.token,
+      submitted_at:          fr.submitted_at ?? new Date().toISOString(),
+      raw_payload:           payload as unknown as Record<string, unknown>,
+      answers:               flat,
+      respondent_name:       respondentName,
+      respondent_email:      respondentEmail,
+      doctor_id:             doctorId,
+    }, { onConflict: "form_id,provider_response_id", ignoreDuplicates: true });
+
+  if (insErr) {
+    console.error("[typeform-webhook] insert failed:", insErr);
+    return json({ ok: false, error: "Insert failed", detail: insErr.message }, 500);
+  }
+
+  return json({ ok: true, form_id: form.id, response_id: fr.token }, 200);
+});
+
+function json(payload: unknown, status: number): Response {
+  return new Response(JSON.stringify(payload), {
+    status,
+    headers: { ...CORS, "Content-Type": "application/json" },
+  });
+}
