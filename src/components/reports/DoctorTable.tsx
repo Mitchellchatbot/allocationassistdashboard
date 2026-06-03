@@ -17,6 +17,8 @@ import { User2 } from "lucide-react";
 import { supabase } from "@/lib/supabase";
 import type { FlowRun } from "@/hooks/use-automation-flows";
 import type { DoctorLifecycle } from "@/hooks/use-doctor-lifecycle";
+import { useDoctorProfiles } from "@/hooks/use-doctor-profiles";
+import { useZohoData } from "@/hooks/use-zoho-data";
 
 interface DoctorReportRow {
   doctor_id:    string;
@@ -32,7 +34,30 @@ interface DoctorReportRow {
   lastActivity: string | null;     // ISO of most recent run's last_event_at
 }
 
-function aggregateDoctorRows(runs: FlowRun[], lifecycles: DoctorLifecycle[]): DoctorReportRow[] {
+/** Resolve a doctor's specialty by trying the most reliable sources
+ *  in order: explicit run metadata → CV-extracted doctor profile →
+ *  Zoho lead/DoB record. Returns the first non-empty hit. */
+function resolveSpecialty(
+  doctorId: string,
+  runMetadataSpec: string | null | undefined,
+  profileMap: Map<string, { title?: string | null; area_of_interest?: string | null }>,
+  zohoSpecMap: Map<string, string>,
+): string | null {
+  if (runMetadataSpec && runMetadataSpec.trim()) return runMetadataSpec.trim();
+  const profile = profileMap.get(doctorId);
+  if (profile?.title?.trim()) return profile.title.trim();
+  if (profile?.area_of_interest?.trim()) return profile.area_of_interest.trim();
+  const zohoSpec = zohoSpecMap.get(doctorId);
+  if (zohoSpec) return zohoSpec;
+  return null;
+}
+
+function aggregateDoctorRows(
+  runs: FlowRun[],
+  lifecycles: DoctorLifecycle[],
+  profileMap: Map<string, { title?: string | null; area_of_interest?: string | null }>,
+  zohoSpecMap: Map<string, string>,
+): DoctorReportRow[] {
   const byDoctor = new Map<string, DoctorReportRow>();
   const lifeMap = new Map<string, DoctorLifecycle>();
   for (const l of lifecycles) lifeMap.set(l.doctor_id, l);
@@ -41,12 +66,12 @@ function aggregateDoctorRows(runs: FlowRun[], lifecycles: DoctorLifecycle[]): Do
     if (!r.doctor_id) continue;
     let row = byDoctor.get(r.doctor_id);
     if (!row) {
-      const spec = (r.metadata as Record<string, unknown> | null)?.doctor_speciality as string | undefined;
+      const runSpec = (r.metadata as Record<string, unknown> | null)?.doctor_speciality as string | undefined;
       const life = lifeMap.get(r.doctor_id);
       row = {
         doctor_id:    r.doctor_id,
         doctor_name:  r.doctor_name ?? life?.doctor_name ?? r.doctor_id,
-        specialty:    spec ?? null,
+        specialty:    resolveSpecialty(r.doctor_id, runSpec, profileMap, zohoSpecMap),
         profilesSent: 0,
         shortlists:   0,
         interviews:   0,
@@ -77,7 +102,7 @@ function aggregateDoctorRows(runs: FlowRun[], lifecycles: DoctorLifecycle[]): Do
     byDoctor.set(l.doctor_id, {
       doctor_id:    l.doctor_id,
       doctor_name:  l.doctor_name ?? l.doctor_id,
-      specialty:    null,
+      specialty:    resolveSpecialty(l.doctor_id, null, profileMap, zohoSpecMap),
       profilesSent: 0,
       shortlists:   l.shortlisted_at ? 1 : 0,
       interviews:   l.interviewed_at ? 1 : 0,
@@ -132,7 +157,36 @@ export function DoctorTable() {
     staleTime: 60_000,
   });
 
-  const rows = useMemo(() => aggregateDoctorRows(runs, lifecycles), [runs, lifecycles]);
+  // Pull specialty from the most reliable sources: CV-extracted
+  // doctor_profiles.title first (most accurate), Zoho leads + DoB
+  // second. Without this, the column was '—' for every row because
+  // run.metadata.doctor_speciality is rarely populated.
+  const { data: profiles = [] } = useDoctorProfiles();
+  const { data: zoho }          = useZohoData();
+
+  const profileMap = useMemo(() => {
+    const m = new Map<string, { title?: string | null; area_of_interest?: string | null }>();
+    for (const p of profiles) m.set(p.doctor_id, { title: p.title, area_of_interest: p.area_of_interest });
+    return m;
+  }, [profiles]);
+
+  const zohoSpecMap = useMemo(() => {
+    const m = new Map<string, string>();
+    for (const l of zoho?.rawLeads ?? []) {
+      const spec = (l.Specialty_New ?? l.Specialty ?? "").toString().trim();
+      if (spec) m.set(`lead:${l.id}`, spec);
+    }
+    for (const d of zoho?.rawDoctorsOnBoard ?? []) {
+      const spec = (d.Specialty_New ?? d.Speciality ?? "").toString().trim();
+      if (spec) m.set(`dob:${d.id}`, spec);
+    }
+    return m;
+  }, [zoho?.rawLeads, zoho?.rawDoctorsOnBoard]);
+
+  const rows = useMemo(
+    () => aggregateDoctorRows(runs, lifecycles, profileMap, zohoSpecMap),
+    [runs, lifecycles, profileMap, zohoSpecMap],
+  );
   const loading = rl || ll;
 
   return (
