@@ -24,6 +24,7 @@ import {
 import {
   Workflow, Mail, AlertTriangle, Clock, ChevronRight, Settings, Save, StickyNote,
   Hospital as HospitalIcon, Send, Zap, FileSignature, RefreshCw, Inbox, CalendarCheck,
+  Sparkles, X as XIcon, CheckCircle2,
 } from "lucide-react";
 import { toast } from "sonner";
 import { useQueryClient } from "@tanstack/react-query";
@@ -727,6 +728,13 @@ function RunDetailSheet({ run, open, onClose }: { run: FlowRun | null; open: boo
             filled with the chosen slot and fires the tips email. */}
         <InterviewTimePicker run={run} />
 
+        {/* Shortlist suggestion. Shown on profile_sent runs where the
+            classifier thinks the hospital expressed interest. Ammar
+            2026-06-03: hospitals rarely write 'shortlisted' explicitly,
+            so the system never auto-advances anymore — it only suggests,
+            and the team manually confirms here. */}
+        <ShortlistSuggestion run={run} />
+
         {showClassifyReply && (
           <ClassifyReplyDialog
             open={classifyOpen}
@@ -1124,6 +1132,134 @@ function InterviewTimePicker({ run }: { run: FlowRun }) {
             </button>
           );
         })}
+      </div>
+    </div>
+  );
+}
+
+/* ────────────────────────────────────────────────────────────────────
+ * ShortlistSuggestion — surfaces a yellow card on profile_sent runs
+ * where the hospital reply classifier flagged the reply as "looks
+ * interested". Ammar 2026-06-03 spec: the system does NOT auto-advance
+ * (hospitals rarely write 'shortlisted' clearly, and shortlist confirms
+ * usually happen by phone). The team confirms here, which:
+ *   1. Completes the profile_sent run
+ *   2. Creates the shortlist run
+ *   3. Fires the shortlist confirmation email to the doctor
+ * "Dismiss" just clears the flag — the run keeps awaiting_response.
+ * ──────────────────────────────────────────────────────────────────── */
+function ShortlistSuggestion({ run }: { run: FlowRun }) {
+  const md = (run.metadata as Record<string, unknown>) ?? {};
+  const suggested = md.shortlist_suggested === true;
+  const summary   = (md.shortlist_suggestion_text as string | undefined) ?? "";
+  const [working, setWorking] = useState(false);
+  const qc = useQueryClient();
+
+  if (!suggested) return null;
+
+  const handleConfirm = async () => {
+    setWorking(true);
+    try {
+      const nowIso = new Date().toISOString();
+
+      await supabase.from("automation_flow_runs").update({
+        current_stage: "introduction_complete",
+        status:        "completed",
+        completed_at:  nowIso,
+        last_event_at: nowIso,
+        metadata: { ...md, shortlist_confirmed_at: nowIso },
+      }).eq("id", run.id);
+
+      const { data: shortlistRun, error: createErr } = await supabase
+        .from("automation_flow_runs")
+        .insert({
+          flow_key:      "shortlist",
+          doctor_id:     run.doctor_id,
+          doctor_name:   run.doctor_name,
+          doctor_email:  run.doctor_email,
+          doctor_phone:  run.doctor_phone,
+          hospital:      run.hospital,
+          current_stage: "send_shortlist_email",
+          status:        "active",
+          metadata: {
+            triggered_via:           "shortlist_suggestion_confirm",
+            source_profile_sent_run: run.id,
+          },
+        })
+        .select("id")
+        .single();
+      if (createErr) throw createErr;
+      if (!shortlistRun) throw new Error("Shortlist run insert returned no row");
+
+      await supabase.from("automation_flow_events").insert([
+        { run_id: run.id, stage_key: "awaiting_response", event_type: "completed",
+          message: `Team confirmed shortlist for ${run.hospital ?? "hospital"}. Created shortlist run + queued confirmation email.` },
+        { run_id: shortlistRun.id, stage_key: "trigger_shortlist_confirmed", event_type: "entered",
+          message: `Team-confirmed shortlist from ${run.hospital ?? "hospital"} (suggestion accepted).` },
+        { run_id: shortlistRun.id, stage_key: "send_shortlist_email", event_type: "entered",
+          message: "Queued for sending." },
+      ]);
+
+      const { error: sendErr } = await supabase.functions.invoke("send-flow-email", {
+        body: { run_id: shortlistRun.id },
+      });
+      if (sendErr) throw sendErr;
+
+      toast.success(`Shortlist locked for ${run.hospital}. Confirmation email sent to ${run.doctor_name}.`);
+      qc.invalidateQueries({ queryKey: ["automation-flow-runs"] });
+      qc.invalidateQueries({ queryKey: ["automation-flow-events", run.id] });
+    } catch (e) {
+      toast.error(e instanceof Error ? e.message : "Failed to confirm shortlist");
+    } finally {
+      setWorking(false);
+    }
+  };
+
+  const handleDismiss = async () => {
+    setWorking(true);
+    try {
+      const cleared = { ...md };
+      delete cleared.shortlist_suggested;
+      delete cleared.shortlist_suggested_at;
+      delete cleared.shortlist_suggested_by;
+      delete cleared.shortlist_suggestion_text;
+      delete cleared.shortlist_reply_id;
+
+      await supabase.from("automation_flow_runs").update({
+        metadata: { ...cleared, shortlist_suggestion_dismissed_at: new Date().toISOString() },
+      }).eq("id", run.id);
+
+      await supabase.from("automation_flow_events").insert({
+        run_id: run.id, stage_key: "awaiting_response", event_type: "note",
+        message: "Team dismissed the shortlist suggestion (hospital reply did not actually confirm shortlist).",
+      });
+
+      qc.invalidateQueries({ queryKey: ["automation-flow-runs"] });
+      qc.invalidateQueries({ queryKey: ["automation-flow-events", run.id] });
+    } finally {
+      setWorking(false);
+    }
+  };
+
+  return (
+    <div className="rounded-md border-2 border-amber-200 bg-amber-50/50 p-4 mt-4">
+      <div className="flex items-start gap-2 mb-3">
+        <Sparkles className="h-4 w-4 text-amber-600 mt-0.5 shrink-0" />
+        <div className="text-[12px] text-amber-900 leading-relaxed">
+          <strong>{run.hospital ?? "Hospital"} looks interested in {run.doctor_name ?? "this doctor"}.</strong>
+          {summary && <span className="block mt-1 italic text-amber-800/90">"{summary}"</span>}
+          <span className="block mt-1.5 text-amber-800/90">
+            Hospitals usually confirm shortlists by phone, so we don't advance automatically. Confirm only if you've actually been told this doctor is shortlisted.
+          </span>
+        </div>
+      </div>
+      <div className="flex items-center gap-2">
+        <Button size="sm" onClick={handleConfirm} disabled={working} className="bg-amber-600 hover:bg-amber-700">
+          <CheckCircle2 className="h-3.5 w-3.5 mr-1" /> Mark shortlisted
+        </Button>
+        <Button size="sm" variant="outline" onClick={handleDismiss} disabled={working}>
+          <XIcon className="h-3.5 w-3.5 mr-1" /> Not shortlisted
+        </Button>
       </div>
     </div>
   );

@@ -173,65 +173,44 @@ Output ONLY the JSON object. No markdown fences, no commentary, no preamble.`;
   const nowIso = new Date().toISOString();
 
   if (parsedResult.classification === "shortlisted") {
-    // Mark the Profile Sent run complete + create a Shortlist run + auto-fire
-    // the Shortlist Confirmation email to the doctor.
+    // SUGGESTION ONLY — do NOT auto-advance (Ammar 2026-06-03). Hospitals
+    // rarely write "shortlisted" explicitly; most confirmations happen by
+    // phone, and even text replies are ambiguous ("send salary expectations"
+    // etc.). Store the suggestion on the run + write a notification so the
+    // HI team can manually confirm the shortlist via the Trigger Shortlist
+    // button. The Shortlist run + email only fire when the team clicks.
+    const existingMd = (run.metadata as Record<string, unknown>) ?? {};
     await supabase.from("automation_flow_runs").update({
-      current_stage: "introduction_complete",
-      status:        "completed",
-      completed_at:  nowIso,
       last_event_at: nowIso,
+      metadata: {
+        ...existingMd,
+        shortlist_suggested:       true,
+        shortlist_suggested_at:    nowIso,
+        shortlist_suggested_by:    "hospital_reply_classifier",
+        shortlist_suggestion_text: parsedResult.summary,
+        shortlist_reply_id:        replyRow?.id ?? null,
+      },
     }).eq("id", run_id);
 
-    await supabase.from("automation_flow_events").insert([
-      { run_id, stage_key: "awaiting_response", event_type: "note",
-        message: `${run.hospital ?? "Hospital"} replied (shortlisted, confidence ${parsedResult.confidence.toFixed(2)}): ${parsedResult.summary}` },
-      { run_id, stage_key: "introduction_complete", event_type: "completed",
-        message: "Introduction succeeded. Shortlist flow auto-triggered." },
-    ]);
+    await supabase.from("automation_flow_events").insert({
+      run_id, stage_key: "awaiting_response", event_type: "note",
+      message: `${run.hospital ?? "Hospital"} looks interested (confidence ${parsedResult.confidence.toFixed(2)}): ${parsedResult.summary}. Suggestion: mark as shortlisted manually if confirmed.`,
+    });
 
-    // Create the Shortlist run
-    const { data: shortlistRun } = await supabase
-      .from("automation_flow_runs")
-      .insert({
-        flow_key:      "shortlist",
-        doctor_id:     run.doctor_id,
-        doctor_name:   run.doctor_name,
-        doctor_email:  run.doctor_email,
-        doctor_phone:  run.doctor_phone,
-        hospital:      run.hospital,
-        current_stage: "send_shortlist_email",
-        status:        "active",
-        metadata: {
-          triggered_via:           "hospital_reply_classifier",
-          source_profile_sent_run: run_id,
-          source_reply_id:         replyRow?.id ?? null,
-        },
-      })
-      .select("id")
-      .single();
+    // Notification so the suggestion shows up in the HI team's bell + on
+    // PendingActionsCard. for_user null = team-wide (the run's assignee
+    // also has a chance to see this via their workspace).
+    await supabase.from("notifications").insert({
+      kind:           "shortlist_suggested",
+      title:          `${run.hospital ?? "Hospital"} may have shortlisted ${run.doctor_name ?? "the doctor"}`,
+      body:           parsedResult.summary,
+      link_path:      `/automations?flow=profile_sent&run=${run_id}`,
+      related_run_id: run_id,
+      related_doctor_id: run.doctor_id,
+      for_user:       null,
+    });
 
-    if (shortlistRun) {
-      await supabase.from("automation_flow_events").insert([
-        { run_id: shortlistRun.id, stage_key: "trigger_shortlist_confirmed", event_type: "entered",
-          message: `Auto-triggered: ${run.hospital ?? "Hospital"} shortlisted ${run.doctor_name} (via reply classification).` },
-        { run_id: shortlistRun.id, stage_key: "send_shortlist_email", event_type: "entered",
-          message: "Queued for sending." },
-      ]);
-
-      // Fire-and-forget the shortlist email via send-flow-email
-      fetch(`${Deno.env.get("SUPABASE_URL")}/functions/v1/send-flow-email`, {
-        method:  "POST",
-        headers: {
-          "Content-Type":  "application/json",
-          "Authorization": `Bearer ${Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")}`,
-        },
-        body: JSON.stringify({ run_id: shortlistRun.id }),
-      }).catch(e => console.error("[classify-hospital-reply] shortlist auto-send threw:", e));
-
-      action_taken = `Profile Sent completed; Shortlist run ${shortlistRun.id} created + email queued`;
-    } else {
-      action_taken = "Profile Sent completed; failed to create Shortlist run";
-    }
+    action_taken = `Shortlist suggestion stored on run; awaiting manual confirmation by HI team`;
   } else if (parsedResult.classification === "proposing_interview") {
     // Hospital is offering specific time(s). Store on the run's metadata
     // so the RunDetailSheet can render a "pick a time + confirm with the
