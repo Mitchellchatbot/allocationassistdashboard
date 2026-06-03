@@ -60,11 +60,11 @@ ROLE-BASED ACCESS
 PAGES
 - /                  Dashboard. Top KPIs, lead funnel, channel breakdown, pending-actions card.
 - /my-workspace      HI team member's home base. Tasks assigned to them, their doctors, their vacancies, recent activity, scoped notifications. Default landing for hi_member role.
-- /automations       The 7 HI flows. "Flow" tabs show active runs per flow. "Queues" admin tab surfaces every active run sitting at a manual-action stage. "Hospitals", "Templates", "Default Flow Editor" tabs configure the engine.
-- /doctor-profiles   Editor for doctor profile records — bio, specialty, license info, CV upload. Profile completion % drives readiness to send. CV parsing happens via Claude.
-- /vacancies         Open hospital roles with priority (high/medium/low). Click any row to see matching doctors. Link leads to vacancies from the Sales side.
-- /batches           Recurring sends: Daily duo (Mon-Fri, 2 profiles to all hospitals), Tuesday top 15 (mixed specialties), Specialty of the day (Wed-Fri, rotates ~60 specialties).
-- /reports           HI KPIs per team member, hospital relationship health (warming/cooling), per-flow funnel, doctors-on-the-way.
+- /automations       The 6 HI flows (Onboarding was removed 2026-06-03 — Sales now sends the intake email from Zoho directly on lead→Doctor-on-Board conversion). "Flow" tabs show active runs per flow. "Queues" admin tab surfaces every active run sitting at a manual-action stage. "Hospitals", "Templates", "Default Flow Editor" tabs configure the engine.
+- /doctor-profiles   Editor for doctor profile records — bio, specialty, license info, CV upload. Profile completion % drives readiness to send. CV parsing happens via Claude. Per-doctor "Lifecycle" timeline + "Vacancy Matches" panel underneath the profile editor.
+- /vacancies         Open hospital roles with priority (high/medium/low). Click any row to see matching candidates in TWO tabs: "Onboarded doctors" (auto-scored from the ~1k AA roster) and "Leads" (manually filled by Sales — empty until Sales links them via Sales Pipeline).
+- /batches           Recurring sends, COUNTRY-SCOPED (Ammar 2026-06-03): each batch picks ONE country (UAE / Saudi Arabia / Qatar / Oman / Kuwait / Bahrain) and only sends to hospitals in that country. Kinds: Daily duo (Mon-Fri, 2 profiles), Tuesday top 15, Specialty of the day (Wed-Fri). Rotation cycles the ~67 canonical specialties from the AA website.
+- /reports           HI KPIs per team member, weekly + monthly recap (Shortlisted / Interviewed / Offered / Signed / Joined trending), Placements table (replaces Ammar's "Hammad" Google sheet — milestone tracker with 45-day payment clock), Per-doctor table, Hospital relationship health.
 - /contracts         Build + send contracts to doctors via BoldSign. Real recipients (not test mode).
 - /sales             Sales tracker with recruiter performance + lead pipeline + SLA breach indicators.
 - /leads-pipeline    Per-doctor stage view across the full pipeline. License status (DOH/DHA/MOH). Click "Link to vacancy" in expanded row to attach to an open role.
@@ -76,21 +76,22 @@ PAGES
 - /import-bulk       One-shot CSV imports for the 6 sheet types.
 - /settings          User management — invite users, set roles, set allowed pages.
 
-THE 7 AUTOMATION FLOWS
-1. onboarding — fires when finance confirms first payment. Sends qualification form + doc upload request to the doctor. 3-day reminder if incomplete.
-2. profile_sent — fires when team clicks "Send Profile" on a doctor. BCCs the chosen hospitals using the hospital-specific template. Also notifies the doctor that they were introduced. 7-day wait for hospital reply, then flagged for chase.
-3. shortlist — fires when team logs "hospital shortlisted this doctor". Sends shortlist-confirmation email to the doctor.
-4. interview — fires when team logs interview confirmed (with date/time/format). Sends combined tips + confirmation email to the doctor. 72h post-interview, system flags a chase reminder.
-5. contract_signing — fires when offer is extended. Opens Contract Builder (BoldSign envelope). When the doctor signs, boldsign-webhook auto-fires the relocation flow.
-6. relocation — fires after contract signed. Team picks the doctor's city → system sends the right city-specific relocation guide + attestation info.
-7. second_payment — fires +15d after joining_date is logged. Sends Plinky's welcome + invoice. Reminder cadence: 25 working days, day-before-due, weekly post-due until paid (escalates to FINAL letter with debt-collection threat).
+THE 6 ACTIVE AUTOMATION FLOWS (Onboarding removed 2026-06-03)
+1. profile_sent — fires when team clicks "Send Profile" on a doctor. Each hospital recipient gets the magazine-style email with a tokenised "View full profile" link to /shared-profile/<token> (90-day, revocable, view-count tracked). Also notifies the doctor. 7-day wait, then flagged. If hospital reply is classified as "shortlisted" the team sees a yellow SUGGESTION card on the run — they confirm manually (Ammar 2026-06-03: hospitals rarely write "shortlisted" — usually a phone call).
+2. shortlist — fires when team clicks "Mark shortlisted" on the suggestion card OR triggers manually. Sends shortlist-confirmation email to the doctor.
+3. interview — fires when team logs interview confirmed (with date/time/format). Sends combined tips + confirmation email to the doctor. 72h post-interview, system flags a chase reminder.
+4. contract_signing — fires when offer is extended. Opens Contract Builder (BoldSign envelope). When the doctor signs, boldsign-webhook auto-fires the relocation flow. Per Ammar: the actual offer is hospital↔doctor — HI tracks the milestones (offered_at / signed_at / start_date / joined_at) on the Placements tab in Reports.
+5. relocation — fires after contract signed. Team picks the doctor's city → system pulls the city-specific guide URL from relocation_articles table and embeds it as a prominent CTA in the email.
+6. second_payment — fires +15d after joining_date is logged. Reminder cadence: 25 working days, day-before-due, weekly post-due until paid (escalates to FINAL letter). 45-day clock: invoice is due 45d after joined_at — surfaced on Placements as a per-row pill (Paid / N days left / Due in 15d / Overdue).
 
 KEY ACTIONS / BUTTONS
 - "New batch" (Batches): creates a new daily/Tuesday/specialty batch and immediately swaps into the doctor-picker. Auto-pick top N ranks by readiness (CV uploaded, license info, recency).
 - "Resend" (Batches, past sends): re-fires the same batch to the same hospitals. Asks for confirmation.
 - "Cancel" (Batches, draft): deletes the batch outright. Tick-scheduler won't fire it.
 - "Send Profile" (Automations): 3-step wizard — pick doctor → select hospital(s) → preview → send. Multi-hospital uses BCC.
-- "Hospital replied?" (Run detail sheet, profile_sent): paste the hospital's reply text. Claude classifies (shortlisted / declined / wants more info) and advances the run.
+- "Hospital replied?" (Run detail sheet, profile_sent): paste the hospital's reply text. Claude classifies (shortlisted / declined / wants more info / proposing interview times). For "shortlisted" the run is NOT auto-advanced — instead a yellow SUGGESTION card appears with "Mark shortlisted" / "Not shortlisted" buttons (Ammar 2026-06-03: most shortlists happen by phone, classifier is just a hint).
+- "Mark shortlisted" (Run detail sheet, on suggestion card): manually confirms hospital interest. Completes profile_sent, creates shortlist run, fires shortlist confirmation email to the doctor.
+- "Edit milestones" (Placements row): opens a date-picker dialog for shortlisted_at / interviewed_at / offered_at / signed_at / start_date / joined_at / paid_at + placement hospital. Replaces Ammar's external "Hammad" sheet entirely.
 - "Pick city" (Run detail sheet, relocation): chooses which city's relocation guide to send.
 - "Reassign" (Run detail sheet, queue rows): dropdown with the 4 HI members + Unassigned. Updates assigned_to and logs a note in the timeline.
 - "Link to vacancy" (Leads Pipeline expanded row): attach this lead to an open vacancy. Inserts into vacancy_lead_links so HI sees the candidate.
@@ -106,10 +107,13 @@ GLOSSARY
 - "active runs" — status = 'active'. The run is in flight; tick-scheduler may still advance it.
 - "queue" — UI view of runs at a manual-action stage. Distinct from flow tab, which shows all runs for that flow.
 - "Mine / All team" toggle (Queues) — defaults to "Mine" for hi_member, "All" for admins.
-- "Daily duo" — Mon-Fri 10:30 AM batch: 2 doctors → all ~95 hospitals via BCC.
-- "Specialty of the day" — Wed-Fri batch rotating through ~60 specialties (cursor auto-advances after each send).
+- "Daily duo" — Mon-Fri 10:30 AM COUNTRY-SCOPED batch: 2 doctors → all hospitals in the chosen country (UAE / KSA / Qatar / Oman / Kuwait / Bahrain) via BCC. Create one batch per country per day.
+- "Specialty of the day" — Wed-Fri batch rotating through ~67 canonical specialties from the AA website list (cursor auto-advances after each send). Replaces the old Zoho-bucketed list Ammar called "very wrong".
+- "Canonical specialty" — every Zoho free-text specialty resolves to one of ~135 entries via groupSpecialty(). Sub-specialties roll up to a parent (e.g. "Retinal Specialist" → Ophthalmology; "Pediatric Cardiology" → Cardiology). The scorer uses this for fuzzy matching when doctor.speciality and vacancy.specialty don't match exactly.
 - "Hospital health score" — 0–100 number per hospital. Warming = trending up. Cooling = trending down. Triggers relationship-health flags in Reports.
-- "Test recipient override" — MAIL_TEST_RECIPIENT_OVERRIDE env var on send-batch + send-flow-email. When set, all emails route to that address instead of real recipients. Currently shaheerkhosa6@gmail.com (test mode). Contracts via BoldSign do NOT honor the override — they go to real doctors.
+- "Placements" — Reports tab replacing Ammar's "Hammad" Google sheet. One row per doctor with milestone date columns + 45-day-clock pill.
+- "Shared profile token" — every profile_sent send mints a 90-day token at /shared-profile/<token>. View-count and last-viewed are tracked on shared_profile_tokens so the team sees whether a hospital opened the link. Tokens can be revoked.
+- "Test recipient override" — MAIL_TEST_RECIPIENT_OVERRIDE env var on send-batch + send-flow-email + send-cv-upload-link. Comma-separated; currently routes to shaheerkhosa6@gmail.com + ammar@allocationassist.com (first → To, rest → Cc). Contracts via BoldSign do NOT honor the override — they go to real doctors.
 
 NAVIGATION TIPS
 - Cmd/Ctrl+K opens Universal Search across all entities (doctors, vacancies, flows, hospitals, batches, templates, pages).
