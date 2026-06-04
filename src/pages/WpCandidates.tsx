@@ -19,7 +19,7 @@ import { Input } from "@/components/ui/input";
 import { Badge } from "@/components/ui/badge";
 import { Dialog, DialogContent } from "@/components/ui/dialog";
 import {
-  UserSquare, Search, RefreshCw, ExternalLink, ChevronRight, FileText, Link2,
+  UserSquare, Search, RefreshCw, ExternalLink, ArrowUpRight, FileText, Link2,
   History,
   Phone, Mail, IdCard, MapPin, Stethoscope, BadgeCheck, Calendar, CalendarDays,
   Briefcase, Award, Globe, Languages as LanguagesIcon, Users as UsersIcon,
@@ -338,7 +338,10 @@ function CandidateRow({ candidate, highlight, onOpen }: { candidate: WpCandidate
           onClick={onOpen}
           className="w-full flex items-center gap-2.5 px-3 py-2 text-left hover:bg-slate-50"
         >
-          <ChevronRight className="h-3.5 w-3.5 text-slate-400 shrink-0" />
+          {/* Opens the centered profile dialog — arrow points outward
+              so it reads "pop out" instead of the old chevron's
+              "drill down". */}
+          <ArrowUpRight className="h-3.5 w-3.5 text-slate-400 shrink-0" />
           <Avatar src={candidate.photo_url} name={candidate.full_name ?? candidate.title ?? "?"} size={32} />
           <div className="flex-1 min-w-0">
             <div className="text-[12px] font-medium text-slate-800 truncate">
