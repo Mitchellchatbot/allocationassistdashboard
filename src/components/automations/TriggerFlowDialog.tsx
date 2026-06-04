@@ -25,6 +25,8 @@ const PIPELINE_PREDECESSOR: Partial<Record<FlowKey, { flow: FlowKey; statuses: s
   // Doctors who got the shortlist email — flow completes immediately so
   // they sit in `completed` state until interview is confirmed.
   interview:      { flow: "shortlist",    statuses: ["completed", "active"] },
+  // Doctors who completed the interview — pool for "offer extended" trigger.
+  contract_signing: { flow: "interview", statuses: ["completed", "active"] },
   // Doctors who finished relocation prep — waiting on joining date.
   second_payment: { flow: "relocation",   statuses: ["completed", "active"] },
 };
@@ -154,6 +156,18 @@ export function TriggerFlowDialog({ open, flowKey, onClose }: Props) {
         autoSend:         true,
         triggerEventMessage: (d: DoctorOption, hospName?: string) => `Interview confirmed for ${d.name}${hospName ? ` with ${hospName}` : ""}.`,
         confirmButtonLabel:  "Confirm & send tips",
+      };
+      case "contract_signing": return {
+        title:        "Mark Offer Extended",
+        description: "Triggers the contract check-in loop. Use this when the hospital has sent the offer letter to the doctor. HI doesn't send the contract — the hospital does. We email both sides to acknowledge + chase the doctor for confirmation of signature.",
+        needsHospital:    true,
+        needsInterview:   false,
+        needsJoiningDate: false,
+        triggerStage:     "trigger_offer_extended",
+        nextStage:        "checkin_doctor",
+        autoSend:         true,
+        triggerEventMessage: (d: DoctorOption, hospName?: string) => `Offer extended by ${hospName ?? "hospital"} to ${d.name}. HI now checking in on signature.`,
+        confirmButtonLabel:  "Log offer & send check-ins",
       };
       case "second_payment": return {
         title:        "Set Joining Date",

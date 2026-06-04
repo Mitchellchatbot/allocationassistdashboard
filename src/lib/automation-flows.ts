@@ -151,33 +151,40 @@ const interview: FlowDefinition = {
   ],
 };
 
-// ── Flow 5: Contract Signing ────────────────────────────────────────────────
-// Bridges Interview → Relocation. The Contract Builder + BoldSign integration
-// already handles the actual envelope creation and webhook on signing; this
-// flow makes those events visible in the Automations timeline. When the
-// boldsign-webhook eventually writes here, signed contracts will auto-trigger
-// the Relocation flow.
+// ── Flow 5: Contract Check-in ───────────────────────────────────────────────
+// IMPORTANT (Ammar 2026-06-03): the offer letter is between the HOSPITAL
+// and the DOCTOR. AA does NOT send it. This flow is a CHECK-IN loop —
+// HI emails the doctor + hospital asking whether the offer has been
+// signed, sends a reminder if no answer, and waits for the team to
+// confirm in-app once both sides report signing. The signature date
+// gets written to placement_attempts.signed_at when the team marks
+// signed; that fires the Relocation flow.
 const contractSigning: FlowDefinition = {
   key: "contract_signing",
-  name: "Contract Signing",
+  name: "Contract Check-in",
   shortName: "Contract",
-  summary: "Hospital extends offer → BoldSign envelope → doctor signs",
+  summary: "Hospital sends offer → HI checks in with both sides → team logs signed",
   description:
-    "Triggered when the hospital confirms they want to offer the doctor. The team generates the Service Agreement in the Contract Builder; " +
-    "BoldSign emails it to the doctor for signature. When signed, the doctor's Lead_Status flips to Closed Won in Zoho, a Doctors on Board " +
-    "contact is created, and the Relocation flow fires automatically.",
-  triggerCopy: "Hospital confirms they want to offer the doctor — team clicks 'Send contract' which opens the Contract Builder.",
+    "Triggered when the team logs that the hospital extended an offer to the doctor. " +
+    "HI does NOT send the contract — the hospital sends its own offer letter directly to the doctor. " +
+    "This flow nudges both sides: an email to the doctor confirming the offer + asking them to share once they sign, " +
+    "and an email to the hospital saying we'll follow up with the doctor. A reminder fires after 5 days if the team " +
+    "hasn't marked the signature. Click 'Mark signed' on the run when the doctor confirms — that writes signed_at " +
+    "to Placements and kicks off the Relocation flow.",
+  triggerCopy: "Team logs 'offer extended' (hospital sent the offer letter to the doctor).",
   stages: [
-    { key: "trigger_offer_extended", label: "Offer Extended",     kind: "trigger", icon: ClipboardCheck,
-      description: "Hospital has agreed to offer the doctor. The team initiates the contract send from the Contract Builder." },
-    { key: "send_contract",          label: "Send Contract",      kind: "email",   icon: FileSignature,
-      description: "Service Agreement generated in the Contract Builder. BoldSign creates the envelope and emails the doctor." },
-    { key: "awaiting_view",          label: "Awaiting Doctor View", kind: "wait", icon: Eye, defaultDelayDays: 2,
-      description: "Envelope delivered but the doctor hasn't opened it yet. BoldSign sends an automatic reminder after 2 days." },
-    { key: "awaiting_signature",     label: "Awaiting Signature", kind: "wait",    icon: AlarmClock, defaultDelayDays: 3,
-      description: "Doctor opened the envelope but hasn't signed yet. BoldSign reminds every 3 days until signed, declined, or expired." },
-    { key: "contract_signed",        label: "Contract Signed",    kind: "terminal", icon: CheckCircle2,
-      description: "Doctor signed. Zoho updates automatically; Relocation flow auto-fires from the BoldSign webhook." },
+    { key: "trigger_offer_extended", label: "Offer Extended",        kind: "trigger", icon: ClipboardCheck,
+      description: "Hospital has sent the offer letter to the doctor. Team logs the date here; HI doesn't send the contract." },
+    { key: "checkin_doctor",         label: "Check in · Doctor",     kind: "email",   icon: FileSignature,
+      description: "Email to the doctor: 'Congrats on the offer from [Hospital] — let us know once you've signed so we can start your relocation.'" },
+    { key: "checkin_hospital",       label: "Check in · Hospital",   kind: "email",   icon: FileSignature,
+      description: "Email to the hospital's recruiter: 'We're following up with [Doctor] about the offer. Will keep you posted on the signature.'" },
+    { key: "awaiting_signature",     label: "Awaiting Signature",    kind: "wait",    icon: AlarmClock, defaultDelayDays: 5,
+      description: "Window for the doctor to sign. If nothing's marked after 5 days, the reminder stage fires." },
+    { key: "reminder_signature",     label: "Reminder · Both Sides", kind: "reminder", icon: BellRing,    defaultDelayDays: 5,
+      description: "Nudge email to both the doctor and the hospital asking for an update on the signature." },
+    { key: "contract_signed",        label: "Contract Signed",       kind: "terminal", icon: CheckCircle2,
+      description: "Team clicks 'Mark signed' once the doctor confirms. Writes signed_at to Placements + auto-fires the Relocation flow." },
   ],
 };
 

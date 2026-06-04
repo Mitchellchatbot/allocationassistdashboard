@@ -241,13 +241,16 @@ export default function Automations() {
                       runs={runsByFlow[key] ?? []}
                       onSelectRun={setSelectedRunId}
                       onSendProfile={key === "profile_sent" ? () => setSendProfileOpen(true) : undefined}
-                      onSendContract={key === "contract_signing" ? () => setContractOpen(true) : undefined}
                       onTriggerFlow={
                         // 'onboarding' intentionally absent — Sales sends
-                        // the intake email from Zoho now; we don't trigger
-                        // a duplicate from here (Ammar 2026-06-03).
-                        key === "shortlist" ||
-                        key === "interview" || key === "second_payment"
+                        // the intake email from Zoho now (Ammar 2026-06-03).
+                        // 'contract_signing' now uses the same Trigger Flow
+                        // dialog to log "offer extended" — the hospital
+                        // sends the actual contract, not AA.
+                        key === "shortlist"     ||
+                        key === "interview"     ||
+                        key === "contract_signing" ||
+                        key === "second_payment"
                           ? () => setTriggerFlow(key)
                           : undefined
                       }
@@ -338,10 +341,11 @@ function KpiPill({ label, value, tone }: { label: string; value: number; tone: "
 }
 
 const TRIGGER_BUTTON_LABEL: Partial<Record<FlowKey, string>> = {
-  onboarding:     "Mark first payment received",
-  shortlist:      "Mark shortlisted",
-  interview:      "Mark interview confirmed",
-  second_payment: "Set joining date",
+  onboarding:       "Mark first payment received",
+  shortlist:        "Mark shortlisted",
+  interview:        "Mark interview confirmed",
+  contract_signing: "Mark offer extended",
+  second_payment:   "Set joining date",
 };
 
 function FlowTab({ flow, runs, onSelectRun, onSendProfile, onSendContract, onTriggerFlow }: {
@@ -748,6 +752,13 @@ function RunDetailSheet({ run, open, onClose }: { run: FlowRun | null; open: boo
             so the system never auto-advances anymore — it only suggests,
             and the team manually confirms here. */}
         <ShortlistSuggestion run={run} />
+
+        {/* Contract Check-in — green panel on active contract_signing
+            runs with a "Mark signed" button. Writes signed_at to
+            placement_attempts (via useUpsertPlacementAttempt), completes
+            the run, and the existing trigger fires the Relocation flow.
+            Ammar 2026-06-03: HI doesn't send contracts — they confirm. */}
+        <ContractCheckinAction run={run} />
 
         {showClassifyReply && (
           <ClassifyReplyDialog
@@ -1273,6 +1284,123 @@ function ShortlistSuggestion({ run }: { run: FlowRun }) {
         </Button>
         <Button size="sm" variant="outline" onClick={handleDismiss} disabled={working}>
           <XIcon className="h-3.5 w-3.5 mr-1" /> Not shortlisted
+        </Button>
+      </div>
+    </div>
+  );
+}
+
+/* ────────────────────────────────────────────────────────────────────
+ * ContractCheckinAction — green panel + 'Mark signed' button on
+ * active contract_signing runs. Logs the signature date to
+ * placement_attempts (via useUpsertPlacementAttempt — the DB trigger
+ * forward-syncs to doctor_lifecycle so downstream code that reads
+ * lifecycle.signed_at still works), completes the run, and the
+ * existing flow handoff fires the Relocation flow.
+ *
+ * Ammar 2026-06-03 spec: HI doesn't send the contract — the hospital
+ * does. HI just confirms the signature, logs the date, and lets the
+ * relocation start.
+ * ──────────────────────────────────────────────────────────────────── */
+function ContractCheckinAction({ run }: { run: FlowRun }) {
+  const [working, setWorking] = useState(false);
+  const [signedDate, setSignedDate] = useState<string>(new Date().toISOString().slice(0, 10));
+  const qc = useQueryClient();
+
+  if (run.flow_key !== "contract_signing" || run.status !== "active") return null;
+  // Don't show the panel if the run hasn't progressed to the wait
+  // stage — the team will still be in the email-sending phase.
+  if (run.current_stage === "trigger_offer_extended") return null;
+
+  const handleMarkSigned = async () => {
+    setWorking(true);
+    try {
+      const iso = signedDate ? new Date(signedDate + "T00:00:00.000Z").toISOString() : new Date().toISOString();
+
+      // 1. Write to placement_attempts. The trigger updates doctor_lifecycle.
+      if (run.doctor_id && run.doctor_name && run.hospital) {
+        await supabase.from("placement_attempts")
+          .upsert({
+            doctor_id:        run.doctor_id,
+            doctor_name:      run.doctor_name,
+            hospital_name:    run.hospital,
+            signed_at:        iso,
+            source:           "contract_checkin",
+            updated_at:       new Date().toISOString(),
+          }, { onConflict: "doctor_id,hospital_name" });
+      }
+
+      // 2. Complete the run.
+      const nowIso = new Date().toISOString();
+      await supabase.from("automation_flow_runs").update({
+        current_stage: "contract_signed",
+        status:        "completed",
+        completed_at:  nowIso,
+        last_event_at: nowIso,
+      }).eq("id", run.id);
+
+      await supabase.from("automation_flow_events").insert({
+        run_id: run.id, stage_key: "contract_signed", event_type: "completed",
+        message: `Team confirmed signature on ${signedDate}. Relocation flow can start now.`,
+      });
+
+      // 3. Fire the Relocation flow run (HI-confirmed signature is the
+      //    real trigger now, instead of the old BoldSign webhook path).
+      const { data: existingReloc } = await supabase
+        .from("automation_flow_runs")
+        .select("id")
+        .eq("doctor_id", run.doctor_id)
+        .eq("flow_key", "relocation")
+        .order("started_at", { ascending: false })
+        .limit(1);
+      if (!existingReloc || existingReloc.length === 0) {
+        await supabase.from("automation_flow_runs").insert({
+          flow_key:      "relocation",
+          doctor_id:     run.doctor_id,
+          doctor_name:   run.doctor_name,
+          doctor_email:  run.doctor_email,
+          doctor_phone:  run.doctor_phone,
+          hospital:      run.hospital,
+          current_stage: "select_city_guide",
+          status:        "active",
+          metadata:      { triggered_via: "contract_checkin_marked_signed", signed_at: iso },
+        });
+      }
+
+      toast.success(`Marked signed. Relocation flow opened — pick a city in the new run.`);
+      qc.invalidateQueries({ queryKey: ["automation-flow-runs"] });
+      qc.invalidateQueries({ queryKey: ["automation-flow-events", run.id] });
+      qc.invalidateQueries({ queryKey: ["placement-attempts"] });
+    } catch (e) {
+      toast.error(e instanceof Error ? e.message : "Couldn't mark signed");
+    } finally {
+      setWorking(false);
+    }
+  };
+
+  return (
+    <div className="rounded-md border-2 border-emerald-200 bg-emerald-50/40 p-4 mt-4">
+      <div className="flex items-start gap-2 mb-3">
+        <CheckCircle2 className="h-4 w-4 text-emerald-600 mt-0.5 shrink-0" />
+        <div className="text-[12px] text-emerald-900 leading-relaxed">
+          <strong>Has {run.doctor_name ?? "the doctor"} signed the offer from {run.hospital ?? "the hospital"} yet?</strong>
+          <span className="block mt-1 text-emerald-800/90">
+            The offer letter is between hospital ↔ doctor — we just track the signature. Once you confirm, the Relocation flow opens automatically.
+          </span>
+        </div>
+      </div>
+      <div className="flex items-center gap-2 flex-wrap">
+        <label className="text-[11px] text-emerald-900/90 flex items-center gap-1.5">
+          Signed on
+          <input
+            type="date"
+            value={signedDate}
+            onChange={e => setSignedDate(e.target.value)}
+            className="rounded-md border border-emerald-300 bg-white px-2 py-1 text-[11px]"
+          />
+        </label>
+        <Button size="sm" onClick={handleMarkSigned} disabled={working} className="bg-emerald-600 hover:bg-emerald-700">
+          <CheckCircle2 className="h-3.5 w-3.5 mr-1" /> {working ? "Saving…" : "Mark signed"}
         </Button>
       </div>
     </div>

@@ -61,7 +61,13 @@ const STAGE_ROUTES: Record<string, StageRoute> = {
   send_shortlist_email:   { template_key: "shortlist_confirmation",   next_stage: "shortlist_complete", terminal_next: true },
   // Flow 4 · Interview
   send_interview_email:   { template_key: "interview_tips_confirmation", next_stage: "interview_complete", terminal_next: true },
-  // Flow 5 · Relocation — guide + attestation go together (per Saif's spec)
+  // Flow 5 · Contract Check-in (Ammar 2026-06-03: HI doesn't send the
+  // contract — hospital does. These are nudges to both sides while we
+  // wait for the doctor to confirm signature.)
+  checkin_doctor:         { template_key: "contract_checkin_doctor",     next_stage: "checkin_hospital", auto_continue: true },
+  checkin_hospital:       { template_key: "contract_checkin_hospital",   next_stage: "awaiting_signature" },
+  reminder_signature:     { template_key: "contract_checkin_reminder",   next_stage: "contract_signed", terminal_next: true },
+  // Flow 6 · Relocation — guide + attestation go together (per Saif's spec)
   send_relocation_email:  { template_key: "relocation_guide",         next_stage: "send_attestation_email", auto_continue: true },
   send_attestation_email: { template_key: "relocation_attestation",   next_stage: "relocation_complete", terminal_next: true },
   // Flow 6 · Second Payment
