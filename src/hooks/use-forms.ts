@@ -184,17 +184,18 @@ export function useFormStats(formId: string | null) {
     queryKey: ["form-stats", formId ?? "_"],
     enabled:  !!formId,
     queryFn: async () => {
-      if (!formId) return { total: 0, last7d: 0, linked: 0 };
-      const cutoff7 = new Date(Date.now() - 7 * 86_400_000).toISOString();
-      const [totalRes, recentRes, linkedRes] = await Promise.all([
+      if (!formId) return { total: 0, last7d: 0, last30d: 0 };
+      const cutoff7  = new Date(Date.now() - 7  * 86_400_000).toISOString();
+      const cutoff30 = new Date(Date.now() - 30 * 86_400_000).toISOString();
+      const [totalRes, last7Res, last30Res] = await Promise.all([
         supabase.from("form_responses").select("id", { count: "exact", head: true }).eq("form_id", formId),
         supabase.from("form_responses").select("id", { count: "exact", head: true }).eq("form_id", formId).gte("submitted_at", cutoff7),
-        supabase.from("form_responses").select("id", { count: "exact", head: true }).eq("form_id", formId).not("doctor_id", "is", null),
+        supabase.from("form_responses").select("id", { count: "exact", head: true }).eq("form_id", formId).gte("submitted_at", cutoff30),
       ]);
       return {
-        total:  totalRes.count  ?? 0,
-        last7d: recentRes.count ?? 0,
-        linked: linkedRes.count ?? 0,
+        total:   totalRes.count   ?? 0,
+        last7d:  last7Res.count   ?? 0,
+        last30d: last30Res.count  ?? 0,
       };
     },
     staleTime: 60_000,

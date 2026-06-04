@@ -157,7 +157,7 @@ function FormDetail({ form }: { form: Form }) {
   const { data: stats } = useFormStats(form.id);
   const total      = stats?.total      ?? form.response_count ?? 0;
   const last7Days  = stats?.last7d     ?? 0;
-  const linkedCt   = stats?.linked     ?? 0;
+  const last30Days = stats?.last30d    ?? 0;
 
   // Sentinel for infinite scroll.
   const sentinelRef = useRef<HTMLDivElement | null>(null);
@@ -282,9 +282,9 @@ function FormDetail({ form }: { form: Form }) {
       {/* Analytics strip — server-side counts so it stays accurate as
           the user scrolls / filters / searches. */}
       <div className="grid grid-cols-2 sm:grid-cols-3 gap-3">
-        <Kpi label="Total submissions"     value={total}     tone="slate" />
-        <Kpi label="Last 7 days"            value={last7Days} tone="sky" />
-        <Kpi label="Auto-linked to Zoho"    value={linkedCt}  tone="indigo" hint={`${Math.round((linkedCt / Math.max(total, 1)) * 100)}% matched`} />
+        <Kpi label="Total submissions"     value={total}      tone="slate" />
+        <Kpi label="Last 7 days"            value={last7Days}  tone="sky" />
+        <Kpi label="Last 30 days"           value={last30Days} tone="emerald" />
       </div>
 
       {/* Supercharged search + filters bar */}
