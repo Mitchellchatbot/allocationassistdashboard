@@ -199,8 +199,94 @@ Deno.serve(async (req: Request) => {
     return json({ ok: false, error: `Mirror upsert: ${upErr.message}`, wp_id: newId }, 500);
   }
 
-  return json({ ok: true, id: newId, row: mirrorRow, created: !isEdit }, 200);
+  // 5. Auto-link the newly-created (or freshly-edited) row to an
+  //    existing AA doctor_id by email or unique normalised name.
+  //    Only fires when doctor_id is currently null — manual links
+  //    are sacred. The RPC has the same guard, so this is doubly safe.
+  let autoLinked: string | null = null;
+  if (!body.doctor_id) {
+    autoLinked = await autoLinkOne({
+      id:        newId,
+      full_name: cleanText(a.full_name as string | undefined),
+      title:     cleanText(c.title?.rendered),
+      email:     cleanText(a.email as string | undefined),
+    });
+  }
+
+  return json({ ok: true, id: newId, row: mirrorRow, created: !isEdit, auto_linked: autoLinked }, 200);
 });
+
+// ─── one-row auto-link ────────────────────────────────────────────────
+
+interface ZohoLeadLike {
+  id?: string;
+  Full_Name?: string | null;
+  First_Name?: string | null;
+  Last_Name?: string | null;
+  Email?: string | null;
+}
+
+/** Lookup a single candidate against the Zoho cache. Returns the
+ *  doctor_id if a confident match exists, else null. */
+async function autoLinkOne(c: { id: number; full_name: string | null; title: string | null; email: string | null }): Promise<string | null> {
+  try {
+    const { data: cacheRows } = await supabase.from("zoho_cache").select("id, data").in("id", [1, 2]);
+    const merged: Record<string, unknown> = {};
+    for (const r of (cacheRows ?? []) as Array<{ data: Record<string, unknown> }>) Object.assign(merged, r.data ?? {});
+    const leads          = (merged.leads          as ZohoLeadLike[]) ?? [];
+    const doctorsOnBoard = (merged.doctorsOnBoard as ZohoLeadLike[]) ?? (merged.contacts as ZohoLeadLike[]) ?? [];
+
+    const emailIdx = new Map<string, string>();
+    const nameIdx  = new Map<string, string[]>();
+    const indexOne = (r: ZohoLeadLike, prefix: "lead" | "dob") => {
+      if (!r.id) return;
+      const did = `${prefix}:${r.id}`;
+      const e = normaliseEmail(r.Email);
+      if (e) emailIdx.set(e, did);
+      const n = normaliseName(r.Full_Name ?? `${r.First_Name ?? ""} ${r.Last_Name ?? ""}`);
+      if (n) { const arr = nameIdx.get(n); if (arr) { if (!arr.includes(did)) arr.push(did); } else nameIdx.set(n, [did]); }
+    };
+    for (const r of leads)          indexOne(r, "lead");
+    for (const r of doctorsOnBoard) indexOne(r, "dob");
+
+    const e = normaliseEmail(c.email);
+    if (e && emailIdx.has(e)) {
+      const did = emailIdx.get(e)!;
+      await supabase.rpc("wordpress_candidates_bulk_link", { updates: [{ id: c.id, doctor_id: did }] as unknown as Record<string, unknown>[] });
+      return did;
+    }
+    const n = normaliseName(c.full_name ?? c.title ?? "");
+    if (n) {
+      const hits = nameIdx.get(n);
+      if (hits && hits.length === 1) {
+        const did = hits[0];
+        await supabase.rpc("wordpress_candidates_bulk_link", { updates: [{ id: c.id, doctor_id: did }] as unknown as Record<string, unknown>[] });
+        return did;
+      }
+    }
+    return null;
+  } catch (err) {
+    console.warn("[wordpress-candidate-upsert] auto-link failed:", err);
+    return null;
+  }
+}
+
+function normaliseEmail(raw: string | null | undefined): string | null {
+  if (!raw) return null;
+  const e = String(raw).trim().toLowerCase();
+  return e.includes("@") ? e : null;
+}
+
+function normaliseName(raw: string | null | undefined): string | null {
+  if (!raw) return null;
+  let s = String(raw).normalize("NFD").replace(/[̀-ͯ]/g, "");
+  s = s.toLowerCase()
+       .replace(/^(dr|doctor|prof|mr|mrs|ms|miss)\.?\s+/i, "")
+       .replace(/[^\w\s]/g, " ")
+       .replace(/\s+/g, " ")
+       .trim();
+  return s.split(" ").length >= 2 ? s : null;
+}
 
 // ─── helpers ──────────────────────────────────────────────────────────
 

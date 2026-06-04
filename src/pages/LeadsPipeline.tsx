@@ -3,6 +3,7 @@ import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { useFilteredData } from "@/hooks/use-filtered-data";
+import { useDoctorPhotoMap } from "@/hooks/use-wp-candidates";
 import { useZohoLeads, useDebounce, type LeadsFilters } from "@/hooks/use-zoho-leads";
 import { useZohoData } from "@/hooks/use-zoho-data";
 import { ArrowRight, AlertTriangle, CheckCircle, Clock, Search, Loader2, Check, X, ChevronDown, Phone, Calendar, Filter, GitBranch, ClipboardList } from "lucide-react";
@@ -195,6 +196,7 @@ interface LeadsPipelineProps { embedded?: boolean }
 const LeadsPipeline = ({ embedded }: LeadsPipelineProps = {}) => {
   const { workflow } = useFilteredData();
   const { data: zoho } = useZohoData();
+  const { data: photoMap } = useDoctorPhotoMap();
   // Read deep-link params (e.g. /leads-pipeline?stage=Not%20Contacted) so other
   // pages can link straight to a filtered view of the leads list.
   const [searchParams, setSearchParams] = useSearchParams();
@@ -530,19 +532,26 @@ const LeadsPipeline = ({ embedded }: LeadsPipelineProps = {}) => {
                     {doctors.map(doc => {
                       const st = statusConfig[doc.status];
                       const StIcon = st.icon;
+                      // Pull the avatar from the WP candidate mirror if the
+                      // doctor has been linked there. Try `lead:` then `dob:`
+                      // — most pipeline rows come from the Zoho Leads module.
+                      const photo = doc.zohoId
+                        ? (photoMap?.get(`lead:${doc.zohoId}`) ?? photoMap?.get(`dob:${doc.zohoId}`) ?? null)
+                        : null;
                       return (
                         <Fragment key={doc.zohoId ?? doc.id}>
                           <TableRow className="hover:bg-muted/30">
                             <TableCell className="text-[10px] font-mono text-muted-foreground py-2.5">{doc.id}</TableCell>
                             <TableCell className="text-[12px] font-medium py-2.5">
                               <div
-                                className="flex items-center gap-1 cursor-pointer select-none"
+                                className="flex items-center gap-2 cursor-pointer select-none"
                                 onClick={() => {
                                   const key = doc.zohoId ?? doc.id;
                                   setExpandedId(prev => prev === key ? null : key);
                                 }}
                               >
-                                <ChevronDown className={`h-3 w-3 text-muted-foreground transition-transform duration-200 ${expandedId === (doc.zohoId ?? doc.id) ? "rotate-180" : ""}`} />
+                                <ChevronDown className={`h-3 w-3 text-muted-foreground transition-transform duration-200 shrink-0 ${expandedId === (doc.zohoId ?? doc.id) ? "rotate-180" : ""}`} />
+                                <DoctorAvatar src={photo} name={doc.name} size={24} />
                                 {doc.name}
                               </div>
                             </TableCell>
@@ -653,5 +662,30 @@ const LeadsPipeline = ({ embedded }: LeadsPipelineProps = {}) => {
     </DashboardLayout>
   );
 };
+
+/** Tiny avatar for pipeline rows. Falls back to initials when there's
+ *  no photo (which is most of the time — only doctors linked to a WP
+ *  candidate have one). Identical pattern to the avatar used in the
+ *  Profiles tab so the same face shows up in both places. */
+function DoctorAvatar({ src, name, size }: { src: string | null; name: string; size: number }) {
+  const [errored, setErrored] = useState(false);
+  const initials = (name || "?")
+    .replace(/^Dr\.?\s+/i, "")
+    .split(/\s+/).map(s => s[0]).filter(Boolean).slice(0, 2).join("")
+    .toUpperCase() || "?";
+  const showImage = src && !errored;
+  return (
+    <div
+      style={{ width: size, height: size, fontSize: Math.max(9, size * 0.35) }}
+      className="rounded-full bg-slate-200 overflow-hidden flex items-center justify-center text-slate-600 font-medium shrink-0"
+    >
+      {showImage ? (
+        <img src={src!} alt="" width={size} height={size} onError={() => setErrored(true)} className="w-full h-full object-cover" />
+      ) : (
+        <span>{initials}</span>
+      )}
+    </div>
+  );
+}
 
 export default LeadsPipeline;

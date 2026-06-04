@@ -25,7 +25,7 @@ import {
   Briefcase, Award, Globe, Languages as LanguagesIcon, Users as UsersIcon,
   Baby, Clock as ClockIcon, GraduationCap,
 } from "lucide-react";
-import { useWpCandidates, useSyncWpCandidates, useLinkWpCandidate, useAutoLinkWpCandidates, type WpCandidate } from "@/hooks/use-wp-candidates";
+import { useWpCandidates, useSyncWpCandidates, useLinkWpCandidate, type WpCandidate } from "@/hooks/use-wp-candidates";
 import { WpCandidateEditDialog } from "@/components/WpCandidateEditDialog";
 import { toast } from "sonner";
 import { Plus, Pencil } from "lucide-react";
@@ -34,8 +34,7 @@ interface WpCandidatesProps { embedded?: boolean }
 
 export default function WpCandidates({ embedded }: WpCandidatesProps = {}) {
   const { data: candidates = [], isLoading } = useWpCandidates();
-  const sync     = useSyncWpCandidates();
-  const autoLink = useAutoLinkWpCandidates();
+  const sync = useSyncWpCandidates();
   const [editing, setEditing] = useState<{ open: boolean; candidate: WpCandidate | null }>({ open: false, candidate: null });
 
   // Search + filter state — same architecture as /forms.
@@ -106,24 +105,12 @@ export default function WpCandidates({ embedded }: WpCandidatesProps = {}) {
   const handleSync = async () => {
     try {
       const r = await sync.mutateAsync();
-      toast.success(`Synced — ${r.inserted} candidates · ${r.totalReported} total in WP · ${(r.durationMs / 1000).toFixed(1)}s`, { duration: 8000 });
+      // Sync auto-links freshly added rows on its way out, so this single
+      // toast covers both phases — no separate "Auto-link" button needed.
+      const linkedNote = r.auto_linked ? ` · auto-linked ${r.auto_linked} new` : "";
+      toast.success(`Synced — ${r.inserted} candidates${linkedNote} · ${(r.durationMs / 1000).toFixed(1)}s`, { duration: 8000 });
     } catch (e) {
       toast.error(e instanceof Error ? e.message : "Sync failed");
-    }
-  };
-
-  const handleAutoLink = async () => {
-    try {
-      const r = await autoLink.mutateAsync();
-      const bits = [
-        `${r.updated} linked`,
-        r.matched_by_email ? `${r.matched_by_email} by email` : "",
-        r.matched_by_name  ? `${r.matched_by_name} by name`   : "",
-        r.skipped_ambiguous ? `${r.skipped_ambiguous} skipped (ambiguous)` : "",
-      ].filter(Boolean).join(" · ");
-      toast.success(`Auto-linked: ${bits}`, { duration: 9000 });
-    } catch (e) {
-      toast.error(e instanceof Error ? e.message : "Auto-link failed");
     }
   };
 
@@ -140,11 +127,7 @@ export default function WpCandidates({ embedded }: WpCandidatesProps = {}) {
   const headerButtons = (
     <div className="flex items-center gap-2">
       <Button size="sm" onClick={() => setEditing({ open: true, candidate: null })}>
-        <Plus className="h-3.5 w-3.5 mr-1" /> New candidate
-      </Button>
-      <Button size="sm" variant="outline" onClick={handleAutoLink} disabled={autoLink.isPending}>
-        {autoLink.isPending ? <RefreshCw className="h-3.5 w-3.5 mr-1 animate-spin" /> : <Link2 className="h-3.5 w-3.5 mr-1" />}
-        {autoLink.isPending ? "Auto-linking…" : "Auto-link to AA doctors"}
+        <Plus className="h-3.5 w-3.5 mr-1" /> New profile
       </Button>
       <Button size="sm" variant="outline" onClick={handleSync} disabled={sync.isPending}>
         {sync.isPending ? <RefreshCw className="h-3.5 w-3.5 mr-1 animate-spin" /> : <History className="h-3.5 w-3.5 mr-1" />}

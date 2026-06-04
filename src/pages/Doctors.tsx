@@ -1,31 +1,32 @@
 /**
  * /doctors — single hub for everything doctor-shaped.
  *
- * Three tabs, one shared search:
- *   - Doctor Progress  → existing <LeadsPipeline embedded /> view
- *   - AA Profiles      → existing <DoctorProfiles embedded /> view
- *   - WP Candidates    → existing <WpCandidates  embedded /> view
+ * Two tabs, one shared search:
+ *   - Doctor Progress  → <LeadsPipeline embedded /> — the pipeline view
+ *   - Profiles         → <WpCandidates  embedded /> — the canonical
+ *                        profile record for each doctor (mirror of the
+ *                        WP candidate CPT). Linked rows are read-only
+ *                        until edited; unlinked rows are editable from
+ *                        the same dialog. New candidates created here
+ *                        auto-link to the AA roster on the way in.
  *
  * Search lives in `?q=...`. Each embedded view reads it and writes back
  * to it, so typing once filters whichever tab you're on. Tab state lives
- * in `?tab=progress|profiles|wp`, so the active tab survives reloads and
- * is sharable in a link.
+ * in `?tab=progress|profiles`.
  *
- * The old standalone routes (/leads-pipeline, /doctor-profiles,
- * /wp-candidates) still exist and just redirect into here with the
- * right tab pre-selected, so muscle-memory + bookmarks keep working.
+ * Legacy routes /leads-pipeline + /doctor-profiles + /wp-candidates all
+ * redirect into here so existing bookmarks keep working.
  */
 import { lazy, Suspense, useMemo } from "react";
 import { useSearchParams } from "react-router-dom";
 import { DashboardLayout } from "@/components/layout/DashboardLayout";
 import { Input } from "@/components/ui/input";
-import { Search, UserSquare, GitBranch, Stethoscope } from "lucide-react";
+import { Search, UserSquare, GitBranch } from "lucide-react";
 
 const LeadsPipeline  = lazy(() => import("./LeadsPipeline"));
-const DoctorProfiles = lazy(() => import("./DoctorProfiles"));
 const WpCandidates   = lazy(() => import("./WpCandidates"));
 
-type Tab = "progress" | "profiles" | "wp";
+type Tab = "progress" | "profiles";
 
 const TAB_META: Record<Tab, { label: string; icon: typeof UserSquare; subtitle: string; placeholder: string }> = {
   progress: {
@@ -35,15 +36,9 @@ const TAB_META: Record<Tab, { label: string; icon: typeof UserSquare; subtitle: 
     placeholder: "Search by name, specialty, recruiter, country, license, destination…",
   },
   profiles: {
-    label:       "AA Profiles",
+    label:       "Profiles",
     icon:        UserSquare,
-    subtitle:    "Our editable canon — the fields hospitals see when we send a Profile Sent email.",
-    placeholder: "Search by name, email, specialty…",
-  },
-  wp: {
-    label:       "WP Candidates",
-    icon:        Stethoscope,
-    subtitle:    "The 1,243 doctor profiles curated for hospitals on allocationassist.com.",
+    subtitle:    "The canonical doctor profile — mirrors allocationassist.com. Edit any candidate (linked or not). New profiles auto-link to the AA roster.",
     placeholder: "Search any field — name, specialty, license, country, salary, location…",
   },
 };
@@ -123,9 +118,8 @@ export default function Doctors() {
           the whole shell. */}
       <Suspense fallback={<TabSkeleton />}>
         <div key={tab}>
-          {tab === "progress" && <LeadsPipeline  embedded />}
-          {tab === "profiles" && <DoctorProfiles embedded />}
-          {tab === "wp"       && <WpCandidates   embedded />}
+          {tab === "progress" && <LeadsPipeline embedded />}
+          {tab === "profiles" && <WpCandidates  embedded />}
         </div>
       </Suspense>
     </DashboardLayout>
@@ -133,7 +127,9 @@ export default function Doctors() {
 }
 
 function parseTab(raw: string | null): Tab {
-  if (raw === "progress" || raw === "profiles" || raw === "wp") return raw;
+  if (raw === "progress" || raw === "profiles") return raw;
+  // Legacy `?tab=wp` (the old WP Candidates tab name) lands on Profiles.
+  if (raw === "wp") return "profiles";
   // Default landing — Progress is the highest-traffic view for HI staff.
   return "progress";
 }

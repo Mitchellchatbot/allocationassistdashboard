@@ -159,7 +159,7 @@ const App = () => (
                     into the unified /doctors shell with the right tab pre-selected. */}
                 <Route path="/leads-pipeline"  element={<Navigate to="/doctors?tab=progress" replace />} />
                 <Route path="/doctor-profiles" element={<Navigate to="/doctors?tab=profiles" replace />} />
-                <Route path="/wp-candidates"   element={<Navigate to="/doctors?tab=wp"       replace />} />
+                <Route path="/wp-candidates"   element={<Navigate to="/doctors?tab=profiles" replace />} />
                 <Route path="/vacancies"      element={<Vacancies />} />
                 <Route path="/reports"        element={<Reports />} />
                 <Route path="/batches"        element={<Batches />} />

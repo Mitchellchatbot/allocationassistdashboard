@@ -102,7 +102,14 @@ export function useSyncWpCandidates() {
     mutationFn: async () => {
       const { data, error } = await supabase.functions.invoke("wordpress-candidates-sync", { body: {} });
       if (error) throw error;
-      const resp = data as { ok: boolean; error?: string; fetched: number; inserted: number; pages: number; totalReported: number; durationMs: number };
+      const resp = data as {
+        ok: boolean; error?: string;
+        fetched: number; inserted: number; pages: number; totalReported: number;
+        // Sync runs the auto-linker on its way out — these are how many
+        // rows got their doctor_id stamped during this run.
+        auto_linked?: number; auto_link_email?: number; auto_link_name?: number;
+        durationMs: number;
+      };
       if (!resp.ok) throw new Error(resp.error ?? "Sync failed");
       return resp;
     },
@@ -221,6 +228,34 @@ export function useUploadWpPhoto() {
       return json;
     },
     onSuccess: () => qc.invalidateQueries({ queryKey: KEY }),
+  });
+}
+
+/** Photo map keyed by the prefixed AA doctor_id (`lead:<zoho>` /
+ *  `dob:<zoho>`). Used to render avatars next to any doctor row that
+ *  links back to a WP candidate. Tiny payload + 5-min cache, so cheap
+ *  to call from anywhere. */
+export function useDoctorPhotoMap() {
+  return useQuery<Map<string, string>>({
+    queryKey: ["wp-doctor-photos"],
+    queryFn: async () => {
+      const all = new Map<string, string>();
+      const PAGE = 1000;
+      for (let from = 0; from < 50_000; from += PAGE) {
+        const { data, error } = await supabase
+          .from("wordpress_candidates")
+          .select("doctor_id, photo_url")
+          .not("doctor_id", "is", null)
+          .not("photo_url", "is", null)
+          .range(from, from + PAGE - 1);
+        if (error) throw error;
+        const batch = (data ?? []) as Array<{ doctor_id: string; photo_url: string }>;
+        for (const r of batch) all.set(r.doctor_id, r.photo_url);
+        if (batch.length < PAGE) break;
+      }
+      return all;
+    },
+    staleTime: 5 * 60_000,
   });
 }
 

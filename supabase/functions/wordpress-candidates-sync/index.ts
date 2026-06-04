@@ -253,15 +253,129 @@ Deno.serve(async (req: Request) => {
     if (totalPages && page >= totalPages) break;
   }
 
+  // Auto-link freshly synced rows to existing AA doctor_ids by
+  // email + normalised name. Runs inside the sync so the user never
+  // has to think about "step 2" — a new candidate that maps to a
+  // Zoho record gets stamped on the way in.
+  const linkResult = await autoLinkCandidates();
+
   return json({
     ok:            true,
     fetched,
     inserted:      upserted,       // can't cheaply distinguish new vs updated; reports total touched
     pages:         totalPages,
     totalReported: totalCands,
+    auto_linked:   linkResult.updated,
+    auto_link_email: linkResult.matched_by_email,
+    auto_link_name:  linkResult.matched_by_name,
     durationMs:    Date.now() - started,
   }, 200);
 });
+
+// ─── Auto-linker — same logic as the wordpress-candidates-link function,
+//      inlined here so every sync ends with a fresh pass. Keeping it in
+//      one place would be nicer, but Supabase edge functions can't import
+//      each other yet without a shared package. ──────────────────────────
+
+interface ZohoLeadLike {
+  id?: string;
+  Full_Name?: string | null;
+  First_Name?: string | null;
+  Last_Name?: string | null;
+  Email?: string | null;
+}
+
+async function autoLinkCandidates(): Promise<{ updated: number; matched_by_email: number; matched_by_name: number }> {
+  try {
+    const { data: cacheRows, error: cacheErr } = await supabase
+      .from("zoho_cache")
+      .select("id, data")
+      .in("id", [1, 2]);
+    if (cacheErr) { console.warn("[sync auto-link] zoho_cache:", cacheErr.message); return zeroes(); }
+
+    const merged: Record<string, unknown> = {};
+    for (const r of (cacheRows ?? []) as Array<{ id: number; data: Record<string, unknown> }>) {
+      Object.assign(merged, r.data ?? {});
+    }
+    const leads        = (merged.leads        as ZohoLeadLike[]) ?? [];
+    const doctorsOnBoard = (merged.doctorsOnBoard as ZohoLeadLike[])
+                        ?? (merged.contacts as ZohoLeadLike[])
+                        ?? (merged.doctors_on_board as ZohoLeadLike[])
+                        ?? [];
+
+    const emailIdx = new Map<string, string>();
+    const nameIdx  = new Map<string, string[]>();
+    const indexOne = (r: ZohoLeadLike, prefix: "lead" | "dob") => {
+      if (!r.id) return;
+      const did = `${prefix}:${r.id}`;
+      const e = normaliseEmail(r.Email);
+      if (e) emailIdx.set(e, did);
+      const n = normaliseName(r.Full_Name ?? `${r.First_Name ?? ""} ${r.Last_Name ?? ""}`);
+      if (n) {
+        const arr = nameIdx.get(n);
+        if (arr) { if (!arr.includes(did)) arr.push(did); }
+        else nameIdx.set(n, [did]);
+      }
+    };
+    for (const r of leads)          indexOne(r, "lead");
+    for (const r of doctorsOnBoard) indexOne(r, "dob");
+
+    const updates: Array<{ id: number; doctor_id: string }> = [];
+    let matchedByEmail = 0, matchedByName = 0;
+    const PAGE = 1000;
+    for (let from = 0; from < 50_000; from += PAGE) {
+      const { data, error } = await supabase
+        .from("wordpress_candidates")
+        .select("id, full_name, title, email")
+        .is("doctor_id", null)
+        .range(from, from + PAGE - 1);
+      if (error) { console.warn("[sync auto-link] candidates fetch:", error.message); break; }
+      const batch = (data ?? []) as Array<{ id: number; full_name: string | null; title: string | null; email: string | null }>;
+      if (batch.length === 0) break;
+      for (const c of batch) {
+        const e = normaliseEmail(c.email);
+        const n = normaliseName(c.full_name ?? c.title ?? "");
+        if (e && emailIdx.has(e)) { updates.push({ id: c.id, doctor_id: emailIdx.get(e)! }); matchedByEmail++; continue; }
+        if (n) {
+          const hits = nameIdx.get(n);
+          if (hits && hits.length === 1) { updates.push({ id: c.id, doctor_id: hits[0] }); matchedByName++; }
+        }
+      }
+      if (batch.length < PAGE) break;
+    }
+    if (updates.length === 0) return { updated: 0, matched_by_email: 0, matched_by_name: 0 };
+
+    const { data: affected, error: rpcErr } = await supabase.rpc("wordpress_candidates_bulk_link", {
+      updates: updates as unknown as Record<string, unknown>[],
+    });
+    if (rpcErr) { console.warn("[sync auto-link] rpc:", rpcErr.message); return zeroes(); }
+    const updated = typeof affected === "number" ? affected : 0;
+    console.log(`[wordpress-candidates-sync] auto-linked ${updated} rows (${matchedByEmail} email + ${matchedByName} name)`);
+    return { updated, matched_by_email: matchedByEmail, matched_by_name: matchedByName };
+  } catch (e) {
+    console.warn("[sync auto-link] unexpected error:", e);
+    return zeroes();
+  }
+}
+
+function zeroes() { return { updated: 0, matched_by_email: 0, matched_by_name: 0 }; }
+
+function normaliseEmail(raw: string | null | undefined): string | null {
+  if (!raw) return null;
+  const e = String(raw).trim().toLowerCase();
+  return e.includes("@") ? e : null;
+}
+
+function normaliseName(raw: string | null | undefined): string | null {
+  if (!raw) return null;
+  let s = String(raw).normalize("NFD").replace(/[̀-ͯ]/g, "");
+  s = s.toLowerCase()
+       .replace(/^(dr|doctor|prof|mr|mrs|ms|miss)\.?\s+/i, "")
+       .replace(/[^\w\s]/g, " ")
+       .replace(/\s+/g, " ")
+       .trim();
+  return s.split(" ").length >= 2 ? s : null;
+}
 
 /** WP REST returns title.rendered with HTML entities ("&#8211;", "&amp;",
  *  &nbsp;, …) already encoded. We render those fields as plain text in
