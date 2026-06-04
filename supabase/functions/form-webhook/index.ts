@@ -165,18 +165,14 @@ Deno.serve(async (req: Request) => {
   const responseId = Array.from(new Uint8Array(buf)).map(b => b.toString(16).padStart(2, "0")).join("").slice(0, 32);
 
   // ── 5. Match respondent email to AA Zoho lead/DoB if possible ──────
+  // Single RPC, canonical JSONB cache, DoB > Lead precedence baked in.
+  // (Was reading from non-existent zoho_cache_dob / zoho_cache_leads
+  // tables — silently failing to link.)
   let doctorId: string | null = null;
   if (respondentEmail) {
-    const { data: dobRow } = await supabase
-      .from("zoho_cache_dob").select("zoho_id")
-      .ilike("email", respondentEmail).maybeSingle();
-    if (dobRow?.zoho_id) doctorId = `dob:${dobRow.zoho_id}`;
-    if (!doctorId) {
-      const { data: leadRow } = await supabase
-        .from("zoho_cache_leads").select("zoho_id")
-        .ilike("email", respondentEmail).maybeSingle();
-      if (leadRow?.zoho_id) doctorId = `lead:${leadRow.zoho_id}`;
-    }
+    const { data, error } = await supabase.rpc("lookup_doctor_id_by_email", { p_email: respondentEmail });
+    if (error) console.warn("[form-webhook] lookup_doctor_id_by_email:", error.message);
+    else if (typeof data === "string") doctorId = data;
   }
 
   // ── 6. Insert (idempotent) ─────────────────────────────────────────

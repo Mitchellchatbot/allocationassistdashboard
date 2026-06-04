@@ -159,7 +159,15 @@ Deno.serve(async (req: Request) => {
     if (value) flat[title] = value;
 
     // Heuristic respondent capture — first email/name we see wins.
-    if (!respondentEmail && a.type === "email" && a.email) respondentEmail = a.email;
+    // Some forms configure the email question as short_text (custom
+    // regex validation), so we also accept text answers whose value
+    // looks like an email.
+    if (!respondentEmail) {
+      if (a.type === "email" && a.email) respondentEmail = a.email;
+      else if (a.type === "text" && a.text && /^[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Za-z]{2,}$/.test(a.text.trim())) {
+        respondentEmail = a.text.trim();
+      }
+    }
     const titleLc = (a.field.title ?? "").toLowerCase();
     if (!respondentName && a.type === "text" && a.text && (titleLc.includes("name") || titleLc.includes("full name"))) {
       respondentName = a.text;
@@ -167,25 +175,15 @@ Deno.serve(async (req: Request) => {
   }
 
   // ── Try to link to an existing AA lead / DoB by email ───────────────
-  // The dashboard's doctor IDs are prefixed; we don't fetch Zoho here
-  // (heavy) — just check meta_leads + lead_emails_cache if available,
-  // otherwise skip linkage and let the UI offer manual linking later.
+  // Single RPC against the canonical JSONB Zoho cache. DoB > Lead
+  // precedence is baked into the SQL function. The previous
+  // implementation queried zoho_cache_dob / zoho_cache_leads tables
+  // that don't exist on this project, silently failing to link.
   let doctorId: string | null = null;
   if (respondentEmail) {
-    const { data: dobRow } = await supabase
-      .from("zoho_cache_dob")
-      .select("zoho_id")
-      .ilike("email", respondentEmail)
-      .maybeSingle();
-    if (dobRow?.zoho_id) doctorId = `dob:${dobRow.zoho_id}`;
-    if (!doctorId) {
-      const { data: leadRow } = await supabase
-        .from("zoho_cache_leads")
-        .select("zoho_id")
-        .ilike("email", respondentEmail)
-        .maybeSingle();
-      if (leadRow?.zoho_id) doctorId = `lead:${leadRow.zoho_id}`;
-    }
+    const { data, error } = await supabase.rpc("lookup_doctor_id_by_email", { p_email: respondentEmail });
+    if (error) console.warn("[typeform-webhook] lookup_doctor_id_by_email:", error.message);
+    else if (typeof data === "string") doctorId = data;
   }
 
   // ── Insert response (idempotent on (form_id, provider_response_id)) ──

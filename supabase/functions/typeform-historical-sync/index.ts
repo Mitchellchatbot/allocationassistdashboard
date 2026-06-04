@@ -189,8 +189,18 @@ Deno.serve(async (req: Request) => {
           a.type === "choices"       ? ([...(a.choices?.labels ?? []), a.choices?.other].filter(Boolean).join(", ")) :
                                        JSON.stringify(a);
         if (value) flat[title] = value;
-        if (!respondentEmail && a.type === "email" && a.email) respondentEmail = a.email;
         const titleLc = (a.field.title ?? "").toLowerCase();
+        // Email extraction: prefer the native email-typed answer, but
+        // also catch text-typed fields that hold an email (this form
+        // configures the email question as short_text so the team can
+        // validate format with a custom regex). Falls through to any
+        // text whose value looks like an email + title hints at it.
+        if (!respondentEmail) {
+          if (a.type === "email" && a.email) respondentEmail = a.email;
+          else if (a.type === "text" && a.text && /^[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Za-z]{2,}$/.test(a.text.trim())) {
+            respondentEmail = a.text.trim();
+          }
+        }
         if (!respondentName && a.type === "text" && a.text && (titleLc.includes("name") || titleLc.includes("full name"))) {
           respondentName = a.text;
         }
@@ -212,25 +222,34 @@ Deno.serve(async (req: Request) => {
       });
     }
 
-    // ── 2. Batch Zoho lookups (one query per cache, not per row) ──────
-    // ilike doesn't combine with .in() so we fall back to lowercase
-    // exact-match against the (already lowercased) emails. zoho_cache
-    // tables store emails normalized so this matches the prior per-row
-    // .ilike behaviour for the common case.
+    // ── 2. Batch Zoho lookups via the canonical JSONB cache ──────────
+    // Pull the cache rows once per page, build a Map<email, doctor_id>
+    // by iterating leads + doctorsOnBoard. DoB wins precedence over
+    // Lead (further down the funnel).
+    //
+    // (The previous version of this function read from zoho_cache_dob
+    // and zoho_cache_leads tables that don't exist on this project; the
+    // .in() lookups silently returned nothing and 17k+ rows landed
+    // unlinked. Migration 20260605000004 backfilled the historical
+    // damage; this rewrite ensures future runs are correct.)
     const emailToDoctorId = new Map<string, string>();
     if (emails.length > 0) {
-      const uniqueEmails = Array.from(new Set(emails));
-      const [{ data: dobRows }, { data: leadRows }] = await Promise.all([
-        supabase.from("zoho_cache_dob")  .select("zoho_id, email").in("email", uniqueEmails),
-        supabase.from("zoho_cache_leads").select("zoho_id, email").in("email", uniqueEmails),
+      const uniqueEmails = new Set(emails.map(e => e.toLowerCase()));
+      const [{ data: cache1 }, { data: cache2 }] = await Promise.all([
+        supabase.from("zoho_cache").select("data").eq("id", 1).maybeSingle(),
+        supabase.from("zoho_cache").select("data").eq("id", 2).maybeSingle(),
       ]);
-      // DoB wins over Lead (further down the pipeline) — same precedence
-      // as the live webhook.
-      for (const r of leadRows ?? []) {
-        if (r.email && r.zoho_id) emailToDoctorId.set(String(r.email).toLowerCase(), `lead:${r.zoho_id}`);
+      const leads = (cache1?.data as { leads?: Array<{ id?: string; Email?: string | null }> } | null)?.leads ?? [];
+      const dob   = (cache2?.data as { doctorsOnBoard?: Array<{ id?: string; Email?: string | null }> } | null)?.doctorsOnBoard ?? [];
+
+      for (const r of leads) {
+        const e = (r.Email ?? "").trim().toLowerCase();
+        if (e && r.id && uniqueEmails.has(e)) emailToDoctorId.set(e, `lead:${r.id}`);
       }
-      for (const r of dobRows ?? []) {
-        if (r.email && r.zoho_id) emailToDoctorId.set(String(r.email).toLowerCase(), `dob:${r.zoho_id}`);
+      // DoB second so it overwrites any lead match for the same email.
+      for (const r of dob) {
+        const e = (r.Email ?? "").trim().toLowerCase();
+        if (e && r.id && uniqueEmails.has(e)) emailToDoctorId.set(e, `dob:${r.id}`);
       }
     }
     for (const row of rows) {
