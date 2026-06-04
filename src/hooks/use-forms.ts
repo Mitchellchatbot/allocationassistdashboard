@@ -118,8 +118,15 @@ export interface FormResponseFilters {
   date?:       "7d" | "30d" | "90d" | "all";
   link?:       "all" | "linked" | "unlinked";
   sort?:       "newest" | "oldest";
-  /** 'all' (default) | 'mine' (open + due) | a specific lifecycle bucket */
-  outreach?:   "all" | "mine" | OutreachStatus;
+  /** Outreach filter:
+   *  - 'all'              — no outreach filter
+   *  - 'mine'             — open lifecycle, owned by me OR unowned
+   *  - 'uncontacted-zoho' — doctor_id matches a Zoho lead in 'Not Contacted'.
+   *                         Default on free-signal forms because it's the
+   *                         narrowest actionable bucket.
+   *  - 'unqualified'      — doctor_id IS NULL (never reached Zoho)
+   *  - or a specific lifecycle bucket (new / contacted / qualified / declined / closed). */
+  outreach?:   "all" | "mine" | "uncontacted-zoho" | "unqualified" | OutreachStatus;
   /** When set, the calling page's current user. Filters 'mine' to
    *  rows owned by this email (or unowned + new). */
   currentOwnerEmail?: string;
@@ -184,6 +191,20 @@ export function useFormResponsesInfinite(formId: string | null, filters: FormRes
             .or(filters.currentOwnerEmail
               ? `outreach_owner.eq.${filters.currentOwnerEmail},outreach_owner.is.null`
               : "outreach_owner.is.null");
+        } else if (filters.outreach === "uncontacted-zoho") {
+          // Pull the doctor_id set from the Zoho cache via RPC, then
+          // restrict the response query to that set. The RPC returns a
+          // few hundred ids at most, which fits in a PostgREST IN URL.
+          const { data: idsRaw, error: rpcErr } = await supabase.rpc("uncontacted_zoho_doctor_ids");
+          if (rpcErr) throw rpcErr;
+          const ids = Array.isArray(idsRaw) ? (idsRaw as string[]) : [];
+          if (ids.length === 0) {
+            // No leads in 'Not Contacted' → empty page, no DB hit needed.
+            return { rows: [] as FormResponse[], nextOffset: null as number | null };
+          }
+          query = query.in("doctor_id", ids);
+        } else if (filters.outreach === "unqualified") {
+          query = query.is("doctor_id", null);
         } else {
           query = query.eq("outreach_status", filters.outreach);
         }

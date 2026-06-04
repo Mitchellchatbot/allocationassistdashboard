@@ -143,7 +143,13 @@ function FormDetail({ form }: { form: Form }) {
   const search = useDebounce(searchRaw, 250);
   const [dateFilter, setDateFilter] = useState<"all" | "7d" | "30d" | "90d">("all");
   const [sortDir, setSortDir]       = useState<"newest" | "oldest">("newest");
-  const [outreachFilter, setOutreachFilter] = useState<"all" | "mine" | OutreachStatus>("all");
+  // Free-signal forms default to 'Uncontacted in Zoho' — the narrowest
+  // actionable bucket. Paid-lead forms (DoctorsFinder) don't go through
+  // Zoho so that filter is meaningless there — default to 'all'.
+  const isPaidFormInit = (form.lead_value_cents ?? 0) > 0;
+  const [outreachFilter, setOutreachFilter] = useState<"all" | "mine" | "uncontacted-zoho" | "unqualified" | OutreachStatus>(
+    isPaidFormInit ? "all" : "uncontacted-zoho",
+  );
   const { user } = useAuth();
 
   // Server-side paginated + filtered feed. First page is 200 rows; each
@@ -388,11 +394,18 @@ function FormDetail({ form }: { form: Form }) {
               ]}
             />
             <span className="text-muted-foreground/40">·</span>
-            {/* Outreach lifecycle */}
+            {/* Outreach lifecycle — chip order matches the typical
+                triage flow. 'Uncontacted in Zoho' first because that's
+                where the team starts each day; 'Unqualified' is the
+                explicit not-in-Zoho bucket from Saif's logic. The pure
+                lifecycle buckets (New / Contacted / …) live behind a
+                'lifecycle…' divider so they don't crowd the front of
+                the row. */}
             <FilterChipGroup
               value={outreachFilter}
               onChange={(v) => setOutreachFilter(v as typeof outreachFilter)}
-              options={[
+              options={isPaidFormInit ? [
+                // Paid forms: Zoho-side buckets don't apply.
                 { value: "all",        label: "All outreach" },
                 { value: "mine",       label: "My queue" },
                 { value: "new",        label: "New" },
@@ -400,6 +413,14 @@ function FormDetail({ form }: { form: Form }) {
                 { value: "qualified",  label: "Qualified" },
                 { value: "declined",   label: "Declined" },
                 { value: "closed",     label: "Closed" },
+              ] : [
+                { value: "uncontacted-zoho", label: "Uncontacted in Zoho" },
+                { value: "unqualified",      label: "Unqualified" },
+                { value: "mine",             label: "My queue" },
+                { value: "all",              label: "All" },
+                { value: "new",              label: "New (form)" },
+                { value: "contacted",        label: "Contacted (form)" },
+                { value: "qualified",        label: "Qualified (form)" },
               ]}
             />
             <span className="text-muted-foreground/40">·</span>
