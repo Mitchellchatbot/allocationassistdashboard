@@ -82,6 +82,7 @@ export default function WpCandidates({ embedded }: WpCandidatesProps = {}) {
   const [licenseFilter, setLicenseFilter] = useState<"all" | "DHA" | "DOH" | "MOH" | "SCFHS" | "QCHP">("all");
   const [renderLimit, setRenderLimit] = useState(60);
   const searchRef = useRef<HTMLInputElement | null>(null);
+  const sentinelRef = useRef<HTMLDivElement | null>(null);
 
   // Pre-build search corpus once per data refresh. Per-keystroke
   // filter is then plain string.includes() — fast at 1k+ rows.
@@ -110,6 +111,24 @@ export default function WpCandidates({ embedded }: WpCandidatesProps = {}) {
 
   // Reset render window when filter narrows.
   useEffect(() => { setRenderLimit(60); }, [search, statusFilter, licenseFilter]);
+
+  // Infinite scroll — when the sentinel below the last row scrolls into
+  // view, bump the window by 100. Same pattern the Doctor Progress
+  // pipeline uses, just lazier (no network round-trip; we already have
+  // every row in memory). 200px rootMargin so we start rendering the
+  // next batch slightly before the user reaches the bottom — avoids a
+  // visible "Loading…" flicker on fast scrolls.
+  useEffect(() => {
+    const el = sentinelRef.current;
+    if (!el) return;
+    const io = new IntersectionObserver((entries) => {
+      for (const e of entries) {
+        if (e.isIntersecting) setRenderLimit(n => n + 100);
+      }
+    }, { rootMargin: "200px" });
+    io.observe(el);
+    return () => io.disconnect();
+  }, [sentinelRef.current, renderLimit]);
 
   // ⌘F to focus search.
   useEffect(() => {
@@ -268,15 +287,19 @@ export default function WpCandidates({ embedded }: WpCandidatesProps = {}) {
             ) : (
               <>
                 {filtered.slice(0, renderLimit).map(c => <CandidateRow key={c.id} candidate={c} highlight={search.trim().toLowerCase()} onOpen={() => setOpenDetailId(c.id)} />)}
-                {filtered.length > renderLimit && (
-                  <button
-                    type="button"
-                    onClick={() => setRenderLimit(n => n + 100)}
-                    className="w-full py-2 text-[11px] text-teal-700 hover:bg-slate-50 rounded-md border border-dashed"
-                  >
-                    Show {Math.min(100, filtered.length - renderLimit)} more · {filtered.length - renderLimit} remaining
-                  </button>
-                )}
+                {/* Sentinel — when this scrolls into view (200px before
+                    actually), bump the render window by 100. Once we're
+                    past the end, render a quiet 'All loaded' line. */}
+                {filtered.length > renderLimit ? (
+                  <div ref={sentinelRef} className="w-full py-3 flex items-center justify-center gap-2 text-[11px] text-muted-foreground">
+                    <Loader2 className="h-3 w-3 animate-spin" />
+                    Loading more · {filtered.length - renderLimit} remaining
+                  </div>
+                ) : filtered.length > 60 ? (
+                  <div className="w-full py-3 text-center text-[10px] text-muted-foreground/70">
+                    All {filtered.length.toLocaleString()} loaded
+                  </div>
+                ) : null}
               </>
             )}
           </CardContent>
