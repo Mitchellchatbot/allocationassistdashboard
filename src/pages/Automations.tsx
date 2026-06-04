@@ -36,7 +36,6 @@ import { ReassignButton } from "@/components/automations/ReassignButton";
 import { SendProfileDialog } from "@/components/automations/SendProfileDialog";
 import { TriggerFlowDialog } from "@/components/automations/TriggerFlowDialog";
 import { ClassifyReplyDialog } from "@/components/automations/ClassifyReplyDialog";
-import { Sparkles } from "lucide-react";
 import { lazy, Suspense } from "react";
 // Lazy-load the Contract Builder so opening the Sheet doesn't bloat the
 // Automations bundle. Only fetched when the user clicks "Send contract".
