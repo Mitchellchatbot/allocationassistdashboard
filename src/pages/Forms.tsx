@@ -32,7 +32,7 @@ import {
 import { useAuth } from "@/hooks/use-auth";
 import {
   useForms, useFormResponsesInfinite, useFormStats, useCreateForm, useUpdateForm, useDeleteForm,
-  useUpdateFormResponseOutreach,
+  useUpdateFormResponseOutreach, useBackfillFormCsv,
   type OutreachStatus,
   useSyncTypeformHistory, generateWebhookSecret,
   type Form, type FormResponse,
@@ -297,11 +297,23 @@ function FormDetail({ form }: { form: Form }) {
         <Kpi label="Last 7 days"       value={last7Days}  tone="sky" />
         <Kpi label="Last 30 days"      value={last30Days} tone="emerald" />
         <Kpi
-          label={paidPerLead > 0 ? `Open outreach · $${(paidPerLead * openOutreach).toLocaleString()} at stake` : "Open outreach"}
+          label="Open outreach"
           value={openOutreach}
           tone="amber"
           hint="new + contacted + qualified"
         />
+        {/* On a paid-lead form, total revenue collected is the most
+            useful headline next to the count — these are receipts, not
+            exposure. Hide it for the free Typeforms. */}
+        {paidPerLead > 0 && (
+          <Kpi
+            label={`Revenue from this form`}
+            value={paidPerLead * total}
+            tone="indigo"
+            format="currency"
+            hint={`${total.toLocaleString()} × $${paidPerLead.toLocaleString()}`}
+          />
+        )}
       </div>
 
       {/* Supercharged search + filters bar */}
@@ -473,11 +485,11 @@ function useDebounce<T>(value: T, delay: number): T {
 function SetupDialog({ form, open, onClose }: { form: Form; open: boolean; onClose: () => void }) {
   return (
     <Dialog open={open} onOpenChange={v => !v && onClose()}>
-      <DialogContent className="sm:max-w-[560px]">
+      <DialogContent className="sm:max-w-[600px] max-h-[88vh] overflow-y-auto">
         <DialogHeader>
           <DialogTitle className="flex items-center gap-2 text-[14px]">
             <Settings className="h-4 w-4 text-teal-600" />
-            {form.name} · Webhook setup
+            {form.name} · Setup
           </DialogTitle>
           <p className="text-[11px] text-muted-foreground">
             {form.provider === "typeform"
@@ -485,17 +497,88 @@ function SetupDialog({ form, open, onClose }: { form: Form; open: boolean; onClo
               : "Paste this URL into the Elementor form's 'Webhook' action. The key in the URL identifies this form — keep it secret."}
           </p>
         </DialogHeader>
-        <div className="space-y-3 py-1">
-          <FieldRow label="Webhook URL" value={webhookUrlFor(form)} />
-          {form.provider === "typeform" && (
-            <FieldRow label="Secret" value={form.webhook_secret ?? "(none)"} masked />
-          )}
+        <div className="space-y-4 py-1">
+          <div className="space-y-2">
+            <div className="text-[10px] uppercase tracking-wider text-slate-500 font-medium">Webhook</div>
+            <FieldRow label="Webhook URL" value={webhookUrlFor(form)} />
+            {form.provider === "typeform" && (
+              <FieldRow label="Secret" value={form.webhook_secret ?? "(none)"} masked />
+            )}
+          </div>
+          <BackfillCsvSection form={form} />
         </div>
         <DialogFooter>
           <Button variant="outline" onClick={onClose}>Done</Button>
         </DialogFooter>
       </DialogContent>
     </Dialog>
+  );
+}
+
+/** CSV import for backfilling historical submissions. Works for any
+ *  form — useful for the DoctorsFinder $750 leads where there's no
+ *  Typeform / Elementor history API to pull from, so a CSV export
+ *  from the source system is the only way in.
+ *
+ *  Column mapping is heuristic: standard 'email', 'phone', 'name',
+ *  'date' columns get auto-mapped; everything else lands in the
+ *  answers JSONB so the search bar still hits them. Re-running the
+ *  same import no-ops via a stable synthetic provider_response_id. */
+function BackfillCsvSection({ form }: { form: Form }) {
+  const backfill = useBackfillFormCsv();
+  const fileRef  = useRef<HTMLInputElement | null>(null);
+  const [preview, setPreview] = useState<{ count: number; firstHeaders: string[] } | null>(null);
+
+  const handlePick = () => fileRef.current?.click();
+
+  const handleFile = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+    e.target.value = "";
+
+    try {
+      // Parse with papaparse — header row becomes the keys.
+      const Papa = (await import("papaparse")).default;
+      const text = await file.text();
+      const parsed = Papa.parse<Record<string, string>>(text, { header: true, skipEmptyLines: "greedy" });
+      const rows = parsed.data.filter(r => Object.values(r).some(v => String(v ?? "").trim() !== ""));
+      if (rows.length === 0) {
+        toast.error("CSV had no data rows.");
+        return;
+      }
+
+      const firstHeaders = parsed.meta.fields?.slice(0, 6) ?? [];
+      setPreview({ count: rows.length, firstHeaders });
+
+      const result = await backfill.mutateAsync({ formId: form.id, rows });
+      toast.success(
+        `Imported ${result.inserted} response${result.inserted === 1 ? "" : "s"}${result.skipped ? ` · ${result.skipped} duplicates skipped` : ""}.`,
+        { duration: 9000 },
+      );
+    } catch (err) {
+      toast.error(err instanceof Error ? err.message : "CSV import failed");
+    }
+  };
+
+  return (
+    <div className="space-y-2">
+      <div className="text-[10px] uppercase tracking-wider text-slate-500 font-medium">Backfill historical submissions</div>
+      <p className="text-[11px] text-muted-foreground leading-relaxed">
+        Upload a CSV exported from wherever your historical submissions live (WordPress admin, WooCommerce export, payment processor, spreadsheet…). Columns are auto-mapped — anything called <code className="text-[10px] bg-slate-100 px-1 rounded">email</code>, <code className="text-[10px] bg-slate-100 px-1 rounded">name</code> (or <code className="text-[10px] bg-slate-100 px-1 rounded">first_name</code> + <code className="text-[10px] bg-slate-100 px-1 rounded">last_name</code>), <code className="text-[10px] bg-slate-100 px-1 rounded">phone</code>, <code className="text-[10px] bg-slate-100 px-1 rounded">date</code>/<code className="text-[10px] bg-slate-100 px-1 rounded">submitted_at</code> gets recognised; every other column becomes an answer. Re-running the same file is safe — duplicates are skipped.
+      </p>
+      <div className="flex items-center gap-2">
+        <Button size="sm" variant="outline" onClick={handlePick} disabled={backfill.isPending}>
+          {backfill.isPending ? <Loader2 className="h-3.5 w-3.5 mr-1 animate-spin" /> : <Download className="h-3.5 w-3.5 mr-1 rotate-180" />}
+          {backfill.isPending ? "Importing…" : "Upload CSV"}
+        </Button>
+        <input ref={fileRef} type="file" accept=".csv,text/csv" className="hidden" onChange={handleFile} />
+        {preview && (
+          <span className="text-[10px] text-muted-foreground">
+            Last upload: {preview.count.toLocaleString()} rows · cols: {preview.firstHeaders.join(", ")}{preview.firstHeaders.length >= 6 ? "…" : ""}
+          </span>
+        )}
+      </div>
+    </div>
   );
 }
 
@@ -627,17 +710,22 @@ function FieldRow({ label, value, masked = false }: { label: string; value: stri
   );
 }
 
-function Kpi({ label, value, tone, hint }: { label: string; value: number; tone: "slate" | "emerald" | "sky" | "indigo"; hint?: string }) {
+function Kpi({ label, value, tone, hint, format }: { label: string; value: number; tone: "slate" | "emerald" | "sky" | "indigo" | "amber"; hint?: string; format?: "number" | "currency" }) {
   const cls = {
     slate:   "bg-slate-50 text-slate-700",
     emerald: "bg-emerald-50 text-emerald-700",
     sky:     "bg-sky-50 text-sky-700",
     indigo:  "bg-indigo-50 text-indigo-700",
+    amber:   "bg-amber-50 text-amber-700",
   }[tone];
+  const display =
+    format === "currency"
+      ? `$${value.toLocaleString()}`
+      : value.toLocaleString();
   return (
     <div className={`rounded-md border ${cls} px-3 py-3`}>
       <div className="text-[10px] uppercase tracking-wider opacity-80">{label}</div>
-      <div className="text-[24px] font-semibold mt-1 leading-none">{value}</div>
+      <div className="text-[24px] font-semibold mt-1 leading-none tabular-nums">{display}</div>
       {hint && <div className="text-[10px] opacity-70 mt-1">{hint}</div>}
     </div>
   );
@@ -746,7 +834,7 @@ function ResponseRow({
             (DoctorsFinder = $750). Keeps high-value rows visually loud. */}
         {isPaid && (
           <Badge variant="outline" className="text-[9px] bg-amber-50 text-amber-800 border-amber-300 shrink-0 font-semibold">
-            <DollarSign className="h-2.5 w-2.5 mr-0.5" /> ${(leadValueCents / 100).toLocaleString()} paid lead
+            <DollarSign className="h-2.5 w-2.5 mr-0.5" /> ${(leadValueCents / 100).toLocaleString()} collected
           </Badge>
         )}
         {/* Outreach status pill */}

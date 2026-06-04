@@ -349,6 +349,144 @@ export function useUpdateFormResponseOutreach() {
   });
 }
 
+// ─── CSV backfill ─────────────────────────────────────────────────────
+
+/** Loose-CSV-row shape used by the backfill: just a header→value map.
+ *  Columns are auto-mapped — known names land on respondent_email etc.,
+ *  everything else is treated as a question/answer pair. */
+export interface BackfillCsvRow { [k: string]: string }
+
+export interface BackfillResult {
+  inserted: number;
+  skipped:  number;   // duplicate provider_response_id
+  total:    number;
+}
+
+/** Bulk-insert historical form submissions from a CSV. Maps columns
+ *  heuristically:
+ *   - email / e-mail / respondent_email → respondent_email
+ *   - name / full_name + first_name/last_name (combined) → respondent_name
+ *   - phone / mobile / tel / whatsapp → answers
+ *   - date / submitted_at / created_at / order_date / time → submitted_at
+ *   - everything else                                     → answers
+ *  Synthesises a provider_response_id by SHA-256 of email + submitted_at
+ *  + form_id so re-running the import is idempotent (duplicates ignored).
+ */
+export function useBackfillFormCsv() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: async ({ formId, rows }: { formId: string; rows: BackfillCsvRow[] }): Promise<BackfillResult> => {
+      // Build per-row form_response payloads.
+      const prepared = await Promise.all(rows.map(async (row) => {
+        const lower = Object.fromEntries(
+          Object.entries(row).map(([k, v]) => [normaliseColKey(k), String(v ?? "").trim()])
+        );
+        const email = pickFirst(lower, ["email", "emailaddress", "respondentemail"]);
+        const phone = pickFirst(lower, ["phone", "phonenumber", "mobile", "tel", "telephone", "whatsapp"]);
+        const first = pickFirst(lower, ["firstname", "fname", "givenname"]);
+        const last  = pickFirst(lower, ["lastname", "lname", "surname", "familyname"]);
+        const full  = pickFirst(lower, ["fullname", "name"]);
+        const dateRaw = pickFirst(lower, [
+          "submittedat", "submitteddate", "date", "createdat", "created", "orderdate", "ordertime", "timestamp", "time",
+        ]);
+
+        const respondent_name  = [first, last].filter(Boolean).join(" ").trim() || full || null;
+        const respondent_email = email || null;
+        const submitted_at     = parseDateMaybe(dateRaw) ?? new Date().toISOString();
+
+        // Everything else (anything we didn't claim) lands in answers.
+        const claimed = new Set([
+          "email", "emailaddress", "respondentemail",
+          "firstname", "fname", "givenname",
+          "lastname", "lname", "surname", "familyname",
+          "fullname", "name",
+          "submittedat", "submitteddate", "date", "createdat", "created", "orderdate", "ordertime", "timestamp", "time",
+        ]);
+        const answers: Record<string, string> = {};
+        for (const [origKey, val] of Object.entries(row)) {
+          if (!val) continue;
+          const n = normaliseColKey(origKey);
+          if (claimed.has(n)) continue;
+          answers[origKey] = String(val).trim();
+        }
+        // Phone is useful both as a top-level signal (for tap-to-call
+        // shortcuts) AND searchable — keep it in answers under its
+        // original key. The phoneFor() helper on the page will still
+        // pick it up.
+        if (phone && !Object.values(answers).includes(phone)) {
+          answers.Phone = phone;
+        }
+
+        // Synthetic provider_response_id — stable across re-runs of the
+        // same CSV so duplicate uploads no-op instead of double-counting.
+        const fingerprint = `${formId}|${respondent_email ?? ""}|${submitted_at}|${respondent_name ?? ""}`;
+        const provider_response_id = "csv:" + await sha256Hex(fingerprint);
+
+        return {
+          form_id:        formId,
+          provider_response_id,
+          submitted_at,
+          raw_payload:    row,
+          answers,
+          respondent_name,
+          respondent_email,
+          outreach_status: "new",
+        };
+      }));
+
+      // Bulk upsert in 500-row chunks. onConflict on (form_id,
+      // provider_response_id) lets us ignore duplicates without
+      // walking the rows twice.
+      const CHUNK = 500;
+      let inserted = 0;
+      for (let i = 0; i < prepared.length; i += CHUNK) {
+        const slice = prepared.slice(i, i + CHUNK);
+        const { error, data } = await supabase
+          .from("form_responses")
+          .upsert(slice, { onConflict: "form_id,provider_response_id", ignoreDuplicates: true })
+          .select("id");
+        if (error) throw error;
+        inserted += data?.length ?? 0;
+      }
+      return { inserted, skipped: prepared.length - inserted, total: prepared.length };
+    },
+    onSuccess: (_, vars) => {
+      qc.invalidateQueries({ queryKey: ["form-responses-infinite", vars.formId] });
+      qc.invalidateQueries({ queryKey: ["form-stats", vars.formId] });
+      qc.invalidateQueries({ queryKey: FORMS_KEY });
+    },
+  });
+}
+
+// ── helpers shared with the backfill ──────────────────────────────────
+
+function normaliseColKey(k: string): string {
+  return k.toLowerCase().replace(/[^a-z0-9]/g, "");
+}
+
+function pickFirst(map: Record<string, string>, keys: string[]): string {
+  for (const k of keys) if (map[k]) return map[k];
+  return "";
+}
+
+function parseDateMaybe(raw: string | null | undefined): string | null {
+  if (!raw) return null;
+  const s = String(raw).trim();
+  if (!s) return null;
+  // Try ISO first, fall back to Date constructor for anything human
+  // (e.g. "12/06/2026", "Jun 1, 2026 14:30"). Spreadsheets vary
+  // wildly here so we lean on the JS Date parser as a last resort.
+  const d = new Date(s);
+  if (!isNaN(d.valueOf())) return d.toISOString();
+  return null;
+}
+
+async function sha256Hex(input: string): Promise<string> {
+  const bytes = new TextEncoder().encode(input);
+  const hash  = await crypto.subtle.digest("SHA-256", bytes);
+  return Array.from(new Uint8Array(hash)).map(b => b.toString(16).padStart(2, "0")).join("");
+}
+
 /** Generate a strong random webhook secret (32 hex chars). Returned
  *  to the caller so they can show it to the user once + paste it into
  *  Typeform's webhook UI. */

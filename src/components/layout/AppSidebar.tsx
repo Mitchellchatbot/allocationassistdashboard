@@ -380,7 +380,16 @@ function NavRow({ item, collapsed, badgeCtx, accent }: { item: NavItem; collapse
           className="rounded-xl px-3 py-1.5 text-[13px] text-sidebar-foreground/75 hover:bg-sidebar-accent hover:text-sidebar-accent-foreground transition-colors"
           activeClassName="bg-sidebar-accent text-sidebar-primary font-medium"
         >
-          <item.icon className="mr-2.5 h-[15px] w-[15px] shrink-0" style={{ color: accent }} />
+          {/* Icon sits inside a small filled-circle that picks up the
+              section's accent colour. White glyph inside reads against
+              every accent we use. Slight soft shadow keeps the circles
+              from looking flat in the sidebar tint. */}
+          <span
+            className="mr-2.5 inline-flex h-6 w-6 items-center justify-center rounded-full shrink-0 shadow-sm ring-1 ring-white/40"
+            style={{ backgroundColor: accent }}
+          >
+            <item.icon className="h-[13px] w-[13px] text-white" />
+          </span>
           {!collapsed && <span className="flex-1">{item.title}</span>}
           {!collapsed && badge > 0 && (
             <span className="ml-auto inline-flex h-4 min-w-[16px] items-center justify-center rounded-full bg-rose-500 px-1 text-[9px] font-semibold text-white">
