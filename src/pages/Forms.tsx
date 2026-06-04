@@ -405,14 +405,16 @@ function FormDetail({ form }: { form: Form }) {
               value={outreachFilter}
               onChange={(v) => setOutreachFilter(v as typeof outreachFilter)}
               options={isPaidFormInit ? [
-                // Paid forms: Zoho-side buckets don't apply.
-                { value: "all",        label: "All outreach" },
-                { value: "mine",       label: "My queue" },
-                { value: "new",        label: "New" },
-                { value: "contacted",  label: "Contacted" },
-                { value: "qualified",  label: "Qualified" },
-                { value: "declined",   label: "Declined" },
-                { value: "closed",     label: "Closed" },
+                // Paid leads (DoctorsFinder) — minimal funnel: each row
+                // is a chunk of revenue the team works carefully. Drop
+                // 'Qualified' and 'Declined' (paid leads don't decline
+                // us — deals close-won or close-lost) and keep just
+                // the buckets the team actually moves things between.
+                { value: "all",       label: "All" },
+                { value: "mine",      label: "My queue" },
+                { value: "new",       label: "New" },
+                { value: "contacted", label: "Contacted" },
+                { value: "closed",    label: "Closed" },
               ] : [
                 { value: "uncontacted-zoho", label: "Uncontacted in Zoho" },
                 { value: "unqualified",      label: "Unqualified" },
