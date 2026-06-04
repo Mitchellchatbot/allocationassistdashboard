@@ -42,6 +42,22 @@ export interface WpCandidate {
   notice_period:       string | null;
   targeted_locations:  string[] | null;
   cv_url:              string | null;
+  photo_url:           string | null;
+
+  education_title:        string | null;
+  education_academy:      string | null;
+  education_start:        string | null;
+  education_end:          string | null;
+  education_present:      boolean | null;
+  education_description:  string | null;
+
+  experience_title:       string | null;
+  experience_company:     string | null;
+  experience_start:       string | null;
+  experience_end:         string | null;
+  experience_present:     boolean | null;
+  experience_description: string | null;
+
   doctor_id:           string | null;
   raw_acf:             Record<string, unknown> | null;
   wp_date:             string | null;

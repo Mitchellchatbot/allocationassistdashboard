@@ -16,8 +16,13 @@ import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "@/com
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Badge } from "@/components/ui/badge";
-import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from "@/components/ui/dialog";
-import { UserSquare, Search, RefreshCw, ExternalLink, ChevronRight, FileText, Link2, History } from "lucide-react";
+import { Dialog, DialogContent } from "@/components/ui/dialog";
+import {
+  UserSquare, Search, RefreshCw, ExternalLink, ChevronRight, FileText, Link2,
+  Phone, Mail, IdCard, MapPin, Stethoscope, BadgeCheck, Calendar, CalendarDays,
+  Briefcase, Award, Globe, Languages as LanguagesIcon, Users as UsersIcon,
+  Baby, Clock as ClockIcon, GraduationCap,
+} from "lucide-react";
 import { useWpCandidates, useSyncWpCandidates, useLinkWpCandidate, type WpCandidate } from "@/hooks/use-wp-candidates";
 import { toast } from "sonner";
 
@@ -226,9 +231,10 @@ function CandidateRow({ candidate, highlight }: { candidate: WpCandidate; highli
         <button
           type="button"
           onClick={() => setOpen(true)}
-          className="w-full flex items-center gap-2 px-3 py-2 text-left hover:bg-slate-50"
+          className="w-full flex items-center gap-2.5 px-3 py-2 text-left hover:bg-slate-50"
         >
           <ChevronRight className="h-3.5 w-3.5 text-slate-400 shrink-0" />
+          <Avatar src={candidate.photo_url} name={candidate.full_name ?? candidate.title ?? "?"} size={32} />
           <div className="flex-1 min-w-0">
             <div className="text-[12px] font-medium text-slate-800 truncate">
               <Hl text={candidate.full_name ?? candidate.title ?? "—"} q={highlight} />
@@ -257,100 +263,355 @@ function CandidateRow({ candidate, highlight }: { candidate: WpCandidate; highli
 function CandidateDetailDialog({ candidate, open, onClose }: { candidate: WpCandidate; open: boolean; onClose: () => void }) {
   const link = useLinkWpCandidate();
   const [doctorIdInput, setDoctorIdInput] = useState(candidate.doctor_id ?? "");
+  const [tab, setTab] = useState<"education" | "experience">("education");
+
+  // Reset linkage input when a different candidate opens.
+  useEffect(() => { setDoctorIdInput(candidate.doctor_id ?? ""); }, [candidate.doctor_id, candidate.id]);
 
   const saveLink = async () => {
     try {
       await link.mutateAsync({ id: candidate.id, doctorId: doctorIdInput.trim() || null });
       toast.success(doctorIdInput.trim() ? "Linked." : "Unlinked.");
-      onClose();
     } catch (e) {
       toast.error(e instanceof Error ? e.message : "Failed");
     }
   };
 
-  const Field = ({ label, value }: { label: string; value: string | number | string[] | null | undefined }) => {
-    if (value == null || value === "" || (Array.isArray(value) && value.length === 0)) return null;
-    return (
-      <div className="grid grid-cols-[140px_1fr] gap-3 text-[11px]">
-        <span className="text-muted-foreground">{label}</span>
-        <span className="text-slate-800 break-words">{Array.isArray(value) ? value.join(", ") : String(value)}</span>
-      </div>
-    );
-  };
+  const age          = ageFromDob(candidate.date_of_birth);
+  const dobPretty    = prettyDate(candidate.date_of_birth);
+  const memberSince  = prettyDate(candidate.wp_date);
+  const hasDeps      = candidate.has_dependents;
+  const hasEducation = !!(candidate.education_title || candidate.education_academy || candidate.education_description);
+  const hasExperience = !!(candidate.experience_title || candidate.experience_company || candidate.experience_description);
 
   return (
     <Dialog open={open} onOpenChange={v => !v && onClose()}>
-      <DialogContent className="sm:max-w-[640px] max-h-[88vh] overflow-y-auto">
-        <DialogHeader>
-          <DialogTitle className="flex items-center gap-2 text-[14px]">
-            <UserSquare className="h-4 w-4 text-teal-600" />
-            {candidate.full_name ?? candidate.title}
-          </DialogTitle>
-          <p className="text-[11px] text-muted-foreground">
-            {candidate.job_title ?? "—"}
-            {candidate.specialty && <> · {candidate.specialty}</>}
-          </p>
-        </DialogHeader>
+      <DialogContent className="sm:max-w-[1080px] max-h-[92vh] overflow-y-auto p-0">
+        <div className="p-5 md:p-7">
+          <div className="grid grid-cols-1 md:grid-cols-[280px_1fr] gap-6">
 
-        <div className="space-y-1 py-1">
-          <Field label="Email"               value={candidate.email} />
-          <Field label="Phone"               value={candidate.phone} />
-          <Field label="Date of birth"       value={candidate.date_of_birth} />
-          <Field label="Nationality"         value={candidate.nationality} />
-          <Field label="Specialty"           value={candidate.specialty} />
-          <Field label="Subspecialty"        value={candidate.subspecialty} />
-          <Field label="Area of interest"    value={candidate.area_of_interest} />
-          <Field label="Years experience"    value={candidate.years_experience} />
-          <Field label="License status"      value={candidate.license_status} />
-          <Field label="License types"       value={candidate.license_types} />
-          <Field label="Country of training" value={candidate.country_of_training} />
-          <Field label="Current location"    value={candidate.current_location} />
-          <Field label="Rank"                value={candidate.rank} />
-          <Field label="Languages"           value={candidate.languages} />
-          <Field label="English level"       value={candidate.english_level} />
-          <Field label="Current salary"      value={candidate.current_salary} />
-          <Field label="Expected salary"     value={candidate.expected_salary} />
-          <Field label="Notice period"       value={candidate.notice_period} />
-          <Field label="Targeted locations"  value={candidate.targeted_locations} />
-          <Field label="Family status"       value={candidate.family_status} />
-          <Field label="Has dependents"      value={candidate.has_dependents == null ? null : (candidate.has_dependents ? "Yes" : "No")} />
-          <Field label="Status"              value={candidate.status} />
-        </div>
+            {/* ── Left teal sidebar card ───────────────────────────────── */}
+            <div className="space-y-3">
+              <div className="rounded-2xl bg-gradient-to-b from-teal-400 to-teal-500 text-white p-5 shadow-sm">
+                <div className="flex justify-center">
+                  <Avatar src={candidate.photo_url} name={candidate.full_name ?? candidate.title ?? "?"} size={132} ring />
+                </div>
+                <div className="mt-4 text-center">
+                  <div className="text-[18px] font-semibold leading-tight">{candidate.full_name ?? candidate.title ?? "—"}</div>
+                  {candidate.job_title && (
+                    <div className="text-[12px] text-white/90 mt-1 leading-snug">{candidate.job_title}</div>
+                  )}
+                  {memberSince && (
+                    <div className="inline-flex mt-3 text-[10.5px] bg-white/15 rounded-full px-2.5 py-0.5">
+                      Member Since: {memberSince}
+                    </div>
+                  )}
+                </div>
 
-        <div className="space-y-2 border-t pt-3 mt-2">
-          <div className="text-[11px] font-medium text-slate-700">Link to AA doctor</div>
-          <div className="flex items-center gap-2">
-            <Input
-              value={doctorIdInput}
-              onChange={e => setDoctorIdInput(e.target.value)}
-              placeholder="lead:12345 or dob:67890 (or leave blank to unlink)"
-              className="h-9 text-[11px] font-mono"
-            />
-            <Button size="sm" onClick={saveLink} disabled={link.isPending}>
-              {link.isPending ? "Saving…" : "Save"}
-            </Button>
+                <div className="my-4 border-t border-white/25" />
+
+                <div className="space-y-2.5 text-[12px]">
+                  {age != null && (
+                    <div className="flex items-center justify-center gap-2">
+                      <span>Age: {age} Years Old</span>
+                    </div>
+                  )}
+                  {candidate.phone && (
+                    <ContactLine icon={<Phone className="h-3.5 w-3.5" />} value={candidate.phone} href={`tel:${candidate.phone}`} />
+                  )}
+                  {candidate.email && (
+                    <ContactLine icon={<Mail className="h-3.5 w-3.5" />} value={candidate.email} href={`mailto:${candidate.email}`} />
+                  )}
+                </div>
+              </div>
+
+              {/* Action buttons mirroring the WP layout */}
+              <div className="space-y-2">
+                {candidate.cv_url && (
+                  <a href={candidate.cv_url} target="_blank" rel="noreferrer" className="block">
+                    <Button variant="outline" className="w-full justify-center h-10 rounded-full border-slate-200 shadow-sm">
+                      <FileText className="h-4 w-4 mr-2" /> View Resume
+                    </Button>
+                  </a>
+                )}
+                <a href={candidate.wp_link} target="_blank" rel="noreferrer" className="block">
+                  <Button variant="outline" className="w-full justify-center h-10 rounded-full border-teal-200 text-teal-700 hover:bg-teal-50">
+                    <ExternalLink className="h-4 w-4 mr-2" /> View on WordPress
+                  </Button>
+                </a>
+                {candidate.email && (
+                  <a href={`mailto:${candidate.email}`} className="block">
+                    <Button className="w-full justify-center h-10 rounded-full bg-slate-900 hover:bg-slate-800">
+                      <Mail className="h-4 w-4 mr-2" /> Contact
+                    </Button>
+                  </a>
+                )}
+              </div>
+
+              {/* Manual AA linkage stays here — admin-only thing, tucked
+                  under the contact buttons so the card still reads like a
+                  profile card and not a CRM form. */}
+              <div className="rounded-xl border border-slate-200 bg-slate-50/50 p-3 space-y-1.5">
+                <div className="text-[10.5px] font-medium text-slate-600 uppercase tracking-wider">Link to AA doctor</div>
+                <div className="flex items-center gap-2">
+                  <Input
+                    value={doctorIdInput}
+                    onChange={e => setDoctorIdInput(e.target.value)}
+                    placeholder="lead:12345 / dob:6789"
+                    className="h-8 text-[11px] font-mono bg-white"
+                  />
+                  <Button size="sm" className="h-8" onClick={saveLink} disabled={link.isPending}>
+                    {link.isPending ? "…" : "Save"}
+                  </Button>
+                </div>
+                {candidate.doctor_id && (
+                  <div className="text-[10px] text-emerald-700 flex items-center gap-1">
+                    <Link2 className="h-2.5 w-2.5" /> Currently linked to <span className="font-mono">{candidate.doctor_id}</span>
+                  </div>
+                )}
+              </div>
+            </div>
+
+            {/* ── Right detail pane ────────────────────────────────────── */}
+            <div className="space-y-5">
+              <div>
+                <h2 className="text-[22px] md:text-[26px] font-semibold text-slate-900 leading-tight">
+                  {prefixedTitle(candidate)}
+                </h2>
+                {candidate.area_of_interest && (
+                  <>
+                    <p className="mt-3 text-[14px] text-slate-600">Specific areas of interests within the specialization</p>
+                    <div className="mt-1 h-px bg-gradient-to-r from-teal-300 to-transparent" />
+                    <p className="mt-2 text-[13px] text-slate-700">{candidate.area_of_interest}</p>
+                  </>
+                )}
+              </div>
+
+              {/* Stat tile grid */}
+              <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-x-5 gap-y-4">
+                <InfoTile icon={<IdCard className="h-4 w-4" />}        label="Age"                          value={age != null ? `${age} years old` : null} />
+                <InfoTile icon={<Globe className="h-4 w-4" />}         label="Nationality"                  value={candidate.nationality} />
+                <InfoTile icon={<Calendar className="h-4 w-4" />}      label="Date of Birth"                value={dobPretty} />
+                <InfoTile icon={<Stethoscope className="h-4 w-4" />}   label="Specialty"                    value={[candidate.specialty, candidate.subspecialty].filter(Boolean).join(" / ") || null} />
+                <InfoTile icon={<BadgeCheck className="h-4 w-4" />}    label="Specialist / Consultant"      value={candidate.rank} />
+                <InfoTile icon={<CalendarDays className="h-4 w-4" />}  label="Years of Experience"          value={candidate.years_experience != null ? `${candidate.years_experience} Years` : null} />
+                <InfoTile icon={<Award className="h-4 w-4" />}         label="DHA / DOH / MOH / SCFHS / QCHP Licenses?" value={licenseSummary(candidate)} />
+                <InfoTile icon={<ClockIcon className="h-4 w-4" />}     label="Notice Period"                value={candidate.notice_period} />
+                <InfoTile icon={<MapPin className="h-4 w-4" />}        label="Targeted Location"            value={(candidate.targeted_locations ?? []).join(", ") || null} />
+                <InfoTile icon={<LanguagesIcon className="h-4 w-4" />} label="Languages"                    value={candidate.languages} />
+                <InfoTile icon={<LanguagesIcon className="h-4 w-4" />} label="English Level"                value={candidate.english_level} />
+                <InfoTile icon={<UsersIcon className="h-4 w-4" />}     label="Family Status"                value={candidate.family_status} />
+                <InfoTile icon={<Baby className="h-4 w-4" />}          label="Have Children / Dependent"    value={hasDeps == null ? null : (hasDeps ? "Yes" : "No")} />
+                <InfoTile icon={<MapPin className="h-4 w-4" />}        label="Country of Training"          value={candidate.country_of_training} />
+                <InfoTile icon={<MapPin className="h-4 w-4" />}        label="Current Location"             value={candidate.current_location} />
+              </div>
+
+              {/* Education / Experience tabs */}
+              {(hasEducation || hasExperience) && (
+                <div className="rounded-xl border border-slate-200 overflow-hidden">
+                  <div className="grid grid-cols-2">
+                    <TabBtn active={tab === "education"}  onClick={() => setTab("education")}  disabled={!hasEducation}>Education</TabBtn>
+                    <TabBtn active={tab === "experience"} onClick={() => setTab("experience")} disabled={!hasExperience}>Experience</TabBtn>
+                  </div>
+                  <div className="p-5 bg-white">
+                    {tab === "education" && hasEducation && (
+                      <TimelineEntry
+                        title={candidate.education_title}
+                        org={candidate.education_academy}
+                        start={candidate.education_start}
+                        end={candidate.education_end}
+                        present={candidate.education_present}
+                        description={candidate.education_description}
+                        leadIcon={<GraduationCap className="h-4 w-4 text-teal-600" />}
+                        leadLabel="Specialty Training:"
+                      />
+                    )}
+                    {tab === "experience" && hasExperience && (
+                      <TimelineEntry
+                        title={candidate.experience_title}
+                        org={candidate.experience_company}
+                        start={candidate.experience_start}
+                        end={candidate.experience_end}
+                        present={candidate.experience_present}
+                        description={candidate.experience_description}
+                        leadIcon={<Briefcase className="h-4 w-4 text-teal-600" />}
+                        leadLabel="Role:"
+                      />
+                    )}
+                  </div>
+                </div>
+              )}
+
+              {/* Status chip row — admin-y info that the WP card doesn't show but we want internally */}
+              <div className="flex flex-wrap items-center gap-1.5 pt-2">
+                {candidate.license_types?.map(l => (
+                  <Badge key={l} variant="outline" className="text-[10px] bg-sky-50 text-sky-700 border-sky-200">{l}</Badge>
+                ))}
+                {candidate.status && (
+                  <Badge variant="outline" className={`text-[10px] ${
+                    candidate.status === "publish" ? "bg-emerald-50 text-emerald-700 border-emerald-200" :
+                    candidate.status === "private" ? "bg-amber-50 text-amber-700 border-amber-200" :
+                    "bg-slate-50 text-slate-700 border-slate-200"
+                  }`}>{candidate.status}</Badge>
+                )}
+                {candidate.current_salary && <Badge variant="outline" className="text-[10px]">Current: {candidate.current_salary}</Badge>}
+                {candidate.expected_salary && <Badge variant="outline" className="text-[10px]">Expected: {candidate.expected_salary}</Badge>}
+              </div>
+            </div>
           </div>
-          <p className="text-[10px] text-muted-foreground">Use the lead:/dob: prefix that other parts of the dashboard use.</p>
         </div>
-
-        <DialogFooter>
-          <a href={candidate.wp_link} target="_blank" rel="noreferrer">
-            <Button variant="outline" size="sm">
-              <ExternalLink className="h-3.5 w-3.5 mr-1" /> View on WordPress
-            </Button>
-          </a>
-          {candidate.cv_url && (
-            <a href={candidate.cv_url} target="_blank" rel="noreferrer">
-              <Button variant="outline" size="sm">
-                <FileText className="h-3.5 w-3.5 mr-1" /> CV
-              </Button>
-            </a>
-          )}
-          <Button onClick={onClose}>Close</Button>
-        </DialogFooter>
       </DialogContent>
     </Dialog>
   );
+}
+
+/** Square-ish circular avatar with initials fallback. Matches the teal
+ *  WP profile-card ring when `ring` is on. */
+function Avatar({ src, name, size, ring }: { src: string | null; name: string; size: number; ring?: boolean }) {
+  const [errored, setErrored] = useState(false);
+  const initials = name.replace(/^Dr\.?\s+/i, "").split(/\s+/).map(s => s[0]).filter(Boolean).slice(0, 2).join("").toUpperCase() || "?";
+  const showImage = src && !errored;
+  const ringClass = ring ? "ring-4 ring-white/40 shadow-lg" : "";
+  return (
+    <div
+      style={{ width: size, height: size }}
+      className={`rounded-full bg-slate-200 overflow-hidden flex items-center justify-center text-slate-600 font-medium shrink-0 ${ringClass}`}
+    >
+      {showImage ? (
+        <img
+          src={src!}
+          alt={name}
+          width={size}
+          height={size}
+          onError={() => setErrored(true)}
+          className="w-full h-full object-cover"
+        />
+      ) : (
+        <span style={{ fontSize: Math.max(10, size * 0.32) }}>{initials}</span>
+      )}
+    </div>
+  );
+}
+
+function ContactLine({ icon, value, href }: { icon: React.ReactNode; value: string; href: string }) {
+  return (
+    <a href={href} className="flex items-center justify-center gap-2 text-white/95 hover:text-white">
+      <span className="inline-flex items-center justify-center h-5 w-5 rounded-full bg-white/15">{icon}</span>
+      <span className="truncate">{value}</span>
+    </a>
+  );
+}
+
+function InfoTile({ icon, label, value }: { icon: React.ReactNode; label: string; value: string | number | null | undefined }) {
+  const display = value == null || value === "" ? "—" : String(value);
+  const muted   = display === "—";
+  return (
+    <div className="flex items-start gap-3">
+      <div className="h-9 w-9 rounded-full bg-slate-100 text-slate-500 flex items-center justify-center shrink-0">{icon}</div>
+      <div className="min-w-0">
+        <div className="text-[11px] text-slate-500">{label}</div>
+        <div className={`text-[13px] mt-0.5 break-words ${muted ? "text-slate-400" : "text-slate-800"}`}>{display}</div>
+      </div>
+    </div>
+  );
+}
+
+function TabBtn({ active, onClick, disabled, children }: { active: boolean; onClick: () => void; disabled?: boolean; children: React.ReactNode }) {
+  return (
+    <button
+      type="button"
+      onClick={onClick}
+      disabled={disabled}
+      className={`py-3 text-[12px] font-medium tracking-wider uppercase transition-colors ${
+        disabled ? "bg-slate-50 text-slate-300 cursor-not-allowed"
+        : active   ? "bg-teal-600 text-white"
+        :            "bg-slate-50 text-slate-600 hover:bg-slate-100"
+      }`}
+    >
+      {children}
+    </button>
+  );
+}
+
+function TimelineEntry({ title, org, start, end, present, description, leadIcon, leadLabel }: {
+  title: string | null; org: string | null; start: string | null; end: string | null;
+  present: boolean | null; description: string | null;
+  leadIcon: React.ReactNode; leadLabel: string;
+}) {
+  const range = formatRange(start, end, present);
+  return (
+    <div className="space-y-1.5">
+      {title && (
+        <div className="text-[15px] text-slate-900 leading-snug">
+          <span className="inline-flex items-center gap-1.5 font-semibold">{leadIcon}{leadLabel}</span>{" "}
+          <span>{title}</span>
+        </div>
+      )}
+      {org && <div className="text-[14px] text-teal-600 font-medium">{org}</div>}
+      {range && <div className="text-[12px] text-slate-500">{range}</div>}
+      {description && <div className="text-[12.5px] text-slate-700 whitespace-pre-line">Description: {description}</div>}
+      {!description && org && !title && <div className="text-[12px] text-slate-500">Description: {org}</div>}
+    </div>
+  );
+}
+
+// ─── small formatters ─────────────────────────────────────────────────
+
+function prefixedTitle(c: WpCandidate): string {
+  // Prefer the WP-rendered post title (already has the "Dr. X – Consultant in …" shape).
+  const t = (c.title ?? "").trim();
+  if (t) return t;
+  const parts = [c.full_name, c.job_title].filter(Boolean) as string[];
+  return parts.join(" – ") || "Candidate";
+}
+
+function ageFromDob(dob: string | null): number | null {
+  if (!dob) return null;
+  // Accept "19870904", "1987-09-04", "4 September 1987" — try them in order.
+  let d: Date | null = null;
+  if (/^\d{8}$/.test(dob))                      d = new Date(`${dob.slice(0, 4)}-${dob.slice(4, 6)}-${dob.slice(6, 8)}`);
+  else if (/^\d{4}-\d{2}-\d{2}/.test(dob))      d = new Date(dob);
+  else                                          { const parsed = new Date(dob); if (!isNaN(parsed.valueOf())) d = parsed; }
+  if (!d || isNaN(d.valueOf())) return null;
+  const now = new Date();
+  let age = now.getFullYear() - d.getFullYear();
+  const m = now.getMonth() - d.getMonth();
+  if (m < 0 || (m === 0 && now.getDate() < d.getDate())) age--;
+  return age >= 0 && age < 120 ? age : null;
+}
+
+function prettyDate(raw: string | null): string | null {
+  if (!raw) return null;
+  let d: Date | null = null;
+  if (/^\d{8}$/.test(raw))                 d = new Date(`${raw.slice(0, 4)}-${raw.slice(4, 6)}-${raw.slice(6, 8)}`);
+  else                                     { const parsed = new Date(raw); if (!isNaN(parsed.valueOf())) d = parsed; }
+  if (!d || isNaN(d.valueOf())) return raw;
+  return d.toLocaleDateString("en-GB", { day: "numeric", month: "long", year: "numeric" });
+}
+
+function formatRange(start: string | null, end: string | null, present: boolean | null): string {
+  const s = prettyMonthYear(start);
+  const e = present ? "Present" : prettyMonthYear(end);
+  if (s && e) return `${s} – ${e}`;
+  if (s)      return present ? `${s} – Present` : s;
+  if (e)      return e;
+  return present ? "Present" : "";
+}
+
+function prettyMonthYear(raw: string | null): string | null {
+  if (!raw) return null;
+  let d: Date | null = null;
+  if (/^\d{8}$/.test(raw))            d = new Date(`${raw.slice(0, 4)}-${raw.slice(4, 6)}-${raw.slice(6, 8)}`);
+  else                                { const parsed = new Date(raw); if (!isNaN(parsed.valueOf())) d = parsed; }
+  if (!d || isNaN(d.valueOf())) return raw;
+  return d.toLocaleDateString("en-GB", { month: "short", year: "numeric" });
+}
+
+function licenseSummary(c: WpCandidate): string | null {
+  // Prefer the human-written "DHA, DOH & MOH in process" field if present.
+  if (c.license_status) return c.license_status;
+  if (c.license_types?.length) return c.license_types.join(", ");
+  return null;
 }
 
 function Kpi({ label, value, tone, hint }: { label: string; value: number; tone: "slate" | "emerald" | "amber" | "sky" | "indigo"; hint?: string }) {

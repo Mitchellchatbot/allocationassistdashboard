@@ -61,6 +61,28 @@ interface CandidateAcf {
   notice_period?:   string;
   targeted_locations?: Array<string | { name?: string }>;
   cv_resume?:       string | { url?: string };
+
+  // Profile picture is stored as a WP attachment ID (or, if ACF return
+  // format is "Image Object", a {id, url, sizes} object). Either way
+  // we resolve to source_url via the /wp/v2/media endpoint.
+  profile_picture?: number | string | { id?: number; url?: string; source_url?: string };
+
+  // Single education slot — the WP CPT doesn't use a real ACF repeater.
+  academy1?:        string;
+  title1?:          string;
+  start_date1?:     string;
+  end_date1?:       string;
+  present1?:        string | boolean;
+  description1?:    string;
+
+  // Single experience slot.
+  company2?:        string;
+  title2?:          string;
+  start_date_2?:    string;
+  end_date2?:       string;
+  present2?:        string | boolean;
+  description2?:    string;
+
   [k: string]: unknown;
 }
 
@@ -118,6 +140,16 @@ Deno.serve(async (req: Request) => {
     if (!Array.isArray(items) || items.length === 0) break;
     fetched += items.length;
 
+    // Collect profile_picture attachment IDs on this page so we can
+    // batch-resolve them with one /wp/v2/media call instead of N.
+    const mediaIds = new Set<number>();
+    for (const c of items) {
+      const pp = c.acf?.profile_picture;
+      if (typeof pp === "number") mediaIds.add(pp);
+      else if (typeof pp === "string" && /^\d+$/.test(pp)) mediaIds.add(parseInt(pp, 10));
+    }
+    const mediaMap = await resolveMedia([...mediaIds], basic);
+
     // Flatten + bulk upsert per page.
     const rows = items.map(c => {
       const a = c.acf ?? {};
@@ -138,6 +170,21 @@ Deno.serve(async (req: Request) => {
       const cvUrl = typeof a.cv_resume === "string"
         ? a.cv_resume
         : (a.cv_resume?.url ?? null);
+
+      // Resolve profile picture — accept either a media ID, a string ID,
+      // or an ACF image object that already carries source_url/url.
+      let photoUrl: string | null = null;
+      const pp = a.profile_picture;
+      if (typeof pp === "number")                                  photoUrl = mediaMap.get(pp) ?? null;
+      else if (typeof pp === "string" && /^\d+$/.test(pp))         photoUrl = mediaMap.get(parseInt(pp, 10)) ?? null;
+      else if (pp && typeof pp === "object")                       photoUrl = (pp.source_url || pp.url) ?? null;
+
+      const eduPresent = typeof a.present1 === "boolean"
+        ? a.present1
+        : /yes|true|1/i.test(String(a.present1 ?? ""));
+      const expPresent = typeof a.present2 === "boolean"
+        ? a.present2
+        : /yes|true|1/i.test(String(a.present2 ?? ""));
 
       return {
         id:                 c.id,
@@ -169,6 +216,22 @@ Deno.serve(async (req: Request) => {
         notice_period:      a.notice_period ?? null,
         targeted_locations: targeted,
         cv_url:             cvUrl,
+        photo_url:          photoUrl,
+
+        education_title:       a.title1       ? String(a.title1).trim() : null,
+        education_academy:     a.academy1     ? String(a.academy1).trim() : null,
+        education_start:       a.start_date1 ?? null,
+        education_end:         a.end_date1   ?? null,
+        education_present:     eduPresent,
+        education_description: a.description1 ? String(a.description1).trim() : null,
+
+        experience_title:       a.title2       ? String(a.title2).trim() : null,
+        experience_company:     a.company2     ? String(a.company2).trim() : null,
+        experience_start:       a.start_date_2 ?? null,
+        experience_end:         a.end_date2    ?? null,
+        experience_present:     expPresent,
+        experience_description: a.description2 ? String(a.description2).trim() : null,
+
         raw_acf:            a as Record<string, unknown>,
         wp_date:            c.date     ?? null,
         wp_modified:        c.modified ?? null,
@@ -205,4 +268,30 @@ function json(payload: unknown, status: number): Response {
     status,
     headers: { ...CORS, "Content-Type": "application/json" },
   });
+}
+
+/** Batch-resolve attachment IDs → source_url via /wp/v2/media?include[]=…
+ *  WP caps include[] at 100 per request, so chunk if needed. Returns a
+ *  Map keyed by attachment id; missing IDs are silently absent. */
+async function resolveMedia(ids: number[], basic: string): Promise<Map<number, string>> {
+  const out = new Map<number, string>();
+  if (!ids.length) return out;
+  const CHUNK = 100;
+  for (let i = 0; i < ids.length; i += CHUNK) {
+    const slice = ids.slice(i, i + CHUNK);
+    const qs = slice.map(id => `include[]=${id}`).join("&");
+    const url = `${wpBaseUrl}/wp-json/wp/v2/media?per_page=100&_fields=id,source_url&${qs}`;
+    try {
+      const res = await fetch(url, { headers: { Authorization: basic, Accept: "application/json" } });
+      if (!res.ok) {
+        console.warn("[wordpress-candidates-sync] media batch failed", res.status, await res.text().catch(() => ""));
+        continue;
+      }
+      const arr = await res.json() as Array<{ id: number; source_url: string }>;
+      for (const m of arr) if (m?.id && m.source_url) out.set(m.id, m.source_url);
+    } catch (err) {
+      console.warn("[wordpress-candidates-sync] media batch error", err);
+    }
+  }
+  return out;
 }
