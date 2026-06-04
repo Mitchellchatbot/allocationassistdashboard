@@ -135,7 +135,6 @@ function FormDetail({ form }: { form: Form }) {
   const [searchRaw, setSearchRaw] = useState("");
   const search = useDebounce(searchRaw, 250);
   const [dateFilter, setDateFilter] = useState<"all" | "7d" | "30d" | "90d">("all");
-  const [linkFilter, setLinkFilter] = useState<"all" | "linked" | "unlinked">("all");
   const [sortDir, setSortDir]       = useState<"newest" | "oldest">("newest");
 
   // Server-side paginated + filtered feed. First page is 200 rows; each
@@ -144,7 +143,6 @@ function FormDetail({ form }: { form: Form }) {
   const feed = useFormResponsesInfinite(form.id, {
     search: search.trim(),
     date:   dateFilter,
-    link:   linkFilter,
     sort:   sortDir,
   });
   const responses = useMemo(
@@ -322,17 +320,6 @@ function FormDetail({ form }: { form: Form }) {
               ]}
             />
             <span className="text-muted-foreground/40">·</span>
-            {/* Zoho link chips */}
-            <FilterChipGroup
-              value={linkFilter}
-              onChange={(v) => setLinkFilter(v as typeof linkFilter)}
-              options={[
-                { value: "all",      label: "All" },
-                { value: "linked",   label: "Zoho-linked" },
-                { value: "unlinked", label: "Unlinked" },
-              ]}
-            />
-            <span className="text-muted-foreground/40">·</span>
             {/* Sort */}
             <FilterChipGroup
               value={sortDir}
@@ -357,11 +344,11 @@ function FormDetail({ form }: { form: Form }) {
           {isLoading ? (
             <p className="text-[11px] text-muted-foreground py-2">Loading submissions…</p>
           ) : responses.length === 0 ? (
-            isSearching || dateFilter !== "all" || linkFilter !== "all" ? (
+            isSearching || dateFilter !== "all" ? (
               <div className="rounded-md border border-dashed py-8 text-center">
                 <Search className="h-5 w-5 mx-auto mb-2 text-muted-foreground/60" />
                 <p className="text-[12px] text-muted-foreground">No matches for the current filter.</p>
-                <button onClick={() => { setSearchRaw(""); setDateFilter("all"); setLinkFilter("all"); }} className="text-[11px] text-teal-700 hover:underline mt-1">
+                <button onClick={() => { setSearchRaw(""); setDateFilter("all"); }} className="text-[11px] text-teal-700 hover:underline mt-1">
                   Clear filters
                 </button>
               </div>
