@@ -308,6 +308,25 @@ export function useDeleteForm() {
   });
 }
 
+/** Stamp a doctor_id onto a form_response (used after manually creating
+ *  a Zoho lead from an unlinked response, or for ad-hoc linkage). */
+export function useLinkFormResponseToDoctor() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: async ({ responseId, doctorId }: { responseId: string; doctorId: string | null }) => {
+      const { error } = await supabase
+        .from("form_responses")
+        .update({ doctor_id: doctorId })
+        .eq("id", responseId);
+      if (error) throw error;
+    },
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ["form-responses-infinite"] });
+      qc.invalidateQueries({ queryKey: ["form-stats"] });
+    },
+  });
+}
+
 /** Patch a single response's outreach state. Any field can be omitted —
  *  the mutation only writes what was passed. `markContactedNow: true` is
  *  syntactic sugar that bumps last_contacted_at to now() in the same call

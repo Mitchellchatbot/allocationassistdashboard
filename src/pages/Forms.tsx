@@ -30,9 +30,13 @@ import {
   Search, Download, Loader2, Phone, DollarSign, CalendarClock, Save,
 } from "lucide-react";
 import { useAuth } from "@/hooks/use-auth";
+import { useZohoData, type ZohoLead } from "@/hooks/use-zoho-data";
+import { zohoPut, zohoPost } from "@/lib/zoho";
+import { useQueryClient } from "@tanstack/react-query";
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import {
   useForms, useFormResponsesInfinite, useFormStats, useCreateForm, useUpdateForm, useDeleteForm,
-  useUpdateFormResponseOutreach, useBackfillFormCsv,
+  useUpdateFormResponseOutreach, useBackfillFormCsv, useLinkFormResponseToDoctor,
   type OutreachStatus,
   useSyncTypeformHistory, generateWebhookSecret,
   type Form, type FormResponse,
@@ -412,7 +416,14 @@ function FormDetail({ form }: { form: Form }) {
           ) : (
             <>
               {responses.map(r => (
-                <ResponseRow key={r.id} response={r} highlight={search.trim().toLowerCase()} leadValueCents={form.lead_value_cents ?? 0} />
+                <ResponseRow
+                  key={r.id}
+                  response={r}
+                  highlight={search.trim().toLowerCase()}
+                  leadValueCents={form.lead_value_cents ?? 0}
+                  formType={form.form_type}
+                  formProvider={form.provider}
+                />
               ))}
               {/* Infinite-scroll sentinel — fires fetchNextPage() ~300px
                   before reaching the bottom so there's no perceptible
@@ -785,11 +796,13 @@ const OUTREACH_STYLE: Record<OutreachStatus, { label: string; className: string 
 };
 
 function ResponseRow({
-  response, highlight = "", leadValueCents = 0,
+  response, highlight = "", leadValueCents = 0, formType, formProvider,
 }: {
   response: FormResponse;
   highlight?: string;
   leadValueCents?: number;
+  formType?: string;
+  formProvider?: string;
 }) {
   const [open, setOpen] = useState(false);
   const entries = Object.entries(response.answers ?? {});
@@ -846,10 +859,19 @@ function ResponseRow({
             <CalendarClock className="h-2.5 w-2.5 mr-0.5" /> follow-up due
           </Badge>
         )}
-        {response.doctor_id && (
+        {response.doctor_id ? (
           <Badge variant="outline" className="text-[9px] bg-emerald-50 text-emerald-700 border-emerald-200 shrink-0">
-            <Sparkles className="h-2.5 w-2.5 mr-0.5" /> Zoho linked
+            <Sparkles className="h-2.5 w-2.5 mr-0.5" /> in Zoho
           </Badge>
+        ) : (
+          // Form was supposed to create a Zoho lead automatically. No
+          // match = the respondent never made it to the CRM — Saif's
+          // shorthand for an unqualified submission.
+          leadValueCents === 0 && (formProvider === "typeform" || (formProvider === "elementor" && formType !== "doctors_finder")) && (
+            <Badge variant="outline" className="text-[9px] bg-slate-100 text-slate-500 border-slate-200 shrink-0" title="No matching Zoho lead — likely an unqualified submission">
+              not in Zoho
+            </Badge>
+          )
         )}
         <div className="text-[10px] text-muted-foreground shrink-0">{relativeTime(response.submitted_at)}</div>
       </button>
@@ -857,7 +879,13 @@ function ResponseRow({
         <div className="border-t bg-slate-50/30 px-3 py-2 space-y-3">
           {/* Outreach panel — keeps the team's working state on the
               same surface as the data. */}
-          <OutreachPanel response={response} email={response.respondent_email} phone={phone} />
+          <OutreachPanel
+            response={response}
+            email={response.respondent_email}
+            phone={phone}
+            displayName={display.label}
+            expectedInZoho={leadValueCents === 0}
+          />
 
           {/* Answers dump */}
           <div className="space-y-1">
@@ -888,11 +916,13 @@ function ResponseRow({
  *  date, last-contacted stamp. Every change is a partial PATCH; tiny
  *  spinner shows while saving, green check on success. */
 function OutreachPanel({
-  response, email, phone,
+  response, email, phone, displayName, expectedInZoho,
 }: {
   response: FormResponse;
   email: string | null;
   phone: string | null;
+  displayName: string;
+  expectedInZoho: boolean;
 }) {
   const upd = useUpdateFormResponseOutreach();
   const { user } = useAuth();
@@ -1019,6 +1049,186 @@ function OutreachPanel({
             </div>
           )}
         </div>
+      </div>
+
+      {/* Zoho CRM block — show the linked lead's status (editable) or,
+          if no Zoho lead exists yet, offer to create one (only on forms
+          where Zoho is expected — free-signal forms). */}
+      <ZohoBlock
+        responseId={response.id}
+        doctorId={response.doctor_id}
+        email={email}
+        phone={phone}
+        displayName={displayName}
+        expectedInZoho={expectedInZoho}
+      />
+    </div>
+  );
+}
+
+/** Renders the Zoho-CRM bit of an outreach panel. Three states:
+ *   - Linked (doctor_id starts with 'lead:'): show current Lead_Status +
+ *     dropdown. Change fires zohoPut + invalidates the zoho-data cache so
+ *     Doctor Progress reflects it within a beat.
+ *   - Unlinked + expected: offer 'Create Zoho lead' button. POSTs a
+ *     minimal lead (Last_Name, Email, Phone, Description=notes) then
+ *     stamps the new id back as doctor_id so this response shows as
+ *     linked next render.
+ *   - Unlinked + not expected (e.g. DoctorsFinder paid leads): renders
+ *     nothing — these forms don't feed Zoho. */
+function ZohoBlock({
+  responseId, doctorId, email, phone, displayName, expectedInZoho,
+}: {
+  responseId: string;
+  doctorId: string | null;
+  email: string | null;
+  phone: string | null;
+  displayName: string;
+  expectedInZoho: boolean;
+}) {
+  const { data: zoho } = useZohoData();
+  const link = useLinkFormResponseToDoctor();
+  const qc = useQueryClient();
+  const [busy, setBusy] = useState(false);
+
+  const linkedZohoId = doctorId?.startsWith("lead:") ? doctorId.slice(5) : null;
+  const lead = useMemo<ZohoLead | null>(() => {
+    if (!linkedZohoId) return null;
+    const all = (zoho as { rawLeads?: ZohoLead[] } | undefined)?.rawLeads ?? [];
+    return all.find(l => l.id === linkedZohoId) ?? null;
+  }, [linkedZohoId, zoho]);
+
+  const leadStatuses = useMemo(() => {
+    const seen = new Set<string>();
+    for (const l of (zoho as { rawLeads?: ZohoLead[] } | undefined)?.rawLeads ?? []) {
+      if (l.Lead_Status) seen.add(l.Lead_Status);
+    }
+    return Array.from(seen).sort();
+  }, [zoho]);
+
+  // ─── Linked: status dropdown ─────────────────────────────────────────
+  if (lead) {
+    const setStatus = async (newStatus: string) => {
+      if (newStatus === lead.Lead_Status) return;
+      setBusy(true);
+      try {
+        await zohoPut(`Leads/${lead.id}`, { data: [{ Lead_Status: newStatus }] });
+        // Patch the local zoho cache so Doctor Progress / KPIs reflect
+        // it on next render without a full re-fetch.
+        qc.setQueryData<unknown>(["zoho-data"], (prev) => {
+          const data = prev as { rawLeads?: ZohoLead[] } | undefined;
+          if (!data?.rawLeads) return prev;
+          return {
+            ...data,
+            rawLeads: data.rawLeads.map(l => l.id === lead.id ? { ...l, Lead_Status: newStatus } : l),
+          };
+        });
+        toast.success(`Zoho lead status → ${newStatus}.`);
+      } catch (e) {
+        toast.error(e instanceof Error ? e.message : "Couldn't update Zoho");
+      } finally { setBusy(false); }
+    };
+    return (
+      <div className="border-t border-slate-100 pt-2 mt-1">
+        <div className="flex items-center gap-2 flex-wrap text-[10.5px]">
+          <span className="text-slate-500 inline-flex items-center gap-1">
+            <Sparkles className="h-3 w-3 text-emerald-600" />
+            Zoho lead
+          </span>
+          <code className="text-[10px] bg-slate-100 px-1 rounded">{doctorId}</code>
+          <span className="text-slate-400">·</span>
+          <span className="text-slate-500">Status:</span>
+          <Select value={lead.Lead_Status ?? ""} onValueChange={setStatus} disabled={busy}>
+            <SelectTrigger className="h-6 w-[180px] text-[10px] bg-white border-slate-200 px-2 py-0">
+              <SelectValue placeholder="Set status" />
+            </SelectTrigger>
+            <SelectContent>
+              {leadStatuses.map(s => (
+                <SelectItem key={s} value={s} className="text-[11px]">{s}</SelectItem>
+              ))}
+            </SelectContent>
+          </Select>
+          {busy && <Loader2 className="h-3 w-3 animate-spin text-slate-400" />}
+          <a
+            href={`https://crm.zoho.com/crm/org/leads/${lead.id}`}
+            target="_blank"
+            rel="noreferrer"
+            className="ml-auto text-teal-700 hover:underline"
+          >
+            Open in Zoho ↗
+          </a>
+        </div>
+      </div>
+    );
+  }
+
+  // ─── Unlinked + not expected → render nothing (DoctorsFinder etc.) ───
+  if (!expectedInZoho) return null;
+
+  // ─── Unlinked + expected: offer to create ────────────────────────────
+  const createLead = async () => {
+    if (!email && !displayName) {
+      toast.error("Need at least a name or an email to create a Zoho lead.");
+      return;
+    }
+    // Zoho Leads requires Last_Name + Company. Derive Last_Name from
+    // the display name (last token), Company defaults to AA.
+    const nameParts = displayName.replace(/^Dr\.?\s+/i, "").trim().split(/\s+/);
+    const lastName  = nameParts.length > 1 ? nameParts.slice(-1)[0] : (nameParts[0] || "Unknown");
+    const firstName = nameParts.length > 1 ? nameParts.slice(0, -1).join(" ") : "";
+    setBusy(true);
+    try {
+      const payload = {
+        data: [{
+          Last_Name:    lastName,
+          First_Name:   firstName || undefined,
+          Email:        email     || undefined,
+          Phone:        phone     || undefined,
+          Company:      "Allocation Assist",
+          Lead_Source:  "Dashboard backfill",
+          Lead_Status:  "Not Contacted",
+          Description:  "Created from a form response that didn't auto-match an existing Zoho lead.",
+        }],
+        trigger: ["workflow"],
+      };
+      const resp = await zohoPost<{ data?: Array<{ code?: string; details?: { id?: string }; message?: string }> }>(
+        "Leads",
+        payload,
+      );
+      const newId = resp?.data?.[0]?.details?.id;
+      const code  = resp?.data?.[0]?.code;
+      if (!newId || code !== "SUCCESS") {
+        throw new Error(resp?.data?.[0]?.message ?? "Zoho refused the new lead");
+      }
+      // Stamp the new lead's id onto the form_response so it now reads
+      // as linked.
+      await link.mutateAsync({ responseId, doctorId: `lead:${newId}` });
+      // Schedule a Zoho sync so the cache picks up the new row.
+      qc.invalidateQueries({ queryKey: ["zoho-data"] });
+      toast.success(`Created Zoho lead · ${firstName ? `${firstName} ${lastName}` : lastName}`);
+    } catch (e) {
+      toast.error(e instanceof Error ? e.message : "Couldn't create Zoho lead");
+    } finally { setBusy(false); }
+  };
+
+  return (
+    <div className="border-t border-slate-100 pt-2 mt-1">
+      <div className="flex items-center gap-2 flex-wrap text-[10.5px]">
+        <span className="text-slate-500 inline-flex items-center gap-1">
+          <Sparkles className="h-3 w-3 text-slate-400" />
+          Not in Zoho
+        </span>
+        <span className="text-slate-400">·</span>
+        <span className="text-slate-500">No matching lead — likely an unqualified submission.</span>
+        <button
+          type="button"
+          onClick={createLead}
+          disabled={busy}
+          className="ml-auto text-[10px] h-6 px-2 rounded-full border border-teal-200 bg-teal-50 text-teal-700 hover:bg-teal-100 inline-flex items-center gap-1 disabled:opacity-60"
+        >
+          {busy ? <Loader2 className="h-3 w-3 animate-spin" /> : <Plus className="h-3 w-3" />}
+          Create Zoho lead
+        </button>
       </div>
     </div>
   );

@@ -197,11 +197,14 @@ serve(async (req: Request) => {
 
     const token = await getAccessToken();
 
-    // ── PUT: forward body to Zoho (e.g. updating a record field) ────────────
-    if (req.method === 'PUT') {
+    // ── PUT or POST: forward body to Zoho (update / create) ────────────────
+    //   PUT  → /Leads/<id>       (update one record)
+    //   POST → /Leads            (create new record)
+    // Same shape both ways: { data: [{ Field: value, ... }] }
+    if (req.method === 'PUT' || req.method === 'POST') {
       const reqBody = await req.text();
       const zohoRes = await fetch(zohoUrl.toString(), {
-        method: 'PUT',
+        method: req.method,
         headers: {
           'Authorization': `Zoho-oauthtoken ${token}`,
           'Content-Type':  'application/json',

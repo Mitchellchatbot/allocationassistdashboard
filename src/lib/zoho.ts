@@ -88,6 +88,37 @@ export async function zohoSync(): Promise<{ ok: boolean; leads: number; deals: n
 }
 
 /**
+ * POST to a Zoho module path (e.g. "Leads" to create a record).
+ * Body should be { data: [{ Field: value }], trigger: ["workflow"] }
+ * Returns Zoho's response, which includes the new record's id under
+ * data[0].details.id.
+ */
+export async function zohoPost<T = unknown>(
+  modulePath: string,
+  body: unknown
+): Promise<T> {
+  const url = new URL(PROXY_URL);
+  url.searchParams.set('module', modulePath);
+
+  const res = await fetch(url.toString(), {
+    method: 'POST',
+    headers: {
+      'apikey':         SUPABASE_ANON_KEY,
+      'Authorization':  `Bearer ${SUPABASE_ANON_KEY}`,
+      'Content-Type':   'application/json',
+    },
+    body: JSON.stringify(body),
+  });
+
+  if (!res.ok) {
+    const text = await res.text();
+    throw new Error(`zoho-proxy POST ${res.status}: ${text}`);
+  }
+
+  return res.json() as Promise<T>;
+}
+
+/**
  * PUT to a Zoho module path (e.g. "Leads/RECORD_ID").
  * Body should be { data: [{ Field: value }] }
  */
