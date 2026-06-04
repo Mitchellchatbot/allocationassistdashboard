@@ -144,15 +144,9 @@ export default function Reports() {
           specialty={specialty === "__all" ? null : specialty}
         />
 
-        {/* Per-doctor breakdown — companion to the hospital table
-            below. Ammar 2026-06-03: 'add another table over here for
-            the individual doctors themselves'. */}
-        <DoctorTable
-          rangeDays={rangeDays}
-          hospital={hospital   === "__all" ? null : hospital}
-          specialty={specialty === "__all" ? null : specialty}
-        />
-
+        {/* Hospital relationships — surfaced above the per-doctor
+            table so the team scans accounts first (who's warming /
+            cooling) before drilling into individual doctors. */}
         <Card>
           <CardHeader className="pb-2">
             <CardTitle className="text-base flex items-center gap-2">
@@ -167,6 +161,15 @@ export default function Reports() {
             <HospitalTable rows={bundle.hospitals} loading={bundle.isLoading} />
           </CardContent>
         </Card>
+
+        {/* Per-doctor breakdown — companion to the hospital table above.
+            Ammar 2026-06-03: 'add another table over here for the
+            individual doctors themselves'. */}
+        <DoctorTable
+          rangeDays={rangeDays}
+          hospital={hospital   === "__all" ? null : hospital}
+          specialty={specialty === "__all" ? null : specialty}
+        />
       </div>
     </DashboardLayout>
   );
