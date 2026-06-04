@@ -110,6 +110,30 @@ export function useSyncWpCandidates() {
   });
 }
 
+/** Auto-match every unlinked WP candidate against the Zoho cache
+ *  (lead + DoB) by email + normalised name. Server-side; returns a
+ *  breakdown of what got matched. */
+export function useAutoLinkWpCandidates() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: async () => {
+      const { data, error } = await supabase.functions.invoke("wordpress-candidates-link", { body: {} });
+      if (error) throw error;
+      const resp = data as {
+        ok: boolean; error?: string;
+        scanned: number; proposed: number; updated: number;
+        matched_by_email: number; matched_by_name: number;
+        skipped_ambiguous: number;
+        zoho_leads_indexed: number; zoho_records_total: number;
+        durationMs: number;
+      };
+      if (!resp.ok) throw new Error(resp.error ?? "Auto-link failed");
+      return resp;
+    },
+    onSuccess: () => qc.invalidateQueries({ queryKey: KEY }),
+  });
+}
+
 /** Update the doctor_id on a WP candidate row (manual linkage). */
 export function useLinkWpCandidate() {
   const qc = useQueryClient();

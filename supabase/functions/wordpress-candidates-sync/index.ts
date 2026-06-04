@@ -191,46 +191,46 @@ Deno.serve(async (req: Request) => {
         wp_slug:            c.slug,
         wp_link:            c.link,
         status:             c.status ?? null,
-        title:              c.title?.rendered ?? null,
-        full_name:          a.full_name ?? null,
-        job_title:          a.job_title ?? null,
-        email:              a.email ?? null,
-        phone:              a.phone_number ?? null,
-        date_of_birth:      a.date_of_birth ?? null,
-        nationality:        a.nationality ?? null,
-        specialty:          a.specialty ?? null,
-        subspecialty:       a.subspecialty ?? null,
-        area_of_interest:   a.specific_areas_of_interests_within_the_specialization ?? null,
+        title:              cleanText(c.title?.rendered),
+        full_name:          cleanText(a.full_name),
+        job_title:          cleanText(a.job_title),
+        email:              cleanText(a.email),
+        phone:              cleanText(a.phone_number),
+        date_of_birth:      cleanText(a.date_of_birth),
+        nationality:        cleanText(a.nationality),
+        specialty:          cleanText(a.specialty),
+        subspecialty:       cleanText(a.subspecialty),
+        area_of_interest:   cleanText(a.specific_areas_of_interests_within_the_specialization),
         years_experience:   years,
-        license_status:     a.dha__haad__moh_license ?? null,
-        license_types:      licenseTypes,
-        family_status:      a.family_status ?? null,
+        license_status:     cleanText(a.dha__haad__moh_license),
+        license_types:      licenseTypes.map(l => decodeEntities(l)),
+        family_status:      cleanText(a.family_status),
         has_dependents:     hasDeps,
-        country_of_training: a.country_of_training ?? null,
-        current_location:   a.current_location ?? null,
-        rank:               a.specialist__consultant ?? null,
-        languages:          a.languages ?? null,
-        english_level:      a.english_level ?? null,
-        current_salary:     a.current_salary ?? null,
-        expected_salary:    a.expected_salary ?? null,
-        notice_period:      a.notice_period ?? null,
-        targeted_locations: targeted,
+        country_of_training: cleanText(a.country_of_training),
+        current_location:   cleanText(a.current_location),
+        rank:               cleanText(a.specialist__consultant),
+        languages:          cleanText(a.languages),
+        english_level:      cleanText(a.english_level),
+        current_salary:     cleanText(a.current_salary),
+        expected_salary:    cleanText(a.expected_salary),
+        notice_period:      cleanText(a.notice_period),
+        targeted_locations: targeted.map(t => decodeEntities(t)),
         cv_url:             cvUrl,
         photo_url:          photoUrl,
 
-        education_title:       a.title1       ? String(a.title1).trim() : null,
-        education_academy:     a.academy1     ? String(a.academy1).trim() : null,
+        education_title:       cleanText(a.title1 as string | undefined),
+        education_academy:     cleanText(a.academy1 as string | undefined),
         education_start:       a.start_date1 ?? null,
         education_end:         a.end_date1   ?? null,
         education_present:     eduPresent,
-        education_description: a.description1 ? String(a.description1).trim() : null,
+        education_description: cleanText(a.description1 as string | undefined),
 
-        experience_title:       a.title2       ? String(a.title2).trim() : null,
-        experience_company:     a.company2     ? String(a.company2).trim() : null,
+        experience_title:       cleanText(a.title2 as string | undefined),
+        experience_company:     cleanText(a.company2 as string | undefined),
         experience_start:       a.start_date_2 ?? null,
         experience_end:         a.end_date2    ?? null,
         experience_present:     expPresent,
-        experience_description: a.description2 ? String(a.description2).trim() : null,
+        experience_description: cleanText(a.description2 as string | undefined),
 
         raw_acf:            a as Record<string, unknown>,
         wp_date:            c.date     ?? null,
@@ -262,6 +262,31 @@ Deno.serve(async (req: Request) => {
     durationMs:    Date.now() - started,
   }, 200);
 });
+
+/** WP REST returns title.rendered with HTML entities ("&#8211;", "&amp;",
+ *  &nbsp;, …) already encoded. We render those fields as plain text in
+ *  the UI, so we decode here once on the way in. Covers the entities
+ *  WP actually emits — &#8211; (en-dash), &#8212; (em-dash),
+ *  &#8216;/&#8217; (curly quotes), &amp;, &#038;, &quot;, &#39;, &nbsp;,
+ *  and any numeric or hex numeric entity. */
+function decodeEntities(s: string): string {
+  if (!s) return s;
+  return s
+    .replace(/&#x([0-9a-f]+);/gi, (_, h) => String.fromCodePoint(parseInt(h, 16)))
+    .replace(/&#(\d+);/g,         (_, n) => String.fromCodePoint(parseInt(n, 10)))
+    .replace(/&amp;/g,  "&")
+    .replace(/&lt;/g,   "<")
+    .replace(/&gt;/g,   ">")
+    .replace(/&quot;/g, '"')
+    .replace(/&apos;/g, "'")
+    .replace(/&nbsp;/g, " ");
+}
+
+function cleanText(s: string | null | undefined): string | null {
+  if (s == null) return null;
+  const decoded = decodeEntities(String(s)).trim();
+  return decoded === "" ? null : decoded;
+}
 
 function json(payload: unknown, status: number): Response {
   return new Response(JSON.stringify(payload), {

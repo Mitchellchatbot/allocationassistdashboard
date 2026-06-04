@@ -24,12 +24,13 @@ import {
   Briefcase, Award, Globe, Languages as LanguagesIcon, Users as UsersIcon,
   Baby, Clock as ClockIcon, GraduationCap,
 } from "lucide-react";
-import { useWpCandidates, useSyncWpCandidates, useLinkWpCandidate, type WpCandidate } from "@/hooks/use-wp-candidates";
+import { useWpCandidates, useSyncWpCandidates, useLinkWpCandidate, useAutoLinkWpCandidates, type WpCandidate } from "@/hooks/use-wp-candidates";
 import { toast } from "sonner";
 
 export default function WpCandidates() {
   const { data: candidates = [], isLoading } = useWpCandidates();
-  const sync = useSyncWpCandidates();
+  const sync     = useSyncWpCandidates();
+  const autoLink = useAutoLinkWpCandidates();
 
   // Search + filter state — same architecture as /forms.
   const [searchRaw, setSearchRaw] = useState("");
@@ -90,6 +91,21 @@ export default function WpCandidates() {
     }
   };
 
+  const handleAutoLink = async () => {
+    try {
+      const r = await autoLink.mutateAsync();
+      const bits = [
+        `${r.updated} linked`,
+        r.matched_by_email ? `${r.matched_by_email} by email` : "",
+        r.matched_by_name  ? `${r.matched_by_name} by name`   : "",
+        r.skipped_ambiguous ? `${r.skipped_ambiguous} skipped (ambiguous)` : "",
+      ].filter(Boolean).join(" · ");
+      toast.success(`Auto-linked: ${bits}`, { duration: 9000 });
+    } catch (e) {
+      toast.error(e instanceof Error ? e.message : "Auto-link failed");
+    }
+  };
+
   // KPI snapshot — taken on the FULL list, not the filter, so it stays
   // stable as the user types.
   const kpis = useMemo(() => ({
@@ -113,10 +129,16 @@ export default function WpCandidates() {
               Mirror of the doctor profiles on allocationassist.com. Use this as a one-stop search across every AA-curated candidate — specialty, license, country of training, salary expectations, targeted locations, the lot.
             </p>
           </div>
-          <Button size="sm" variant="outline" onClick={handleSync} disabled={sync.isPending}>
-            {sync.isPending ? <RefreshCw className="h-3.5 w-3.5 mr-1 animate-spin" /> : <History className="h-3.5 w-3.5 mr-1" />}
-            {sync.isPending ? "Syncing…" : "Sync from WordPress"}
-          </Button>
+          <div className="flex items-center gap-2">
+            <Button size="sm" variant="outline" onClick={handleAutoLink} disabled={autoLink.isPending}>
+              {autoLink.isPending ? <RefreshCw className="h-3.5 w-3.5 mr-1 animate-spin" /> : <Link2 className="h-3.5 w-3.5 mr-1" />}
+              {autoLink.isPending ? "Auto-linking…" : "Auto-link to AA doctors"}
+            </Button>
+            <Button size="sm" variant="outline" onClick={handleSync} disabled={sync.isPending}>
+              {sync.isPending ? <RefreshCw className="h-3.5 w-3.5 mr-1 animate-spin" /> : <History className="h-3.5 w-3.5 mr-1" />}
+              {sync.isPending ? "Syncing…" : "Sync from WordPress"}
+            </Button>
+          </div>
         </div>
 
         {/* KPI strip */}
