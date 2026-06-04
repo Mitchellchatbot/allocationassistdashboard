@@ -21,6 +21,7 @@ import {
   Search,
   ChevronRight,
   Inbox,
+  Stethoscope,
   type LucideIcon,
 } from "lucide-react";
 import { useCallback, useEffect, useState } from "react";
@@ -84,6 +85,7 @@ const NAV_SECTIONS: NavSection[] = [
     items: [
       { title: "My Workspace",    url: "/my-workspace",    icon: Inbox },
       { title: "Doctor Profiles", url: "/doctor-profiles", icon: UserSquare },
+      { title: "WP Candidates",   url: "/wp-candidates",   icon: Stethoscope },
       { title: "Automations",     url: "/automations",     icon: Workflow },
       { title: "Vacancies",       url: "/vacancies",       icon: ClipboardList },
       { title: "Batch Sends",     url: "/batches",         icon: Mailbox },

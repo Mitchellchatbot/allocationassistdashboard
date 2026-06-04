@@ -41,6 +41,7 @@ const Connections     = lazy(() => import("./pages/Connections"));
 const UploadCV        = lazy(() => import("./pages/UploadCV"));
 const SharedProfile   = lazy(() => import("./pages/SharedProfile"));
 const Forms           = lazy(() => import("./pages/Forms"));
+const WpCandidates    = lazy(() => import("./pages/WpCandidates"));
 const NotFound        = lazy(() => import("./pages/NotFound"));
 
 // Global react-query defaults tuned for this dashboard:
@@ -157,6 +158,7 @@ const App = () => (
                 <Route path="/import-bulk"    element={<BulkImport />} />
                 <Route path="/connections"    element={<Connections />} />
                 <Route path="/forms"          element={<Forms />} />
+                <Route path="/wp-candidates"  element={<WpCandidates />} />
               </Route>
 
               <Route path="*" element={<NotFound />} />
