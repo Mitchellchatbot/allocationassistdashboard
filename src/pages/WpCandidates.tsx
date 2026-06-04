@@ -19,6 +19,7 @@ import { Badge } from "@/components/ui/badge";
 import { Dialog, DialogContent } from "@/components/ui/dialog";
 import {
   UserSquare, Search, RefreshCw, ExternalLink, ChevronRight, FileText, Link2,
+  History,
   Phone, Mail, IdCard, MapPin, Stethoscope, BadgeCheck, Calendar, CalendarDays,
   Briefcase, Award, Globe, Languages as LanguagesIcon, Users as UsersIcon,
   Baby, Clock as ClockIcon, GraduationCap,
