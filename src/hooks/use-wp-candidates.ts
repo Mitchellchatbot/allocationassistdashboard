@@ -231,6 +231,86 @@ export function useUploadWpPhoto() {
   });
 }
 
+/** Fetch the WP candidate linked to an AA doctor_id (lead:/dob:),
+ *  if any. Used by SendProfileDialog and other email-rendering surfaces
+ *  to populate template tokens from the canonical profile record. */
+export function useWpCandidateByDoctorId(doctorId: string | null) {
+  return useQuery<WpCandidate | null>({
+    queryKey: ["wp-candidate-by-doctor", doctorId ?? "none"],
+    enabled: !!doctorId,
+    queryFn: async () => {
+      if (!doctorId) return null;
+      const { data, error } = await supabase
+        .from("wordpress_candidates")
+        .select("*")
+        .eq("doctor_id", doctorId)
+        .order("wp_modified", { ascending: false, nullsFirst: false })
+        .limit(1)
+        .maybeSingle();
+      if (error) throw error;
+      return (data ?? null) as WpCandidate | null;
+    },
+    staleTime: 60_000,
+  });
+}
+
+/** Compute age in years from the WP date_of_birth field. WP accepts
+ *  several formats ("YYYYMMDD", "YYYY-MM-DD", "4 September 1987"); we
+ *  parse all three. Returns null if anything's off. */
+function computeAge(dob: string | null): number | null {
+  if (!dob) return null;
+  let d: Date | null = null;
+  if (/^\d{8}$/.test(dob))                 d = new Date(`${dob.slice(0,4)}-${dob.slice(4,6)}-${dob.slice(6,8)}`);
+  else if (/^\d{4}-\d{2}-\d{2}/.test(dob)) d = new Date(dob);
+  else                                     { const p = new Date(dob); if (!isNaN(p.valueOf())) d = p; }
+  if (!d || isNaN(d.valueOf())) return null;
+  const now = new Date();
+  let a = now.getFullYear() - d.getFullYear();
+  const m = now.getMonth() - d.getMonth();
+  if (m < 0 || (m === 0 && now.getDate() < d.getDate())) a--;
+  return a >= 0 && a < 120 ? a : null;
+}
+
+/** Map a WP candidate to the email-template token bag the renderer
+ *  expects. Same shape as profileToTokens() from use-doctor-profiles
+ *  so existing templates keep working without changes. Both client and
+ *  server (send-flow-email edge function) duplicate this mapping —
+ *  keep them in lockstep when adding tokens. */
+export function wpCandidateToTokens(c: WpCandidate | null): Record<string, string> {
+  if (!c) return {};
+  const age = computeAge(c.date_of_birth);
+  return {
+    // Canonical template tokens — kept aligned with the old
+    // profileToTokens() so templates that hard-code "Dr. {{doctor_title}}…"
+    // continue to render correctly.
+    doctor_title:               c.job_title              ?? "",
+    doctor_bio:                 c.area_of_interest       ?? "",  // closest analogue; WP has no bio field
+    doctor_area_of_interest:    c.area_of_interest       ?? "",
+    doctor_country_training:    c.country_of_training    ?? "",
+    doctor_years_experience:    c.years_experience != null ? String(c.years_experience) : "",
+    doctor_nationality:         c.nationality            ?? "",
+    doctor_age:                 age != null ? String(age) : "",
+    doctor_marital_status:      c.family_status          ?? "",  // WP doesn't separate marital vs family
+    doctor_family_status:       c.family_status          ?? "",
+    doctor_license:             c.license_status         ?? "",
+    doctor_salary_expectation:  c.expected_salary        ?? "",
+    doctor_notice_period:       c.notice_period          ?? "",
+    // Extras that the new richer WP record exposes — templates can
+    // pick these up too as we iterate the email copy.
+    doctor_photo_url:           c.photo_url              ?? "",
+    doctor_specialty:           c.specialty              ?? "",
+    doctor_subspecialty:        c.subspecialty           ?? "",
+    doctor_rank:                c.rank                   ?? "",  // Specialist / Consultant
+    doctor_languages:           c.languages              ?? "",
+    doctor_english_level:       c.english_level          ?? "",
+    doctor_current_location:    c.current_location       ?? "",
+    doctor_targeted_locations:  (c.targeted_locations ?? []).join(", "),
+    doctor_license_types:       (c.license_types ?? []).join(", "),
+    doctor_cv_url:              c.cv_url                 ?? "",
+    doctor_wp_link:             c.wp_link                ?? "",
+  };
+}
+
 /** Photo map keyed by the prefixed AA doctor_id (`lead:<zoho>` /
  *  `dob:<zoho>`). Used to render avatars next to any doctor row that
  *  links back to a WP candidate. Tiny payload + 5-min cache, so cheap

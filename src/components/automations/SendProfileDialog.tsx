@@ -14,6 +14,7 @@ import { supabase } from "@/lib/supabase";
 import { useHospitals, type Hospital } from "@/hooks/use-hospitals";
 import { useEmailTemplates, renderTemplate } from "@/hooks/use-email-templates";
 import { useDoctorProfile, profileToTokens, calcCompletion } from "@/hooks/use-doctor-profiles";
+import { useWpCandidateByDoctorId, wpCandidateToTokens } from "@/hooks/use-wp-candidates";
 import { useZohoData, type ZohoDoctorOnBoard, type ZohoLead } from "@/hooks/use-zoho-data";
 import { useQueryClient } from "@tanstack/react-query";
 
@@ -441,18 +442,40 @@ function PreviewConfirm({
   onConfirm: () => void;
   submitting: boolean;
 }) {
-  // Pull the doctor's saved profile so the preview renders with REAL field
-  // values (years experience, license, etc.) instead of leaving `{{token}}`
-  // placeholders. Missing profile → render with empty strings + show a warning.
-  const { data: profile } = useDoctorProfile(doctor.id);
-  const profileCompletion = profile ? calcCompletion(profile) : 0;
+  // Pull the doctor's profile data for the preview. WP candidates are
+  // now the source of truth — if the doctor is linked to a WP record
+  // we use that; for any field WP doesn't have set, we fall back to
+  // the legacy doctor_profiles row so historical data still renders.
+  const { data: wpCandidate } = useWpCandidateByDoctorId(doctor.id);
+  const { data: profile }     = useDoctorProfile(doctor.id);
+  const wpTokens     = wpCandidateToTokens(wpCandidate);
+  const legacyTokens = profileToTokens(profile);
+  const mergedProfileTokens: Record<string, string> = { ...legacyTokens };
+  for (const [k, v] of Object.entries(wpTokens)) {
+    if (v) mergedProfileTokens[k] = v;                // WP wins when populated
+    else if (!(k in mergedProfileTokens)) mergedProfileTokens[k] = "";
+  }
+  // Completion %: prefer WP candidate filled-fields ratio; fall back to
+  // the legacy profile's completion if no WP record exists.
+  const profileCompletion = wpCandidate
+    ? Math.round(
+        ([
+          wpCandidate.job_title, wpCandidate.area_of_interest, wpCandidate.country_of_training,
+          wpCandidate.years_experience, wpCandidate.nationality, wpCandidate.family_status,
+          wpCandidate.license_status, wpCandidate.expected_salary, wpCandidate.notice_period,
+        ].filter(v => v != null && v !== "").length / 9) * 100
+      )
+    : profile ? calcCompletion(profile) : 0;
   const sampleHospital = hospitals[0];
 
   // Strip any redundant "Dr." prefix so templates that hard-code "Hi Dr.
-  // {{doctor_name}}" don't render "Hi Dr. Dr. Louise Denjean".
-  const cleanedDoctorName = doctor.name.replace(/^\s*Dr\.?\s+/i, "");
+  // {{doctor_name}}" don't render "Hi Dr. Dr. Louise Denjean". Prefer
+  // the WP candidate's full_name when present (it's the canonical
+  // record); fall back to the Zoho-derived name otherwise.
+  const rawName = (wpCandidate?.full_name && wpCandidate.full_name.trim()) || doctor.name;
+  const cleanedDoctorName = rawName.replace(/^\s*Dr\.?\s+/i, "");
   const vars: Record<string, string> = {
-    ...profileToTokens(profile),
+    ...mergedProfileTokens,
     doctor_name:        cleanedDoctorName,
     doctor_email:       doctor.email ?? "",
     doctor_phone:       doctor.phone ?? "",

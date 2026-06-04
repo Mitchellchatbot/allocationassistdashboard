@@ -236,20 +236,69 @@ Deno.serve(async (req: Request) => {
     return json({ ok: false, error: `Template "${templateKey}" not found`, detail: tplErr?.message }, 404);
   }
 
-  // ── Load doctor profile (Phase 2) ────────────────────────────────────────
-  // For email_hospital + multi-doctor batches, the template needs structured
-  // fields (title, bio, years experience, etc.) that don't exist in Zoho.
-  // Mirrors profileToTokens() in src/hooks/use-doctor-profiles.ts — keep both
-  // in sync when adding new fields.
+  // ── Load doctor profile tokens (WP candidate is source of truth) ───────
+  // For email_hospital + multi-doctor batches the template needs structured
+  // fields (title, area of interest, years experience, etc.) that don't
+  // exist in Zoho.
+  //
+  // Source priority:
+  //   1. wordpress_candidates row linked via doctor_id (canonical going
+  //      forward — same record the Profiles tab edits live).
+  //   2. legacy doctor_profiles row — fills any token WP doesn't have.
+  //
+  // Mirrors wpCandidateToTokens() + profileToTokens() in the frontend hooks;
+  // keep them in lockstep when adding new tokens.
   let profileTokens: Record<string, string> = {};
   if (run.doctor_id) {
+    // Step 1: WP candidate — most recent linked row (a doctor *should*
+    // only have one, but order-by-modified just in case).
+    const { data: wp } = await supabase
+      .from("wordpress_candidates")
+      .select("*")
+      .eq("doctor_id", run.doctor_id)
+      .order("wp_modified", { ascending: false, nullsFirst: false })
+      .limit(1)
+      .maybeSingle();
+    if (wp) {
+      const age = computeAgeFromDob(wp.date_of_birth);
+      profileTokens = {
+        doctor_title:              String(wp.job_title              ?? ""),
+        doctor_bio:                String(wp.area_of_interest       ?? ""),  // WP has no bio; closest analogue
+        doctor_area_of_interest:   String(wp.area_of_interest       ?? ""),
+        doctor_country_training:   String(wp.country_of_training    ?? ""),
+        doctor_years_experience:   wp.years_experience != null ? String(wp.years_experience) : "",
+        doctor_nationality:        String(wp.nationality            ?? ""),
+        doctor_age:                age != null ? String(age) : "",
+        doctor_marital_status:     String(wp.family_status          ?? ""),  // WP doesn't separate marital
+        doctor_family_status:      String(wp.family_status          ?? ""),
+        doctor_license:            String(wp.license_status         ?? ""),
+        doctor_salary_expectation: String(wp.expected_salary        ?? ""),
+        doctor_notice_period:      String(wp.notice_period          ?? ""),
+        // Extras from the richer WP record — templates can reference these
+        // as we iterate the copy.
+        doctor_photo_url:          String(wp.photo_url              ?? ""),
+        doctor_specialty:          String(wp.specialty              ?? ""),
+        doctor_subspecialty:       String(wp.subspecialty           ?? ""),
+        doctor_rank:               String(wp.rank                   ?? ""),
+        doctor_languages:          String(wp.languages              ?? ""),
+        doctor_english_level:      String(wp.english_level          ?? ""),
+        doctor_current_location:   String(wp.current_location       ?? ""),
+        doctor_targeted_locations: Array.isArray(wp.targeted_locations) ? wp.targeted_locations.join(", ") : "",
+        doctor_license_types:      Array.isArray(wp.license_types)      ? wp.license_types.join(", ")      : "",
+        doctor_cv_url:             String(wp.cv_url                 ?? ""),
+        doctor_wp_link:            String(wp.wp_link                ?? ""),
+      };
+      console.log("[send-flow-email] WP candidate tokens loaded for", run.doctor_id);
+    }
+
+    // Step 2: legacy doctor_profiles — fills any token WP didn't have.
     const { data: prof } = await supabase
       .from("doctor_profiles")
       .select("*")
       .eq("doctor_id", run.doctor_id)
       .maybeSingle();
     if (prof) {
-      profileTokens = {
+      const fallback: Record<string, string> = {
         doctor_title:              String(prof.title              ?? ""),
         doctor_bio:                String(prof.bio                ?? ""),
         doctor_area_of_interest:   String(prof.area_of_interest   ?? ""),
@@ -263,7 +312,11 @@ Deno.serve(async (req: Request) => {
         doctor_salary_expectation: String(prof.salary_expectation ?? ""),
         doctor_notice_period:      String(prof.notice_period      ?? ""),
       };
-      console.log("[send-flow-email] loaded doctor profile for", run.doctor_id);
+      // Fold in any field WP left empty.
+      for (const [k, v] of Object.entries(fallback)) {
+        if (v && !profileTokens[k]) profileTokens[k] = v;
+      }
+      console.log("[send-flow-email] legacy doctor_profiles fallback applied for", run.doctor_id);
     }
   }
 
@@ -596,6 +649,22 @@ Deno.serve(async (req: Request) => {
 // must NOT be HTML-escaped during template substitution. Anything not in
 // this set is treated as untrusted text and escaped.
 const RAW_HTML_TOKENS = new Set(["signature", "doctors_table_html"]);
+
+/** Age from WP date_of_birth. Accepts "YYYYMMDD", "YYYY-MM-DD", or
+ *  human-formatted "4 September 1987". Returns null if unparseable. */
+function computeAgeFromDob(dob: string | null | undefined): number | null {
+  if (!dob) return null;
+  let d: Date | null = null;
+  if (/^\d{8}$/.test(dob))                 d = new Date(`${dob.slice(0,4)}-${dob.slice(4,6)}-${dob.slice(6,8)}`);
+  else if (/^\d{4}-\d{2}-\d{2}/.test(dob)) d = new Date(dob);
+  else                                     { const p = new Date(dob); if (!isNaN(p.valueOf())) d = p; }
+  if (!d || isNaN(d.valueOf())) return null;
+  const now = new Date();
+  let a = now.getFullYear() - d.getFullYear();
+  const m = now.getMonth() - d.getMonth();
+  if (m < 0 || (m === 0 && now.getDate() < d.getDate())) a--;
+  return a >= 0 && a < 120 ? a : null;
+}
 
 function render(body: string, vars: Record<string, string>, html = false): string {
   // Pass 1: conditional sections
