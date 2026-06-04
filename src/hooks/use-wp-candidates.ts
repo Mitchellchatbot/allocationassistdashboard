@@ -134,6 +134,96 @@ export function useAutoLinkWpCandidates() {
   });
 }
 
+/** Edit-fields payload sent to the upsert function. The keys here are
+ *  WP-native ACF keys, not our column names — the edge function
+ *  translates back into our mirror shape on the way home. */
+export interface WpCandidateUpsertPayload {
+  id?:        number;                              // omit to create
+  status?:    "publish" | "private" | "draft";
+  title?:     string;                              // post title
+  doctor_id?: string | null;                       // our linkage field
+  acf?: {
+    full_name?:                                              string;
+    job_title?:                                              string;
+    phone_number?:                                           string;
+    email?:                                                  string;
+    date_of_birth?:                                          string;
+    nationality?:                                            string;
+    specialty?:                                              string;
+    subspecialty?:                                           string;
+    specific_areas_of_interests_within_the_specialization?:  string;
+    years_of_experience_post_specialization?:                string | number;
+    license_type?:                                           string[];
+    dha__haad__moh_license?:                                 string;
+    family_status?:                                          string;
+    have_children_or_any_dependent?:                         boolean | "Yes" | "No";
+    country_of_training?:                                    string;
+    current_location?:                                       string;
+    specialist__consultant?:                                 string;
+    languages?:                                              string;
+    english_level?:                                          string;
+    current_salary?:                                         string;
+    expected_salary?:                                        string;
+    notice_period?:                                          string;
+    targeted_locations?:                                     string[];
+    profile_picture?:                                        number;   // attachment id from upload-photo
+    // Single education slot
+    academy1?:     string; title1?:    string;
+    start_date1?:  string; end_date1?: string;
+    present1?:     "Yes" | "No";
+    description1?: string;
+    // Single experience slot
+    company2?:     string; title2?:    string;
+    start_date_2?: string; end_date2?: string;
+    present2?:     "Yes" | "No";
+    description2?: string;
+  };
+}
+
+/** Create-or-edit a candidate. Writes to WordPress, then refreshes our
+ *  mirror so the new row appears in the list immediately. */
+export function useUpsertWpCandidate() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: async (payload: WpCandidateUpsertPayload) => {
+      const { data, error } = await supabase.functions.invoke("wordpress-candidate-upsert", { body: payload });
+      if (error) throw error;
+      const resp = data as { ok: boolean; id?: number; row?: WpCandidate; created?: boolean; error?: string };
+      if (!resp.ok) throw new Error(resp.error ?? "Upsert failed");
+      return resp;
+    },
+    onSuccess: () => qc.invalidateQueries({ queryKey: KEY }),
+  });
+}
+
+/** Upload a profile photo to WP Media. If candidateId is set, the
+ *  upload also attaches it to that candidate's profile_picture field
+ *  in one round-trip. Returns the media id + the public URL. */
+export function useUploadWpPhoto() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: async ({ file, candidateId }: { file: File; candidateId?: number }) => {
+      const form = new FormData();
+      form.append("file", file);
+      if (candidateId) form.append("candidate_id", String(candidateId));
+      // supabase.functions.invoke serialises bodies; we need raw FormData
+      // so call fetch directly to the function URL.
+      const { data: { session } } = await supabase.auth.getSession();
+      const projectUrl = (import.meta.env.VITE_SUPABASE_URL as string) ?? "";
+      const anonKey    = (import.meta.env.VITE_SUPABASE_ANON_KEY as string) ?? "";
+      const res = await fetch(`${projectUrl}/functions/v1/wordpress-candidate-upload-photo`, {
+        method: "POST",
+        headers: { Authorization: `Bearer ${session?.access_token ?? anonKey}`, apikey: anonKey },
+        body: form,
+      });
+      const json = await res.json().catch(() => null) as { ok: boolean; media_id?: number; source_url?: string; attached_to?: number; error?: string } | null;
+      if (!res.ok || !json?.ok) throw new Error(json?.error ?? `Upload failed (${res.status})`);
+      return json;
+    },
+    onSuccess: () => qc.invalidateQueries({ queryKey: KEY }),
+  });
+}
+
 /** Update the doctor_id on a WP candidate row (manual linkage). */
 export function useLinkWpCandidate() {
   const qc = useQueryClient();

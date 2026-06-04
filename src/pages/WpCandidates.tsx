@@ -25,12 +25,15 @@ import {
   Baby, Clock as ClockIcon, GraduationCap,
 } from "lucide-react";
 import { useWpCandidates, useSyncWpCandidates, useLinkWpCandidate, useAutoLinkWpCandidates, type WpCandidate } from "@/hooks/use-wp-candidates";
+import { WpCandidateEditDialog } from "@/components/WpCandidateEditDialog";
 import { toast } from "sonner";
+import { Plus, Pencil } from "lucide-react";
 
 export default function WpCandidates() {
   const { data: candidates = [], isLoading } = useWpCandidates();
   const sync     = useSyncWpCandidates();
   const autoLink = useAutoLinkWpCandidates();
+  const [editing, setEditing] = useState<{ open: boolean; candidate: WpCandidate | null }>({ open: false, candidate: null });
 
   // Search + filter state — same architecture as /forms.
   const [searchRaw, setSearchRaw] = useState("");
@@ -130,6 +133,9 @@ export default function WpCandidates() {
             </p>
           </div>
           <div className="flex items-center gap-2">
+            <Button size="sm" onClick={() => setEditing({ open: true, candidate: null })}>
+              <Plus className="h-3.5 w-3.5 mr-1" /> New candidate
+            </Button>
             <Button size="sm" variant="outline" onClick={handleAutoLink} disabled={autoLink.isPending}>
               {autoLink.isPending ? <RefreshCw className="h-3.5 w-3.5 mr-1 animate-spin" /> : <Link2 className="h-3.5 w-3.5 mr-1" />}
               {autoLink.isPending ? "Auto-linking…" : "Auto-link to AA doctors"}
@@ -226,7 +232,7 @@ export default function WpCandidates() {
               </div>
             ) : (
               <>
-                {filtered.slice(0, renderLimit).map(c => <CandidateRow key={c.id} candidate={c} highlight={search.trim().toLowerCase()} />)}
+                {filtered.slice(0, renderLimit).map(c => <CandidateRow key={c.id} candidate={c} highlight={search.trim().toLowerCase()} onEdit={() => setEditing({ open: true, candidate: c })} />)}
                 {filtered.length > renderLimit && (
                   <button
                     type="button"
@@ -241,11 +247,16 @@ export default function WpCandidates() {
           </CardContent>
         </Card>
       </div>
+      <WpCandidateEditDialog
+        open={editing.open}
+        candidate={editing.candidate}
+        onClose={() => setEditing({ open: false, candidate: null })}
+      />
     </DashboardLayout>
   );
 }
 
-function CandidateRow({ candidate, highlight }: { candidate: WpCandidate; highlight: string }) {
+function CandidateRow({ candidate, highlight, onEdit }: { candidate: WpCandidate; highlight: string; onEdit: () => void }) {
   const [open, setOpen] = useState(false);
   const subtitle = [candidate.job_title, candidate.country_of_training].filter(Boolean).join(" · ");
   return (
@@ -278,12 +289,17 @@ function CandidateRow({ candidate, highlight }: { candidate: WpCandidate; highli
           {candidate.status === "private" && <Badge variant="outline" className="text-[9px] bg-amber-50 text-amber-700 border-amber-200 shrink-0">Private</Badge>}
         </button>
       </div>
-      <CandidateDetailDialog candidate={candidate} open={open} onClose={() => setOpen(false)} />
+      <CandidateDetailDialog
+        candidate={candidate}
+        open={open}
+        onClose={() => setOpen(false)}
+        onEdit={() => { setOpen(false); onEdit(); }}
+      />
     </>
   );
 }
 
-function CandidateDetailDialog({ candidate, open, onClose }: { candidate: WpCandidate; open: boolean; onClose: () => void }) {
+function CandidateDetailDialog({ candidate, open, onClose, onEdit }: { candidate: WpCandidate; open: boolean; onClose: () => void; onEdit: () => void }) {
   const link = useLinkWpCandidate();
   const [doctorIdInput, setDoctorIdInput] = useState(candidate.doctor_id ?? "");
   const [tab, setTab] = useState<"education" | "experience">("education");
@@ -350,6 +366,9 @@ function CandidateDetailDialog({ candidate, open, onClose }: { candidate: WpCand
 
               {/* Action buttons mirroring the WP layout */}
               <div className="space-y-2">
+                <Button onClick={onEdit} className="w-full justify-center h-10 rounded-full bg-teal-600 hover:bg-teal-700">
+                  <Pencil className="h-4 w-4 mr-2" /> Edit profile
+                </Button>
                 {candidate.cv_url && (
                   <a href={candidate.cv_url} target="_blank" rel="noreferrer" className="block">
                     <Button variant="outline" className="w-full justify-center h-10 rounded-full border-slate-200 shadow-sm">
