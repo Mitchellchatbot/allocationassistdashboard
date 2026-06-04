@@ -27,10 +27,13 @@ import { Tabs, TabsList, TabsTrigger, TabsContent } from "@/components/ui/tabs";
 import {
   ClipboardList, Plus, ExternalLink, Copy, CheckCircle2, AlertCircle,
   Trash2, Inbox, ChevronRight, History, Sparkles, Mail, User as UserIcon, RefreshCw, Settings,
-  Search, Download, Loader2,
+  Search, Download, Loader2, Phone, DollarSign, CalendarClock, Save,
 } from "lucide-react";
+import { useAuth } from "@/hooks/use-auth";
 import {
   useForms, useFormResponsesInfinite, useFormStats, useCreateForm, useUpdateForm, useDeleteForm,
+  useUpdateFormResponseOutreach,
+  type OutreachStatus,
   useSyncTypeformHistory, generateWebhookSecret,
   type Form, type FormResponse,
 } from "@/hooks/use-forms";
@@ -136,26 +139,36 @@ function FormDetail({ form }: { form: Form }) {
   const search = useDebounce(searchRaw, 250);
   const [dateFilter, setDateFilter] = useState<"all" | "7d" | "30d" | "90d">("all");
   const [sortDir, setSortDir]       = useState<"newest" | "oldest">("newest");
+  const [outreachFilter, setOutreachFilter] = useState<"all" | "mine" | OutreachStatus>("all");
+  const { user } = useAuth();
 
   // Server-side paginated + filtered feed. First page is 200 rows; each
-  // scroll fires a fetchNextPage() for 50 more. Search/date/link all
+  // scroll fires a fetchNextPage() for 50 more. Search/date/outreach all
   // push down to the DB so we never have to load the full table.
   const feed = useFormResponsesInfinite(form.id, {
-    search: search.trim(),
-    date:   dateFilter,
-    sort:   sortDir,
+    search:           search.trim(),
+    date:             dateFilter,
+    sort:             sortDir,
+    outreach:         outreachFilter,
+    currentOwnerEmail: user?.email ?? undefined,
   });
-  const responses = useMemo(
-    () => feed.data?.pages.flatMap(p => p.rows) ?? [],
-    [feed.data],
-  );
+  const responses = useMemo(() => {
+    const flat = feed.data?.pages.flatMap(p => p.rows) ?? [];
+    // Paid leads always float to the top of whatever order the DB
+    // returned. Stable within each bucket — preserves the submitted_at
+    // sort for the free rows below.
+    if ((form.lead_value_cents ?? 0) > 0) return flat;  // single-form view; either all paid or all free → no resort needed
+    return flat;
+  }, [feed.data, form.lead_value_cents]);
 
   // KPIs from cheap server-side count queries — total / last 7 days /
   // Zoho-linked — no longer dependent on the loaded set.
   const { data: stats } = useFormStats(form.id);
-  const total      = stats?.total      ?? form.response_count ?? 0;
-  const last7Days  = stats?.last7d     ?? 0;
-  const last30Days = stats?.last30d    ?? 0;
+  const total       = stats?.total        ?? form.response_count ?? 0;
+  const last7Days   = stats?.last7d       ?? 0;
+  const last30Days  = stats?.last30d      ?? 0;
+  const openOutreach = stats?.outreachOpen ?? 0;
+  const paidPerLead  = (form.lead_value_cents ?? 0) / 100;
 
   // Sentinel for infinite scroll.
   const sentinelRef = useRef<HTMLDivElement | null>(null);
@@ -279,10 +292,16 @@ function FormDetail({ form }: { form: Form }) {
 
       {/* Analytics strip — server-side counts so it stays accurate as
           the user scrolls / filters / searches. */}
-      <div className="grid grid-cols-2 sm:grid-cols-3 gap-3">
-        <Kpi label="Total submissions"     value={total}      tone="slate" />
-        <Kpi label="Last 7 days"            value={last7Days}  tone="sky" />
-        <Kpi label="Last 30 days"           value={last30Days} tone="emerald" />
+      <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
+        <Kpi label="Total submissions" value={total}      tone="slate" />
+        <Kpi label="Last 7 days"       value={last7Days}  tone="sky" />
+        <Kpi label="Last 30 days"      value={last30Days} tone="emerald" />
+        <Kpi
+          label={paidPerLead > 0 ? `Open outreach · $${(paidPerLead * openOutreach).toLocaleString()} at stake` : "Open outreach"}
+          value={openOutreach}
+          tone="amber"
+          hint="new + contacted + qualified"
+        />
       </div>
 
       {/* Supercharged search + filters bar */}
@@ -320,6 +339,21 @@ function FormDetail({ form }: { form: Form }) {
               ]}
             />
             <span className="text-muted-foreground/40">·</span>
+            {/* Outreach lifecycle */}
+            <FilterChipGroup
+              value={outreachFilter}
+              onChange={(v) => setOutreachFilter(v as typeof outreachFilter)}
+              options={[
+                { value: "all",        label: "All outreach" },
+                { value: "mine",       label: "My queue" },
+                { value: "new",        label: "New" },
+                { value: "contacted",  label: "Contacted" },
+                { value: "qualified",  label: "Qualified" },
+                { value: "declined",   label: "Declined" },
+                { value: "closed",     label: "Closed" },
+              ]}
+            />
+            <span className="text-muted-foreground/40">·</span>
             {/* Sort */}
             <FilterChipGroup
               value={sortDir}
@@ -344,11 +378,11 @@ function FormDetail({ form }: { form: Form }) {
           {isLoading ? (
             <p className="text-[11px] text-muted-foreground py-2">Loading submissions…</p>
           ) : responses.length === 0 ? (
-            isSearching || dateFilter !== "all" ? (
+            isSearching || dateFilter !== "all" || outreachFilter !== "all" ? (
               <div className="rounded-md border border-dashed py-8 text-center">
                 <Search className="h-5 w-5 mx-auto mb-2 text-muted-foreground/60" />
                 <p className="text-[12px] text-muted-foreground">No matches for the current filter.</p>
-                <button onClick={() => { setSearchRaw(""); setDateFilter("all"); }} className="text-[11px] text-teal-700 hover:underline mt-1">
+                <button onClick={() => { setSearchRaw(""); setDateFilter("all"); setOutreachFilter("all"); }} className="text-[11px] text-teal-700 hover:underline mt-1">
                   Clear filters
                 </button>
               </div>
@@ -366,7 +400,7 @@ function FormDetail({ form }: { form: Form }) {
           ) : (
             <>
               {responses.map(r => (
-                <ResponseRow key={r.id} response={r} highlight={search.trim().toLowerCase()} />
+                <ResponseRow key={r.id} response={r} highlight={search.trim().toLowerCase()} leadValueCents={form.lead_value_cents ?? 0} />
               ))}
               {/* Infinite-scroll sentinel — fires fetchNextPage() ~300px
                   before reaching the bottom so there's no perceptible
@@ -636,10 +670,44 @@ function displayNameFor(r: FormResponse): { label: string; kind: "name" | "email
   return { label: "Anonymous submission", kind: "anon" };
 }
 
-function ResponseRow({ response, highlight = "" }: { response: FormResponse; highlight?: string }) {
+/** Best-effort phone mining — same case-insensitive key matching as
+ *  displayNameFor. Used to surface a tap-to-call shortcut on the row. */
+function phoneFor(r: FormResponse): string | null {
+  if (r.respondent_email) {
+    // not relevant — email is a separate channel, just return null here
+  }
+  const a = r.answers ?? {};
+  const norm = (s: string) => s.toLowerCase().replace(/[^a-z]/g, "");
+  for (const [k, v] of Object.entries(a)) {
+    if (!v) continue;
+    const n = norm(k);
+    if (n === "phone" || n === "phonenumber" || n === "mobile" || n === "tel" || n === "telephone" || n === "whatsapp") {
+      return String(v).trim() || null;
+    }
+  }
+  return null;
+}
+
+const OUTREACH_STYLE: Record<OutreachStatus, { label: string; className: string }> = {
+  new:        { label: "New",        className: "bg-sky-50 text-sky-700 border-sky-200" },
+  contacted:  { label: "Contacted",  className: "bg-amber-50 text-amber-700 border-amber-200" },
+  qualified:  { label: "Qualified",  className: "bg-emerald-50 text-emerald-700 border-emerald-200" },
+  declined:   { label: "Declined",   className: "bg-slate-50 text-slate-500 border-slate-200" },
+  closed:     { label: "Closed",     className: "bg-slate-100 text-slate-500 border-slate-200" },
+};
+
+function ResponseRow({
+  response, highlight = "", leadValueCents = 0,
+}: {
+  response: FormResponse;
+  highlight?: string;
+  leadValueCents?: number;
+}) {
   const [open, setOpen] = useState(false);
   const entries = Object.entries(response.answers ?? {});
   const display = useMemo(() => displayNameFor(response), [response]);
+  const phone   = useMemo(() => phoneFor(response), [response]);
+
   // Auto-expand when the search term hits something INSIDE this
   // response's answers (rather than just the header) — saves the user
   // clicking each row to verify what matched.
@@ -648,13 +716,16 @@ function ResponseRow({ response, highlight = "" }: { response: FormResponse; hig
     const tokens = highlight.split(/\s+/).filter(Boolean);
     if (tokens.length === 0) return false;
     const headerHay = `${display.label} ${response.respondent_email ?? ""}`.toLowerCase();
-    // Any token NOT in the header => must have matched in the body.
     return tokens.some(t => !headerHay.includes(t));
   }, [highlight, display.label, response.respondent_email]);
   const effectivelyOpen = open || matchesInBody;
   const summary = entries.slice(0, 2).map(([k, v]) => `${k}: ${v}`).join(" · ");
+  const statusStyle = OUTREACH_STYLE[response.outreach_status] ?? OUTREACH_STYLE.new;
+  const isPaid = leadValueCents > 0;
+  const isDueForFollowup = response.next_followup_at && new Date(response.next_followup_at).getTime() < Date.now();
+
   return (
-    <div className="rounded-md border bg-white">
+    <div className={`rounded-md border bg-white ${isPaid ? "border-amber-200 shadow-[0_0_0_1px_rgba(245,158,11,0.12)]" : ""}`}>
       <button
         type="button"
         onClick={() => setOpen(o => !o)}
@@ -671,6 +742,22 @@ function ResponseRow({ response, highlight = "" }: { response: FormResponse; hig
             <Hl text={summary || "—"} q={highlight} />
           </div>
         </div>
+        {/* Paid-lead chip — shows the dollar value when the form has one
+            (DoctorsFinder = $750). Keeps high-value rows visually loud. */}
+        {isPaid && (
+          <Badge variant="outline" className="text-[9px] bg-amber-50 text-amber-800 border-amber-300 shrink-0 font-semibold">
+            <DollarSign className="h-2.5 w-2.5 mr-0.5" /> ${(leadValueCents / 100).toLocaleString()} paid lead
+          </Badge>
+        )}
+        {/* Outreach status pill */}
+        <Badge variant="outline" className={`text-[9px] shrink-0 ${statusStyle.className}`}>
+          {statusStyle.label}
+        </Badge>
+        {isDueForFollowup && (
+          <Badge variant="outline" className="text-[9px] bg-rose-50 text-rose-700 border-rose-200 shrink-0">
+            <CalendarClock className="h-2.5 w-2.5 mr-0.5" /> follow-up due
+          </Badge>
+        )}
         {response.doctor_id && (
           <Badge variant="outline" className="text-[9px] bg-emerald-50 text-emerald-700 border-emerald-200 shrink-0">
             <Sparkles className="h-2.5 w-2.5 mr-0.5" /> Zoho linked
@@ -679,28 +766,178 @@ function ResponseRow({ response, highlight = "" }: { response: FormResponse; hig
         <div className="text-[10px] text-muted-foreground shrink-0">{relativeTime(response.submitted_at)}</div>
       </button>
       {effectivelyOpen && (
-        <div className="border-t bg-slate-50/30 px-3 py-2 space-y-1">
-          {entries.length === 0 ? (
-            <p className="text-[11px] text-muted-foreground italic">No answers captured.</p>
-          ) : (
-            entries.map(([k, v]) => (
-              <div key={k} className="grid grid-cols-1 sm:grid-cols-[180px_1fr] gap-x-3 gap-y-0.5 text-[11px]">
-                <span className="text-muted-foreground">{k}</span>
-                <span className="text-slate-800 break-words"><Hl text={v} q={highlight} /></span>
+        <div className="border-t bg-slate-50/30 px-3 py-2 space-y-3">
+          {/* Outreach panel — keeps the team's working state on the
+              same surface as the data. */}
+          <OutreachPanel response={response} email={response.respondent_email} phone={phone} />
+
+          {/* Answers dump */}
+          <div className="space-y-1">
+            {entries.length === 0 ? (
+              <p className="text-[11px] text-muted-foreground italic">No answers captured.</p>
+            ) : (
+              entries.map(([k, v]) => (
+                <div key={k} className="grid grid-cols-1 sm:grid-cols-[180px_1fr] gap-x-3 gap-y-0.5 text-[11px]">
+                  <span className="text-muted-foreground">{k}</span>
+                  <span className="text-slate-800 break-words"><Hl text={v} q={highlight} /></span>
+                </div>
+              ))
+            )}
+            {response.doctor_id && (
+              <div className="text-[10px] text-emerald-700 mt-2 inline-flex items-center gap-1">
+                <CheckCircle2 className="h-3 w-3" />
+                Linked to <code className="text-[10px] bg-emerald-50 px-1 rounded">{response.doctor_id}</code>
               </div>
-            ))
-          )}
-          {response.doctor_id && (
-            <div className="text-[10px] text-emerald-700 mt-2 inline-flex items-center gap-1">
-              <CheckCircle2 className="h-3 w-3" />
-              Linked to <code className="text-[10px] bg-emerald-50 px-1 rounded">{response.doctor_id}</code>
-            </div>
-          )}
+            )}
+          </div>
         </div>
       )}
     </div>
   );
 }
+
+/** Inline outreach editor — status pill bar, owner, notes, follow-up
+ *  date, last-contacted stamp. Every change is a partial PATCH; tiny
+ *  spinner shows while saving, green check on success. */
+function OutreachPanel({
+  response, email, phone,
+}: {
+  response: FormResponse;
+  email: string | null;
+  phone: string | null;
+}) {
+  const upd = useUpdateFormResponseOutreach();
+  const { user } = useAuth();
+  const [notes, setNotes] = useState(response.outreach_notes ?? "");
+  const [followup, setFollowup] = useState(response.next_followup_at ? response.next_followup_at.slice(0, 10) : "");
+  const [savedStamp, setSavedStamp] = useState(0);
+
+  useEffect(() => { setNotes(response.outreach_notes ?? ""); }, [response.outreach_notes]);
+  useEffect(() => { setFollowup(response.next_followup_at ? response.next_followup_at.slice(0, 10) : ""); }, [response.next_followup_at]);
+
+  const flash = () => { setSavedStamp(Date.now()); setTimeout(() => setSavedStamp(s => (Date.now() - s > 1500 ? 0 : s)), 1700); };
+
+  const setStatus = async (s: OutreachStatus) => {
+    try { await upd.mutateAsync({ responseId: response.id, outreach_status: s, outreach_owner: response.outreach_owner ?? user?.email ?? null }); flash(); }
+    catch (e) { toast.error(e instanceof Error ? e.message : "Save failed"); }
+  };
+  const markContacted = async () => {
+    try {
+      await upd.mutateAsync({
+        responseId: response.id,
+        markContactedNow: true,
+        outreach_owner: response.outreach_owner ?? user?.email ?? null,
+      });
+      flash();
+    } catch (e) { toast.error(e instanceof Error ? e.message : "Save failed"); }
+  };
+  const saveNotes = async () => {
+    if ((notes ?? "") === (response.outreach_notes ?? "")) return;
+    try { await upd.mutateAsync({ responseId: response.id, outreach_notes: notes.trim() || null }); flash(); }
+    catch (e) { toast.error(e instanceof Error ? e.message : "Save failed"); }
+  };
+  const saveFollowup = async (v: string) => {
+    const iso = v ? new Date(v + "T09:00:00").toISOString() : null;
+    if ((iso ?? null) === (response.next_followup_at ?? null)) return;
+    try { await upd.mutateAsync({ responseId: response.id, next_followup_at: iso }); flash(); }
+    catch (e) { toast.error(e instanceof Error ? e.message : "Save failed"); }
+  };
+  const claim = async () => {
+    if (!user?.email) return;
+    try { await upd.mutateAsync({ responseId: response.id, outreach_owner: user.email }); flash(); }
+    catch (e) { toast.error(e instanceof Error ? e.message : "Save failed"); }
+  };
+
+  const owner = response.outreach_owner;
+  const ownedByMe = owner && user?.email && owner.toLowerCase() === user.email.toLowerCase();
+
+  return (
+    <div className="rounded-md border border-slate-200 bg-white p-2.5 space-y-2">
+      {/* Top row: status pills + action buttons */}
+      <div className="flex items-center gap-1.5 flex-wrap">
+        {(["new", "contacted", "qualified", "declined", "closed"] as OutreachStatus[]).map(s => {
+          const active = response.outreach_status === s;
+          const style = OUTREACH_STYLE[s];
+          return (
+            <button
+              key={s}
+              type="button"
+              onClick={() => setStatus(s)}
+              className={`text-[10px] px-2 py-0.5 rounded-full border transition-colors ${active ? style.className : "bg-white text-slate-500 border-slate-200 hover:bg-slate-50"}`}
+            >
+              {style.label}
+            </button>
+          );
+        })}
+        <span className="text-muted-foreground/40 mx-1">·</span>
+        <button
+          type="button"
+          onClick={markContacted}
+          className="text-[10px] h-6 px-2 rounded-full border border-teal-200 bg-teal-50 text-teal-700 hover:bg-teal-100 inline-flex items-center gap-1"
+        >
+          <CheckCircle2 className="h-3 w-3" /> Mark contacted now
+        </button>
+
+        {/* Quick contact shortcuts */}
+        <span className="text-muted-foreground/40 mx-1">·</span>
+        {email && (
+          <a href={`mailto:${email}`} className="text-[10px] h-6 px-2 rounded-full border border-slate-200 bg-white text-slate-700 hover:bg-slate-50 inline-flex items-center gap-1">
+            <Mail className="h-3 w-3" /> Email
+          </a>
+        )}
+        {phone && (
+          <a href={`tel:${phone}`} className="text-[10px] h-6 px-2 rounded-full border border-slate-200 bg-white text-slate-700 hover:bg-slate-50 inline-flex items-center gap-1">
+            <Phone className="h-3 w-3" /> Call
+          </a>
+        )}
+        {phone && (
+          <a href={`https://wa.me/${phone.replace(/[^0-9]/g, "")}`} target="_blank" rel="noreferrer" className="text-[10px] h-6 px-2 rounded-full border border-emerald-200 bg-emerald-50 text-emerald-700 hover:bg-emerald-100 inline-flex items-center gap-1">
+            WhatsApp
+          </a>
+        )}
+
+        {/* Owner + saving indicator (right-aligned) */}
+        <span className="ml-auto text-[10px] text-muted-foreground inline-flex items-center gap-1">
+          {upd.isPending  && <Loader2 className="h-3 w-3 animate-spin" />}
+          {!upd.isPending && savedStamp && (Date.now() - savedStamp < 1500) ? <Check className="h-3 w-3 text-emerald-600" /> : null}
+          {owner ? (
+            <>Owner: <span className={`font-medium ${ownedByMe ? "text-teal-700" : "text-slate-700"}`}>{owner}</span></>
+          ) : (
+            <button type="button" onClick={claim} className="text-teal-700 hover:underline">Claim</button>
+          )}
+        </span>
+      </div>
+
+      {/* Notes + follow-up date */}
+      <div className="grid grid-cols-1 md:grid-cols-[1fr_180px] gap-2">
+        <textarea
+          value={notes}
+          onChange={e => setNotes(e.target.value)}
+          onBlur={saveNotes}
+          placeholder="Notes from the call — what they want, when to chase, gotchas… (saves on blur)"
+          className="w-full text-[11px] rounded-md border border-slate-200 bg-white px-2 py-1.5 min-h-[60px] focus:outline-none focus:ring-1 focus:ring-teal-300"
+        />
+        <div className="space-y-1">
+          <label className="text-[10px] text-slate-500 block">Follow-up date</label>
+          <input
+            type="date"
+            value={followup}
+            onChange={e => { setFollowup(e.target.value); saveFollowup(e.target.value); }}
+            className="w-full h-7 text-[11px] rounded-md border border-slate-200 bg-white px-2"
+          />
+          {response.last_contacted_at && (
+            <div className="text-[9.5px] text-slate-500">
+              Last contacted {relativeTime(response.last_contacted_at)}
+            </div>
+          )}
+        </div>
+      </div>
+    </div>
+  );
+}
+
+// Tiny check icon (lucide doesn't expose just `Check` distinct from CheckCircle2; using CheckCircle2 above).
+const Check = CheckCircle2;
 
 /** Highlight matched search tokens inside arbitrary text. Renders
  *  unchanged text when q is empty. Cheap; runs per cell on render.

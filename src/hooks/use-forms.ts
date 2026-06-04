@@ -32,10 +32,18 @@ export interface Form {
   response_count:    number;
   last_response_at:  string | null;
   active:            boolean;
+  /** Per-response monetary value (cents). 0 = free signal (Typeform,
+   *  Consultation). 75 000 = DoctorsFinder $750 paid lead. Used to
+   *  flag responses as PAID LEAD in the UI + sort them on top. */
+  lead_value_cents:  number;
   created_by:        string | null;
   created_at:        string;
   updated_at:        string;
 }
+
+export type OutreachStatus = "new" | "contacted" | "qualified" | "declined" | "closed";
+
+export const OUTREACH_STATUSES: OutreachStatus[] = ["new", "contacted", "qualified", "declined", "closed"];
 
 export interface FormResponse {
   id:                    string;
@@ -47,6 +55,14 @@ export interface FormResponse {
   respondent_name:       string | null;
   respondent_email:      string | null;
   doctor_id:             string | null;
+
+  // Outreach lifecycle.
+  outreach_status:       OutreachStatus;
+  outreach_owner:        string | null;
+  outreach_notes:        string | null;
+  last_contacted_at:     string | null;
+  next_followup_at:      string | null;
+
   created_at:            string;
 }
 
@@ -98,10 +114,15 @@ export function useFormResponses(formId: string | null) {
 // ─── server-side paginated + searchable hook ──────────────────────────
 
 export interface FormResponseFilters {
-  search?:     string;             // matched against search_text (ILIKE)
+  search?:     string;                                            // matched against search_text (ILIKE)
   date?:       "7d" | "30d" | "90d" | "all";
   link?:       "all" | "linked" | "unlinked";
   sort?:       "newest" | "oldest";
+  /** 'all' (default) | 'mine' (open + due) | a specific lifecycle bucket */
+  outreach?:   "all" | "mine" | OutreachStatus;
+  /** When set, the calling page's current user. Filters 'mine' to
+   *  rows owned by this email (or unowned + new). */
+  currentOwnerEmail?: string;
 }
 
 /** Page sizes. First page is big so the user sees a lot at once, then
@@ -136,6 +157,11 @@ export function useFormResponsesInfinite(formId: string | null, filters: FormRes
         .from("form_responses")
         .select("*")
         .eq("form_id", formId)
+        // Paid leads first — sort by the form's lead_value implicitly via
+        // a follow-up client-side sort (PostgREST can't ORDER BY a joined
+        // column without a view), then by submitted_at. We accept the
+        // minor cost: paid leads are ~1 per page, so the secondary sort
+        // dominates for free leads.
         .order("submitted_at", { ascending: filters.sort === "oldest", nullsFirst: false });
 
       if (filters.date && filters.date !== "all") {
@@ -146,10 +172,28 @@ export function useFormResponsesInfinite(formId: string | null, filters: FormRes
       if (filters.link === "linked")   query = query.not("doctor_id", "is", null);
       if (filters.link === "unlinked") query = query.is("doctor_id", null);
 
+      // Outreach lifecycle filter.
+      if (filters.outreach && filters.outreach !== "all") {
+        if (filters.outreach === "mine") {
+          // 'Mine' = anything not closed/declined that I own OR that's
+          // still untouched (status='new', no owner). HI members chase
+          // these together — claiming a row is just clicking 'Mark
+          // contacted' which stamps the owner.
+          query = query
+            .not("outreach_status", "in", "(closed,declined)")
+            .or(filters.currentOwnerEmail
+              ? `outreach_owner.eq.${filters.currentOwnerEmail},outreach_owner.is.null`
+              : "outreach_owner.is.null");
+        } else {
+          query = query.eq("outreach_status", filters.outreach);
+        }
+      }
+
       const term = filters.search?.trim().toLowerCase();
       if (term) {
         // search_text is built by the trigger from name + email + doctor_id
-        // + every answer value, so a single ILIKE covers the whole row.
+        // + outreach_notes + every answer value, so a single ILIKE covers
+        // the whole row.
         query = query.ilike("search_text", `%${term}%`);
       }
 
@@ -184,18 +228,21 @@ export function useFormStats(formId: string | null) {
     queryKey: ["form-stats", formId ?? "_"],
     enabled:  !!formId,
     queryFn: async () => {
-      if (!formId) return { total: 0, last7d: 0, last30d: 0 };
+      if (!formId) return { total: 0, last7d: 0, last30d: 0, outreachOpen: 0 };
       const cutoff7  = new Date(Date.now() - 7  * 86_400_000).toISOString();
       const cutoff30 = new Date(Date.now() - 30 * 86_400_000).toISOString();
-      const [totalRes, last7Res, last30Res] = await Promise.all([
+      const [totalRes, last7Res, last30Res, openRes] = await Promise.all([
         supabase.from("form_responses").select("id", { count: "exact", head: true }).eq("form_id", formId),
         supabase.from("form_responses").select("id", { count: "exact", head: true }).eq("form_id", formId).gte("submitted_at", cutoff7),
         supabase.from("form_responses").select("id", { count: "exact", head: true }).eq("form_id", formId).gte("submitted_at", cutoff30),
+        // Open outreach = anything still in the live funnel (not closed/declined).
+        supabase.from("form_responses").select("id", { count: "exact", head: true }).eq("form_id", formId).in("outreach_status", ["new", "contacted", "qualified"]),
       ]);
       return {
-        total:   totalRes.count   ?? 0,
-        last7d:  last7Res.count   ?? 0,
-        last30d: last30Res.count  ?? 0,
+        total:        totalRes.count   ?? 0,
+        last7d:       last7Res.count   ?? 0,
+        last30d:      last30Res.count  ?? 0,
+        outreachOpen: openRes.count    ?? 0,
       };
     },
     staleTime: 60_000,
@@ -258,6 +305,47 @@ export function useDeleteForm() {
       if (error) throw error;
     },
     onSuccess: () => qc.invalidateQueries({ queryKey: FORMS_KEY }),
+  });
+}
+
+/** Patch a single response's outreach state. Any field can be omitted —
+ *  the mutation only writes what was passed. `markContactedNow: true` is
+ *  syntactic sugar that bumps last_contacted_at to now() in the same call
+ *  (useful for the 'Mark contacted' shortcut). */
+export interface OutreachPatch {
+  responseId:           string;
+  outreach_status?:     OutreachStatus;
+  outreach_owner?:      string | null;
+  outreach_notes?:      string | null;
+  next_followup_at?:    string | null;
+  markContactedNow?:    boolean;
+}
+
+export function useUpdateFormResponseOutreach() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: async (patch: OutreachPatch) => {
+      const body: Record<string, unknown> = {};
+      if (patch.outreach_status   !== undefined) body.outreach_status   = patch.outreach_status;
+      if (patch.outreach_owner    !== undefined) body.outreach_owner    = patch.outreach_owner;
+      if (patch.outreach_notes    !== undefined) body.outreach_notes    = patch.outreach_notes;
+      if (patch.next_followup_at  !== undefined) body.next_followup_at  = patch.next_followup_at;
+      if (patch.markContactedNow) {
+        body.last_contacted_at = new Date().toISOString();
+        if (body.outreach_status === undefined) body.outreach_status = "contacted";
+      }
+      if (Object.keys(body).length === 0) return;
+      const { error } = await supabase
+        .from("form_responses")
+        .update(body)
+        .eq("id", patch.responseId);
+      if (error) throw error;
+    },
+    // Invalidate any infinite-feed cache + the stats counters.
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ["form-responses-infinite"] });
+      qc.invalidateQueries({ queryKey: ["form-stats"] });
+    },
   });
 }
 
