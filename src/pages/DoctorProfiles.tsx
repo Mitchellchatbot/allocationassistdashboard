@@ -1,4 +1,5 @@
 import { useEffect, useMemo, useRef, useState } from "react";
+import { useSearchParams } from "react-router-dom";
 import { DashboardLayout } from "@/components/layout/DashboardLayout";
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
@@ -43,7 +44,9 @@ interface DoctorRow {
 
 const BLANK: DoctorProfileInput = { doctor_id: "" };
 
-export default function DoctorProfiles() {
+interface DoctorProfilesProps { embedded?: boolean }
+
+export default function DoctorProfiles({ embedded }: DoctorProfilesProps = {}) {
   const { data: zoho, isLoading: zohoLoading } = useZohoData();
   const { data: profiles = [] } = useDoctorProfiles();
   const { data: pendingUploads = [] } = usePendingCvUploads();
@@ -88,7 +91,21 @@ export default function DoctorProfiles() {
     return out;
   }, [zoho]);
 
-  const [search,  setSearch]  = useState("");
+  // When embedded in the /doctors shell, the URL `q` param is the source of
+  // truth. Standalone we keep local state.
+  const [searchParams, setSearchParams] = useSearchParams();
+  const urlQ = searchParams.get("q") ?? "";
+  const [localSearch, setLocalSearch]  = useState(urlQ);
+  const search = embedded ? urlQ : localSearch;
+  const setSearch = (v: string) => {
+    if (embedded) {
+      const next = new URLSearchParams(searchParams);
+      if (v) next.set("q", v); else next.delete("q");
+      setSearchParams(next, { replace: true });
+    } else {
+      setLocalSearch(v);
+    }
+  };
   const [selectedId, setSelectedId] = useState<string | null>(null);
   const [filterMode, setFilterMode] = useState<"all" | "missing" | "complete">("all");
   const [pendingOpen, setPendingOpen] = useState(true);
@@ -149,25 +166,35 @@ export default function DoctorProfiles() {
     [profiles],
   );
 
-  return (
-    <DashboardLayout>
+  const body = (
       <div className="space-y-4">
-        <div className="flex items-start justify-between gap-4">
-          <div>
-            <h1 className="text-2xl font-semibold tracking-tight flex items-center gap-2">
-              <UserSquare className="h-6 w-6 text-teal-600" />
-              Doctor Profiles
-            </h1>
-            <p className="text-sm text-muted-foreground mt-1">
-              Phase 2 — the structured profile data that backs the Profile Sent emails. Fields here populate the per-doctor row in hospital introductions.
-            </p>
+        {/* Page header — shown only standalone. The /doctors shell renders
+            its own h1 + subtitle for all three tabs. */}
+        {!embedded && (
+          <div className="flex items-start justify-between gap-4">
+            <div>
+              <h1 className="text-2xl font-semibold tracking-tight flex items-center gap-2">
+                <UserSquare className="h-6 w-6 text-teal-600" />
+                Doctor Profiles
+              </h1>
+              <p className="text-sm text-muted-foreground mt-1">
+                Phase 2 — the structured profile data that backs the Profile Sent emails. Fields here populate the per-doctor row in hospital introductions.
+              </p>
+            </div>
+            <div className="flex items-center gap-2">
+              <KpiPill label="Profiles started" value={profiles.length} />
+              <KpiPill label="Complete" value={completeCount} tone="emerald" />
+              <KpiPill label="Doctors in Zoho" value={allDoctors.length} tone="slate" />
+            </div>
           </div>
-          <div className="flex items-center gap-2">
+        )}
+        {embedded && (
+          <div className="flex items-center gap-2 justify-end">
             <KpiPill label="Profiles started" value={profiles.length} />
             <KpiPill label="Complete" value={completeCount} tone="emerald" />
             <KpiPill label="Doctors in Zoho" value={allDoctors.length} tone="slate" />
           </div>
-        </div>
+        )}
 
         {pendingUploads.length > 0 && (
           <PendingUploadsPanel
@@ -192,15 +219,18 @@ export default function DoctorProfiles() {
                 Doctors
                 <span className="text-muted-foreground font-normal text-[11px]">· {filtered.length}{filtered.length === 200 ? "+" : ""}</span>
               </CardTitle>
-              <div className="relative mt-1.5">
-                <Search className="absolute left-2 top-1/2 -translate-y-1/2 h-3 w-3 text-muted-foreground" />
-                <Input
-                  value={search}
-                  onChange={e => setSearch(e.target.value)}
-                  placeholder="Search by name, email, speciality..."
-                  className="pl-7 text-[11px] h-7"
-                />
-              </div>
+              {/* Local search bar — hidden when the /doctors shell owns it */}
+              {!embedded && (
+                <div className="relative mt-1.5">
+                  <Search className="absolute left-2 top-1/2 -translate-y-1/2 h-3 w-3 text-muted-foreground" />
+                  <Input
+                    value={search}
+                    onChange={e => setSearch(e.target.value)}
+                    placeholder="Search by name, email, speciality..."
+                    className="pl-7 text-[11px] h-7"
+                  />
+                </div>
+              )}
               <div className="flex items-center gap-1 mt-1.5">
                 {(["all", "missing", "complete"] as const).map(m => (
                   <button
@@ -285,8 +315,10 @@ export default function DoctorProfiles() {
           )}
         </div>
       </div>
-    </DashboardLayout>
   );
+
+  if (embedded) return body;
+  return <DashboardLayout>{body}</DashboardLayout>;
 }
 
 function KpiPill({ label, value, tone = "teal" }: { label: string; value: number; tone?: "teal" | "emerald" | "slate" }) {

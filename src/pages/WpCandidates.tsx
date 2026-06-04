@@ -11,6 +11,7 @@
  * names don't auto-match.
  */
 import { useEffect, useMemo, useRef, useState } from "react";
+import { useSearchParams } from "react-router-dom";
 import { DashboardLayout } from "@/components/layout/DashboardLayout";
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
@@ -29,14 +30,31 @@ import { WpCandidateEditDialog } from "@/components/WpCandidateEditDialog";
 import { toast } from "sonner";
 import { Plus, Pencil } from "lucide-react";
 
-export default function WpCandidates() {
+interface WpCandidatesProps { embedded?: boolean }
+
+export default function WpCandidates({ embedded }: WpCandidatesProps = {}) {
   const { data: candidates = [], isLoading } = useWpCandidates();
   const sync     = useSyncWpCandidates();
   const autoLink = useAutoLinkWpCandidates();
   const [editing, setEditing] = useState<{ open: boolean; candidate: WpCandidate | null }>({ open: false, candidate: null });
 
   // Search + filter state — same architecture as /forms.
-  const [searchRaw, setSearchRaw] = useState("");
+  // In embedded mode the URL `q` is the source of truth (shell owns the
+  // input). Standalone, we use a local raw value that's still URL-synced
+  // so deep links work.
+  const [searchParams, setSearchParams] = useSearchParams();
+  const urlQ = searchParams.get("q") ?? "";
+  const [localRaw, setLocalRaw] = useState(urlQ);
+  const searchRaw = embedded ? urlQ : localRaw;
+  const setSearchRaw = (v: string) => {
+    if (embedded) {
+      const next = new URLSearchParams(searchParams);
+      if (v) next.set("q", v); else next.delete("q");
+      setSearchParams(next, { replace: true });
+    } else {
+      setLocalRaw(v);
+    }
+  };
   const search = useDebounce(searchRaw, 120);
   const [statusFilter, setStatusFilter] = useState<"all" | "publish" | "private" | "draft">("all");
   const [licenseFilter, setLicenseFilter] = useState<"all" | "DHA" | "DOH" | "MOH" | "SCFHS" | "QCHP">("all");
@@ -119,33 +137,41 @@ export default function WpCandidates() {
     linked:    candidates.filter(c => !!c.doctor_id).length,
   }), [candidates]);
 
-  return (
-    <DashboardLayout>
+  const headerButtons = (
+    <div className="flex items-center gap-2">
+      <Button size="sm" onClick={() => setEditing({ open: true, candidate: null })}>
+        <Plus className="h-3.5 w-3.5 mr-1" /> New candidate
+      </Button>
+      <Button size="sm" variant="outline" onClick={handleAutoLink} disabled={autoLink.isPending}>
+        {autoLink.isPending ? <RefreshCw className="h-3.5 w-3.5 mr-1 animate-spin" /> : <Link2 className="h-3.5 w-3.5 mr-1" />}
+        {autoLink.isPending ? "Auto-linking…" : "Auto-link to AA doctors"}
+      </Button>
+      <Button size="sm" variant="outline" onClick={handleSync} disabled={sync.isPending}>
+        {sync.isPending ? <RefreshCw className="h-3.5 w-3.5 mr-1 animate-spin" /> : <History className="h-3.5 w-3.5 mr-1" />}
+        {sync.isPending ? "Syncing…" : "Sync from WordPress"}
+      </Button>
+    </div>
+  );
+
+  const body = (
       <div className="space-y-4">
-        <div className="flex items-start justify-between gap-3 flex-wrap">
-          <div>
-            <h1 className="text-2xl font-semibold tracking-tight flex items-center gap-2">
-              <UserSquare className="h-6 w-6 text-teal-600" />
-              WP Candidates
-            </h1>
-            <p className="text-sm text-muted-foreground mt-1">
-              Mirror of the doctor profiles on allocationassist.com. Use this as a one-stop search across every AA-curated candidate — specialty, license, country of training, salary expectations, targeted locations, the lot.
-            </p>
+        {/* Page header — shown only standalone. Embedded mode parks the
+            buttons under the shared KPI strip to keep them reachable. */}
+        {!embedded && (
+          <div className="flex items-start justify-between gap-3 flex-wrap">
+            <div>
+              <h1 className="text-2xl font-semibold tracking-tight flex items-center gap-2">
+                <UserSquare className="h-6 w-6 text-teal-600" />
+                WP Candidates
+              </h1>
+              <p className="text-sm text-muted-foreground mt-1">
+                Mirror of the doctor profiles on allocationassist.com. Use this as a one-stop search across every AA-curated candidate — specialty, license, country of training, salary expectations, targeted locations, the lot.
+              </p>
+            </div>
+            {headerButtons}
           </div>
-          <div className="flex items-center gap-2">
-            <Button size="sm" onClick={() => setEditing({ open: true, candidate: null })}>
-              <Plus className="h-3.5 w-3.5 mr-1" /> New candidate
-            </Button>
-            <Button size="sm" variant="outline" onClick={handleAutoLink} disabled={autoLink.isPending}>
-              {autoLink.isPending ? <RefreshCw className="h-3.5 w-3.5 mr-1 animate-spin" /> : <Link2 className="h-3.5 w-3.5 mr-1" />}
-              {autoLink.isPending ? "Auto-linking…" : "Auto-link to AA doctors"}
-            </Button>
-            <Button size="sm" variant="outline" onClick={handleSync} disabled={sync.isPending}>
-              {sync.isPending ? <RefreshCw className="h-3.5 w-3.5 mr-1 animate-spin" /> : <History className="h-3.5 w-3.5 mr-1" />}
-              {sync.isPending ? "Syncing…" : "Sync from WordPress"}
-            </Button>
-          </div>
-        </div>
+        )}
+        {embedded && <div className="flex justify-end">{headerButtons}</div>}
 
         {/* KPI strip */}
         <div className="grid grid-cols-2 sm:grid-cols-5 gap-3">
@@ -159,25 +185,27 @@ export default function WpCandidates() {
         {/* Search + filters */}
         <Card>
           <CardContent className="pt-3 pb-3 space-y-2">
-            <div className="relative">
-              <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" />
-              <Input
-                ref={searchRef}
-                value={searchRaw}
-                onChange={e => setSearchRaw(e.target.value)}
-                placeholder="Search any field — name, specialty, license, country, salary, location… (⌘F)"
-                className="pl-10 pr-24 h-10 text-[13px]"
-              />
-              {searchRaw && (
-                <button
-                  type="button"
-                  onClick={() => setSearchRaw("")}
-                  className="absolute right-3 top-1/2 -translate-y-1/2 text-[11px] text-muted-foreground hover:text-slate-800"
-                >
-                  Clear
-                </button>
-              )}
-            </div>
+            {!embedded && (
+              <div className="relative">
+                <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" />
+                <Input
+                  ref={searchRef}
+                  value={searchRaw}
+                  onChange={e => setSearchRaw(e.target.value)}
+                  placeholder="Search any field — name, specialty, license, country, salary, location… (⌘F)"
+                  className="pl-10 pr-24 h-10 text-[13px]"
+                />
+                {searchRaw && (
+                  <button
+                    type="button"
+                    onClick={() => setSearchRaw("")}
+                    className="absolute right-3 top-1/2 -translate-y-1/2 text-[11px] text-muted-foreground hover:text-slate-800"
+                  >
+                    Clear
+                  </button>
+                )}
+              </div>
+            )}
             <div className="flex items-center gap-2 flex-wrap text-[11px]">
               <ChipGroup
                 value={statusFilter}
@@ -247,13 +275,21 @@ export default function WpCandidates() {
           </CardContent>
         </Card>
       </div>
+  );
+
+  const withDialog = (
+    <>
+      {body}
       <WpCandidateEditDialog
         open={editing.open}
         candidate={editing.candidate}
         onClose={() => setEditing({ open: false, candidate: null })}
       />
-    </DashboardLayout>
+    </>
   );
+
+  if (embedded) return withDialog;
+  return <DashboardLayout>{withDialog}</DashboardLayout>;
 }
 
 function CandidateRow({ candidate, highlight, onEdit }: { candidate: WpCandidate; highlight: string; onEdit: () => void }) {

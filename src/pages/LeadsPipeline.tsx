@@ -190,13 +190,30 @@ const statusConfig = {
   "closed":  { label: "Closed", className: "bg-muted text-muted-foreground border-border/50", icon: X },
 };
 
-const LeadsPipeline = () => {
+interface LeadsPipelineProps { embedded?: boolean }
+
+const LeadsPipeline = ({ embedded }: LeadsPipelineProps = {}) => {
   const { workflow } = useFilteredData();
   const { data: zoho } = useZohoData();
   // Read deep-link params (e.g. /leads-pipeline?stage=Not%20Contacted) so other
   // pages can link straight to a filtered view of the leads list.
-  const [searchParams] = useSearchParams();
-  const [search, setSearch] = useState(searchParams.get("q") ?? "");
+  const [searchParams, setSearchParams] = useSearchParams();
+  // When mounted inside the /doctors shell, the URL `q` is the source of
+  // truth (shell owns the search box). Standalone, we use a local state
+  // for the search input + push it back to the URL on change so deep
+  // links keep working.
+  const urlQ = searchParams.get("q") ?? "";
+  const [localSearch, setLocalSearch] = useState(urlQ);
+  const search = embedded ? urlQ : localSearch;
+  const setSearch = (v: string) => {
+    if (embedded) {
+      const next = new URLSearchParams(searchParams);
+      if (v) next.set("q", v); else next.delete("q");
+      setSearchParams(next, { replace: true });
+    } else {
+      setLocalSearch(v);
+    }
+  };
   const debouncedSearch = useDebounce(search, 300);
   const [filters, setFilters] = useState<LeadsFilters>({
     stage:     searchParams.get("stage")     ?? undefined,
@@ -315,8 +332,8 @@ const LeadsPipeline = () => {
     return () => observer.disconnect();
   }, [hasNextPage, isFetchingNextPage, fetchNextPage]);
 
-  return (
-    <DashboardLayout title="Doctor Progress" subtitle="Track each doctor's journey from application to placement">
+  const body = (
+    <>
       <Card className="mb-5 shadow-sm border-border/50">
         <CardHeader className="pb-1 pt-4 px-4">
           <CardTitle className="text-[12px] font-medium text-muted-foreground uppercase tracking-wide">Where Doctors Are Right Now</CardTitle>
@@ -357,15 +374,18 @@ const LeadsPipeline = () => {
                   </span>
                 )}
               </CardTitle>
-              <div className="relative w-full sm:w-[220px]">
-                <Search className="absolute left-2.5 top-1/2 -translate-y-1/2 h-3 w-3 text-muted-foreground" />
-                <Input
-                  placeholder="Search name, specialty, recruiter, country, license, destination…"
-                  value={search}
-                  onChange={(e) => setSearch(e.target.value)}
-                  className="h-7 pl-7 text-[11px] bg-secondary/50 border-0"
-                />
-              </div>
+              {/* Shell owns the search input when embedded — hide the page-local one to avoid two boxes */}
+              {!embedded && (
+                <div className="relative w-full sm:w-[220px]">
+                  <Search className="absolute left-2.5 top-1/2 -translate-y-1/2 h-3 w-3 text-muted-foreground" />
+                  <Input
+                    placeholder="Search name, specialty, recruiter, country, license, destination…"
+                    value={search}
+                    onChange={(e) => setSearch(e.target.value)}
+                    className="h-7 pl-7 text-[11px] bg-secondary/50 border-0"
+                  />
+                </div>
+              )}
             </div>
 
             {/* Row 2: filter dropdowns */}
@@ -623,6 +643,13 @@ const LeadsPipeline = () => {
         onClose={() => setLinkLead(null)}
         lead={linkLead}
       />
+    </>
+  );
+
+  if (embedded) return body;
+  return (
+    <DashboardLayout title="Doctor Progress" subtitle="Track each doctor's journey from application to placement">
+      {body}
     </DashboardLayout>
   );
 };

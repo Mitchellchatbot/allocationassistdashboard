@@ -5,7 +5,6 @@ import {
   Users as UsersIcon,
   DollarSign,
   Settings,
-  GitBranch,
   ClipboardList,
   BarChart3,
   Mailbox,
@@ -21,7 +20,6 @@ import {
   Search,
   ChevronRight,
   Inbox,
-  Stethoscope,
   type LucideIcon,
 } from "lucide-react";
 import { useCallback, useEffect, useState } from "react";
@@ -84,8 +82,7 @@ const NAV_SECTIONS: NavSection[] = [
     accent: "#fb923c",  // vivid orange
     items: [
       { title: "My Workspace",    url: "/my-workspace",    icon: Inbox },
-      { title: "Doctor Profiles", url: "/doctor-profiles", icon: UserSquare },
-      { title: "WP Candidates",   url: "/wp-candidates",   icon: Stethoscope },
+      { title: "Doctors",         url: "/doctors",         icon: UserSquare },
       { title: "Automations",     url: "/automations",     icon: Workflow },
       { title: "Vacancies",       url: "/vacancies",       icon: ClipboardList },
       { title: "Batch Sends",     url: "/batches",         icon: Mailbox },
@@ -97,7 +94,6 @@ const NAV_SECTIONS: NavSection[] = [
     accent: "#38bdf8",  // vivid sky blue
     items: [
       { title: "Sales Tracker",     url: "/sales",           icon: TrendingUp },
-      { title: "Doctor Progress",   url: "/leads-pipeline",  icon: GitBranch },
       { title: "Follow-ups",        url: "/follow-ups",      icon: BellRing },
       { title: "Calls",             url: "/calls",           icon: PhoneCall },
       { title: "Contract Builder",  url: "/contracts",       icon: FileSignature },

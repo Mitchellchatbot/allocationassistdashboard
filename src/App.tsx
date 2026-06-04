@@ -1,6 +1,6 @@
 import { Suspense, lazy } from "react";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
-import { BrowserRouter, Route, Routes, Outlet, useLocation } from "react-router-dom";
+import { BrowserRouter, Route, Routes, Outlet, useLocation, Navigate } from "react-router-dom";
 import { Toaster as Sonner } from "@/components/ui/sonner";
 import { Toaster } from "@/components/ui/toaster";
 import { TooltipProvider } from "@/components/ui/tooltip";
@@ -20,7 +20,10 @@ import Login from "./pages/Login";
 const Index           = lazy(() => import("./pages/Index"));
 const Sales           = lazy(() => import("./pages/Sales"));
 const Marketing       = lazy(() => import("./pages/Marketing"));
-const LeadsPipeline   = lazy(() => import("./pages/LeadsPipeline"));
+// LeadsPipeline / DoctorProfiles / WpCandidates are now embedded inside
+// the /doctors shell — the shell does its own lazy import, so we don't
+// need a top-level lazy here anymore. Their old URLs redirect into the
+// shell via <Navigate /> below.
 const TeamPerformance = lazy(() => import("./pages/TeamPerformance"));
 const Finance         = lazy(() => import("./pages/Finance"));
 const Settings        = lazy(() => import("./pages/Settings"));
@@ -31,7 +34,6 @@ const Contracts       = lazy(() => import("./pages/Contracts"));
 const FollowUps       = lazy(() => import("./pages/FollowUps"));
 const Calls           = lazy(() => import("./pages/Calls"));
 const Automations     = lazy(() => import("./pages/Automations"));
-const DoctorProfiles  = lazy(() => import("./pages/DoctorProfiles"));
 const Vacancies       = lazy(() => import("./pages/Vacancies"));
 const Reports         = lazy(() => import("./pages/Reports"));
 const Batches         = lazy(() => import("./pages/Batches"));
@@ -41,7 +43,7 @@ const Connections     = lazy(() => import("./pages/Connections"));
 const UploadCV        = lazy(() => import("./pages/UploadCV"));
 const SharedProfile   = lazy(() => import("./pages/SharedProfile"));
 const Forms           = lazy(() => import("./pages/Forms"));
-const WpCandidates    = lazy(() => import("./pages/WpCandidates"));
+const Doctors         = lazy(() => import("./pages/Doctors"));
 const NotFound        = lazy(() => import("./pages/NotFound"));
 
 // Global react-query defaults tuned for this dashboard:
@@ -110,6 +112,8 @@ function ProtectedShell() {
  *  don't have their own row in the user_pages config. */
 function requiredPageForPath(pathname: string): string {
   if (pathname === "/import" || pathname === "/contracts" || pathname === "/import-bulk" || pathname === "/connections") return "/";
+  // Legacy doctor URLs gate on /doctors (the page they redirect into)
+  if (pathname === "/leads-pipeline" || pathname === "/doctor-profiles" || pathname === "/wp-candidates") return "/doctors";
   return pathname;
 }
 
@@ -139,7 +143,6 @@ const App = () => (
                 <Route path="/"               element={<Index />} />
                 <Route path="/sales"          element={<Sales />} />
                 <Route path="/marketing"      element={<Marketing />} />
-                <Route path="/leads-pipeline" element={<LeadsPipeline />} />
                 <Route path="/team"           element={<TeamPerformance />} />
                 <Route path="/finance"        element={<Finance />} />
                 <Route path="/settings"       element={<Settings />} />
@@ -151,14 +154,18 @@ const App = () => (
                 <Route path="/calls"          element={<Calls />} />
                 <Route path="/my-workspace"   element={<MyWorkspace />} />
                 <Route path="/automations"    element={<Automations />} />
-                <Route path="/doctor-profiles" element={<DoctorProfiles />} />
+                <Route path="/doctors"        element={<Doctors />} />
+                {/* Legacy routes — keep bookmarks working by redirecting
+                    into the unified /doctors shell with the right tab pre-selected. */}
+                <Route path="/leads-pipeline"  element={<Navigate to="/doctors?tab=progress" replace />} />
+                <Route path="/doctor-profiles" element={<Navigate to="/doctors?tab=profiles" replace />} />
+                <Route path="/wp-candidates"   element={<Navigate to="/doctors?tab=wp"       replace />} />
                 <Route path="/vacancies"      element={<Vacancies />} />
                 <Route path="/reports"        element={<Reports />} />
                 <Route path="/batches"        element={<Batches />} />
                 <Route path="/import-bulk"    element={<BulkImport />} />
                 <Route path="/connections"    element={<Connections />} />
                 <Route path="/forms"          element={<Forms />} />
-                <Route path="/wp-candidates"  element={<WpCandidates />} />
               </Route>
 
               <Route path="*" element={<NotFound />} />

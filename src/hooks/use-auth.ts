@@ -24,7 +24,10 @@ export const WORKER_EMAIL_TO_NAME: Record<string, string> = {
 };
 
 // All pages that exist in the app (used for admin fallback)
-export const ALL_PAGES = ["/", "/my-workspace", "/sales", "/marketing", "/leads-pipeline", "/team", "/finance", "/meta-ads", "/settings", "/worker", "/calls", "/follow-ups", "/automations", "/doctor-profiles", "/vacancies", "/reports", "/batches", "/import-bulk", "/connections", "/forms", "/wp-candidates"];
+// /doctors is the unified shell — the old /leads-pipeline, /doctor-profiles
+// and /wp-candidates URLs redirect into it, so they don't need their own
+// entry in the access list. Anyone who can see "doctors" sees all three tabs.
+export const ALL_PAGES = ["/", "/my-workspace", "/sales", "/marketing", "/doctors", "/team", "/finance", "/meta-ads", "/settings", "/worker", "/calls", "/follow-ups", "/automations", "/vacancies", "/reports", "/batches", "/import-bulk", "/connections", "/forms"];
 
 // Hospital Introduction team page set. They land on /my-workspace and
 // only see the surfaces that matter for moving doctors through the
@@ -33,12 +36,11 @@ export const HI_MEMBER_PAGES = [
   "/",
   "/my-workspace",
   "/automations",
-  "/doctor-profiles",
+  "/doctors",
   "/vacancies",
   "/batches",
   "/reports",
   "/forms",
-  "/wp-candidates",
 ];
 
 // Role presets — selected in the Add User dialog
