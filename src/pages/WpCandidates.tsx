@@ -12,7 +12,7 @@
  */
 import { useEffect, useMemo, useRef, useState } from "react";
 import { DashboardLayout } from "@/components/layout/DashboardLayout";
-import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "@/components/ui/card";
+import { CardContent } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Badge } from "@/components/ui/badge";
@@ -118,6 +118,18 @@ export default function WpCandidates() {
 
   return (
     <DashboardLayout>
+      {/* Glass backdrop — soft teal/sky/fuchsia gradient with a few large
+          blurred colour orbs so the backdrop-blur on cards actually has
+          something to refract. Pinned to the page scroll area so it
+          stays put as you read. */}
+      <div className="relative -mx-4 lg:-mx-6 -mt-5 px-4 lg:px-6 pt-5 pb-6 min-h-[calc(100vh-52px)]">
+        <div aria-hidden className="absolute inset-0 -z-10 overflow-hidden">
+          <div className="absolute inset-0 bg-gradient-to-br from-teal-50 via-sky-50/70 to-fuchsia-50/40" />
+          <div className="absolute -top-32 -left-24 h-[480px] w-[480px] rounded-full bg-teal-300/40 blur-3xl" />
+          <div className="absolute top-1/3 -right-32 h-[420px] w-[420px] rounded-full bg-sky-300/40 blur-3xl" />
+          <div className="absolute bottom-[-20%] left-1/3 h-[380px] w-[380px] rounded-full bg-fuchsia-200/30 blur-3xl" />
+        </div>
+
       <div className="space-y-4">
         <div className="flex items-start justify-between gap-3 flex-wrap">
           <div>
@@ -125,23 +137,23 @@ export default function WpCandidates() {
               <UserSquare className="h-6 w-6 text-teal-600" />
               WP Candidates
             </h1>
-            <p className="text-sm text-muted-foreground mt-1">
+            <p className="text-sm text-slate-600 mt-1">
               Mirror of the doctor profiles on allocationassist.com. Use this as a one-stop search across every AA-curated candidate — specialty, license, country of training, salary expectations, targeted locations, the lot.
             </p>
           </div>
           <div className="flex items-center gap-2">
-            <Button size="sm" variant="outline" onClick={handleAutoLink} disabled={autoLink.isPending}>
+            <Button size="sm" variant="outline" onClick={handleAutoLink} disabled={autoLink.isPending} className="bg-white/60 backdrop-blur-md border-white/60 hover:bg-white/80 shadow-sm">
               {autoLink.isPending ? <RefreshCw className="h-3.5 w-3.5 mr-1 animate-spin" /> : <Link2 className="h-3.5 w-3.5 mr-1" />}
               {autoLink.isPending ? "Auto-linking…" : "Auto-link to AA doctors"}
             </Button>
-            <Button size="sm" variant="outline" onClick={handleSync} disabled={sync.isPending}>
+            <Button size="sm" variant="outline" onClick={handleSync} disabled={sync.isPending} className="bg-white/60 backdrop-blur-md border-white/60 hover:bg-white/80 shadow-sm">
               {sync.isPending ? <RefreshCw className="h-3.5 w-3.5 mr-1 animate-spin" /> : <History className="h-3.5 w-3.5 mr-1" />}
               {sync.isPending ? "Syncing…" : "Sync from WordPress"}
             </Button>
           </div>
         </div>
 
-        {/* KPI strip */}
+        {/* KPI strip — glassy tinted tiles */}
         <div className="grid grid-cols-2 sm:grid-cols-5 gap-3">
           <Kpi label="Total"          value={kpis.total}     tone="slate" />
           <Kpi label="Published"      value={kpis.published} tone="emerald" />
@@ -151,7 +163,7 @@ export default function WpCandidates() {
         </div>
 
         {/* Search + filters */}
-        <Card>
+        <GlassCard>
           <CardContent className="pt-3 pb-3 space-y-2">
             <div className="relative">
               <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" />
@@ -201,10 +213,10 @@ export default function WpCandidates() {
               </span>
             </div>
           </CardContent>
-        </Card>
+        </GlassCard>
 
         {/* List */}
-        <Card>
+        <GlassCard>
           <CardContent className="pt-3 space-y-2">
             {isLoading ? (
               <p className="text-[11px] text-muted-foreground py-2">Loading candidates…</p>
@@ -239,9 +251,23 @@ export default function WpCandidates() {
               </>
             )}
           </CardContent>
-        </Card>
+        </GlassCard>
+      </div>
       </div>
     </DashboardLayout>
+  );
+}
+
+/** Wrapper around the shadcn Card that swaps its solid background for a
+ *  translucent glass surface. Adds the 1px top inner-highlight that makes
+ *  the panel read as "lit from above" — the cheapest detail with the
+ *  biggest perceptual payoff. */
+function GlassCard({ children, className }: { children: React.ReactNode; className?: string }) {
+  return (
+    <div className={`relative rounded-xl border border-white/50 bg-white/55 backdrop-blur-xl shadow-[0_8px_32px_-12px_rgba(15,23,42,0.18)] overflow-hidden ${className ?? ""}`}>
+      <span aria-hidden className="pointer-events-none absolute inset-x-0 top-0 h-px bg-gradient-to-r from-transparent via-white/90 to-transparent" />
+      {children}
+    </div>
   );
 }
 
@@ -250,11 +276,11 @@ function CandidateRow({ candidate, highlight }: { candidate: WpCandidate; highli
   const subtitle = [candidate.job_title, candidate.country_of_training].filter(Boolean).join(" · ");
   return (
     <>
-      <div className="rounded-md border bg-white">
+      <div className="rounded-md border border-white/50 bg-white/40 backdrop-blur-md hover:bg-white/70 transition-colors">
         <button
           type="button"
           onClick={() => setOpen(true)}
-          className="w-full flex items-center gap-2.5 px-3 py-2 text-left hover:bg-slate-50"
+          className="w-full flex items-center gap-2.5 px-3 py-2 text-left"
         >
           <ChevronRight className="h-3.5 w-3.5 text-slate-400 shrink-0" />
           <Avatar src={candidate.photo_url} name={candidate.full_name ?? candidate.title ?? "?"} size={32} />
@@ -309,13 +335,23 @@ function CandidateDetailDialog({ candidate, open, onClose }: { candidate: WpCand
 
   return (
     <Dialog open={open} onOpenChange={v => !v && onClose()}>
-      <DialogContent className="sm:max-w-[1080px] max-h-[92vh] overflow-y-auto p-0">
+      <DialogContent className="sm:max-w-[1080px] max-h-[92vh] overflow-y-auto p-0 bg-white/70 backdrop-blur-2xl border border-white/60 shadow-[0_24px_80px_-20px_rgba(15,23,42,0.35)]">
+        {/* Soft colour wash inside the dialog so its glass also has something to refract */}
+        <div aria-hidden className="pointer-events-none absolute inset-0 -z-10 overflow-hidden rounded-lg">
+          <div className="absolute -top-20 -left-20 h-[300px] w-[300px] rounded-full bg-teal-200/30 blur-3xl" />
+          <div className="absolute -bottom-24 -right-16 h-[280px] w-[280px] rounded-full bg-sky-200/30 blur-3xl" />
+        </div>
+        <span aria-hidden className="pointer-events-none absolute inset-x-0 top-0 h-px bg-gradient-to-r from-transparent via-white/90 to-transparent" />
         <div className="p-5 md:p-7">
           <div className="grid grid-cols-1 md:grid-cols-[280px_1fr] gap-6">
 
             {/* ── Left teal sidebar card ───────────────────────────────── */}
             <div className="space-y-3">
-              <div className="rounded-2xl bg-gradient-to-b from-teal-400 to-teal-500 text-white p-5 shadow-sm">
+              <div className="relative rounded-2xl bg-gradient-to-b from-teal-400 to-teal-600 text-white p-5 shadow-[0_18px_40px_-16px_rgba(13,148,136,0.55)] overflow-hidden">
+                {/* Inner top highlight — the rim that sells the glass effect */}
+                <span aria-hidden className="pointer-events-none absolute inset-x-0 top-0 h-px bg-gradient-to-r from-transparent via-white/70 to-transparent" />
+                {/* Soft inner blob for depth */}
+                <span aria-hidden className="pointer-events-none absolute -top-12 -right-12 h-40 w-40 rounded-full bg-white/15 blur-2xl" />
                 <div className="flex justify-center">
                   <Avatar src={candidate.photo_url} name={candidate.full_name ?? candidate.title ?? "?"} size={132} ring />
                 </div>
@@ -374,7 +410,7 @@ function CandidateDetailDialog({ candidate, open, onClose }: { candidate: WpCand
               {/* Manual AA linkage stays here — admin-only thing, tucked
                   under the contact buttons so the card still reads like a
                   profile card and not a CRM form. */}
-              <div className="rounded-xl border border-slate-200 bg-slate-50/50 p-3 space-y-1.5">
+              <div className="rounded-xl border border-white/60 bg-white/50 backdrop-blur-md p-3 space-y-1.5 shadow-sm">
                 <div className="text-[10.5px] font-medium text-slate-600 uppercase tracking-wider">Link to AA doctor</div>
                 <div className="flex items-center gap-2">
                   <Input
@@ -431,12 +467,12 @@ function CandidateDetailDialog({ candidate, open, onClose }: { candidate: WpCand
 
               {/* Education / Experience tabs */}
               {(hasEducation || hasExperience) && (
-                <div className="rounded-xl border border-slate-200 overflow-hidden">
+                <div className="rounded-xl border border-white/60 bg-white/50 backdrop-blur-md overflow-hidden shadow-sm">
                   <div className="grid grid-cols-2">
                     <TabBtn active={tab === "education"}  onClick={() => setTab("education")}  disabled={!hasEducation}>Education</TabBtn>
                     <TabBtn active={tab === "experience"} onClick={() => setTab("experience")} disabled={!hasExperience}>Experience</TabBtn>
                   </div>
-                  <div className="p-5 bg-white">
+                  <div className="p-5 bg-white/60 backdrop-blur-sm">
                     {tab === "education" && hasEducation && (
                       <TimelineEntry
                         title={candidate.education_title}
@@ -530,7 +566,7 @@ function InfoTile({ icon, label, value }: { icon: React.ReactNode; label: string
   const muted   = display === "—";
   return (
     <div className="flex items-start gap-3">
-      <div className="h-9 w-9 rounded-full bg-slate-100 text-slate-500 flex items-center justify-center shrink-0">{icon}</div>
+      <div className="h-9 w-9 rounded-full bg-white/70 backdrop-blur-md border border-white/70 text-teal-600 flex items-center justify-center shrink-0 shadow-sm">{icon}</div>
       <div className="min-w-0">
         <div className="text-[11px] text-slate-500">{label}</div>
         <div className={`text-[13px] mt-0.5 break-words ${muted ? "text-slate-400" : "text-slate-800"}`}>{display}</div>
@@ -638,15 +674,19 @@ function licenseSummary(c: WpCandidate): string | null {
 }
 
 function Kpi({ label, value, tone, hint }: { label: string; value: number; tone: "slate" | "emerald" | "amber" | "sky" | "indigo"; hint?: string }) {
+  // Tinted glass — coloured wash held at ~35% alpha so the gradient
+  // bleeds through, paired with a slightly stronger text colour. Border
+  // matches but at ~50% so the rim looks lit.
   const cls = {
-    slate:   "bg-slate-50 text-slate-700",
-    emerald: "bg-emerald-50 text-emerald-700",
-    amber:   "bg-amber-50 text-amber-700",
-    sky:     "bg-sky-50 text-sky-700",
-    indigo:  "bg-indigo-50 text-indigo-700",
+    slate:   "bg-slate-100/55 text-slate-800   border-slate-200/60",
+    emerald: "bg-emerald-100/55 text-emerald-800 border-emerald-200/60",
+    amber:   "bg-amber-100/55 text-amber-800   border-amber-200/60",
+    sky:     "bg-sky-100/55 text-sky-800       border-sky-200/60",
+    indigo:  "bg-indigo-100/55 text-indigo-800 border-indigo-200/60",
   }[tone];
   return (
-    <div className={`rounded-md border ${cls} px-3 py-3`}>
+    <div className={`relative rounded-xl border ${cls} backdrop-blur-xl px-3 py-3 shadow-[0_6px_24px_-12px_rgba(15,23,42,0.18)] overflow-hidden`}>
+      <span aria-hidden className="pointer-events-none absolute inset-x-0 top-0 h-px bg-gradient-to-r from-transparent via-white/80 to-transparent" />
       <div className="text-[10px] uppercase tracking-wider opacity-80">{label}</div>
       <div className="text-[22px] font-semibold mt-1 leading-none">{value.toLocaleString()}</div>
       {hint && <div className="text-[10px] opacity-70 mt-1">{hint}</div>}
