@@ -70,32 +70,21 @@ export const HI_TOUR_STEPS: TourStep[] = [
     placement: "auto",
   },
 
-  // ── Doctor Profiles ─────────────────────────────────────────────────
+  // ── Doctors hub (Progress + Profiles in one page) ───────────────────
+  // Used to be three separate sidebar entries — now one. The deep tour
+  // steps that referenced doctor-profile-card / doctor-lifecycle /
+  // doctor-matches went away with the AA Profiles tab. New deep-dive
+  // happens inside the WP candidate detail dialog (click any row).
   {
-    target: "sidebar-doctor-profiles",
-    title:  "Doctor Profiles",
-    body:   "The standardised profile we send to hospitals — name, specialty, license region, summary. Auto-extracted from the doctor's CV by Claude when they upload it, then editable.",
+    target: "sidebar-doctors",
+    title:  "Doctors hub",
+    body:   "One place for every doctor view: Doctor Progress (Zoho pipeline stages) and Profiles (the canonical record we use in hospital emails). Tabs at the top switch between them; a single search bar filters whichever tab you're on.",
     placement: "right",
   },
   {
-    route: "/doctor-profiles",
-    target: "doctor-profile-card",
-    title:  "Profile card + completion %",
-    body:   "The completion bar tells you who's ready to send. License pills show where they're licensed (UAE / Saudi / Qatar). 'View Journey' opens a full timeline of stages, emails, and replies.",
-    placement: "auto",
-  },
-  {
-    route: "/doctor-profiles",
-    target: "doctor-lifecycle",
-    title:  "Lifecycle timeline",
-    body:   "Full per-doctor history across the 6 flows — profile-sent, shortlisted, interviewed, offered, signed, joined. Plus an Upload CV button right above this card (use it when a doctor sends their CV via WhatsApp — Claude extracts the profile fields automatically).",
-    placement: "auto",
-  },
-  {
-    route: "/doctor-profiles",
-    target: "doctor-matches",
-    title:  "Best-fit vacancies",
-    body:   "Live ranked match between this doctor and every open vacancy — Strong / Decent / Long-shot. Specialty + license region drive the score. 'Link to vacancy' feeds them into the profile-sent flow.",
+    route: "/doctors?tab=profiles",
+    title:  "Click any row to edit inline",
+    body:   "Each profile opens a fully-editable card — hover any field (name, specialty, photo, education…) to change it. Saves directly to WordPress. New profiles auto-link to a Zoho lead when there's an email match.",
     placement: "auto",
   },
 

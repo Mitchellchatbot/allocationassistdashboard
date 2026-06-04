@@ -184,7 +184,7 @@ export default function MyWorkspace() {
               )}
               {!isLoading && doctors.length > 0 && (
                 <div className="divide-y divide-border/40 max-h-[420px] overflow-y-auto">
-                  {doctors.map(d => <DoctorRow key={d.doctor_id} d={d} onOpen={() => navigate("/doctor-profiles")} />)}
+                  {doctors.map(d => <DoctorRow key={d.doctor_id} d={d} onOpen={() => navigate("/doctors?tab=profiles")} />)}
                 </div>
               )}
             </CardContent>

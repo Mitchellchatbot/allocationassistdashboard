@@ -46,7 +46,7 @@ export const HI_MEMBER_PAGES = [
 // Role presets — selected in the Add User dialog
 export const ROLE_PRESETS: Record<string, string[]> = {
   admin:     ALL_PAGES,
-  sales:     ["/", "/sales", "/marketing", "/leads-pipeline", "/team", "/calls"],
+  sales:     ["/", "/sales", "/marketing", "/doctors", "/team", "/calls"],
   finance:   ["/", "/finance"],
   worker:    ["/worker"],
   hi_member: HI_MEMBER_PAGES,

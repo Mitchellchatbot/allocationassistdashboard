@@ -5,9 +5,11 @@ import { Bell, Download, AlertTriangle, ChevronRight, Home, Sparkles, RefreshCw,
 import { useTour } from "@/components/OnboardingTour";
 import { HI_TOUR_ID, HI_TOUR_STEPS } from "@/lib/hi-onboarding-tour";
 
+// Pages where the HI onboarding tour can fire. `/doctors` covers what
+// used to be /doctor-profiles + /leads-pipeline + /wp-candidates.
 const HI_PAGES = new Set([
-  "/", "/my-workspace", "/automations", "/doctor-profiles",
-  "/vacancies", "/batches", "/reports",
+  "/", "/my-workspace", "/automations", "/doctors",
+  "/vacancies", "/batches", "/reports", "/forms",
 ]);
 import { ChatChart, parseCharts } from "@/components/ChatChart";
 import { Button } from "@/components/ui/button";

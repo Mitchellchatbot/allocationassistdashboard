@@ -58,7 +58,9 @@ const PAGES: SearchEntity[] = [
   { id: "page:dashboard",       kind: "Page", label: "Dashboard",        sublabel: "Overview", route: "/", keywords: "home overview kpi summary" },
 
   // Hospital Introduction Department
-  { id: "page:doctor-profiles", kind: "Page", label: "Doctor Profiles",  sublabel: "Build the doctor profile sent to hospitals", route: "/doctor-profiles", keywords: "doctors profiles cv hospital introduction generation" },
+  { id: "page:doctors",         kind: "Page", label: "Doctors",          sublabel: "Doctor Progress + Profiles in one hub", route: "/doctors", keywords: "doctors profiles wp progress pipeline lifecycle leads cv hospital introduction wordpress candidates" },
+  { id: "page:my-workspace",    kind: "Page", label: "My Workspace",     sublabel: "HI personal queue + notifications", route: "/my-workspace", keywords: "workspace inbox queue tasks personal mine" },
+  { id: "page:forms",           kind: "Page", label: "Forms",            sublabel: "Typeform + Consultation + DoctorsFinder submissions", route: "/forms", keywords: "forms typeform consultation doctorsfinder submissions responses leads" },
   { id: "page:automations",     kind: "Page", label: "Automations",      sublabel: "Phase 1 email flows + run timeline", route: "/automations", keywords: "automations flows emails onboarding shortlist interview contract relocation payment" },
   { id: "page:vacancies",       kind: "Page", label: "Vacancies",        sublabel: "Open hospital roles + auto-match", route: "/vacancies", keywords: "vacancies open roles hospitals match" },
   { id: "page:batches",         kind: "Page", label: "Batch Sends",      sublabel: "Daily duo, Tuesday top 15, specialty rotation", route: "/batches", keywords: "batches send recurring daily tuesday rotation" },
@@ -66,7 +68,7 @@ const PAGES: SearchEntity[] = [
 
   // Sales
   { id: "page:sales",           kind: "Page", label: "Sales Tracker",    sublabel: "Recruiter performance", route: "/sales", keywords: "recruiters team conversion pipeline" },
-  { id: "page:leads",           kind: "Page", label: "Doctor Progress",  sublabel: "Pipeline by stage", route: "/leads-pipeline", keywords: "leads pipeline doctors progress stages" },
+  { id: "page:leads",           kind: "Page", label: "Doctor Progress",  sublabel: "Pipeline by stage", route: "/doctors?tab=progress", keywords: "leads pipeline doctors progress stages" },
   { id: "page:follow-ups",      kind: "Page", label: "Follow-ups",       sublabel: "Pending follow-ups", route: "/follow-ups", keywords: "tasks reminders calls" },
   { id: "page:calls",           kind: "Page", label: "Calls",            sublabel: "Fathom-recorded calls", route: "/calls", keywords: "calls fathom transcripts conversations" },
   { id: "page:contracts",       kind: "Page", label: "Contract Builder", sublabel: "Generate + send Service Agreements", route: "/contracts", keywords: "contracts agreements legal boldsign signature" },
@@ -94,14 +96,14 @@ const METRICS: SearchEntity[] = [
   { id: "metric:qualified-leads",      kind: "Metric", label: "Qualified Leads",            sublabel: "Marketing · how many leads qualify",               route: "/marketing", keywords: "qualified leads qualification rate qualifying initial sales call" },
   { id: "metric:qualification-rate",   kind: "Metric", label: "Qualification Rate",         sublabel: "Marketing · % qualified",                          route: "/marketing", keywords: "qualification rate percentage funnel" },
   { id: "metric:contact-rate",         kind: "Metric", label: "Contact Rate by Channel",    sublabel: "Marketing · contacted vs uncontacted",             route: "/marketing", keywords: "contact rate contacted uncontacted reachable response" },
-  { id: "metric:uncontacted",          kind: "Metric", label: "Uncontacted Leads",          sublabel: "Doctor Progress · leads never contacted",          route: "/leads-pipeline?stage=Not%20Contacted", keywords: "uncontacted not contacted no contact follow up needed waiting" },
+  { id: "metric:uncontacted",          kind: "Metric", label: "Uncontacted Leads",          sublabel: "Doctor Progress · leads never contacted",          route: "/doctors?tab=progress&stage=Not%20Contacted", keywords: "uncontacted not contacted no contact follow up needed waiting" },
   { id: "metric:best-channel",         kind: "Metric", label: "Best Channel",               sublabel: "Marketing · top performer by volume / CPL / CPQL", route: "/marketing", keywords: "best channel winner top top performing volume" },
   { id: "metric:campaign-winners",     kind: "Metric", label: "Campaign Winners",           sublabel: "Marketing · most qualified / lowest CPQL",         route: "/marketing", keywords: "best campaign top campaign most qualified lowest cost winner" },
 
   // Doctor / pipeline
   { id: "metric:doctor-pipeline",      kind: "Metric", label: "Doctor Pipeline",            sublabel: "Dashboard · funnel by stage",                      route: "/", keywords: "pipeline funnel stages doctors workflow" },
   { id: "metric:license-pipeline",     kind: "Metric", label: "License Pipeline (DOH/DHA/MOH)", sublabel: "Dashboard · license status counts",            route: "/", keywords: "license doh dha moh ministry of health authorization status" },
-  { id: "metric:high-priority",        kind: "Metric", label: "High Priority Follow-ups",   sublabel: "Doctor Progress · urgent leads",                   route: "/leads-pipeline?stage=High%20Priority%20Follow%20up", keywords: "high priority follow up urgent need attention" },
+  { id: "metric:high-priority",        kind: "Metric", label: "High Priority Follow-ups",   sublabel: "Doctor Progress · urgent leads",                   route: "/doctors?tab=progress&stage=High%20Priority%20Follow%20up", keywords: "high priority follow up urgent need attention" },
 
   // Sales
   { id: "metric:recruiter-performance", kind: "Metric", label: "Recruiter Performance",     sublabel: "Team · contact rate, qualified, placed",           route: "/team", keywords: "recruiter performance sales rep team workload contact rate placed" },
@@ -215,7 +217,7 @@ export function useSearchIndex(): SearchEntity[] {
         label:    name,
         sublabel: [specialty, status, recruiter].filter(Boolean).join(" · ") || undefined,
         keywords: `lead doctor zoho ${specialty} ${status} ${source} ${recruiter} ${l.Email ?? ""} ${l.Phone ?? ""} ${l.Mobile ?? ""} ${l.Nationality ?? ""} ${l.License ?? ""}`,
-        route:    `/doctor-profiles?id=lead:${l.id}`,
+        route:    `/doctors?tab=profiles&id=lead:${l.id}`,
       });
     }
 
@@ -229,7 +231,7 @@ export function useSearchIndex(): SearchEntity[] {
         label:    name,
         sublabel: [(d.Specialty_New ?? d.Speciality) ?? "", d.Account_Name?.name ? `Hospital: ${d.Account_Name.name}` : ""].filter(Boolean).join(" · ") || "Doctor on Board",
         keywords: `doctor on board placed dob ${d.Specialty_New ?? d.Speciality ?? ""} ${d.Email ?? ""} ${d.Phone ?? ""} ${d.Mobile ?? ""} ${d.Account_Name?.name ?? ""}`,
-        route:    `/doctor-profiles?id=dob:${d.id}`,
+        route:    `/doctors?tab=profiles&id=dob:${d.id}`,
       });
     }
 
@@ -244,7 +246,7 @@ export function useSearchIndex(): SearchEntity[] {
         label:    p.doctor_name,
         sublabel: [p.title, p.nationality, p.country_training, p.years_experience ? `${p.years_experience}y exp` : null].filter(Boolean).join(" · ") || "Doctor profile",
         keywords: `profile cv ${p.title ?? ""} ${p.nationality ?? ""} ${p.country_training ?? ""} ${p.license ?? ""} ${p.area_of_interest ?? ""} ${p.bio ?? ""}`,
-        route:    `/doctor-profiles?id=${encodeURIComponent(p.doctor_id)}`,
+        route:    `/doctors?tab=profiles&id=${encodeURIComponent(p.doctor_id)}`,
       });
     }
 
@@ -340,7 +342,7 @@ export function useSearchIndex(): SearchEntity[] {
         label:    s.value,
         sublabel: `${s.count} doctor${s.count === 1 ? "" : "s"}`,
         keywords: `specialty ${s.value}`,
-        route:    `/leads-pipeline?specialty=${encodeURIComponent(s.value)}`,
+        route:    `/doctors?tab=progress&specialty=${encodeURIComponent(s.value)}`,
       });
     }
 
@@ -377,7 +379,7 @@ export function useSearchIndex(): SearchEntity[] {
         label:    c.channel,
         sublabel: `${c.leads.toLocaleString()} leads · ${c.qualified.toLocaleString()} qualified`,
         keywords: `channel source marketing ${c.channel}`,
-        route:    `/leads-pipeline?source=${encodeURIComponent(c.channel)}`,
+        route:    `/doctors?tab=progress&source=${encodeURIComponent(c.channel)}`,
       });
     }
 
@@ -395,7 +397,7 @@ export function useSearchIndex(): SearchEntity[] {
         label:    name,
         sublabel: `${count.toLocaleString()} leads owned`,
         keywords: `recruiter sales rep team owner ${name}`,
-        route:    `/leads-pipeline?recruiter=${encodeURIComponent(name)}`,
+        route:    `/doctors?tab=progress&recruiter=${encodeURIComponent(name)}`,
       });
     }
 

@@ -13,16 +13,31 @@ import { toast } from "sonner";
 const SUPABASE_URL      = import.meta.env.VITE_SUPABASE_URL as string;
 const SUPABASE_ANON_KEY = import.meta.env.VITE_SUPABASE_ANON_KEY as string;
 
+// Permission-checkbox labels in the Add User dialog. Kept aligned with
+// the sidebar nav so what an admin grants matches what the user sees.
+// /leads-pipeline and /doctor-profiles are gone — folded into /doctors.
 const PAGE_LABELS: Record<string, string> = {
   "/":               "Dashboard",
   "/sales":          "Sales Tracker",
   "/marketing":      "Marketing",
-  "/leads-pipeline": "Doctor Progress",
   "/team":           "Team Performance",
   "/finance":        "Finance",
   "/meta-ads":       "Meta Ads",
   "/settings":       "Settings",
   "/worker":         "Worker Portal (upload & view records)",
+  "/my-workspace":   "My Workspace",
+  "/doctors":        "Doctors (Progress + Profiles)",
+  "/automations":    "Automations",
+  "/vacancies":      "Vacancies",
+  "/batches":        "Batch Sends",
+  "/reports":        "Reports",
+  "/forms":          "Forms",
+  "/follow-ups":     "Follow-ups",
+  "/calls":          "Calls",
+  "/contracts":      "Contract Builder",
+  "/import":         "Import Data",
+  "/import-bulk":    "Bulk Import",
+  "/connections":    "Connections",
 };
 
 const ROLE_COLORS: Record<string, string> = {
