@@ -25,17 +25,40 @@ import {
   Briefcase, Award, Globe, Languages as LanguagesIcon, Users as UsersIcon,
   Baby, Clock as ClockIcon, GraduationCap,
 } from "lucide-react";
-import { useWpCandidates, useSyncWpCandidates, useLinkWpCandidate, type WpCandidate } from "@/hooks/use-wp-candidates";
-import { WpCandidateEditDialog } from "@/components/WpCandidateEditDialog";
+import {
+  useWpCandidates, useSyncWpCandidates, useLinkWpCandidate,
+  useUpsertWpCandidate, useUploadWpPhoto,
+  type WpCandidate,
+} from "@/hooks/use-wp-candidates";
 import { toast } from "sonner";
-import { Plus, Pencil } from "lucide-react";
+import { Plus, Camera, Loader2, Check, AlertCircle } from "lucide-react";
+import { Textarea } from "@/components/ui/textarea";
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 
 interface WpCandidatesProps { embedded?: boolean }
 
 export default function WpCandidates({ embedded }: WpCandidatesProps = {}) {
   const { data: candidates = [], isLoading } = useWpCandidates();
   const sync = useSyncWpCandidates();
-  const [editing, setEditing] = useState<{ open: boolean; candidate: WpCandidate | null }>({ open: false, candidate: null });
+  const upsert = useUpsertWpCandidate();
+  const [openDetailId, setOpenDetailId] = useState<number | null>(null);
+
+  // Click "New profile" → POST a draft to WP immediately, then open the
+  // detail dialog on the new row. The detail dialog is fully inline-
+  // editable, so the user just fills in the empty fields from there.
+  const handleNewProfile = async () => {
+    try {
+      const r = await upsert.mutateAsync({
+        status: "draft",
+        title: "New profile",
+        acf: { full_name: "New profile" },
+      });
+      if (r.id) setOpenDetailId(r.id);
+      toast.success("Blank profile created — fill in the fields inline.");
+    } catch (e) {
+      toast.error(e instanceof Error ? e.message : "Failed to create");
+    }
+  };
 
   // Search + filter state — same architecture as /forms.
   // In embedded mode the URL `q` is the source of truth (shell owns the
@@ -126,8 +149,9 @@ export default function WpCandidates({ embedded }: WpCandidatesProps = {}) {
 
   const headerButtons = (
     <div className="flex items-center gap-2">
-      <Button size="sm" onClick={() => setEditing({ open: true, candidate: null })}>
-        <Plus className="h-3.5 w-3.5 mr-1" /> New profile
+      <Button size="sm" onClick={handleNewProfile} disabled={upsert.isPending}>
+        {upsert.isPending ? <Loader2 className="h-3.5 w-3.5 mr-1 animate-spin" /> : <Plus className="h-3.5 w-3.5 mr-1" />}
+        New profile
       </Button>
       <Button size="sm" variant="outline" onClick={handleSync} disabled={sync.isPending}>
         {sync.isPending ? <RefreshCw className="h-3.5 w-3.5 mr-1 animate-spin" /> : <History className="h-3.5 w-3.5 mr-1" />}
@@ -243,7 +267,7 @@ export default function WpCandidates({ embedded }: WpCandidatesProps = {}) {
               </div>
             ) : (
               <>
-                {filtered.slice(0, renderLimit).map(c => <CandidateRow key={c.id} candidate={c} highlight={search.trim().toLowerCase()} onEdit={() => setEditing({ open: true, candidate: c })} />)}
+                {filtered.slice(0, renderLimit).map(c => <CandidateRow key={c.id} candidate={c} highlight={search.trim().toLowerCase()} onOpen={() => setOpenDetailId(c.id)} />)}
                 {filtered.length > renderLimit && (
                   <button
                     type="button"
@@ -260,13 +284,19 @@ export default function WpCandidates({ embedded }: WpCandidatesProps = {}) {
       </div>
   );
 
+  // The detail dialog reads its candidate by ID from the cached list,
+  // so inline edits flow through useUpsertWpCandidate → cache invalidation
+  // → fresh row on next render without us having to plumb state around.
+  const detailCandidate = openDetailId != null
+    ? candidates.find(c => c.id === openDetailId) ?? null
+    : null;
   const withDialog = (
     <>
       {body}
-      <WpCandidateEditDialog
-        open={editing.open}
-        candidate={editing.candidate}
-        onClose={() => setEditing({ open: false, candidate: null })}
+      <CandidateDetailDialog
+        candidate={detailCandidate}
+        open={openDetailId != null}
+        onClose={() => setOpenDetailId(null)}
       />
     </>
   );
@@ -275,15 +305,14 @@ export default function WpCandidates({ embedded }: WpCandidatesProps = {}) {
   return <DashboardLayout>{withDialog}</DashboardLayout>;
 }
 
-function CandidateRow({ candidate, highlight, onEdit }: { candidate: WpCandidate; highlight: string; onEdit: () => void }) {
-  const [open, setOpen] = useState(false);
+function CandidateRow({ candidate, highlight, onOpen }: { candidate: WpCandidate; highlight: string; onOpen: () => void }) {
   const subtitle = [candidate.job_title, candidate.country_of_training].filter(Boolean).join(" · ");
   return (
     <>
       <div className="rounded-md border bg-white">
         <button
           type="button"
-          onClick={() => setOpen(true)}
+          onClick={onOpen}
           className="w-full flex items-center gap-2.5 px-3 py-2 text-left hover:bg-slate-50"
         >
           <ChevronRight className="h-3.5 w-3.5 text-slate-400 shrink-0" />
@@ -308,23 +337,79 @@ function CandidateRow({ candidate, highlight, onEdit }: { candidate: WpCandidate
           {candidate.status === "private" && <Badge variant="outline" className="text-[9px] bg-amber-50 text-amber-700 border-amber-200 shrink-0">Private</Badge>}
         </button>
       </div>
-      <CandidateDetailDialog
-        candidate={candidate}
-        open={open}
-        onClose={() => setOpen(false)}
-        onEdit={() => { setOpen(false); onEdit(); }}
-      />
+      {/* Detail dialog is mounted ONCE at the page level — the row just
+          signals which candidate to open via onOpen. */}
     </>
   );
 }
 
-function CandidateDetailDialog({ candidate, open, onClose, onEdit }: { candidate: WpCandidate; open: boolean; onClose: () => void; onEdit: () => void }) {
-  const link = useLinkWpCandidate();
-  const [doctorIdInput, setDoctorIdInput] = useState(candidate.doctor_id ?? "");
-  const [tab, setTab] = useState<"education" | "experience">("education");
+/**
+ * Inline-editable profile card.
+ *
+ * Every field on the candidate is its own click-to-edit affordance —
+ * hover shows a faint outline, click swaps it for an Input/Textarea/
+ * Select, blur (or Enter on single-line, Esc to cancel) commits. Each
+ * commit fires a partial PATCH via useUpsertWpCandidate.
+ *
+ * The avatar is the same — hover reveals a "Change photo" overlay that
+ * opens the file picker and uploads to WP media in one shot.
+ *
+ * Accepts `candidate: WpCandidate | null` to gracefully handle the
+ * brief moment between "New profile" POST → cache invalidation → row
+ * actually appearing in the list.
+ */
+function CandidateDetailDialog({ candidate, open, onClose }: { candidate: WpCandidate | null; open: boolean; onClose: () => void }) {
+  if (!candidate) {
+    // The dialog is open but the row hasn't materialised in the cache
+    // yet — show a placeholder rather than blowing up.
+    return (
+      <Dialog open={open} onOpenChange={v => !v && onClose()}>
+        <DialogContent className="sm:max-w-[480px]">
+          <div className="flex items-center justify-center py-12 text-[12px] text-muted-foreground">
+            <Loader2 className="h-4 w-4 mr-2 animate-spin" /> Loading profile…
+          </div>
+        </DialogContent>
+      </Dialog>
+    );
+  }
+  return <CandidateDetailDialogInner candidate={candidate} open={open} onClose={onClose} />;
+}
 
-  // Reset linkage input when a different candidate opens.
+function CandidateDetailDialogInner({ candidate, open, onClose }: { candidate: WpCandidate; open: boolean; onClose: () => void }) {
+  const upsert = useUpsertWpCandidate();
+  const upload = useUploadWpPhoto();
+  const link   = useLinkWpCandidate();
+  const fileRef = useRef<HTMLInputElement | null>(null);
+  const [tab, setTab] = useState<"education" | "experience">("education");
+  const [doctorIdInput, setDoctorIdInput] = useState(candidate.doctor_id ?? "");
+
   useEffect(() => { setDoctorIdInput(candidate.doctor_id ?? ""); }, [candidate.doctor_id, candidate.id]);
+
+  // Generic save: takes a partial ACF patch, fires upsert. Errors
+  // bubble out so the inline field can show its red dot.
+  const saveAcf = async (patch: Record<string, unknown>) => {
+    await upsert.mutateAsync({ id: candidate.id, acf: patch });
+  };
+  const saveStatus = async (status: "draft" | "private" | "publish") => {
+    await upsert.mutateAsync({ id: candidate.id, status });
+  };
+  const saveTitle = async (title: string) => {
+    await upsert.mutateAsync({ id: candidate.id, title });
+  };
+
+  const handlePhotoPick = () => fileRef.current?.click();
+  const handlePhotoFile = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+    try {
+      await upload.mutateAsync({ file, candidateId: candidate.id });
+      toast.success("Photo updated.");
+    } catch (err) {
+      toast.error(err instanceof Error ? err.message : "Upload failed");
+    } finally {
+      e.target.value = "";
+    }
+  };
 
   const saveLink = async () => {
     try {
@@ -335,30 +420,57 @@ function CandidateDetailDialog({ candidate, open, onClose, onEdit }: { candidate
     }
   };
 
-  const age          = ageFromDob(candidate.date_of_birth);
-  const dobPretty    = prettyDate(candidate.date_of_birth);
-  const memberSince  = prettyDate(candidate.wp_date);
-  const hasDeps      = candidate.has_dependents;
-  const hasEducation = !!(candidate.education_title || candidate.education_academy || candidate.education_description);
-  const hasExperience = !!(candidate.experience_title || candidate.experience_company || candidate.experience_description);
+  const age         = ageFromDob(candidate.date_of_birth);
+  const memberSince = prettyDate(candidate.wp_date);
 
   return (
     <Dialog open={open} onOpenChange={v => !v && onClose()}>
       <DialogContent className="sm:max-w-[1080px] max-h-[92vh] overflow-y-auto p-0">
+        <input ref={fileRef} type="file" accept="image/*" onChange={handlePhotoFile} className="hidden" />
         <div className="p-5 md:p-7">
           <div className="grid grid-cols-1 md:grid-cols-[280px_1fr] gap-6">
 
             {/* ── Left teal sidebar card ───────────────────────────────── */}
             <div className="space-y-3">
               <div className="rounded-2xl bg-gradient-to-b from-teal-400 to-teal-500 text-white p-5 shadow-sm">
+                {/* Photo with hover-to-upload overlay */}
                 <div className="flex justify-center">
-                  <Avatar src={candidate.photo_url} name={candidate.full_name ?? candidate.title ?? "?"} size={132} ring />
+                  <button
+                    type="button"
+                    onClick={handlePhotoPick}
+                    className="relative group rounded-full"
+                    title="Click to change photo"
+                  >
+                    <Avatar src={candidate.photo_url} name={candidate.full_name ?? candidate.title ?? "?"} size={132} ring />
+                    <div className="absolute inset-0 rounded-full flex flex-col items-center justify-center bg-black/55 text-white text-[10.5px] font-medium opacity-0 group-hover:opacity-100 transition-opacity">
+                      {upload.isPending ? (
+                        <Loader2 className="h-5 w-5 animate-spin" />
+                      ) : (
+                        <>
+                          <Camera className="h-5 w-5 mb-1" />
+                          Change photo
+                        </>
+                      )}
+                    </div>
+                  </button>
                 </div>
-                <div className="mt-4 text-center">
-                  <div className="text-[18px] font-semibold leading-tight">{candidate.full_name ?? candidate.title ?? "—"}</div>
-                  {candidate.job_title && (
-                    <div className="text-[12px] text-white/90 mt-1 leading-snug">{candidate.job_title}</div>
-                  )}
+
+                {/* Name + job title — both inline-editable */}
+                <div className="mt-4 text-center space-y-1">
+                  <EditableText
+                    value={candidate.full_name}
+                    onSave={v => saveAcf({ full_name: v ?? "" })}
+                    placeholder="Add full name…"
+                    className="text-[18px] font-semibold leading-tight text-white"
+                    hoverClass="hover:bg-white/15"
+                  />
+                  <EditableText
+                    value={candidate.job_title}
+                    onSave={v => saveAcf({ job_title: v ?? "" })}
+                    placeholder="Add job title…"
+                    className="text-[12px] text-white/90 leading-snug"
+                    hoverClass="hover:bg-white/15"
+                  />
                   {memberSince && (
                     <div className="inline-flex mt-3 text-[10.5px] bg-white/15 rounded-full px-2.5 py-0.5">
                       Member Since: {memberSince}
@@ -370,24 +482,28 @@ function CandidateDetailDialog({ candidate, open, onClose, onEdit }: { candidate
 
                 <div className="space-y-2.5 text-[12px]">
                   {age != null && (
-                    <div className="flex items-center justify-center gap-2">
+                    <div className="flex items-center justify-center gap-2 text-white/90">
                       <span>Age: {age} Years Old</span>
                     </div>
                   )}
-                  {candidate.phone && (
-                    <ContactLine icon={<Phone className="h-3.5 w-3.5" />} value={candidate.phone} href={`tel:${candidate.phone}`} />
-                  )}
-                  {candidate.email && (
-                    <ContactLine icon={<Mail className="h-3.5 w-3.5" />} value={candidate.email} href={`mailto:${candidate.email}`} />
-                  )}
+                  <ContactLineEditable
+                    icon={<Phone className="h-3.5 w-3.5" />}
+                    value={candidate.phone}
+                    placeholder="Add phone…"
+                    onSave={v => saveAcf({ phone_number: v ?? "" })}
+                  />
+                  <ContactLineEditable
+                    icon={<Mail className="h-3.5 w-3.5" />}
+                    value={candidate.email}
+                    placeholder="Add email…"
+                    onSave={v => saveAcf({ email: v ?? "" })}
+                  />
                 </div>
               </div>
 
-              {/* Action buttons mirroring the WP layout */}
+              {/* Action buttons — Edit profile button is gone; the card
+                  IS the editor now. */}
               <div className="space-y-2">
-                <Button onClick={onEdit} className="w-full justify-center h-10 rounded-full bg-teal-600 hover:bg-teal-700">
-                  <Pencil className="h-4 w-4 mr-2" /> Edit profile
-                </Button>
                 {candidate.cv_url && (
                   <a href={candidate.cv_url} target="_blank" rel="noreferrer" className="block">
                     <Button variant="outline" className="w-full justify-center h-10 rounded-full border-slate-200 shadow-sm">
@@ -409,120 +525,447 @@ function CandidateDetailDialog({ candidate, open, onClose, onEdit }: { candidate
                 )}
               </div>
 
-              {/* Manual AA linkage stays here — admin-only thing, tucked
-                  under the contact buttons so the card still reads like a
-                  profile card and not a CRM form. */}
-              <div className="rounded-xl border border-slate-200 bg-slate-50/50 p-3 space-y-1.5">
-                <div className="text-[10.5px] font-medium text-slate-600 uppercase tracking-wider">Link to AA doctor</div>
-                <div className="flex items-center gap-2">
-                  <Input
-                    value={doctorIdInput}
-                    onChange={e => setDoctorIdInput(e.target.value)}
-                    placeholder="lead:12345 / dob:6789"
-                    className="h-8 text-[11px] font-mono bg-white"
-                  />
-                  <Button size="sm" className="h-8" onClick={saveLink} disabled={link.isPending}>
-                    {link.isPending ? "…" : "Save"}
-                  </Button>
+              {/* Status inline-editor + Link to AA doctor (admin tools) */}
+              <div className="rounded-xl border border-slate-200 bg-slate-50/50 p-3 space-y-2.5">
+                <div>
+                  <div className="text-[10.5px] font-medium text-slate-600 uppercase tracking-wider mb-1">Status</div>
+                  <Select value={candidate.status ?? "draft"} onValueChange={(v) => saveStatus(v as "draft" | "private" | "publish")}>
+                    <SelectTrigger className="h-8 text-[11px] bg-white"><SelectValue /></SelectTrigger>
+                    <SelectContent>
+                      <SelectItem value="draft">Draft</SelectItem>
+                      <SelectItem value="private">Private</SelectItem>
+                      <SelectItem value="publish">Published</SelectItem>
+                    </SelectContent>
+                  </Select>
                 </div>
-                {candidate.doctor_id && (
-                  <div className="text-[10px] text-emerald-700 flex items-center gap-1">
-                    <Link2 className="h-2.5 w-2.5" /> Currently linked to <span className="font-mono">{candidate.doctor_id}</span>
+                <div>
+                  <div className="text-[10.5px] font-medium text-slate-600 uppercase tracking-wider mb-1">Link to AA doctor</div>
+                  <div className="flex items-center gap-2">
+                    <Input
+                      value={doctorIdInput}
+                      onChange={e => setDoctorIdInput(e.target.value)}
+                      placeholder="lead:12345 / dob:6789"
+                      className="h-8 text-[11px] font-mono bg-white"
+                    />
+                    <Button size="sm" className="h-8" onClick={saveLink} disabled={link.isPending}>
+                      {link.isPending ? "…" : "Save"}
+                    </Button>
                   </div>
-                )}
+                  {candidate.doctor_id && (
+                    <div className="text-[10px] text-emerald-700 flex items-center gap-1 mt-1">
+                      <Link2 className="h-2.5 w-2.5" /> Currently linked to <span className="font-mono">{candidate.doctor_id}</span>
+                    </div>
+                  )}
+                </div>
               </div>
             </div>
 
             {/* ── Right detail pane ────────────────────────────────────── */}
             <div className="space-y-5">
               <div>
-                <h2 className="text-[22px] md:text-[26px] font-semibold text-slate-900 leading-tight">
-                  {prefixedTitle(candidate)}
-                </h2>
-                {candidate.area_of_interest && (
-                  <>
-                    <p className="mt-3 text-[14px] text-slate-600">Specific areas of interests within the specialization</p>
-                    <div className="mt-1 h-px bg-gradient-to-r from-teal-300 to-transparent" />
-                    <p className="mt-2 text-[13px] text-slate-700">{candidate.area_of_interest}</p>
-                  </>
-                )}
+                {/* WP post title — editable */}
+                <EditableText
+                  value={candidate.title}
+                  onSave={v => saveTitle(v ?? "")}
+                  placeholder="Add a heading…"
+                  className="text-[22px] md:text-[26px] font-semibold text-slate-900 leading-tight block"
+                  hoverClass="hover:bg-slate-100/70"
+                />
+
+                <p className="mt-3 text-[14px] text-slate-600">Specific areas of interests within the specialization</p>
+                <div className="mt-1 h-px bg-gradient-to-r from-teal-300 to-transparent" />
+                <EditableText
+                  value={candidate.area_of_interest}
+                  onSave={v => saveAcf({ specific_areas_of_interests_within_the_specialization: v ?? "" })}
+                  placeholder="Add areas of interest…"
+                  className="text-[13px] text-slate-700 mt-2 block"
+                  multiline
+                />
               </div>
 
-              {/* Stat tile grid */}
+              {/* Stat tile grid — every tile is inline-editable */}
               <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-x-5 gap-y-4">
-                <InfoTile icon={<IdCard className="h-4 w-4" />}        label="Age"                          value={age != null ? `${age} years old` : null} />
-                <InfoTile icon={<Globe className="h-4 w-4" />}         label="Nationality"                  value={candidate.nationality} />
-                <InfoTile icon={<Calendar className="h-4 w-4" />}      label="Date of Birth"                value={dobPretty} />
-                <InfoTile icon={<Stethoscope className="h-4 w-4" />}   label="Specialty"                    value={[candidate.specialty, candidate.subspecialty].filter(Boolean).join(" / ") || null} />
-                <InfoTile icon={<BadgeCheck className="h-4 w-4" />}    label="Specialist / Consultant"      value={candidate.rank} />
-                <InfoTile icon={<CalendarDays className="h-4 w-4" />}  label="Years of Experience"          value={candidate.years_experience != null ? `${candidate.years_experience} Years` : null} />
-                <InfoTile icon={<Award className="h-4 w-4" />}         label="DHA / DOH / MOH / SCFHS / QCHP Licenses?" value={licenseSummary(candidate)} />
-                <InfoTile icon={<ClockIcon className="h-4 w-4" />}     label="Notice Period"                value={candidate.notice_period} />
-                <InfoTile icon={<MapPin className="h-4 w-4" />}        label="Targeted Location"            value={(candidate.targeted_locations ?? []).join(", ") || null} />
-                <InfoTile icon={<LanguagesIcon className="h-4 w-4" />} label="Languages"                    value={candidate.languages} />
-                <InfoTile icon={<LanguagesIcon className="h-4 w-4" />} label="English Level"                value={candidate.english_level} />
-                <InfoTile icon={<UsersIcon className="h-4 w-4" />}     label="Family Status"                value={candidate.family_status} />
-                <InfoTile icon={<Baby className="h-4 w-4" />}          label="Have Children / Dependent"    value={hasDeps == null ? null : (hasDeps ? "Yes" : "No")} />
-                <InfoTile icon={<MapPin className="h-4 w-4" />}        label="Country of Training"          value={candidate.country_of_training} />
-                <InfoTile icon={<MapPin className="h-4 w-4" />}        label="Current Location"             value={candidate.current_location} />
+                <EditableTile icon={<Globe className="h-4 w-4" />} label="Nationality"
+                  value={candidate.nationality}
+                  onSave={v => saveAcf({ nationality: v ?? "" })} />
+                <EditableTile icon={<Calendar className="h-4 w-4" />} label="Date of Birth"
+                  value={candidate.date_of_birth}
+                  display={prettyDate(candidate.date_of_birth)}
+                  hint="YYYYMMDD or YYYY-MM-DD"
+                  onSave={v => saveAcf({ date_of_birth: v ?? "" })} />
+                <EditableTile icon={<Stethoscope className="h-4 w-4" />} label="Specialty"
+                  value={candidate.specialty}
+                  onSave={v => saveAcf({ specialty: v ?? "" })} />
+                <EditableTile icon={<Stethoscope className="h-4 w-4" />} label="Subspecialty"
+                  value={candidate.subspecialty}
+                  onSave={v => saveAcf({ subspecialty: v ?? "" })} />
+                <EditableTile icon={<BadgeCheck className="h-4 w-4" />} label="Specialist / Consultant"
+                  value={candidate.rank}
+                  onSave={v => saveAcf({ specialist__consultant: v ?? "" })} />
+                <EditableTile icon={<CalendarDays className="h-4 w-4" />} label="Years of Experience"
+                  value={candidate.years_experience != null ? String(candidate.years_experience) : null}
+                  display={candidate.years_experience != null ? `${candidate.years_experience} Years` : null}
+                  onSave={v => saveAcf({ years_of_experience_post_specialization: v ?? "" })} />
+                <EditableTile icon={<Award className="h-4 w-4" />} label="DHA / DOH / MOH / SCFHS / QCHP Licenses?"
+                  value={candidate.license_status}
+                  onSave={v => saveAcf({ dha__haad__moh_license: v ?? "" })} />
+                <EditableTile icon={<ClockIcon className="h-4 w-4" />} label="Notice Period"
+                  value={candidate.notice_period}
+                  onSave={v => saveAcf({ notice_period: v ?? "" })} />
+                <EditableTile icon={<MapPin className="h-4 w-4" />} label="Targeted Location"
+                  value={(candidate.targeted_locations ?? []).join(", ") || null}
+                  hint="Comma-separated"
+                  onSave={v => saveAcf({ targeted_locations: v ? v.split(",").map(s => s.trim()).filter(Boolean) : [] })} />
+                <EditableTile icon={<LanguagesIcon className="h-4 w-4" />} label="Languages"
+                  value={candidate.languages}
+                  onSave={v => saveAcf({ languages: v ?? "" })} />
+                <EditableTile icon={<LanguagesIcon className="h-4 w-4" />} label="English Level"
+                  value={candidate.english_level}
+                  onSave={v => saveAcf({ english_level: v ?? "" })} />
+                <EditableTile icon={<UsersIcon className="h-4 w-4" />} label="Family Status"
+                  value={candidate.family_status}
+                  onSave={v => saveAcf({ family_status: v ?? "" })} />
+                <EditableTileSelect icon={<Baby className="h-4 w-4" />} label="Have Children / Dependent"
+                  value={candidate.has_dependents == null ? UNSET : (candidate.has_dependents ? "Yes" : "No")}
+                  options={[{ value: UNSET, label: "—" }, { value: "Yes", label: "Yes" }, { value: "No", label: "No" }]}
+                  onSave={v => saveAcf({ have_children_or_any_dependent: v === UNSET ? "" : v })} />
+                <EditableTile icon={<MapPin className="h-4 w-4" />} label="Country of Training"
+                  value={candidate.country_of_training}
+                  onSave={v => saveAcf({ country_of_training: v ?? "" })} />
+                <EditableTile icon={<MapPin className="h-4 w-4" />} label="Current Location"
+                  value={candidate.current_location}
+                  onSave={v => saveAcf({ current_location: v ?? "" })} />
+                <EditableTile icon={<Award className="h-4 w-4" />} label="License type tags"
+                  value={(candidate.license_types ?? []).join(", ") || null}
+                  hint="DHA, DOH, MOH, …"
+                  onSave={v => saveAcf({ license_type: v ? v.split(",").map(s => s.trim()).filter(Boolean) : [] })} />
+                <EditableTile icon={<CalendarDays className="h-4 w-4" />} label="Current Salary"
+                  value={candidate.current_salary}
+                  onSave={v => saveAcf({ current_salary: v ?? "" })} />
+                <EditableTile icon={<CalendarDays className="h-4 w-4" />} label="Expected Salary"
+                  value={candidate.expected_salary}
+                  onSave={v => saveAcf({ expected_salary: v ?? "" })} />
               </div>
 
-              {/* Education / Experience tabs */}
-              {(hasEducation || hasExperience) && (
-                <div className="rounded-xl border border-slate-200 overflow-hidden">
-                  <div className="grid grid-cols-2">
-                    <TabBtn active={tab === "education"}  onClick={() => setTab("education")}  disabled={!hasEducation}>Education</TabBtn>
-                    <TabBtn active={tab === "experience"} onClick={() => setTab("experience")} disabled={!hasExperience}>Experience</TabBtn>
-                  </div>
-                  <div className="p-5 bg-white">
-                    {tab === "education" && hasEducation && (
-                      <TimelineEntry
-                        title={candidate.education_title}
-                        org={candidate.education_academy}
-                        start={candidate.education_start}
-                        end={candidate.education_end}
-                        present={candidate.education_present}
-                        description={candidate.education_description}
-                        leadIcon={<GraduationCap className="h-4 w-4 text-teal-600" />}
-                        leadLabel="Specialty Training:"
-                      />
-                    )}
-                    {tab === "experience" && hasExperience && (
-                      <TimelineEntry
-                        title={candidate.experience_title}
-                        org={candidate.experience_company}
-                        start={candidate.experience_start}
-                        end={candidate.experience_end}
-                        present={candidate.experience_present}
-                        description={candidate.experience_description}
-                        leadIcon={<Briefcase className="h-4 w-4 text-teal-600" />}
-                        leadLabel="Role:"
-                      />
-                    )}
-                  </div>
+              {/* Education / Experience — always visible so you can fill
+                  them in inline. Each subfield is its own editable. */}
+              <div className="rounded-xl border border-slate-200 overflow-hidden">
+                <div className="grid grid-cols-2">
+                  <TabBtn active={tab === "education"}  onClick={() => setTab("education")}>Education</TabBtn>
+                  <TabBtn active={tab === "experience"} onClick={() => setTab("experience")}>Experience</TabBtn>
                 </div>
-              )}
-
-              {/* Status chip row — admin-y info that the WP card doesn't show but we want internally */}
-              <div className="flex flex-wrap items-center gap-1.5 pt-2">
-                {candidate.license_types?.map(l => (
-                  <Badge key={l} variant="outline" className="text-[10px] bg-sky-50 text-sky-700 border-sky-200">{l}</Badge>
-                ))}
-                {candidate.status && (
-                  <Badge variant="outline" className={`text-[10px] ${
-                    candidate.status === "publish" ? "bg-emerald-50 text-emerald-700 border-emerald-200" :
-                    candidate.status === "private" ? "bg-amber-50 text-amber-700 border-amber-200" :
-                    "bg-slate-50 text-slate-700 border-slate-200"
-                  }`}>{candidate.status}</Badge>
-                )}
-                {candidate.current_salary && <Badge variant="outline" className="text-[10px]">Current: {candidate.current_salary}</Badge>}
-                {candidate.expected_salary && <Badge variant="outline" className="text-[10px]">Expected: {candidate.expected_salary}</Badge>}
+                <div className="p-5 bg-white space-y-2">
+                  {tab === "education" && (
+                    <EditableTimelineEntry
+                      leadIcon={<GraduationCap className="h-4 w-4 text-teal-600" />}
+                      leadLabel="Specialty Training:"
+                      title={candidate.education_title}
+                      org={candidate.education_academy}
+                      start={candidate.education_start}
+                      end={candidate.education_end}
+                      present={candidate.education_present}
+                      description={candidate.education_description}
+                      onSave={(patch) => saveAcf({
+                        title1:        patch.title       ?? candidate.education_title       ?? "",
+                        academy1:      patch.org         ?? candidate.education_academy     ?? "",
+                        start_date1:   patch.start       ?? candidate.education_start       ?? "",
+                        end_date1:     patch.end         ?? candidate.education_end         ?? "",
+                        present1:      (patch.present !== undefined ? patch.present : candidate.education_present) ? "Yes" : "No",
+                        description1:  patch.description ?? candidate.education_description ?? "",
+                      })}
+                    />
+                  )}
+                  {tab === "experience" && (
+                    <EditableTimelineEntry
+                      leadIcon={<Briefcase className="h-4 w-4 text-teal-600" />}
+                      leadLabel="Role:"
+                      title={candidate.experience_title}
+                      org={candidate.experience_company}
+                      start={candidate.experience_start}
+                      end={candidate.experience_end}
+                      present={candidate.experience_present}
+                      description={candidate.experience_description}
+                      onSave={(patch) => saveAcf({
+                        title2:        patch.title       ?? candidate.experience_title       ?? "",
+                        company2:      patch.org         ?? candidate.experience_company     ?? "",
+                        start_date_2:  patch.start       ?? candidate.experience_start       ?? "",
+                        end_date2:     patch.end         ?? candidate.experience_end         ?? "",
+                        present2:      (patch.present !== undefined ? patch.present : candidate.experience_present) ? "Yes" : "No",
+                        description2:  patch.description ?? candidate.experience_description ?? "",
+                      })}
+                    />
+                  )}
+                </div>
               </div>
             </div>
           </div>
         </div>
       </DialogContent>
     </Dialog>
+  );
+}
+
+// ─── inline-edit primitives ───────────────────────────────────────────
+
+/** Sentinel value used by EditableTileSelect when "unset" is one of the
+ *  options. Radix's <Select.Item value="" /> isn't legal — value must be
+ *  a non-empty string — so we map "" ↔ this sentinel at the boundary. */
+const UNSET = "__unset__";
+
+/** Click-to-edit single-line (or multi-line) text. Auto-saves on blur,
+ *  Enter, or click-outside; Esc reverts. Shows a tiny saving spinner +
+ *  green check after a successful save, red dot on error. */
+function EditableText({
+  value, onSave, placeholder, className, hoverClass, multiline,
+}: {
+  value: string | null;
+  onSave: (v: string | null) => Promise<void>;
+  placeholder?: string;
+  className?: string;
+  hoverClass?: string;
+  multiline?: boolean;
+}) {
+  const [editing, setEditing] = useState(false);
+  const [draft,   setDraft]   = useState(value ?? "");
+  const [state,   setState]   = useState<"idle" | "saving" | "saved" | "error">("idle");
+
+  useEffect(() => { setDraft(value ?? ""); }, [value]);
+
+  const commit = async () => {
+    setEditing(false);
+    const next = draft.trim();
+    if ((next || null) === (value ?? null) || (next === "" && (value == null || value === ""))) {
+      // No-op
+      return;
+    }
+    setState("saving");
+    try {
+      await onSave(next === "" ? null : next);
+      setState("saved");
+      setTimeout(() => setState("idle"), 1200);
+    } catch {
+      setState("error");
+      setTimeout(() => setState("idle"), 3000);
+    }
+  };
+
+  if (editing) {
+    return multiline ? (
+      <Textarea
+        autoFocus
+        value={draft}
+        onChange={e => setDraft(e.target.value)}
+        onBlur={commit}
+        onKeyDown={e => { if (e.key === "Escape") { setDraft(value ?? ""); setEditing(false); } }}
+        rows={3}
+        className={`text-[13px] ${className ?? ""}`}
+      />
+    ) : (
+      <Input
+        autoFocus
+        value={draft}
+        onChange={e => setDraft(e.target.value)}
+        onBlur={commit}
+        onKeyDown={e => {
+          if (e.key === "Enter") { e.preventDefault(); commit(); }
+          else if (e.key === "Escape") { setDraft(value ?? ""); setEditing(false); }
+        }}
+        className={`h-8 text-[13px] ${className ?? ""}`}
+      />
+    );
+  }
+
+  const empty = value == null || value === "";
+  return (
+    <span
+      role="button"
+      tabIndex={0}
+      onClick={() => setEditing(true)}
+      onKeyDown={e => { if (e.key === "Enter" || e.key === " ") { e.preventDefault(); setEditing(true); } }}
+      className={`rounded px-1 -mx-1 cursor-text inline-flex items-center transition-colors ${
+        hoverClass ?? "hover:bg-slate-100/80"
+      } ${className ?? ""}`}
+    >
+      {empty
+        ? <span className="text-slate-400 italic font-normal">{placeholder ?? "Click to add"}</span>
+        : <span className="whitespace-pre-wrap">{value}</span>}
+      <SaveIndicator state={state} />
+    </span>
+  );
+}
+
+/** Same affordance as the icon-tile labelled fields on the right pane —
+ *  icon + label + editable value. */
+function EditableTile({
+  icon, label, value, display, hint, onSave,
+}: {
+  icon: React.ReactNode;
+  label: string;
+  value: string | null;
+  display?: string | null;       // optional formatted view for the display state
+  hint?: string;                  // shown as placeholder when empty
+  onSave: (v: string | null) => Promise<void>;
+}) {
+  return (
+    <div className="flex items-start gap-3">
+      <div className="h-9 w-9 rounded-full bg-slate-100 text-slate-500 flex items-center justify-center shrink-0">{icon}</div>
+      <div className="min-w-0 flex-1">
+        <div className="text-[11px] text-slate-500">{label}</div>
+        <div className="text-[13px] mt-0.5 text-slate-800 break-words">
+          <EditableText
+            value={value}
+            onSave={onSave}
+            placeholder={hint ?? `Add ${label.toLowerCase()}…`}
+            className="block"
+          />
+          {display && value && display !== value && (
+            <span className="text-[10.5px] text-slate-400 ml-1">({display})</span>
+          )}
+        </div>
+      </div>
+    </div>
+  );
+}
+
+/** Select variant of the tile — used for Yes/No/— style fields. */
+function EditableTileSelect({
+  icon, label, value, options, onSave,
+}: {
+  icon: React.ReactNode;
+  label: string;
+  value: string;
+  options: Array<{ value: string; label: string }>;
+  onSave: (v: string) => Promise<void>;
+}) {
+  const [state, setState] = useState<"idle" | "saving" | "saved" | "error">("idle");
+  const handle = async (v: string) => {
+    if (v === value) return;
+    setState("saving");
+    try {
+      await onSave(v);
+      setState("saved");
+      setTimeout(() => setState("idle"), 1200);
+    } catch {
+      setState("error");
+      setTimeout(() => setState("idle"), 3000);
+    }
+  };
+  return (
+    <div className="flex items-start gap-3">
+      <div className="h-9 w-9 rounded-full bg-slate-100 text-slate-500 flex items-center justify-center shrink-0">{icon}</div>
+      <div className="min-w-0 flex-1">
+        <div className="text-[11px] text-slate-500 flex items-center gap-1">{label} <SaveIndicator state={state} /></div>
+        <Select value={value} onValueChange={handle}>
+          <SelectTrigger className="h-8 mt-0.5 text-[12px] bg-white"><SelectValue /></SelectTrigger>
+          <SelectContent>
+            {options.map(o => <SelectItem key={o.value} value={o.value}>{o.label}</SelectItem>)}
+          </SelectContent>
+        </Select>
+      </div>
+    </div>
+  );
+}
+
+/** Phone / email contact row inside the teal sidebar — editable. */
+function ContactLineEditable({
+  icon, value, placeholder, onSave,
+}: {
+  icon: React.ReactNode;
+  value: string | null;
+  placeholder: string;
+  onSave: (v: string | null) => Promise<void>;
+}) {
+  return (
+    <div className="flex items-center justify-center gap-2 text-white/95">
+      <span className="inline-flex items-center justify-center h-5 w-5 rounded-full bg-white/15">{icon}</span>
+      <EditableText
+        value={value}
+        onSave={onSave}
+        placeholder={placeholder}
+        className="text-[12px] text-white/95"
+        hoverClass="hover:bg-white/15"
+      />
+    </div>
+  );
+}
+
+/** Tiny status dot rendered next to a value. idle = nothing, saving =
+ *  spinner, saved = green check (1s), error = red alert. */
+function SaveIndicator({ state }: { state: "idle" | "saving" | "saved" | "error" }) {
+  if (state === "idle")   return null;
+  if (state === "saving") return <Loader2 className="inline h-3 w-3 ml-1.5 animate-spin opacity-70" />;
+  if (state === "saved")  return <Check    className="inline h-3 w-3 ml-1.5 text-emerald-600" />;
+  return <AlertCircle className="inline h-3 w-3 ml-1.5 text-red-500" />;
+}
+
+/** Editable Education / Experience entry. */
+function EditableTimelineEntry({
+  leadIcon, leadLabel, title, org, start, end, present, description, onSave,
+}: {
+  leadIcon: React.ReactNode;
+  leadLabel: string;
+  title: string | null;
+  org: string | null;
+  start: string | null;
+  end: string | null;
+  present: boolean | null;
+  description: string | null;
+  onSave: (patch: { title?: string; org?: string; start?: string; end?: string; present?: boolean; description?: string }) => Promise<void>;
+}) {
+  return (
+    <div className="space-y-1.5 text-[13px]">
+      <div className="text-[15px] text-slate-900 leading-snug">
+        <span className="inline-flex items-center gap-1.5 font-semibold mr-1">{leadIcon}{leadLabel}</span>
+        <EditableText
+          value={title}
+          onSave={v => onSave({ title: v ?? "" })}
+          placeholder="Add title…"
+          className="text-[15px] text-slate-900"
+        />
+      </div>
+      <div className="text-[14px] text-teal-600 font-medium">
+        <EditableText
+          value={org}
+          onSave={v => onSave({ org: v ?? "" })}
+          placeholder="Add organisation…"
+          className="text-[14px] text-teal-600 font-medium"
+          hoverClass="hover:bg-teal-50"
+        />
+      </div>
+      <div className="text-[12px] text-slate-500 flex items-center gap-2 flex-wrap">
+        <EditableText
+          value={start}
+          onSave={v => onSave({ start: v ?? "" })}
+          placeholder="Start (YYYYMMDD)"
+          className="text-[12px] text-slate-500"
+        />
+        <span>–</span>
+        {present ? (
+          <span>Present</span>
+        ) : (
+          <EditableText
+            value={end}
+            onSave={v => onSave({ end: v ?? "" })}
+            placeholder="End (YYYYMMDD)"
+            className="text-[12px] text-slate-500"
+          />
+        )}
+        <label className="inline-flex items-center gap-1 text-[11px] text-slate-600 ml-2">
+          <input type="checkbox" checked={!!present} onChange={e => onSave({ present: e.target.checked })} />
+          Currently {leadLabel.toLowerCase().includes("training") ? "studying" : "working"}
+        </label>
+      </div>
+      <div className="text-[12.5px] text-slate-700 mt-2">
+        <span className="font-medium mr-1">Description:</span>
+        <EditableText
+          value={description}
+          onSave={v => onSave({ description: v ?? "" })}
+          placeholder="Add description…"
+          className="text-[12.5px] text-slate-700"
+          multiline
+        />
+      </div>
+    </div>
   );
 }
 
@@ -554,29 +997,6 @@ function Avatar({ src, name, size, ring }: { src: string | null; name: string; s
   );
 }
 
-function ContactLine({ icon, value, href }: { icon: React.ReactNode; value: string; href: string }) {
-  return (
-    <a href={href} className="flex items-center justify-center gap-2 text-white/95 hover:text-white">
-      <span className="inline-flex items-center justify-center h-5 w-5 rounded-full bg-white/15">{icon}</span>
-      <span className="truncate">{value}</span>
-    </a>
-  );
-}
-
-function InfoTile({ icon, label, value }: { icon: React.ReactNode; label: string; value: string | number | null | undefined }) {
-  const display = value == null || value === "" ? "—" : String(value);
-  const muted   = display === "—";
-  return (
-    <div className="flex items-start gap-3">
-      <div className="h-9 w-9 rounded-full bg-slate-100 text-slate-500 flex items-center justify-center shrink-0">{icon}</div>
-      <div className="min-w-0">
-        <div className="text-[11px] text-slate-500">{label}</div>
-        <div className={`text-[13px] mt-0.5 break-words ${muted ? "text-slate-400" : "text-slate-800"}`}>{display}</div>
-      </div>
-    </div>
-  );
-}
-
 function TabBtn({ active, onClick, disabled, children }: { active: boolean; onClick: () => void; disabled?: boolean; children: React.ReactNode }) {
   return (
     <button
@@ -594,37 +1014,7 @@ function TabBtn({ active, onClick, disabled, children }: { active: boolean; onCl
   );
 }
 
-function TimelineEntry({ title, org, start, end, present, description, leadIcon, leadLabel }: {
-  title: string | null; org: string | null; start: string | null; end: string | null;
-  present: boolean | null; description: string | null;
-  leadIcon: React.ReactNode; leadLabel: string;
-}) {
-  const range = formatRange(start, end, present);
-  return (
-    <div className="space-y-1.5">
-      {title && (
-        <div className="text-[15px] text-slate-900 leading-snug">
-          <span className="inline-flex items-center gap-1.5 font-semibold">{leadIcon}{leadLabel}</span>{" "}
-          <span>{title}</span>
-        </div>
-      )}
-      {org && <div className="text-[14px] text-teal-600 font-medium">{org}</div>}
-      {range && <div className="text-[12px] text-slate-500">{range}</div>}
-      {description && <div className="text-[12.5px] text-slate-700 whitespace-pre-line">Description: {description}</div>}
-      {!description && org && !title && <div className="text-[12px] text-slate-500">Description: {org}</div>}
-    </div>
-  );
-}
-
 // ─── small formatters ─────────────────────────────────────────────────
-
-function prefixedTitle(c: WpCandidate): string {
-  // Prefer the WP-rendered post title (already has the "Dr. X – Consultant in …" shape).
-  const t = (c.title ?? "").trim();
-  if (t) return t;
-  const parts = [c.full_name, c.job_title].filter(Boolean) as string[];
-  return parts.join(" – ") || "Candidate";
-}
 
 function ageFromDob(dob: string | null): number | null {
   if (!dob) return null;
@@ -650,30 +1040,6 @@ function prettyDate(raw: string | null): string | null {
   return d.toLocaleDateString("en-GB", { day: "numeric", month: "long", year: "numeric" });
 }
 
-function formatRange(start: string | null, end: string | null, present: boolean | null): string {
-  const s = prettyMonthYear(start);
-  const e = present ? "Present" : prettyMonthYear(end);
-  if (s && e) return `${s} – ${e}`;
-  if (s)      return present ? `${s} – Present` : s;
-  if (e)      return e;
-  return present ? "Present" : "";
-}
-
-function prettyMonthYear(raw: string | null): string | null {
-  if (!raw) return null;
-  let d: Date | null = null;
-  if (/^\d{8}$/.test(raw))            d = new Date(`${raw.slice(0, 4)}-${raw.slice(4, 6)}-${raw.slice(6, 8)}`);
-  else                                { const parsed = new Date(raw); if (!isNaN(parsed.valueOf())) d = parsed; }
-  if (!d || isNaN(d.valueOf())) return raw;
-  return d.toLocaleDateString("en-GB", { month: "short", year: "numeric" });
-}
-
-function licenseSummary(c: WpCandidate): string | null {
-  // Prefer the human-written "DHA, DOH & MOH in process" field if present.
-  if (c.license_status) return c.license_status;
-  if (c.license_types?.length) return c.license_types.join(", ");
-  return null;
-}
 
 function Kpi({ label, value, tone, hint }: { label: string; value: number; tone: "slate" | "emerald" | "amber" | "sky" | "indigo"; hint?: string }) {
   const cls = {
