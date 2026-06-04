@@ -40,10 +40,28 @@ export interface ScheduledBatch {
 export interface SpecialtyRotation {
   id:                  number;
   queue:               string[];
+  /** Persisted cursor at the anchor date. Read this when you want to
+   *  edit the anchor; for "what specialty is today" use `effective_cursor_index`. */
   cursor_index:        number;
+  /** Calendar date at which `cursor_index` was last set explicitly
+   *  (queue edit OR Advance click). The displayed cursor auto-walks
+   *  forward from here, one step per calendar day. */
+  cursor_anchor_at:    string;
+  /** Derived: today's pick. Computed client-side as
+   *  (cursor_index + days_since_anchor) mod queue.length. */
+  effective_cursor_index: number;
   last_sent_specialty: string | null;
   last_sent_at:        string | null;
   updated_at:          string;
+}
+
+/** Whole calendar days between two ISO timestamps, both pinned to UTC
+ *  midnight so DST and timezone drift can't make the count flap by ±1. */
+function calendarDaysBetween(from: string, to: Date): number {
+  const a = new Date(from);
+  const aUtc = Date.UTC(a.getUTCFullYear(), a.getUTCMonth(), a.getUTCDate());
+  const bUtc = Date.UTC(to.getUTCFullYear(), to.getUTCMonth(), to.getUTCDate());
+  return Math.max(0, Math.floor((bUtc - aUtc) / 86_400_000));
 }
 
 const BATCHES_KEY  = ["scheduled-batches"] as const;
@@ -82,9 +100,21 @@ export function useSpecialtyRotation() {
         .eq("id", 1)
         .single();
       if (error) throw error;
-      return data as SpecialtyRotation;
+      const row = data as Omit<SpecialtyRotation, "effective_cursor_index">;
+      // Derive today's pick from the anchor. The DB cursor only moves
+      // when the team explicitly advances or edits — the day-to-day
+      // walk is a render-time computation, so the UI updates every
+      // calendar day without any cron / write.
+      const queueLen = Math.max(1, row.queue?.length ?? 0);
+      const daysSince = row.cursor_anchor_at ? calendarDaysBetween(row.cursor_anchor_at, new Date()) : 0;
+      const effective_cursor_index = ((row.cursor_index % queueLen) + (daysSince % queueLen) + queueLen) % queueLen;
+      return { ...row, effective_cursor_index };
     },
-    staleTime: 30_000,
+    // Refetch every 5 minutes so a long-open tab eventually catches a
+    // day-rollover even without a navigation. Day boundaries happen at
+    // midnight; the user might have the dashboard open across them.
+    staleTime:   5  * 60_000,
+    refetchInterval: 15 * 60_000,
   });
 }
 
@@ -205,9 +235,14 @@ export function useUpdateSpecialtyRotation() {
   const qc = useQueryClient();
   return useMutation({
     mutationFn: async (patch: { queue?: string[]; cursor_index?: number }): Promise<SpecialtyRotation> => {
+      // Any explicit edit to the cursor or queue re-anchors at today so
+      // the daily-walk math restarts from "now". Without this, clicking
+      // Advance once but viewing the page a week later would jump 8
+      // specialties forward (1 manual + 7 derived).
+      const stamp = { ...patch, updated_at: new Date().toISOString(), cursor_anchor_at: new Date().toISOString() };
       const { data, error } = await supabase
         .from("specialty_rotation_state")
-        .update({ ...patch, updated_at: new Date().toISOString() })
+        .update(stamp)
         .eq("id", 1)
         .select("*")
         .single();

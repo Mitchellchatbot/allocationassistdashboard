@@ -256,9 +256,13 @@ Deno.serve(async (req: Request) => {
     updated_at:      new Date().toISOString(),
   }).eq("id", batch.id);
 
-  // ── Specialty rotation advance ────────────────────────────────────────
+  // ── Stamp last-sent on the rotation, but DON'T advance the cursor ────
+  // The cursor now auto-advances one per calendar day via the derived
+  // effective_cursor_index in useSpecialtyRotation. Bumping it again on
+  // send would double-count — sending today would push tomorrow's pick
+  // two specialties forward instead of one.
   if (batch.kind === "specialty_of_day") {
-    await advanceRotation(supabase, String(batch.specialty ?? ""));
+    await markRotationSent(supabase, String(batch.specialty ?? ""));
   }
 
   return json({
@@ -273,25 +277,17 @@ Deno.serve(async (req: Request) => {
 
 // ── Helpers ────────────────────────────────────────────────────────────────
 
-async function advanceRotation(supabase: ReturnType<typeof createClient>, sentSpecialty: string): Promise<void> {
+async function markRotationSent(supabase: ReturnType<typeof createClient>, sentSpecialty: string): Promise<void> {
+  // Stamp last_sent_* for audit + the 'Last sent: X' line in the UI.
+  // Do NOT touch cursor_index or cursor_anchor_at — the daily derivation
+  // owns cursor progression now.
   try {
-    const { data: state } = await supabase
-      .from("specialty_rotation_state")
-      .select("*")
-      .eq("id", 1)
-      .maybeSingle();
-    if (!state) return;
-    const queue: string[] = state.queue ?? [];
-    if (queue.length === 0) return;
-    const next = (state.cursor_index + 1) % queue.length;
     await supabase.from("specialty_rotation_state").update({
-      cursor_index:        next,
       last_sent_specialty: sentSpecialty,
       last_sent_at:        new Date().toISOString(),
-      updated_at:          new Date().toISOString(),
     }).eq("id", 1);
   } catch (e) {
-    console.error("[send-batch] rotation advance failed:", e);
+    console.error("[send-batch] rotation last-sent stamp failed:", e);
   }
 }
 

@@ -124,7 +124,7 @@ export default function Batches() {
         target={dialogTarget}
         onTargetChange={setDialogTarget}
         batches={batches}
-        suggestedSpecialty={rotation?.queue[rotation.cursor_index] ?? null}
+        suggestedSpecialty={rotation && rotation.queue.length > 0 ? rotation.queue[rotation.effective_cursor_index] ?? null : null}
       />
     </DashboardLayout>
   );
@@ -226,8 +226,14 @@ function SpecialtyRotationCard({ rotation }: { rotation: ReturnType<typeof useSp
   const [draft, setDraft]     = useState("");
 
   const queue = rotation?.queue ?? [];
-  const cursor = rotation?.cursor_index ?? 0;
-  const upcoming = queue.slice(cursor, cursor + 5);
+  // Use the derived cursor — the daily-walked position. The persisted
+  // cursor_index is the anchor; today's pick is anchor + days_since.
+  // Falls back to cursor_index for a rotation that just rolled over
+  // before the hook recomputes.
+  const cursor = rotation?.effective_cursor_index ?? rotation?.cursor_index ?? 0;
+  // Wrap the next-up preview so we don't run off the end of the queue
+  // mid-cycle (the next 4 specialties wrap to the start of the queue).
+  const upcoming = Array.from({ length: Math.min(5, queue.length) }, (_, i) => queue[(cursor + i) % queue.length]).filter(Boolean);
 
   // Collapse Zoho's thousands of raw specialty strings into ~60 canonical
   // buckets via groupSpecialty(). For each bucket we keep:
@@ -369,7 +375,7 @@ function SpecialtyRotationCard({ rotation }: { rotation: ReturnType<typeof useSp
               Specialty-of-the-day rotation
             </CardTitle>
             <CardDescription className="text-[11px]">
-              The Wed-Fri queue. Paste your full list once; the system advances the cursor after every send.
+              The Wed-Fri queue. Paste your full list once; today's pick advances by one calendar day on its own. Click <em>Advance</em> any time to skip ahead manually.
             </CardDescription>
           </div>
           {!editing && (
