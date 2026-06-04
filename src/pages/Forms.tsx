@@ -264,7 +264,7 @@ function FormDetail({ form }: { form: Form }) {
                   </Button>
                 </a>
               )}
-              <Button size="sm" variant="outline" onClick={handleExportCsv} title={`Export filtered responses (${filtered.length}) to CSV`}>
+              <Button size="sm" variant="outline" onClick={handleExportCsv} title={`Export ${responses.length} loaded response${responses.length === 1 ? "" : "s"} to CSV`}>
                 <Download className="h-3.5 w-3.5 mr-1" /> Export
               </Button>
               {form.provider === "typeform" && <TypeformSyncButton form={form} />}
