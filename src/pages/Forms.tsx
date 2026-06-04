@@ -168,11 +168,14 @@ function FormDetail({ form }: { form: Form }) {
   // KPIs from cheap server-side count queries — total / last 7 days /
   // Zoho-linked — no longer dependent on the loaded set.
   const { data: stats } = useFormStats(form.id);
-  const total       = stats?.total        ?? form.response_count ?? 0;
-  const last7Days   = stats?.last7d       ?? 0;
-  const last30Days  = stats?.last30d      ?? 0;
-  const openOutreach = stats?.outreachOpen ?? 0;
-  const paidPerLead  = (form.lead_value_cents ?? 0) / 100;
+  const total              = stats?.total              ?? form.response_count ?? 0;
+  const last7Days          = stats?.last7d             ?? 0;
+  const last30Days         = stats?.last30d            ?? 0;
+  const openOutreach       = stats?.outreachOpen       ?? 0;
+  const unqualified        = stats?.unqualified        ?? 0;
+  const uncontactedInZoho  = stats?.uncontactedInZoho  ?? 0;
+  const paidPerLead        = (form.lead_value_cents ?? 0) / 100;
+  const isPaidForm         = paidPerLead > 0;
 
   // Sentinel for infinite scroll.
   const sentinelRef = useRef<HTMLDivElement | null>(null);
@@ -299,26 +302,56 @@ function FormDetail({ form }: { form: Form }) {
       <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
         <Kpi label="Total submissions" value={total}      tone="slate" />
         <Kpi label="Last 7 days"       value={last7Days}  tone="sky" />
-        <Kpi label="Last 30 days"      value={last30Days} tone="emerald" />
-        <Kpi
-          label="Open outreach"
-          value={openOutreach}
-          tone="amber"
-          hint="new + contacted + qualified"
-        />
-        {/* On a paid-lead form, total revenue collected is the most
-            useful headline next to the count — these are receipts, not
-            exposure. Hide it for the free Typeforms. */}
-        {paidPerLead > 0 && (
-          <Kpi
-            label={`Revenue from this form`}
-            value={paidPerLead * total}
-            tone="indigo"
-            format="currency"
-            hint={`${total.toLocaleString()} × $${paidPerLead.toLocaleString()}`}
-          />
+
+        {/* KPI 3 + 4 branch on the form type:
+            - Paid-lead form (DoctorsFinder): Last 30d + Revenue. These
+              don't feed Zoho, so 'Open outreach' from the form_responses
+              lifecycle is the only outreach signal — show it in row 2.
+            - Free-signal form (Typeform / Consultation): Unqualified +
+              Uncontacted-in-Zoho. The 'Open outreach' tile we used to
+              show was deceptive (it counted every default-'new' row
+              including unqualified ones, ~17k strong). These two are
+              the actually-actionable buckets. */}
+        {isPaidForm ? (
+          <>
+            <Kpi label="Last 30 days" value={last30Days} tone="emerald" />
+            <Kpi
+              label="Revenue from this form"
+              value={paidPerLead * total}
+              tone="indigo"
+              format="currency"
+              hint={`${total.toLocaleString()} × $${paidPerLead.toLocaleString()}`}
+            />
+          </>
+        ) : (
+          <>
+            <Kpi
+              label="Unqualified"
+              value={unqualified}
+              tone="slate"
+              hint="never reached Zoho"
+            />
+            <Kpi
+              label="Uncontacted in Zoho"
+              value={uncontactedInZoho}
+              tone="amber"
+              hint="Lead_Status = Not Contacted"
+            />
+          </>
         )}
       </div>
+      {/* Paid forms still get the form-response lifecycle tile — it's
+          the right outreach signal when there's no Zoho funnel. */}
+      {isPaidForm && (
+        <div className="grid grid-cols-1 sm:grid-cols-3 gap-3 -mt-1">
+          <Kpi
+            label="Open outreach"
+            value={openOutreach}
+            tone="amber"
+            hint="new + contacted + qualified"
+          />
+        </div>
+      )}
 
       {/* Supercharged search + filters bar */}
       <Card>

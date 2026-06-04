@@ -228,21 +228,31 @@ export function useFormStats(formId: string | null) {
     queryKey: ["form-stats", formId ?? "_"],
     enabled:  !!formId,
     queryFn: async () => {
-      if (!formId) return { total: 0, last7d: 0, last30d: 0, outreachOpen: 0 };
+      if (!formId) return { total: 0, last7d: 0, last30d: 0, outreachOpen: 0, unqualified: 0, uncontactedInZoho: 0 };
       const cutoff7  = new Date(Date.now() - 7  * 86_400_000).toISOString();
       const cutoff30 = new Date(Date.now() - 30 * 86_400_000).toISOString();
-      const [totalRes, last7Res, last30Res, openRes] = await Promise.all([
+      const [totalRes, last7Res, last30Res, openRes, unqualifiedRes, uncontactedRes] = await Promise.all([
         supabase.from("form_responses").select("id", { count: "exact", head: true }).eq("form_id", formId),
         supabase.from("form_responses").select("id", { count: "exact", head: true }).eq("form_id", formId).gte("submitted_at", cutoff7),
         supabase.from("form_responses").select("id", { count: "exact", head: true }).eq("form_id", formId).gte("submitted_at", cutoff30),
-        // Open outreach = anything still in the live funnel (not closed/declined).
+        // Open outreach = form-response lifecycle still live. Used for
+        // paid-lead forms (DoctorsFinder) where there's no Zoho funnel.
         supabase.from("form_responses").select("id", { count: "exact", head: true }).eq("form_id", formId).in("outreach_status", ["new", "contacted", "qualified"]),
+        // Unqualified = the form was supposed to auto-create a Zoho
+        // lead and didn't (the respondent never got past qualification).
+        supabase.from("form_responses").select("id", { count: "exact", head: true }).eq("form_id", formId).is("doctor_id", null),
+        // Uncontacted in Zoho = linked to a Zoho lead whose Lead_Status
+        // is still "Not Contacted". One RPC call rather than dragging
+        // 28k cached leads through the client to count.
+        supabase.rpc("form_response_zoho_status_count", { p_form_id: formId, p_status: "Not Contacted" }),
       ]);
       return {
-        total:        totalRes.count   ?? 0,
-        last7d:       last7Res.count   ?? 0,
-        last30d:      last30Res.count  ?? 0,
-        outreachOpen: openRes.count    ?? 0,
+        total:        totalRes.count       ?? 0,
+        last7d:       last7Res.count       ?? 0,
+        last30d:      last30Res.count      ?? 0,
+        outreachOpen: openRes.count        ?? 0,
+        unqualified:  unqualifiedRes.count ?? 0,
+        uncontactedInZoho: typeof uncontactedRes.data === "number" ? uncontactedRes.data : 0,
       };
     },
     staleTime: 60_000,
