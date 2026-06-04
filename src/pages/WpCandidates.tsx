@@ -31,7 +31,7 @@ import {
   type WpCandidate,
 } from "@/hooks/use-wp-candidates";
 import { toast } from "sonner";
-import { Plus, Camera, Loader2, Check, AlertCircle } from "lucide-react";
+import { Plus, Camera, Loader2, Check, AlertCircle, Pencil } from "lucide-react";
 import { Textarea } from "@/components/ui/textarea";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 
@@ -462,14 +462,14 @@ function CandidateDetailDialogInner({ candidate, open, onClose }: { candidate: W
                     onSave={v => saveAcf({ full_name: v ?? "" })}
                     placeholder="Add full name…"
                     className="text-[18px] font-semibold leading-tight text-white"
-                    hoverClass="hover:bg-white/15"
+                    hoverClass="hover:bg-white/25 hover:ring-white/40"
                   />
                   <EditableText
                     value={candidate.job_title}
                     onSave={v => saveAcf({ job_title: v ?? "" })}
                     placeholder="Add job title…"
                     className="text-[12px] text-white/90 leading-snug"
-                    hoverClass="hover:bg-white/15"
+                    hoverClass="hover:bg-white/25 hover:ring-white/40"
                   />
                   {memberSince && (
                     <div className="inline-flex mt-3 text-[10.5px] bg-white/15 rounded-full px-2.5 py-0.5">
@@ -776,19 +776,36 @@ function EditableText({
   }
 
   const empty = value == null || value === "";
+  // Two affordances combined:
+  //   1. A faint emerald background that brightens on hover, with a tiny
+  //      pencil that fades in. Tells the user the value is interactive.
+  //   2. An empty value gets a dashed emerald outline + a more prominent
+  //      "Click to add …" so blank fields read as a TODO rather than
+  //      just absent data.
+  // The teal sidebar passes a custom hoverClass so the highlight stays
+  // visible against the dark background — emerald-on-teal vanishes,
+  // white/15 doesn't.
+  const baseHover = hoverClass ?? "hover:bg-emerald-50 hover:ring-emerald-300";
   return (
     <span
       role="button"
       tabIndex={0}
       onClick={() => setEditing(true)}
       onKeyDown={e => { if (e.key === "Enter" || e.key === " ") { e.preventDefault(); setEditing(true); } }}
-      className={`rounded px-1 -mx-1 cursor-text inline-flex items-center transition-colors ${
-        hoverClass ?? "hover:bg-slate-100/80"
+      className={`group/edit relative rounded px-1.5 -mx-1.5 py-0.5 cursor-text inline-flex items-center gap-1 ring-1 transition-all duration-150 ${
+        empty
+          ? "ring-emerald-300/70 bg-emerald-50/40 hover:bg-emerald-100/60 [border-style:dashed]"
+          : `ring-transparent ${baseHover}`
       } ${className ?? ""}`}
     >
       {empty
-        ? <span className="text-slate-400 italic font-normal">{placeholder ?? "Click to add"}</span>
+        ? <span className="text-emerald-700/80 italic font-normal">{placeholder ?? "Click to add"}</span>
         : <span className="whitespace-pre-wrap">{value}</span>}
+      {/* Pencil affordance — appears on hover when there's a value. For
+          empty fields the placeholder text already prompts the action. */}
+      {!empty && state === "idle" && (
+        <Pencil className="h-3 w-3 opacity-0 group-hover/edit:opacity-60 transition-opacity shrink-0" />
+      )}
       <SaveIndicator state={state} />
     </span>
   );
@@ -883,7 +900,7 @@ function ContactLineEditable({
         onSave={onSave}
         placeholder={placeholder}
         className="text-[12px] text-white/95"
-        hoverClass="hover:bg-white/15"
+        hoverClass="hover:bg-white/25 hover:ring-white/40"
       />
     </div>
   );
