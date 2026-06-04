@@ -302,7 +302,7 @@ export function ChannelEconomicsTable() {
                   </TableRow>,
                   ...list.map(r => (
                     <TableRow key={r.channel} className="hover:bg-muted/30 cursor-pointer group border-b-border/40" onClick={() => {
-                      navigate(`/leads-pipeline?source=${encodeURIComponent(r.channel)}`);
+                      navigate(`/doctors?tab=progress&source=${encodeURIComponent(r.channel)}`);
                     }}>
                       <TableCell className="text-[12px] font-medium py-3 pl-7 pr-3 whitespace-nowrap">
                         <div className="flex items-center gap-2">
@@ -345,7 +345,7 @@ export function ChannelEconomicsTable() {
                       </TableCell>
                       <TableCell className="text-right py-3 px-3 whitespace-nowrap">
                         <Link
-                          to={`/leads-pipeline?source=${encodeURIComponent(r.channel)}&stage=Not%20Contacted`}
+                          to={`/doctors?tab=progress&source=${encodeURIComponent(r.channel)}&stage=Not%20Contacted`}
                           onClick={(e) => e.stopPropagation()}
                           className="inline-flex items-center gap-0.5 text-[10px] text-warning hover:text-warning/80 font-medium transition-colors opacity-0 group-hover:opacity-100"
                         >

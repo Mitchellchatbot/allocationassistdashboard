@@ -476,6 +476,19 @@ Deno.serve(async (req: Request) => {
   const html    = render(tpl.body_html || wrapHtml(tpl.body_text), vars, true);
   const text    = render(tpl.body_text ?? "", vars);
 
+  // Refuse to send templates that still carry the PLACEHOLDER stub copy
+  // from the seed migrations. The template editor warns the team, but
+  // this guard is what actually stops a misclick from shipping
+  // "PLACEHOLDER — generic profile-introduction email…" to a hospital.
+  // Dry-runs skip the guard so you can still preview a placeholder.
+  const placeholderRe = /^\s*PLACEHOLDER\b|^\s*\(PLACEHOLDER\)/i;
+  if (!dryRun && (placeholderRe.test(text) || placeholderRe.test(subject))) {
+    return json({
+      ok: false,
+      error: `Template "${templateKey}" still contains PLACEHOLDER copy. Edit it in /automations → Email Templates before sending.`,
+    }, 422);
+  }
+
   // ── Pick recipient ────────────────────────────────────────────────────────
   // For Flow 2's hospital-stage, the recipient is the hospital's recruiter
   // email (not the doctor). For every other stage, the doctor.

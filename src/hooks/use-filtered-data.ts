@@ -135,7 +135,10 @@ export function useFilteredData() {
         days: Math.round(days),
       });
     }
-    console.log(`[useFilteredData] placementCycles — DoBs in window:${filteredDoB.length} matched:${cycles.length} (email:${hitEmail} phone:${hitPhone} name:${hitName}) missed:${missed} | DoB fields populated → email:${dobHasEmail} phone:${dobHasPhone}`);
+    // Dev-only diagnostics — gated so production browser consoles don't
+    // leak the team's lead emails / phones / names to anything that
+    // reads them (extensions, page-injected scripts, screen-shares).
+    if (import.meta.env.DEV) console.log(`[useFilteredData] placementCycles — DoBs in window:${filteredDoB.length} matched:${cycles.length} (email:${hitEmail} phone:${hitPhone} name:${hitName}) missed:${missed} | DoB fields populated → email:${dobHasEmail} phone:${dobHasPhone}`);
     // Sample 5 unmatched DoBs so we can verify the hypothesis: their original
     // Lead got converted out of the Leads module so it's missing from cache.
     const unmatchedSamples: { dobEmail: string; dobPhone: string; dobName: string; emailExistsInLeads: boolean; phoneExistsInLeads: boolean }[] = [];
@@ -158,8 +161,10 @@ export function useFilteredData() {
         });
       }
     }
-    console.log('[useFilteredData] sample unmatched DoBs:\n' + unmatchedSamples.map((s, i) => `  ${i + 1}. email="${s.dobEmail}" phone="${s.dobPhone}" name="${s.dobName}" → emailInLeads=${s.emailExistsInLeads} phoneInLeads=${s.phoneExistsInLeads}`).join('\n'));
-    console.log(`[useFilteredData] lookup-map sizes — leads-by-email:${byEmail.size} leads-by-phone:${byPhone.size} leads-by-name:${byName.size} (universe: ${zoho.rawLeads.length} leads)`);
+    if (import.meta.env.DEV) {
+      console.log('[useFilteredData] sample unmatched DoBs:\n' + unmatchedSamples.map((s, i) => `  ${i + 1}. email="${s.dobEmail}" phone="${s.dobPhone}" name="${s.dobName}" → emailInLeads=${s.emailExistsInLeads} phoneInLeads=${s.phoneExistsInLeads}`).join('\n'));
+      console.log(`[useFilteredData] lookup-map sizes — leads-by-email:${byEmail.size} leads-by-phone:${byPhone.size} leads-by-name:${byName.size} (universe: ${zoho.rawLeads.length} leads)`);
+    }
     agg.placementCycles = cycles;
 
     // ── Time-series chart: slice to the number of months in the range ────

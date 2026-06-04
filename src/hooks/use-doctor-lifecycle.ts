@@ -70,6 +70,12 @@ export function useDoctorLifecycle(doctorId: string | null | undefined) {
   // tick-scheduler bumps last_availability_ping_at) should reflect here.
   useEffect(() => {
     if (!doctorId) return;
+    // Random suffix on the channel name is intentional — multiple
+    // components can call useDoctorLifecycle for the same doctor (e.g.
+    // DoctorLifecycleCard + DoctorProgress row + the modal), and
+    // supabase-js throws "cannot add postgres_changes callbacks after
+    // subscribe()" if you reuse a channel name across mounts. Same
+    // pattern as use-contract-activity.ts.
     const channel = supabase
       .channel(`doctor_lifecycle_${doctorId}_${Math.random().toString(36).slice(2, 8)}`)
       .on("postgres_changes", {
@@ -261,9 +267,17 @@ export async function ensureSecondPaymentRun(doctorId: string, doctorName: strin
 
   if (existing && existing.length > 0) {
     const r = existing[0];
-    // Bump the joining_date so the timer re-anchors if the team corrected it.
+    // Re-anchor the joining_date timer if the team corrected it. Merge
+    // into the existing metadata blob so other fields (e.g. triggered_via,
+    // hospital_id, anything tick-scheduler stamps in) don't get wiped.
+    const { data: prev } = await supabase
+      .from("automation_flow_runs")
+      .select("metadata")
+      .eq("id", r.id)
+      .maybeSingle();
+    const merged = { ...((prev?.metadata as Record<string, unknown>) ?? {}), joining_date: joiningDate };
     await supabase.from("automation_flow_runs")
-      .update({ metadata: { joining_date: joiningDate }, last_event_at: new Date().toISOString() })
+      .update({ metadata: merged, last_event_at: new Date().toISOString() })
       .eq("id", r.id);
     return;
   }

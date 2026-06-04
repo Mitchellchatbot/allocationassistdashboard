@@ -14,17 +14,21 @@ import {
 import { FLOW_DEFINITIONS, FLOW_ORDER } from "@/lib/automation-flows";
 import { EmailPreview } from "@/components/EmailPreview";
 
+// Preview tokens used to render templates in the editor. Use the
+// production app origin so previews read like the real thing — not
+// 'aa.example'. These are PREVIEW-ONLY; send-flow-email mints the
+// real tokens at send time.
 const SAMPLE_VARS: Record<string, string> = {
   doctor_name:        "Dr. Heena Sharma",
   doctor_speciality:  "Pediatrics",
   hospital_name:      "American Hospital Dubai",
   city:               "Dubai",
   country:            "UAE",
-  form_link:          "https://aa.example/forms/abc123",
-  upload_link:        "https://aa.example/uploads/abc123",
-  profile_link:       "https://aa.example/profiles/heena-sharma",
-  guide_link:         "https://aa.example/guides/dubai.pdf",
-  payment_link:       "https://aa.example/pay/xyz789",
+  form_link:          "https://care-assist.io/forms/abc123",
+  upload_link:        "https://care-assist.io/upload-cv/abc123",
+  profile_link:       "https://care-assist.io/shared-profile/heena-sharma",
+  guide_link:         "https://care-assist.io/guides/dubai.pdf",
+  payment_link:       "https://care-assist.io/pay/xyz789",
   amount:             "AED 21,000",
   due_date:           "May 30, 2026",
   days_overdue:       "12",
