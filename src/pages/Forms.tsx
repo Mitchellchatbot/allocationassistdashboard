@@ -27,10 +27,10 @@ import { Tabs, TabsList, TabsTrigger, TabsContent } from "@/components/ui/tabs";
 import {
   ClipboardList, Plus, ExternalLink, Copy, CheckCircle2, AlertCircle,
   Trash2, Inbox, ChevronRight, History, Sparkles, Mail, User as UserIcon, RefreshCw, Settings,
-  Search, Download,
+  Search, Download, Loader2,
 } from "lucide-react";
 import {
-  useForms, useFormResponses, useCreateForm, useUpdateForm, useDeleteForm,
+  useForms, useFormResponsesInfinite, useFormStats, useCreateForm, useUpdateForm, useDeleteForm,
   useSyncTypeformHistory, generateWebhookSecret,
   type Form, type FormResponse,
 } from "@/hooks/use-forms";
@@ -128,68 +128,55 @@ function ProviderDot({ provider }: { provider: string }) {
  * FormDetail — analytics + submission feed for one form.
  * ──────────────────────────────────────────────────────────────────── */
 function FormDetail({ form }: { form: Form }) {
-  const { data: responses = [], isLoading } = useFormResponses(form.id);
   const del = useDeleteForm();
   const [setupOpen, setSetupOpen] = useState(false);
 
   // ── Search + filter + sort state ──────────────────────────────────
   const [searchRaw, setSearchRaw] = useState("");
-  const search = useDebounce(searchRaw, 120);
+  const search = useDebounce(searchRaw, 250);
   const [dateFilter, setDateFilter] = useState<"all" | "7d" | "30d" | "90d">("all");
   const [linkFilter, setLinkFilter] = useState<"all" | "linked" | "unlinked">("all");
-  const [sortDir, setSortDir]   = useState<"newest" | "oldest">("newest");
-  const [renderLimit, setRenderLimit] = useState(100);   // virtualisation-lite: only render the first N rows; "Load more" reveals more
+  const [sortDir, setSortDir]       = useState<"newest" | "oldest">("newest");
 
-  const analytics = useMemo(() => computeAnalytics(responses), [responses]);
+  // Server-side paginated + filtered feed. First page is 200 rows; each
+  // scroll fires a fetchNextPage() for 50 more. Search/date/link all
+  // push down to the DB so we never have to load the full table.
+  const feed = useFormResponsesInfinite(form.id, {
+    search: search.trim(),
+    date:   dateFilter,
+    link:   linkFilter,
+    sort:   sortDir,
+  });
+  const responses = useMemo(
+    () => feed.data?.pages.flatMap(p => p.rows) ?? [],
+    [feed.data],
+  );
 
-  // Pre-stringify each response into a single search-corpus to make
-  // the per-keystroke filter loop fast even at 20k+ rows.
-  const corpus = useMemo(() => responses.map(r => {
-    const parts: string[] = [];
-    if (r.respondent_name)  parts.push(r.respondent_name);
-    if (r.respondent_email) parts.push(r.respondent_email);
-    if (r.doctor_id)        parts.push(r.doctor_id);
-    for (const [k, v] of Object.entries(r.answers ?? {})) {
-      parts.push(k, v);
-    }
-    return parts.join(" \n ").toLowerCase();
-  }), [responses]);
+  // KPIs from cheap server-side count queries — total / last 7 days /
+  // Zoho-linked — no longer dependent on the loaded set.
+  const { data: stats } = useFormStats(form.id);
+  const total      = stats?.total      ?? form.response_count ?? 0;
+  const last7Days  = stats?.last7d     ?? 0;
+  const linkedCt   = stats?.linked     ?? 0;
 
-  const filtered = useMemo(() => {
-    const q = search.trim().toLowerCase();
-    const tokens = q ? q.split(/\s+/).filter(Boolean) : [];
-    const cutoffMs =
-      dateFilter === "7d"  ? Date.now() - 7  * 86_400_000 :
-      dateFilter === "30d" ? Date.now() - 30 * 86_400_000 :
-      dateFilter === "90d" ? Date.now() - 90 * 86_400_000 : 0;
-
-    const out: FormResponse[] = [];
-    for (let i = 0; i < responses.length; i++) {
-      const r = responses[i];
-      if (cutoffMs && new Date(r.submitted_at).getTime() < cutoffMs) continue;
-      if (linkFilter === "linked"   && !r.doctor_id) continue;
-      if (linkFilter === "unlinked" &&  r.doctor_id) continue;
-      if (tokens.length > 0) {
-        const hay = corpus[i];
-        let allHit = true;
-        for (const t of tokens) {
-          if (!hay.includes(t)) { allHit = false; break; }
+  // Sentinel for infinite scroll.
+  const sentinelRef = useRef<HTMLDivElement | null>(null);
+  useEffect(() => {
+    const el = sentinelRef.current;
+    if (!el) return;
+    const io = new IntersectionObserver((entries) => {
+      for (const e of entries) {
+        if (e.isIntersecting && feed.hasNextPage && !feed.isFetchingNextPage) {
+          feed.fetchNextPage();
         }
-        if (!allHit) continue;
       }
-      out.push(r);
-    }
-    out.sort((a, b) => {
-      const ta = new Date(a.submitted_at).getTime();
-      const tb = new Date(b.submitted_at).getTime();
-      return sortDir === "newest" ? tb - ta : ta - tb;
-    });
-    return out;
-  }, [responses, corpus, search, dateFilter, linkFilter, sortDir]);
+    }, { rootMargin: "300px" });
+    io.observe(el);
+    return () => io.disconnect();
+  }, [feed.hasNextPage, feed.isFetchingNextPage, feed.fetchNextPage]);
 
-  // Reset the render limit whenever the filter narrows the list so
-  // "Load more" doesn't reveal stale offsets.
-  useEffect(() => { setRenderLimit(100); }, [search, dateFilter, linkFilter, sortDir]);
+  const isLoading = feed.isLoading;
+  const isSearching = !!search.trim();
 
   // ⌘K / Ctrl+K to focus the search bar from anywhere on the page.
   const searchRef = useRef<HTMLInputElement | null>(null);
@@ -215,19 +202,24 @@ function FormDetail({ form }: { form: Form }) {
   };
 
   const handleExportCsv = () => {
-    if (filtered.length === 0) { toast.error("Nothing to export."); return; }
-    // Gather all distinct question keys across the filtered set so
-    // the CSV has a stable column for every question, even ones some
-    // responses didn't answer.
+    // Now that we paginate, "Export" dumps what's currently loaded —
+    // tell the user explicitly so they don't think they got everything
+    // when they've only scrolled through a hundred rows.
+    if (responses.length === 0) { toast.error("Nothing to export."); return; }
+    if (responses.length < total && !confirm(
+      `You've loaded ${responses.length} of ${total.toLocaleString()} submissions. Export only the loaded ones?`
+    )) return;
+
+    // Stable column per question across the exported set.
     const keys = new Set<string>();
-    for (const r of filtered) for (const k of Object.keys(r.answers ?? {})) keys.add(k);
+    for (const r of responses) for (const k of Object.keys(r.answers ?? {})) keys.add(k);
     const headers = ["submitted_at", "respondent_name", "respondent_email", "doctor_id", ...Array.from(keys)];
     const esc = (s: string | null | undefined) => {
       const v = s == null ? "" : String(s);
       return /[",\n]/.test(v) ? `"${v.replace(/"/g, '""')}"` : v;
     };
     const lines = [headers.join(",")];
-    for (const r of filtered) {
+    for (const r of responses) {
       const row = [
         r.submitted_at,
         r.respondent_name ?? "",
@@ -244,7 +236,7 @@ function FormDetail({ form }: { form: Form }) {
     a.download = `${form.name.replace(/[^a-z0-9]+/gi, "_")}-${new Date().toISOString().slice(0, 10)}.csv`;
     document.body.appendChild(a); a.click(); a.remove();
     URL.revokeObjectURL(url);
-    toast.success(`Exported ${filtered.length} responses.`);
+    toast.success(`Exported ${responses.length} responses.`);
   };
 
   return (
@@ -287,12 +279,12 @@ function FormDetail({ form }: { form: Form }) {
         </CardHeader>
       </Card>
 
-      {/* Analytics strip */}
-      <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
-        <Kpi label="Total submissions"     value={analytics.total}      tone="slate" />
-        <Kpi label="This week"              value={analytics.thisWeek}   tone="emerald" />
-        <Kpi label="Last 7 days"            value={analytics.last7Days}  tone="sky"     hint={`vs ${analytics.priorWindow} prior 7d`} />
-        <Kpi label="Auto-linked to Zoho"    value={analytics.linkedCount} tone="indigo" hint={`${Math.round((analytics.linkedCount / Math.max(analytics.total, 1)) * 100)}% matched`} />
+      {/* Analytics strip — server-side counts so it stays accurate as
+          the user scrolls / filters / searches. */}
+      <div className="grid grid-cols-2 sm:grid-cols-3 gap-3">
+        <Kpi label="Total submissions"     value={total}     tone="slate" />
+        <Kpi label="Last 7 days"            value={last7Days} tone="sky" />
+        <Kpi label="Auto-linked to Zoho"    value={linkedCt}  tone="indigo" hint={`${Math.round((linkedCt / Math.max(total, 1)) * 100)}% matched`} />
       </div>
 
       {/* Supercharged search + filters bar */}
@@ -351,7 +343,9 @@ function FormDetail({ form }: { form: Form }) {
               ]}
             />
             <span className="ml-auto text-[11px] text-muted-foreground tabular-nums">
-              {filtered.length === responses.length ? `${responses.length} responses` : `${filtered.length} of ${responses.length}`}
+              {isSearching
+                ? `${responses.length}${feed.hasNextPage ? "+" : ""} matches`
+                : `${responses.length.toLocaleString()} of ${total.toLocaleString()} loaded`}
             </span>
           </div>
         </CardContent>
@@ -363,37 +357,45 @@ function FormDetail({ form }: { form: Form }) {
           {isLoading ? (
             <p className="text-[11px] text-muted-foreground py-2">Loading submissions…</p>
           ) : responses.length === 0 ? (
-            <div className="rounded-md border border-dashed py-8 text-center">
-              <Inbox className="h-5 w-5 mx-auto mb-2 text-muted-foreground/60" />
-              <p className="text-[12px] text-muted-foreground">No submissions yet.</p>
-              <p className="text-[10px] text-muted-foreground/80 mt-1">
-                {form.provider === "typeform"
-                  ? "Once the webhook is active in Typeform, submissions appear here within seconds. Or click 'Sync history' to backfill past responses."
-                  : "Once the webhook URL is wired into Elementor, submissions appear here within seconds."}
-              </p>
-            </div>
-          ) : filtered.length === 0 ? (
-            <div className="rounded-md border border-dashed py-8 text-center">
-              <Search className="h-5 w-5 mx-auto mb-2 text-muted-foreground/60" />
-              <p className="text-[12px] text-muted-foreground">No matches for the current filter.</p>
-              <button onClick={() => { setSearchRaw(""); setDateFilter("all"); setLinkFilter("all"); }} className="text-[11px] text-teal-700 hover:underline mt-1">
-                Clear filters
-              </button>
-            </div>
+            isSearching || dateFilter !== "all" || linkFilter !== "all" ? (
+              <div className="rounded-md border border-dashed py-8 text-center">
+                <Search className="h-5 w-5 mx-auto mb-2 text-muted-foreground/60" />
+                <p className="text-[12px] text-muted-foreground">No matches for the current filter.</p>
+                <button onClick={() => { setSearchRaw(""); setDateFilter("all"); setLinkFilter("all"); }} className="text-[11px] text-teal-700 hover:underline mt-1">
+                  Clear filters
+                </button>
+              </div>
+            ) : (
+              <div className="rounded-md border border-dashed py-8 text-center">
+                <Inbox className="h-5 w-5 mx-auto mb-2 text-muted-foreground/60" />
+                <p className="text-[12px] text-muted-foreground">No submissions yet.</p>
+                <p className="text-[10px] text-muted-foreground/80 mt-1">
+                  {form.provider === "typeform"
+                    ? "Once the webhook is active in Typeform, submissions appear here within seconds. Or click 'Sync history' to backfill past responses."
+                    : "Once the webhook URL is wired into Elementor, submissions appear here within seconds."}
+                </p>
+              </div>
+            )
           ) : (
             <>
-              {filtered.slice(0, renderLimit).map(r => (
+              {responses.map(r => (
                 <ResponseRow key={r.id} response={r} highlight={search.trim().toLowerCase()} />
               ))}
-              {filtered.length > renderLimit && (
-                <button
-                  type="button"
-                  onClick={() => setRenderLimit(n => n + 200)}
-                  className="w-full py-2 text-[11px] text-teal-700 hover:bg-slate-50 rounded-md border border-dashed"
-                >
-                  Show {Math.min(200, filtered.length - renderLimit)} more · {filtered.length - renderLimit} remaining
-                </button>
-              )}
+              {/* Infinite-scroll sentinel — fires fetchNextPage() ~300px
+                  before reaching the bottom so there's no perceptible
+                  pause on fast scrolls. */}
+              {feed.hasNextPage ? (
+                <div ref={sentinelRef} className="w-full py-3 flex items-center justify-center gap-2 text-[11px] text-muted-foreground">
+                  <Loader2 className="h-3 w-3 animate-spin" />
+                  Loading more…
+                </div>
+              ) : responses.length > 0 ? (
+                <div className="w-full py-3 text-center text-[10px] text-muted-foreground/70">
+                  {isSearching
+                    ? `${responses.length} match${responses.length === 1 ? "" : "es"} loaded`
+                    : `All ${responses.length.toLocaleString()} loaded`}
+                </div>
+              ) : null}
             </>
           )}
         </CardContent>
@@ -620,9 +622,37 @@ function Kpi({ label, value, tone, hint }: { label: string; value: number; tone:
   );
 }
 
+/** Best-effort display name. Falls back through respondent_name →
+ *  first_name + last_name (or any of the common variants) in answers →
+ *  email → "Anonymous submission". Lots of forms don't have a single
+ *  "name" field; they ask First / Last separately, so we stitch them
+ *  back together here. */
+function displayNameFor(r: FormResponse): { label: string; kind: "name" | "email" | "anon" } {
+  if (r.respondent_name && r.respondent_name.trim()) return { label: r.respondent_name.trim(), kind: "name" };
+  const a = r.answers ?? {};
+  // Match keys case-insensitively, ignoring punctuation. So "First Name",
+  // "first_name", "First-name", etc all map to the same bucket.
+  const norm = (s: string) => s.toLowerCase().replace(/[^a-z]/g, "");
+  let first = "";
+  let last  = "";
+  let full  = "";
+  for (const [k, v] of Object.entries(a)) {
+    if (!v) continue;
+    const n = norm(k);
+    if (!first && (n === "firstname"  || n === "fname" || n === "givenname"))            first = String(v).trim();
+    else if (!last && (n === "lastname" || n === "lname" || n === "surname" || n === "familyname")) last = String(v).trim();
+    else if (!full && (n === "name" || n === "fullname"))                                  full = String(v).trim();
+  }
+  const stitched = [first, last].filter(Boolean).join(" ").trim() || full;
+  if (stitched) return { label: stitched, kind: "name" };
+  if (r.respondent_email) return { label: r.respondent_email, kind: "email" };
+  return { label: "Anonymous submission", kind: "anon" };
+}
+
 function ResponseRow({ response, highlight = "" }: { response: FormResponse; highlight?: string }) {
   const [open, setOpen] = useState(false);
   const entries = Object.entries(response.answers ?? {});
+  const display = useMemo(() => displayNameFor(response), [response]);
   // Auto-expand when the search term hits something INSIDE this
   // response's answers (rather than just the header) — saves the user
   // clicking each row to verify what matched.
@@ -630,10 +660,10 @@ function ResponseRow({ response, highlight = "" }: { response: FormResponse; hig
     if (!highlight) return false;
     const tokens = highlight.split(/\s+/).filter(Boolean);
     if (tokens.length === 0) return false;
-    const headerHay = `${response.respondent_name ?? ""} ${response.respondent_email ?? ""}`.toLowerCase();
+    const headerHay = `${display.label} ${response.respondent_email ?? ""}`.toLowerCase();
     // Any token NOT in the header => must have matched in the body.
     return tokens.some(t => !headerHay.includes(t));
-  }, [highlight, response.respondent_name, response.respondent_email]);
+  }, [highlight, display.label, response.respondent_email]);
   const effectivelyOpen = open || matchesInBody;
   const summary = entries.slice(0, 2).map(([k, v]) => `${k}: ${v}`).join(" · ");
   return (
@@ -646,8 +676,9 @@ function ResponseRow({ response, highlight = "" }: { response: FormResponse; hig
         <ChevronRight className={`h-3.5 w-3.5 text-slate-400 shrink-0 transition-transform ${effectivelyOpen ? "rotate-90" : ""}`} />
         <div className="flex-1 min-w-0">
           <div className="text-[12px] font-medium text-slate-800 truncate flex items-center gap-1">
-            {response.respondent_name ? <UserIcon className="h-3 w-3 text-slate-400 shrink-0" /> : response.respondent_email ? <Mail className="h-3 w-3 text-slate-400 shrink-0" /> : null}
-            <Hl text={response.respondent_name ?? response.respondent_email ?? "Anonymous submission"} q={highlight} />
+            {display.kind === "name"  && <UserIcon className="h-3 w-3 text-slate-400 shrink-0" />}
+            {display.kind === "email" && <Mail     className="h-3 w-3 text-slate-400 shrink-0" />}
+            <Hl text={display.label} q={highlight} />
           </div>
           <div className="text-[10px] text-muted-foreground truncate">
             <Hl text={summary || "—"} q={highlight} />
@@ -861,65 +892,6 @@ function DoneInstructions({ form }: { form: Form }) {
 /* ────────────────────────────────────────────────────────────────────
  * Lightweight analytics
  * ──────────────────────────────────────────────────────────────────── */
-interface Analytics {
-  total:        number;
-  thisWeek:     number;
-  last7Days:    number;
-  priorWindow:  number;
-  linkedCount:  number;
-  questions:    Array<{
-    question:     string;
-    answeredCount: number;
-    distinct:     number;
-    topAnswers:   Array<{ value: string; count: number }>;
-  }>;
-}
-
-function computeAnalytics(responses: FormResponse[]): Analytics {
-  const now = Date.now();
-  const startOfWeek = (d => { const date = new Date(d); const day = (date.getDay() + 6) % 7; date.setDate(date.getDate() - day); date.setHours(0,0,0,0); return date; })(new Date());
-  const cutoff7   = now - 7  * 86_400_000;
-  const cutoff14  = now - 14 * 86_400_000;
-
-  let thisWeek = 0;
-  let last7    = 0;
-  let prior7   = 0;
-  let linked   = 0;
-  const questionCounts = new Map<string, Map<string, number>>();
-
-  for (const r of responses) {
-    const t = new Date(r.submitted_at).getTime();
-    if (t >= startOfWeek.getTime()) thisWeek++;
-    if (t >= cutoff7)               last7++;
-    else if (t >= cutoff14)         prior7++;
-    if (r.doctor_id)                linked++;
-    for (const [k, v] of Object.entries(r.answers ?? {})) {
-      let m = questionCounts.get(k);
-      if (!m) { m = new Map(); questionCounts.set(k, m); }
-      m.set(v, (m.get(v) ?? 0) + 1);
-    }
-  }
-
-  const questions = Array.from(questionCounts.entries())
-    .map(([question, valueMap]) => {
-      const totalAnswers = Array.from(valueMap.values()).reduce((a, b) => a + b, 0);
-      const top = Array.from(valueMap.entries())
-        .sort((a, b) => b[1] - a[1])
-        .map(([value, count]) => ({ value, count }));
-      return { question, answeredCount: totalAnswers, distinct: valueMap.size, topAnswers: top };
-    })
-    .sort((a, b) => b.answeredCount - a.answeredCount);
-
-  return {
-    total:        responses.length,
-    thisWeek,
-    last7Days:    last7,
-    priorWindow:  prior7,
-    linkedCount:  linked,
-    questions,
-  };
-}
-
 function relativeTime(iso: string | null | undefined): string {
   if (!iso) return "—";
   const d = new Date(iso);
