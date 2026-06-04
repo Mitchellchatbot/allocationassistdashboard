@@ -93,6 +93,9 @@ Deno.serve(async (req: Request) => {
       "reminder_25_working",
       "reminder_day_before",
       "reminder_weekly",
+      "awaiting_response",   // profile_sent — chase nudge after 7d silence
+      "awaiting_signature",  // contract_signing — fire reminder after 5d
+      "interview_complete",  // interview — chase hospital after 3d
     ]);
 
   if (error) {
@@ -234,6 +237,58 @@ Deno.serve(async (req: Request) => {
           }
           const sent = await invokeSendFlow(r.id);
           actions.push(rec(r, sent.ok ? "sent" : "error", sent.ok ? "day-before reminder dispatched" : `send-flow-email failed: ${sent.detail}`));
+          break;
+        }
+
+        case "awaiting_response": {
+          // profile_sent: hospital hasn't replied 7d after the team sent
+          // the profile. Don't spam-email the hospital — they'd
+          // typically reply by phone. Instead write a team-facing
+          // notification so it surfaces in the bell + PendingActions.
+          if (ageDays < 7) {
+            actions.push(rec(r, "skipped", `${ageDays.toFixed(1)}d since profile sent (need 7)`));
+            break;
+          }
+          // Dedupe: only fire once per run. The 'last_event_at' check
+          // below keeps us idempotent — once the notification is
+          // logged we touch last_event_at so this branch won't re-fire.
+          await supabase.from("notifications").insert({
+            kind:              "hospital_reply_overdue",
+            title:             `${r.hospital ?? "Hospital"} hasn't replied to ${r.doctor_name}'s profile`,
+            body:              `7+ days since send. Chase the recruiter or mark the run completed if you've heard back another way.`,
+            link_path:         `/automations?flow=profile_sent&run=${r.id}`,
+            related_run_id:    r.id,
+            related_doctor_id: r.doctor_id,
+            for_user:          (r.metadata as Record<string, unknown> | null)?.assigned_to as string | null ?? null,
+          }).catch(() => {/* harmless if dedupe constraint hits */});
+          await supabase.from("automation_flow_runs")
+            .update({ last_event_at: now.toISOString() })
+            .eq("id", r.id);
+          await supabase.from("automation_flow_events").insert({
+            run_id: r.id, stage_key: "awaiting_response", event_type: "note",
+            message: `Scheduler nudge: hospital hasn't replied in ${ageDays.toFixed(0)}d.`,
+          });
+          actions.push(rec(r, "sent", "hospital-reply-overdue notification logged"));
+          break;
+        }
+
+        case "awaiting_signature": {
+          // contract_signing: 5d at this stage with no team-confirmed
+          // signature → advance to reminder_signature + fire the nudge
+          // email to the doctor (template: contract_checkin_reminder).
+          if (ageDays < 5) {
+            actions.push(rec(r, "skipped", `${ageDays.toFixed(1)}d awaiting signature (need 5)`));
+            break;
+          }
+          await supabase.from("automation_flow_runs")
+            .update({ current_stage: "reminder_signature", last_event_at: now.toISOString() })
+            .eq("id", r.id);
+          await supabase.from("automation_flow_events").insert({
+            run_id: r.id, stage_key: "reminder_signature", event_type: "entered",
+            message: "Scheduler advanced after 5d at awaiting_signature (no team-confirmed signature).",
+          });
+          const sent = await invokeSendFlow(r.id);
+          actions.push(rec(r, sent.ok ? "sent" : "error", sent.ok ? "contract reminder dispatched" : `send-flow-email failed: ${sent.detail}`));
           break;
         }
 
