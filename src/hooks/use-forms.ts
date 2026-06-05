@@ -546,6 +546,37 @@ export function generateWebhookSecret(): string {
   return Array.from(buf).map(b => b.toString(16).padStart(2, "0")).join("");
 }
 
+/** Call the jotform-historical-sync edge function. Requires
+ *  forms.api_token (JotForm API key) + forms.provider_form_id
+ *  (the JotForm form id) to be set on the row. Returns
+ *  { fetched, inserted, skipped, wp_created, wp_updated, total_reported }. */
+export function useSyncJotformHistory() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: async (formId: string) => {
+      const { data, error } = await supabase.functions.invoke("jotform-historical-sync", {
+        body: { form_id: formId },
+      });
+      if (error) throw error;
+      const resp = data as {
+        ok: boolean; error?: string;
+        fetched: number; inserted: number; skipped: number;
+        wp_created: number; wp_updated: number;
+        total_reported: number; durationMs: number;
+      };
+      if (!resp.ok) throw new Error(resp.error ?? "Sync failed");
+      return resp;
+    },
+    onSuccess: (_, formId) => {
+      qc.invalidateQueries({ queryKey: RESP_KEY(formId) });
+      qc.invalidateQueries({ queryKey: ["form-responses-infinite", formId] });
+      qc.invalidateQueries({ queryKey: ["form-stats", formId] });
+      qc.invalidateQueries({ queryKey: FORMS_KEY });
+      qc.invalidateQueries({ queryKey: ["wp-candidates"] });
+    },
+  });
+}
+
 /** Call the typeform-historical-sync edge function for a Typeform.
  *  Requires forms.api_token to be set on the row. Returns
  *  { fetched, inserted, skipped }. */

@@ -38,7 +38,7 @@ import {
   useForms, useFormResponsesInfinite, useFormStats, useCreateForm, useUpdateForm, useDeleteForm,
   useUpdateFormResponseOutreach, useBackfillFormCsv, useLinkFormResponseToDoctor,
   type OutreachStatus,
-  useSyncTypeformHistory, generateWebhookSecret,
+  useSyncTypeformHistory, useSyncJotformHistory, generateWebhookSecret,
   type Form, type FormResponse,
 } from "@/hooks/use-forms";
 import { toast } from "sonner";
@@ -297,6 +297,7 @@ function FormDetail({ form }: { form: Form }) {
                 <Download className="h-3.5 w-3.5 mr-1" /> Export
               </Button>
               {form.provider === "typeform" && <TypeformSyncButton form={form} />}
+              {form.provider === "jotform"  && <JotformSyncButton  form={form} />}
               <Button size="sm" variant="outline" onClick={() => setSetupOpen(true)} title="View webhook URL + setup instructions">
                 <Settings className="h-3.5 w-3.5 mr-1" /> Setup
               </Button>
@@ -727,6 +728,109 @@ function TypeformSyncButton({ form }: { form: Form }) {
           <DialogFooter>
             <Button variant="outline" onClick={() => setOpen(false)}>Cancel</Button>
             <Button onClick={handleSaveToken} disabled={!token.trim()}>Save & sync</Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+    </>
+  );
+}
+
+/** "Sync history" button for JotForm. Requires both a JotForm API key
+ *  (Settings → API) and the JotForm form id (URL slug). First click
+ *  opens a small dialog to capture both; subsequent clicks fire the
+ *  sync directly. Each sync re-runs the same WP-upsert + Zoho-link
+ *  pipeline that the live webhook uses. */
+function JotformSyncButton({ form }: { form: Form }) {
+  const sync   = useSyncJotformHistory();
+  const update = useUpdateForm();
+  const [open,  setOpen]  = useState(false);
+  const [token, setToken] = useState("");
+  const [jfId,  setJfId]  = useState(form.provider_form_id ?? "");
+
+  const ready = !!form.api_token && !!form.provider_form_id;
+
+  const handleStart = () => {
+    if (!ready) { setOpen(true); return; }
+    runSync();
+  };
+
+  const runSync = async () => {
+    try {
+      const r = await sync.mutateAsync(form.id);
+      const totalNote = r.total_reported > 0 ? ` · JotForm reports ${r.total_reported.toLocaleString()} total` : "";
+      const wpNote    = (r.wp_created + r.wp_updated) > 0
+        ? ` · WP: ${r.wp_created} created, ${r.wp_updated} updated`
+        : "";
+      toast.success(
+        `Synced — fetched ${r.fetched}, ${r.inserted} stored${totalNote}${wpNote}.`,
+        { duration: 9000 },
+      );
+    } catch (e) {
+      toast.error(e instanceof Error ? e.message : "Sync failed");
+    }
+  };
+
+  const handleSaveAndSync = async () => {
+    if (!token.trim() || !jfId.trim()) return;
+    try {
+      await update.mutateAsync({
+        id: form.id,
+        patch: { api_token: token.trim(), provider_form_id: jfId.trim() },
+      });
+      setOpen(false);
+      setToken("");
+      await runSync();
+    } catch (e) {
+      toast.error(e instanceof Error ? e.message : "Couldn't save credentials");
+    }
+  };
+
+  return (
+    <>
+      <Button size="sm" variant="outline" onClick={handleStart} disabled={sync.isPending}>
+        {sync.isPending ? <RefreshCw className="h-3.5 w-3.5 mr-1 animate-spin" /> : <History className="h-3.5 w-3.5 mr-1" />}
+        {sync.isPending ? "Syncing…" : "Sync history"}
+      </Button>
+
+      <Dialog open={open} onOpenChange={v => !v && setOpen(false)}>
+        <DialogContent className="sm:max-w-[480px]">
+          <DialogHeader>
+            <DialogTitle className="flex items-center gap-2 text-[14px]">
+              <History className="h-4 w-4 text-teal-600" />
+              JotForm credentials
+            </DialogTitle>
+            <p className="text-[11px] text-muted-foreground">
+              To pull every past submission, we call JotForm's API. Need two things, both one-time:
+            </p>
+          </DialogHeader>
+          <div className="space-y-3 py-1">
+            <div className="space-y-1">
+              <label className="text-[11px] font-medium text-muted-foreground">JotForm form id</label>
+              <Input
+                value={jfId}
+                onChange={e => setJfId(e.target.value)}
+                placeholder="e.g. 240851234567890"
+              />
+              <p className="text-[10px] text-muted-foreground/80">
+                The number in your form URL: <code className="bg-slate-100 px-1 rounded">jotform.com/form/<strong>240851234567890</strong></code>.
+              </p>
+            </div>
+            <div className="space-y-1">
+              <label className="text-[11px] font-medium text-muted-foreground">API key</label>
+              <Input
+                value={token}
+                onChange={e => setToken(e.target.value)}
+                placeholder="Your JotForm API key"
+                type="password"
+              />
+              <p className="text-[10px] text-muted-foreground/80">
+                Generate at <a href="https://www.jotform.com/myaccount/api" target="_blank" rel="noreferrer" className="text-teal-700 hover:underline">jotform.com/myaccount/api</a> → New API Key → READ scope is enough. Stored encrypted in our DB.
+              </p>
+            </div>
+          </div>
+          <DialogFooter>
+            <Button variant="outline" onClick={() => setOpen(false)}>Cancel</Button>
+            <Button onClick={handleSaveAndSync} disabled={!token.trim() || !jfId.trim()}>Save & sync</Button>
           </DialogFooter>
         </DialogContent>
       </Dialog>
