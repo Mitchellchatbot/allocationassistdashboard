@@ -94,45 +94,58 @@ Deno.serve(async (req: Request) => {
   const profile = mapToProfile(flat);
   const responseId = String(parsed.submissionID ?? parsed.submission_id ?? crypto.randomUUID());
 
-  if (!profile.email) {
-    return json({ ok: false, error: "Submission has no email — can't match to a WP candidate. Skipped." }, 422);
-  }
+  // Previously: bail with 422 if no email. That tossed the submission
+  // entirely — the team never saw it land. Now: keep going. We can't
+  // upsert a WP candidate without an email (the WP candidate's primary
+  // identifier IS the email) but we CAN store the form_response and
+  // ping Slack so the team knows something arrived. The notification
+  // body flags the missing email so they know to chase the doctor.
+  const hasEmail = !!profile.email;
 
   // ── 4. Lookup existing WP candidate by email ──────────────────────
-  const { data: existing } = await supabase
+  const { data: existing } = hasEmail ? await supabase
     .from("wordpress_candidates")
     .select("id, doctor_id")
     .ilike("email", profile.email)
     .order("wp_modified", { ascending: false, nullsFirst: false })
     .limit(1)
-    .maybeSingle();
+    .maybeSingle() : { data: null };
 
   // ── 5. Upsert to WordPress via the existing edge function ─────────
   // Wraps WP REST + mirror sync + auto-Zoho-link in one call. We pass
   // the existing WP id when there's an email match so it's an UPDATE.
   // New rows land as `status=draft` so HI reviews before they go live.
-  const upsertBody = {
-    id:     existing?.id,
-    status: existing ? undefined : "draft",
-    title:  profile.full_name || "JotForm intake",
-    acf:    profile.acf,
-  };
-  const upsertRes = await fetch(`${supabaseUrl}/functions/v1/wordpress-candidate-upsert`, {
-    method:  "POST",
-    headers: { "Authorization": `Bearer ${serviceKey}`, "Content-Type": "application/json" },
-    body:    JSON.stringify(upsertBody),
-  });
-  const upsertJson = await upsertRes.json().catch(() => null) as { ok: boolean; id?: number; error?: string } | null;
-  if (!upsertRes.ok || !upsertJson?.ok) {
-    console.error("[jotform-webhook] WP upsert failed:", upsertJson);
-    // We still record the form_response so the team sees the submission
-    // landed; flagging the error in outreach_notes for visibility.
+  // Skipped entirely when the submission has no email — WP candidates
+  // are keyed on email, no email means no upsert target.
+  let upsertJson: { ok: boolean; id?: number; error?: string } | null = null;
+  if (hasEmail) {
+    const upsertBody = {
+      id:     existing?.id,
+      status: existing ? undefined : "draft",
+      title:  profile.full_name || "JotForm intake",
+      acf:    profile.acf,
+    };
+    const upsertRes = await fetch(`${supabaseUrl}/functions/v1/wordpress-candidate-upsert`, {
+      method:  "POST",
+      headers: { "Authorization": `Bearer ${serviceKey}`, "Content-Type": "application/json" },
+      body:    JSON.stringify(upsertBody),
+    });
+    upsertJson = await upsertRes.json().catch(() => null) as { ok: boolean; id?: number; error?: string } | null;
+    if (!upsertRes.ok || !upsertJson?.ok) {
+      console.error("[jotform-webhook] WP upsert failed:", upsertJson);
+      // We still record the form_response so the team sees the submission
+      // landed; flagging the error in outreach_notes for visibility.
+    }
+  } else {
+    console.log("[jotform-webhook] no email on submission — skipping WP upsert, recording response only");
   }
 
   // ── 6. Auto-link doctor_id from the Zoho cache (email match) ──────
   let doctorId: string | null = null;
-  const { data: lookupData } = await supabase.rpc("lookup_doctor_id_by_email", { p_email: profile.email });
-  if (typeof lookupData === "string") doctorId = lookupData;
+  if (hasEmail) {
+    const { data: lookupData } = await supabase.rpc("lookup_doctor_id_by_email", { p_email: profile.email });
+    if (typeof lookupData === "string") doctorId = lookupData;
+  }
 
   // ── 7. Insert form_response so /forms shows the submission ────────
   await supabase.from("form_responses").upsert({
@@ -145,26 +158,33 @@ Deno.serve(async (req: Request) => {
     respondent_email:      profile.email      || null,
     doctor_id:             doctorId,
     outreach_status:       "new",
-    outreach_notes:        upsertJson?.ok
-      ? `Auto-created WP candidate #${upsertJson.id}${existing ? " (updated existing)" : " (new draft)"}.`
-      : `WP upsert failed: ${upsertJson?.error ?? "unknown"}`,
+    outreach_notes:
+      !hasEmail
+        ? "No email on submission — recorded but couldn't create/link a WP candidate."
+        : upsertJson?.ok
+          ? `Auto-created WP candidate #${upsertJson.id}${existing ? " (updated existing)" : " (new draft)"}.`
+          : `WP upsert failed: ${upsertJson?.error ?? "unknown"}`,
   }, { onConflict: "form_id,provider_response_id", ignoreDuplicates: false });
 
   console.log("[jotform-webhook] processed submission", responseId, "email:", profile.email, "wp_id:", upsertJson?.id, "doctor_id:", doctorId);
 
   // ── 8. Slack-deliverable nudge so the team reviews the profile ─────
-  // Deep-link strategy: prefer the WP candidate's Doctors → Profiles
-  // tab (the team's review surface). Falls back to /forms when WP
-  // upsert failed so the team still has somewhere to go.
-  const reviewLink = upsertJson?.ok
+  // Deep-link strategy: WP profile if one exists, otherwise the Forms
+  // page filtered to this submission so the team can act either way.
+  const reviewLink = (hasEmail && upsertJson?.ok)
     ? `/doctors?tab=profiles&q=${encodeURIComponent(profile.email)}`
     : `/forms`;
   const summary = [profile.full_name, profile.acf?.specialty, profile.acf?.country_of_training]
-    .filter(Boolean).join(" · ") || profile.email;
+    .filter(Boolean).join(" · ") || profile.email || "no contact details extracted";
+  const status =
+    !hasEmail            ? "No email captured"
+    : existing           ? "Updated existing WP profile"
+    : upsertJson?.ok     ? "Draft WP profile created"
+                         : "WP upsert failed";
   await notify({
     kind:    "new_form_submission",
     title:   `New form submission${profile.full_name ? ` · ${profile.full_name}` : ""}`,
-    body:    `${summary}. ${existing ? "Updated existing WP profile" : (upsertJson?.ok ? "Draft WP profile created" : "WP upsert failed")} — review and decide whether to publish.`,
+    body:    `${summary}. ${status} — review and decide whether to publish.`,
     link_path:         reviewLink,
     related_doctor_id: doctorId,
   }).catch(e => console.error("[jotform-webhook] notify failed:", e));

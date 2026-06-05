@@ -160,9 +160,11 @@ function FormDetail({ form }: { form: Form }) {
   const isPaidFormInit = (form.lead_value_cents ?? 0) > 0;
   const isJotform      = form.provider === "jotform";
   const showOutreachChips = !isJotform;
-  const [outreachFilter, setOutreachFilter] = useState<"all" | "mine" | "uncontacted-zoho" | "unqualified" | OutreachStatus>(
-    (isPaidFormInit || isJotform) ? "all" : "uncontacted-zoho",
-  );
+  // Every form now defaults to "all" — previously Typeform/Consultation
+  // defaulted to 'uncontacted-zoho' (the narrowest actionable bucket),
+  // but that hid 99% of submissions on first load and people kept
+  // thinking the page was broken. Show everything, let the team narrow.
+  const [outreachFilter, setOutreachFilter] = useState<"all" | "mine" | "uncontacted-zoho" | "unqualified" | OutreachStatus>("all");
   // WP-presence filter — JotForm only. Client-side because the data
   // lives in a separate table. Pre-fetched email + phone sets +
   // Set.has lookups keep this O(1) per row.
@@ -413,6 +415,25 @@ function FormDetail({ form }: { form: Form }) {
               </button>
             )}
           </div>
+          {/* Active filter banner — counts every chip set away from the
+              default ("all") plus the search box. Hidden when nothing's
+              active so the page stays calm; loud when something is so
+              users don't sit on an empty result for ages thinking the
+              data's gone. Click 'Clear' to reset everything. */}
+          <ActiveFilterBanner
+            count={
+              (search.trim()           ? 1 : 0) +
+              (dateFilter    !== "all" ? 1 : 0) +
+              (outreachFilter !== "all" ? 1 : 0) +
+              (wpFilter      !== "all" ? 1 : 0)
+            }
+            onClear={() => {
+              setSearchRaw("");
+              setDateFilter("all");
+              setOutreachFilter("all");
+              setWpFilter("all");
+            }}
+          />
           <div className="flex items-center gap-2 flex-wrap text-[11px]">
             {/* Date chips */}
             <FilterChipGroup
@@ -561,6 +582,28 @@ function FormDetail({ form }: { form: Form }) {
       </Card>
 
       <SetupDialog form={form} open={setupOpen} onClose={() => setSetupOpen(false)} />
+    </div>
+  );
+}
+
+/** Loud-but-thin amber bar that surfaces when any filter is away from
+ *  its default. Sits between the search box and the chip row so it's
+ *  impossible to miss when "no results" is actually a filter issue
+ *  rather than empty data. Hidden when nothing's active. */
+function ActiveFilterBanner({ count, onClear }: { count: number; onClear: () => void }) {
+  if (count === 0) return null;
+  return (
+    <div className="flex items-center justify-between gap-2 px-3 py-1.5 rounded-md border border-amber-200 bg-amber-50 text-[11px] text-amber-900">
+      <div className="flex items-center gap-1.5">
+        <span className="inline-flex h-4 w-4 items-center justify-center rounded-full bg-amber-200/70 text-[9px] font-semibold text-amber-900">{count}</span>
+        <span>filter{count === 1 ? "" : "s"} active — narrowing the results. Showing only what matches.</span>
+      </div>
+      <button
+        onClick={onClear}
+        className="text-[11px] font-medium text-amber-900 underline hover:text-amber-700"
+      >
+        Clear all
+      </button>
     </div>
   );
 }

@@ -14,10 +14,11 @@ const sb = createClient(
 );
 
 Deno.serve(async () => {
-  const [{ data: forms }, { data: responses }, { data: notifs }] = await Promise.all([
+  const [{ data: forms }, { data: responses }, { data: notifs }, { data: amani }] = await Promise.all([
     sb.from("forms").select("id, name, provider, provider_form_id, webhook_secret, active, response_count").order("created_at", { ascending: false }),
-    sb.from("form_responses").select("id, form_id, respondent_email, respondent_name, submitted_at, created_at").order("created_at", { ascending: false, nullsFirst: false }).limit(8),
+    sb.from("form_responses").select("id, form_id, respondent_email, respondent_name, submitted_at, created_at, search_text, outreach_status").order("created_at", { ascending: false, nullsFirst: false }).limit(8),
     sb.from("notifications").select("id, kind, severity, title, slack_delivered_at, slack_skip_reason, created_at").order("created_at", { ascending: false }).limit(10),
+    sb.from("form_responses").select("id, form_id, respondent_email, respondent_name, submitted_at, created_at, outreach_status").ilike("respondent_email", "%dr_amani.almalti%"),
   ]);
   return new Response(JSON.stringify({
     SLACK_WEBHOOK_URL_set: !!Deno.env.get("SLACK_WEBHOOK_URL"),
@@ -28,5 +29,6 @@ Deno.serve(async () => {
     })),
     recent_responses: responses ?? [],
     recent_notifications: notifs ?? [],
+    amani_rows: amani ?? [],
   }, null, 2), { headers: { "Content-Type": "application/json" } });
 });
