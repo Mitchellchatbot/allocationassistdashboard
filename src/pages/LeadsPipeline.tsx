@@ -3,7 +3,7 @@ import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { useFilteredData } from "@/hooks/use-filtered-data";
-import { useDoctorPhotoMap } from "@/hooks/use-wp-candidates";
+import { useDoctorPhotoMap, useJotformPhotoMap } from "@/hooks/use-wp-candidates";
 import { useZohoLeads, useDebounce, type LeadsFilters } from "@/hooks/use-zoho-leads";
 import { useZohoData } from "@/hooks/use-zoho-data";
 import { ArrowRight, AlertTriangle, CheckCircle, Clock, Search, Loader2, Check, X, ChevronDown, Phone, Calendar, Filter, GitBranch, ClipboardList } from "lucide-react";
@@ -209,7 +209,11 @@ interface LeadsPipelineProps { embedded?: boolean }
 const LeadsPipeline = ({ embedded }: LeadsPipelineProps = {}) => {
   const { workflow } = useFilteredData();
   const { data: zoho } = useZohoData();
-  const { data: photoMap } = useDoctorPhotoMap();
+  const { data: photoMap }   = useDoctorPhotoMap();
+  // Second photo source: JotForm submissions where a doctor uploaded a
+  // 'professional picture'. Falls back behind the WP map below so the
+  // canonical avatar wins when both exist.
+  const { data: jfPhotoMap } = useJotformPhotoMap();
   // Read deep-link params (e.g. /leads-pipeline?stage=Not%20Contacted) so other
   // pages can link straight to a filtered view of the leads list.
   const [searchParams, setSearchParams] = useSearchParams();
@@ -548,8 +552,14 @@ const LeadsPipeline = ({ embedded }: LeadsPipelineProps = {}) => {
                       // Pull the avatar from the WP candidate mirror if the
                       // doctor has been linked there. Try `lead:` then `dob:`
                       // — most pipeline rows come from the Zoho Leads module.
+                      // Fall back to a JotForm 'professional picture' answer
+                      // if no WP photo exists yet — same doctor_id keys.
                       const photo = doc.zohoId
-                        ? (photoMap?.get(`lead:${doc.zohoId}`) ?? photoMap?.get(`dob:${doc.zohoId}`) ?? null)
+                        ? (photoMap?.get(`lead:${doc.zohoId}`)
+                          ?? photoMap?.get(`dob:${doc.zohoId}`)
+                          ?? jfPhotoMap?.get(`lead:${doc.zohoId}`)
+                          ?? jfPhotoMap?.get(`dob:${doc.zohoId}`)
+                          ?? null)
                         : null;
                       return (
                         <Fragment key={doc.zohoId ?? doc.id}>

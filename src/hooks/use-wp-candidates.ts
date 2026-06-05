@@ -303,6 +303,70 @@ export function useWpContactSet() {
   return q;
 }
 
+/** Map of doctor_id → JotForm picture proxy URL for every form_response
+ *  that (a) is linked to a doctor and (b) has a 'picture' widget answer
+ *  in its raw_payload. Used as a fallback source on the Doctors page so
+ *  a doctor who submitted a picture via JotForm but isn't in WordPress
+ *  yet still gets a face on their pipeline row.
+ *
+ *  The proxy URL is constructed against the `jotform-file-proxy` edge
+ *  function — same convention as the Forms page. */
+export function useJotformPhotoMap() {
+  const qc = useQueryClient();
+  const q = useQuery<Map<string, string>>({
+    queryKey: ["jotform-doctor-photos"],
+    queryFn: async () => {
+      const out = new Map<string, string>();
+      const projectUrl = (import.meta.env.VITE_SUPABASE_URL as string)?.replace(/\/$/, "") ?? "";
+      const PAGE = 1000;
+      for (let from = 0; from < 50_000; from += PAGE) {
+        const { data, error } = await supabase
+          .from("form_responses")
+          .select("doctor_id, form_id, raw_payload")
+          .not("doctor_id", "is", null)
+          .range(from, from + PAGE - 1);
+        if (error) throw error;
+        const batch = (data ?? []) as Array<{
+          doctor_id:   string;
+          form_id:     string;
+          raw_payload: Record<string, unknown>;
+        }>;
+        for (const r of batch) {
+          if (out.has(r.doctor_id)) continue;
+          const ans = (r.raw_payload?.answers as Record<string, unknown> | undefined);
+          if (!ans || typeof ans !== "object") continue;
+          let url: string | null = null;
+          for (const v of Object.values(ans)) {
+            if (!v || typeof v !== "object") continue;
+            const obj = v as { text?: string; answer?: unknown };
+            const text = String(obj.text ?? "").toLowerCase();
+            const looksLikePic = text.includes("picture") || text.includes("photo") || text.includes("image");
+            const answerStr = typeof obj.answer === "string" ? obj.answer : JSON.stringify(obj.answer ?? "");
+            if (!answerStr.includes("widget_metadata") && !looksLikePic) continue;
+            try {
+              const parsed = typeof obj.answer === "string" ? JSON.parse(obj.answer) : obj.answer;
+              const items  = (parsed as { widget_metadata?: { value?: Array<{ url?: string }> } })?.widget_metadata?.value;
+              const path   = items?.find(it => typeof it?.url === "string")?.url;
+              if (path) {
+                url = `${projectUrl}/functions/v1/jotform-file-proxy?form_id=${encodeURIComponent(r.form_id)}&path=${encodeURIComponent(path)}`;
+                break;
+              }
+            } catch { /* try next answer */ }
+          }
+          if (url) out.set(r.doctor_id, url);
+        }
+        if (batch.length < PAGE) break;
+      }
+      return out;
+    },
+    staleTime: 5 * 60_000,
+  });
+  useTableSubscription("form_responses", useCallback(() => {
+    qc.invalidateQueries({ queryKey: ["jotform-doctor-photos"] });
+  }, [qc]));
+  return q;
+}
+
 /** Look up a WP candidate by email OR phone. Used by the Forms page to
  *  decide whether to surface a "Create WP profile" button — a row with
  *  no email but a matching phone shouldn't get the create prompt.
