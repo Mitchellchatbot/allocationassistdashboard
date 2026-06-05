@@ -563,7 +563,7 @@ function CandidateDetailDialogInner({ candidate, open, onClose }: { candidate: W
                   )}
                   <ContactLineEditable
                     icon={<Phone className="h-3.5 w-3.5" />}
-                    value={candidate.phone}
+                    value={formatPhone(candidate.phone)}
                     placeholder="Add phone…"
                     onSave={v => saveAcf({ phone_number: v ?? "" })}
                   />
@@ -586,11 +586,25 @@ function CandidateDetailDialogInner({ candidate, open, onClose }: { candidate: W
                     </Button>
                   </a>
                 )}
-                <a href={candidate.wp_link} target="_blank" rel="noreferrer" className="block">
-                  <Button variant="outline" className="w-full justify-center h-10 rounded-full border-teal-200 text-teal-700 hover:bg-teal-50">
-                    <ExternalLink className="h-4 w-4 mr-2" /> View on WordPress
-                  </Button>
-                </a>
+                {/* Status-aware label: only call it 'View on WordPress'
+                    (i.e. the public allocationassist.com page) when the
+                    candidate is actually published. Drafts + private
+                    posts get 'Open in WP admin' because that's where
+                    they're editable; the public URL would just 404. */}
+                {(() => {
+                  const published = candidate.status === "publish";
+                  const href = published
+                    ? candidate.wp_link
+                    : `https://www.allocationassist.com/wp-admin/post.php?action=edit&post=${candidate.id}`;
+                  const label = published ? "View on allocationassist.com" : "Open in WP admin (draft)";
+                  return (
+                    <a href={href} target="_blank" rel="noreferrer" className="block">
+                      <Button variant="outline" className="w-full justify-center h-10 rounded-full border-teal-200 text-teal-700 hover:bg-teal-50">
+                        <ExternalLink className="h-4 w-4 mr-2" /> {label}
+                      </Button>
+                    </a>
+                  );
+                })()}
                 {candidate.email && (
                   <a href={`mailto:${candidate.email}`} className="block">
                     <Button className="w-full justify-center h-10 rounded-full bg-slate-900 hover:bg-slate-800">
@@ -1347,4 +1361,24 @@ function DeleteCandidateButton({ candidate, onDone }: { candidate: WpCandidate; 
       {del.isPending ? "Deleting…" : "Delete profile"}
     </Button>
   );
+}
+
+/** Reformat a phone string at render time. Some legacy mirror rows
+ *  were populated before the webhook flattener handled the bare
+ *  {area, phone} object — they ended up stored as the raw JSON
+ *  string. Detect that shape and turn it into "+area phone" so the
+ *  profile card doesn't show stringified JSON. Pass-through for
+ *  anything else (already-formatted strings, nulls). */
+function formatPhone(raw: string | null): string | null {
+  if (!raw) return raw;
+  const s = raw.trim();
+  if (!s.startsWith("{") || !s.includes("phone")) return raw;
+  try {
+    const obj = JSON.parse(s) as { area?: string | number; phone?: string | number; full?: string };
+    if (typeof obj.full === "string" && obj.full.trim()) return obj.full.trim();
+    const a = obj.area != null ? String(obj.area).trim() : "";
+    const p = obj.phone != null ? String(obj.phone).trim() : "";
+    if (a || p) return [a, p].filter(Boolean).join(" ");
+  } catch { /* fall through */ }
+  return raw;
 }
