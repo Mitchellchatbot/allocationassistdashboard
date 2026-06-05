@@ -373,13 +373,13 @@ export function DashboardLayout({ children, title: pageTitle, subtitle: pageSubt
         }
       `}</style>
       <SidebarCloser aiOpen={aiOpen} />
-      <div className="h-screen flex w-full bg-background overflow-hidden">
+      <div className="h-screen flex w-full bg-muted/40 overflow-hidden">
         <AppSidebar />
-        <div className="flex-1 flex flex-col min-w-0">
-          {/* Top header bar — pill-styled: soft shadow instead of a hard
-              border, breadcrumb left, action cluster right where each
-              control is its own rounded-full chip. */}
-          <header className="h-[52px] flex items-center justify-between bg-card px-3 sm:px-4 lg:px-5 shrink-0 border-b border-border/30 shadow-[0_1px_2px_rgba(0,0,0,0.03)]">
+        <div className="flex-1 flex flex-col min-w-0 pt-2 pr-2 pb-2 gap-2">
+          {/* Top header bar — its own floating pill panel: margins on
+              all sides, rounded, drop-shadow. Sits visually parallel to
+              the floating sidebar. */}
+          <header className="h-[52px] flex items-center justify-between bg-card px-3 sm:px-4 lg:px-5 shrink-0 rounded-3xl border border-border/40 shadow-lg">
             <div className="flex items-center gap-2 sm:gap-2.5 min-w-0">
               <SidebarTrigger className="text-muted-foreground hover:text-foreground hover:bg-muted/60 shrink-0 rounded-full h-8 w-8" />
 
@@ -525,22 +525,24 @@ export function DashboardLayout({ children, title: pageTitle, subtitle: pageSubt
             </div>
           </header>
 
-          {/* Page title section. Falls back to the breadcrumb label so newer
-              pages (Vacancies / Reports / Batches / etc) that wrap themselves
-              in <DashboardLayout> without a `title` prop still get a nice
-              header. */}
-          <div className="px-4 lg:px-5 pt-5 pb-3 border-b border-border/40 bg-card">
-            <h1 className="text-[20px] sm:text-[22px] font-semibold text-foreground leading-tight">
-              {title || breadcrumbLabel}
-            </h1>
-            {subtitle && <p className="text-[13px] text-muted-foreground mt-1">{subtitle}</p>}
-          </div>
-
-          <main className="flex-1 overflow-auto px-4 lg:px-6 pb-6 pt-5">
-            <div className="max-w-[1400px] mx-auto">
-              <PageTransition>{children}</PageTransition>
+          {/* Page panel — title + content live inside one floating
+              panel below the header so the screen reads as a stack of
+              two pills (header pill / content pill) against the muted
+              background. */}
+          <div className="flex-1 flex flex-col min-h-0 rounded-3xl border border-border/40 bg-card shadow-lg overflow-hidden">
+            <div className="px-4 lg:px-5 pt-5 pb-3 border-b border-border/40">
+              <h1 className="text-[20px] sm:text-[22px] font-semibold text-foreground leading-tight">
+                {title || breadcrumbLabel}
+              </h1>
+              {subtitle && <p className="text-[13px] text-muted-foreground mt-1">{subtitle}</p>}
             </div>
-          </main>
+
+            <main className="flex-1 overflow-auto px-4 lg:px-6 pb-6 pt-5">
+              <div className="max-w-[1400px] mx-auto">
+                <PageTransition>{children}</PageTransition>
+              </div>
+            </main>
+          </div>
         </div>
 
         {/* AI Panel — inline flex child, pushes content left.
