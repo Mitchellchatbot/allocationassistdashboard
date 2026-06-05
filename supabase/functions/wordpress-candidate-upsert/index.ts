@@ -49,6 +49,20 @@ interface UpsertBody {
 }
 
 Deno.serve(async (req: Request) => {
+  // Top-level try/catch turns any uncaught throw (WP timeout, malformed
+  // response, etc.) into a JSON error response instead of a runtime
+  // crash that surfaces to the client as 502 EDGE_FUNCTION_ERROR with
+  // no usable detail.
+  try {
+    return await handleUpsert(req);
+  } catch (err) {
+    console.error("[wordpress-candidate-upsert] uncaught:", err);
+    const msg = err instanceof Error ? err.message : String(err);
+    return json({ ok: false, error: `Edge function threw: ${msg}` }, 500);
+  }
+});
+
+async function handleUpsert(req: Request): Promise<Response> {
   if (req.method === "OPTIONS") return new Response(null, { headers: CORS });
   if (req.method !== "POST")    return json({ ok: false, error: "Method not allowed" }, 405);
   if (!wpBaseUrl || !wpUsername || !wpAppPassword) {
@@ -78,15 +92,27 @@ Deno.serve(async (req: Request) => {
     ? `${wpBaseUrl}/wp-json/wp/v2/candidate/${body.id}`
     : `${wpBaseUrl}/wp-json/wp/v2/candidate`;
 
-  const wpRes = await fetch(wpUrl, {
-    method: "POST",
-    headers: {
-      Authorization: basic,
-      "Content-Type": "application/json",
-      Accept:         "application/json",
-    },
-    body: JSON.stringify({ ...wpPayload, ...(isEdit ? {} : { status: body.status ?? "draft" }) }),
-  });
+  // Hard wall on WP REST. The supabase edge-runtime kills functions at
+  // ~150s; a slow WP host can easily eat that and 502 the caller. Cap
+  // at 45s per call so we fail loudly with a useful error before the
+  // runtime nukes us.
+  let wpRes: Response;
+  try {
+    wpRes = await fetchWithTimeout(wpUrl, {
+      method: "POST",
+      headers: {
+        Authorization: basic,
+        "Content-Type": "application/json",
+        Accept:         "application/json",
+      },
+      body: JSON.stringify({ ...wpPayload, ...(isEdit ? {} : { status: body.status ?? "draft" }) }),
+    }, 45_000);
+  } catch (e) {
+    return json({
+      ok: false,
+      error: `WP REST didn't respond in 45s. WP may be slow or unreachable. Detail: ${(e as Error).message}`,
+    }, 504);
+  }
   const wpJson = await wpRes.json().catch(() => null) as { id?: number; code?: string; message?: string } | null;
   if (!wpRes.ok || !wpJson || wpJson.code) {
     return json({
@@ -102,9 +128,14 @@ Deno.serve(async (req: Request) => {
 
   // 3. Re-fetch the row so our mirror reflects WP's truth (including
   //    fields WP normalises, e.g. status defaults, slug generation).
-  const refetchRes = await fetch(`${wpBaseUrl}/wp-json/wp/v2/candidate/${newId}?_fields=id,slug,status,link,date,modified,title,acf`, {
-    headers: { Authorization: basic, Accept: "application/json" },
-  });
+  let refetchRes: Response;
+  try {
+    refetchRes = await fetchWithTimeout(`${wpBaseUrl}/wp-json/wp/v2/candidate/${newId}?_fields=id,slug,status,link,date,modified,title,acf`, {
+      headers: { Authorization: basic, Accept: "application/json" },
+    }, 20_000);
+  } catch (e) {
+    return json({ ok: false, error: `WP refetch timed out: ${(e as Error).message}` }, 504);
+  }
   if (!refetchRes.ok) {
     return json({ ok: false, error: `WP refetch ${refetchRes.status}` }, 502);
   }
@@ -214,7 +245,7 @@ Deno.serve(async (req: Request) => {
   }
 
   return json({ ok: true, id: newId, row: mirrorRow, created: !isEdit, auto_linked: autoLinked }, 200);
-});
+}
 
 // ─── one-row auto-link ────────────────────────────────────────────────
 
@@ -347,4 +378,16 @@ function json(payload: unknown, status: number): Response {
     status,
     headers: { ...CORS, "Content-Type": "application/json" },
   });
+}
+
+/** fetch + AbortController timeout. Throws on timeout so callers can
+ *  distinguish a slow upstream from a connection refusal. */
+async function fetchWithTimeout(input: string, init: RequestInit, ms: number): Promise<Response> {
+  const controller = new AbortController();
+  const t = setTimeout(() => controller.abort(), ms);
+  try {
+    return await fetch(input, { ...init, signal: controller.signal });
+  } finally {
+    clearTimeout(t);
+  }
 }
