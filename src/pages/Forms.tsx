@@ -148,12 +148,17 @@ function FormDetail({ form }: { form: Form }) {
   const search = useDebounce(searchRaw, 250);
   const [dateFilter, setDateFilter] = useState<"all" | "7d" | "30d" | "90d">("all");
   const [sortDir, setSortDir]       = useState<"newest" | "oldest">("newest");
-  // Free-signal forms default to 'Uncontacted in Zoho' — the narrowest
-  // actionable bucket. Paid-lead forms (DoctorsFinder) don't go through
-  // Zoho so that filter is meaningless there — default to 'all'.
+  // Default outreach filter by form type:
+  // - Paid-lead (DoctorsFinder) → 'all' (Zoho-side buckets don't apply)
+  // - JotForm (doctor profile intake) → 'all' (it's a simple intake;
+  //   we don't apply the Zoho/outreach lifecycle frame here)
+  // - Free-signal forms (Typeform / Consultation) → 'uncontacted-zoho'
+  //   (narrowest actionable bucket, where the team starts each day)
   const isPaidFormInit = (form.lead_value_cents ?? 0) > 0;
+  const isJotform      = form.provider === "jotform";
+  const showOutreachChips = !isJotform;
   const [outreachFilter, setOutreachFilter] = useState<"all" | "mine" | "uncontacted-zoho" | "unqualified" | OutreachStatus>(
-    isPaidFormInit ? "all" : "uncontacted-zoho",
+    (isPaidFormInit || isJotform) ? "all" : "uncontacted-zoho",
   );
   const { user } = useAuth();
 
@@ -399,38 +404,46 @@ function FormDetail({ form }: { form: Form }) {
                 { value: "90d", label: "Last 90d" },
               ]}
             />
-            <span className="text-muted-foreground/40">·</span>
             {/* Outreach lifecycle — chip order matches the typical
                 triage flow. 'Uncontacted in Zoho' first because that's
                 where the team starts each day; 'Unqualified' is the
                 explicit not-in-Zoho bucket from Saif's logic. The pure
                 lifecycle buckets (New / Contacted / …) live behind a
                 'lifecycle…' divider so they don't crowd the front of
-                the row. */}
-            <FilterChipGroup
-              value={outreachFilter}
-              onChange={(v) => setOutreachFilter(v as typeof outreachFilter)}
-              options={isPaidFormInit ? [
-                // Paid leads (DoctorsFinder) — minimal funnel: each row
-                // is a chunk of revenue the team works carefully. Drop
-                // 'Qualified' and 'Declined' (paid leads don't decline
-                // us — deals close-won or close-lost) and keep just
-                // the buckets the team actually moves things between.
-                { value: "all",       label: "All" },
-                { value: "mine",      label: "My queue" },
-                { value: "new",       label: "New" },
-                { value: "contacted", label: "Contacted" },
-                { value: "closed",    label: "Closed" },
-              ] : [
-                { value: "uncontacted-zoho", label: "Uncontacted in Zoho" },
-                { value: "unqualified",      label: "Unqualified" },
-                { value: "mine",             label: "My queue" },
-                { value: "all",              label: "All" },
-                { value: "new",              label: "New (form)" },
-                { value: "contacted",        label: "Contacted (form)" },
-                { value: "qualified",        label: "Qualified (form)" },
-              ]}
-            />
+                the row.
+
+                JotForm is excluded — it's a self-serve doctor intake,
+                not a Zoho-funnel form. Date + sort are the only useful
+                filters there. */}
+            {showOutreachChips && (
+              <>
+                <span className="text-muted-foreground/40">·</span>
+                <FilterChipGroup
+                  value={outreachFilter}
+                  onChange={(v) => setOutreachFilter(v as typeof outreachFilter)}
+                  options={isPaidFormInit ? [
+                    // Paid leads (DoctorsFinder) — minimal funnel: each row
+                    // is a chunk of revenue the team works carefully. Drop
+                    // 'Qualified' and 'Declined' (paid leads don't decline
+                    // us — deals close-won or close-lost) and keep just
+                    // the buckets the team actually moves things between.
+                    { value: "all",       label: "All" },
+                    { value: "mine",      label: "My queue" },
+                    { value: "new",       label: "New" },
+                    { value: "contacted", label: "Contacted" },
+                    { value: "closed",    label: "Closed" },
+                  ] : [
+                    { value: "uncontacted-zoho", label: "Uncontacted in Zoho" },
+                    { value: "unqualified",      label: "Unqualified" },
+                    { value: "mine",             label: "My queue" },
+                    { value: "all",              label: "All" },
+                    { value: "new",              label: "New (form)" },
+                    { value: "contacted",        label: "Contacted (form)" },
+                    { value: "qualified",        label: "Qualified (form)" },
+                  ]}
+                />
+              </>
+            )}
             <span className="text-muted-foreground/40">·</span>
             {/* Sort */}
             <FilterChipGroup

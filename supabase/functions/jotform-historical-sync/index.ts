@@ -59,11 +59,20 @@ Deno.serve(async (req: Request) => {
   if (!form.provider_form_id) return json({ ok: false, error: "JotForm form_id not set (forms.provider_form_id). It's the slug in the form URL (jotform.com/form/<id>)." }, 400);
 
   // ── Walk /form/<id>/submissions ─────────────────────────────────────
-  // JotForm's API caps `limit` at 1000 per page. We paginate offset-style
-  // until we get a short page back (the only reliable signal — content[].length
-  // < limit means end-of-stream). `resultSet.count` on the response tells
-  // us total reported.
-  const PAGE_SIZE = 1000;
+  // JotForm's `limit` is capped per plan tier (free: 20, basic: 100,
+  // pro: 1000). We ASK for 1000 but the server silently returns fewer
+  // when a tier cap is in effect. The earlier version broke when
+  // items.length < PAGE_SIZE (= 1000), so on a tier-capped plan we
+  // bailed after page 0 with only N items fetched ("stuck at 225").
+  //
+  // Robust pagination:
+  //   - Advance offset by the ACTUAL page length, not the requested PAGE_SIZE
+  //   - Terminate when the server returns 0 items, OR when offset has
+  //     reached resultSet.count (JotForm's reported total).
+  //   - Hard cap 100k as a safety net.
+  const PAGE_SIZE  = 1000;
+  const HARD_CAP   = 100_000;
+  const MAX_PAGES  = 2000;
   let offset = 0;
   let fetched = 0;
   let inserted = 0;
@@ -72,7 +81,7 @@ Deno.serve(async (req: Request) => {
   let wpUpdated = 0;
   let totalReported = 0;
 
-  for (let page = 0; page < 50; page++) {        // 50k row hard cap
+  for (let page = 0; page < MAX_PAGES && fetched < HARD_CAP; page++) {
     const url = new URL(`https://api.jotform.com/form/${form.provider_form_id}/submissions`);
     url.searchParams.set("apiKey", form.api_token);
     url.searchParams.set("limit",  String(PAGE_SIZE));
@@ -94,7 +103,7 @@ Deno.serve(async (req: Request) => {
       return json({ ok: false, error: `JotForm: ${payload.message ?? "unknown error"}`, fetched, inserted }, 502);
     }
     const items = payload.content ?? [];
-    if (page === 0) totalReported = payload.resultSet?.count ?? items.length;
+    if (page === 0) totalReported = payload.resultSet?.count ?? 0;
     if (items.length === 0) break;
     fetched += items.length;
 
@@ -188,8 +197,12 @@ Deno.serve(async (req: Request) => {
       }
     }
 
-    if (items.length < PAGE_SIZE) break;
-    offset += PAGE_SIZE;
+    // Advance by the ACTUAL number of items returned (tier-cap-safe).
+    offset += items.length;
+    // Stop once we've covered the reported total. If the API didn't
+    // report a total (totalReported = 0), keep walking until we get
+    // an empty page on the next loop iteration.
+    if (totalReported > 0 && offset >= totalReported) break;
   }
 
   return json({
