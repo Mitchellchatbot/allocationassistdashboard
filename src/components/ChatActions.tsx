@@ -10,12 +10,12 @@
  * Each action type maps to a handler below. New action types live in
  * one place: extend the `ACTION_HANDLERS` map.
  */
-import { useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { useNavigate } from "react-router-dom";
 import { toast } from "sonner";
 import {
   ArrowRight, ExternalLink, Search, UserCheck, Send, Workflow, Link2,
-  CheckCircle2, Tag, FileText, ClipboardList, Sparkles,
+  CheckCircle2, Tag, FileText, ClipboardList, Sparkles, Compass, X,
 } from "lucide-react";
 import { supabase } from "@/lib/supabase";
 import { zohoPut } from "@/lib/zoho";
@@ -50,6 +50,7 @@ export function parseActions(text: string): { text: string; actions: ActionSpec[
 }
 
 const TYPE_ICON: Record<string, typeof ArrowRight> = {
+  goto:                 Compass,
   navigate:             ArrowRight,
   search:               Search,
   open_doctor:          UserCheck,
@@ -64,6 +65,12 @@ const TYPE_ICON: Record<string, typeof ArrowRight> = {
   mark_vacancy_status:  CheckCircle2,
   update_outreach:      FileText,
 };
+
+/** Action types that fire automatically without a click. We surface a
+ *  countdown chip with a "Stay here" link so the user can cancel
+ *  before the route changes. */
+const AUTO_FIRE_TYPES = new Set(["goto"]);
+const AUTO_FIRE_DELAY_MS = 1200;
 
 export function ChatActionBar({ actions, onActionDone }: {
   actions:       ActionSpec[];
@@ -83,10 +90,12 @@ function ActionRow({ action, onDone }: { action: ActionSpec; onDone?: () => void
   const navigate = useNavigate();
   const [pending, setPending] = useState(false);
   const [done, setDone]       = useState(false);
+  const [cancelled, setCancelled] = useState(false);
   const Icon = TYPE_ICON[action.type] ?? ExternalLink;
+  const autoFire = AUTO_FIRE_TYPES.has(action.type);
 
   const handle = async () => {
-    if (pending || done) return;
+    if (pending || done || cancelled) return;
     setPending(true);
     try {
       await dispatch(action, navigate);
@@ -98,6 +107,49 @@ function ActionRow({ action, onDone }: { action: ActionSpec; onDone?: () => void
       setPending(false);
     }
   };
+
+  // Auto-fire navigation actions after a short delay. The user can hit
+  // "Stay here" within the window to abort. We only fire once per
+  // ActionRow instance — the firedRef guards against React strict-mode
+  // double-mount in dev.
+  const firedRef = useRef(false);
+  useEffect(() => {
+    if (!autoFire || firedRef.current) return;
+    firedRef.current = true;
+    const t = setTimeout(() => {
+      if (!cancelled) handle();
+    }, AUTO_FIRE_DELAY_MS);
+    return () => clearTimeout(t);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [autoFire]);
+
+  if (autoFire) {
+    return (
+      <div className="rounded-xl border border-emerald-200/60 bg-emerald-50/40 px-3 py-2 flex items-center justify-between gap-3">
+        <div className="flex items-start gap-2 min-w-0">
+          <Compass className="h-3.5 w-3.5 text-emerald-700 mt-0.5 shrink-0" />
+          <div className="min-w-0">
+            <p className="text-[11px] text-emerald-900/80 leading-snug">{action.rationale}</p>
+            <p className="text-[10px] text-emerald-700/70 mt-0.5">
+              {done       ? `Taken you to ${action.label}.`
+                : pending ? "Going…"
+                : cancelled ? "Cancelled."
+                : `Taking you to ${action.label}…`}
+            </p>
+          </div>
+        </div>
+        {!done && !pending && !cancelled && (
+          <button
+            onClick={() => setCancelled(true)}
+            title="Stay on this page"
+            className="shrink-0 inline-flex items-center gap-1 h-6 px-2 rounded-full text-[10px] text-emerald-700/80 hover:text-emerald-900 hover:bg-white/60 transition-colors"
+          >
+            <X className="h-3 w-3" /> Stay
+          </button>
+        )}
+      </div>
+    );
+  }
 
   return (
     <div className="rounded-xl border border-emerald-200/60 bg-emerald-50/40 px-3 py-2">
@@ -125,6 +177,10 @@ function ActionRow({ action, onDone }: { action: ActionSpec; onDone?: () => void
 async function dispatch(a: ActionSpec, navigate: (to: string) => void): Promise<void> {
   const p = a.params;
   switch (a.type) {
+    // `goto` and `navigate` share the same effect — the difference is
+    // purely UX: goto auto-fires (the AI is taking you somewhere on
+    // your behalf), navigate is a button you click.
+    case "goto":
     case "navigate": {
       const path = String(p.path ?? "/");
       navigate(path);

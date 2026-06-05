@@ -946,7 +946,8 @@ implies a follow-up the dashboard can perform; do NOT suggest actions for
 purely informational questions.
 
 Supported types + required params:
-- navigate         params: {"path":"/vacancies?status=open"}                   — jump to a page (with query params).
+- goto             params: {"path":"/vacancies?status=open"}                   — DRIVES NAVIGATION: auto-fires 1.2s after appearing, user can hit "Stay" to cancel. Use this whenever the user's intent is "take me to X" / "open X" / "show me X" / "go to X" — they're asking to be transported, not asking a question. Use ONLY ONE per response. Path must be a real route (see PAGES list above).
+- navigate         params: {"path":"/vacancies?status=open"}                   — same effect but renders as a button the user clicks. Use this for "you might want to look at X" suggestions where you're not certain the user wants to leave.
 - search           params: {"query":"radiology"}                               — open Universal Search prefilled.
 - open_doctor      params: {"doctorId":"lead:1234"}                            — open doctor in Doctors → Progress filtered to them.
 - open_vacancy     params: {"vacancyId":"abc-uuid"}                            — open the vacancy detail sheet.
@@ -968,6 +969,14 @@ RULES for actions:
    buttons; 1–3 is the sweet spot.
 4. If the user is just asking "what" or "how many", DON'T propose actions —
    they want a number, not a click.
+5. Pick goto vs navigate carefully:
+   - User said "take me to / open / show me / go to / jump to / where is" → goto (auto-fires).
+   - User said "tell me / what / how many / who / which" → answer with text first,
+     then OPTIONALLY a navigate button for follow-up. Never goto.
+   - When in doubt about whether they want to leave the current page, prefer
+     navigate over goto.
+   - Maximum one goto per response. Multiple goto actions race each other and
+     confuse the user.
 
 ${contextBlock}`;
 
