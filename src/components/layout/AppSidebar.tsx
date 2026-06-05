@@ -207,11 +207,11 @@ export function AppSidebar() {
         {!collapsed && (
           <button
             onClick={() => search?.open()}
-            className="mx-2 mb-3 flex items-center gap-2 rounded-2xl border border-sidebar-border/30 bg-sidebar-accent/30 px-3.5 py-2 text-left text-[11px] text-sidebar-foreground/55 hover:text-sidebar-foreground hover:bg-sidebar-accent transition-colors"
+            className="mx-2 mb-3 flex items-center gap-2 rounded-full border border-sidebar-border/30 bg-sidebar-accent/30 px-3.5 py-1.5 text-left text-[11px] text-sidebar-foreground/55 hover:text-sidebar-foreground hover:bg-sidebar-accent transition-colors"
           >
             <Search className="h-3 w-3" />
             <span className="flex-1">Quick jump...</span>
-            <kbd className="hidden lg:inline-flex h-4 items-center px-1.5 rounded-md border border-sidebar-border/40 bg-sidebar/40 text-[9px] font-mono text-sidebar-foreground/50">
+            <kbd className="hidden lg:inline-flex h-4 items-center px-1.5 rounded-full border border-sidebar-border/40 bg-sidebar/40 text-[9px] font-mono text-sidebar-foreground/50">
               ⌘K
             </kbd>
           </button>
@@ -233,7 +233,7 @@ export function AppSidebar() {
                       <SidebarMenuButton asChild>
                         <Link
                           to={r.path}
-                          className="rounded-xl px-3 py-1.5 text-[12px] text-sidebar-foreground/65 hover:bg-sidebar-accent hover:text-sidebar-accent-foreground transition-colors"
+                          className="rounded-full px-3 py-1.5 text-[12px] text-sidebar-foreground/65 hover:bg-sidebar-accent hover:text-sidebar-accent-foreground transition-colors"
                         >
                           <Clock className="mr-2 h-3 w-3 shrink-0" style={{ color: RECENT_ACCENT }} />
                           <span className="truncate">{r.label}</span>
@@ -297,8 +297,8 @@ export function AppSidebar() {
 
       <SidebarFooter className="px-2 pb-3 border-t border-sidebar-border pt-3">
         {!collapsed && (
-          <div className="mx-1 rounded-2xl bg-sidebar-accent/50 overflow-hidden">
-            <div className="flex items-center gap-2 p-2.5">
+          <div className="mx-1 space-y-1.5">
+            <div className="flex items-center gap-2 rounded-full bg-sidebar-accent/50 px-2 py-1.5">
               <div className="flex h-7 w-7 items-center justify-center rounded-full bg-sidebar-primary text-white text-[9px] font-bold shrink-0">
                 {user?.email ? user.email.slice(0, 2).toUpperCase() : "AA"}
               </div>
@@ -311,7 +311,7 @@ export function AppSidebar() {
             </div>
             <button
               onClick={handleSignOut}
-              className="w-full flex items-center gap-2 px-2 py-1.5 text-[11px] text-sidebar-foreground/60 hover:text-sidebar-foreground hover:bg-sidebar-accent transition-colors border-t border-sidebar-border/30"
+              className="w-full flex items-center gap-2 rounded-full px-3 py-1.5 text-[11px] text-sidebar-foreground/60 hover:text-sidebar-foreground hover:bg-sidebar-accent/70 transition-colors"
             >
               <LogOut className="h-3 w-3" />
               Sign out
@@ -377,8 +377,8 @@ function NavRow({ item, collapsed, badgeCtx, accent }: { item: NavItem; collapse
           to={item.url}
           end={item.url === "/"}
           data-tour={tourId}
-          className="rounded-xl px-3 py-1.5 text-[13px] text-sidebar-foreground/75 hover:bg-sidebar-accent hover:text-sidebar-accent-foreground transition-colors"
-          activeClassName="bg-sidebar-accent text-sidebar-primary font-medium"
+          className="rounded-full px-3 py-1.5 text-[13px] text-sidebar-foreground/75 hover:bg-sidebar-accent/70 hover:text-sidebar-accent-foreground transition-all duration-150"
+          activeClassName="bg-white/10 text-white font-medium shadow-[inset_0_0_0_1px_rgba(255,255,255,0.12)]"
         >
           {/* Icon sits inside a small filled-circle that picks up the
               section's accent colour. White glyph inside reads against

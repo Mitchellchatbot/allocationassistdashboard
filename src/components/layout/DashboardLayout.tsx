@@ -376,25 +376,26 @@ export function DashboardLayout({ children, title: pageTitle, subtitle: pageSubt
       <div className="h-screen flex w-full bg-background overflow-hidden">
         <AppSidebar />
         <div className="flex-1 flex flex-col min-w-0">
-          {/* Top header bar */}
-          <header className="h-[52px] flex items-center justify-between border-b bg-card px-3 sm:px-4 lg:px-5 shrink-0">
-            <div className="flex items-center gap-2 sm:gap-3 min-w-0">
+          {/* Top header bar — pill-styled: soft shadow instead of a hard
+              border, breadcrumb left, action cluster right where each
+              control is its own rounded-full chip. */}
+          <header className="h-[52px] flex items-center justify-between bg-card px-3 sm:px-4 lg:px-5 shrink-0 border-b border-border/30 shadow-[0_1px_2px_rgba(0,0,0,0.03)]">
+            <div className="flex items-center gap-2 sm:gap-2.5 min-w-0">
               <SidebarTrigger className="text-muted-foreground hover:text-foreground hover:bg-muted/60 shrink-0 rounded-full h-8 w-8" />
-              <div className="h-4 w-px bg-border/60 hidden sm:block shrink-0" />
-              
-              {/* Breadcrumb — shows section context now that the sidebar groups
-                  pages (Home › Hospital Introduction › Vacancies). */}
-              <nav className="flex items-center gap-1 text-[11px] min-w-0">
-                <Link to="/" className="text-muted-foreground hover:text-foreground transition-colors shrink-0">
+
+              {/* Breadcrumb pill — Home › Section › Page on one chip so it
+                  reads as a single sleek control rather than loose text. */}
+              <nav className="flex items-center gap-1.5 text-[11px] min-w-0 rounded-full bg-muted/40 border border-border/40 px-3 py-1.5">
+                <Link to="/" className="text-muted-foreground hover:text-foreground transition-colors shrink-0 inline-flex">
                   <Home className="h-3 w-3" />
                 </Link>
                 {breadcrumbSection && (
                   <>
-                    <ChevronRight className="h-3 w-3 text-muted-foreground/50 shrink-0" />
+                    <ChevronRight className="h-3 w-3 text-muted-foreground/40 shrink-0" />
                     <span className="text-muted-foreground truncate">{breadcrumbSection}</span>
                   </>
                 )}
-                <ChevronRight className="h-3 w-3 text-muted-foreground/50 shrink-0" />
+                <ChevronRight className="h-3 w-3 text-muted-foreground/40 shrink-0" />
                 <span className="font-medium text-foreground truncate">{breadcrumbLabel}</span>
               </nav>
             </div>
@@ -404,7 +405,7 @@ export function DashboardLayout({ children, title: pageTitle, subtitle: pageSubt
                   <button
                     onClick={() => !sync.isPending && sync.mutate()}
                     disabled={sync.isPending}
-                    className="hidden sm:flex items-center gap-1.5 h-8 px-3 text-[11px] font-medium rounded-full border border-border/60 bg-card text-muted-foreground hover:text-foreground hover:border-border hover:bg-muted/50 transition-all duration-150 disabled:opacity-50 shadow-sm"
+                    className="hidden sm:flex items-center gap-1.5 h-8 px-3 text-[11px] font-medium rounded-full border border-border/40 bg-muted/40 text-muted-foreground hover:text-foreground hover:bg-muted/60 transition-all duration-150 disabled:opacity-50"
                   >
                     <RefreshCw className={`h-3 w-3 shrink-0 ${sync.isPending ? "animate-spin" : ""}`} />
                     {sync.isPending
@@ -430,7 +431,7 @@ export function DashboardLayout({ children, title: pageTitle, subtitle: pageSubt
                     <button
                       onClick={startHiTour}
                       data-tour="topbar-tour-button"
-                      className="hidden md:flex items-center gap-1.5 h-8 px-3 text-[11px] font-medium rounded-full border border-teal-200 bg-teal-50 text-teal-800 hover:bg-teal-100 hover:border-teal-300 transition-all duration-150 shadow-sm"
+                      className="hidden md:flex items-center gap-1.5 h-8 px-3 text-[11px] font-medium rounded-full border border-teal-200/70 bg-teal-50 text-teal-800 hover:bg-teal-100 hover:border-teal-300 transition-all duration-150"
                       aria-label="Replay Hospital Introduction onboarding tour"
                     >
                       <GraduationCap className="h-3 w-3 shrink-0" />
@@ -447,11 +448,11 @@ export function DashboardLayout({ children, title: pageTitle, subtitle: pageSubt
                   <button
                     onClick={() => setSearchOpen(true)}
                     data-tour="topbar-search"
-                    className="hidden sm:flex items-center gap-1.5 h-8 px-3 text-[11px] font-medium rounded-full border border-border/60 bg-card text-muted-foreground hover:text-foreground hover:border-border hover:bg-muted/50 transition-all duration-150 shadow-sm"
+                    className="hidden sm:flex items-center gap-1.5 h-8 px-3 text-[11px] font-medium rounded-full border border-border/40 bg-muted/40 text-muted-foreground hover:text-foreground hover:bg-muted/60 transition-all duration-150"
                   >
                     <Search className="h-3 w-3 shrink-0" />
                     Search
-                    <kbd className="ml-1 hidden md:inline-flex items-center gap-0.5 rounded-md bg-muted/60 px-1.5 py-0.5 text-[9px] font-mono text-muted-foreground">
+                    <kbd className="ml-1 hidden md:inline-flex items-center gap-0.5 rounded-full bg-background/80 px-1.5 py-0.5 text-[9px] font-mono text-muted-foreground border border-border/40">
                       ⌘K
                     </kbd>
                   </button>
