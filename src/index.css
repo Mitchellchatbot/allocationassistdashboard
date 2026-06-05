@@ -111,24 +111,43 @@
   height: 0;
 }
 
-/* Floating-sidebar 'glass' treatment: a teal gradient base, a soft
-   inner highlight at the top edge, a green-accent halo ring, and a
-   subtle backdrop blur so the panel feels like frosted glass tinted
-   in our brand teal. The base sidebar token (--sidebar-background)
-   is the same hsl(170, 55%, 30%) so the glass takes its colour from
-   the existing palette without needing any new variables. */
+/* Floating-sidebar 'frosted glass' treatment.
+ *
+ * Stack (back to front):
+ *   1. Deep teal base — the brand colour.
+ *   2. Soft radial green-accent glows top + bottom — the "tinted light
+ *      behind the glass" feel.
+ *   3. Diagonal sheen line — the moving highlight you see when light
+ *      hits real frosted glass.
+ *   4. SVG fractal-noise overlay — the actual frosted texture; subtle
+ *      grain that breaks the flat-color look without feeling noisy.
+ *   5. Inner 1px white sheen along the top edge + an outer accent ring.
+ *
+ * Rounding + clipping are duplicated with !important on the outer
+ * wrapper because the Sidebar primitive composes multiple Tailwind
+ * classes and the radius was getting lost depending on render order.
+ */
 .aa-sidebar-glass {
   position: relative;
-  border-radius: 1.5rem; /* matches the rounded-3xl outer wrapper */
-  border: 1px solid hsl(170, 55%, 55% / 0.18);
+  border-radius: 1.5rem !important;
+  border: 1px solid hsl(160, 70%, 60% / 0.22) !important;
+  overflow: hidden !important;
   background:
-    radial-gradient(120% 60% at 50% -10%, hsl(170, 60%, 48% / 0.45) 0%, transparent 60%),
-    linear-gradient(180deg, hsl(170, 55%, 32% / 0.92) 0%, hsl(170, 55%, 27% / 0.92) 100%);
+    /* fractal-noise frosted-glass grain */
+    url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' width='160' height='160'><filter id='n'><feTurbulence type='fractalNoise' baseFrequency='0.85' numOctaves='2' stitchTiles='stitch'/><feColorMatrix values='0 0 0 0 1  0 0 0 0 1  0 0 0 0 1  0 0 0 0.18 0'/></filter><rect width='100%25' height='100%25' filter='url(%23n)'/></svg>"),
+    /* diagonal sheen */
+    linear-gradient(135deg, hsl(160, 80%, 70% / 0.10) 0%, transparent 35%, transparent 65%, hsl(160, 80%, 70% / 0.06) 100%),
+    /* accent glow top */
+    radial-gradient(140% 65% at 50% -10%, hsl(160, 75%, 55% / 0.55) 0%, transparent 55%),
+    /* accent glow bottom */
+    radial-gradient(120% 50% at 50% 110%, hsl(170, 70%, 38% / 0.55) 0%, transparent 60%),
+    /* base teal */
+    linear-gradient(180deg, hsl(170, 60%, 24%) 0%, hsl(170, 55%, 19%) 100%);
   box-shadow:
-    0 8px 30px rgba(0, 0, 0, 0.18),
-    inset 0 1px 0 hsl(170, 80%, 70% / 0.18),
-    inset 0 0 0 1px hsl(170, 60%, 60% / 0.06);
-  backdrop-filter: blur(14px) saturate(140%);
-  -webkit-backdrop-filter: blur(14px) saturate(140%);
-  overflow: hidden;
+    0 12px 40px rgba(0, 0, 0, 0.28),
+    0 0 0 1px hsl(160, 70%, 50% / 0.10),
+    inset 0 1px 0 hsl(160, 90%, 80% / 0.22),
+    inset 0 -1px 0 hsl(170, 50%, 12% / 0.6);
+  backdrop-filter: blur(18px) saturate(160%);
+  -webkit-backdrop-filter: blur(18px) saturate(160%);
 }
