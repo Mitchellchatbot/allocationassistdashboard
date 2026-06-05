@@ -516,9 +516,17 @@ function PreviewConfirm({
         <div className="text-[11px] text-muted-foreground">
           One run per hospital will be created in Flow 2. Hospital + doctor emails fire automatically on confirm.
         </div>
-        <div className="text-[11px] text-muted-foreground pt-1 border-t border-slate-200/70 mt-1.5">
-          Sending as: <span className="font-medium text-slate-700">{senderLine}</span>
-          {!sender && <span className="text-amber-700 ml-1">· current user isn't in the verified sender roster, so the generic team address is used</span>}
+        <div className="text-[11px] text-muted-foreground pt-1 border-t border-slate-200/70 mt-1.5 space-y-0.5">
+          <div>Sending as: <span className="font-medium text-slate-700">{senderLine}</span></div>
+          {sender ? (
+            <div className="text-[10.5px] text-emerald-700">
+              Hospital replies will land in <span className="font-mono">{sender.email}</span> · a BCC copy also goes there so your inbox has the full thread.
+            </div>
+          ) : (
+            <div className="text-[10.5px] text-amber-700">
+              Current user isn't in the verified sender roster, so the generic team address is used and replies route through the dashboard parser.
+            </div>
+          )}
         </div>
       </div>
 

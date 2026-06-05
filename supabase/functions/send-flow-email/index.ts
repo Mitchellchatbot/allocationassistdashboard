@@ -589,12 +589,32 @@ Deno.serve(async (req: Request) => {
     headers["X-AA-Original-Recipient"] = actualRecipient;
   }
 
-  // Per-run Reply-To address. Any reply to this lands at Resend Inbound
-  // with the run_id encoded right in the recipient address — most accurate
-  // matching strategy in inbound-hospital-reply. We also store it on the
-  // run's metadata so the team can see in the timeline what address they'd
-  // need to inspect inbound logs for.
-  const replyToAddress = `reply-${run.id}@${MAIL_REPLY_DOMAIN}`;
+  // ── Reply-To + BCC routing ──────────────────────────────────────────
+  // Two patterns depending on whether this run has a known HI sender:
+  //
+  // (a) Run is assigned to a HI member (rodaina/mohamed/sohaila/ishak/ammar):
+  //     - Reply-To = their mailbox → hospital replies land in their inbox
+  //       natively, so the back-and-forth happens in Gmail like normal
+  //       correspondence.
+  //     - BCC      = their mailbox → they also get a copy of every
+  //       outbound, so their inbox carries the full thread.
+  //     - Trade-off: the dashboard's inbound parser doesn't see these
+  //       replies. We capture sent events + the HI member can paste
+  //       any important context back via notes. A follow-up Gmail-OAuth
+  //       integration would make replies dashboard-visible again.
+  //
+  // (b) Unowned run (system sends, sales, fallback):
+  //     - Reply-To = the per-run parser address. Dashboard captures
+  //       replies via Resend Inbound + the inbound-hospital-reply edge
+  //       function. No personal mailbox to BCC.
+  const personalRouting = !!sender.replyHint;
+  const parserReplyTo   = `reply-${run.id}@${MAIL_REPLY_DOMAIN}`;
+  const replyToAddress  = personalRouting ? sender.replyHint : parserReplyTo;
+  // BCC list — sender's own mailbox when this run has a personal
+  // sender; plus any test-override CC recipients (these go on CC, not
+  // BCC). Skip BCC entirely under TEST_OVERRIDE to avoid double-sending
+  // to the same address.
+  const bccList = (personalRouting && !TEST_OVERRIDE) ? [sender.replyHint] : undefined;
 
   let resendRes: Response;
   try {
@@ -610,6 +630,7 @@ Deno.serve(async (req: Request) => {
         // When the test-override is a multi-address list, CC the rest of the
         // team so every test email lands in everyone's inbox.
         cc:       TEST_OVERRIDE_LIST.length > 1 ? TEST_OVERRIDE_LIST.slice(1) : undefined,
+        bcc:      bccList,
         reply_to: replyToAddress,
         subject,
         html,
@@ -648,12 +669,24 @@ Deno.serve(async (req: Request) => {
   console.log("[send-flow-email] Resend OK, message_id:", messageId);
 
   // ── Write email_sent event + advance stage ────────────────────────────────
+  // Stamp the resolved From + Reply-To + BCC into the event payload so
+  // the team can audit later from the run timeline ("did this go from
+  // Rodaina or the fallback? where will the reply land?").
   await supabase.from("automation_flow_events").insert({
     run_id:     run.id,
     stage_key:  run.current_stage,
     event_type: "email_sent",
-    message:    `Sent "${subject}" to ${effectiveTo}${TEST_OVERRIDE && actualRecipient !== TEST_OVERRIDE ? ` (test override; would have gone to ${actualRecipient})` : ""}.`,
-    payload:    { resend_message_id: messageId, template_key: templateKey, original_recipient: actualRecipient, effective_recipient: effectiveTo },
+    message:    `Sent "${subject}" from ${sender.fromHeader} to ${effectiveTo}${personalRouting ? ` · replies land in ${sender.replyHint}` : ""}${TEST_OVERRIDE && actualRecipient !== TEST_OVERRIDE ? ` (test override; would have gone to ${actualRecipient})` : ""}.`,
+    payload:    {
+      resend_message_id:   messageId,
+      template_key:        templateKey,
+      original_recipient:  actualRecipient,
+      effective_recipient: effectiveTo,
+      from:                sender.fromHeader,
+      reply_to:            replyToAddress,
+      bcc:                 bccList ?? null,
+      personal_routing:    personalRouting,
+    },
   });
 
   const update: Record<string, unknown> = {
