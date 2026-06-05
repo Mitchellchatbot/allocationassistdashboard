@@ -772,18 +772,33 @@ function JotformSyncButton({ form }: { form: Form }) {
   };
 
   const runSync = async () => {
+    // Each invocation processes ~40 new rows then returns; the hook
+    // chains calls until done. We pump progress toasts so the team
+    // sees the counter ticking as the chain runs.
+    const toastId = toast.loading("Sync starting…");
     try {
-      const r = await sync.mutateAsync(form.id);
+      const r = await sync.mutateAsync({
+        formId: form.id,
+        onProgress: (p) => {
+          const wpNote = (p.wp_created + p.wp_updated) > 0
+            ? ` · WP: ${p.wp_created} created, ${p.wp_updated} updated`
+            : "";
+          toast.loading(
+            `Sync chunk ${p.chunkN} done · ${p.inserted} rows stored${wpNote}${p.totalReported ? ` of ${p.totalReported.toLocaleString()}` : ""}`,
+            { id: toastId },
+          );
+        },
+      });
       const totalNote = r.total_reported > 0 ? ` · JotForm reports ${r.total_reported.toLocaleString()} total` : "";
       const wpNote    = (r.wp_created + r.wp_updated) > 0
         ? ` · WP: ${r.wp_created} created, ${r.wp_updated} updated`
         : "";
       toast.success(
-        `Synced — fetched ${r.fetched}, ${r.inserted} stored${totalNote}${wpNote}.`,
-        { duration: 9000 },
+        `Synced — ${r.inserted} stored${totalNote}${wpNote}.`,
+        { id: toastId, duration: 9000 },
       );
     } catch (e) {
-      toast.error(e instanceof Error ? e.message : "Sync failed");
+      toast.error(e instanceof Error ? e.message : "Sync failed", { id: toastId });
     }
   };
 

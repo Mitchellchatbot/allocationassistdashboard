@@ -546,31 +546,73 @@ export function generateWebhookSecret(): string {
   return Array.from(buf).map(b => b.toString(16).padStart(2, "0")).join("");
 }
 
+interface JotformSyncResp {
+  ok:             boolean;
+  error?:         string;
+  done:           boolean;
+  fetched:        number;
+  inserted:       number;
+  skipped:        number;
+  wp_created:     number;
+  wp_updated:     number;
+  total_reported: number;
+  durationMs:     number;
+}
+
 /** Call the jotform-historical-sync edge function. Requires
  *  forms.api_token (JotForm API key) + forms.provider_form_id
- *  (the JotForm form id) to be set on the row. Returns
- *  { fetched, inserted, skipped, wp_created, wp_updated, total_reported }. */
+ *  (the JotForm form id) to be set on the row.
+ *
+ *  The sync caps each invocation at ~40 new rows because each
+ *  WordPress candidate upsert takes ~9 seconds and the edge wall
+ *  clock is 150s. The hook chains invocations back-to-back until
+ *  the function reports done:true, accumulating counters across
+ *  calls. The caller passes an optional onProgress so the UI can
+ *  show running totals while the chain runs. */
 export function useSyncJotformHistory() {
   const qc = useQueryClient();
   return useMutation({
-    mutationFn: async (formId: string) => {
-      const { data, error } = await supabase.functions.invoke("jotform-historical-sync", {
-        body: { form_id: formId },
-      });
-      if (error) throw error;
-      const resp = data as {
-        ok: boolean; error?: string;
-        fetched: number; inserted: number; skipped: number;
-        wp_created: number; wp_updated: number;
-        total_reported: number; durationMs: number;
-      };
-      if (!resp.ok) throw new Error(resp.error ?? "Sync failed");
-      return resp;
+    mutationFn: async ({ formId, onProgress }: { formId: string; onProgress?: (totals: { wp_created: number; wp_updated: number; inserted: number; totalReported: number; chunkN: number }) => void }): Promise<JotformSyncResp> => {
+      let chunkN  = 0;
+      const totals = { fetched: 0, inserted: 0, skipped: 0, wp_created: 0, wp_updated: 0, total_reported: 0, durationMs: 0 };
+      // Loop until the function returns done:true. Hard cap at 100
+      // invocations as a safety net (4000+ rows worth) so a logic bug
+      // can't infinitely loop client-side.
+      while (chunkN < 100) {
+        chunkN++;
+        const { data, error } = await supabase.functions.invoke("jotform-historical-sync", {
+          body: { form_id: formId },
+        });
+        if (error) throw error;
+        const resp = data as JotformSyncResp;
+        if (!resp.ok) throw new Error(resp.error ?? "Sync failed");
+        totals.fetched        += resp.fetched;
+        totals.inserted       += resp.inserted;
+        totals.skipped        += resp.skipped;
+        totals.wp_created     += resp.wp_created;
+        totals.wp_updated     += resp.wp_updated;
+        totals.total_reported  = resp.total_reported || totals.total_reported;
+        totals.durationMs     += resp.durationMs;
+        onProgress?.({
+          wp_created:    totals.wp_created,
+          wp_updated:    totals.wp_updated,
+          inserted:      totals.inserted,
+          totalReported: totals.total_reported,
+          chunkN,
+        });
+        // Invalidate AFTER each chunk so the UI ticks up. The realtime
+        // debounce coalesces the in-flight writes; this kick makes
+        // sure the page refetches when the chunk completes.
+        qc.invalidateQueries({ queryKey: ["form-responses-infinite", formId] });
+        qc.invalidateQueries({ queryKey: ["form-stats", formId] });
+        if (resp.done) break;
+      }
+      return { ok: true, done: true, ...totals };
     },
-    onSuccess: (_, formId) => {
-      qc.invalidateQueries({ queryKey: RESP_KEY(formId) });
-      qc.invalidateQueries({ queryKey: ["form-responses-infinite", formId] });
-      qc.invalidateQueries({ queryKey: ["form-stats", formId] });
+    onSuccess: (_, vars) => {
+      qc.invalidateQueries({ queryKey: RESP_KEY(vars.formId) });
+      qc.invalidateQueries({ queryKey: ["form-responses-infinite", vars.formId] });
+      qc.invalidateQueries({ queryKey: ["form-stats", vars.formId] });
       qc.invalidateQueries({ queryKey: FORMS_KEY });
       qc.invalidateQueries({ queryKey: ["wp-candidates"] });
     },
