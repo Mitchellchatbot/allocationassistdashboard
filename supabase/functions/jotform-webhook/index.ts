@@ -125,70 +125,58 @@ Deno.serve(async (req: Request) => {
   // body flags the missing email so they know to chase the doctor.
   const hasEmail = !!profile.email;
 
-  // ── 4. Lookup existing WP candidate by email ──────────────────────
-  const { data: existing } = hasEmail ? await supabase
-    .from("wordpress_candidates")
-    .select("id, doctor_id")
-    .ilike("email", profile.email)
-    .order("wp_modified", { ascending: false, nullsFirst: false })
-    .limit(1)
-    .maybeSingle() : { data: null };
+  // ── 4. STAGE the profile (does NOT touch WordPress) ──────────────
+  // Submissions land here, NOT on WordPress. The HI team reviews from
+  // the Staging section on Doctors → Profiles. Only when they click
+  // Save-as-draft or Publish does anything get sent to WP.
+  //
+  // cv_resume gets stored on the staged row itself (in acf jsonb), and
+  // the CV pipeline keys off staged:<id> instead of wp:<id> so the
+  // extracted fields are available when the team chooses to publish.
+  const safeAcf: Record<string, unknown> = { ...(profile.acf ?? {}) };
+  delete safeAcf.cv_resume;  // kept as a separate field; not for WP write
 
-  // ── 5. Upsert to WordPress via the existing edge function ─────────
-  // Wraps WP REST + mirror sync + auto-Zoho-link in one call. We pass
-  // the existing WP id when there's an email match so it's an UPDATE.
-  // New rows land as `status=draft` so HI reviews before they go live.
-  // Skipped entirely when the submission has no email — WP candidates
-  // are keyed on email, no email means no upsert target.
-  let upsertJson: { ok: boolean; id?: number; error?: string } | null = null;
-  if (hasEmail) {
-    // cv_resume is a File-type ACF on WP — sending a raw URL string
-    // triggers a 400 rest_invalid_param that takes down the entire
-    // upsert. We hold the CV URL separately (it's in cv_uploads + the
-    // doctor-cvs bucket via fireCvPipeline below). Drop it from the
-    // outgoing ACF so the rest of the fields land.
-    const safeAcf: Record<string, unknown> = { ...(profile.acf ?? {}) };
-    delete safeAcf.cv_resume;
-    const upsertBody = {
-      id:     existing?.id,
-      status: existing ? undefined : "draft",
-      title:  profile.full_name || "JotForm intake",
-      acf:    safeAcf,
-    };
-    const upsertRes = await fetch(`${supabaseUrl}/functions/v1/wordpress-candidate-upsert`, {
-      method:  "POST",
-      headers: { "Authorization": `Bearer ${serviceKey}`, "Content-Type": "application/json" },
-      body:    JSON.stringify(upsertBody),
-    });
-    upsertJson = await upsertRes.json().catch(() => null) as { ok: boolean; id?: number; error?: string } | null;
-    if (!upsertRes.ok || !upsertJson?.ok) {
-      console.error("[jotform-webhook] WP upsert failed:", upsertJson);
-      // We still record the form_response so the team sees the submission
-      // landed; flagging the error in outreach_notes for visibility.
-    }
-  } else {
-    console.log("[jotform-webhook] no email on submission — skipping WP upsert, recording response only");
+  const stagedInsert: Record<string, unknown> = {
+    source:              "jotform",
+    full_name:           profile.full_name || null,
+    email:               profile.email      || null,
+    phone:               profile.phone      || null,
+    specialty:           (safeAcf.specialty           as string | undefined) ?? null,
+    subspecialty:        (safeAcf.subspecialty        as string | undefined) ?? null,
+    nationality:         (safeAcf.nationality         as string | undefined) ?? null,
+    job_title:           (safeAcf.job_title           as string | undefined) ?? null,
+    current_location:    (safeAcf.current_location    as string | undefined) ?? null,
+    country_of_training: (safeAcf.country_of_training as string | undefined) ?? null,
+    years_experience:    (safeAcf.years_of_experience_post_specialization as string | undefined) ?? null,
+    acf:                 safeAcf,
+    created_by:          "jotform-webhook",
+  };
+
+  const { data: stagedRow, error: stagedErr } = await supabase
+    .from("staged_doctor_profiles")
+    .insert(stagedInsert)
+    .select("id")
+    .single();
+
+  if (stagedErr || !stagedRow) {
+    console.error("[jotform-webhook] staged insert failed:", stagedErr?.message);
   }
+  const stagedId: string | null = stagedRow?.id ?? null;
 
-  // ── 5b. CV pipeline: download → bucket → cv-extract → merge into WP ─
-  // If the submission included a CV URL AND we successfully created/
-  // updated the WP candidate, download the file via the JotForm API
-  // (the URL itself requires a JotForm session), store it in the
-  // doctor-cvs bucket, create a cv_uploads row, and asynchronously
-  // invoke cv-extract. cv-extract will populate doctor_profiles AND
-  // (via the wp:<id> doctor_id prefix) update the WP candidate's ACF
-  // with bio / license / years_experience / etc. — so the team sees
-  // the draft auto-fill over the next 15-30s instead of having to
-  // copy fields by hand.
+  // ── 4b. CV pipeline: download → bucket → cv-extract → write back ──
+  // Async, fire-and-forget. cv-extract handles the staged:<id> prefix
+  // and writes extracted fields onto the staged_doctor_profiles row
+  // via extracted_cv_data. The StagedRow Publish handler merges that
+  // into the WP upsert when the team eventually clicks Publish.
   const cvUrl = (profile.acf?.cv_resume as string | undefined) ?? "";
-  if (cvUrl && upsertJson?.ok && upsertJson.id && form.api_token) {
+  if (cvUrl && stagedId && form.api_token) {
     fireCvPipeline({
       supabaseUrl, serviceKey,
       cvUrl,
       jotformApiKey: form.api_token,
-      wpCandidateId: upsertJson.id,
-      candidateName: profile.full_name || "JotForm intake",
-      candidateEmail: profile.email,
+      stagedProfileId: stagedId,
+      candidateName:   profile.full_name || "JotForm intake",
+      candidateEmail:  profile.email,
     }).catch(e => console.error("[jotform-webhook] cv pipeline error:", e));
   }
 
@@ -212,34 +200,27 @@ Deno.serve(async (req: Request) => {
     outreach_status:       "new",
     outreach_notes:
       !hasEmail
-        ? "Submission saved. No email captured yet — add one in the dashboard to link a profile."
-        : upsertJson?.ok
-          ? `Draft profile ready for review${existing ? " (updated existing)" : ""}.`
-          : "Submission saved. Finish creating the profile in the dashboard.",
+        ? "Staged for review. No email captured yet — open the staging row to add contact details."
+        : stagedId
+          ? "Staged for review. Open Doctors → Profiles → Staging to publish or discard."
+          : "Submission saved. Staging insert failed — create the profile manually if needed.",
   }, { onConflict: "form_id,provider_response_id", ignoreDuplicates: false });
 
-  console.log("[jotform-webhook] processed submission", responseId, "email:", profile.email, "wp_id:", upsertJson?.id, "doctor_id:", doctorId);
+  console.log("[jotform-webhook] processed submission", responseId, "email:", profile.email, "staged_id:", stagedId, "doctor_id:", doctorId);
 
-  // ── 8. Slack-deliverable nudge so the team reviews the profile ─────
-  // Deep-link strategy: deep-link straight into the rich editor for the
-  // freshly-created WP candidate when we have one, so clicking the
-  // Slack button lands the user on the inline edit dialog. Falls back
-  // to the Forms page if the upsert was skipped or failed.
-  const reviewLink = (hasEmail && upsertJson?.ok && upsertJson.id)
-    ? `/doctors?tab=profiles&open=${upsertJson.id}`
-    : `/forms`;
+  // ── 8. Slack-deliverable nudge so the team reviews the staged row ─
+  // Always land on Doctors → Profiles, where the Staging section sits
+  // at the top of the list with Publish / Save-as-draft / Discard
+  // buttons. NOTHING has touched WordPress at this point.
+  const reviewLink = `/doctors?tab=profiles`;
   const summary = [profile.full_name, profile.acf?.specialty, profile.acf?.country_of_training]
     .filter(Boolean).join(" · ") || profile.email || "no contact details extracted yet";
-  // Friendly body — no jargon, no "upsert failed" tech-speak. Tells the
-  // operator what's waiting for them in plain English.
   const body =
     !hasEmail
-      ? `${summary}. No email on the submission yet — open it in the dashboard to add contact details.`
-      : existing
-        ? `${summary}. Existing profile updated — click to review the changes.`
-        : upsertJson?.ok
-          ? `${summary}. Your draft is ready — click to review and publish.`
-          : `${summary}. Submission saved — finish creating the profile in the dashboard.`;
+      ? `${summary}. Staged for review — no email captured, add one in the staging row before publishing.`
+      : stagedId
+        ? `${summary}. Staged for review — pick Publish or Save as draft from the staging row.`
+        : `${summary}. Submission saved, staging failed — create the profile manually if needed.`;
   await notify({
     kind:    "new_form_submission",
     title:   `New form submission${profile.full_name ? ` · ${profile.full_name}` : ""}`,
@@ -249,11 +230,10 @@ Deno.serve(async (req: Request) => {
   }).catch(e => console.error("[jotform-webhook] notify failed:", e));
 
   return json({
-    ok:              true,
-    submission_id:   responseId,
-    wp_candidate_id: upsertJson?.id ?? null,
-    wp_action:       existing ? "updated" : "created",
-    doctor_id:       doctorId,
+    ok:                true,
+    submission_id:     responseId,
+    staged_profile_id: stagedId,
+    doctor_id:         doctorId,
   }, 200);
 });
 
@@ -266,28 +246,27 @@ function json(payload: unknown, status: number): Response {
 
 /**
  * Download a JotForm-hosted CV, drop it in the doctor-cvs bucket,
- * insert a cv_uploads row that links it to the freshly-created WP
- * candidate via doctor_id = `wp:<id>`, and kick off cv-extract.
+ * insert a cv_uploads row that links it to the staged profile via
+ * doctor_id = `staged:<id>`, and kick off cv-extract.
  *
- * cv-extract reads doctor_id off the cv_uploads row and (with the
- * companion change in cv-extract) will detect the wp: prefix +
- * upsert the extracted fields into the matching WP candidate's ACF —
- * so the team's draft auto-fills with bio / license / years_experience
- * over the next ~15-30 seconds.
+ * cv-extract detects the staged: prefix and writes the extracted
+ * fields onto the staged_doctor_profiles row's extracted_cv_data
+ * column. When the team later clicks Publish/Save-as-draft on the
+ * staged row, the publish handler merges that into the WP upsert.
  *
  * Runs fire-and-forget from the webhook so the JotForm round-trip
  * stays fast.
  */
 async function fireCvPipeline(args: {
-  supabaseUrl:    string;
-  serviceKey:     string;
-  cvUrl:          string;
-  jotformApiKey:  string;
-  wpCandidateId:  number;
-  candidateName:  string;
-  candidateEmail: string;
+  supabaseUrl:     string;
+  serviceKey:      string;
+  cvUrl:           string;
+  jotformApiKey:   string;
+  stagedProfileId: string;
+  candidateName:   string;
+  candidateEmail:  string;
 }): Promise<void> {
-  const { supabaseUrl, serviceKey, cvUrl, jotformApiKey, wpCandidateId, candidateName, candidateEmail } = args;
+  const { supabaseUrl, serviceKey, cvUrl, jotformApiKey, stagedProfileId, candidateName, candidateEmail } = args;
 
   // 1. Download the CV from JotForm using APIKEY auth.
   const jfRes = await fetch(cvUrl, { headers: { APIKEY: jotformApiKey } });
@@ -304,11 +283,14 @@ async function fireCvPipeline(args: {
   })();
 
   // 2. Upload to the doctor-cvs storage bucket. Path key:
-  //    wp-<id>/<token>/<filename> — same convention as send-cv-upload-link.
+  //    staged-<id>/<token>/<filename> — staging-aware so cv-extract
+  //    can route the result back to staged_doctor_profiles.
   const sb = createClient(supabaseUrl, serviceKey);
   const token = crypto.randomUUID().replace(/-/g, "");
-  const doctorId = `wp:${wpCandidateId}`;
-  const filePath = `${doctorId}/${token}/${filename}`;
+  const doctorId = `staged:${stagedProfileId}`;
+  // Storage doesn't accept `:` in keys cleanly; replace with `-` for path
+  const safeDir = doctorId.replace(/[:]/g, "-");
+  const filePath = `${safeDir}/${token}/${filename}`;
 
   const { error: upErr } = await sb.storage
     .from("doctor-cvs")
@@ -345,14 +327,22 @@ async function fireCvPipeline(args: {
     return;
   }
 
+  // 3b. Link the cv_uploads row id onto the staged_doctor_profiles row
+  //     so the StagedRow Publish handler can find the CV file path
+  //     without a separate lookup.
+  await sb.from("staged_doctor_profiles")
+    .update({ cv_upload_id: row.id })
+    .eq("id", stagedProfileId);
+
   // 4. Fire cv-extract. Don't await — it can take 15-30s and we want
   //    this whole pipeline to be fire-and-forget. cv-extract handles
-  //    the wp: prefix and updates the WP candidate on its own.
+  //    the staged: prefix and writes extracted_cv_data onto the
+  //    staged_doctor_profiles row.
   fetch(`${supabaseUrl}/functions/v1/cv-extract`, {
     method:  "POST",
     headers: { Authorization: `Bearer ${serviceKey}`, "Content-Type": "application/json" },
     body:    JSON.stringify({ upload_id: row.id }),
   }).catch(e => console.error("[cv-pipeline] cv-extract invoke failed:", e));
 
-  console.log(`[cv-pipeline] queued CV extraction for WP candidate ${wpCandidateId} (upload ${row.id})`);
+  console.log(`[cv-pipeline] queued CV extraction for staged profile ${stagedProfileId} (upload ${row.id})`);
 }

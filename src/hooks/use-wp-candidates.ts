@@ -238,6 +238,8 @@ export interface StagedProfile {
   country_of_training: string | null;
   years_experience:    string | null;
   acf:                 Record<string, unknown>;
+  extracted_cv_data:   Record<string, unknown> | null;
+  cv_upload_id:        string | null;
   created_by:          string | null;
   created_at:          string;
   updated_at:          string;
@@ -331,18 +333,48 @@ export function useDeleteStagedProfile() {
   });
 }
 
-/** Publish a staged profile to WordPress. Calls wordpress-candidate-upsert
- *  with the staging row's acf payload at the requested status, then
- *  drops the staging row on success so the same record can't be
- *  published twice. */
+/** Publish a staged profile to WordPress. Merges the form-derived ACF
+ *  with any CV-extracted fields (written by cv-extract back onto the
+ *  staged row), calls wordpress-candidate-upsert at the requested
+ *  status, then drops the staging row on success. cv_resume is
+ *  stripped from the outgoing ACF — WP rejects it as a raw URL. */
 export function usePublishStagedProfile() {
   const qc = useQueryClient();
   return useMutation({
     mutationFn: async ({ profile, status }: { profile: StagedProfile; status: "draft" | "publish" }) => {
+      // Merge precedence: form ACF (manual edits in the staging row)
+      // wins over CV-extracted fields, which fill the gaps.
+      const cv = profile.extracted_cv_data ?? {};
+      const cvAcf: Record<string, unknown> = {
+        job_title:                                              cv.title,
+        bio:                                                    cv.bio,
+        specific_areas_of_interests_within_the_specialization:  cv.area_of_interest,
+        country_of_training:                                    cv.country_training,
+        years_of_experience_post_specialization:                cv.years_experience,
+        nationality:                                            cv.nationality,
+        family_status:                                          cv.family_status,
+        dha__haad__moh_license:                                 cv.license,
+        expected_salary:                                        cv.salary_expectation,
+        notice_period:                                          cv.notice_period,
+        languages:                                              cv.languages,
+      };
+      const mergedAcf: Record<string, unknown> = { ...cvAcf };
+      // Form values win — only overwrite where the form has a real value.
+      for (const [k, v] of Object.entries(profile.acf ?? {})) {
+        if (v !== null && v !== undefined && v !== "") mergedAcf[k] = v;
+      }
+      // Drop blank/undefined entries so we don't ship "undefined" strings.
+      for (const k of Object.keys(mergedAcf)) {
+        if (mergedAcf[k] === null || mergedAcf[k] === undefined || mergedAcf[k] === "") delete mergedAcf[k];
+      }
+      // cv_resume is a File-type ACF on WP — reject as a string. The CV
+      // file lives in cv_uploads and is reachable via the proxy.
+      delete mergedAcf.cv_resume;
+
       const payload: WpCandidateUpsertPayload = {
         status,
         title: profile.full_name ?? undefined,
-        acf:   profile.acf as WpCandidateUpsertPayload["acf"],
+        acf:   mergedAcf as WpCandidateUpsertPayload["acf"],
       };
       const { data, error } = await supabase.functions.invoke("wordpress-candidate-upsert", { body: payload });
       if (error) throw error;

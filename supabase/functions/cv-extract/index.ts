@@ -203,13 +203,23 @@ Deno.serve(async (req: Request) => {
     extraction_error: null,
   }).eq("id", uploadId);
 
-  // ── Merge into a WP candidate when the upload was created by the
-  //    JotForm pipeline. The cv_uploads.doctor_id is prefixed with
-  //    `wp:<id>` in that case (see fireCvPipeline in jotform-webhook).
-  //    We update the WP candidate's ACF with the extracted bio /
-  //    title / license / years_experience so the team's draft auto-
-  //    fills with CV data without them having to re-extract.
+  // ── Route 1: extracted on top of a STAGED profile. The jotform
+  //    webhook now inserts into staged_doctor_profiles (not WP) and
+  //    keys the cv_uploads row with `staged:<uuid>`. We mirror the
+  //    extracted fields onto the staged row's extracted_cv_data
+  //    column so the StagedRow Publish handler can splice them into
+  //    the WP upsert at click-time.
   const did = String(row.doctor_id ?? "");
+  if (did.startsWith("staged:")) {
+    const stagedId = did.slice(7);
+    await supabase.from("staged_doctor_profiles")
+      .update({ extracted_cv_data: extracted })
+      .eq("id", stagedId);
+    console.log(`[cv-extract] wrote extracted_cv_data onto staged profile ${stagedId}`);
+  }
+
+  // ── Route 2: legacy direct-WP path. Kept for back-compat in case
+  //    any existing cv_uploads rows still use the wp:<id> prefix.
   if (did.startsWith("wp:")) {
     const wpId = Number(did.slice(3));
     if (Number.isFinite(wpId) && wpId > 0) {
