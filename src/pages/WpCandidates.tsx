@@ -1255,8 +1255,13 @@ function StagedRow({ profile }: { profile: StagedProfile }) {
 
   const pending = publish.isPending || del.isPending;
 
+  // CV status indicator — extracted_cv_data fills once the async
+  // cv-extract pass finishes. We show it as a chip so the team knows
+  // there are extra fields ready to merge when they click Publish.
+  const hasCv = !!profile.extracted_cv_data && Object.keys(profile.extracted_cv_data ?? {}).length > 0;
+
   return (
-    <div className="rounded-md border bg-white px-3 py-2 flex items-center gap-3">
+    <div className="rounded-md border border-amber-200/70 bg-white px-3 py-2 flex items-center gap-3">
       <Avatar src={null} name={profile.full_name ?? profile.email ?? "?"} size={28} />
       <div className="flex-1 min-w-0">
         <div className="text-[12px] font-medium text-slate-800 truncate">
@@ -1266,6 +1271,18 @@ function StagedRow({ profile }: { profile: StagedProfile }) {
           {subtitle || profile.email || "—"}
         </div>
       </div>
+      {/* Status chips: 'not on WP' makes it unmissable that this row
+          hasn't been pushed yet, even when scanning the list at a
+          glance. 'CV parsed' appears once cv-extract finishes so the
+          team knows the Publish click will splice in extra fields. */}
+      <Badge variant="outline" className="text-[9px] bg-slate-100 text-slate-600 border-slate-200 shrink-0" title="Not yet on WordPress. Hit Publish or Save as draft to push.">
+        not on WP
+      </Badge>
+      {hasCv && (
+        <Badge variant="outline" className="text-[9px] bg-emerald-50 text-emerald-700 border-emerald-200 shrink-0" title="CV extracted — bio, license, years of experience etc. will merge into WP on Publish.">
+          + CV parsed
+        </Badge>
+      )}
       <div className="flex items-center gap-1 shrink-0">
         <Button
           size="sm"
