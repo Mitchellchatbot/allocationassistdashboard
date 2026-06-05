@@ -596,25 +596,40 @@ Deno.serve(async (req: Request) => {
   //     - Reply-To = their mailbox → hospital replies land in their inbox
   //       natively, so the back-and-forth happens in Gmail like normal
   //       correspondence.
-  //     - BCC      = their mailbox → they also get a copy of every
-  //       outbound, so their inbox carries the full thread.
+  //     - BCC      = whoever the dispatcher picked (defaults to the
+  //       sender so they have a copy; overridable per-run via
+  //       metadata.bcc_override so the team can also loop in colleagues).
   //     - Trade-off: the dashboard's inbound parser doesn't see these
-  //       replies. We capture sent events + the HI member can paste
-  //       any important context back via notes. A follow-up Gmail-OAuth
+  //       replies. We capture sent events + the HI member can paste any
+  //       important context back via notes. A follow-up Gmail-OAuth
   //       integration would make replies dashboard-visible again.
   //
   // (b) Unowned run (system sends, sales, fallback):
   //     - Reply-To = the per-run parser address. Dashboard captures
   //       replies via Resend Inbound + the inbound-hospital-reply edge
-  //       function. No personal mailbox to BCC.
+  //       function. metadata.bcc_override still honoured if set.
   const personalRouting = !!sender.replyHint;
   const parserReplyTo   = `reply-${run.id}@${MAIL_REPLY_DOMAIN}`;
   const replyToAddress  = personalRouting ? sender.replyHint : parserReplyTo;
-  // BCC list — sender's own mailbox when this run has a personal
-  // sender; plus any test-override CC recipients (these go on CC, not
-  // BCC). Skip BCC entirely under TEST_OVERRIDE to avoid double-sending
-  // to the same address.
-  const bccList = (personalRouting && !TEST_OVERRIDE) ? [sender.replyHint] : undefined;
+
+  // BCC list — explicit override from the dispatcher wins; otherwise
+  // default to sender's mailbox under personal routing. TEST_OVERRIDE
+  // bypasses BCC entirely so test runs don't double-deliver.
+  const bccOverrideRaw = (md.bcc_override as unknown);
+  const bccOverride: string[] | null = Array.isArray(bccOverrideRaw)
+    ? (bccOverrideRaw as unknown[])
+        .map(v => typeof v === "string" ? v.trim().toLowerCase() : "")
+        .filter(v => v.length > 0 && v.includes("@"))
+    : null;
+  let bccList: string[] | undefined;
+  if (TEST_OVERRIDE) {
+    bccList = undefined;
+  } else if (bccOverride !== null) {
+    // Empty array on the override means 'BCC no-one' — respect it.
+    bccList = bccOverride.length > 0 ? bccOverride : undefined;
+  } else if (personalRouting) {
+    bccList = [sender.replyHint];
+  }
 
   let resendRes: Response;
   try {

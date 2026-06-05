@@ -6,11 +6,12 @@ import { Label } from "@/components/ui/label";
 import { Textarea } from "@/components/ui/textarea";
 import { Badge } from "@/components/ui/badge";
 import { Checkbox } from "@/components/ui/checkbox";
-import { Search, Send, X, Eye, ChevronLeft, AlertTriangle } from "lucide-react";
+import { Search, Send, X, Eye, ChevronLeft, AlertTriangle, Mail, ChevronDown } from "lucide-react";
 import { toast } from "sonner";
 import { useDoctorLifecycleMap } from "@/hooks/use-doctor-lifecycle";
 import { useAuth } from "@/hooks/use-auth";
-import { findSenderByEmail } from "@/lib/hi-team";
+import { AA_SENDERS, findSenderByEmail } from "@/lib/hi-team";
+import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
 import { supabase } from "@/lib/supabase";
 import { useHospitals, type Hospital } from "@/hooks/use-hospitals";
 import { useEmailTemplates, renderTemplate } from "@/hooks/use-email-templates";
@@ -51,6 +52,11 @@ export function SendProfileDialog({ open, onClose }: Props) {
   const [selectedIds,     setSelectedIds]     = useState<string[]>([]);
   const [customMessage,   setCustomMessage]   = useState("");
   const [submitting,      setSubmitting]      = useState(false);
+  // Dispatcher-chosen BCC list. Empty array = no BCC; null = use the
+  // function's default behaviour (auto-BCC the sender on personal
+  // routing). Defaulted from the current user so their own outbound
+  // copy lands in their inbox unless they actively change it.
+  const [bccList,         setBccList]         = useState<string[]>([]);
 
   const qc = useQueryClient();
   const { data: zoho, isLoading: zohoLoading } = useZohoData();
@@ -65,8 +71,13 @@ export function SendProfileDialog({ open, onClose }: Props) {
       setSelectedDoctor(null);
       setSelectedIds([]);
       setCustomMessage("");
+      // Default the BCC list to the current user if they're a known
+      // sender — most common case is "I'm sending, BCC me on my own
+      // outbound". The Preview step exposes the dropdown for changes.
+      const me = findSenderByEmail(user?.email ?? null);
+      setBccList(me ? [me.email] : []);
     }
-  }, [open]);
+  }, [open, user?.email]);
 
   // Phase 4 — hide signed + unavailable doctors from the send list. Spec:
   // "Signed status removes from public website (not eligible to be sent in
@@ -136,6 +147,10 @@ export function SendProfileDialog({ open, onClose }: Props) {
               custom_message:     customMessage || null,
               doctor_speciality:  selectedDoctor.speciality,
               triggered_via:      "send_profile_dialog",
+              // Dispatcher-picked BCC list — read by send-flow-email
+              // and applied verbatim to the outbound. Empty array =
+              // BCC no-one.
+              bcc_override:       bccList,
             },
           })
           .select("id")
@@ -265,6 +280,8 @@ export function SendProfileDialog({ open, onClose }: Props) {
             onBack={() => setStep("pick-hospitals")}
             onConfirm={handleConfirm}
             submitting={submitting}
+            bccList={bccList}
+            setBccList={setBccList}
           />
         )}
       </DialogContent>
@@ -430,7 +447,7 @@ function HospitalPicker({
 
 function PreviewConfirm({
   doctor, hospitals, customMessage, hospitalSubject, hospitalBody, doctorSubject, doctorBody,
-  onBack, onConfirm, submitting,
+  onBack, onConfirm, submitting, bccList, setBccList,
 }: {
   doctor: DoctorOption;
   hospitals: Hospital[];
@@ -442,6 +459,8 @@ function PreviewConfirm({
   onBack: () => void;
   onConfirm: () => void;
   submitting: boolean;
+  bccList: string[];
+  setBccList: (next: string[]) => void;
 }) {
   // Who'll be on the From line — derived from the current user, which
   // matches what send-flow-email does at send time (looks up
@@ -516,15 +535,22 @@ function PreviewConfirm({
         <div className="text-[11px] text-muted-foreground">
           One run per hospital will be created in Flow 2. Hospital + doctor emails fire automatically on confirm.
         </div>
-        <div className="text-[11px] text-muted-foreground pt-1 border-t border-slate-200/70 mt-1.5 space-y-0.5">
+        <div className="text-[11px] text-muted-foreground pt-1 border-t border-slate-200/70 mt-1.5 space-y-1.5">
           <div>Sending as: <span className="font-medium text-slate-700">{senderLine}</span></div>
+
+          {/* BCC picker — choose any combination of the AA sender
+              roster. Defaulted to the current user so their own
+              outbound copy lands in their inbox; tick others to
+              loop them in on this send. */}
+          <BccPicker selected={bccList} onChange={setBccList} />
+
           {sender ? (
             <div className="text-[10.5px] text-emerald-700">
-              Hospital replies will land in <span className="font-mono">{sender.email}</span> · a BCC copy also goes there so your inbox has the full thread.
+              Hospital replies will land in <span className="font-mono">{sender.email}</span>. BCC{bccList.length ? `: ${bccList.join(", ")}` : ": none"}.
             </div>
           ) : (
             <div className="text-[10.5px] text-amber-700">
-              Current user isn't in the verified sender roster, so the generic team address is used and replies route through the dashboard parser.
+              Current user isn't in the verified sender roster, so the generic team address is used and replies route through the dashboard parser. BCC{bccList.length ? `: ${bccList.join(", ")}` : ": none"}.
             </div>
           )}
         </div>
@@ -669,5 +695,76 @@ function HtmlPreview({ html }: { html: string }) {
       sandbox="allow-same-origin"
       style={{ width: "100%", height, border: "1px solid hsl(var(--border))", borderRadius: 6, background: "#fff" }}
     />
+  );
+}
+
+/** Multi-select dropdown for BCC. Choose any combination of the AA
+ *  sender roster (Rodaina / Mohamed / Sohaila / Ishak / Ammar). The
+ *  trigger label flips between 'BCC nobody' / 'BCC just me' / 'BCC X'
+ *  / 'BCC X+1 others' depending on selection, so the closed state
+ *  reads at a glance without needing to open the popover. */
+function BccPicker({ selected, onChange }: { selected: string[]; onChange: (next: string[]) => void }) {
+  const selectedSet = new Set(selected.map(e => e.toLowerCase()));
+
+  const toggle = (email: string) => {
+    const lc = email.toLowerCase();
+    if (selectedSet.has(lc)) {
+      onChange(selected.filter(e => e.toLowerCase() !== lc));
+    } else {
+      onChange([...selected, email]);
+    }
+  };
+
+  const summary = (() => {
+    if (selected.length === 0) return "BCC: nobody";
+    if (selected.length === 1) {
+      const m = AA_SENDERS.find(s => s.email.toLowerCase() === selected[0].toLowerCase());
+      return `BCC: ${m?.name ?? selected[0]}`;
+    }
+    const first = AA_SENDERS.find(s => s.email.toLowerCase() === selected[0].toLowerCase());
+    return `BCC: ${first?.name ?? selected[0]} +${selected.length - 1}`;
+  })();
+
+  return (
+    <Popover>
+      <PopoverTrigger className="inline-flex items-center gap-1.5 text-[10.5px] h-6 px-2 rounded-full border border-slate-200 bg-white text-slate-700 hover:bg-slate-50 transition-colors">
+        <Mail className="h-3 w-3" />
+        <span>{summary}</span>
+        <ChevronDown className="h-3 w-3 opacity-60" />
+      </PopoverTrigger>
+      <PopoverContent className="w-[280px] p-2" align="start">
+        <div className="text-[10px] uppercase tracking-wider text-muted-foreground px-1.5 pb-1.5">
+          Loop colleagues in on this send
+        </div>
+        <div className="space-y-0.5">
+          {AA_SENDERS.map(s => {
+            const checked = selectedSet.has(s.email.toLowerCase());
+            return (
+              <label
+                key={s.email}
+                className="flex items-center gap-2 px-1.5 py-1 rounded hover:bg-slate-50 cursor-pointer"
+              >
+                <Checkbox
+                  checked={checked}
+                  onCheckedChange={() => toggle(s.email)}
+                  className="h-3.5 w-3.5"
+                />
+                <span className="text-[12px] text-slate-800 flex-1">{s.name}</span>
+                <span className="text-[10px] font-mono text-muted-foreground">{s.email.split("@")[0]}</span>
+              </label>
+            );
+          })}
+        </div>
+        {selected.length > 0 && (
+          <button
+            type="button"
+            onClick={() => onChange([])}
+            className="mt-1.5 text-[10.5px] text-slate-500 hover:text-slate-700 px-1.5"
+          >
+            Clear all
+          </button>
+        )}
+      </PopoverContent>
+    </Popover>
   );
 }
