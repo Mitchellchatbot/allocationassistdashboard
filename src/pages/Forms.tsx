@@ -43,7 +43,7 @@ import {
 } from "@/hooks/use-forms";
 import { toast } from "sonner";
 import { supabase } from "@/lib/supabase";
-import { useWpCandidateByEmail, useWpEmailSet } from "@/hooks/use-wp-candidates";
+import { useWpCandidateByContact, useWpContactSet, normalizePhone } from "@/hooks/use-wp-candidates";
 import { CreateWpProfileDialog } from "@/components/forms/CreateWpProfileDialog";
 
 const supabaseUrl = (import.meta.env.VITE_SUPABASE_URL as string) ?? "";
@@ -163,10 +163,10 @@ function FormDetail({ form }: { form: Form }) {
     (isPaidFormInit || isJotform) ? "all" : "uncontacted-zoho",
   );
   // WP-presence filter — JotForm only. Client-side because the data
-  // lives in a separate table. Pre-fetched email set + Set lookup
-  // keeps this O(1) per row.
+  // lives in a separate table. Pre-fetched email + phone sets +
+  // Set.has lookups keep this O(1) per row.
   const [wpFilter, setWpFilter] = useState<"all" | "in" | "out">("all");
-  const wpEmails = useWpEmailSet();
+  const wpContacts = useWpContactSet();
   const { user } = useAuth();
 
   // Server-side paginated + filtered feed. First page is 200 rows; each
@@ -186,14 +186,16 @@ function FormDetail({ form }: { form: Form }) {
     // sees an already-trimmed list. While the email set is still
     // loading we pass everything through rather than blanking the
     // list — avoids a momentary empty state on first paint.
-    const filtered = (!isJotform || wpFilter === "all" || !wpEmails.data) ? flat : flat.filter(r => {
+    const filtered = (!isJotform || wpFilter === "all" || !wpContacts.data) ? flat : flat.filter(r => {
       const e = (r.respondent_email ?? "").toLowerCase().trim();
-      const inWp = !!e && wpEmails.data!.has(e);
+      const p = normalizePhone(phoneFor(r));
+      const inWp = (!!e && wpContacts.data!.emails.has(e))
+                || (!!p && wpContacts.data!.phones.has(p));
       return wpFilter === "in" ? inWp : !inWp;
     });
     if ((form.lead_value_cents ?? 0) > 0) return filtered;
     return filtered;
-  }, [feed.data, form.lead_value_cents, isJotform, wpFilter, wpEmails.data]);
+  }, [feed.data, form.lead_value_cents, isJotform, wpFilter, wpContacts.data]);
 
   // KPIs from cheap server-side count queries — total / last 7 days /
   // Zoho-linked — no longer dependent on the loaded set.
@@ -1043,13 +1045,15 @@ function ResponseRow({
   const phone   = useMemo(() => phoneFor(response), [response]);
   const avatar  = useMemo(() => pictureUrlFor(response), [response]);
 
-  // Check whether a WP candidate already exists for this email so we
-  // can either offer a 'Create WP profile' action (no match) or a
-  // 'View in WP' link (match). Only matters for JotForm — Typeform /
-  // Elementor flows don't feed WP. Query is guarded by `enabled` in
-  // the hook, so we still call it unconditionally for hook-rules sake.
-  const wpQuery = useWpCandidateByEmail(
+  // Check whether a WP candidate already exists for this submission so
+  // we can either offer a 'Create WP profile' action (no match) or a
+  // 'View in WP' link (match). Matches on email OR normalised phone —
+  // a row that the doctor submitted with a different email but the
+  // same phone we already have on file is still in WP. Only matters
+  // for JotForm — Typeform / Elementor flows don't feed WP.
+  const wpQuery = useWpCandidateByContact(
     formProvider === "jotform" ? response.respondent_email : null,
+    formProvider === "jotform" ? phone : null,
   );
   const existingWp = wpQuery.data;
 
@@ -1135,14 +1139,16 @@ function ResponseRow({
         )}
         {/* WP profile presence — paired with the Zoho badge so the team
             sees both systems' state without expanding the row. Only
-            JotForm feeds WP, so other providers stay silent. */}
+            JotForm feeds WP, so other providers stay silent. Match
+            considers email OR phone so a doctor who re-submitted with
+            a different email isn't flagged as missing. */}
         {formProvider === "jotform" && !wpQuery.isLoading && (
           existingWp ? (
             <Badge variant="outline" className="text-[9px] bg-violet-50 text-violet-700 border-violet-200 shrink-0" title={`WP candidate #${existingWp.id} · ${existingWp.status ?? ""}`}>
               <Sparkles className="h-2.5 w-2.5 mr-0.5" /> in WordPress
             </Badge>
-          ) : response.respondent_email ? (
-            <Badge variant="outline" className="text-[9px] bg-slate-100 text-slate-500 border-slate-200 shrink-0" title="No WP candidate matches this email yet — expand the row to create one">
+          ) : (response.respondent_email || phone) ? (
+            <Badge variant="outline" className="text-[9px] bg-slate-100 text-slate-500 border-slate-200 shrink-0" title="No WP candidate matches this email or phone yet — expand the row to create one">
               not in WP
             </Badge>
           ) : null

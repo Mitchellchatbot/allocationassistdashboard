@@ -254,66 +254,104 @@ export function useWpCandidateByDoctorId(doctorId: string | null) {
   });
 }
 
-/** Lower-cased Set of every email that has at least one matching WP
- *  candidate. Used by the Forms page's "in WordPress / not in WP"
- *  filter chip — pre-fetching the full set once is cheaper than per
- *  row email lookups, and the table is ~1.2k rows. Refreshes on the
- *  same realtime channel as the main list. */
-export function useWpEmailSet() {
+/** Normalise a phone to its last 9 digits so country-code / spacing /
+ *  punctuation variants collapse onto the same key. JotForm hands us
+ *  '+44 7900 123 456'; WP often has '07900123456' or '447900123456';
+ *  taking the last-9 ('900123456') matches both without false-positives
+ *  on short strings (returns null for anything under 8 digits). */
+export function normalizePhone(raw: string | null | undefined): string | null {
+  const digits = (raw ?? "").replace(/\D+/g, "");
+  if (digits.length < 8) return null;
+  return digits.slice(-9);
+}
+
+/** Contact-set used by the Forms page's "in WordPress / not in WP"
+ *  filter chip + the per-row badge: any candidate matched on email OR
+ *  phone counts. Pre-fetching the full set once is cheaper than per
+ *  row lookups, and the table is ~1.2k rows. Refreshes on the shared
+ *  realtime channel so newly-created candidates flip badges live. */
+export function useWpContactSet() {
   const qc = useQueryClient();
-  const q = useQuery<Set<string>>({
-    queryKey: ["wp-candidate-email-set"],
+  const q = useQuery<{ emails: Set<string>; phones: Set<string> }>({
+    queryKey: ["wp-candidate-contact-set"],
     queryFn: async () => {
-      const out = new Set<string>();
+      const emails = new Set<string>();
+      const phones = new Set<string>();
       const PAGE = 1000;
       for (let from = 0; from < 50_000; from += PAGE) {
         const { data, error } = await supabase
           .from("wordpress_candidates")
-          .select("email")
-          .not("email", "is", null)
+          .select("email, phone")
           .range(from, from + PAGE - 1);
         if (error) throw error;
-        const batch = (data ?? []) as Array<{ email: string | null }>;
+        const batch = (data ?? []) as Array<{ email: string | null; phone: string | null }>;
         for (const r of batch) {
           const e = (r.email ?? "").toLowerCase().trim();
-          if (e) out.add(e);
+          if (e) emails.add(e);
+          const p = normalizePhone(r.phone);
+          if (p) phones.add(p);
         }
         if (batch.length < PAGE) break;
       }
-      return out;
+      return { emails, phones };
     },
     staleTime: 60_000,
   });
   useTableSubscription("wordpress_candidates", useCallback(() => {
-    qc.invalidateQueries({ queryKey: ["wp-candidate-email-set"] });
+    qc.invalidateQueries({ queryKey: ["wp-candidate-contact-set"] });
   }, [qc]));
   return q;
 }
 
-/** Look up a WP candidate by email. Used by the Forms page to decide
- *  whether to surface a "Create WP profile" button for an unmatched
- *  JotForm submission. Returns null if no candidate has that email.
- *  Case-insensitive — WP stores emails case-preserving but the rest of
- *  the dashboard treats them as identifiers. */
-export function useWpCandidateByEmail(email: string | null | undefined) {
+/** Look up a WP candidate by email OR phone. Used by the Forms page to
+ *  decide whether to surface a "Create WP profile" button — a row with
+ *  no email but a matching phone shouldn't get the create prompt.
+ *  Returns null if neither contact matches. Email matched first (the
+ *  cheaper exact-string lookup); phone is fall-back, normalised to
+ *  last-9-digits and matched via ILIKE suffix so country-code variants
+ *  collapse onto the same record. */
+export function useWpCandidateByContact(email: string | null | undefined, phone: string | null | undefined) {
+  const normEmail = (email ?? "").toLowerCase().trim();
+  const normPhone = normalizePhone(phone);
   return useQuery<WpCandidate | null>({
-    queryKey: ["wp-candidate-by-email", (email ?? "").toLowerCase().trim()],
-    enabled: !!email && email.includes("@"),
+    queryKey: ["wp-candidate-by-contact", normEmail, normPhone ?? ""],
+    enabled:  !!normEmail || !!normPhone,
     queryFn: async () => {
-      const e = (email ?? "").toLowerCase().trim();
-      if (!e) return null;
-      const { data, error } = await supabase
-        .from("wordpress_candidates")
-        .select("*")
-        .ilike("email", e)
-        .order("wp_modified", { ascending: false, nullsFirst: false })
-        .limit(1)
-        .maybeSingle();
-      if (error) throw error;
-      return (data ?? null) as WpCandidate | null;
+      if (normEmail) {
+        const { data, error } = await supabase
+          .from("wordpress_candidates")
+          .select("*")
+          .ilike("email", normEmail)
+          .order("wp_modified", { ascending: false, nullsFirst: false })
+          .limit(1)
+          .maybeSingle();
+        if (error) throw error;
+        if (data) return data as WpCandidate;
+      }
+      if (normPhone) {
+        // Suffix-match — WP phones can have country codes or not; we
+        // already collapsed to the last 9 digits client-side.
+        const { data, error } = await supabase
+          .from("wordpress_candidates")
+          .select("*")
+          .ilike("phone", `%${normPhone}`)
+          .order("wp_modified", { ascending: false, nullsFirst: false })
+          .limit(1)
+          .maybeSingle();
+        if (error) throw error;
+        if (data) return data as WpCandidate;
+      }
+      return null;
     },
     staleTime: 60_000,
   });
+}
+
+/** Back-compat shim — the old hook took only an email. Keep the name
+ *  pointing at the new email-or-phone implementation so existing call
+ *  sites continue to work, and remove on the next sweep. */
+export function useWpCandidateByEmail(email: string | null | undefined) {
+  return useWpCandidateByContact(email, null);
 }
 
 /** Compute age in years from the WP date_of_birth field. WP accepts
