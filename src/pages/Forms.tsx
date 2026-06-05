@@ -50,6 +50,10 @@ function webhookUrlFor(form: Form): string {
   if (form.provider === "typeform") {
     return `${supabaseUrl}/functions/v1/typeform-webhook`;
   }
+  if (form.provider === "jotform") {
+    // JotForm doesn't sign requests; the secret in the URL is the auth.
+    return `${supabaseUrl}/functions/v1/jotform-webhook?key=${form.webhook_secret ?? ""}`;
+  }
   // Elementor / generic: identifies the form by webhook_secret in URL.
   return `${supabaseUrl}/functions/v1/form-webhook?key=${form.webhook_secret ?? ""}`;
 }
@@ -127,6 +131,7 @@ function ProviderDot({ provider }: { provider: string }) {
   const cls =
     provider === "typeform"   ? "bg-purple-500" :
     provider === "elementor"  ? "bg-pink-500"   :
+    provider === "jotform"    ? "bg-amber-500"  :
                                 "bg-slate-400";
   return <span className={`inline-block h-1.5 w-1.5 rounded-full ${cls}`} title={provider} />;
 }
@@ -465,6 +470,8 @@ function FormDetail({ form }: { form: Form }) {
                 <p className="text-[10px] text-muted-foreground/80 mt-1">
                   {form.provider === "typeform"
                     ? "Once the webhook is active in Typeform, submissions appear here within seconds. Or click 'Sync history' to backfill past responses."
+                    : form.provider === "jotform"
+                    ? "Once the webhook URL is wired into JotForm → Settings → Integrations → Webhooks, submissions appear here within seconds AND auto-create a WordPress doctor profile."
                     : "Once the webhook URL is wired into Elementor, submissions appear here within seconds."}
                 </p>
               </div>
@@ -561,6 +568,8 @@ function SetupDialog({ form, open, onClose }: { form: Form; open: boolean; onClo
           <p className="text-[11px] text-muted-foreground">
             {form.provider === "typeform"
               ? "Paste this URL + secret into Typeform → Connect → Webhooks if you ever recreate the webhook."
+              : form.provider === "jotform"
+              ? "Paste this URL into JotForm → Settings → Integrations → Webhooks. Each submission auto-creates or updates a WordPress doctor profile (matched by email; new ones land as drafts for review). The key in the URL is the auth — keep it secret."
               : "Paste this URL into the Elementor form's 'Webhook' action. The key in the URL identifies this form — keep it secret."}
           </p>
         </DialogHeader>
