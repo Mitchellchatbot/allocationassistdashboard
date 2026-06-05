@@ -288,6 +288,89 @@ async function loadDoctorLifecycles(): Promise<DoctorLifecycle[]> {
   return (data ?? []) as DoctorLifecycle[];
 }
 
+// Newer entities added so the AI has visibility into everything the team
+// actually touches day-to-day — not just the Zoho mirror.
+
+interface FormResponseRow {
+  id: string; form_id: string; respondent_email: string | null;
+  doctor_id: string | null; outreach_status: string | null;
+  outreach_owner: string | null; next_followup_at: string | null;
+  submitted_at: string;
+}
+
+interface WpCandidateRow {
+  id: number; full_name: string | null; email: string | null;
+  phone: string | null; specialty: string | null; subspecialty: string | null;
+  years_experience: number | null; current_location: string | null;
+  status: string | null; doctor_id: string | null;
+  wp_link: string | null;
+}
+
+interface CallLogRow {
+  id: string; call_date: string; doctor_name: string | null;
+  doctor_email: string | null; status: string | null;
+  qualifications: string | null; specialty: string | null;
+  years_experience: number | null;
+}
+
+interface PlacementRow {
+  id: string; doctor_name: string | null; hospital_name: string | null;
+  specialty: string | null; shortlisted_at: string | null;
+  interviewed_at: string | null; offered_at: string | null;
+  signed_at: string | null; start_date: string | null;
+  joined_at: string | null; paid_at: string | null;
+}
+
+interface VacancyLinkRow {
+  vacancy_id: string; lead_id: string | null;
+  doctor_name: string | null; linked_at: string;
+}
+
+async function loadFormResponses(): Promise<FormResponseRow[]> {
+  const { data } = await supabase
+    .from('form_responses')
+    .select('id, form_id, respondent_email, doctor_id, outreach_status, outreach_owner, next_followup_at, submitted_at')
+    .order('submitted_at', { ascending: false })
+    .limit(400);
+  return (data ?? []) as FormResponseRow[];
+}
+
+async function loadWpCandidates(): Promise<WpCandidateRow[]> {
+  const { data } = await supabase
+    .from('wordpress_candidates')
+    .select('id, full_name, email, phone, specialty, subspecialty, years_experience, current_location, status, doctor_id, wp_link')
+    .order('wp_modified', { ascending: false, nullsFirst: false })
+    .limit(500);
+  return (data ?? []) as WpCandidateRow[];
+}
+
+async function loadRecentCalls(): Promise<CallLogRow[]> {
+  const { data } = await supabase
+    .from('call_log')
+    .select('id, call_date, doctor_name, doctor_email, status, qualifications, specialty, years_experience')
+    .order('call_date', { ascending: false })
+    .limit(200);
+  return (data ?? []) as CallLogRow[];
+}
+
+async function loadPlacements(): Promise<PlacementRow[]> {
+  const { data } = await supabase
+    .from('placement_attempts')
+    .select('id, doctor_name, hospital_name, specialty, shortlisted_at, interviewed_at, offered_at, signed_at, start_date, joined_at, paid_at')
+    .order('updated_at', { ascending: false })
+    .limit(200);
+  return (data ?? []) as PlacementRow[];
+}
+
+async function loadVacancyLinks(): Promise<VacancyLinkRow[]> {
+  const { data } = await supabase
+    .from('vacancy_lead_links')
+    .select('vacancy_id, lead_id, doctor_name, linked_at')
+    .order('linked_at', { ascending: false })
+    .limit(300);
+  return (data ?? []) as VacancyLinkRow[];
+}
+
 // ── Filter detection ──────────────────────────────────────────────────────────
 
 const STATUS_KEYWORDS: Record<string, string> = {
@@ -479,6 +562,11 @@ Deno.serve(async (req: Request) => {
     notifications,
     hospitals,
     lifecycles,
+    formResponses,
+    wpCandidates,
+    recentCalls,
+    placements,
+    vacancyLinks,
   ] = await Promise.all([
     loadZohoCache(),
     loadContracts(),
@@ -488,6 +576,11 @@ Deno.serve(async (req: Request) => {
     loadOpenNotifications(),
     loadHospitalsSummary(),
     loadDoctorLifecycles(),
+    loadFormResponses(),
+    loadWpCandidates(),
+    loadRecentCalls(),
+    loadPlacements(),
+    loadVacancyLinks(),
   ]);
 
   // ── Detect filters ────────────────────────────────────────────────────────
@@ -625,6 +718,41 @@ Deno.serve(async (req: Request) => {
   const joinedNotApproved = lifecycles.filter(l => l.joined_at && !l.approved_at).length;
   const unavailableCount = lifecycles.filter(l => l.unavailable).length;
 
+  // ── New entity rollups ─────────────────────────────────────────────────
+  const formByStatus: Record<string, number> = {};
+  for (const fr of formResponses) {
+    const k = fr.outreach_status ?? 'new';
+    formByStatus[k] = (formByStatus[k] ?? 0) + 1;
+  }
+  const formsLinkedToDoctor   = formResponses.filter(f => !!f.doctor_id).length;
+  const formsAwaitingFollowup = formResponses.filter(f => f.next_followup_at && new Date(f.next_followup_at!).getTime() < now).length;
+
+  const wpByStatus: Record<string, number> = {};
+  for (const c of wpCandidates) {
+    const k = c.status ?? 'unknown';
+    wpByStatus[k] = (wpByStatus[k] ?? 0) + 1;
+  }
+  const wpUnlinked = wpCandidates.filter(c => !c.doctor_id).length;
+
+  const callByStatus: Record<string, number> = {};
+  for (const c of recentCalls) {
+    const k = (c.status ?? '—').toLowerCase();
+    callByStatus[k] = (callByStatus[k] ?? 0) + 1;
+  }
+  const highPotentialCalls = recentCalls.filter(c => (c.status ?? '').toLowerCase() === 'high potential').length;
+  const declinedCalls       = recentCalls.filter(c => (c.status ?? '').toLowerCase() === 'declined').length;
+
+  // Placements 45-day clock buckets
+  const placementsPaid       = placements.filter(p => !!p.paid_at).length;
+  const placementsAwaitingPayment = placements.filter(p => p.joined_at && !p.paid_at).length;
+  const placementsOverdue    = placements.filter(p => {
+    if (!p.joined_at || p.paid_at) return false;
+    const due = new Date(p.joined_at).getTime() + 45 * 86_400_000;
+    return now > due;
+  }).length;
+
+  const vacanciesWithCandidates = new Set(vacancyLinks.map(v => v.vacancy_id)).size;
+
   // Compact text rep — kept tight so we don't blow the token budget.
   const FLOW_LABELS: Record<string, string> = {
     onboarding:       'Onboarding (welcome + form)',
@@ -686,6 +814,24 @@ Deno.serve(async (req: Request) => {
     '',
     '=== DOCTOR LIFECYCLE ===',
     `Signed but not joined yet: ${signedNotJoined}. Joined but not approved: ${joinedNotApproved}. Marked unavailable: ${unavailableCount}.`,
+    '',
+    '=== FORM SUBMISSIONS ===',
+    `Total recent: ${formResponses.length} (last 400). Linked to Zoho doctor: ${formsLinkedToDoctor}. Follow-up overdue: ${formsAwaitingFollowup}.`,
+    `By outreach status: ${Object.entries(formByStatus).map(([k, n]) => `${k}=${n}`).join(', ')}.`,
+    '',
+    '=== WORDPRESS CANDIDATES (doctor profiles published on the website) ===',
+    `Total mirrored: ${wpCandidates.length}. Unlinked from Zoho: ${wpUnlinked}.`,
+    `By status: ${Object.entries(wpByStatus).map(([k, n]) => `${k}=${n}`).join(', ')}.`,
+    '',
+    '=== CALL LOG (recent sales calls) ===',
+    `Recent calls tracked: ${recentCalls.length}. High potential: ${highPotentialCalls}. Declined: ${declinedCalls}.`,
+    `By status: ${Object.entries(callByStatus).map(([k, n]) => `${k}=${n}`).join(', ')}.`,
+    '',
+    '=== PLACEMENTS (per-doctor, per-hospital attempts) ===',
+    `Tracked: ${placements.length}. Paid: ${placementsPaid}. Awaiting 45-day payment: ${placementsAwaitingPayment}. Overdue: ${placementsOverdue}.`,
+    '',
+    '=== VACANCY LINKS (leads attached to open roles) ===',
+    `Total links: ${vacancyLinks.length}. Distinct vacancies with at least one candidate: ${vacanciesWithCandidates}.`,
   ].join('\n');
 
   const contextBlock = [
@@ -787,6 +933,41 @@ CHARTS: When visualising distribution, comparison, or trends include ONE chart a
 - pie:  {"labels":["A","B"],"values":[10,20]}
 - line: {"labels":["Jan","Feb"],"series":[{"name":"Leads","values":[10,20]}]}
 Only include a chart when it genuinely adds value.
+
+AGENTIC ACTIONS — you are not just a chat, you can SERVE BUTTONS the user can
+click to perform operations. Emit ZERO or more action proposals at the END of
+your response (after charts, never inline mid-sentence) using:
+
+<action type="TYPE" label="BUTTON LABEL" params='VALID_JSON'>One-line rationale shown above the button.</action>
+
+The client renders each as a confirmation button. Clicking it performs the
+operation against the live data. Suggest actions when the user's question
+implies a follow-up the dashboard can perform; do NOT suggest actions for
+purely informational questions.
+
+Supported types + required params:
+- navigate         params: {"path":"/vacancies?status=open"}                   — jump to a page (with query params).
+- search           params: {"query":"radiology"}                               — open Universal Search prefilled.
+- open_doctor      params: {"doctorId":"lead:1234"}                            — open doctor in Doctors → Progress filtered to them.
+- open_vacancy     params: {"vacancyId":"abc-uuid"}                            — open the vacancy detail sheet.
+- open_run         params: {"runId":"abc-uuid"}                                — open an automation_flow_run in its sheet.
+- update_lead_status   params: {"zohoId":"...", "newStatus":"Initial Call Done"}  — change Zoho Lead_Status. Choices listed in glossary.
+- reassign_run     params: {"runId":"...", "toEmail":"rodaina@allocationassist.com"} — reassign an active flow run.
+- mark_shortlisted params: {"runId":"..."}                                     — confirm a hospital reply suggestion, advance profile_sent.
+- send_profile     params: {"doctorId":"lead:1234"}                            — open the Send Profile dialog pre-selected to that doctor.
+- link_to_vacancy  params: {"leadId":"...","vacancyId":"..."}                  — insert into vacancy_lead_links.
+- create_wp_profile params: {"responseId":"form-response-uuid"}                — open the Create WP Profile review dialog for a JotForm submission.
+- mark_vacancy_status params: {"vacancyId":"...","status":"filled|closed|open"} — change vacancy status.
+- update_outreach  params: {"responseId":"...","status":"contacted|qualified|unqualified|closed"} — set a form response's outreach status.
+
+RULES for actions:
+1. Always include a short rationale between the open and close tags — what the
+   click will do, in one line, plain English.
+2. Use IDs from the data above. Never invent UUIDs.
+3. Prefer the smallest action that moves the user forward. Don't propose 6
+   buttons; 1–3 is the sweet spot.
+4. If the user is just asking "what" or "how many", DON'T propose actions —
+   they want a number, not a click.
 
 ${contextBlock}`;
 

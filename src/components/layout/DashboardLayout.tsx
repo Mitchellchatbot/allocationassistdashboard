@@ -12,6 +12,7 @@ const HI_PAGES = new Set([
   "/vacancies", "/batches", "/reports", "/forms",
 ]);
 import { ChatChart, parseCharts } from "@/components/ChatChart";
+import { ChatActionBar, parseActions } from "@/components/ChatActions";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { CurrencyToggle } from "@/components/CurrencyToggle";
@@ -342,11 +343,16 @@ export function DashboardLayout({ children, title: pageTitle, subtitle: pageSubt
         done = d;
         if (value) {
           full += decoder.decode(value, { stream: !d });
-          // Strip <chart>…</chart> blocks during streaming so the user
-          // doesn't see raw JSON before the chart renders. The final
-          // setChatMessages below keeps the full text including charts
-          // for the persisted message render.
-          setChatStreaming(full.replace(/<chart\b[^>]*>[\s\S]*?<\/chart>/gi, ""));
+          // Strip <chart>…</chart> AND <action>…</action> blocks during
+          // streaming so the user doesn't see raw XML/JSON before the
+          // chart / action buttons render. The final setChatMessages
+          // below keeps the full text so the message-render pass can
+          // parse them out.
+          setChatStreaming(
+            full
+              .replace(/<chart\b[^>]*>[\s\S]*?<\/chart>/gi, "")
+              .replace(/<action\b[^>]*>[\s\S]*?<\/action>/gi, ""),
+          );
         }
       }
 
@@ -656,7 +662,12 @@ export function DashboardLayout({ children, title: pageTitle, subtitle: pageSubt
                   </div>
                   <div className="flex-1 min-w-0">
                     {(() => {
-                      const { text: cleanText, charts } = parseCharts(m.content);
+                      // First strip <action> tags, then <chart> tags from
+                      // what remains. parseActions returns the cleaned
+                      // text + structured ActionSpec[]; parseCharts then
+                      // does the same for charts.
+                      const { text: noActions, actions } = parseActions(m.content);
+                      const { text: cleanText, charts }  = parseCharts(noActions);
                       return (
                         <div className="space-y-2">
                           {cleanText && (
@@ -719,6 +730,12 @@ export function DashboardLayout({ children, title: pageTitle, subtitle: pageSubt
                               <ChatChart spec={spec} />
                             </div>
                           ))}
+                          {actions.length > 0 && (
+                            <ChatActionBar
+                              actions={actions}
+                              onActionDone={() => setAiOpen(false)}
+                            />
+                          )}
                         </div>
                       );
                     })()}
