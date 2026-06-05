@@ -115,10 +115,16 @@ async function handleUpsert(req: Request): Promise<Response> {
   }
   const wpJson = await wpRes.json().catch(() => null) as { id?: number; code?: string; message?: string } | null;
   if (!wpRes.ok || !wpJson || wpJson.code) {
+    // Pass through 4xx as-is so the client sees the actual WP error
+    // (rest_invalid_param, rest_forbidden, etc.) instead of an opaque
+    // 502. 5xx stays 502 because that's a true upstream gateway issue.
+    const passthrough = wpRes.status >= 400 && wpRes.status < 500
+      ? wpRes.status
+      : 502;
     return json({
       ok: false,
       error: `WP ${wpRes.status}: ${wpJson?.code ?? "unknown"} — ${wpJson?.message ?? "no body"}`,
-    }, wpRes.status === 401 ? 401 : 502);
+    }, passthrough);
   }
 
   const newId = wpJson.id;

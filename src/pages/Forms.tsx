@@ -1113,11 +1113,19 @@ function ResponseRow({
     try {
       const mapped = mapAnswersToWp(response.answers ?? {});
       const fullName = mapped.full_name || display.label || "New profile";
+      // Strip ACF fields the WP REST endpoint refuses on POST. cv_resume
+      // is a File-type ACF — it wants an attachment id, not a raw URL,
+      // and rejects the entire body with 400 rest_invalid_param if we
+      // pass a string. The CV stays in our doctor-cvs bucket + the
+      // cv_uploads table; the team accesses it from the Forms page via
+      // the jotform-file-proxy.
+      const safeAcf: Record<string, unknown> = { ...(mapped.acf ?? {}), full_name: fullName };
+      delete safeAcf.cv_resume;
       const r = await upsertWp.mutateAsync({
         status:    "draft",
         title:     fullName,
         doctor_id: response.doctor_id ?? null,
-        acf:       { ...(mapped.acf ?? {}), full_name: fullName },
+        acf:       safeAcf,
       });
       if (r.id) {
         navigate(`/doctors?tab=profiles&open=${r.id}`);

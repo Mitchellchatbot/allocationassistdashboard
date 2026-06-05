@@ -142,11 +142,18 @@ Deno.serve(async (req: Request) => {
   // are keyed on email, no email means no upsert target.
   let upsertJson: { ok: boolean; id?: number; error?: string } | null = null;
   if (hasEmail) {
+    // cv_resume is a File-type ACF on WP — sending a raw URL string
+    // triggers a 400 rest_invalid_param that takes down the entire
+    // upsert. We hold the CV URL separately (it's in cv_uploads + the
+    // doctor-cvs bucket via fireCvPipeline below). Drop it from the
+    // outgoing ACF so the rest of the fields land.
+    const safeAcf: Record<string, unknown> = { ...(profile.acf ?? {}) };
+    delete safeAcf.cv_resume;
     const upsertBody = {
       id:     existing?.id,
       status: existing ? undefined : "draft",
       title:  profile.full_name || "JotForm intake",
-      acf:    profile.acf,
+      acf:    safeAcf,
     };
     const upsertRes = await fetch(`${supabaseUrl}/functions/v1/wordpress-candidate-upsert`, {
       method:  "POST",
