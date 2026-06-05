@@ -101,8 +101,8 @@ export default function MyWorkspace() {
             </div>
             <div className="flex items-center gap-2">
               <HeroStat label="Tasks" value={totalTasks} tone="default" />
-              <HeroStat label="Action now" value={action} tone={action > 0 ? "rose" : "default"} />
-              <HeroStat label="Stale 7d+" value={stale} tone={stale > 0 ? "amber" : "default"} />
+              <HeroStat label="Action now" value={action} tone={action > 0 ? "rose" : "default"} hint="Tasks assigned to you that are waiting for a manual step right now (send profile, schedule interview, pick city, etc.)." />
+              <HeroStat label="Stale 7d+" value={stale} tone={stale > 0 ? "amber" : "default"} hint="Your active runs with no event in the last 7+ days. Nudge or reassign before they go cold." />
             </div>
           </div>
         </div>
@@ -267,13 +267,13 @@ export default function MyWorkspace() {
 
 // ── Bits ────────────────────────────────────────────────────────────────
 
-function HeroStat({ label, value, tone }: { label: string; value: number; tone: "default" | "rose" | "amber" }) {
+function HeroStat({ label, value, tone, hint }: { label: string; value: number; tone: "default" | "rose" | "amber"; hint?: string }) {
   const toneCls =
     tone === "rose"  ? "bg-rose-50 text-rose-700 border-rose-200" :
     tone === "amber" ? "bg-amber-50 text-amber-800 border-amber-200" :
                        "bg-white text-slate-700 border-slate-200";
   return (
-    <div className={`rounded-xl border px-3 py-2 ${toneCls} min-w-[88px]`}>
+    <div className={`rounded-xl border px-3 py-2 ${toneCls} min-w-[88px]`} title={hint}>
       <div className="text-[9px] uppercase tracking-wider opacity-70">{label}</div>
       <div className="text-xl font-semibold tabular-nums leading-tight">{value}</div>
     </div>

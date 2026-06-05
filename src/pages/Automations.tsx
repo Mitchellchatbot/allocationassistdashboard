@@ -61,7 +61,13 @@ function statusBadge(status: FlowRun["status"]) {
     paused:    "bg-amber-100 text-amber-800 border-amber-200",
     failed:    "bg-rose-100 text-rose-800 border-rose-200",
   };
-  return <Badge variant="outline" className={`${map[status]} text-[10px] uppercase tracking-wider`}>{status}</Badge>;
+  const hint: Record<FlowRun["status"], string> = {
+    active:    "Run is in progress — currently sitting on a stage waiting for the next action.",
+    completed: "Run finished all its stages successfully.",
+    paused:    "Run was manually paused — won't auto-advance until someone resumes it.",
+    failed:    "Run errored on a stage and stopped. Open it to see the error and decide whether to retry.",
+  };
+  return <Badge variant="outline" title={hint[status]} className={`${map[status]} text-[10px] uppercase tracking-wider`}>{status}</Badge>;
 }
 
 type TabKey = FlowKey | "settings" | "hospitals" | "templates" | "queues";

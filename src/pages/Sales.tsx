@@ -142,7 +142,10 @@ const Sales = () => {
                 <div className="flex items-center gap-1.5">
                   <p className="text-[11px] font-medium truncate">{l.Full_Name || `${l.First_Name ?? ''} ${l.Last_Name ?? ''}`.trim() || '—'}</p>
                   {slaBreached && (
-                    <span className="inline-flex items-center gap-0.5 rounded-full bg-destructive/15 border border-destructive/30 px-1 py-0 text-[8px] font-semibold text-destructive shrink-0">
+                    <span
+                      title="SLA breach — this lead has sat in 'High Priority Follow up' for more than 2 days without movement. Contact today."
+                      className="inline-flex items-center gap-0.5 rounded-full bg-destructive/15 border border-destructive/30 px-1 py-0 text-[8px] font-semibold text-destructive shrink-0"
+                    >
                       <AlertTriangle className="h-2 w-2" />SLA
                     </span>
                   )}

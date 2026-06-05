@@ -62,8 +62,21 @@ const LOG_STATUS_STYLE: Record<string, string> = {
   "unsure":                  "bg-muted text-muted-foreground border-border/50",
 };
 
+const LOG_STATUS_HINT: Record<string, string> = {
+  "high potential":          "Strong fit — push to qualify + convert.",
+  "converted":               "Lead became a placement (Doctor on Board).",
+  "follow up in the future": "Not ready now — diarised to be re-contacted later.",
+  "minimal follow up":       "Lukewarm signal — light-touch nurture only.",
+  "declined":                "Lead actively said no — closed lost.",
+  "unsure":                  "Sales couldn't read the signal on this call.",
+};
+
 function logStatusStyle(status: string) {
   return LOG_STATUS_STYLE[status.toLowerCase()] ?? "bg-muted text-muted-foreground border-border/50";
+}
+
+function logStatusHint(status: string): string | undefined {
+  return LOG_STATUS_HINT[status.toLowerCase()];
 }
 
 // Strip "Dr.", "Prof.", leading/trailing spaces so name matching is robust
@@ -156,7 +169,7 @@ function CallLogPanel({ doctorName }: { doctorName: string }) {
                     <Calendar className="h-2.5 w-2.5" />
                     {log.call_date || "—"}
                   </div>
-                  <span className={`inline-flex rounded-full border px-1.5 py-0.5 text-[9px] font-medium ${logStatusStyle(log.status)}`}>
+                  <span title={logStatusHint(log.status)} className={`inline-flex rounded-full border px-1.5 py-0.5 text-[9px] font-medium ${logStatusStyle(log.status)}`}>
                     {log.status}
                   </span>
                   {log.call_state && (

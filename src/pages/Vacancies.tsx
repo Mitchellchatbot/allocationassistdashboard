@@ -116,10 +116,10 @@ export default function Vacancies() {
             </p>
           </div>
           <div className="flex items-center gap-2">
-            <KpiPill label="Open"        value={stats.open}     tone="teal" />
-            <KpiPill label="High pri"    value={stats.high}     tone="rose" />
-            <KpiPill label="Stale > 14d" value={stats.stale}    tone="amber" />
-            <KpiPill label="Filled (30d)" value={stats.filled30} tone="emerald" />
+            <KpiPill label="Open"        value={stats.open}     tone="teal"    hint="Vacancies currently in 'open' status — actively being filled." />
+            <KpiPill label="High pri"    value={stats.high}     tone="rose"    hint="High-priority vacancies — flagged urgent by the hospital or close to start date." />
+            <KpiPill label="Stale > 14d" value={stats.stale}    tone="amber"   hint="Open vacancies with no progress in over 14 days. Triage candidates: nudge the hospital, surface alternatives, or close." />
+            <KpiPill label="Filled (30d)" value={stats.filled30} tone="emerald" hint="Vacancies marked 'filled' in the last 30 days. Healthy throughput indicator." />
             <Button size="sm" onClick={() => setCreateOpen(true)}>
               <Plus className="h-3.5 w-3.5 mr-1.5" /> New vacancy
             </Button>
@@ -247,7 +247,7 @@ export default function Vacancies() {
   );
 }
 
-function KpiPill({ label, value, tone = "teal" }: { label: string; value: number; tone?: "teal" | "emerald" | "amber" | "rose" }) {
+function KpiPill({ label, value, tone = "teal", hint }: { label: string; value: number; tone?: "teal" | "emerald" | "amber" | "rose"; hint?: string }) {
   const colors = {
     teal:    "bg-teal-50 text-teal-700 border-teal-200",
     emerald: "bg-emerald-50 text-emerald-700 border-emerald-200",
@@ -255,7 +255,7 @@ function KpiPill({ label, value, tone = "teal" }: { label: string; value: number
     rose:    "bg-rose-50 text-rose-700 border-rose-200",
   };
   return (
-    <div className={`rounded-md border px-3 py-1.5 ${colors[tone]}`}>
+    <div className={`rounded-md border px-3 py-1.5 ${colors[tone]}`} title={hint}>
       <div className="text-[9px] uppercase tracking-wider opacity-70">{label}</div>
       <div className="text-base font-semibold leading-tight">{value.toLocaleString()}</div>
     </div>
@@ -298,23 +298,23 @@ function VacancyRow({ v, onOpen, onStatusChange, onDelete }: {
         <div className="flex justify-end gap-1">
           {v.status === "open" && (
             <>
-              <Button size="sm" variant="outline" className="h-7 text-[10px]" onClick={onOpen}>
+              <Button size="sm" variant="outline" className="h-7 text-[10px]" onClick={onOpen} title="Open this vacancy and see the top doctor matches scored by specialty, license, location and notice period.">
                 <Sparkles className="h-3 w-3 mr-1 text-emerald-600" /> Matches
               </Button>
-              <Button size="sm" variant="outline" className="h-7 text-[10px]" onClick={() => onStatusChange("filled")}>
+              <Button size="sm" variant="outline" className="h-7 text-[10px]" onClick={() => onStatusChange("filled")} title="Mark this vacancy as filled. Counts toward the 'Filled (30d)' KPI.">
                 <CheckCircle2 className="h-3 w-3 mr-1 text-emerald-600" /> Filled
               </Button>
-              <Button size="sm" variant="outline" className="h-7 text-[10px]" onClick={() => onStatusChange("closed")}>
+              <Button size="sm" variant="outline" className="h-7 text-[10px]" onClick={() => onStatusChange("closed")} title="Close this vacancy without a placement (hospital cancelled, role pulled, etc.).">
                 <X className="h-3 w-3 mr-1" /> Close
               </Button>
             </>
           )}
           {v.status !== "open" && (
-            <Button size="sm" variant="outline" className="h-7 text-[10px]" onClick={() => onStatusChange("open")}>
+            <Button size="sm" variant="outline" className="h-7 text-[10px]" onClick={() => onStatusChange("open")} title="Move this vacancy back to 'open' so it appears in active matching again.">
               Reopen
             </Button>
           )}
-          <Button size="sm" variant="ghost" className="h-7 text-[10px] text-rose-600 hover:bg-rose-50" onClick={onDelete}>
+          <Button size="sm" variant="ghost" className="h-7 text-[10px] text-rose-600 hover:bg-rose-50" onClick={onDelete} title="Permanently delete this vacancy and its links.">
             Delete
           </Button>
         </div>

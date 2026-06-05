@@ -44,6 +44,7 @@ import {
 import { toast } from "sonner";
 import { supabase } from "@/lib/supabase";
 import { useWpCandidateByContact, useWpContactSet, normalizePhone } from "@/hooks/use-wp-candidates";
+import { useNavigate } from "react-router-dom";
 import { CreateWpProfileDialog } from "@/components/forms/CreateWpProfileDialog";
 
 const supabaseUrl = (import.meta.env.VITE_SUPABASE_URL as string) ?? "";
@@ -754,7 +755,7 @@ function TypeformSyncButton({ form }: { form: Form }) {
 
   return (
     <>
-      <Button size="sm" variant="outline" onClick={handleStart} disabled={sync.isPending}>
+      <Button size="sm" variant="outline" onClick={handleStart} disabled={sync.isPending} title="Backfill historical submissions via the form provider's API. Resumable in chunks — safe to click multiple times.">
         {sync.isPending ? <RefreshCw className="h-3.5 w-3.5 mr-1 animate-spin" /> : <History className="h-3.5 w-3.5 mr-1" />}
         {sync.isPending ? "Syncing…" : "Sync history"}
       </Button>
@@ -852,7 +853,7 @@ function JotformSyncButton({ form }: { form: Form }) {
 
   return (
     <>
-      <Button size="sm" variant="outline" onClick={handleStart} disabled={sync.isPending}>
+      <Button size="sm" variant="outline" onClick={handleStart} disabled={sync.isPending} title="Backfill historical submissions via the form provider's API. Resumable in chunks — safe to click multiple times.">
         {sync.isPending ? <RefreshCw className="h-3.5 w-3.5 mr-1 animate-spin" /> : <History className="h-3.5 w-3.5 mr-1" />}
         {sync.isPending ? "Syncing…" : "Sync history"}
       </Button>
@@ -1044,6 +1045,15 @@ function ResponseRow({
   const display = useMemo(() => displayNameFor(response), [response]);
   const phone   = useMemo(() => phoneFor(response), [response]);
   const avatar  = useMemo(() => pictureUrlFor(response), [response]);
+  const navigate = useNavigate();
+
+  /** Cross-link helper: send the user to the unified Doctors page with
+   *  the email (or fallback display name) pre-typed into the search,
+   *  so they land directly on this person's record in the chosen tab. */
+  const openInDoctors = (tab: "progress" | "profiles") => {
+    const q = response.respondent_email || display.label || "";
+    navigate(`/doctors?tab=${tab}${q ? `&q=${encodeURIComponent(q)}` : ""}`);
+  };
 
   // Check whether a WP candidate already exists for this submission so
   // we can either offer a 'Create WP profile' action (no match) or a
@@ -1124,9 +1134,18 @@ function ResponseRow({
           </Badge>
         )}
         {response.doctor_id ? (
-          <Badge variant="outline" className="text-[9px] bg-emerald-50 text-emerald-700 border-emerald-200 shrink-0">
+          // Clickable — opens the Doctors → Progress tab with this
+          // respondent's email pre-filled in search. Stop propagation
+          // so we don't also toggle the row open. asChild on Badge
+          // would lose the styling, so we just render a styled <button>.
+          <button
+            type="button"
+            onClick={(e) => { e.stopPropagation(); openInDoctors("progress"); }}
+            title="Open in Doctors → Progress"
+            className="text-[9px] shrink-0 inline-flex items-center rounded-md border px-1.5 py-0.5 bg-emerald-50 text-emerald-700 border-emerald-200 hover:bg-emerald-100 transition-colors"
+          >
             <Sparkles className="h-2.5 w-2.5 mr-0.5" /> in Zoho
-          </Badge>
+          </button>
         ) : (
           // Form was supposed to create a Zoho lead automatically. No
           // match = the respondent never made it to the CRM — Saif's
@@ -1144,9 +1163,14 @@ function ResponseRow({
             a different email isn't flagged as missing. */}
         {formProvider === "jotform" && !wpQuery.isLoading && (
           existingWp ? (
-            <Badge variant="outline" className="text-[9px] bg-violet-50 text-violet-700 border-violet-200 shrink-0" title={`WP candidate #${existingWp.id} · ${existingWp.status ?? ""}`}>
+            <button
+              type="button"
+              onClick={(e) => { e.stopPropagation(); openInDoctors("profiles"); }}
+              title={`WP candidate #${existingWp.id} · ${existingWp.status ?? ""} — open in Doctor Profiles`}
+              className="text-[9px] shrink-0 inline-flex items-center rounded-md border px-1.5 py-0.5 bg-violet-50 text-violet-700 border-violet-200 hover:bg-violet-100 transition-colors"
+            >
               <Sparkles className="h-2.5 w-2.5 mr-0.5" /> in WordPress
-            </Badge>
+            </button>
           ) : (response.respondent_email || phone) ? (
             <Badge variant="outline" className="text-[9px] bg-slate-100 text-slate-500 border-slate-200 shrink-0" title="No WP candidate matches this email or phone yet — expand the row to create one">
               not in WP
