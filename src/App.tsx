@@ -8,6 +8,7 @@ import { FilterProvider } from "@/lib/FilterProvider";
 import { PageErrorBoundary } from "@/components/PageErrorBoundary";
 import { ProtectedRoute } from "@/components/ProtectedRoute";
 import { AIPageContextProvider } from "@/lib/ai-page-context";
+import { AIPanelProvider } from "@/lib/ai-panel-context";
 import { OnboardingTourProvider } from "@/components/OnboardingTour";
 import { CurrencyProvider } from "@/lib/CurrencyProvider";
 import { DashboardLayout, ViewportSpinner } from "@/components/layout/DashboardLayout";
@@ -128,6 +129,12 @@ const App = () => (
             provider calls useNavigate/useLocation to drive route-bound
             steps, and those hooks need a Router ancestor. */}
         <BrowserRouter>
+          {/* AIPanelProvider sits INSIDE BrowserRouter so useNavigate /
+              useLocation work, but OUTSIDE Routes — meaning its state
+              survives every route change. The panel is a fixed
+              overlay; the main viewport doesn't participate in its
+              layout. */}
+          <AIPanelProvider>
           <OnboardingTourProvider>
           <Suspense fallback={<PageSkeleton />}>
             <Routes>
@@ -172,6 +179,7 @@ const App = () => (
             </Routes>
           </Suspense>
           </OnboardingTourProvider>
+          </AIPanelProvider>
         </BrowserRouter>
       </CurrencyProvider>
       </AIPageContextProvider>

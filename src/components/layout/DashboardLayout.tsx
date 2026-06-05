@@ -93,17 +93,16 @@ function formatSyncedAt(iso: string): string {
   return new Date(iso).toLocaleDateString("en-GB", { day: "numeric", month: "short" });
 }
 
-/** Reopens the sidebar after navigation on desktop. */
-function SidebarCloser({ aiOpen }: { aiOpen: boolean }) {
+/** Reopens the sidebar after navigation on desktop. The AI panel is
+ *  a fixed overlay now (rendered by <AIPanelProvider>) so it doesn't
+ *  compete for layout — we just always reopen the sidebar on nav. */
+function SidebarOpener() {
   const { setOpen, isMobile } = useSidebar();
   const location = useLocation();
-
-  // Reopen sidebar after any navigation (desktop only, AI not open)
   useEffect(() => {
-    if (!isMobile && !aiOpen) setOpen(true);
+    if (!isMobile) setOpen(true);
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [location.pathname]);
-
   return null;
 }
 
@@ -130,15 +129,6 @@ export function DashboardLayout({ children, title: pageTitle, subtitle: pageSubt
 
   const { alerts: rawAlerts, filteredLeads, filteredDeals } = useFilteredData();
   const [readIdxs, setReadIdxs] = useState<number[]>([]);
-  const [aiOpen, setAiOpen] = useState(false);
-  // Track whether the AI panel has ever been opened — we defer mounting its
-  // heavy chat UI until first use so it doesn't slow down the initial page render.
-  const aiPanelMounted = useRef(false);
-  if (aiOpen) aiPanelMounted.current = true;
-
-  const [indexing, setIndexing] = useState(false);
-  const [indexStatus, setIndexStatus] = useState('');
-
   // Universal search dialog
   const [searchOpen, setSearchOpen] = useState(false);
   useEffect(() => {
@@ -152,17 +142,8 @@ export function DashboardLayout({ children, title: pageTitle, subtitle: pageSubt
     return () => window.removeEventListener('keydown', handler);
   }, []);
 
-  // Chat state
-  type ChatMsg = { role: 'user' | 'assistant'; content: string; isInsights?: boolean };
-  const [chatMessages, setChatMessages] = useState<ChatMsg[]>([]);
-  const [chatInput, setChatInput] = useState('');
-  const [chatLoading, setChatLoading] = useState(false);
-  const [chatStreaming, setChatStreaming] = useState('');
-  const chatEndRef = useRef<HTMLDivElement>(null);
-  const inputRef = useRef<HTMLTextAreaElement>(null);
   const location = useLocation();
   const currentPath = location.pathname;
-  const { pageData } = useAIPageContext();
   const tour = useTour();
   const showTourButton = HI_PAGES.has(currentPath);
   const startHiTour = useCallback(() => {
@@ -245,130 +226,15 @@ export function DashboardLayout({ children, title: pageTitle, subtitle: pageSubt
     return items;
   }, [rawAlerts, contractActivity]);
 
-  // Lead count for AI panel subtitle
-  const compactLeads = useMemo(() => filteredLeads, [filteredLeads]);
-
   const unreadCount = notifications.filter((_, i) => !readIdxs.includes(i)).length;
   const markAllRead = () => setReadIdxs(notifications.map((_, i) => i));
-
-  const INSIGHTS_PROMPT = 'Give me exactly 5 insights the recruitment team should act on today. Focus on: where leads are getting stuck, which channels are producing the most doctors, high-priority follow-ups, recruiter workload balance, and any pipeline anomalies. Number each insight 1–5.';
-
-  // Chat persists across open/close + across navigations — the AI panel
-  // is now a viable way to drive the portal, not a throwaway sidebar.
-  // The DashboardLayout sits ABOVE the route Outlet so its state survives
-  // route changes naturally. We only blank the IN-FLIGHT streaming text
-  // on close so a half-sent message doesn't replay when the panel
-  // reopens. Use the RotateCcw "Clear chat" button in the panel header
-  // to wipe history when desired.
-  useEffect(() => {
-    if (!aiOpen) setChatStreaming('');
-  }, [aiOpen]);
-
-  // Auto-scroll chat to bottom
-  useEffect(() => {
-    chatEndRef.current?.scrollIntoView({ behavior: 'smooth' });
-  }, [chatMessages, chatStreaming]);
-
-  /** Embed leads in chunks of 500 so we never hit the Edge Function CPU timeout. */
-  const runEmbedChunked = useCallback(async (silent = false) => {
-    if (!silent) { setIndexing(true); setIndexStatus('Indexing leads…'); }
-    const CHUNK = 500;
-    let offset = 0;
-    let totalEmbedded = 0;
-    try {
-      while (true) {
-        const res = await fetch(`${SUPABASE_URL}/functions/v1/embed-leads`, {
-          method: 'POST',
-          headers: { 'apikey': SUPABASE_ANON_KEY, 'Authorization': `Bearer ${SUPABASE_ANON_KEY}`, 'Content-Type': 'application/json' },
-          body: JSON.stringify({ offset, limit: CHUNK, onlyNew: true }),
-        });
-        if (!res.ok) { console.warn('[embed-leads] chunk failed', offset); break; }
-        const json = await res.json();
-        totalEmbedded += json.embedded ?? 0;
-        if (!silent) setIndexStatus(`Indexed ${totalEmbedded} leads…`);
-        if (json.done || json.embedded === 0) break;
-        offset += CHUNK;
-      }
-      if (!silent) setIndexStatus(`Done — ${totalEmbedded} leads indexed`);
-      setTimeout(() => { setIndexStatus(''); setIndexing(false); }, 3000);
-    } catch (err) {
-      console.warn('[embed-leads]', err);
-      if (!silent) { setIndexStatus('Indexing failed'); setTimeout(() => { setIndexStatus(''); setIndexing(false); }, 3000); }
-    }
-  }, []);
 
   const sync = useMutation({
     mutationFn: zohoSync,
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ["zoho-data"] });
-      runEmbedChunked(true); // silent background re-index after sync
     },
   });
-
-  const sendChat = useCallback(async (presetText?: string) => {
-    const text = (presetText ?? chatInput).trim();
-    if (!text || chatLoading) return;
-    const isInsightsRequest = presetText === INSIGHTS_PROMPT;
-
-    const userMsg: ChatMsg = { role: 'user', content: text };
-    const updatedMsgs = [...chatMessages, userMsg];
-    setChatMessages(updatedMsgs);
-    if (!presetText) setChatInput('');
-    setChatLoading(true);
-    setChatStreaming('');
-
-    const apiMessages = updatedMsgs.map(m => ({ role: m.role, content: m.content }));
-
-    let full = '';
-    try {
-      const res = await fetch(`${SUPABASE_URL}/functions/v1/ai-insights`, {
-        method:  'POST',
-        headers: {
-          'apikey':        SUPABASE_ANON_KEY,
-          'Authorization': `Bearer ${SUPABASE_ANON_KEY}`,
-          'Content-Type':  'application/json',
-        },
-        body: JSON.stringify({
-          messages:    apiMessages,
-          currentPage: currentPath,
-          pageData:    pageData?.data ?? null,
-        }),
-      });
-
-      if (!res.ok || !res.body) throw new Error('Request failed');
-
-      const reader  = res.body.getReader();
-      const decoder = new TextDecoder();
-      let done = false;
-      while (!done) {
-        const { value, done: d } = await reader.read();
-        done = d;
-        if (value) {
-          full += decoder.decode(value, { stream: !d });
-          // Strip <chart>…</chart> AND <action>…</action> blocks during
-          // streaming so the user doesn't see raw XML/JSON before the
-          // chart / action buttons render. The final setChatMessages
-          // below keeps the full text so the message-render pass can
-          // parse them out.
-          setChatStreaming(
-            full
-              .replace(/<chart\b[^>]*>[\s\S]*?<\/chart>/gi, "")
-              .replace(/<action\b[^>]*>[\s\S]*?<\/action>/gi, ""),
-          );
-        }
-      }
-
-      setChatMessages(prev => [...prev, { role: 'assistant', content: full, isInsights: isInsightsRequest }]);
-    } catch {
-      setChatMessages(prev => [...prev, { role: 'assistant', content: 'Sorry, something went wrong. Please try again.' }]);
-    } finally {
-      setChatStreaming('');
-      setChatLoading(false);
-      setTimeout(() => inputRef.current?.focus(), 100);
-    }
-  // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [chatInput, chatMessages, chatLoading, zoho, syncedAt]);
-
 
   return (
     <LayoutContext.Provider value={{ mounted: true, setTitle: setTitleState, setSubtitle: setSubtitleState }}>
@@ -380,7 +246,7 @@ export function DashboardLayout({ children, title: pageTitle, subtitle: pageSubt
           to   { opacity: 1; transform: translateY(0); }
         }
       `}</style>
-      <SidebarCloser aiOpen={aiOpen} />
+      <SidebarOpener />
       <div className="h-screen flex w-full bg-muted/40 overflow-hidden">
         <AppSidebar />
         <div className="flex-1 flex flex-col min-w-0 pt-2 pr-2 pb-2 gap-2">
@@ -553,282 +419,7 @@ export function DashboardLayout({ children, title: pageTitle, subtitle: pageSubt
           </div>
         </div>
 
-        {/* AI Panel — inline flex child, pushes content left.
-            Inner content is only mounted after the first open to avoid
-            blocking the initial page render with chat state and embeds. */}
-        <div
-          className="shrink-0 flex flex-col border-l border-border/40 overflow-hidden"
-          style={{ width: aiOpen ? '460px' : '0px', transition: 'width 300ms cubic-bezier(0.4,0,0.2,1)' }}
-          aria-hidden={!aiOpen}
-        >
-        {aiPanelMounted.current && (
-          <div className="w-[460px] flex flex-col h-full bg-card">
-
-            {/* Row 1 — blank bar that aligns with the main header (same bg, same border-b) */}
-            <div className="h-[52px] shrink-0 border-b border-border/40 bg-card flex items-center justify-between px-4">
-              {/* Index leads button */}
-              <button
-                onClick={() => runEmbedChunked(false)}
-                disabled={indexing}
-                title="Re-index all leads for AI search"
-                className="flex items-center gap-1.5 h-7 px-3 rounded-full text-[11px] font-medium border border-border/60 text-muted-foreground hover:text-foreground hover:bg-muted/50 transition-colors disabled:opacity-50"
-              >
-                <RefreshCw className={`h-3 w-3 ${indexing ? 'animate-spin' : ''}`} />
-                {indexStatus || 'Index leads'}
-              </button>
-              <div className="flex items-center gap-1">
-                {chatMessages.length > 0 && (
-                  <button
-                    onClick={() => { setChatMessages([]); setChatInput(''); setChatStreaming(''); }}
-                    title="Clear chat"
-                    className="flex h-7 w-7 items-center justify-center rounded-full text-muted-foreground hover:text-foreground hover:bg-muted/60 transition-colors"
-                  >
-                    <RotateCcw className="h-3.5 w-3.5" />
-                  </button>
-                )}
-                <button
-                  onClick={() => setAiOpen(false)}
-                  title="Close"
-                  className="flex h-7 w-7 items-center justify-center rounded-full text-muted-foreground hover:text-foreground hover:bg-muted/60 transition-colors"
-                >
-                  <X className="h-4 w-4" />
-                </button>
-              </div>
-            </div>
-
-            {/* Row 2 — title section that mirrors the page-title section */}
-            <div className="px-5 pt-5 pb-3 border-b border-border/40 bg-card shrink-0">
-              <div className="flex items-center gap-2.5">
-                <div className="flex h-8 w-8 items-center justify-center rounded-lg bg-primary/10 shrink-0">
-                  <Sparkles className="h-4 w-4 text-primary" />
-                </div>
-                <div>
-                  <h2 className="text-[20px] font-semibold text-foreground leading-tight">AI Assistant</h2>
-                  <p className="text-[13px] text-muted-foreground mt-0.5">RAG · {compactLeads.length} leads indexed</p>
-                </div>
-              </div>
-            </div>
-
-            {/* Scrollable chat area */}
-            <div className="flex-1 overflow-y-auto bg-background">
-            <div className="flex flex-col justify-end min-h-full px-5 py-5 space-y-4">
-
-              {/* Empty state */}
-              {chatMessages.length === 0 && !chatLoading && (
-                <div className="flex flex-col items-center gap-4 py-10">
-                  <div className="flex h-12 w-12 items-center justify-center rounded-full bg-primary/10">
-                    <Sparkles className="h-6 w-6 text-primary/40" />
-                  </div>
-                  <p className="text-[13px] text-muted-foreground text-center max-w-[280px]">
-                    Ask anything about your recruitment data.
-                  </p>
-                  <div className="flex flex-wrap gap-2 justify-center">
-                    {[
-                      { label: '✨ Get 5 insights', prompt: INSIGHTS_PROMPT },
-                      { label: 'Who needs follow-up?', prompt: 'Which leads have High Priority Follow-up status? List their names and recruiters.' },
-                      { label: 'Top channels', prompt: 'Which lead sources are producing the most doctors right now?' },
-                      { label: 'Pipeline summary', prompt: 'Give me a quick summary of where doctors are in the pipeline right now.' },
-                    ].map(chip => (
-                      <button
-                        key={chip.label}
-                        onClick={() => sendChat(chip.prompt)}
-                        disabled={chatLoading}
-                        className="rounded-full border border-border bg-card px-3.5 py-1.5 text-[12px] font-medium text-muted-foreground hover:bg-muted hover:text-foreground transition-colors disabled:opacity-40"
-                      >
-                        {chip.label}
-                      </button>
-                    ))}
-                  </div>
-                </div>
-              )}
-
-              {/* Chat messages */}
-              {chatMessages.map((m, i) => m.role === 'user' ? (
-                <div
-                  key={i}
-                  className="flex justify-end"
-                  style={{ animation: 'msgSlideUp 0.28s cubic-bezier(0.22,1,0.36,1) both' }}
-                >
-                  <div className="max-w-[78%] rounded-2xl rounded-br-sm bg-primary px-4 py-3">
-                    <p className="text-[13px] text-white leading-relaxed">{m.content}</p>
-                  </div>
-                </div>
-              ) : (
-                <div
-                  key={i}
-                  className="flex items-start gap-3"
-                  style={{ animation: 'msgSlideUp 0.32s cubic-bezier(0.22,1,0.36,1) both' }}
-                >
-                  <div className="h-7 w-7 rounded-full bg-primary/10 flex items-center justify-center shrink-0 mt-0.5">
-                    <Sparkles className="h-3.5 w-3.5 text-primary" />
-                  </div>
-                  <div className="flex-1 min-w-0">
-                    {(() => {
-                      // First strip <action> tags, then <chart> tags from
-                      // what remains. parseActions returns the cleaned
-                      // text + structured ActionSpec[]; parseCharts then
-                      // does the same for charts.
-                      const { text: noActions, actions } = parseActions(m.content);
-                      const { text: cleanText, charts }  = parseCharts(noActions);
-                      return (
-                        <div className="space-y-2">
-                          {cleanText && (
-                            <div className="group relative rounded-2xl rounded-bl-sm bg-card border border-border/50 px-4 py-3">
-                              <button
-                                onClick={() => {
-                                  navigator.clipboard.writeText(cleanText);
-                                  toast.success("Copied");
-                                }}
-                                title="Copy"
-                                className="absolute top-2 right-2 h-6 w-6 rounded-md flex items-center justify-center opacity-0 group-hover:opacity-100 transition-opacity hover:bg-muted/80 text-muted-foreground hover:text-foreground"
-                              >
-                                <Copy className="h-3 w-3" />
-                              </button>
-                              <ReactMarkdown
-                                remarkPlugins={[remarkGfm]}
-                                components={{
-                                  p:      ({ children }) => <p className="text-[13px] text-foreground leading-relaxed mb-2 last:mb-0">{children}</p>,
-                                  strong: ({ children }) => <strong className="font-semibold text-foreground">{children}</strong>,
-                                  em:     ({ children }) => <em className="italic text-foreground/80">{children}</em>,
-                                  h1:     ({ children }) => <h1 className="text-[15px] font-bold text-foreground mt-3 mb-1.5 first:mt-0">{children}</h1>,
-                                  h2:     ({ children }) => <h2 className="text-[14px] font-semibold text-foreground mt-3 mb-1 first:mt-0">{children}</h2>,
-                                  h3:     ({ children }) => <h3 className="text-[13px] font-semibold text-foreground/90 mt-2 mb-1 first:mt-0">{children}</h3>,
-                                  ul:     ({ children }) => <ul className="my-2 space-y-1 pl-1">{children}</ul>,
-                                  ol:     ({ children }) => <ol className="my-2 space-y-1 pl-1 list-none counter-reset-[item]">{children}</ol>,
-                                  li:     ({ children, ...props }) => {
-                                    const isOrdered = (props as { ordered?: boolean }).ordered;
-                                    return (
-                                      <li className="flex items-start gap-2 text-[13px] text-foreground leading-relaxed">
-                                        {isOrdered
-                                          ? <span className="shrink-0 mt-0.5 h-4 w-4 rounded-full bg-primary/10 text-[9px] font-bold text-primary flex items-center justify-center">•</span>
-                                          : <span className="shrink-0 mt-[7px] h-1.5 w-1.5 rounded-full bg-primary/60" />
-                                        }
-                                        <span>{children}</span>
-                                      </li>
-                                    );
-                                  },
-                                  code:   ({ children, className }) => {
-                                    const isBlock = className?.includes('language-');
-                                    return isBlock
-                                      ? <code className="block bg-muted rounded-lg px-3 py-2 text-[12px] font-mono text-foreground my-2 overflow-x-auto">{children}</code>
-                                      : <code className="bg-muted rounded px-1.5 py-0.5 text-[11px] font-mono text-primary">{children}</code>;
-                                  },
-                                  table:   ({ children }) => <div className="overflow-x-auto my-2"><table className="w-full border-collapse text-[11px]">{children}</table></div>,
-                                  thead:   ({ children }) => <thead className="bg-muted/50">{children}</thead>,
-                                  tbody:   ({ children }) => <tbody>{children}</tbody>,
-                                  tr:      ({ children }) => <tr className="border-b border-border/40 last:border-0">{children}</tr>,
-                                  th:      ({ children }) => <th className="text-left px-2 py-1.5 text-[10px] font-semibold text-muted-foreground uppercase tracking-wide whitespace-nowrap">{children}</th>,
-                                  td:      ({ children }) => <td className="px-2 py-1.5 text-[11px] text-foreground">{children}</td>,
-                                  blockquote: ({ children }) => <blockquote className="border-l-2 border-primary/40 pl-3 italic text-foreground/70 my-2">{children}</blockquote>,
-                                  hr: () => <hr className="border-border/40 my-3" />,
-                                }}
-                              >
-                                {cleanText}
-                              </ReactMarkdown>
-                            </div>
-                          )}
-                          {charts.map((spec, ci) => (
-                            <div key={ci} style={{ animation: `msgSlideUp 0.35s cubic-bezier(0.22,1,0.36,1) ${ci * 80}ms both` }}>
-                              <ChatChart spec={spec} />
-                            </div>
-                          ))}
-                          {actions.length > 0 && (
-                            <ChatActionBar actions={actions} />
-                          )}
-                        </div>
-                      );
-                    })()}
-                  </div>
-                </div>
-              ))}
-
-              {/* Streaming assistant bubble — shown while tokens arrive.
-                  Once the stream completes, the full message is appended to
-                  chatMessages and this block clears. */}
-              {chatLoading && chatStreaming && (
-                <div className="flex gap-3">
-                  <div className="h-7 w-7 rounded-full bg-primary/10 flex items-center justify-center shrink-0 ring-1 ring-primary/20">
-                    <Sparkles className="h-3.5 w-3.5 text-primary" />
-                  </div>
-                  <div className="flex-1 min-w-0">
-                    <div className="prose prose-sm max-w-none text-[13px] leading-relaxed text-foreground/90 [&_p]:my-1 [&_h2]:text-[14px] [&_h2]:font-semibold [&_h2]:mt-3 [&_h2]:mb-1 [&_ul]:my-1 [&_li]:my-0.5 [&_strong]:font-semibold [&_strong]:text-foreground [&_table]:text-[11px] [&_table]:my-2 [&_th]:px-2 [&_th]:py-1 [&_td]:px-2 [&_td]:py-1">
-                      <ReactMarkdown remarkPlugins={[remarkGfm]}>{chatStreaming}</ReactMarkdown>
-                    </div>
-                    <div className="inline-flex items-center gap-1 mt-1">
-                      <span className="h-1 w-1 rounded-full bg-primary/60 animate-bounce [animation-delay:0ms]" />
-                      <span className="h-1 w-1 rounded-full bg-primary/60 animate-bounce [animation-delay:150ms]" />
-                      <span className="h-1 w-1 rounded-full bg-primary/60 animate-bounce [animation-delay:300ms]" />
-                    </div>
-                  </div>
-                </div>
-              )}
-
-              {/* Thinking dots — only when stream hasn't started */}
-              {chatLoading && !chatStreaming && (
-                <div className="flex items-center gap-2 pl-10">
-                  <span className="h-2 w-2 rounded-full bg-primary/60 animate-bounce [animation-delay:0ms]" />
-                  <span className="h-2 w-2 rounded-full bg-primary/60 animate-bounce [animation-delay:150ms]" />
-                  <span className="h-2 w-2 rounded-full bg-primary/60 animate-bounce [animation-delay:300ms]" />
-                </div>
-              )}
-
-              <div ref={chatEndRef} />
-            </div>
-            </div>
-
-            {/* Input bar — textarea so multi-line prompts work. Shift+Enter
-                inserts a newline; Enter alone sends. Auto-grows up to 5
-                rows, then scrolls. */}
-            <div className="shrink-0 border-t border-border/40 bg-card px-5 py-4">
-              <div className="flex items-end gap-3 rounded-xl border border-border bg-background px-4 py-3 focus-within:ring-1 focus-within:ring-primary/40 focus-within:border-primary/50 transition-all">
-                <textarea
-                  ref={inputRef}
-                  rows={1}
-                  value={chatInput}
-                  onChange={e => {
-                    setChatInput(e.target.value);
-                    // Auto-grow up to 5 lines.
-                    const el = e.currentTarget;
-                    el.style.height = "auto";
-                    el.style.height = `${Math.min(el.scrollHeight, 5 * 22)}px`;
-                  }}
-                  onKeyDown={(e: KeyboardEvent<HTMLTextAreaElement>) => {
-                    if (e.key === 'Enter' && !e.shiftKey) {
-                      e.preventDefault();
-                      sendChat();
-                    }
-                  }}
-                  placeholder="Ask about your data…   (Shift+Enter for newline)"
-                  disabled={chatLoading}
-                  className="flex-1 text-[13px] bg-transparent outline-none placeholder:text-muted-foreground/40 disabled:opacity-50 resize-none leading-[22px] max-h-[110px]"
-                />
-                <button
-                  onClick={() => sendChat()}
-                  disabled={!chatInput.trim() || chatLoading}
-                  className="h-7 w-7 flex items-center justify-center rounded-lg bg-primary text-white transition-all disabled:opacity-25 hover:bg-primary/85 active:scale-95 shrink-0"
-                  title="Send (Enter)"
-                >
-                  <Send className="h-3.5 w-3.5" />
-                </button>
-              </div>
-            </div>
-
-          </div>
-        )}{/* end deferred AI panel content */}
-        </div>{/* end AI panel */}
       </div>{/* end min-h-screen flex */}
-
-      {/* Floating button — only when panel is closed */}
-      {!aiOpen && (
-        <button
-          onClick={() => setAiOpen(true)}
-          data-tour="ai-floating-button"
-          className="fixed bottom-5 right-5 z-50 flex items-center gap-1.5 rounded-full bg-primary px-3.5 py-2 text-white shadow-lg hover:bg-primary/90 active:scale-95 transition-all duration-150 text-[11px] font-medium"
-        >
-          <Sparkles className="h-3 w-3" />
-          AI Assistant
-        </button>
-      )}
 
       {/* Universal search (Cmd+K) — fuzzy-matches across leads, deals, channels, recruiters, pages */}
       <UniversalSearch open={searchOpen} onOpenChange={setSearchOpen} />
