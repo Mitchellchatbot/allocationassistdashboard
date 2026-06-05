@@ -151,12 +151,21 @@ const Sidebar = React.forwardRef<
   }
 
   if (isMobile) {
+    // Mobile mode renders inside a Radix Sheet drawer. Apply the same
+    // glass treatment when variant=floating so the panel matches the
+    // desktop look (the previous code rendered a flat bg-sidebar).
+    const sheetClass = variant === "floating"
+      ? "w-[--sidebar-width] p-2 text-sidebar-foreground [&>button]:hidden bg-transparent border-0"
+      : "w-[--sidebar-width] bg-sidebar p-0 text-sidebar-foreground [&>button]:hidden";
+    const innerClass = variant === "floating"
+      ? "flex h-full w-full flex-col aa-sidebar-glass"
+      : "flex h-full w-full flex-col";
     return (
       <Sheet open={openMobile} onOpenChange={setOpenMobile} {...props}>
         <SheetContent
           data-sidebar="sidebar"
           data-mobile="true"
-          className="w-[--sidebar-width] bg-sidebar p-0 text-sidebar-foreground [&>button]:hidden"
+          className={sheetClass}
           style={
             {
               "--sidebar-width": SIDEBAR_WIDTH_MOBILE,
@@ -164,7 +173,7 @@ const Sidebar = React.forwardRef<
           }
           side={side}
         >
-          <div className="flex h-full w-full flex-col">{children}</div>
+          <div className={innerClass}>{children}</div>
         </SheetContent>
       </Sheet>
     );
@@ -196,9 +205,12 @@ const Sidebar = React.forwardRef<
           side === "left"
             ? "left-0 group-data-[collapsible=offcanvas]:left-[calc(var(--sidebar-width)*-1)]"
             : "right-0 group-data-[collapsible=offcanvas]:right-[calc(var(--sidebar-width)*-1)]",
-          // Adjust the padding for floating and inset variants.
+          // Adjust the padding for floating and inset variants. Bumped
+          // from p-2 → p-3 so the floating panel sits noticeably away
+          // from the viewport edges (8px read as "almost flush" at
+          // typical zoom).
           variant === "floating" || variant === "inset"
-            ? "p-2 group-data-[collapsible=icon]:w-[calc(var(--sidebar-width-icon)_+_theme(spacing.4)_+2px)]"
+            ? "p-3 group-data-[collapsible=icon]:w-[calc(var(--sidebar-width-icon)_+_theme(spacing.4)_+2px)]"
             : "group-data-[collapsible=icon]:w-[--sidebar-width-icon] group-data-[side=left]:border-r group-data-[side=right]:border-l",
           className,
         )}
