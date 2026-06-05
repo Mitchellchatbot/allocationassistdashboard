@@ -55,7 +55,7 @@ Deno.serve(async (req: Request) => {
 
   const { data: form } = await supabase
     .from("forms")
-    .select("id, webhook_secret, form_type, provider")
+    .select("id, webhook_secret, form_type, provider, api_token")
     .eq("provider", "jotform")
     .eq("webhook_secret", key)
     .maybeSingle();
@@ -163,6 +163,28 @@ Deno.serve(async (req: Request) => {
     console.log("[jotform-webhook] no email on submission — skipping WP upsert, recording response only");
   }
 
+  // ── 5b. CV pipeline: download → bucket → cv-extract → merge into WP ─
+  // If the submission included a CV URL AND we successfully created/
+  // updated the WP candidate, download the file via the JotForm API
+  // (the URL itself requires a JotForm session), store it in the
+  // doctor-cvs bucket, create a cv_uploads row, and asynchronously
+  // invoke cv-extract. cv-extract will populate doctor_profiles AND
+  // (via the wp:<id> doctor_id prefix) update the WP candidate's ACF
+  // with bio / license / years_experience / etc. — so the team sees
+  // the draft auto-fill over the next 15-30s instead of having to
+  // copy fields by hand.
+  const cvUrl = (profile.acf?.cv_resume as string | undefined) ?? "";
+  if (cvUrl && upsertJson?.ok && upsertJson.id && form.api_token) {
+    fireCvPipeline({
+      supabaseUrl, serviceKey,
+      cvUrl,
+      jotformApiKey: form.api_token,
+      wpCandidateId: upsertJson.id,
+      candidateName: profile.full_name || "JotForm intake",
+      candidateEmail: profile.email,
+    }).catch(e => console.error("[jotform-webhook] cv pipeline error:", e));
+  }
+
   // ── 6. Auto-link doctor_id from the Zoho cache (email match) ──────
   let doctorId: string | null = null;
   if (hasEmail) {
@@ -233,4 +255,97 @@ function json(payload: unknown, status: number): Response {
     status,
     headers: { ...CORS, "Content-Type": "application/json" },
   });
+}
+
+/**
+ * Download a JotForm-hosted CV, drop it in the doctor-cvs bucket,
+ * insert a cv_uploads row that links it to the freshly-created WP
+ * candidate via doctor_id = `wp:<id>`, and kick off cv-extract.
+ *
+ * cv-extract reads doctor_id off the cv_uploads row and (with the
+ * companion change in cv-extract) will detect the wp: prefix +
+ * upsert the extracted fields into the matching WP candidate's ACF —
+ * so the team's draft auto-fills with bio / license / years_experience
+ * over the next ~15-30 seconds.
+ *
+ * Runs fire-and-forget from the webhook so the JotForm round-trip
+ * stays fast.
+ */
+async function fireCvPipeline(args: {
+  supabaseUrl:    string;
+  serviceKey:     string;
+  cvUrl:          string;
+  jotformApiKey:  string;
+  wpCandidateId:  number;
+  candidateName:  string;
+  candidateEmail: string;
+}): Promise<void> {
+  const { supabaseUrl, serviceKey, cvUrl, jotformApiKey, wpCandidateId, candidateName, candidateEmail } = args;
+
+  // 1. Download the CV from JotForm using APIKEY auth.
+  const jfRes = await fetch(cvUrl, { headers: { APIKEY: jotformApiKey } });
+  if (!jfRes.ok) {
+    console.error("[cv-pipeline] CV download failed:", jfRes.status, cvUrl);
+    return;
+  }
+  const blob = await jfRes.blob();
+  const filename = (() => {
+    try {
+      const p = new URL(cvUrl).pathname;
+      return decodeURIComponent(p.split("/").filter(Boolean).pop() ?? "cv.pdf");
+    } catch { return "cv.pdf"; }
+  })();
+
+  // 2. Upload to the doctor-cvs storage bucket. Path key:
+  //    wp-<id>/<token>/<filename> — same convention as send-cv-upload-link.
+  const sb = createClient(supabaseUrl, serviceKey);
+  const token = crypto.randomUUID().replace(/-/g, "");
+  const doctorId = `wp:${wpCandidateId}`;
+  const filePath = `${doctorId}/${token}/${filename}`;
+
+  const { error: upErr } = await sb.storage
+    .from("doctor-cvs")
+    .upload(filePath, blob, {
+      contentType: jfRes.headers.get("content-type") ?? "application/pdf",
+      upsert: true,
+    });
+  if (upErr) {
+    console.error("[cv-pipeline] storage upload failed:", upErr.message);
+    return;
+  }
+
+  // 3. Insert cv_uploads row. cv-extract will pick this up via the
+  //    upload_id we pass through next.
+  const { data: row, error: insErr } = await sb
+    .from("cv_uploads")
+    .insert({
+      doctor_id:    doctorId,
+      doctor_name:  candidateName,
+      doctor_email: candidateEmail,
+      token,
+      file_path:    filePath,
+      file_name:    filename,
+      file_size:    blob.size,
+      file_mime:    jfRes.headers.get("content-type") ?? "application/pdf",
+      uploaded_at:  new Date().toISOString(),
+      status:       "uploaded",
+      created_by:   "jotform-webhook",
+    })
+    .select("id")
+    .single();
+  if (insErr || !row) {
+    console.error("[cv-pipeline] cv_uploads insert failed:", insErr?.message);
+    return;
+  }
+
+  // 4. Fire cv-extract. Don't await — it can take 15-30s and we want
+  //    this whole pipeline to be fire-and-forget. cv-extract handles
+  //    the wp: prefix and updates the WP candidate on its own.
+  fetch(`${supabaseUrl}/functions/v1/cv-extract`, {
+    method:  "POST",
+    headers: { Authorization: `Bearer ${serviceKey}`, "Content-Type": "application/json" },
+    body:    JSON.stringify({ upload_id: row.id }),
+  }).catch(e => console.error("[cv-pipeline] cv-extract invoke failed:", e));
+
+  console.log(`[cv-pipeline] queued CV extraction for WP candidate ${wpCandidateId} (upload ${row.id})`);
 }

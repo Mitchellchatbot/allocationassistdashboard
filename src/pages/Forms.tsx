@@ -1771,19 +1771,24 @@ function AnswerValue({ k, v, highlight, formId }: { k: string; v: string; highli
   //    Common for JotForm 'file upload' (CV) fields.
   const urls = extractUrls(trimmed);
   if (urls.length > 0 && urls.join(" ").length >= trimmed.length * 0.7) {
-    // Treat the value as a list of URLs (≥70% of it is URLs).
+    // Treat the value as a list of URLs (≥70% of it is URLs). Route
+    // every URL through jotformImageUrl so JotForm-hosted files (CVs,
+    // pics, anything in /uploads/) go through our edge-function proxy
+    // instead of the bare jotform.com URL that requires a JotForm
+    // session to download.
     return (
       <div className="flex flex-col gap-1">
         {urls.map((u, i) => {
           const filename = filenameFromUrl(u);
           const isImage = /\.(jpe?g|png|gif|webp|svg)(\?|$)/i.test(u);
+          const proxied = jotformImageUrl(u, formId);
           return isImage ? (
-            <a key={i} href={u} target="_blank" rel="noreferrer" className="inline-flex flex-col gap-0.5">
-              <img src={u} alt={filename} className="h-20 w-20 object-cover rounded border border-slate-200" />
+            <a key={i} href={proxied} target="_blank" rel="noreferrer" className="inline-flex flex-col gap-0.5">
+              <img src={proxied} alt={filename} className="h-20 w-20 object-cover rounded border border-slate-200" />
               <span className="text-[9.5px] text-slate-500 max-w-[140px] truncate">{filename}</span>
             </a>
           ) : (
-            <a key={i} href={u} target="_blank" rel="noreferrer" className="text-[11px] text-teal-700 hover:underline inline-flex items-center gap-1 max-w-full">
+            <a key={i} href={proxied} target="_blank" rel="noreferrer" className="text-[11px] text-teal-700 hover:underline inline-flex items-center gap-1 max-w-full">
               <Download className="h-3 w-3 shrink-0" />
               <span className="truncate">{filename || u}</span>
             </a>
@@ -1802,6 +1807,22 @@ function AnswerValue({ k, v, highlight, formId }: { k: string; v: string; highli
  *  back. For any non-widget URL we just return it as-is (still
  *  absolutising relative paths defensively). */
 function jotformImageUrl(url: string, formId: string | undefined): string {
+  // Full https URLs pointing at jotform.com — extract the path part and
+  // route through the proxy. Otherwise the dashboard would link directly
+  // to JotForm, which requires the user to be logged in there. Common
+  // case: CV PDFs come back as
+  //   https://www.jotform.com/uploads/Allocationassist/.../file.pdf
+  if (/^https?:\/\/(?:www\.)?jotform\.com\//i.test(url)) {
+    try {
+      const u = new URL(url);
+      const path = u.pathname; // e.g. /uploads/Allocationassist/.../file.pdf
+      if (formId && (path.startsWith("/uploads/") || path.startsWith("/widget-uploads/"))) {
+        const base = (import.meta.env.VITE_SUPABASE_URL as string)?.replace(/\/$/, "") ?? "";
+        return `${base}/functions/v1/jotform-file-proxy?form_id=${encodeURIComponent(formId)}&path=${encodeURIComponent(path)}`;
+      }
+    } catch { /* fall through to return as-is */ }
+    return url;
+  }
   if (/^https?:\/\//i.test(url)) return url;
   if (url.startsWith("/widget-uploads/") || url.startsWith("/uploads/")) {
     if (!formId) return `https://www.jotform.com${url}`;

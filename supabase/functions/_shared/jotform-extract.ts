@@ -192,5 +192,69 @@ export function mapToProfile(flat: Record<string, string>): {
           || pickContains("cv", "resume");
   if (cv) acf.cv_resume = cv;
 
+  // ── Value-pattern fallbacks ────────────────────────────────────────
+  // JotForm question labels often arrive truncated to generic stems
+  // ("What Is", "Type A", "Please Send"). The label-match above misses
+  // those, so we also scan VALUES and rescue fields by their shape.
+
+  // CV URL: any value that's a jotform.com URL pointing at /uploads/…
+  // ending in a document extension. The "Please Send63" field is a
+  // common offender.
+  if (!acf.cv_resume) {
+    for (const v of Object.values(flat)) {
+      const m = /(https?:\/\/[^\s,;]+\.(?:pdf|doc|docx))/i.exec(v ?? "");
+      if (m && /jotform\.com\/uploads\//i.test(m[1])) {
+        acf.cv_resume = m[1];
+        break;
+      }
+    }
+  }
+
+  // Date of birth: a JSON-looking value with {day, month, year}.
+  if (!acf.date_of_birth) {
+    for (const v of Object.values(flat)) {
+      const trimmed = (v ?? "").trim();
+      if (!trimmed.startsWith("{") || !trimmed.includes("year")) continue;
+      try {
+        const obj = JSON.parse(trimmed) as Record<string, unknown>;
+        if (typeof obj.year === "string" && typeof obj.month === "string" && typeof obj.day === "string") {
+          acf.date_of_birth = `${obj.year}-${String(obj.month).padStart(2, "0")}-${String(obj.day).padStart(2, "0")}`;
+          break;
+        }
+      } catch { /* skip */ }
+    }
+  }
+
+  // Bio / area of interest: the longest single free-text answer that's
+  // 80+ chars and doesn't look like JSON, a URL, or a phone object —
+  // matches the "What Is44" field shape (truncated "what is your area
+  // of interest" / "tell us about your experience" prompts).
+  if (!acf.specific_areas_of_interests_within_the_specialization) {
+    let longest = "";
+    for (const [k, v] of Object.entries(flat)) {
+      const s = (v ?? "").trim();
+      if (s.length < 80) continue;
+      if (s.startsWith("{") || s.startsWith("[")) continue;
+      if (/^https?:\/\//i.test(s)) continue;
+      // Ignore tracker / JS-execution noise.
+      const nk = norm(k);
+      if (nk.includes("track") || nk.includes("execution") || nk.includes("jsexec")) continue;
+      if (s.length > longest.length) longest = s;
+    }
+    if (longest) acf.specific_areas_of_interests_within_the_specialization = longest;
+  }
+
+  // Currency-shaped value → expected salary fallback if we didn't pick
+  // one by label. Form value looks like "$450,000".
+  if (!acf.expected_salary) {
+    for (const v of Object.values(flat)) {
+      const s = (v ?? "").trim();
+      if (/^[$£€][\d, ]+$/.test(s)) {
+        acf.expected_salary = s;
+        break;
+      }
+    }
+  }
+
   return { full_name: full, email, phone, acf };
 }

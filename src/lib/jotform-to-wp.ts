@@ -114,5 +114,61 @@ export function mapAnswersToWp(flat: Record<string, string>): MappedProfile {
   const targeted = pick("targetedlocations", "preferredlocations") || pickContains("targetedlocation");
   if (targeted) acf.targeted_locations = targeted.split(/[,;\n]+/).map(s => s.trim()).filter(Boolean);
 
+  // ── Value-pattern fallbacks (mirrors supabase _shared/jotform-extract) ─
+  // JotForm question labels often arrive truncated to generic stems
+  // ("What Is", "Type A", "Please Send"). Catch the important fields
+  // by VALUE shape too — keeps client-side stage prefill in lockstep
+  // with what the webhook would have inserted.
+
+  // CV URL: any jotform.com /uploads/ URL ending in pdf/doc/docx.
+  for (const v of Object.values(flat ?? {})) {
+    const m = /(https?:\/\/[^\s,;]+\.(?:pdf|doc|docx))/i.exec(v ?? "");
+    if (m && /jotform\.com\/uploads\//i.test(m[1])) {
+      acf.cv_resume = m[1];
+      break;
+    }
+  }
+
+  // DOB as {day, month, year} JSON.
+  if (!acf.date_of_birth) {
+    for (const v of Object.values(flat ?? {})) {
+      const trimmed = (v ?? "").trim();
+      if (!trimmed.startsWith("{") || !trimmed.includes("year")) continue;
+      try {
+        const obj = JSON.parse(trimmed) as Record<string, unknown>;
+        if (typeof obj.year === "string" && typeof obj.month === "string" && typeof obj.day === "string") {
+          acf.date_of_birth = `${obj.year}-${String(obj.month).padStart(2, "0")}-${String(obj.day).padStart(2, "0")}`;
+          break;
+        }
+      } catch { /* skip */ }
+    }
+  }
+
+  // Bio: longest free-text answer 80+ chars, not JSON/URL/tracker.
+  if (!acf.specific_areas_of_interests_within_the_specialization) {
+    let longest = "";
+    for (const [k, v] of Object.entries(flat ?? {})) {
+      const s = (v ?? "").trim();
+      if (s.length < 80) continue;
+      if (s.startsWith("{") || s.startsWith("[")) continue;
+      if (/^https?:\/\//i.test(s)) continue;
+      const nk = norm(k);
+      if (nk.includes("track") || nk.includes("execution") || nk.includes("jsexec")) continue;
+      if (s.length > longest.length) longest = s;
+    }
+    if (longest) acf.specific_areas_of_interests_within_the_specialization = longest;
+  }
+
+  // Currency-shaped value → expected_salary fallback.
+  if (!acf.expected_salary) {
+    for (const v of Object.values(flat ?? {})) {
+      const s = (v ?? "").trim();
+      if (/^[$£€][\d, ]+$/.test(s)) {
+        acf.expected_salary = s;
+        break;
+      }
+    }
+  }
+
   return { full_name: full, email, phone, acf };
 }

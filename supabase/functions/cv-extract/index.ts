@@ -203,6 +203,49 @@ Deno.serve(async (req: Request) => {
     extraction_error: null,
   }).eq("id", uploadId);
 
+  // ── Merge into a WP candidate when the upload was created by the
+  //    JotForm pipeline. The cv_uploads.doctor_id is prefixed with
+  //    `wp:<id>` in that case (see fireCvPipeline in jotform-webhook).
+  //    We update the WP candidate's ACF with the extracted bio /
+  //    title / license / years_experience so the team's draft auto-
+  //    fills with CV data without them having to re-extract.
+  const did = String(row.doctor_id ?? "");
+  if (did.startsWith("wp:")) {
+    const wpId = Number(did.slice(3));
+    if (Number.isFinite(wpId) && wpId > 0) {
+      const acf: Record<string, unknown> = {};
+      const map = {
+        job_title:                                              extracted.title,
+        bio:                                                    extracted.bio,
+        specific_areas_of_interests_within_the_specialization:  extracted.area_of_interest,
+        country_of_training:                                    extracted.country_training,
+        years_of_experience_post_specialization:                extracted.years_experience,
+        nationality:                                            extracted.nationality,
+        family_status:                                          extracted.family_status,
+        dha__haad__moh_license:                                 extracted.license,
+        expected_salary:                                        extracted.salary_expectation,
+        notice_period:                                          extracted.notice_period,
+        languages:                                              extracted.languages,
+      } as const;
+      for (const [k, v] of Object.entries(map)) {
+        if (v !== null && v !== undefined && v !== "") acf[k] = v;
+      }
+      if (Object.keys(acf).length > 0) {
+        const upsertRes = await fetch(`${Deno.env.get("SUPABASE_URL")}/functions/v1/wordpress-candidate-upsert`, {
+          method:  "POST",
+          headers: { Authorization: `Bearer ${Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")}`, "Content-Type": "application/json" },
+          body:    JSON.stringify({ id: wpId, acf }),
+        });
+        if (!upsertRes.ok) {
+          const text = await upsertRes.text().catch(() => "");
+          console.error("[cv-extract] WP candidate ACF merge failed:", upsertRes.status, text.slice(0, 200));
+        } else {
+          console.log(`[cv-extract] merged ${Object.keys(acf).length} CV fields into WP candidate #${wpId}`);
+        }
+      }
+    }
+  }
+
   return json({ ok: true, extracted, profile_updated: !upsertErr }, 200);
 });
 
