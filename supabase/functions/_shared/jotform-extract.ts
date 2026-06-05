@@ -60,13 +60,18 @@ function humaniseKey(k: string): string {
 function stringifyValue(v: unknown): string {
   if (v == null) return "";
   if (typeof v === "string") return v.trim();
-  if (typeof v === "number" || typeof v === "boolean") return String(v);
+  // Skip the literal `false` boolean — JotForm sends it for unanswered
+  // toggle-style questions and "false" is rarely a meaningful answer
+  // for our downstream consumers. true → "Yes" for the same reason.
+  if (typeof v === "boolean") return v ? "Yes" : "";
+  if (typeof v === "number") return String(v);
   if (Array.isArray(v)) return v.map(stringifyValue).filter(Boolean).join(", ");
   if (typeof v === "object") {
     const obj = v as Record<string, unknown>;
     // Common JotForm compound shapes:
     //   { first, last, middle? }                     ← name
     //   { full, area?, phone? }                      ← phone
+    //   { area, phone }                              ← phone (no full)
     //   { url }                                      ← file upload
     //   { prettyFormat } / { text }                  ← API submissions shape
     if (typeof obj.full === "string")  return obj.full.trim();
@@ -76,12 +81,75 @@ function stringifyValue(v: unknown): string {
         .filter(Boolean)
         .join(" ");
     }
+    // Phone-without-full: { area: "+49", phone: "1727816641" } → "+49 1727816641"
+    if ((typeof obj.area === "string" || typeof obj.area === "number") &&
+        (typeof obj.phone === "string" || typeof obj.phone === "number")) {
+      const a = String(obj.area).trim();
+      const p = String(obj.phone).trim();
+      if (a || p) return [a, p].filter(Boolean).join(" ");
+    }
     if (typeof obj.url === "string")           return obj.url.trim();
     if (typeof obj.prettyFormat === "string")  return obj.prettyFormat.trim();
     if (typeof obj.text === "string")          return obj.text.trim();
     return JSON.stringify(obj);
   }
   return String(v);
+}
+
+// ── Value-pattern lookup lists ────────────────────────────────────────
+// Compact dictionaries used by mapToProfile's value-based fallbacks.
+// We can't rely on JotForm question labels because they arrive
+// truncated to generic stems ("Type A", "What Is", "Please Send"), so
+// we match on the VALUE the doctor entered. The lists are small on
+// purpose — only the high-frequency entries — to keep the heuristic
+// tight. Extend over time as we see misses.
+
+const MEDICAL_SPECIALTIES = [
+  "Cardiology", "Cardiologist", "Anaesthesiology", "Anesthesiology", "Anaesthesia", "Anesthesia",
+  "Dermatology", "Endocrinology", "Gastroenterology", "Hematology", "Haematology",
+  "Nephrology", "Neurology", "Oncology", "Pulmonology", "Respiratory Medicine",
+  "Rheumatology", "Urology", "Orthopaedic", "Orthopedic", "Orthopaedics", "Orthopedics",
+  "Plastic Surgery", "Vascular Surgery", "General Surgery", "Surgery",
+  "Pediatric", "Paediatric", "Pediatrics", "Paediatrics", "Neonatology",
+  "Obstetric", "Gynecology", "Gynaecology", "Obstetrics", "OBGYN", "OB-GYN",
+  "Psychiatry", "Family Medicine", "Internal Medicine", "Emergency Medicine",
+  "Radiology", "Radiologist", "Pathology", "Pathologist", "ENT", "Otolaryngology",
+  "Ophthalmology", "Opthalmology", "Ophthalmologist", "Dentistry", "Dentist",
+  "Orthodontics", "Periodontics", "Endodontics",
+  "Electrophysiology", "Interventional Cardiology", "Interventional Radiology",
+  "Critical Care", "Intensive Care", "ICU", "Pulmonary", "Cardiothoracic",
+  "Bariatric", "Colorectal", "Hepatology", "Maxillofacial",
+];
+const COUNTRIES = [
+  "Egypt", "Sudan", "Syria", "Jordan", "Lebanon", "Iraq", "Yemen", "Palestine",
+  "Saudi Arabia", "UAE", "United Arab Emirates", "Kuwait", "Bahrain", "Qatar", "Oman",
+  "Pakistan", "India", "Bangladesh", "Sri Lanka", "Nepal", "Afghanistan",
+  "Philippines", "Indonesia", "Malaysia", "Singapore", "Thailand",
+  "United Kingdom", "UK", "Ireland", "Germany", "France", "Italy", "Spain",
+  "Netherlands", "Belgium", "Sweden", "Denmark", "Norway", "Finland", "Switzerland",
+  "Russia", "Ukraine", "Poland", "Romania", "Hungary", "Bulgaria", "Greece",
+  "Turkey", "Iran",
+  "USA", "United States", "Canada", "Mexico", "Brazil", "Argentina",
+  "Nigeria", "Kenya", "Ethiopia", "Tunisia", "Morocco", "Algeria", "Libya",
+  "China", "Japan", "South Korea", "Korea", "Vietnam", "Taiwan",
+  "Australia", "New Zealand",
+];
+const LANGUAGES = [
+  "English", "Arabic", "French", "Spanish", "German", "Italian", "Portuguese",
+  "Russian", "Mandarin", "Chinese", "Cantonese", "Hindi", "Urdu", "Bengali",
+  "Tagalog", "Filipino", "Indonesian", "Malay", "Persian", "Farsi", "Turkish",
+  "Dutch", "Swedish", "Norwegian", "Danish", "Polish", "Greek", "Hebrew",
+];
+
+/** Case-insensitive substring match. Returns the first canonical hit
+ *  from `list` that appears in `value` — used by mapToProfile to detect
+ *  specialty/nationality/languages from a raw answer. */
+function findInList(value: string, list: string[]): string | null {
+  const v = value.toLowerCase();
+  for (const item of list) {
+    if (v.includes(item.toLowerCase())) return item;
+  }
+  return null;
 }
 
 /** Map the flattened JotForm record to the canonical WordPress ACF
@@ -254,6 +322,91 @@ export function mapToProfile(flat: Record<string, string>): {
         break;
       }
     }
+  }
+
+  // Specialty: scan values against the medical-specialty dictionary.
+  // Hits when the doctor entered "Cardiology" or "Consultant
+  // Cardiologist" as a free-text answer to a generic-labelled question.
+  if (!acf.specialty) {
+    for (const v of Object.values(flat)) {
+      const hit = findInList(v ?? "", MEDICAL_SPECIALTIES);
+      if (hit) { acf.specialty = hit; break; }
+    }
+  }
+
+  // Nationality: any single short answer that matches a country in our
+  // list. Skip values that look like a long bio (>40 chars) since those
+  // could mention a country without being one.
+  if (!acf.nationality) {
+    for (const v of Object.values(flat)) {
+      const s = (v ?? "").trim();
+      if (!s || s.length > 40) continue;
+      const hit = findInList(s, COUNTRIES);
+      if (hit) { acf.nationality = hit; break; }
+    }
+  }
+
+  // Country of training: same list, different label. Skip the answer we
+  // already assigned to nationality so we don't double-up.
+  if (!acf.country_of_training) {
+    const usedNat = String(acf.nationality ?? "").toLowerCase();
+    for (const v of Object.values(flat)) {
+      const s = (v ?? "").trim();
+      if (!s || s.length > 60) continue;
+      if (usedNat && s.toLowerCase().includes(usedNat)) continue;
+      const hit = findInList(s, COUNTRIES);
+      if (hit) { acf.country_of_training = hit; break; }
+    }
+  }
+
+  // Years of experience: a pure number 1-50 or "X years" pattern.
+  if (!acf.years_of_experience_post_specialization) {
+    for (const v of Object.values(flat)) {
+      const s = (v ?? "").trim();
+      const m = /^(\d{1,2})(?:\s*(?:years?|yrs?))?$/i.exec(s);
+      if (m) {
+        const n = parseInt(m[1], 10);
+        if (n >= 1 && n <= 50) {
+          acf.years_of_experience_post_specialization = String(n);
+          break;
+        }
+      }
+    }
+  }
+
+  // Job title: lines that start with a medical seniority word.
+  if (!acf.job_title) {
+    const re = /^(Consultant|Specialist|Senior\s+Specialist|Senior\s+Consultant|Doctor|Resident|Registrar|Fellow)\b[\s\S]{2,80}$/i;
+    for (const v of Object.values(flat)) {
+      const s = (v ?? "").trim();
+      if (s.length > 100) continue;
+      if (re.test(s)) { acf.job_title = s; break; }
+    }
+  }
+
+  // Languages: comma-separated values where most tokens match our list.
+  if (!acf.languages) {
+    for (const v of Object.values(flat)) {
+      const s = (v ?? "").trim();
+      if (!s.includes(",") && !s.includes(" ")) continue;
+      if (s.length > 200) continue;
+      const tokens = s.split(/[,;&]+| and /i).map(t => t.trim()).filter(Boolean);
+      if (tokens.length < 2) continue;
+      const matched = tokens.filter(t => findInList(t, LANGUAGES));
+      // At least 2 tokens AND ≥60% must match — keeps stray "English"
+      // mentions in bios from getting picked.
+      if (matched.length >= 2 && matched.length / tokens.length >= 0.6) {
+        acf.languages = matched.join(", ");
+        break;
+      }
+    }
+  }
+
+  // Family status: "false" booleans from JotForm. Convert to the
+  // sensible default; stringifyValue already drops them, but defend
+  // here in case anything slipped through.
+  if (acf.family_status === false || acf.family_status === "false") {
+    delete acf.family_status;
   }
 
   return { full_name: full, email, phone, acf };

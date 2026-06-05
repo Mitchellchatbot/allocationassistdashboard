@@ -170,5 +170,106 @@ export function mapAnswersToWp(flat: Record<string, string>): MappedProfile {
     }
   }
 
+  // ── Value-pattern medical / personal-info detection ──────────────
+  // JotForm question labels arrive as generic stems ("Type A", "What
+  // Is", etc.) so we match on the VALUES the doctor entered. Compact
+  // lists below — extend over time as we see misses. See the server
+  // module supabase/functions/_shared/jotform-extract.ts for the
+  // master copy of these heuristics (the two stay in lockstep).
+  const SPECIALTIES = [
+    "Cardiology", "Cardiologist", "Anaesthesiology", "Anesthesiology", "Anaesthesia", "Anesthesia",
+    "Dermatology", "Endocrinology", "Gastroenterology", "Hematology", "Haematology",
+    "Nephrology", "Neurology", "Oncology", "Pulmonology", "Respiratory Medicine",
+    "Rheumatology", "Urology", "Orthopaedic", "Orthopedic", "Orthopaedics", "Orthopedics",
+    "Plastic Surgery", "Vascular Surgery", "General Surgery", "Surgery",
+    "Pediatric", "Paediatric", "Pediatrics", "Paediatrics", "Neonatology",
+    "Obstetric", "Gynecology", "Gynaecology", "Obstetrics", "OBGYN", "OB-GYN",
+    "Psychiatry", "Family Medicine", "Internal Medicine", "Emergency Medicine",
+    "Radiology", "Radiologist", "Pathology", "Pathologist", "ENT", "Otolaryngology",
+    "Ophthalmology", "Opthalmology", "Ophthalmologist", "Dentistry", "Dentist",
+    "Electrophysiology", "Interventional Cardiology", "Critical Care", "Intensive Care", "ICU",
+  ];
+  const COUNTRIES = [
+    "Egypt", "Sudan", "Syria", "Jordan", "Lebanon", "Iraq", "Yemen", "Palestine",
+    "Saudi Arabia", "UAE", "United Arab Emirates", "Kuwait", "Bahrain", "Qatar", "Oman",
+    "Pakistan", "India", "Bangladesh", "Sri Lanka", "Nepal",
+    "Philippines", "Indonesia", "Malaysia", "Singapore", "Thailand",
+    "United Kingdom", "UK", "Ireland", "Germany", "France", "Italy", "Spain",
+    "Netherlands", "Belgium", "Sweden", "Denmark", "Norway", "Finland", "Switzerland",
+    "Russia", "Ukraine", "Poland", "Greece", "Turkey", "Iran",
+    "USA", "United States", "Canada", "Mexico", "Brazil",
+    "Nigeria", "Kenya", "Tunisia", "Morocco", "Algeria",
+    "China", "Japan", "South Korea", "Korea",
+    "Australia", "New Zealand",
+  ];
+  const LANGUAGES = [
+    "English", "Arabic", "French", "Spanish", "German", "Italian", "Portuguese",
+    "Russian", "Mandarin", "Chinese", "Hindi", "Urdu", "Bengali", "Tagalog",
+    "Filipino", "Indonesian", "Malay", "Persian", "Farsi", "Turkish", "Greek", "Hebrew",
+  ];
+  const findIn = (s: string, list: string[]) => {
+    const v = s.toLowerCase();
+    return list.find(it => v.includes(it.toLowerCase())) ?? null;
+  };
+
+  if (!acf.specialty) {
+    for (const v of Object.values(flat ?? {})) {
+      const hit = findIn(v ?? "", SPECIALTIES);
+      if (hit) { acf.specialty = hit; break; }
+    }
+  }
+  if (!acf.nationality) {
+    for (const v of Object.values(flat ?? {})) {
+      const s = (v ?? "").trim();
+      if (!s || s.length > 40) continue;
+      const hit = findIn(s, COUNTRIES);
+      if (hit) { acf.nationality = hit; break; }
+    }
+  }
+  if (!acf.country_of_training) {
+    const usedNat = String(acf.nationality ?? "").toLowerCase();
+    for (const v of Object.values(flat ?? {})) {
+      const s = (v ?? "").trim();
+      if (!s || s.length > 60) continue;
+      if (usedNat && s.toLowerCase().includes(usedNat)) continue;
+      const hit = findIn(s, COUNTRIES);
+      if (hit) { acf.country_of_training = hit; break; }
+    }
+  }
+  if (!acf.years_of_experience_post_specialization) {
+    for (const v of Object.values(flat ?? {})) {
+      const m = /^(\d{1,2})(?:\s*(?:years?|yrs?))?$/i.exec((v ?? "").trim());
+      if (m) {
+        const n = parseInt(m[1], 10);
+        if (n >= 1 && n <= 50) { acf.years_of_experience_post_specialization = String(n); break; }
+      }
+    }
+  }
+  if (!acf.job_title) {
+    const re = /^(Consultant|Specialist|Senior\s+Specialist|Senior\s+Consultant|Doctor|Resident|Registrar|Fellow)\b[\s\S]{2,80}$/i;
+    for (const v of Object.values(flat ?? {})) {
+      const s = (v ?? "").trim();
+      if (s.length > 100) continue;
+      if (re.test(s)) { acf.job_title = s; break; }
+    }
+  }
+  if (!acf.languages) {
+    for (const v of Object.values(flat ?? {})) {
+      const s = (v ?? "").trim();
+      if (!s.includes(",") && !s.includes(" ")) continue;
+      if (s.length > 200) continue;
+      const tokens = s.split(/[,;&]+| and /i).map(t => t.trim()).filter(Boolean);
+      if (tokens.length < 2) continue;
+      const matched = tokens.filter(t => findIn(t, LANGUAGES));
+      if (matched.length >= 2 && matched.length / tokens.length >= 0.6) {
+        acf.languages = matched.join(", ");
+        break;
+      }
+    }
+  }
+  if (acf.family_status === false || acf.family_status === "false") {
+    delete (acf as Record<string, unknown>).family_status;
+  }
+
   return { full_name: full, email, phone, acf };
 }
