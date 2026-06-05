@@ -254,6 +254,42 @@ export function useWpCandidateByDoctorId(doctorId: string | null) {
   });
 }
 
+/** Lower-cased Set of every email that has at least one matching WP
+ *  candidate. Used by the Forms page's "in WordPress / not in WP"
+ *  filter chip — pre-fetching the full set once is cheaper than per
+ *  row email lookups, and the table is ~1.2k rows. Refreshes on the
+ *  same realtime channel as the main list. */
+export function useWpEmailSet() {
+  const qc = useQueryClient();
+  const q = useQuery<Set<string>>({
+    queryKey: ["wp-candidate-email-set"],
+    queryFn: async () => {
+      const out = new Set<string>();
+      const PAGE = 1000;
+      for (let from = 0; from < 50_000; from += PAGE) {
+        const { data, error } = await supabase
+          .from("wordpress_candidates")
+          .select("email")
+          .not("email", "is", null)
+          .range(from, from + PAGE - 1);
+        if (error) throw error;
+        const batch = (data ?? []) as Array<{ email: string | null }>;
+        for (const r of batch) {
+          const e = (r.email ?? "").toLowerCase().trim();
+          if (e) out.add(e);
+        }
+        if (batch.length < PAGE) break;
+      }
+      return out;
+    },
+    staleTime: 60_000,
+  });
+  useTableSubscription("wordpress_candidates", useCallback(() => {
+    qc.invalidateQueries({ queryKey: ["wp-candidate-email-set"] });
+  }, [qc]));
+  return q;
+}
+
 /** Look up a WP candidate by email. Used by the Forms page to decide
  *  whether to surface a "Create WP profile" button for an unmatched
  *  JotForm submission. Returns null if no candidate has that email.

@@ -43,7 +43,7 @@ import {
 } from "@/hooks/use-forms";
 import { toast } from "sonner";
 import { supabase } from "@/lib/supabase";
-import { useWpCandidateByEmail } from "@/hooks/use-wp-candidates";
+import { useWpCandidateByEmail, useWpEmailSet } from "@/hooks/use-wp-candidates";
 import { CreateWpProfileDialog } from "@/components/forms/CreateWpProfileDialog";
 
 const supabaseUrl = (import.meta.env.VITE_SUPABASE_URL as string) ?? "";
@@ -162,6 +162,11 @@ function FormDetail({ form }: { form: Form }) {
   const [outreachFilter, setOutreachFilter] = useState<"all" | "mine" | "uncontacted-zoho" | "unqualified" | OutreachStatus>(
     (isPaidFormInit || isJotform) ? "all" : "uncontacted-zoho",
   );
+  // WP-presence filter — JotForm only. Client-side because the data
+  // lives in a separate table. Pre-fetched email set + Set lookup
+  // keeps this O(1) per row.
+  const [wpFilter, setWpFilter] = useState<"all" | "in" | "out">("all");
+  const wpEmails = useWpEmailSet();
   const { user } = useAuth();
 
   // Server-side paginated + filtered feed. First page is 200 rows; each
@@ -176,12 +181,19 @@ function FormDetail({ form }: { form: Form }) {
   });
   const responses = useMemo(() => {
     const flat = feed.data?.pages.flatMap(p => p.rows) ?? [];
-    // Paid leads always float to the top of whatever order the DB
-    // returned. Stable within each bucket — preserves the submitted_at
-    // sort for the free rows below.
-    if ((form.lead_value_cents ?? 0) > 0) return flat;  // single-form view; either all paid or all free → no resort needed
-    return flat;
-  }, [feed.data, form.lead_value_cents]);
+    // WP-presence filter is client-side (the lookup data lives in a
+    // separate table). Applied here so the rest of the render path
+    // sees an already-trimmed list. While the email set is still
+    // loading we pass everything through rather than blanking the
+    // list — avoids a momentary empty state on first paint.
+    const filtered = (!isJotform || wpFilter === "all" || !wpEmails.data) ? flat : flat.filter(r => {
+      const e = (r.respondent_email ?? "").toLowerCase().trim();
+      const inWp = !!e && wpEmails.data!.has(e);
+      return wpFilter === "in" ? inWp : !inWp;
+    });
+    if ((form.lead_value_cents ?? 0) > 0) return filtered;
+    return filtered;
+  }, [feed.data, form.lead_value_cents, isJotform, wpFilter, wpEmails.data]);
 
   // KPIs from cheap server-side count queries — total / last 7 days /
   // Zoho-linked — no longer dependent on the loaded set.
@@ -421,6 +433,23 @@ function FormDetail({ form }: { form: Form }) {
                 JotForm is excluded — it's a self-serve doctor intake,
                 not a Zoho-funnel form. Date + sort are the only useful
                 filters there. */}
+            {/* WordPress-presence filter — JotForm only, since other
+                providers don't feed WP. Sits next to date so the team
+                can quickly answer "who do I still need to import?". */}
+            {isJotform && (
+              <>
+                <span className="text-muted-foreground/40">·</span>
+                <FilterChipGroup
+                  value={wpFilter}
+                  onChange={(v) => setWpFilter(v as typeof wpFilter)}
+                  options={[
+                    { value: "all", label: "All" },
+                    { value: "in",  label: "In WordPress" },
+                    { value: "out", label: "Not in WP" },
+                  ]}
+                />
+              </>
+            )}
             {showOutreachChips && (
               <>
                 <span className="text-muted-foreground/40">·</span>
@@ -475,11 +504,11 @@ function FormDetail({ form }: { form: Form }) {
           {isLoading ? (
             <p className="text-[11px] text-muted-foreground py-2">Loading submissions…</p>
           ) : responses.length === 0 ? (
-            isSearching || dateFilter !== "all" || outreachFilter !== "all" ? (
+            isSearching || dateFilter !== "all" || outreachFilter !== "all" || wpFilter !== "all" ? (
               <div className="rounded-md border border-dashed py-8 text-center">
                 <Search className="h-5 w-5 mx-auto mb-2 text-muted-foreground/60" />
                 <p className="text-[12px] text-muted-foreground">No matches for the current filter.</p>
-                <button onClick={() => { setSearchRaw(""); setDateFilter("all"); setOutreachFilter("all"); }} className="text-[11px] text-teal-700 hover:underline mt-1">
+                <button onClick={() => { setSearchRaw(""); setDateFilter("all"); setOutreachFilter("all"); setWpFilter("all"); }} className="text-[11px] text-teal-700 hover:underline mt-1">
                   Clear filters
                 </button>
               </div>
