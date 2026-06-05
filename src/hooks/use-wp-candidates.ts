@@ -240,6 +240,9 @@ export interface StagedProfile {
   acf:                 Record<string, unknown>;
   extracted_cv_data:   Record<string, unknown> | null;
   cv_upload_id:        string | null;
+  /** JotForm picture URL captured from the submission's widget_metadata.
+   *  Render via jotform-file-proxy (the raw URL is APIKEY-gated). */
+  picture_url:         string | null;
   created_by:          string | null;
   created_at:          string;
   updated_at:          string;
@@ -370,6 +373,13 @@ export function usePublishStagedProfile() {
       // cv_resume is a File-type ACF on WP — reject as a string. The CV
       // file lives in cv_uploads and is reachable via the proxy.
       delete mergedAcf.cv_resume;
+
+      // NOTE: Picture upload to WP media not wired here yet — would need
+      // a server-side step that downloads the JotForm-hosted URL with
+      // APIKEY auth + POSTs to wp/v2/media. For now we leave the URL
+      // on the staged row (and the "+ photo" badge confirms it was
+      // captured); the team can attach the photo manually in WP admin
+      // until that pipeline is built.
 
       const payload: WpCandidateUpsertPayload = {
         status,

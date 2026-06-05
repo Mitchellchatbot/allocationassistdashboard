@@ -31,7 +31,8 @@
  */
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2.45.0";
 import { flattenAnswers, mapToProfile } from "../_shared/jotform-extract.ts";
-import { notify } from "../_shared/notify.ts";
+import { notify }         from "../_shared/notify.ts";
+import { enrichProfile }  from "../_shared/enrich-profile.ts";
 
 const supabaseUrl = Deno.env.get("SUPABASE_URL") ?? "";
 const serviceKey  = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY") ?? "";
@@ -130,17 +131,26 @@ Deno.serve(async (req: Request) => {
   // the Staging section on Doctors → Profiles. Only when they click
   // Save-as-draft or Publish does anything get sent to WP.
   //
-  // cv_resume gets stored on the staged row itself (in acf jsonb), and
-  // the CV pipeline keys off staged:<id> instead of wp:<id> so the
-  // extracted fields are available when the team chooses to publish.
-  const safeAcf: Record<string, unknown> = { ...(profile.acf ?? {}) };
-  delete safeAcf.cv_resume;  // kept as a separate field; not for WP write
+  // We ENRICH first: merge the form's ACF with anything Zoho already
+  // knows about this email (phone/mobile/specialty/license/country
+  // of training/nationality) + the JotForm picture URL. CV-extracted
+  // fields fill in via cv-extract async pass once the CV downloads.
+  const safeAcfForm: Record<string, unknown> = { ...(profile.acf ?? {}) };
+  delete safeAcfForm.cv_resume;  // WP File-type ACF rejects raw URL
+
+  const { mergedAcf: safeAcf, pictureUrl } = await enrichProfile({
+    supabase,
+    email:   profile.email || null,
+    formAcf: safeAcfForm,
+    // No responseRow yet — we extract the picture from parsed raw_payload here.
+    responseRow: { raw_payload: parsed as Record<string, unknown>, answers: flat },
+  });
 
   const stagedInsert: Record<string, unknown> = {
     source:              "jotform",
     full_name:           profile.full_name || null,
     email:               profile.email      || null,
-    phone:               profile.phone      || null,
+    phone:               profile.phone      || (safeAcf.phone_number as string | undefined) || null,
     specialty:           (safeAcf.specialty           as string | undefined) ?? null,
     subspecialty:        (safeAcf.subspecialty        as string | undefined) ?? null,
     nationality:         (safeAcf.nationality         as string | undefined) ?? null,
@@ -149,6 +159,7 @@ Deno.serve(async (req: Request) => {
     country_of_training: (safeAcf.country_of_training as string | undefined) ?? null,
     years_experience:    (safeAcf.years_of_experience_post_specialization as string | undefined) ?? null,
     acf:                 safeAcf,
+    picture_url:         pictureUrl,
     created_by:          "jotform-webhook",
   };
 

@@ -1273,6 +1273,7 @@ function StagedRow({ profile }: { profile: StagedProfile }) {
   // cv-extract pass finishes. We show it as a chip so the team knows
   // there are extra fields ready to merge when they click Publish.
   const hasCv = !!profile.extracted_cv_data && Object.keys(profile.extracted_cv_data ?? {}).length > 0;
+  const hasPicture = !!profile.picture_url;
 
   return (
     <div className="rounded-md border border-amber-200/70 bg-white px-3 py-2 flex items-center gap-3">
@@ -1292,6 +1293,11 @@ function StagedRow({ profile }: { profile: StagedProfile }) {
       <Badge variant="outline" className="text-[9px] bg-slate-100 text-slate-600 border-slate-200 shrink-0" title="Not yet on WordPress. Hit Publish or Save as draft to push.">
         not on WP
       </Badge>
+      {hasPicture && (
+        <Badge variant="outline" className="text-[9px] bg-blue-50 text-blue-700 border-blue-200 shrink-0" title="Profile picture captured from JotForm. Will upload to WP on Publish.">
+          + photo
+        </Badge>
+      )}
       {hasCv && (
         <Badge variant="outline" className="text-[9px] bg-emerald-50 text-emerald-700 border-emerald-200 shrink-0" title="CV extracted — bio, license, years of experience etc. will merge into WP on Publish.">
           + CV parsed
