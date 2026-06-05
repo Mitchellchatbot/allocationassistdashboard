@@ -253,13 +253,15 @@ export function DashboardLayout({ children, title: pageTitle, subtitle: pageSubt
 
   const INSIGHTS_PROMPT = 'Give me exactly 5 insights the recruitment team should act on today. Focus on: where leads are getting stuck, which channels are producing the most doctors, high-priority follow-ups, recruiter workload balance, and any pipeline anomalies. Number each insight 1–5.';
 
-  // Reset chat on panel close
+  // Chat persists across open/close + across navigations — the AI panel
+  // is now a viable way to drive the portal, not a throwaway sidebar.
+  // The DashboardLayout sits ABOVE the route Outlet so its state survives
+  // route changes naturally. We only blank the IN-FLIGHT streaming text
+  // on close so a half-sent message doesn't replay when the panel
+  // reopens. Use the RotateCcw "Clear chat" button in the panel header
+  // to wipe history when desired.
   useEffect(() => {
-    if (!aiOpen) {
-      setChatMessages([]);
-      setChatInput('');
-      setChatStreaming('');
-    }
+    if (!aiOpen) setChatStreaming('');
   }, [aiOpen]);
 
   // Auto-scroll chat to bottom
@@ -731,10 +733,7 @@ export function DashboardLayout({ children, title: pageTitle, subtitle: pageSubt
                             </div>
                           ))}
                           {actions.length > 0 && (
-                            <ChatActionBar
-                              actions={actions}
-                              onActionDone={() => setAiOpen(false)}
-                            />
+                            <ChatActionBar actions={actions} />
                           )}
                         </div>
                       );
