@@ -43,6 +43,19 @@ window.addEventListener("error", (event) => {
 window.addEventListener("unhandledrejection", (event) => {
   maybeReload(event.reason);
   const r = event.reason;
+  const msg = r instanceof Error ? r.message : String(r ?? "");
+  // Supabase's GoTrue uses the browser's WebLocks API to serialise auth
+  // token refreshes across tabs/iframes. When two tabs or a fresh
+  // realtime channel attempt to grab the lock simultaneously, one
+  // "steals" it from the other and the loser rejects with this message.
+  // It's harmless — auth keeps working — but it dirties the console and
+  // tricks Sentry-style watchers into thinking the app is broken. Filter
+  // out the noise; preventDefault stops the browser's default warning
+  // chrome too.
+  if (/Lock\s+"[^"]*sb-[^"]*auth-token[^"]*"\s+was released because another request stole it/i.test(msg)) {
+    event.preventDefault();
+    return;
+  }
   if (r instanceof Error) {
     console.error("[UnhandledRejection]", r.message);
     if (r.stack) console.error("[UnhandledRejection.stack]", r.stack);

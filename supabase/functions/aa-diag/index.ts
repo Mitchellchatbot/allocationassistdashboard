@@ -1,0 +1,32 @@
+/**
+ * Throwaway diagnostic — service-role read of recent form_responses
+ * and notifications. Useful for "I just submitted a form but nothing
+ * showed up" troubleshooting where RLS hides the data from the anon
+ * key.
+ *
+ * Delete after the issue is resolved; this bypasses RLS by design.
+ */
+import { createClient } from "https://esm.sh/@supabase/supabase-js@2.45.0";
+
+const sb = createClient(
+  Deno.env.get("SUPABASE_URL") ?? "",
+  Deno.env.get("SUPABASE_SERVICE_ROLE_KEY") ?? "",
+);
+
+Deno.serve(async () => {
+  const [{ data: forms }, { data: responses }, { data: notifs }] = await Promise.all([
+    sb.from("forms").select("id, name, provider, provider_form_id, webhook_secret, active, response_count").order("created_at", { ascending: false }),
+    sb.from("form_responses").select("id, form_id, respondent_email, respondent_name, submitted_at, created_at").order("created_at", { ascending: false, nullsFirst: false }).limit(8),
+    sb.from("notifications").select("id, kind, severity, title, slack_delivered_at, slack_skip_reason, created_at").order("created_at", { ascending: false }).limit(10),
+  ]);
+  return new Response(JSON.stringify({
+    SLACK_WEBHOOK_URL_set: !!Deno.env.get("SLACK_WEBHOOK_URL"),
+    forms_count:           forms?.length ?? 0,
+    forms:                 (forms ?? []).map(f => ({
+      id: f.id, name: f.name, provider: f.provider, active: f.active, response_count: f.response_count,
+      webhook_url: f.webhook_secret ? `${Deno.env.get("SUPABASE_URL")}/functions/v1/${f.provider}-webhook?key=${f.webhook_secret}` : null,
+    })),
+    recent_responses: responses ?? [],
+    recent_notifications: notifs ?? [],
+  }, null, 2), { headers: { "Content-Type": "application/json" } });
+});
