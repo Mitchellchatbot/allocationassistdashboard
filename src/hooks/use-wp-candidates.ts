@@ -216,7 +216,20 @@ export function useDeleteWpCandidate() {
       if (!resp.ok) throw new Error(resp.error ?? "Delete failed");
       return resp;
     },
-    onSuccess: () => qc.invalidateQueries({ queryKey: KEY }),
+    // Optimistic update — pull the row out of every cached
+    // wp-candidates list immediately on success so the user sees it
+    // gone in the next paint. Just invalidating the query relied on
+    // a fresh re-fetch returning the updated list before the next
+    // render, which could lag (network slow, realtime channel missed
+    // the DELETE event, etc.) and left the deleted row sitting in
+    // place — the user's complaint that 'i pressed delete and shes
+    // still here'.
+    onSuccess: (_resp, deletedId) => {
+      qc.setQueriesData<WpCandidate[]>({ queryKey: KEY }, (prev) =>
+        (prev ?? []).filter(c => c.id !== deletedId),
+      );
+      qc.invalidateQueries({ queryKey: KEY });
+    },
   });
 }
 
