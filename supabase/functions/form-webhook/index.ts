@@ -21,6 +21,7 @@
  * accidental webhook retries don't double-insert.
  */
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2.45.0";
+import { notify } from "../_shared/notify.ts";
 
 const supabaseUrl = Deno.env.get("SUPABASE_URL") ?? "";
 const serviceKey  = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY") ?? "";
@@ -193,6 +194,16 @@ Deno.serve(async (req: Request) => {
     console.error("[form-webhook] insert failed:", insErr);
     return json({ ok: false, error: "Insert failed", detail: insErr.message }, 500);
   }
+
+  await notify({
+    kind:    "new_form_submission",
+    title:   `New form submission${respondentName ? ` · ${respondentName}` : ""}`,
+    body:    `${respondentEmail ?? "(no email)"} via ${form.provider ?? "form"}. Review the submission and decide whether to action it.`,
+    link_path:         respondentEmail
+      ? `/forms?q=${encodeURIComponent(respondentEmail)}`
+      : `/forms`,
+    related_doctor_id: doctorId,
+  }).catch(e => console.error("[form-webhook] notify failed:", e));
 
   return json({ ok: true, form_id: form.id, response_id: responseId }, 200);
 });

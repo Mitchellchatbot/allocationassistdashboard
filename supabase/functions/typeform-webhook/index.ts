@@ -26,6 +26,7 @@
  */
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2.45.0";
 import { createHmac } from "node:crypto";
+import { notify } from "../_shared/notify.ts";
 
 const supabaseUrl = Deno.env.get("SUPABASE_URL") ?? "";
 const serviceKey  = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY") ?? "";
@@ -204,6 +205,19 @@ Deno.serve(async (req: Request) => {
     console.error("[typeform-webhook] insert failed:", insErr);
     return json({ ok: false, error: "Insert failed", detail: insErr.message }, 500);
   }
+
+  // Slack + bell — review-the-profile nudge. Typeform doesn't push to
+  // WP, so the link target is the Forms page filtered to this
+  // submission's email — the team takes it from there.
+  await notify({
+    kind:    "new_form_submission",
+    title:   `New form submission${respondentName ? ` · ${respondentName}` : ""}`,
+    body:    `${respondentEmail ?? "(no email)"} via Typeform. Review the submission and decide whether to action it.`,
+    link_path:         respondentEmail
+      ? `/forms?q=${encodeURIComponent(respondentEmail)}`
+      : `/forms`,
+    related_doctor_id: doctorId,
+  }).catch(e => console.error("[typeform-webhook] notify failed:", e));
 
   return json({ ok: true, form_id: form.id, response_id: fr.token }, 200);
 });

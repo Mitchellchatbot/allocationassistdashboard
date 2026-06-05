@@ -31,6 +31,7 @@
  */
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2.45.0";
 import { flattenAnswers, mapToProfile } from "../_shared/jotform-extract.ts";
+import { notify } from "../_shared/notify.ts";
 
 const supabaseUrl = Deno.env.get("SUPABASE_URL") ?? "";
 const serviceKey  = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY") ?? "";
@@ -150,6 +151,23 @@ Deno.serve(async (req: Request) => {
   }, { onConflict: "form_id,provider_response_id", ignoreDuplicates: false });
 
   console.log("[jotform-webhook] processed submission", responseId, "email:", profile.email, "wp_id:", upsertJson?.id, "doctor_id:", doctorId);
+
+  // ── 8. Slack-deliverable nudge so the team reviews the profile ─────
+  // Deep-link strategy: prefer the WP candidate's Doctors → Profiles
+  // tab (the team's review surface). Falls back to /forms when WP
+  // upsert failed so the team still has somewhere to go.
+  const reviewLink = upsertJson?.ok
+    ? `/doctors?tab=profiles&q=${encodeURIComponent(profile.email)}`
+    : `/forms`;
+  const summary = [profile.full_name, profile.acf?.specialty, profile.acf?.country_of_training]
+    .filter(Boolean).join(" · ") || profile.email;
+  await notify({
+    kind:    "new_form_submission",
+    title:   `New form submission${profile.full_name ? ` · ${profile.full_name}` : ""}`,
+    body:    `${summary}. ${existing ? "Updated existing WP profile" : (upsertJson?.ok ? "Draft WP profile created" : "WP upsert failed")} — review and decide whether to publish.`,
+    link_path:         reviewLink,
+    related_doctor_id: doctorId,
+  }).catch(e => console.error("[jotform-webhook] notify failed:", e));
 
   return json({
     ok:              true,

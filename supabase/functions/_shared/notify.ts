@@ -85,7 +85,11 @@ const KIND_RULES: Record<string, KindRule> = {
   sla_breach:                { severity: "critical", cta_label: "Open lead",            cta_kind: "open_doctor" },
   // — for awareness —
   vacancy_match:          { severity: "info",     cta_label: "View match",        cta_kind: "open_vacancy" },
-  new_form_submission:    { severity: "info",     cta_label: "View submission",   cta_kind: "navigate" },
+  // Bumped from info → action: every new form submission warrants
+  // a "review the doctor profile" nudge to the team. Slack channel
+  // post + dashboard. Owner @-mention falls back to nobody since
+  // these come in unowned; the team picks one up from the channel.
+  new_form_submission:    { severity: "action",   cta_label: "Review profile",    cta_kind: "navigate" },
 };
 
 const fallbackRule: KindRule = { severity: "info", cta_label: "Open", cta_kind: "navigate" };
