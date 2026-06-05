@@ -483,10 +483,11 @@ function MyNotificationPrefsCard({ session }: { session: { user?: { email?: stri
   const save = async () => {
     setSaving(true);
     try {
-      const clean = handle.replace(/^@/, "").trim();
-      const { error } = await supabase
-        .from("user_profiles")
-        .upsert({ email: myEmail, slack_handle: clean || null }, { onConflict: "email" });
+      // Routed through the `set_my_slack_handle` RPC: security-definer,
+      // upserts by auth.uid(), only ever touches the calling user's
+      // slack_handle column. Avoids the RLS UPDATE-policy rabbit hole
+      // and the non-unique-email ON CONFLICT trap.
+      const { error } = await supabase.rpc("set_my_slack_handle", { handle });
       if (error) throw error;
       toast.success("Slack handle saved");
     } catch (e) {
