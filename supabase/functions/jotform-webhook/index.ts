@@ -62,19 +62,42 @@ Deno.serve(async (req: Request) => {
   if (!form) return json({ ok: false, error: "Unknown or revoked key" }, 401);
 
   // ── 2. Parse payload ──────────────────────────────────────────────
-  // JotForm posts application/x-www-form-urlencoded with a rawRequest
-  // parameter holding the JSON blob of answers. Also handle a direct
-  // JSON POST in case the team configures it that way.
-  const ct  = (req.headers.get("content-type") ?? "").toLowerCase();
-  const raw = await req.text();
-  let parsed: Record<string, unknown> = {};
+  // JotForm sends one of THREE content types depending on the form's
+  // version + how the integration was set up:
+  //   - application/json                        (rare; manual configs)
+  //   - application/x-www-form-urlencoded       (older JotForm setups)
+  //   - multipart/form-data; boundary=…          (current default — most
+  //                                              of our submissions)
+  // We branch on content-type to avoid the multipart-boundary-as-field
+  // bug that turned the whole raw body into one giant garbage answer.
+  const ct = (req.headers.get("content-type") ?? "").toLowerCase();
+  let parsed:     Record<string, unknown> = {};
   let rawAnswers: Record<string, unknown> = {};
 
   if (ct.includes("application/json")) {
+    const raw = await req.text();
     try { parsed = JSON.parse(raw); } catch { /* fall through */ }
     rawAnswers = (parsed.rawRequest as Record<string, unknown> | undefined) ?? parsed;
+  } else if (ct.includes("multipart/form-data")) {
+    // Use the built-in multipart parser. Each form field becomes one
+    // entry on the FormData; large fields like rawRequest or fileToken
+    // come through intact.
+    const fd = await req.formData();
+    for (const [k, v] of fd.entries()) {
+      // Skip file blobs — JotForm uploads come as File entries we don't
+      // need here (the picture proxy + jotform-file-proxy handle them
+      // by URL). Coerce everything else to string.
+      if (typeof v === "string") parsed[k] = v;
+    }
+    const rr = parsed.rawRequest as string | undefined;
+    if (rr) {
+      try { rawAnswers = JSON.parse(rr); } catch { /* fall through */ }
+    } else {
+      rawAnswers = parsed;
+    }
   } else {
-    // application/x-www-form-urlencoded
+    // application/x-www-form-urlencoded (and the no-content-type fallback)
+    const raw = await req.text();
     const params = new URLSearchParams(raw);
     for (const [k, v] of params.entries()) parsed[k] = v;
     const rr = params.get("rawRequest");
