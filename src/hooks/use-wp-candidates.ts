@@ -203,6 +203,165 @@ export function useUpsertWpCandidate() {
   });
 }
 
+/** Delete a candidate from WordPress + our mirror. Calls the
+ *  `wordpress-candidate-delete` edge function which does WP DELETE
+ *  (force=true, skips the trash) + a mirror row delete in one shot. */
+export function useDeleteWpCandidate() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: async (id: number) => {
+      const { data, error } = await supabase.functions.invoke("wordpress-candidate-delete", { body: { id } });
+      if (error) throw error;
+      const resp = data as { ok: boolean; error?: string };
+      if (!resp.ok) throw new Error(resp.error ?? "Delete failed");
+      return resp;
+    },
+    onSuccess: () => qc.invalidateQueries({ queryKey: KEY }),
+  });
+}
+
+/** Staged-profile record — a candidate awaiting review before it lands
+ *  on WordPress. Same shape the upsert edge function eventually
+ *  consumes, plus some flat fields for list rendering. */
+export interface StagedProfile {
+  id:                  string;
+  source:              string;
+  source_response_id:  string | null;
+  full_name:           string | null;
+  email:               string | null;
+  phone:               string | null;
+  specialty:           string | null;
+  subspecialty:        string | null;
+  nationality:         string | null;
+  job_title:           string | null;
+  current_location:    string | null;
+  country_of_training: string | null;
+  years_experience:    string | null;
+  acf:                 Record<string, unknown>;
+  created_by:          string | null;
+  created_at:          string;
+  updated_at:          string;
+}
+
+const STAGED_KEY = ["staged-profiles"] as const;
+
+/** List every staged profile. Tiny table — single page fetch is fine. */
+export function useStagedProfiles() {
+  const qc = useQueryClient();
+  const q = useQuery<StagedProfile[]>({
+    queryKey: STAGED_KEY,
+    queryFn: async () => {
+      const { data, error } = await supabase
+        .from("staged_doctor_profiles")
+        .select("*")
+        .order("created_at", { ascending: false })
+        .limit(500);
+      if (error) throw error;
+      return (data ?? []) as StagedProfile[];
+    },
+    staleTime: 30_000,
+  });
+  useTableSubscription("staged_doctor_profiles", useCallback(() => {
+    qc.invalidateQueries({ queryKey: STAGED_KEY });
+  }, [qc]));
+  return q;
+}
+
+export interface StagedProfileInput {
+  source?:             string;
+  source_response_id?: string | null;
+  full_name?:          string | null;
+  email?:              string | null;
+  phone?:              string | null;
+  specialty?:          string | null;
+  subspecialty?:       string | null;
+  nationality?:        string | null;
+  job_title?:          string | null;
+  current_location?:   string | null;
+  country_of_training?: string | null;
+  years_experience?:   string | null;
+  acf?:                Record<string, unknown>;
+}
+
+/** Insert a new staged profile from the Create-WP-profile dialog. */
+export function useCreateStagedProfile() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: async (input: StagedProfileInput) => {
+      const { data, error } = await supabase
+        .from("staged_doctor_profiles")
+        .insert(input)
+        .select("*")
+        .single();
+      if (error) throw error;
+      return data as StagedProfile;
+    },
+    onSuccess: () => qc.invalidateQueries({ queryKey: STAGED_KEY }),
+  });
+}
+
+/** Edit a staged profile's flat fields or its acf payload in-place. */
+export function useUpdateStagedProfile() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: async ({ id, patch }: { id: string; patch: Partial<StagedProfileInput> }) => {
+      const { data, error } = await supabase
+        .from("staged_doctor_profiles")
+        .update(patch)
+        .eq("id", id)
+        .select("*")
+        .single();
+      if (error) throw error;
+      return data as StagedProfile;
+    },
+    onSuccess: () => qc.invalidateQueries({ queryKey: STAGED_KEY }),
+  });
+}
+
+/** Drop a staging row without touching WordPress. */
+export function useDeleteStagedProfile() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: async (id: string) => {
+      const { error } = await supabase.from("staged_doctor_profiles").delete().eq("id", id);
+      if (error) throw error;
+      return id;
+    },
+    onSuccess: () => qc.invalidateQueries({ queryKey: STAGED_KEY }),
+  });
+}
+
+/** Publish a staged profile to WordPress. Calls wordpress-candidate-upsert
+ *  with the staging row's acf payload at the requested status, then
+ *  drops the staging row on success so the same record can't be
+ *  published twice. */
+export function usePublishStagedProfile() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: async ({ profile, status }: { profile: StagedProfile; status: "draft" | "publish" }) => {
+      const payload: WpCandidateUpsertPayload = {
+        status,
+        title: profile.full_name ?? undefined,
+        acf:   profile.acf as WpCandidateUpsertPayload["acf"],
+      };
+      const { data, error } = await supabase.functions.invoke("wordpress-candidate-upsert", { body: payload });
+      if (error) throw error;
+      const resp = data as { ok: boolean; id?: number; row?: WpCandidate; created?: boolean; error?: string };
+      if (!resp.ok) throw new Error(resp.error ?? "Publish failed");
+
+      // Drop the staging row only after WP write succeeds — leaves the
+      // row in place if WP errors so the user can retry without losing
+      // their edits.
+      await supabase.from("staged_doctor_profiles").delete().eq("id", profile.id);
+      return resp;
+    },
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: STAGED_KEY });
+      qc.invalidateQueries({ queryKey: KEY });
+    },
+  });
+}
+
 /** Upload a profile photo to WP Media. If candidateId is set, the
  *  upload also attaches it to that candidate's profile_picture field
  *  in one round-trip. Returns the media id + the public URL. */

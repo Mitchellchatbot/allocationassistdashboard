@@ -27,11 +27,12 @@ import {
 } from "lucide-react";
 import {
   useWpCandidates, useSyncWpCandidates, useLinkWpCandidate,
-  useUpsertWpCandidate, useUploadWpPhoto,
-  type WpCandidate,
+  useUpsertWpCandidate, useUploadWpPhoto, useDeleteWpCandidate,
+  useStagedProfiles, useDeleteStagedProfile, usePublishStagedProfile,
+  type WpCandidate, type StagedProfile,
 } from "@/hooks/use-wp-candidates";
 import { toast } from "sonner";
-import { Plus, Camera, Loader2, Check, AlertCircle, Pencil } from "lucide-react";
+import { Plus, Camera, Loader2, Check, AlertCircle, Pencil, Trash2, Send } from "lucide-react";
 import { Textarea } from "@/components/ui/textarea";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 
@@ -263,6 +264,11 @@ export default function WpCandidates({ embedded }: WpCandidatesProps = {}) {
           </CardContent>
         </Card>
 
+        {/* Staging area — profiles staged from JotForm but not yet
+            pushed to WordPress. Only renders when there's something to
+            show so the published list stays the default view. */}
+        <StagingSection />
+
         {/* List */}
         <Card>
           <CardContent className="pt-3 space-y-2">
@@ -330,42 +336,63 @@ export default function WpCandidates({ embedded }: WpCandidatesProps = {}) {
 
 function CandidateRow({ candidate, highlight, onOpen }: { candidate: WpCandidate; highlight: string; onOpen: () => void }) {
   const subtitle = [candidate.job_title, candidate.country_of_training].filter(Boolean).join(" · ");
+  const del = useDeleteWpCandidate();
+
+  const handleDelete = async (e: React.MouseEvent) => {
+    e.stopPropagation();
+    const label = candidate.full_name ?? candidate.title ?? `WP candidate #${candidate.id}`;
+    if (!confirm(`Delete "${label}" from WordPress?\n\nThis removes the post on the live site AND the dashboard mirror. Cannot be undone.`)) return;
+    try {
+      await del.mutateAsync(candidate.id);
+      toast.success(`Deleted ${label}`);
+    } catch (err) {
+      toast.error("Couldn't delete", { description: (err as Error).message });
+    }
+  };
+
   return (
-    <>
-      <div className="rounded-md border bg-white">
-        <button
-          type="button"
-          onClick={onOpen}
-          className="w-full flex items-center gap-2.5 px-3 py-2 text-left hover:bg-slate-50"
-        >
-          {/* Opens the centered profile dialog — arrow points outward
-              so it reads "pop out" instead of the old chevron's
-              "drill down". */}
-          <ArrowUpRight className="h-3.5 w-3.5 text-slate-400 shrink-0" />
-          <Avatar src={candidate.photo_url} name={candidate.full_name ?? candidate.title ?? "?"} size={32} />
-          <div className="flex-1 min-w-0">
-            <div className="text-[12px] font-medium text-slate-800 truncate">
-              <Hl text={candidate.full_name ?? candidate.title ?? "—"} q={highlight} />
-            </div>
-            <div className="text-[10px] text-muted-foreground truncate">
-              <Hl text={subtitle || "—"} q={highlight} />
-              {candidate.years_experience != null && <span> · {candidate.years_experience}y exp</span>}
-            </div>
+    <div className="rounded-md border bg-white flex items-stretch">
+      <button
+        type="button"
+        onClick={onOpen}
+        className="flex-1 min-w-0 flex items-center gap-2.5 px-3 py-2 text-left hover:bg-slate-50"
+      >
+        {/* Opens the centered profile dialog — arrow points outward
+            so it reads "pop out" instead of the old chevron's
+            "drill down". */}
+        <ArrowUpRight className="h-3.5 w-3.5 text-slate-400 shrink-0" />
+        <Avatar src={candidate.photo_url} name={candidate.full_name ?? candidate.title ?? "?"} size={32} />
+        <div className="flex-1 min-w-0">
+          <div className="text-[12px] font-medium text-slate-800 truncate">
+            <Hl text={candidate.full_name ?? candidate.title ?? "—"} q={highlight} />
           </div>
-          {(candidate.license_types ?? []).slice(0, 3).map(l => (
-            <Badge key={l} variant="outline" className="text-[9px] bg-sky-50 text-sky-700 border-sky-200 shrink-0">{l}</Badge>
-          ))}
-          {candidate.doctor_id && (
-            <Badge variant="outline" className="text-[9px] bg-emerald-50 text-emerald-700 border-emerald-200 shrink-0">
-              <Link2 className="h-2.5 w-2.5 mr-0.5" /> Linked
-            </Badge>
-          )}
-          {candidate.status === "private" && <Badge variant="outline" className="text-[9px] bg-amber-50 text-amber-700 border-amber-200 shrink-0">Private</Badge>}
-        </button>
-      </div>
-      {/* Detail dialog is mounted ONCE at the page level — the row just
-          signals which candidate to open via onOpen. */}
-    </>
+          <div className="text-[10px] text-muted-foreground truncate">
+            <Hl text={subtitle || "—"} q={highlight} />
+            {candidate.years_experience != null && <span> · {candidate.years_experience}y exp</span>}
+          </div>
+        </div>
+        {(candidate.license_types ?? []).slice(0, 3).map(l => (
+          <Badge key={l} variant="outline" className="text-[9px] bg-sky-50 text-sky-700 border-sky-200 shrink-0">{l}</Badge>
+        ))}
+        {candidate.doctor_id && (
+          <Badge variant="outline" className="text-[9px] bg-emerald-50 text-emerald-700 border-emerald-200 shrink-0">
+            <Link2 className="h-2.5 w-2.5 mr-0.5" /> Linked
+          </Badge>
+        )}
+        {candidate.status === "private" && <Badge variant="outline" className="text-[9px] bg-amber-50 text-amber-700 border-amber-200 shrink-0">Private</Badge>}
+      </button>
+      {/* Delete sits outside the row-click button so it doesn't open the
+          detail dialog. Confirms before firing — this hits WP for real. */}
+      <button
+        type="button"
+        onClick={handleDelete}
+        disabled={del.isPending}
+        title="Delete from WordPress (and remove from the dashboard mirror)"
+        className="shrink-0 w-9 flex items-center justify-center text-slate-300 hover:text-rose-600 hover:bg-rose-50 transition-colors border-l border-slate-100 disabled:opacity-50"
+      >
+        {del.isPending ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Trash2 className="h-3.5 w-3.5" />}
+      </button>
+    </div>
   );
 }
 
@@ -549,6 +576,7 @@ function CandidateDetailDialogInner({ candidate, open, onClose }: { candidate: W
                     </Button>
                   </a>
                 )}
+                <DeleteCandidateButton candidate={candidate} onDone={onClose} />
               </div>
 
               {/* Status inline-editor + Link to AA doctor (admin tools) */}
@@ -1147,4 +1175,137 @@ function useDebounce<T>(value: T, delay: number): T {
     return () => clearTimeout(id);
   }, [value, delay]);
   return v;
+}
+
+/* ─────────────────────────────────────────────────────────────────────
+ * Staging section — profiles awaiting Draft / Publish.
+ *
+ * Sits above the published-candidates list. Hidden when empty so the
+ * primary list stays the default view; expands with a count badge in
+ * the header when there's queued work.
+ * ─────────────────────────────────────────────────────────────────── */
+
+function StagingSection() {
+  const { data: staged = [] } = useStagedProfiles();
+  if (staged.length === 0) return null;
+  return (
+    <Card className="border-amber-200/60 bg-amber-50/30">
+      <CardContent className="pt-3 pb-3 space-y-2">
+        <div className="flex items-center gap-2 text-[11px] uppercase tracking-wider text-amber-900/70 font-semibold">
+          <FileText className="h-3.5 w-3.5" />
+          Staging — {staged.length} profile{staged.length === 1 ? "" : "s"} awaiting review
+        </div>
+        <p className="text-[10px] text-muted-foreground -mt-0.5">
+          Imported from JotForm. Pick Publish or Save as draft to push them to WordPress, or discard.
+        </p>
+        <div className="space-y-1.5">
+          {staged.map(s => <StagedRow key={s.id} profile={s} />)}
+        </div>
+      </CardContent>
+    </Card>
+  );
+}
+
+function StagedRow({ profile }: { profile: StagedProfile }) {
+  const publish = usePublishStagedProfile();
+  const del     = useDeleteStagedProfile();
+  const subtitle = [profile.specialty, profile.country_of_training, profile.current_location]
+    .filter(Boolean).join(" · ");
+
+  const handlePublish = async (status: "draft" | "publish") => {
+    try {
+      await publish.mutateAsync({ profile, status });
+      toast.success(status === "publish" ? "Published to WordPress" : "Saved as WordPress draft");
+    } catch (e) {
+      toast.error("Couldn't push to WordPress", { description: (e as Error).message });
+    }
+  };
+
+  const handleDelete = async () => {
+    if (!confirm(`Discard staged profile for ${profile.full_name ?? profile.email ?? "this submission"}? This doesn't touch WordPress.`)) return;
+    try {
+      await del.mutateAsync(profile.id);
+      toast.success("Staged profile discarded");
+    } catch (e) {
+      toast.error("Couldn't discard", { description: (e as Error).message });
+    }
+  };
+
+  const pending = publish.isPending || del.isPending;
+
+  return (
+    <div className="rounded-md border bg-white px-3 py-2 flex items-center gap-3">
+      <Avatar src={null} name={profile.full_name ?? profile.email ?? "?"} size={28} />
+      <div className="flex-1 min-w-0">
+        <div className="text-[12px] font-medium text-slate-800 truncate">
+          {profile.full_name ?? profile.email ?? "Unnamed submission"}
+        </div>
+        <div className="text-[10px] text-muted-foreground truncate">
+          {subtitle || profile.email || "—"}
+        </div>
+      </div>
+      <div className="flex items-center gap-1 shrink-0">
+        <Button
+          size="sm"
+          variant="outline"
+          className="h-7 text-[10px]"
+          onClick={() => handlePublish("draft")}
+          disabled={pending}
+          title="Push to WordPress as a draft — visible only to WP admin"
+        >
+          {publish.isPending ? <Loader2 className="h-3 w-3 animate-spin mr-1" /> : <FileText className="h-3 w-3 mr-1" />}
+          Save as draft
+        </Button>
+        <Button
+          size="sm"
+          className="h-7 text-[10px]"
+          onClick={() => handlePublish("publish")}
+          disabled={pending}
+          title="Publish live on allocationassist.com"
+        >
+          {publish.isPending ? <Loader2 className="h-3 w-3 animate-spin mr-1" /> : <Send className="h-3 w-3 mr-1" />}
+          Publish
+        </Button>
+        <Button
+          size="sm"
+          variant="ghost"
+          className="h-7 text-[10px] text-rose-600 hover:bg-rose-50"
+          onClick={handleDelete}
+          disabled={pending}
+          title="Discard this staged profile. Doesn't touch WordPress."
+        >
+          {del.isPending ? <Loader2 className="h-3 w-3 animate-spin" /> : <Trash2 className="h-3 w-3" />}
+        </Button>
+      </div>
+    </div>
+  );
+}
+
+/** Small destructive action inside the detail dialog. Confirms via
+ *  native confirm() (low ceremony) before firing — wraps useDeleteWpCandidate. */
+function DeleteCandidateButton({ candidate, onDone }: { candidate: WpCandidate; onDone: () => void }) {
+  const del = useDeleteWpCandidate();
+  const handle = async () => {
+    const label = candidate.full_name ?? candidate.title ?? `WP candidate #${candidate.id}`;
+    if (!confirm(`Delete "${label}" from WordPress?\n\nThis removes the post on the live site AND the dashboard mirror. Cannot be undone.`)) return;
+    try {
+      await del.mutateAsync(candidate.id);
+      toast.success(`Deleted ${label}`);
+      onDone();
+    } catch (err) {
+      toast.error("Couldn't delete", { description: (err as Error).message });
+    }
+  };
+  return (
+    <Button
+      variant="outline"
+      onClick={handle}
+      disabled={del.isPending}
+      className="w-full justify-center h-10 rounded-full border-rose-200 text-rose-700 hover:bg-rose-50"
+      title="Permanently delete this WordPress candidate — removes the post + the dashboard mirror row."
+    >
+      {del.isPending ? <Loader2 className="h-4 w-4 mr-2 animate-spin" /> : <Trash2 className="h-4 w-4 mr-2" />}
+      {del.isPending ? "Deleting…" : "Delete profile"}
+    </Button>
+  );
 }
