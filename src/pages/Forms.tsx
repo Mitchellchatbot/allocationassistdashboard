@@ -1104,6 +1104,20 @@ function ResponseRow({
             </Badge>
           )
         )}
+        {/* WP profile presence — paired with the Zoho badge so the team
+            sees both systems' state without expanding the row. Only
+            JotForm feeds WP, so other providers stay silent. */}
+        {formProvider === "jotform" && !wpQuery.isLoading && (
+          existingWp ? (
+            <Badge variant="outline" className="text-[9px] bg-violet-50 text-violet-700 border-violet-200 shrink-0" title={`WP candidate #${existingWp.id} · ${existingWp.status ?? ""}`}>
+              <Sparkles className="h-2.5 w-2.5 mr-0.5" /> in WordPress
+            </Badge>
+          ) : response.respondent_email ? (
+            <Badge variant="outline" className="text-[9px] bg-slate-100 text-slate-500 border-slate-200 shrink-0" title="No WP candidate matches this email yet — expand the row to create one">
+              not in WP
+            </Badge>
+          ) : null
+        )}
         <div className="text-[10px] text-muted-foreground shrink-0">{relativeTime(response.submitted_at)}</div>
       </button>
       {effectivelyOpen && (
