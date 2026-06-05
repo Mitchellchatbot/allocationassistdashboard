@@ -26,7 +26,7 @@ import { useCallback, useEffect, useState } from "react";
 import logo from "@/assets/logo.png";
 import { NavLink } from "@/components/NavLink";
 import { useAuth } from "@/hooks/use-auth";
-import { useNavigate, useLocation, Link } from "react-router-dom";
+import { useNavigate } from "react-router-dom";
 import {
   Sidebar,
   SidebarContent,
@@ -42,8 +42,6 @@ import {
 } from "@/components/ui/sidebar";
 import { useNotifications } from "@/hooks/use-notifications";
 import { useUniversalSearch } from "@/lib/universal-search-context";
-import { useRecentItems } from "@/hooks/use-recent-items";
-import { Clock } from "lucide-react";
 
 interface NavItem {
   title:   string;
@@ -123,13 +121,11 @@ const ADMIN_SECTION: NavSection = {
   ],
 };
 
-const RECENT_ACCENT = "#a3e635"; // vivid lime
-
 // Section headers can be expanded/collapsed individually; choice persists in
-// localStorage. Recent + Admin default to collapsed because they're reference
-// material rather than primary navigation.
+// localStorage. Admin defaults to collapsed because it's reference material
+// rather than primary navigation.
 const COLLAPSED_KEY = "aa-sidebar-collapsed-sections";
-const DEFAULT_COLLAPSED: Record<string, boolean> = { Recent: true, Admin: true };
+const DEFAULT_COLLAPSED: Record<string, boolean> = { Admin: true };
 
 function useCollapsedSections() {
   const [collapsedMap, setCollapsedMap] = useState<Record<string, boolean>>(() => {
@@ -163,11 +159,6 @@ export function AppSidebar() {
   const { unreadCount } = useNotifications();
   const badgeCtx: BadgeContext = { unreadNotifications: unreadCount };
   const search = useUniversalSearch();
-  const location = useLocation();
-  const recents = useRecentItems();
-  // Filter out the page the user is currently looking at — surfacing it as
-  // "recent" is noisy. Cap at 4 for the sidebar.
-  const recentsToShow = recents.filter(r => r.path !== location.pathname).slice(0, 4);
 
   // Filter sections to only the items this user can see. Drop empty sections
   // entirely so we don't render headers without children.
@@ -215,36 +206,6 @@ export function AppSidebar() {
               ⌘K
             </kbd>
           </button>
-        )}
-
-        {!collapsed && recentsToShow.length > 0 && (
-          <SidebarGroup className="pb-1">
-            <CollapsibleHeader
-              label="Recent"
-              accent={RECENT_ACCENT}
-              isCollapsed={!!collapsedMap.Recent}
-              onToggle={() => toggle("Recent")}
-            />
-            {!collapsedMap.Recent && (
-              <SidebarGroupContent>
-                <SidebarMenu>
-                  {recentsToShow.map(r => (
-                    <SidebarMenuItem key={r.path}>
-                      <SidebarMenuButton asChild>
-                        <Link
-                          to={r.path}
-                          className="rounded-full px-3 py-1.5 text-[12px] text-sidebar-foreground/65 hover:bg-sidebar-accent hover:text-sidebar-accent-foreground transition-colors"
-                        >
-                          <Clock className="mr-2 h-3 w-3 shrink-0" style={{ color: RECENT_ACCENT }} />
-                          <span className="truncate">{r.label}</span>
-                        </Link>
-                      </SidebarMenuButton>
-                    </SidebarMenuItem>
-                  ))}
-                </SidebarMenu>
-              </SidebarGroupContent>
-            )}
-          </SidebarGroup>
         )}
 
         {visibleSections.map(section => {
