@@ -10,6 +10,7 @@ import { Search, Send, X, Eye, ChevronLeft, AlertTriangle } from "lucide-react";
 import { toast } from "sonner";
 import { useDoctorLifecycleMap } from "@/hooks/use-doctor-lifecycle";
 import { useAuth } from "@/hooks/use-auth";
+import { findSenderByEmail } from "@/lib/hi-team";
 import { supabase } from "@/lib/supabase";
 import { useHospitals, type Hospital } from "@/hooks/use-hospitals";
 import { useEmailTemplates, renderTemplate } from "@/hooks/use-email-templates";
@@ -442,6 +443,16 @@ function PreviewConfirm({
   onConfirm: () => void;
   submitting: boolean;
 }) {
+  // Who'll be on the From line — derived from the current user, which
+  // matches what send-flow-email does at send time (looks up
+  // assigned_to in its SENDERS registry). Falls back to the generic
+  // team address when the current user isn't in the verified roster.
+  const { user } = useAuth();
+  const sender   = findSenderByEmail(user?.email ?? null);
+  const senderLine = sender
+    ? `${sender.name} <${sender.email}>`
+    : "Allocation Assist Team <hello@allocationassist.com>";
+
   // Pull the doctor's profile data for the preview. WP candidates are
   // now the source of truth — if the doctor is linked to a WP record
   // we use that; for any field WP doesn't have set, we fall back to
@@ -504,6 +515,10 @@ function PreviewConfirm({
         <div><strong>{doctor.name}</strong> → {hospitals.length === 1 ? hospitals[0].name : `${hospitals.length} hospitals (BCC)`}</div>
         <div className="text-[11px] text-muted-foreground">
           One run per hospital will be created in Flow 2. Hospital + doctor emails fire automatically on confirm.
+        </div>
+        <div className="text-[11px] text-muted-foreground pt-1 border-t border-slate-200/70 mt-1.5">
+          Sending as: <span className="font-medium text-slate-700">{senderLine}</span>
+          {!sender && <span className="text-amber-700 ml-1">· current user isn't in the verified sender roster, so the generic team address is used</span>}
         </div>
       </div>
 

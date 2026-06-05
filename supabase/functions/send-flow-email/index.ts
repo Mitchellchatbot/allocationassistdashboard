@@ -99,15 +99,57 @@ const MAIL_REPLY_DOMAIN = Deno.env.get("MAIL_REPLY_DOMAIN") ?? "reply.care-assis
 // email embeds. e.g. https://care-assist.io
 const APP_ORIGIN = Deno.env.get("APP_ORIGIN") ?? "https://care-assist.io";
 
-// Allocation Assist branded signature block. Matches the layout Ammar uses
-// in his manual sends (teal "Warmest Regards", name + title + company, JLT
-// address with pin icon, website link, logo at bottom). Injected at render
-// time via {{signature}} so we maintain one source of truth across every
-// template — change here once, every email picks it up on the next send.
-const SIGNATURE_HTML = `
+// ── Per-sender From / signature registry ─────────────────────────────────────
+// Each HI team member sends from their own @allocationassist.com address
+// so recipients see a real person. The display-name + first-name pair
+// powers both the From header AND the sign-off in the branded signature.
+//
+// To add or change a sender: bump this map. To temporarily fall back to
+// the generic team address (e.g. domain still verifying), unset
+// assigned_to on the run or remove the entry here.
+//
+// Keys are lowercased — assigned_to may be saved with original casing.
+interface SenderProfile { displayName: string; firstName: string; email: string; title: string; }
+const SENDERS: Record<string, SenderProfile> = {
+  "rodaina@allocationassist.com":        { displayName: "Rodaina Thabit",  firstName: "Rodaina", email: "rodaina@allocationassist.com",        title: "Hospital Introduction" },
+  "mohamed.othman@allocationassist.com": { displayName: "Mohamed Othman",  firstName: "Mohamed", email: "mohamed.othman@allocationassist.com", title: "Hospital Introduction" },
+  "sohaila@allocationassist.com":        { displayName: "Sohaila Mohamed", firstName: "Sohaila", email: "sohaila@allocationassist.com",        title: "Hospital Introduction" },
+  "ishak@allocationassist.com":          { displayName: "Ishak Boulaat",   firstName: "Ishak",   email: "ishak@allocationassist.com",          title: "Hospital Introduction" },
+  "ammar@allocationassist.com":          { displayName: "Ammar",            firstName: "Ammar",   email: "ammar@allocationassist.com",          title: "Founder" },
+};
+
+/** Resolve the From line + signature variant from a run's assigned_to. */
+function pickSender(assignedTo: string | null | undefined): { fromHeader: string; replyHint: string; first: string; title: string } {
+  const key = (assignedTo ?? "").trim().toLowerCase();
+  const s = SENDERS[key];
+  if (s) {
+    return {
+      fromHeader: `${s.displayName} <${s.email}>`,
+      replyHint:  s.email,
+      first:      s.firstName,
+      title:      s.title,
+    };
+  }
+  // No assigned owner or owner not in the registry → fall back to the
+  // generic team address from env. Keeps sends working during the
+  // Resend domain-verification window or for runs the team hasn't
+  // claimed yet.
+  return {
+    fromHeader: MAIL_FROM,
+    replyHint:  "",
+    first:      "The Allocation Assist team",
+    title:      "Allocation Assist",
+  };
+}
+
+/** Signature variant — personalises the "Warmest Regards" line with
+ *  the sender's first name. The rest of the block stays brand-uniform
+ *  so the email still reads like AA, just signed by a real person. */
+function signatureHtml(first: string): string {
+  return `
 <div style="margin-top:32px;font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Helvetica,Arial,sans-serif;color:#1a2332;">
   <p style="margin:0 0 4px;color:#14b8a6;font-weight:700;font-size:15px;">Warmest Regards,</p>
-  <p style="margin:0 0 4px;color:#14b8a6;font-weight:700;font-size:15px;">The Allocation Assist team,</p>
+  <p style="margin:0 0 4px;color:#14b8a6;font-weight:700;font-size:15px;">${escapeHtml(first)},</p>
   <p style="margin:0 0 14px;color:#14b8a6;font-weight:700;font-size:15px;">Allocation Assist</p>
   <p style="margin:0 0 4px;color:#475569;font-size:14px;">
     <span style="display:inline-block;width:14px;color:#14b8a6;">&#9737;</span>
@@ -121,16 +163,25 @@ const SIGNATURE_HTML = `
   </p>
   <p style="margin:2px 0 0;color:#94a3b8;font-size:11px;letter-spacing:0.5px;">The source of workforce</p>
 </div>`;
-
-const SIGNATURE_TEXT = `
+}
+function signatureText(first: string): string {
+  return `
 
 Warmest Regards,
-The Allocation Assist team
+${first}
 Allocation Assist
 
 Jumeirah Lakes Towers, Dubai, UAE
 www.allocationassist.com
 `;
+}
+
+// Allocation Assist branded signature block. Matches the layout Ammar uses
+// in his manual sends (teal "Warmest Regards", name + title + company, JLT
+// address with pin icon, website link, logo at bottom). The block is now
+// generated per-sender by signatureHtml() / signatureText() above —
+// the first line picks up the actual sender's name instead of the
+// generic 'The Allocation Assist team'.
 
 console.log("[send-flow-email] booted.",
   "Has Resend key:", !!RESEND_API_KEY,
@@ -173,6 +224,11 @@ Deno.serve(async (req: Request) => {
     return json({ ok: false, error: "Run not found", detail: runErr?.message }, 404);
   }
   console.log("[send-flow-email] run", runId, "stage:", run.current_stage, "flow:", run.flow_key);
+
+  // Resolve the sender for this run based on assigned_to. Falls back
+  // to the generic MAIL_FROM env when the owner isn't in the registry.
+  const sender = pickSender(run.assigned_to as string | null | undefined);
+  console.log("[send-flow-email] sender:", sender.fromHeader, "(assigned_to:", run.assigned_to, ")");
 
   // ── Resolve route + template ──────────────────────────────────────────────
   const route = STAGE_ROUTES[run.current_stage];
@@ -464,8 +520,8 @@ Deno.serve(async (req: Request) => {
     interview_format:   String(md.interview_format ?? ""),
     interview_link:     normalizeUrl(String(md.interview_link ?? "")),
     joining_date:       String(md.joining_date ?? ""),
-    signature:          SIGNATURE_HTML,
-    signature_text:     SIGNATURE_TEXT,
+    signature:          signatureHtml(sender.first),
+    signature_text:     signatureText(sender.first),
   };
 
   const subject = render(tpl.subject ?? "", vars);
@@ -511,7 +567,7 @@ Deno.serve(async (req: Request) => {
     return json({
       ok: true,
       dry_run: true,
-      preview: { from: MAIL_FROM, to: effectiveTo, subject, html, text },
+      preview: { from: sender.fromHeader, to: effectiveTo, subject, html, text },
       template_key: templateKey,
       stage: run.current_stage,
       next_stage: route.next_stage,
@@ -549,7 +605,7 @@ Deno.serve(async (req: Request) => {
         "Content-Type":  "application/json",
       },
       body: JSON.stringify({
-        from:     MAIL_FROM,
+        from:     sender.fromHeader,
         to:       [effectiveTo],
         // When the test-override is a multi-address list, CC the rest of the
         // team so every test email lands in everyone's inbox.
