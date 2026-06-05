@@ -7,7 +7,8 @@ import { Label } from "@/components/ui/label";
 import { Switch } from "@/components/ui/switch";
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from "@/components/ui/dialog";
 import { useAuth, ROLE_PRESETS, ALL_PAGES } from "@/hooks/use-auth";
-import { Trash2, Plus, UserCog } from "lucide-react";
+import { Trash2, Plus, UserCog, Slack as SlackIcon, Send, Loader2, CheckCircle2, AlertCircle } from "lucide-react";
+import { supabase } from "@/lib/supabase";
 import { toast } from "sonner";
 
 const SUPABASE_URL      = import.meta.env.VITE_SUPABASE_URL as string;
@@ -356,28 +357,10 @@ const Settings = () => {
         )}
 
         {tab === "notifications" && (
-          <Card className="shadow-sm border-border/50">
-            <CardHeader className="pb-2 pt-4 px-4">
-              <CardTitle className="text-[13px] font-semibold">Notifications</CardTitle>
-              <CardDescription className="text-[11px]">Alert preferences</CardDescription>
-            </CardHeader>
-            <CardContent className="px-4 pb-4 space-y-3">
-              {[
-                { label: "New doctor applications", desc: "Notify when a doctor applies", default: true },
-                { label: "Pipeline bottleneck alerts", desc: "Alert when doctors are stuck in a stage", default: true },
-                { label: "Licensing updates", desc: "License approval and rejection notifications", default: true },
-                { label: "Weekly performance digest", desc: "Weekly email with key metrics", default: false },
-              ].map(item => (
-                <div key={item.label} className="flex items-center justify-between">
-                  <div>
-                    <p className="text-[12px] font-medium">{item.label}</p>
-                    <p className="text-[10px] text-muted-foreground">{item.desc}</p>
-                  </div>
-                  <Switch defaultChecked={item.default} />
-                </div>
-              ))}
-            </CardContent>
-          </Card>
+          <div className="space-y-3">
+            <SlackIntegrationCard />
+            <MyNotificationPrefsCard session={session} />
+          </div>
         )}
 
         {tab === "users" && role === "admin" && (
@@ -397,3 +380,145 @@ const Settings = () => {
 };
 
 export default Settings;
+
+/* ─────────────────────────────────────────────────────────────────────
+ * Slack integration card — admin-side wiring.
+ *
+ * The webhook URL itself lives in the Supabase edge-function secrets
+ * (SLACK_WEBHOOK_URL) so we don't store it in the browser. This card
+ * surfaces a "Send test message" button that hits a tiny edge function
+ * + reports whether the webhook is configured.
+ * ─────────────────────────────────────────────────────────────────── */
+function SlackIntegrationCard() {
+  const [pinging, setPinging] = useState(false);
+  const [result,  setResult]  = useState<{ ok: boolean; reason?: string } | null>(null);
+
+  const handleTest = async () => {
+    setPinging(true); setResult(null);
+    try {
+      const { data, error } = await supabase.functions.invoke("slack-test", { body: {} });
+      if (error) throw error;
+      const resp = data as { ok: boolean; reason?: string };
+      setResult(resp);
+      if (resp.ok) toast.success("Test message sent to Slack");
+      else         toast.error("Slack test failed", { description: resp.reason });
+    } catch (e) {
+      const reason = (e as Error).message;
+      setResult({ ok: false, reason });
+      toast.error("Slack test failed", { description: reason });
+    } finally {
+      setPinging(false);
+    }
+  };
+
+  return (
+    <Card className="shadow-sm border-border/50">
+      <CardHeader className="pb-2 pt-4 px-4">
+        <CardTitle className="text-[13px] font-semibold flex items-center gap-2">
+          <SlackIcon className="h-4 w-4 text-violet-600" /> Slack
+        </CardTitle>
+        <CardDescription className="text-[11px]">
+          Action + critical notifications mirror to Slack. Info-level stuff stays in-dashboard so the channel doesn't get noisy.
+        </CardDescription>
+      </CardHeader>
+      <CardContent className="px-4 pb-4 space-y-3">
+        <div className="rounded-md border border-border/60 bg-muted/30 px-3 py-2.5 text-[11px] text-muted-foreground space-y-1.5">
+          <p className="font-medium text-foreground">Webhook setup (one-time, admin only)</p>
+          <ol className="list-decimal pl-4 space-y-0.5">
+            <li>Create an Incoming Webhook in Slack pointed at the team channel.</li>
+            <li>Save the URL into the edge function secret:
+              <code className="ml-1 bg-background border border-border rounded px-1.5 py-0.5 text-[10px] font-mono">npx supabase secrets set SLACK_WEBHOOK_URL=…</code>
+            </li>
+            <li>Hit <span className="font-medium text-foreground">Send test message</span> below to confirm it works.</li>
+          </ol>
+        </div>
+
+        <div className="flex items-center gap-2">
+          <Button onClick={handleTest} disabled={pinging} size="sm" className="h-8">
+            {pinging ? <Loader2 className="h-3.5 w-3.5 mr-1.5 animate-spin" /> : <Send className="h-3.5 w-3.5 mr-1.5" />}
+            Send test message
+          </Button>
+          {result && (
+            <span className={`inline-flex items-center gap-1 text-[11px] ${result.ok ? "text-emerald-700" : "text-rose-700"}`}>
+              {result.ok ? <CheckCircle2 className="h-3.5 w-3.5" /> : <AlertCircle className="h-3.5 w-3.5" />}
+              {result.ok ? "Delivered" : (result.reason ?? "Failed")}
+            </span>
+          )}
+        </div>
+
+        <div className="rounded-md border border-border/60 bg-muted/30 px-3 py-2.5 text-[11px] text-muted-foreground space-y-1.5">
+          <p className="font-medium text-foreground">Severity model</p>
+          <ul className="space-y-0.5">
+            <li><span className="inline-block w-2 h-2 rounded-full bg-rose-500 mr-1.5" /><span className="font-medium text-rose-700">Critical</span> — Slack channel post + dashboard.</li>
+            <li><span className="inline-block w-2 h-2 rounded-full bg-amber-500 mr-1.5" /><span className="font-medium text-amber-700">Needs action</span> — Slack mention of the assigned owner + dashboard.</li>
+            <li><span className="inline-block w-2 h-2 rounded-full bg-slate-400 mr-1.5" /><span className="font-medium text-slate-600">Info</span> — dashboard only.</li>
+          </ul>
+        </div>
+      </CardContent>
+    </Card>
+  );
+}
+
+/** Per-user Slack handle so @-mentions route correctly when the
+ *  notification's `for_user` matches the signed-in account. */
+function MyNotificationPrefsCard({ session }: { session: { user?: { email?: string } } | null }) {
+  const myEmail = session?.user?.email ?? "";
+  const [handle, setHandle] = useState("");
+  const [loaded, setLoaded] = useState(false);
+  const [saving, setSaving] = useState(false);
+
+  useEffect(() => {
+    if (!myEmail) return;
+    void (async () => {
+      const { data } = await supabase
+        .from("user_profiles")
+        .select("slack_handle")
+        .eq("email", myEmail)
+        .maybeSingle();
+      setHandle((data as { slack_handle?: string | null } | null)?.slack_handle ?? "");
+      setLoaded(true);
+    })();
+  }, [myEmail]);
+
+  const save = async () => {
+    setSaving(true);
+    try {
+      const clean = handle.replace(/^@/, "").trim();
+      const { error } = await supabase
+        .from("user_profiles")
+        .upsert({ email: myEmail, slack_handle: clean || null }, { onConflict: "email" });
+      if (error) throw error;
+      toast.success("Slack handle saved");
+    } catch (e) {
+      toast.error("Couldn't save", { description: (e as Error).message });
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  return (
+    <Card className="shadow-sm border-border/50">
+      <CardHeader className="pb-2 pt-4 px-4">
+        <CardTitle className="text-[13px] font-semibold">Your Slack handle</CardTitle>
+        <CardDescription className="text-[11px]">
+          We'll @-mention this when a notification is assigned to you. Leave blank to fall back to your email.
+        </CardDescription>
+      </CardHeader>
+      <CardContent className="px-4 pb-4 space-y-2">
+        <div className="flex items-center gap-2">
+          <span className="text-[12px] text-muted-foreground">@</span>
+          <Input
+            value={handle}
+            onChange={(e) => setHandle(e.target.value)}
+            placeholder="rodaina"
+            disabled={!loaded || saving}
+            className="h-8 text-[12px] max-w-[200px]"
+          />
+          <Button size="sm" onClick={save} disabled={!loaded || saving} className="h-8">
+            {saving ? <Loader2 className="h-3 w-3 animate-spin" /> : "Save"}
+          </Button>
+        </div>
+      </CardContent>
+    </Card>
+  );
+}

@@ -16,6 +16,7 @@ import { ChatActionBar, parseActions } from "@/components/ChatActions";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { CurrencyToggle } from "@/components/CurrencyToggle";
+import { NotificationsPopover } from "@/components/NotificationsPopover";
 import { UniversalSearch } from "@/components/UniversalSearch";
 import { UniversalSearchContext } from "@/lib/universal-search-context";
 import { lookupRoute } from "@/lib/route-labels";
@@ -342,60 +343,7 @@ export function DashboardLayout({ children, title: pageTitle, subtitle: pageSubt
                 </TooltipTrigger>
                 <TooltipContent side="bottom" className="text-[10px]">Download this page's data as a spreadsheet</TooltipContent>
               </Tooltip>
-              <Popover>
-                <PopoverTrigger asChild>
-                  <Button variant="ghost" size="icon" data-tour="topbar-notifications" className="relative h-8 w-8 rounded-full">
-                    <Bell className="h-3.5 w-3.5 text-muted-foreground" />
-                    {unreadCount > 0 && (
-                      <Badge className="absolute -top-0.5 -right-0.5 h-3.5 min-w-[14px] p-0 flex items-center justify-center text-[8px] animate-pulse">
-                        {unreadCount}
-                      </Badge>
-                    )}
-                  </Button>
-                </PopoverTrigger>
-                <PopoverContent align="end" className="w-[340px] p-0">
-                  <div className="flex items-center justify-between px-3 py-2.5 border-b bg-muted/30">
-                    <span className="text-[12px] font-semibold">Notifications</span>
-                    {unreadCount > 0 && (
-                      <button onClick={markAllRead} className="text-[10px] text-primary hover:underline font-medium">
-                        Mark all as read
-                      </button>
-                    )}
-                  </div>
-                  <div className="max-h-[320px] overflow-auto">
-                    {notifications.length === 0 ? (
-                      <div className="flex items-center gap-2.5 px-3 py-4 text-[11px] text-muted-foreground">
-                        <CheckCircle2 className="h-4 w-4 text-success shrink-0" />
-                        All caught up — no urgent items.
-                      </div>
-                    ) : (
-                      notifications.map((n, i) => {
-                        const isUnread = !readIdxs.includes(i);
-                        const Icon = n.icon;
-                        return (
-                          <div
-                            key={i}
-                            className={`flex items-start gap-2.5 px-3 py-2.5 border-b border-border/40 last:border-0 hover:bg-muted/50 cursor-pointer transition-colors ${isUnread ? "bg-primary/5" : ""}`}
-                            onClick={() => !readIdxs.includes(i) && setReadIdxs(prev => [...prev, i])}
-                          >
-                            <div className={`mt-0.5 flex h-6 w-6 shrink-0 items-center justify-center rounded-full ${isUnread ? "bg-primary/10" : "bg-muted"}`}>
-                              <Icon className={`h-3 w-3 ${n.color}`} />
-                            </div>
-                            <div className="flex-1 min-w-0">
-                              <p className={`text-[11px] leading-tight ${isUnread ? "font-semibold text-foreground" : "font-medium text-muted-foreground"}`}>{n.title}</p>
-                              {n.detail && <p className="text-[10px] text-muted-foreground truncate">{n.detail}</p>}
-                            </div>
-                            <div className="flex flex-col items-end shrink-0 gap-0.5">
-                              <span className="text-[9px] text-muted-foreground">{n.time}</span>
-                              {isUnread && <span className="h-1.5 w-1.5 rounded-full bg-primary" />}
-                            </div>
-                          </div>
-                        );
-                      })
-                    )}
-                  </div>
-                </PopoverContent>
-              </Popover>
+              <NotificationsPopover />
             </div>
           </header>
 

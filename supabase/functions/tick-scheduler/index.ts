@@ -39,6 +39,7 @@
  */
 
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2";
+import { notify } from "../_shared/notify.ts";
 
 const SUPABASE_URL              = Deno.env.get("SUPABASE_URL") ?? "";
 const SUPABASE_SERVICE_ROLE_KEY = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY") ?? "";
@@ -252,7 +253,7 @@ Deno.serve(async (req: Request) => {
           // Dedupe: only fire once per run. The 'last_event_at' check
           // below keeps us idempotent — once the notification is
           // logged we touch last_event_at so this branch won't re-fire.
-          await supabase.from("notifications").insert({
+          await notify({
             kind:              "hospital_reply_overdue",
             title:             `${r.hospital ?? "Hospital"} hasn't replied to ${r.doctor_name}'s profile`,
             body:              `7+ days since send. Chase the recruiter or mark the run completed if you've heard back another way.`,
@@ -260,7 +261,7 @@ Deno.serve(async (req: Request) => {
             related_run_id:    r.id,
             related_doctor_id: r.doctor_id,
             for_user:          (r.metadata as Record<string, unknown> | null)?.assigned_to as string | null ?? null,
-          }).catch(() => {/* harmless if dedupe constraint hits */});
+          });
           await supabase.from("automation_flow_runs")
             .update({ last_event_at: now.toISOString() })
             .eq("id", r.id);
@@ -442,7 +443,7 @@ async function runVacancyMatchSweep(
 
         // Upsert via the unique partial index. On conflict, do nothing — we
         // don't want to re-notify after the team has dismissed.
-        const { error: insErr } = await supabase.from("notifications").insert({
+        const result = await notify({
           kind:                "vacancy_match",
           title:               `New match · ${v.hospital_name}`,
           body:                `${c.name || "A doctor"} (${c.specialty}) matches ${v.specialty} at ${v.hospital_name}.`,
@@ -451,11 +452,7 @@ async function runVacancyMatchSweep(
           related_doctor_id:   c.prefixedId,
           for_user:            v.opened_by,
         });
-        if (insErr && !/duplicate key/i.test(insErr.message)) {
-          console.error("[tick-scheduler] notif insert failed:", insErr.message);
-          continue;
-        }
-        if (!insErr) {
+        if (result.id) {
           console.log(`[tick-scheduler] vacancy_match · ${v.hospital_name} ↔ ${c.name} (${score})`);
           acts.push({
             run_id: v.id, doctor: c.name || c.prefixedId,
@@ -492,7 +489,7 @@ async function runInterviewFollowupSweep(
 
     for (const r of (runs ?? []) as Array<{ id: string; doctor_name: string; hospital: string | null; completed_at: string; assigned_to: string | null }>) {
       const hoursSince = Math.floor((now.getTime() - new Date(r.completed_at).getTime()) / 3_600_000);
-      const { error: insErr } = await supabase.from("notifications").insert({
+      const result = await notify({
         kind:           "interview_followup",
         title:          `Chase ${r.hospital ?? "hospital"} — ${r.doctor_name}`,
         body:           `Interview wrapped ${hoursSince}h ago. Spec says nudge the hospital at 72h. No reply logged yet — time to follow up.`,
@@ -500,11 +497,7 @@ async function runInterviewFollowupSweep(
         related_run_id: r.id,
         for_user:       r.assigned_to,
       });
-      if (insErr && !/duplicate key/i.test(insErr.message)) {
-        console.error("[tick-scheduler] interview_followup insert failed:", insErr.message);
-        continue;
-      }
-      if (!insErr) {
+      if (result.id) {
         console.log(`[tick-scheduler] interview_followup · ${r.doctor_name} ↔ ${r.hospital} (${hoursSince}h)`);
         acts.push({
           run_id: r.id, doctor: r.doctor_name,
@@ -549,13 +542,14 @@ async function runAvailabilityCheckInSweep(
         continue;
       }
       const name = r.doctor_name ?? "(doctor)";
-      const { error: insErr } = await supabase.from("notifications").insert({
+      const result = await notify({
         kind:                "availability_checkin",
         title:               `Re-check availability — ${name}`,
         body:                `${name} was paused${r.unavailable_reason ? ` ("${r.unavailable_reason}")` : ""}. Your check-in date has arrived. Confirm available, or push the check-in.`,
         link_path:           `/doctor-profiles`,
         related_doctor_id:   r.doctor_id,
       });
+      const insErr = result.slack_skip_reason && result.slack_skip_reason.startsWith("insert_error") ? { message: result.slack_skip_reason } : null;
       // Bump last_availability_ping_at regardless — we don't want to spam
       // the notification table if the insert fails for some reason.
       await supabase.from("doctor_lifecycle")
@@ -612,17 +606,13 @@ async function runDoctorsOnTheWaySweep(
 
       const days = Math.floor((now.getTime() - new Date(r.signed_at).getTime()) / 86_400_000);
       const name = r.doctor_name ?? "(doctor)";
-      const { error: insErr } = await supabase.from("notifications").insert({
+      await notify({
         kind:                "signed_not_joined",
         title:               `On the way — ${name}`,
         body:                `Signed ${days}d ago, no joining date logged yet. Time for a check-in. Once you set the joining date the second-payment invoice will arm automatically.`,
         link_path:           `/doctor-profiles`,
         related_doctor_id:   r.doctor_id,
       });
-      if (insErr && !/duplicate key/i.test(insErr.message)) {
-        console.error("[tick-scheduler] signed_not_joined insert failed:", insErr.message);
-        continue;
-      }
       acts.push({
         run_id: r.doctor_id, doctor: name,
         flow:   "signed_not_joined", stage: "post_signing",

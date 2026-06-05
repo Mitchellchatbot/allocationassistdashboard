@@ -9,7 +9,8 @@ import { supabase } from "@/lib/supabase";
 import { useTableSubscription } from "@/lib/realtime-registry";
 import { useAuth } from "@/hooks/use-auth";
 
-export type NotificationKind = "vacancy_match" | "interview_followup" | string;
+export type NotificationKind = "vacancy_match" | "interview_followup" | "shortlist_suggested" | "hospital_reply_overdue" | "signed_not_joined" | "availability_checkin" | string;
+export type NotificationSeverity = "info" | "action" | "critical";
 
 export interface AppNotification {
   id:                  string;
@@ -24,6 +25,13 @@ export interface AppNotification {
   read_at:             string | null;
   dismissed_at:        string | null;
   created_at:          string;
+  // Notifications v2 — severity drives grouping + Slack routing on the
+  // server. cta_* render the single primary action button on the card.
+  severity:            NotificationSeverity;
+  cta_label:           string | null;
+  cta_kind:            string | null;
+  slack_delivered_at:  string | null;
+  slack_skip_reason:   string | null;
 }
 
 const KEY = ["notifications"] as const;

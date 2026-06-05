@@ -24,6 +24,7 @@
  */
 
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2";
+import { notify } from "../_shared/notify.ts";
 
 const supabase = createClient(
   Deno.env.get("SUPABASE_URL")!,
@@ -200,14 +201,16 @@ Output ONLY the JSON object. No markdown fences, no commentary, no preamble.`;
     // Notification so the suggestion shows up in the HI team's bell + on
     // PendingActionsCard. for_user null = team-wide (the run's assignee
     // also has a chance to see this via their workspace).
-    await supabase.from("notifications").insert({
+    await notify({
       kind:           "shortlist_suggested",
       title:          `${run.hospital ?? "Hospital"} may have shortlisted ${run.doctor_name ?? "the doctor"}`,
       body:           parsedResult.summary,
       link_path:      `/automations?flow=profile_sent&run=${run_id}`,
       related_run_id: run_id,
       related_doctor_id: run.doctor_id,
-      for_user:       null,
+      // Best signal we have for who's on the hook — the run's
+      // assignee. Slack DM-equivalent (@-mention) routes to them.
+      for_user:       (run as { assigned_to?: string | null }).assigned_to ?? null,
     });
 
     action_taken = `Shortlist suggestion stored on run; awaiting manual confirmation by HI team`;
