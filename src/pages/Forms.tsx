@@ -316,20 +316,24 @@ function FormDetail({ form }: { form: Form }) {
 
       {/* Analytics strip — server-side counts so it stays accurate as
           the user scrolls / filters / searches. */}
-      <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
+      <div className={`grid grid-cols-2 ${isJotform ? "sm:grid-cols-3" : "sm:grid-cols-4"} gap-3`}>
         <Kpi label="Total submissions" value={total}      tone="slate" />
         <Kpi label="Last 7 days"       value={last7Days}  tone="sky" />
 
         {/* KPI 3 + 4 branch on the form type:
+            - JotForm (doctor profile intake): just Last 30d.
+              Zoho-qualification framing doesn't apply; the team
+              wanted a simple count strip.
             - Paid-lead form (DoctorsFinder): Last 30d + Revenue. These
               don't feed Zoho, so 'Open outreach' from the form_responses
               lifecycle is the only outreach signal — show it in row 2.
             - Free-signal form (Typeform / Consultation): Unqualified +
-              Uncontacted-in-Zoho. The 'Open outreach' tile we used to
-              show was deceptive (it counted every default-'new' row
-              including unqualified ones, ~17k strong). These two are
-              the actually-actionable buckets. */}
-        {isPaidForm ? (
+              Uncontacted-in-Zoho. These are the actually-actionable
+              buckets after the 'Open outreach' tile turned out to
+              be misleading (counted every default-'new' row). */}
+        {isJotform ? (
+          <Kpi label="Last 30 days" value={last30Days} tone="emerald" />
+        ) : isPaidForm ? (
           <>
             <Kpi label="Last 30 days" value={last30Days} tone="emerald" />
             <Kpi
