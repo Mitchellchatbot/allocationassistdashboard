@@ -26,7 +26,7 @@ import { useCallback, useEffect, useState } from "react";
 import logo from "@/assets/logo.png";
 import { NavLink } from "@/components/NavLink";
 import { useAuth } from "@/hooks/use-auth";
-import { useNavigate } from "react-router-dom";
+import { useNavigate, Link } from "react-router-dom";
 import {
   Sidebar,
   SidebarContent,
@@ -259,7 +259,15 @@ export function AppSidebar() {
       <SidebarFooter className="px-2 pb-3 border-t border-white/10 pt-3">
         {!collapsed && (
           <div className="mx-1 space-y-1.5">
-            <div className="flex items-center gap-2 rounded-full bg-sidebar-accent/50 px-2 py-1.5">
+            {/* The account chip itself routes to /settings — it's the most
+                discoverable hook into account / notification / Slack
+                configuration, and lifts Settings out from behind the
+                collapsed Admin section. */}
+            <Link
+              to="/settings"
+              className="flex items-center gap-2 rounded-full bg-sidebar-accent/50 px-2 py-1.5 hover:bg-sidebar-accent/80 transition-colors group"
+              title="Settings"
+            >
               <div className="flex h-7 w-7 items-center justify-center rounded-full bg-sidebar-primary text-white text-[9px] font-bold shrink-0">
                 {user?.email ? user.email.slice(0, 2).toUpperCase() : "AA"}
               </div>
@@ -267,9 +275,9 @@ export function AppSidebar() {
                 <p className="text-[11px] font-medium text-sidebar-foreground truncate">
                   {user?.email ?? "admin@allocationassist.com"}
                 </p>
-                <p className="text-[9px] text-sidebar-foreground/40 truncate">Signed in</p>
+                <p className="text-[9px] text-sidebar-foreground/40 group-hover:text-sidebar-foreground/70 truncate transition-colors">Settings & Slack</p>
               </div>
-            </div>
+            </Link>
             <button
               onClick={handleSignOut}
               className="w-full flex items-center gap-2 rounded-full px-3 py-1.5 text-[11px] text-sidebar-foreground/60 hover:text-sidebar-foreground hover:bg-sidebar-accent/70 transition-colors"

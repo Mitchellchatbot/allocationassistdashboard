@@ -1,7 +1,7 @@
 import { SidebarProvider, SidebarTrigger, useSidebar } from "@/components/ui/sidebar";
 import { AppSidebar } from "./AppSidebar";
 import { PageTransition } from "./PageTransition";
-import { Bell, Download, AlertTriangle, ChevronRight, Home, Sparkles, RefreshCw, Info, CheckCircle2, Send, RotateCcw, X, Search, FileSignature, Copy, GraduationCap } from "lucide-react";
+import { Bell, Download, AlertTriangle, ChevronRight, Home, Sparkles, RefreshCw, Info, CheckCircle2, Send, RotateCcw, X, Search, FileSignature, Copy, GraduationCap, Settings as SettingsIcon } from "lucide-react";
 import { useTour } from "@/components/OnboardingTour";
 import { HI_TOUR_ID, HI_TOUR_STEPS } from "@/lib/hi-onboarding-tour";
 
@@ -344,6 +344,18 @@ export function DashboardLayout({ children, title: pageTitle, subtitle: pageSubt
                 <TooltipContent side="bottom" className="text-[10px]">Download this page's data as a spreadsheet</TooltipContent>
               </Tooltip>
               <NotificationsPopover />
+              <Tooltip>
+                <TooltipTrigger asChild>
+                  <Link
+                    to="/settings"
+                    className="flex items-center justify-center h-8 w-8 rounded-full text-muted-foreground hover:text-foreground hover:bg-muted/60 transition-colors"
+                    aria-label="Settings"
+                  >
+                    <SettingsIcon className="h-3.5 w-3.5" />
+                  </Link>
+                </TooltipTrigger>
+                <TooltipContent side="bottom" className="text-[10px]">Settings (Slack, account, users…)</TooltipContent>
+              </Tooltip>
             </div>
           </header>
 

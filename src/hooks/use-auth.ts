@@ -46,10 +46,14 @@ export const HI_MEMBER_PAGES = [
 // Role presets — selected in the Add User dialog
 export const ROLE_PRESETS: Record<string, string[]> = {
   admin:     ALL_PAGES,
-  sales:     ["/", "/sales", "/marketing", "/doctors", "/team", "/calls"],
-  finance:   ["/", "/finance"],
+  // /settings included in every non-worker preset so users can manage
+  // their own Slack handle + notification preferences. The page itself
+  // hides admin-only tabs (Users, organization-level Slack webhook
+  // test) when role !== "admin".
+  sales:     ["/", "/sales", "/marketing", "/doctors", "/team", "/calls", "/settings"],
+  finance:   ["/", "/finance", "/settings"],
   worker:    ["/worker"],
-  hi_member: HI_MEMBER_PAGES,
+  hi_member: [...HI_MEMBER_PAGES, "/settings"],
 };
 
 interface UserProfile {
