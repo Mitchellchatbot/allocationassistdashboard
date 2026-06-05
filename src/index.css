@@ -97,3 +97,38 @@
 @media (prefers-reduced-motion: reduce) {
   .aa-fade-up { animation: none; }
 }
+
+/* Hide scrollbars but keep scrolling. Used on the sidebar so the
+   nav reads as a clean glass panel without the scroll-gutter
+   intruding. Works in Firefox + WebKit + IE/Edge legacy. */
+.aa-scrollbar-hide {
+  scrollbar-width: none;          /* Firefox */
+  -ms-overflow-style: none;       /* old Edge / IE */
+}
+.aa-scrollbar-hide::-webkit-scrollbar {
+  display: none;                  /* Safari + Chrome */
+  width: 0;
+  height: 0;
+}
+
+/* Floating-sidebar 'glass' treatment: a teal gradient base, a soft
+   inner highlight at the top edge, a green-accent halo ring, and a
+   subtle backdrop blur so the panel feels like frosted glass tinted
+   in our brand teal. The base sidebar token (--sidebar-background)
+   is the same hsl(170, 55%, 30%) so the glass takes its colour from
+   the existing palette without needing any new variables. */
+.aa-sidebar-glass {
+  position: relative;
+  border-radius: 1.5rem; /* matches the rounded-3xl outer wrapper */
+  border: 1px solid hsl(170, 55%, 55% / 0.18);
+  background:
+    radial-gradient(120% 60% at 50% -10%, hsl(170, 60%, 48% / 0.45) 0%, transparent 60%),
+    linear-gradient(180deg, hsl(170, 55%, 32% / 0.92) 0%, hsl(170, 55%, 27% / 0.92) 100%);
+  box-shadow:
+    0 8px 30px rgba(0, 0, 0, 0.18),
+    inset 0 1px 0 hsl(170, 80%, 70% / 0.18),
+    inset 0 0 0 1px hsl(170, 60%, 60% / 0.06);
+  backdrop-filter: blur(14px) saturate(140%);
+  -webkit-backdrop-filter: blur(14px) saturate(140%);
+  overflow: hidden;
+}

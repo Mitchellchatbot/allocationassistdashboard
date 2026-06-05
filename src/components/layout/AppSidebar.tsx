@@ -186,7 +186,7 @@ export function AppSidebar() {
 
   return (
     <Sidebar collapsible="offcanvas" variant="floating">
-      <SidebarHeader className="px-4 py-4 border-b border-sidebar-border" style={{ backgroundColor: "hsl(170, 45%, 28%)" }}>
+      <SidebarHeader className="px-4 py-4 border-b border-white/10">
         <div className="flex items-center justify-center gap-2.5">
           <img src={logo} alt="Allocation Assist" className="h-12 w-12 shrink-0 object-contain" />
           {!collapsed && (
@@ -295,7 +295,7 @@ export function AppSidebar() {
         )}
       </SidebarContent>
 
-      <SidebarFooter className="px-2 pb-3 border-t border-sidebar-border pt-3">
+      <SidebarFooter className="px-2 pb-3 border-t border-white/10 pt-3">
         {!collapsed && (
           <div className="mx-1 space-y-1.5">
             <div className="flex items-center gap-2 rounded-full bg-sidebar-accent/50 px-2 py-1.5">

@@ -206,7 +206,7 @@ const Sidebar = React.forwardRef<
       >
         <div
           data-sidebar="sidebar"
-          className="flex h-full w-full flex-col bg-sidebar group-data-[variant=floating]:rounded-3xl group-data-[variant=floating]:border group-data-[variant=floating]:border-sidebar-border/40 group-data-[variant=floating]:shadow-lg group-data-[variant=floating]:overflow-hidden"
+          className="flex h-full w-full flex-col bg-sidebar group-data-[variant=floating]:aa-sidebar-glass"
         >
           {children}
         </div>
@@ -331,7 +331,7 @@ const SidebarContent = React.forwardRef<HTMLDivElement, React.ComponentProps<"di
       ref={ref}
       data-sidebar="content"
       className={cn(
-        "flex min-h-0 flex-1 flex-col gap-2 overflow-auto group-data-[collapsible=icon]:overflow-hidden",
+        "flex min-h-0 flex-1 flex-col gap-2 overflow-auto aa-scrollbar-hide group-data-[collapsible=icon]:overflow-hidden",
         className,
       )}
       {...props}
