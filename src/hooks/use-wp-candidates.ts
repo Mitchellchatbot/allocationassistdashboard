@@ -254,6 +254,32 @@ export function useWpCandidateByDoctorId(doctorId: string | null) {
   });
 }
 
+/** Look up a WP candidate by email. Used by the Forms page to decide
+ *  whether to surface a "Create WP profile" button for an unmatched
+ *  JotForm submission. Returns null if no candidate has that email.
+ *  Case-insensitive — WP stores emails case-preserving but the rest of
+ *  the dashboard treats them as identifiers. */
+export function useWpCandidateByEmail(email: string | null | undefined) {
+  return useQuery<WpCandidate | null>({
+    queryKey: ["wp-candidate-by-email", (email ?? "").toLowerCase().trim()],
+    enabled: !!email && email.includes("@"),
+    queryFn: async () => {
+      const e = (email ?? "").toLowerCase().trim();
+      if (!e) return null;
+      const { data, error } = await supabase
+        .from("wordpress_candidates")
+        .select("*")
+        .ilike("email", e)
+        .order("wp_modified", { ascending: false, nullsFirst: false })
+        .limit(1)
+        .maybeSingle();
+      if (error) throw error;
+      return (data ?? null) as WpCandidate | null;
+    },
+    staleTime: 60_000,
+  });
+}
+
 /** Compute age in years from the WP date_of_birth field. WP accepts
  *  several formats ("YYYYMMDD", "YYYY-MM-DD", "4 September 1987"); we
  *  parse all three. Returns null if anything's off. */

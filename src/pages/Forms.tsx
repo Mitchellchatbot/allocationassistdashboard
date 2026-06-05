@@ -43,6 +43,8 @@ import {
 } from "@/hooks/use-forms";
 import { toast } from "sonner";
 import { supabase } from "@/lib/supabase";
+import { useWpCandidateByEmail } from "@/hooks/use-wp-candidates";
+import { CreateWpProfileDialog } from "@/components/forms/CreateWpProfileDialog";
 
 const supabaseUrl = (import.meta.env.VITE_SUPABASE_URL as string) ?? "";
 
@@ -1006,9 +1008,21 @@ function ResponseRow({
   formProvider?: string;
 }) {
   const [open, setOpen] = useState(false);
+  const [wpDialogOpen, setWpDialogOpen] = useState(false);
   const entries = Object.entries(response.answers ?? {});
   const display = useMemo(() => displayNameFor(response), [response]);
   const phone   = useMemo(() => phoneFor(response), [response]);
+  const avatar  = useMemo(() => pictureUrlFor(response), [response]);
+
+  // Check whether a WP candidate already exists for this email so we
+  // can either offer a 'Create WP profile' action (no match) or a
+  // 'View in WP' link (match). Only matters for JotForm — Typeform /
+  // Elementor flows don't feed WP. Query is guarded by `enabled` in
+  // the hook, so we still call it unconditionally for hook-rules sake.
+  const wpQuery = useWpCandidateByEmail(
+    formProvider === "jotform" ? response.respondent_email : null,
+  );
+  const existingWp = wpQuery.data;
 
   // Auto-expand when the search term hits something INSIDE this
   // response's answers (rather than just the header) — saves the user
@@ -1034,10 +1048,26 @@ function ResponseRow({
         className="w-full flex items-center gap-2 px-3 py-2 text-left hover:bg-slate-50"
       >
         <ChevronRight className={`h-3.5 w-3.5 text-slate-400 shrink-0 transition-transform ${effectivelyOpen ? "rotate-90" : ""}`} />
+        {/* Avatar — JotForm "professional picture" widget answer if the
+            response has one, else a fallback icon. Lets the team scan
+            the feed by face instead of email. */}
+        {avatar ? (
+          <img
+            src={avatar}
+            alt=""
+            loading="lazy"
+            className="h-7 w-7 rounded-full object-cover border border-slate-200 shrink-0"
+            onError={(e) => { (e.currentTarget as HTMLImageElement).style.display = "none"; }}
+          />
+        ) : (
+          <div className="h-7 w-7 rounded-full bg-slate-100 border border-slate-200 flex items-center justify-center shrink-0">
+            {display.kind === "name"
+              ? <UserIcon className="h-3.5 w-3.5 text-slate-400" />
+              : <Mail     className="h-3.5 w-3.5 text-slate-400" />}
+          </div>
+        )}
         <div className="flex-1 min-w-0">
           <div className="text-[12px] font-medium text-slate-800 truncate flex items-center gap-1">
-            {display.kind === "name"  && <UserIcon className="h-3 w-3 text-slate-400 shrink-0" />}
-            {display.kind === "email" && <Mail     className="h-3 w-3 text-slate-400 shrink-0" />}
             <Hl text={display.label} q={highlight} />
           </div>
           <div className="text-[10px] text-muted-foreground truncate">
@@ -1096,7 +1126,7 @@ function ResponseRow({
               entries.map(([k, v]) => (
                 <div key={k} className="grid grid-cols-1 sm:grid-cols-[180px_1fr] gap-x-3 gap-y-0.5 text-[11px]">
                   <span className="text-muted-foreground">{k}</span>
-                  <AnswerValue k={k} v={v} highlight={highlight} />
+                  <AnswerValue k={k} v={v} highlight={highlight} formId={response.form_id} />
                 </div>
               ))
             )}
@@ -1107,8 +1137,48 @@ function ResponseRow({
               </div>
             )}
           </div>
+
+          {/* WordPress profile action — only relevant for JotForm,
+              the only provider currently feeding WP. Shows a link to
+              the existing record if there is one, else a button that
+              opens the review dialog. */}
+          {formProvider === "jotform" && (
+            <div className="flex items-center gap-2 pt-2 border-t">
+              {wpQuery.isLoading ? (
+                <span className="text-[10px] text-muted-foreground inline-flex items-center gap-1">
+                  <Loader2 className="h-3 w-3 animate-spin" /> Checking WordPress…
+                </span>
+              ) : existingWp ? (
+                <a
+                  href={existingWp.wp_link}
+                  target="_blank"
+                  rel="noreferrer"
+                  className="text-[10px] text-emerald-700 hover:underline inline-flex items-center gap-1"
+                >
+                  <CheckCircle2 className="h-3 w-3" />
+                  WP profile exists — open in WordPress ↗
+                </a>
+              ) : (
+                <Button
+                  size="sm"
+                  variant="outline"
+                  className="h-7 text-[11px]"
+                  onClick={(e) => { e.stopPropagation(); setWpDialogOpen(true); }}
+                >
+                  <Sparkles className="h-3 w-3 mr-1 text-emerald-600" />
+                  Create WP profile
+                </Button>
+              )}
+            </div>
+          )}
         </div>
       )}
+
+      <CreateWpProfileDialog
+        response={response}
+        open={wpDialogOpen}
+        onClose={() => setWpDialogOpen(false)}
+      />
     </div>
   );
 }
@@ -1292,12 +1362,29 @@ function ZohoBlock({
   const qc = useQueryClient();
   const [busy, setBusy] = useState(false);
 
-  const linkedZohoId = doctorId?.startsWith("lead:") ? doctorId.slice(5) : null;
+  // Two link shapes: 'lead:<zoho_id>' = Zoho Leads module (full
+  // Lead_Status workflow), 'dob:<zoho_id>' = Zoho Contacts (Doctors
+  // on Board) — further down the funnel, already a placed-ish doctor.
+  // Both count as 'in Zoho'; only Leads have an editable status.
+  const linkedZohoId = doctorId?.startsWith("lead:") ? doctorId.slice(5)
+                     : doctorId?.startsWith("dob:")  ? doctorId.slice(4)
+                     : null;
+  const linkKind: "lead" | "dob" | null =
+    doctorId?.startsWith("lead:") ? "lead"
+    : doctorId?.startsWith("dob:") ? "dob"
+    : null;
+
   const lead = useMemo<ZohoLead | null>(() => {
-    if (!linkedZohoId) return null;
+    if (linkKind !== "lead" || !linkedZohoId) return null;
     const all = (zoho as { rawLeads?: ZohoLead[] } | undefined)?.rawLeads ?? [];
     return all.find(l => l.id === linkedZohoId) ?? null;
-  }, [linkedZohoId, zoho]);
+  }, [linkKind, linkedZohoId, zoho]);
+
+  const dob = useMemo<{ id: string; Full_Name?: string | null } | null>(() => {
+    if (linkKind !== "dob" || !linkedZohoId) return null;
+    const all = (zoho as { rawDoctorsOnBoard?: Array<{ id: string; Full_Name?: string | null }> } | undefined)?.rawDoctorsOnBoard ?? [];
+    return all.find(d => d.id === linkedZohoId) ?? null;
+  }, [linkKind, linkedZohoId, zoho]);
 
   const leadStatuses = useMemo(() => {
     const seen = new Set<string>();
@@ -1307,7 +1394,31 @@ function ZohoBlock({
     return Array.from(seen).sort();
   }, [zoho]);
 
-  // ─── Linked: status dropdown ─────────────────────────────────────────
+  // ─── Linked to a Doctors-on-Board contact (no Lead_Status workflow) ──
+  if (dob || (linkKind === "dob" && linkedZohoId)) {
+    return (
+      <div className="border-t border-slate-100 pt-2 mt-1">
+        <div className="flex items-center gap-2 flex-wrap text-[10.5px]">
+          <span className="text-slate-500 inline-flex items-center gap-1">
+            <Sparkles className="h-3 w-3 text-emerald-600" />
+            Zoho contact (Doctors on Board)
+          </span>
+          <code className="text-[10px] bg-slate-100 px-1 rounded">{doctorId}</code>
+          {dob?.Full_Name && <span className="text-slate-700 font-medium">· {dob.Full_Name}</span>}
+          <a
+            href={`https://crm.zoho.com/crm/org/contacts/${linkedZohoId}`}
+            target="_blank"
+            rel="noreferrer"
+            className="ml-auto text-teal-700 hover:underline"
+          >
+            Open in Zoho ↗
+          </a>
+        </div>
+      </div>
+    );
+  }
+
+  // ─── Linked to a Zoho Lead: status dropdown ─────────────────────────
   if (lead) {
     const setStatus = async (newStatus: string) => {
       if (newStatus === lead.Lead_Status) return;
@@ -1463,7 +1574,7 @@ const Check = CheckCircle2;
  *  Detection is at render time so historical rows benefit without
  *  needing a re-sync. Future syncs can extract this stuff at write
  *  time too — both layers are belt + braces. */
-function AnswerValue({ k, v, highlight }: { k: string; v: string; highlight: string }) {
+function AnswerValue({ k, v, highlight, formId }: { k: string; v: string; highlight: string; formId?: string }) {
   const trimmed = (v ?? "").trim();
   if (!trimmed) return <span className="text-slate-400 italic">—</span>;
 
@@ -1478,7 +1589,7 @@ function AnswerValue({ k, v, highlight }: { k: string; v: string; highlight: str
         return (
           <div className="flex flex-wrap gap-2">
             {images.map((it, i) => {
-              const url = absJotform(it.url!);
+              const url = jotformImageUrl(it.url!, formId);
               return (
                 <a key={i} href={url} target="_blank" rel="noreferrer" className="inline-flex flex-col gap-0.5">
                   <img src={url} alt={it.name ?? ""} className="h-20 w-20 object-cover rounded border border-slate-200" />
@@ -1540,13 +1651,44 @@ function AnswerValue({ k, v, highlight }: { k: string; v: string; highlight: str
   return <span className="text-slate-800 break-words"><Hl text={trimmed} q={highlight} /></span>;
 }
 
-/** JotForm sometimes hands us a relative URL like
- *  '/widget-uploads/imagepreview/<formId>/<filename>'. Absolute-ise it
- *  against jotform.com so the <img> actually loads. */
-function absJotform(url: string): string {
+/** JotForm widget files (`/widget-uploads/...`) aren't publicly readable
+ *  — the bare URL serves a 404 page. The `jotform-file-proxy` edge
+ *  function fetches them with the form's API key and streams the bytes
+ *  back. For any non-widget URL we just return it as-is (still
+ *  absolutising relative paths defensively). */
+function jotformImageUrl(url: string, formId: string | undefined): string {
   if (/^https?:\/\//i.test(url)) return url;
+  if (url.startsWith("/widget-uploads/") || url.startsWith("/uploads/")) {
+    if (!formId) return `https://www.jotform.com${url}`;
+    const base = (import.meta.env.VITE_SUPABASE_URL as string)?.replace(/\/$/, "") ?? "";
+    return `${base}/functions/v1/jotform-file-proxy?form_id=${encodeURIComponent(formId)}&path=${encodeURIComponent(url)}`;
+  }
   if (url.startsWith("/")) return `https://www.jotform.com${url}`;
   return url;
+}
+
+/** Scan a response's `raw_payload.answers` for the first picture-shaped
+ *  widget answer and return its proxy URL — used as the row avatar so
+ *  the team scans by face instead of by email. Returns null if the
+ *  response has no image-widget answer. */
+function pictureUrlFor(response: FormResponse): string | null {
+  const rawAnswers = (response.raw_payload as { answers?: Record<string, unknown> } | undefined)?.answers;
+  if (!rawAnswers || typeof rawAnswers !== "object") return null;
+  for (const v of Object.values(rawAnswers)) {
+    if (!v || typeof v !== "object") continue;
+    const obj = v as { text?: string; answer?: unknown };
+    const text = String(obj.text ?? "").toLowerCase();
+    const looksLikePic = text.includes("picture") || text.includes("photo") || text.includes("image");
+    const answerStr = typeof obj.answer === "string" ? obj.answer : JSON.stringify(obj.answer ?? "");
+    if (!answerStr.includes("widget_metadata") && !looksLikePic) continue;
+    try {
+      const parsed = typeof obj.answer === "string" ? JSON.parse(obj.answer) : obj.answer;
+      const items = (parsed as { widget_metadata?: { value?: Array<{ url?: string }> } })?.widget_metadata?.value;
+      const url   = items?.find(it => typeof it?.url === "string")?.url;
+      if (url) return jotformImageUrl(url, response.form_id);
+    } catch { /* fall through to next answer */ }
+  }
+  return null;
 }
 
 function extractUrls(s: string): string[] {
