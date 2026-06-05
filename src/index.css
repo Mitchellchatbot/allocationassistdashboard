@@ -127,39 +127,40 @@
  * wrapper because the Sidebar primitive composes multiple Tailwind
  * classes and the radius was getting lost depending on render order.
  */
-.aa-sidebar-glass {
-  position: relative;
-  border-radius: 1.75rem !important;
-  border: 1px solid hsl(160, 80%, 65% / 0.30) !important;
-  overflow: hidden !important;
-  background:
-    /* fractal-noise frosted-glass grain — alpha bumped so it actually
-       reads as texture on the green base. */
-    url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' width='200' height='200'><filter id='n'><feTurbulence type='fractalNoise' baseFrequency='0.9' numOctaves='3' stitchTiles='stitch'/><feColorMatrix values='0 0 0 0 1  0 0 0 0 1  0 0 0 0 1  0 0 0 0.45 0'/></filter><rect width='100%25' height='100%25' filter='url(%23n)'/></svg>"),
-    /* large diagonal sheen — the "swiped highlight" of frosted glass */
-    linear-gradient(125deg,
-      hsl(150, 90%, 75% / 0.22) 0%,
-      hsl(160, 90%, 70% / 0.10) 20%,
-      transparent 45%,
-      transparent 55%,
-      hsl(170, 90%, 65% / 0.08) 80%,
-      hsl(150, 90%, 70% / 0.18) 100%),
-    /* bright accent glow top — emerald halo */
-    radial-gradient(150% 70% at 50% -15%, hsl(150, 90%, 60% / 0.75) 0%, transparent 55%),
-    /* accent glow bottom — deeper teal */
-    radial-gradient(130% 55% at 50% 115%, hsl(175, 80%, 35% / 0.65) 0%, transparent 60%),
-    /* extra glow at the left edge so the inside-of-glass feels lit */
-    radial-gradient(60% 100% at -10% 50%, hsl(155, 75%, 50% / 0.30) 0%, transparent 70%),
-    /* base teal — deeper than the screenshot for more contrast against
-       the bright accents above. */
-    linear-gradient(180deg, hsl(170, 65%, 22%) 0%, hsl(172, 60%, 16%) 100%);
-  box-shadow:
-    0 18px 50px rgba(0, 0, 0, 0.32),
-    0 0 0 1px hsl(160, 70%, 50% / 0.15),
-    0 0 60px hsl(155, 80%, 45% / 0.15),
-    inset 0 1px 0 hsl(155, 95%, 80% / 0.35),
-    inset 0 -1px 0 hsl(175, 50%, 8% / 0.7),
-    inset 1px 0 0 hsl(155, 90%, 70% / 0.18);
-  backdrop-filter: blur(22px) saturate(180%);
-  -webkit-backdrop-filter: blur(22px) saturate(180%);
+/* Wrapped in @layer utilities so the rule sits in Tailwind's
+ * utility cascade — otherwise plain custom CSS at the root sits
+ * BELOW Tailwind utilities and `bg-sidebar` (background-color) was
+ * winning over our gradient stack on some builds. Rounding +
+ * overflow are now also applied as Tailwind classes on the element
+ * itself for belt-and-braces. */
+@layer utilities {
+  .aa-sidebar-glass {
+    position: relative;
+    border: 1px solid hsl(160, 80%, 65% / 0.30);
+    background-color: transparent;
+    background-image:
+      /* fractal-noise frosted-glass grain — alpha bumped so it actually
+         reads as texture on the green base. */
+      url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' width='200' height='200'><filter id='n'><feTurbulence type='fractalNoise' baseFrequency='0.9' numOctaves='3' stitchTiles='stitch'/><feColorMatrix values='0 0 0 0 1  0 0 0 0 1  0 0 0 0 1  0 0 0 0.45 0'/></filter><rect width='100%25' height='100%25' filter='url(%23n)'/></svg>"),
+      linear-gradient(125deg,
+        hsl(150, 90%, 75% / 0.22) 0%,
+        hsl(160, 90%, 70% / 0.10) 20%,
+        transparent 45%,
+        transparent 55%,
+        hsl(170, 90%, 65% / 0.08) 80%,
+        hsl(150, 90%, 70% / 0.18) 100%),
+      radial-gradient(150% 70% at 50% -15%, hsl(150, 90%, 60% / 0.75) 0%, transparent 55%),
+      radial-gradient(130% 55% at 50% 115%, hsl(175, 80%, 35% / 0.65) 0%, transparent 60%),
+      radial-gradient(60% 100% at -10% 50%, hsl(155, 75%, 50% / 0.30) 0%, transparent 70%),
+      linear-gradient(180deg, hsl(170, 65%, 22%) 0%, hsl(172, 60%, 16%) 100%);
+    box-shadow:
+      0 18px 50px rgba(0, 0, 0, 0.32),
+      0 0 0 1px hsl(160, 70%, 50% / 0.15),
+      0 0 60px hsl(155, 80%, 45% / 0.15),
+      inset 0 1px 0 hsl(155, 95%, 80% / 0.35),
+      inset 0 -1px 0 hsl(175, 50%, 8% / 0.7),
+      inset 1px 0 0 hsl(155, 90%, 70% / 0.18);
+    backdrop-filter: blur(22px) saturate(180%);
+    -webkit-backdrop-filter: blur(22px) saturate(180%);
+  }
 }

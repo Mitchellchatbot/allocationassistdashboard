@@ -158,7 +158,7 @@ const Sidebar = React.forwardRef<
       ? "w-[--sidebar-width] p-2 text-sidebar-foreground [&>button]:hidden bg-transparent border-0"
       : "w-[--sidebar-width] bg-sidebar p-0 text-sidebar-foreground [&>button]:hidden";
     const innerClass = variant === "floating"
-      ? "flex h-full w-full flex-col aa-sidebar-glass"
+      ? "flex h-full w-full flex-col rounded-[2rem] overflow-hidden aa-sidebar-glass"
       : "flex h-full w-full flex-col";
     return (
       <Sheet open={openMobile} onOpenChange={setOpenMobile} {...props}>
@@ -218,7 +218,7 @@ const Sidebar = React.forwardRef<
       >
         <div
           data-sidebar="sidebar"
-          className="flex h-full w-full flex-col bg-sidebar group-data-[variant=floating]:aa-sidebar-glass"
+          className="flex h-full w-full flex-col bg-sidebar group-data-[variant=floating]:rounded-[2rem] group-data-[variant=floating]:overflow-hidden group-data-[variant=floating]:aa-sidebar-glass"
         >
           {children}
         </div>
