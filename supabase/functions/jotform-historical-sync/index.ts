@@ -58,6 +58,34 @@ Deno.serve(async (req: Request) => {
   if (!form.api_token)       return json({ ok: false, error: "JotForm API token not set (forms.api_token). Open the form in /forms → Sync history to enter it." }, 400);
   if (!form.provider_form_id) return json({ ok: false, error: "JotForm form_id not set (forms.provider_form_id). It's the slug in the form URL (jotform.com/form/<id>)." }, 400);
 
+  // ── Pre-fetch Zoho cache ONCE so per-submission doctor_id lookup is
+  // an in-memory Map hit rather than an RPC round-trip per row. Saves
+  // 50-100ms × N submissions, often the difference between fitting in
+  // Supabase's 150s wall clock and timing out at row ~225.
+  const { data: cacheRows } = await supabase
+    .from("zoho_cache")
+    .select("id, data")
+    .in("id", [1, 2]);
+  const emailToDoctor = new Map<string, string>();
+  for (const r of (cacheRows ?? []) as Array<{ id: number; data: Record<string, unknown> }>) {
+    if (r.id === 1) {
+      // leads on row 1
+      const leads = (r.data?.leads as Array<{ id?: string; Email?: string | null }> | undefined) ?? [];
+      for (const l of leads) {
+        const e = (l.Email ?? "").trim().toLowerCase();
+        if (e && l.id) emailToDoctor.set(e, `lead:${l.id}`);
+      }
+    } else if (r.id === 2) {
+      // doctorsOnBoard on row 2 — wins precedence over leads.
+      const dob = (r.data?.doctorsOnBoard as Array<{ id?: string; Email?: string | null }> | undefined) ?? [];
+      for (const d of dob) {
+        const e = (d.Email ?? "").trim().toLowerCase();
+        if (e && d.id) emailToDoctor.set(e, `dob:${d.id}`);
+      }
+    }
+  }
+  console.log("[jotform-historical-sync] built email→doctor_id map:", emailToDoctor.size, "entries");
+
   // ── Walk /form/<id>/submissions ─────────────────────────────────────
   // JotForm's `limit` is capped per plan tier (free: 20, basic: 100,
   // pro: 1000). We ASK for 1000 but the server silently returns fewer
@@ -107,36 +135,48 @@ Deno.serve(async (req: Request) => {
     if (items.length === 0) break;
     fetched += items.length;
 
-    // ── Process each submission ──────────────────────────────────────
-    // Sequential rather than parallel — each call hits WP REST + Supabase,
-    // and JotForm sub-1000 pages aren't huge enough to justify the
-    // concurrency complexity (or the risk of WP rate-limiting). ~2-4
-    // submissions/sec is fine for a one-shot backfill.
+    // ── Pre-batch the WP-candidate email→id lookup for this whole page
+    // in one query. Otherwise we'd do N round-trips just to learn which
+    // emails already exist as WP candidates.
+    const pageEmails: string[] = [];
     for (const sub of items) {
+      const flat    = flattenAnswers(sub.answers ?? {});
+      const profile = mapToProfile(flat);
+      if (profile.email) pageEmails.push(profile.email.toLowerCase());
+    }
+    const wpExistingByEmail = new Map<string, number>();
+    if (pageEmails.length > 0) {
+      const { data: wpRows } = await supabase
+        .from("wordpress_candidates")
+        .select("id, email")
+        .in("email", Array.from(new Set(pageEmails)));
+      for (const r of (wpRows ?? []) as Array<{ id: number; email: string | null }>) {
+        const e = (r.email ?? "").toLowerCase();
+        if (e && !wpExistingByEmail.has(e)) wpExistingByEmail.set(e, r.id);
+      }
+    }
+
+    // ── Process each submission with bounded concurrency ─────────────
+    // Sequential WP-upsert calls were taking ~500ms each. At 865 rows
+    // that's well over Supabase's 150s wall clock and the function got
+    // killed at ~row 225. Process 8 in parallel and the page finishes
+    // in roughly 1/8 the time. We'd push higher but WP REST is also
+    // serving the public site — being a good neighbour matters.
+    const CONCURRENCY = 8;
+    const processOne = async (sub: { id: string; created_at?: string; answers?: Record<string, unknown> }) => {
       try {
         const flat = flattenAnswers(sub.answers ?? {});
         const profile = mapToProfile(flat);
         const submittedAt = sub.created_at ? new Date(sub.created_at.replace(" ", "T") + "Z").toISOString() : new Date().toISOString();
 
-        // No email? Still record the form_response so the team can see
-        // the submission, but skip WP upsert (we'd have nothing to
-        // match on for the email-based dedup).
         let wpId: number | null = null;
         let wpAction: "created" | "updated" | "skipped" = "skipped";
 
         if (profile.email) {
-          // Lookup existing WP candidate by email.
-          const { data: existing } = await supabase
-            .from("wordpress_candidates")
-            .select("id")
-            .ilike("email", profile.email)
-            .order("wp_modified", { ascending: false, nullsFirst: false })
-            .limit(1)
-            .maybeSingle();
-
+          const existingId = wpExistingByEmail.get(profile.email.toLowerCase()) ?? null;
           const upsertBody = {
-            id:     existing?.id,
-            status: existing ? undefined : "draft",
+            id:     existingId ?? undefined,
+            status: existingId ? undefined : "draft",
             title:  profile.full_name || "JotForm intake",
             acf:    profile.acf,
           };
@@ -149,23 +189,17 @@ Deno.serve(async (req: Request) => {
             const upJson = await upRes.json().catch(() => null) as { ok: boolean; id?: number } | null;
             if (upRes.ok && upJson?.ok && typeof upJson.id === "number") {
               wpId = upJson.id;
-              wpAction = existing ? "updated" : "created";
-              if (existing) wpUpdated++; else wpCreated++;
+              wpAction = existingId ? "updated" : "created";
+              if (existingId) wpUpdated++; else wpCreated++;
             }
           } catch (e) {
             console.warn("[jotform-historical-sync] WP upsert failed for submission", sub.id, e);
           }
         }
 
-        // Auto-link to Zoho lead/DoB.
-        let doctorId: string | null = null;
-        if (profile.email) {
-          const { data: linkData } = await supabase.rpc("lookup_doctor_id_by_email", { p_email: profile.email });
-          if (typeof linkData === "string") doctorId = linkData;
-        }
+        // doctor_id from the in-memory Zoho map (built once at sync start).
+        const doctorId = profile.email ? (emailToDoctor.get(profile.email.toLowerCase()) ?? null) : null;
 
-        // Record the form_response. Upsert on (form_id, provider_response_id)
-        // so a re-run is a no-op for already-imported rows.
         const { data: upserted, error: upErr } = await supabase
           .from("form_responses")
           .upsert({
@@ -195,6 +229,12 @@ Deno.serve(async (req: Request) => {
         console.error("[jotform-historical-sync] submission failed:", sub.id, e);
         skipped++;
       }
+    };
+
+    // Walk the page in fixed-size chunks of CONCURRENCY in-flight tasks.
+    for (let i = 0; i < items.length; i += CONCURRENCY) {
+      const chunk = items.slice(i, i + CONCURRENCY);
+      await Promise.all(chunk.map(processOne));
     }
 
     // Advance by the ACTUAL number of items returned (tier-cap-safe).
