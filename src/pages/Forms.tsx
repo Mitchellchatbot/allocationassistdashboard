@@ -1096,7 +1096,7 @@ function ResponseRow({
               entries.map(([k, v]) => (
                 <div key={k} className="grid grid-cols-1 sm:grid-cols-[180px_1fr] gap-x-3 gap-y-0.5 text-[11px]">
                   <span className="text-muted-foreground">{k}</span>
-                  <span className="text-slate-800 break-words"><Hl text={v} q={highlight} /></span>
+                  <AnswerValue k={k} v={v} highlight={highlight} />
                 </div>
               ))
             )}
@@ -1446,6 +1446,128 @@ const Check = CheckCircle2;
  *  per match check (because RegExp.test on a /g regex is STATEFUL —
  *  re-using the same instance between map iterations would alternate
  *  true/false based on lastIndex). */
+/** Renders a single form-answer value with awareness of JotForm-y
+ *  shapes that would otherwise dump as raw JSON:
+ *
+ *  - widget_metadata images (the 'professional picture' question type):
+ *      thumbnail strip + the original filenames.
+ *  - File-upload URLs (PDFs / docs — the 'send us your CV' question
+ *      type): a 'Download <filename>' link per URL, one per line.
+ *  - Plain URLs that look like images: rendered as a thumbnail too.
+ *  - Compound JSON the JotForm webhook didn't manage to flatten
+ *      (e.g. phone {"area":"001","phone":"..."} or DoB
+ *      {"day":"19","month":"01","year":"1989"...}): a humanised
+ *      'area 001 · phone …' rather than a raw JSON dump.
+ *  - Everything else falls through to the highlighter as before.
+ *
+ *  Detection is at render time so historical rows benefit without
+ *  needing a re-sync. Future syncs can extract this stuff at write
+ *  time too — both layers are belt + braces. */
+function AnswerValue({ k, v, highlight }: { k: string; v: string; highlight: string }) {
+  const trimmed = (v ?? "").trim();
+  if (!trimmed) return <span className="text-slate-400 italic">—</span>;
+
+  // 1. JotForm widget-metadata image blob — JSON shape:
+  //    {"widget_metadata":{"type":"imagelinks","value":[{"name":"...","url":"..."}]}}
+  if (trimmed.startsWith("{") && trimmed.includes("widget_metadata")) {
+    try {
+      const parsed = JSON.parse(trimmed) as { widget_metadata?: { type?: string; value?: Array<{ name?: string; url?: string }> } };
+      const items = parsed.widget_metadata?.value ?? [];
+      const images = items.filter(it => typeof it?.url === "string");
+      if (images.length > 0) {
+        return (
+          <div className="flex flex-wrap gap-2">
+            {images.map((it, i) => {
+              const url = absJotform(it.url!);
+              return (
+                <a key={i} href={url} target="_blank" rel="noreferrer" className="inline-flex flex-col gap-0.5">
+                  <img src={url} alt={it.name ?? ""} className="h-20 w-20 object-cover rounded border border-slate-200" />
+                  <span className="text-[9.5px] text-slate-500 max-w-[80px] truncate" title={it.name ?? ""}>{it.name ?? ""}</span>
+                </a>
+              );
+            })}
+          </div>
+        );
+      }
+    } catch { /* fall through to default */ }
+  }
+
+  // 2. Compound JSON the webhook flattener missed — phone, DoB, etc.
+  //    Render the key/value pairs inline rather than raw JSON.
+  if (trimmed.startsWith("{") && trimmed.endsWith("}") && trimmed.length < 600 && !trimmed.includes("widget_metadata")) {
+    try {
+      const obj = JSON.parse(trimmed) as Record<string, unknown>;
+      const parts = Object.entries(obj)
+        .filter(([k2]) => k2 !== "datetime" && k2 !== "month" && k2 !== "year" && k2 !== "day"
+                       ? true
+                       : true) // include everything for now
+        .map(([k2, v2]) => `${k2}: ${typeof v2 === "string" ? v2 : JSON.stringify(v2)}`)
+        .join(" · ");
+      // For DoB-shaped objects with a datetime, prefer the formatted datetime.
+      const datetime = typeof obj.datetime === "string" ? obj.datetime : null;
+      const formattedDob = datetime ? prettyDateFromIso(datetime) : null;
+      const display = formattedDob ?? parts;
+      if (display) return <span className="text-slate-800 break-words"><Hl text={display} q={highlight} /></span>;
+    } catch { /* fall through */ }
+  }
+
+  // 3. URL list — one URL per line or multiple separated by whitespace.
+  //    Common for JotForm 'file upload' (CV) fields.
+  const urls = extractUrls(trimmed);
+  if (urls.length > 0 && urls.join(" ").length >= trimmed.length * 0.7) {
+    // Treat the value as a list of URLs (≥70% of it is URLs).
+    return (
+      <div className="flex flex-col gap-1">
+        {urls.map((u, i) => {
+          const filename = filenameFromUrl(u);
+          const isImage = /\.(jpe?g|png|gif|webp|svg)(\?|$)/i.test(u);
+          return isImage ? (
+            <a key={i} href={u} target="_blank" rel="noreferrer" className="inline-flex flex-col gap-0.5">
+              <img src={u} alt={filename} className="h-20 w-20 object-cover rounded border border-slate-200" />
+              <span className="text-[9.5px] text-slate-500 max-w-[140px] truncate">{filename}</span>
+            </a>
+          ) : (
+            <a key={i} href={u} target="_blank" rel="noreferrer" className="text-[11px] text-teal-700 hover:underline inline-flex items-center gap-1 max-w-full">
+              <Download className="h-3 w-3 shrink-0" />
+              <span className="truncate">{filename || u}</span>
+            </a>
+          );
+        })}
+      </div>
+    );
+  }
+
+  return <span className="text-slate-800 break-words"><Hl text={trimmed} q={highlight} /></span>;
+}
+
+/** JotForm sometimes hands us a relative URL like
+ *  '/widget-uploads/imagepreview/<formId>/<filename>'. Absolute-ise it
+ *  against jotform.com so the <img> actually loads. */
+function absJotform(url: string): string {
+  if (/^https?:\/\//i.test(url)) return url;
+  if (url.startsWith("/")) return `https://www.jotform.com${url}`;
+  return url;
+}
+
+function extractUrls(s: string): string[] {
+  const matches = s.match(/https?:\/\/[^\s,;]+/g);
+  return matches ?? [];
+}
+
+function filenameFromUrl(u: string): string {
+  try {
+    const p = new URL(u).pathname;
+    const last = p.split("/").filter(Boolean).pop() ?? "";
+    return decodeURIComponent(last);
+  } catch { return ""; }
+}
+
+function prettyDateFromIso(iso: string): string | null {
+  const d = new Date(iso.replace(" ", "T"));
+  if (isNaN(d.valueOf())) return null;
+  return d.toLocaleDateString("en-GB", { day: "numeric", month: "long", year: "numeric" });
+}
+
 function Hl({ text, q }: { text: string; q: string }) {
   if (!q) return <>{text}</>;
   const tokens = q.trim().split(/\s+/).filter(t => t.length > 0);

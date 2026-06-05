@@ -257,12 +257,12 @@ Deno.serve(async (req: Request) => {
   const PAGE_SIZE  = 1000;
   const HARD_CAP   = 100_000;
   const MAX_PAGES  = 2000;
-  // WordPress REST upserts are ~9s each. Even at parallelism 16 we
-  // can fit maybe ~40 in a 150s edge wall clock. Cap each invocation
-  // at PROCESS_LIMIT new rows; the frontend hook loops back-to-back
-  // calls until done. Idempotent on (form_id, provider_response_id)
-  // so re-entering the loop is safe.
-  const PROCESS_LIMIT = 40;
+  // Per-invocation safety cap. Now that WP REST isn't in the loop the
+  // per-row cost drops to ~50ms (a form_responses upsert), so an entire
+  // 800-row form fits comfortably in one call. The chunking
+  // infrastructure stays for huge forms (5k+) where even pure DB
+  // writes would brush the 150s wall clock.
+  const PROCESS_LIMIT = 1000;
   let offset = 0;
   let fetched = 0;
   let inserted = 0;
@@ -354,33 +354,19 @@ Deno.serve(async (req: Request) => {
         const profile = mapToProfile(flat);
         const submittedAt = sub.created_at ? new Date(sub.created_at.replace(" ", "T") + "Z").toISOString() : new Date().toISOString();
 
-        let wpId: number | null = null;
-        let wpAction: "created" | "updated" | "skipped" = "skipped";
-
-        if (profile.email) {
-          const existingId = wpExistingByEmail.get(profile.email.toLowerCase()) ?? null;
-          const upsertBody = {
-            id:     existingId ?? undefined,
-            status: existingId ? undefined : "draft",
-            title:  profile.full_name || "JotForm intake",
-            acf:    profile.acf,
-          };
-          try {
-            const upRes = await fetch(`${supabaseUrl}/functions/v1/wordpress-candidate-upsert`, {
-              method:  "POST",
-              headers: { "Authorization": `Bearer ${serviceKey}`, "Content-Type": "application/json" },
-              body:    JSON.stringify(upsertBody),
-            });
-            const upJson = await upRes.json().catch(() => null) as { ok: boolean; id?: number } | null;
-            if (upRes.ok && upJson?.ok && typeof upJson.id === "number") {
-              wpId = upJson.id;
-              wpAction = existingId ? "updated" : "created";
-              if (existingId) wpUpdated++; else wpCreated++;
-            }
-          } catch (e) {
-            console.warn("[jotform-historical-sync] WP upsert failed for submission", sub.id, e);
-          }
-        }
+        // ── Historical sync no longer creates WordPress candidates ────
+        // Most JotForm respondents are ALREADY in WordPress (the team
+        // filled their profile manually from earlier submissions). The
+        // email-match heuristic would create duplicate drafts for any
+        // submission whose email didn't exactly match the WP record,
+        // and that's a worse outcome than not having a WP profile at
+        // all. The live webhook still auto-creates WP candidates for
+        // brand-new submissions.
+        //
+        // If the team later wants a bulk WP-backfill, we can add a
+        // dedicated 'Push unmatched submissions to WordPress' button
+        // that surfaces candidates for review first.
+        const existingWpId = profile.email ? wpExistingByEmail.get(profile.email.toLowerCase()) ?? null : null;
 
         // doctor_id from the in-memory Zoho map (built once at sync start).
         const doctorId = profile.email ? (emailToDoctor.get(profile.email.toLowerCase()) ?? null) : null;
@@ -397,10 +383,10 @@ Deno.serve(async (req: Request) => {
             respondent_email:      profile.email     || null,
             doctor_id:             doctorId,
             outreach_status:       "new",
-            outreach_notes:        wpId
-              ? `Historical sync · WP candidate #${wpId} (${wpAction}).`
+            outreach_notes:        existingWpId
+              ? `Historical sync · matched WP candidate #${existingWpId} by email.`
               : profile.email
-                ? `Historical sync · WP upsert skipped (failed).`
+                ? `Historical sync · no WP match by email — left untouched.`
                 : `Historical sync · no email on submission, WP candidate not touched.`,
           }, { onConflict: "form_id,provider_response_id", ignoreDuplicates: false })
           .select("id");
