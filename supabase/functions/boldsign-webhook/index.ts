@@ -25,6 +25,7 @@
  */
 
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2";
+import { notify } from "../_shared/notify.ts";
 
 const BOLDSIGN_WEBHOOK_SECRET = Deno.env.get("BOLDSIGN_WEBHOOK_SECRET") ?? "";
 const ZOHO_CLIENT_ID          = Deno.env.get("ZOHO_CLIENT_ID")!;
@@ -600,6 +601,16 @@ Deno.serve(async (req: Request) => {
     zoho_error:       zohoError,
     updated_at:       new Date().toISOString(),
   }).eq("boldsign_document_id", documentId);
+
+  // High-signal celebratory + actionable nudge so HI can log the
+  // milestone in the Placements tab without waiting for a tick.
+  await notify({
+    kind:    "contract_signed",
+    title:   `${existing.doctor_name} signed their contract`,
+    body:    `Service agreement received via BoldSign${zohoError ? "" : " · Doctors on Board record created in Zoho"}. Log the joining date in Reports → Placements so the 45-day payment clock arms.`,
+    link_path: `/reports`,
+    related_doctor_id: contactId ? `dob:${contactId}` : null,
+  }).catch(e => console.error("[boldsign-webhook] notify failed:", e));
 
   return new Response(JSON.stringify({
     ok:        !zohoError && !emailErr,
