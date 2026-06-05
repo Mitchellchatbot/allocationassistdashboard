@@ -109,17 +109,17 @@ const APP_ORIGIN = Deno.env.get("APP_ORIGIN") ?? "https://care-assist.io";
 // assigned_to on the run or remove the entry here.
 //
 // Keys are lowercased — assigned_to may be saved with original casing.
-interface SenderProfile { displayName: string; firstName: string; email: string; title: string; }
+interface SenderProfile { displayName: string; firstName: string; lastName: string; email: string; title: string; phone: string; }
 const SENDERS: Record<string, SenderProfile> = {
-  "rodaina@allocationassist.com":        { displayName: "Rodaina Thabit",  firstName: "Rodaina", email: "rodaina@allocationassist.com",        title: "Hospital Introduction" },
-  "mohamed.othman@allocationassist.com": { displayName: "Mohamed Othman",  firstName: "Mohamed", email: "mohamed.othman@allocationassist.com", title: "Hospital Introduction" },
-  "sohaila@allocationassist.com":        { displayName: "Sohaila Mohamed", firstName: "Sohaila", email: "sohaila@allocationassist.com",        title: "Hospital Introduction" },
-  "ishak@allocationassist.com":          { displayName: "Ishak Boulaat",   firstName: "Ishak",   email: "ishak@allocationassist.com",          title: "Hospital Introduction" },
-  "ammar@allocationassist.com":          { displayName: "Ammar",            firstName: "Ammar",   email: "ammar@allocationassist.com",          title: "Founder" },
+  "rodaina@allocationassist.com":        { displayName: "Rodaina Thabit",  firstName: "Rodaina", lastName: "Thabit",  email: "rodaina@allocationassist.com",        title: "Hospital Introduction Officer", phone: "" },
+  "mohamed.othman@allocationassist.com": { displayName: "Mohamed Othman",  firstName: "Mohamed", lastName: "Othman",  email: "mohamed.othman@allocationassist.com", title: "Hospital Introduction Officer", phone: "" },
+  "sohaila@allocationassist.com":        { displayName: "Sohaila Mohamed", firstName: "Sohaila", lastName: "Mohamed", email: "sohaila@allocationassist.com",        title: "Hospital Introduction Officer", phone: "" },
+  "ishak@allocationassist.com":          { displayName: "Ishak Boulaat",   firstName: "Ishak",   lastName: "Boulaat", email: "ishak@allocationassist.com",          title: "Hospital Introduction Officer", phone: "" },
+  "ammar@allocationassist.com":          { displayName: "Ammar",            firstName: "Ammar",   lastName: "",        email: "ammar@allocationassist.com",          title: "Founder",                       phone: "" },
 };
 
 /** Resolve the From line + signature variant from a run's assigned_to. */
-function pickSender(assignedTo: string | null | undefined): { fromHeader: string; replyHint: string; first: string; title: string } {
+function pickSender(assignedTo: string | null | undefined): { fromHeader: string; replyHint: string; first: string; last: string; title: string; phone: string } {
   const key = (assignedTo ?? "").trim().toLowerCase();
   const s = SENDERS[key];
   if (s) {
@@ -127,7 +127,9 @@ function pickSender(assignedTo: string | null | undefined): { fromHeader: string
       fromHeader: `${s.displayName} <${s.email}>`,
       replyHint:  s.email,
       first:      s.firstName,
+      last:       s.lastName,
       title:      s.title,
+      phone:      s.phone,
     };
   }
   // No assigned owner or owner not in the registry → fall back to the
@@ -138,42 +140,49 @@ function pickSender(assignedTo: string | null | undefined): { fromHeader: string
     fromHeader: MAIL_FROM,
     replyHint:  "",
     first:      "The Allocation Assist team",
+    last:       "",
     title:      "Allocation Assist",
+    phone:      "",
   };
 }
 
-/** Signature variant — personalises the "Warmest Regards" line with
- *  the sender's first name. The rest of the block stays brand-uniform
- *  so the email still reads like AA, just signed by a real person. */
-function signatureHtml(first: string): string {
+/** Signature variant — matches Ammar's reference exactly (2026-06-06):
+ *  teal "Warmest Regards," → teal "Firstname Lastname," → teal title →
+ *  teal phone (when known) → grey JLT location with pin glyph →
+ *  blue website link → bottom teal "Allocation Assist" + grey tagline.
+ *  No box, no logo image, no card frame — just a plain text-only block
+ *  that lands looking identical to Plinky's manual sends. */
+function signatureHtml(first: string, last: string, title: string, phone: string): string {
+  const fullName = [first, last].filter(Boolean).join(" ") || "Allocation Assist";
+  const teal     = "color:#14b8a6;font-weight:700;font-size:14px;margin:0 0 2px;line-height:1.45;";
+  const grey     = "color:#475569;font-size:13px;margin:6px 0 2px;line-height:1.45;";
+  const linkLine = "font-size:13px;margin:2px 0 16px;line-height:1.45;";
   return `
-<div style="margin-top:32px;font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Helvetica,Arial,sans-serif;color:#1a2332;">
-  <p style="margin:0 0 4px;color:#14b8a6;font-weight:700;font-size:15px;">Warmest Regards,</p>
-  <p style="margin:0 0 4px;color:#14b8a6;font-weight:700;font-size:15px;">${escapeHtml(first)},</p>
-  <p style="margin:0 0 14px;color:#14b8a6;font-weight:700;font-size:15px;">Allocation Assist</p>
-  <p style="margin:0 0 4px;color:#475569;font-size:14px;">
-    <span style="display:inline-block;width:14px;color:#14b8a6;">&#9737;</span>
-    <strong style="color:#475569;font-weight:600;">Jumeirah Lakes Towers, Dubai, UAE</strong>
-  </p>
-  <p style="margin:0 0 12px;font-size:14px;">
-    <a href="https://www.allocationassist.com" style="color:#1d4ed8;text-decoration:underline;">www.allocationassist.com</a>
-  </p>
-  <p style="margin:0;color:#14b8a6;font-weight:700;font-size:18px;letter-spacing:-0.3px;">
-    Allocation Assist
-  </p>
-  <p style="margin:2px 0 0;color:#94a3b8;font-size:11px;letter-spacing:0.5px;">The source of workforce</p>
-</div>`;
+<p style="margin:24px 0 0;font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Helvetica,Arial,sans-serif;font-size:14px;color:#1a2332;line-height:1.5;">&nbsp;</p>
+<p style="${teal}">Warmest Regards,</p>
+<p style="${teal}">${escapeHtml(fullName)}</p>
+${title ? `<p style="${teal}">${escapeHtml(title)}</p>` : ""}
+${phone ? `<p style="${teal}">${escapeHtml(phone)}</p>` : ""}
+<p style="${grey}"><span style="color:#14b8a6;">&#x1F4CD;</span> Jumeirah Lakes Towers, Dubai, UAE</p>
+<p style="${linkLine}"><a href="https://www.allocationassist.com" style="color:#1d4ed8;text-decoration:underline;">www.allocationassist.com</a></p>
+<p style="color:#14b8a6;font-weight:700;font-size:16px;margin:0;letter-spacing:-0.2px;">Allocation Assist</p>
+<p style="color:#94a3b8;font-size:11px;margin:2px 0 0;letter-spacing:0.4px;">The source of workforce</p>`;
 }
-function signatureText(first: string): string {
-  return `
-
-Warmest Regards,
-${first}
-Allocation Assist
-
-Jumeirah Lakes Towers, Dubai, UAE
-www.allocationassist.com
-`;
+function signatureText(first: string, last: string, title: string, phone: string): string {
+  const fullName = [first, last].filter(Boolean).join(" ") || "Allocation Assist";
+  return [
+    "",
+    "",
+    "Warmest Regards,",
+    fullName,
+    title || "",
+    phone  || "",
+    "Jumeirah Lakes Towers, Dubai, UAE",
+    "www.allocationassist.com",
+    "",
+    "Allocation Assist",
+    "The source of workforce",
+  ].filter(line => line !== null).join("\n");
 }
 
 // Allocation Assist branded signature block. Matches the layout Ammar uses
@@ -520,8 +529,8 @@ Deno.serve(async (req: Request) => {
     interview_format:   String(md.interview_format ?? ""),
     interview_link:     normalizeUrl(String(md.interview_link ?? "")),
     joining_date:       String(md.joining_date ?? ""),
-    signature:          signatureHtml(sender.first),
-    signature_text:     signatureText(sender.first),
+    signature:          signatureHtml(sender.first, sender.last, sender.title, sender.phone),
+    signature_text:     signatureText(sender.first, sender.last, sender.title, sender.phone),
   };
 
   const subject = render(tpl.subject ?? "", vars);
@@ -529,8 +538,15 @@ Deno.serve(async (req: Request) => {
   // a Claude-extracted field with stray HTML doesn't break the layout or
   // become an XSS vector in a hospital recipient's inbox). Plain text gets
   // raw values.
-  const html    = render(tpl.body_html || wrapHtml(tpl.body_text), vars, true);
-  const text    = render(tpl.body_text ?? "", vars);
+  //
+  // plainifyBody strips fancy inline styling from the stored template body
+  // (buttons / cards / coloured pills) BEFORE we splice in the signature.
+  // The signature itself has to keep its own inline styles (teal sign-off,
+  // logo block) so plainify runs only on the body source.
+  const rawBody       = tpl.body_html || wrapHtml(tpl.body_text);
+  const plainBody     = plainifyBody(rawBody);
+  const html          = render(plainBody, vars, true);
+  const text          = render(tpl.body_text ?? "", vars);
 
   // Refuse to send templates that still carry the PLACEHOLDER stub copy
   // from the seed migrations. The template editor warns the team, but
@@ -828,6 +844,52 @@ function wrapHtml(text: string): string {
     .replace(/</g, "&lt;")
     .replace(/>/g, "&gt;");
   return `<pre style="font-family: -apple-system, system-ui, sans-serif; font-size: 14px; line-height: 1.5; white-space: pre-wrap; max-width: 640px;">${escaped}</pre>`;
+}
+
+/**
+ * Strip the "fancy" inline styling from a template's body HTML at send
+ * time so every email lands in the recipient's inbox as plain text with
+ * a clean signature — same look across templates without rewriting the
+ * stored bodies. Ammar's reference (2026-06-06) shows the target: bare
+ * paragraphs, no buttons, no card frames, just text + a teal signature.
+ *
+ * What we strip:
+ *   - Every `style="…"` attribute (so buttons, cards, coloured pills,
+ *     background frames all collapse to bare text + a default link).
+ *   - <div> and <span> tags themselves (their content stays). Keeps
+ *     the document structure but removes the fancy chrome those tags
+ *     were carrying.
+ *   - Inline class/id/align attributes — same reason.
+ *
+ * What we keep:
+ *   - <p>, <br>, <a>, <strong>, <em>, <ul>/<li>, <h1>-<h3>, <hr>.
+ *   - The signature block — preserved verbatim because it's appended
+ *     AFTER this transform runs. We just leave the {{signature}} token
+ *     alone in the input.
+ */
+function plainifyBody(html: string): string {
+  if (!html) return html;
+  return html
+    // Drop every `style="…"` and `style='…'` attribute on any tag.
+    .replace(/\s+style\s*=\s*"[^"]*"/gi, "")
+    .replace(/\s+style\s*=\s*'[^']*'/gi, "")
+    // Drop class / id / align — common chrome carriers.
+    .replace(/\s+class\s*=\s*"[^"]*"/gi, "")
+    .replace(/\s+class\s*=\s*'[^']*'/gi, "")
+    .replace(/\s+id\s*=\s*"[^"]*"/gi, "")
+    .replace(/\s+id\s*=\s*'[^']*'/gi, "")
+    .replace(/\s+align\s*=\s*"[^"]*"/gi, "")
+    .replace(/\s+align\s*=\s*'[^']*'/gi, "")
+    .replace(/\s+bgcolor\s*=\s*"[^"]*"/gi, "")
+    .replace(/\s+bgcolor\s*=\s*'[^']*'/gi, "")
+    // Unwrap <div> / <span> — keep contents, lose the tags. Buttons in
+    // the templates were typically `<div ...><a ...>Pay</a></div>` so
+    // unwrapping the div + stripping the link's style gives a plain
+    // hyperlink in the paragraph flow.
+    .replace(/<\/?(?:div|span)\b[^>]*>/gi, "")
+    // Collapse runs of whitespace introduced by the above.
+    .replace(/[ \t]+\n/g, "\n")
+    .replace(/\n{3,}/g, "\n\n");
 }
 
 function truncate(s: string, n: number): string {
