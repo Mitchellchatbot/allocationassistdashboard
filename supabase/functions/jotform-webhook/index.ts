@@ -183,31 +183,38 @@ Deno.serve(async (req: Request) => {
     outreach_status:       "new",
     outreach_notes:
       !hasEmail
-        ? "No email on submission — recorded but couldn't create/link a WP candidate."
+        ? "Submission saved. No email captured yet — add one in the dashboard to link a profile."
         : upsertJson?.ok
-          ? `Auto-created WP candidate #${upsertJson.id}${existing ? " (updated existing)" : " (new draft)"}.`
-          : `WP upsert failed: ${upsertJson?.error ?? "unknown"}`,
+          ? `Draft profile ready for review${existing ? " (updated existing)" : ""}.`
+          : "Submission saved. Finish creating the profile in the dashboard.",
   }, { onConflict: "form_id,provider_response_id", ignoreDuplicates: false });
 
   console.log("[jotform-webhook] processed submission", responseId, "email:", profile.email, "wp_id:", upsertJson?.id, "doctor_id:", doctorId);
 
   // ── 8. Slack-deliverable nudge so the team reviews the profile ─────
-  // Deep-link strategy: WP profile if one exists, otherwise the Forms
-  // page filtered to this submission so the team can act either way.
-  const reviewLink = (hasEmail && upsertJson?.ok)
-    ? `/doctors?tab=profiles&q=${encodeURIComponent(profile.email)}`
+  // Deep-link strategy: deep-link straight into the rich editor for the
+  // freshly-created WP candidate when we have one, so clicking the
+  // Slack button lands the user on the inline edit dialog. Falls back
+  // to the Forms page if the upsert was skipped or failed.
+  const reviewLink = (hasEmail && upsertJson?.ok && upsertJson.id)
+    ? `/doctors?tab=profiles&open=${upsertJson.id}`
     : `/forms`;
   const summary = [profile.full_name, profile.acf?.specialty, profile.acf?.country_of_training]
-    .filter(Boolean).join(" · ") || profile.email || "no contact details extracted";
-  const status =
-    !hasEmail            ? "No email captured"
-    : existing           ? "Updated existing WP profile"
-    : upsertJson?.ok     ? "Draft WP profile created"
-                         : "WP upsert failed";
+    .filter(Boolean).join(" · ") || profile.email || "no contact details extracted yet";
+  // Friendly body — no jargon, no "upsert failed" tech-speak. Tells the
+  // operator what's waiting for them in plain English.
+  const body =
+    !hasEmail
+      ? `${summary}. No email on the submission yet — open it in the dashboard to add contact details.`
+      : existing
+        ? `${summary}. Existing profile updated — click to review the changes.`
+        : upsertJson?.ok
+          ? `${summary}. Your draft is ready — click to review and publish.`
+          : `${summary}. Submission saved — finish creating the profile in the dashboard.`;
   await notify({
     kind:    "new_form_submission",
     title:   `New form submission${profile.full_name ? ` · ${profile.full_name}` : ""}`,
-    body:    `${summary}. ${status} — review and decide whether to publish.`,
+    body,
     link_path:         reviewLink,
     related_doctor_id: doctorId,
   }).catch(e => console.error("[jotform-webhook] notify failed:", e));

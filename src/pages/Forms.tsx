@@ -45,7 +45,8 @@ import { toast } from "sonner";
 import { supabase } from "@/lib/supabase";
 import { useWpCandidateByContact, useWpContactSet, normalizePhone } from "@/hooks/use-wp-candidates";
 import { useNavigate } from "react-router-dom";
-import { CreateWpProfileDialog } from "@/components/forms/CreateWpProfileDialog";
+import { useUpsertWpCandidate } from "@/hooks/use-wp-candidates";
+import { mapAnswersToWp } from "@/lib/jotform-to-wp";
 
 const supabaseUrl = (import.meta.env.VITE_SUPABASE_URL as string) ?? "";
 
@@ -1083,7 +1084,8 @@ function ResponseRow({
   formProvider?: string;
 }) {
   const [open, setOpen] = useState(false);
-  const [wpDialogOpen, setWpDialogOpen] = useState(false);
+  const upsertWp = useUpsertWpCandidate();
+  const [creatingWp, setCreatingWp] = useState(false);
   const entries = Object.entries(response.answers ?? {});
   const display = useMemo(() => displayNameFor(response), [response]);
   const phone   = useMemo(() => phoneFor(response), [response]);
@@ -1096,6 +1098,35 @@ function ResponseRow({
   const openInDoctors = (tab: "progress" | "profiles") => {
     const q = response.respondent_email || display.label || "";
     navigate(`/doctors?tab=${tab}${q ? `&q=${encodeURIComponent(q)}` : ""}`);
+  };
+
+  /** Create-WP-profile flow. Replaces the old staging sheet:
+   *   1. Map the form's flat answers → WP-ACF payload.
+   *   2. POST a draft via wordpress-candidate-upsert.
+   *   3. Navigate to /doctors?tab=profiles&open=<newId> so the rich
+   *      inline editor (same dialog as "New profile" from Doctors)
+   *      opens on the new row — the team finishes review there. */
+  const handleCreateWpProfile = async (e: React.MouseEvent) => {
+    e.stopPropagation();
+    if (creatingWp) return;
+    setCreatingWp(true);
+    try {
+      const mapped = mapAnswersToWp(response.answers ?? {});
+      const fullName = mapped.full_name || display.label || "New profile";
+      const r = await upsertWp.mutateAsync({
+        status:    "draft",
+        title:     fullName,
+        doctor_id: response.doctor_id ?? null,
+        acf:       { ...(mapped.acf ?? {}), full_name: fullName },
+      });
+      if (r.id) {
+        navigate(`/doctors?tab=profiles&open=${r.id}`);
+      }
+    } catch (err) {
+      toast.error("Couldn't create draft", { description: (err as Error).message });
+    } finally {
+      setCreatingWp(false);
+    }
   };
 
   // Check whether a WP candidate already exists for this submission so
@@ -1279,10 +1310,13 @@ function ResponseRow({
                   size="sm"
                   variant="outline"
                   className="h-7 text-[11px]"
-                  onClick={(e) => { e.stopPropagation(); setWpDialogOpen(true); }}
+                  onClick={handleCreateWpProfile}
+                  disabled={creatingWp}
                 >
-                  <Sparkles className="h-3 w-3 mr-1 text-emerald-600" />
-                  Create WP profile
+                  {creatingWp
+                    ? <Loader2 className="h-3 w-3 mr-1 animate-spin" />
+                    : <Sparkles className="h-3 w-3 mr-1 text-emerald-600" />}
+                  {creatingWp ? "Creating draft…" : "Create WP profile"}
                 </Button>
               )}
             </div>
@@ -1290,11 +1324,6 @@ function ResponseRow({
         </div>
       )}
 
-      <CreateWpProfileDialog
-        response={response}
-        open={wpDialogOpen}
-        onClose={() => setWpDialogOpen(false)}
-      />
     </div>
   );
 }

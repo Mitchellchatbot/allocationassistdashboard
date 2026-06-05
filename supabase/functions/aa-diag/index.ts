@@ -22,6 +22,7 @@ Deno.serve(async () => {
   ]);
   return new Response(JSON.stringify({
     SLACK_WEBHOOK_URL_set: !!Deno.env.get("SLACK_WEBHOOK_URL"),
+    APP_ORIGIN:            Deno.env.get("APP_ORIGIN") ?? null,
     forms_count:           forms?.length ?? 0,
     forms:                 (forms ?? []).map(f => ({
       id: f.id, name: f.name, provider: f.provider, active: f.active, response_count: f.response_count,

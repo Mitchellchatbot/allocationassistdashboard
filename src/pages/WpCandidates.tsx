@@ -29,6 +29,7 @@ import {
   useWpCandidates, useSyncWpCandidates, useLinkWpCandidate,
   useUpsertWpCandidate, useUploadWpPhoto, useDeleteWpCandidate,
   useStagedProfiles, useDeleteStagedProfile, usePublishStagedProfile,
+  useWpCandidateById,
   type WpCandidate, type StagedProfile,
 } from "@/hooks/use-wp-candidates";
 import { toast } from "sonner";
@@ -43,6 +44,20 @@ export default function WpCandidates({ embedded }: WpCandidatesProps = {}) {
   const sync = useSyncWpCandidates();
   const upsert = useUpsertWpCandidate();
   const [openDetailId, setOpenDetailId] = useState<number | null>(null);
+  // Deep-link support: when Forms (or anything else) navigates here
+  // with ?open=<wp_id>, auto-open that profile's detail dialog so the
+  // user lands directly in the inline editor instead of having to
+  // find + click the row.
+  const [searchParamsForDeepLink] = useSearchParams();
+  useEffect(() => {
+    const raw = searchParamsForDeepLink.get("open");
+    const id  = raw ? Number(raw) : NaN;
+    if (Number.isFinite(id) && id > 0 && openDetailId !== id) {
+      setOpenDetailId(id);
+    }
+    // Only react to the param changing — not to user-driven close.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [searchParamsForDeepLink]);
 
   // Click "New profile" → POST a draft to WP immediately, then open the
   // detail dialog on the new row. The detail dialog is fully inline-
@@ -313,12 +328,19 @@ export default function WpCandidates({ embedded }: WpCandidatesProps = {}) {
       </div>
   );
 
-  // The detail dialog reads its candidate by ID from the cached list,
-  // so inline edits flow through useUpsertWpCandidate → cache invalidation
-  // → fresh row on next render without us having to plumb state around.
-  const detailCandidate = openDetailId != null
+  // The detail dialog reads its candidate from the cached list when
+  // possible (fast — no extra round trip). If the row isn't there yet
+  // — common when we deep-link from Slack moments after the upsert,
+  // before the 1.2k-row pagination has finished — we fall back to a
+  // direct-by-ID fetch so the dialog opens immediately instead of
+  // hanging on "Loading profile…" forever.
+  const cachedCandidate = openDetailId != null
     ? candidates.find(c => c.id === openDetailId) ?? null
     : null;
+  const { data: fetchedCandidate } = useWpCandidateById(
+    openDetailId != null && !cachedCandidate ? openDetailId : null,
+  );
+  const detailCandidate = cachedCandidate ?? fetchedCandidate ?? null;
   const withDialog = (
     <>
       {body}

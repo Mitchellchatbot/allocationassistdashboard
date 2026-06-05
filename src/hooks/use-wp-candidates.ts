@@ -390,6 +390,28 @@ export function useUploadWpPhoto() {
   });
 }
 
+/** Fetch a single WP candidate by its WordPress id. Used by the detail
+ *  dialog as a fast-path when the row isn't in the main paged-list cache
+ *  yet (e.g. deep-linked from Slack moments after the upsert). Skips
+ *  the 1.2k-row scan entirely — one row, one round trip. */
+export function useWpCandidateById(id: number | null) {
+  return useQuery<WpCandidate | null>({
+    queryKey: ["wp-candidate-by-id", id ?? "none"],
+    enabled: !!id,
+    queryFn: async () => {
+      if (!id) return null;
+      const { data, error } = await supabase
+        .from("wordpress_candidates")
+        .select("*")
+        .eq("id", id)
+        .maybeSingle();
+      if (error) throw error;
+      return (data ?? null) as WpCandidate | null;
+    },
+    staleTime: 30_000,
+  });
+}
+
 /** Fetch the WP candidate linked to an AA doctor_id (lead:/dob:),
  *  if any. Used by SendProfileDialog and other email-rendering surfaces
  *  to populate template tokens from the canonical profile record. */

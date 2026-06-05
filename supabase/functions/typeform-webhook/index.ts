@@ -212,7 +212,7 @@ Deno.serve(async (req: Request) => {
   await notify({
     kind:    "new_form_submission",
     title:   `New form submission${respondentName ? ` · ${respondentName}` : ""}`,
-    body:    `${respondentEmail ?? "(no email)"} via Typeform. Review the submission and decide whether to action it.`,
+    body:    `${respondentEmail ?? "no email captured"} via Typeform. Click to review the submission in the dashboard.`,
     link_path:         respondentEmail
       ? `/forms?q=${encodeURIComponent(respondentEmail)}`
       : `/forms`,
