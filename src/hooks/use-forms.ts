@@ -640,3 +640,33 @@ export function useSyncTypeformHistory() {
     },
   });
 }
+
+/** Delete a form_response row outright. Used by the row-level trash
+ *  button on the Forms page to clear out test data / broken submissions
+ *  without having to drop into SQL. Authenticated users have INSERT/
+ *  UPDATE policies on form_responses, so DELETE works too via RLS. */
+export function useDeleteFormResponse() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: async (id: string) => {
+      const { error } = await supabase.from("form_responses").delete().eq("id", id);
+      if (error) throw error;
+      return id;
+    },
+    onSuccess: (deletedId) => {
+      // Optimistic pull-out across every infinite-feed page cached for any form.
+      qc.setQueriesData<{ pages: Array<{ rows: FormResponse[] }> } | undefined>(
+        { queryKey: ["form-responses-infinite"] },
+        (prev) => {
+          if (!prev?.pages) return prev;
+          return {
+            ...prev,
+            pages: prev.pages.map(p => ({ ...p, rows: p.rows.filter(r => r.id !== deletedId) })),
+          };
+        },
+      );
+      qc.invalidateQueries({ queryKey: ["form-responses-infinite"] });
+      qc.invalidateQueries({ queryKey: ["form-stats"] });
+    },
+  });
+}

@@ -56,7 +56,7 @@ Deno.serve(async (req: Request) => {
 
   const { data: form } = await supabase
     .from("forms")
-    .select("id, webhook_secret, form_type, provider, api_token")
+    .select("id, webhook_secret, form_type, provider, api_token, provider_form_id, metadata")
     .eq("provider", "jotform")
     .eq("webhook_secret", key)
     .maybeSingle();
@@ -113,8 +113,23 @@ Deno.serve(async (req: Request) => {
     return json({ ok: false, error: "No answers found in payload", got: Object.keys(parsed) }, 400);
   }
 
+  // ── 3a. (Best-effort) Fetch real question labels from JotForm API ─
+  // Multipart payloads only give us keys like q3_typeA — the truncated
+  // stem. The real question text ("What is your date of birth?", etc.)
+  // is available via GET /form/{id}/questions. We cache the result on
+  // the form row's metadata for 7 days so this is one-call-per-week.
+  const questionLabels = await fetchQuestionLabels({
+    supabase,
+    form,
+  }).catch(e => { console.warn("[jotform-webhook] questions fetch failed (continuing):", e); return null; });
+
   // ── 3. Map JotForm answers → flat record + canonical ACF payload ─
-  const flat = flattenAnswers(rawAnswers);
+  // If we have real labels, swap them in BEFORE flattening so downstream
+  // mapToProfile sees the proper question text and not 'Type A52'.
+  const enriched = questionLabels
+    ? remapKeysWithLabels(rawAnswers, questionLabels)
+    : rawAnswers;
+  const flat = flattenAnswers(enriched);
   const profile = mapToProfile(flat);
   const responseId = String(parsed.submissionID ?? parsed.submission_id ?? crypto.randomUUID());
 
@@ -356,4 +371,68 @@ async function fireCvPipeline(args: {
   }).catch(e => console.error("[cv-pipeline] cv-extract invoke failed:", e));
 
   console.log(`[cv-pipeline] queued CV extraction for staged profile ${stagedProfileId} (upload ${row.id})`);
+}
+
+/**
+ * Fetch the canonical question text from the JotForm API and cache
+ * it on the form row's metadata.questions field for 7 days. This
+ * lets us replace the truncated "q3_typeA52" keys in multipart
+ * payloads with the real labels ("Please upload a recent
+ * professional picture from a studio") before flattening.
+ */
+async function fetchQuestionLabels(args: {
+  supabase: ReturnType<typeof createClient>;
+  form: { id: string; provider_form_id?: string | null; api_token?: string | null; metadata?: Record<string, unknown> | null };
+}): Promise<Record<string, string> | null> {
+  const { supabase, form } = args;
+  if (!form.provider_form_id || !form.api_token) return null;
+
+  // Cache check.
+  const meta = (form.metadata ?? {}) as Record<string, unknown>;
+  const cached = meta.questions as { fetched_at?: string; map?: Record<string, string> } | undefined;
+  const sevenDays = 7 * 86_400_000;
+  if (cached?.map && cached.fetched_at && (Date.now() - new Date(cached.fetched_at).getTime()) < sevenDays) {
+    return cached.map;
+  }
+
+  const url = `https://api.jotform.com/form/${form.provider_form_id}/questions?apiKey=${encodeURIComponent(form.api_token)}`;
+  const res = await fetch(url);
+  if (!res.ok) return cached?.map ?? null;
+  const json = await res.json().catch(() => null) as { content?: Record<string, { qid?: string; name?: string; text?: string }> } | null;
+  const content = json?.content;
+  if (!content) return cached?.map ?? null;
+
+  // Build map keyed by JotForm name-style key (q<qid>_<name>) → real text.
+  // Multipart rawRequest uses that exact key shape.
+  const map: Record<string, string> = {};
+  for (const [qid, q] of Object.entries(content)) {
+    const name = (q?.name ?? "").trim();
+    const text = (q?.text ?? "").trim();
+    if (!text) continue;
+    if (name) map[`q${qid}_${name}`] = text;
+    map[`q${qid}`] = text;          // fallback
+    if (name) map[name] = text;     // also keyed by just the name
+  }
+
+  // Cache for next time.
+  await supabase.from("forms")
+    .update({ metadata: { ...meta, questions: { fetched_at: new Date().toISOString(), map } } })
+    .eq("id", form.id);
+  return map;
+}
+
+/** Substitute keys in the rawAnswers object using the questions map.
+ *  When a key isn't in the map, we leave it alone so the existing
+ *  humaniseKey fallback still produces something readable. */
+function remapKeysWithLabels(answers: Record<string, unknown>, labels: Record<string, string>): Record<string, unknown> {
+  const out: Record<string, unknown> = {};
+  for (const [k, v] of Object.entries(answers)) {
+    const label = labels[k] ?? labels[k.replace(/^q\d+_/, "")] ?? null;
+    if (label) {
+      out[label] = v;
+    } else {
+      out[k] = v;
+    }
+  }
+  return out;
 }

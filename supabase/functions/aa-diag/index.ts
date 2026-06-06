@@ -13,7 +13,30 @@ const sb = createClient(
   Deno.env.get("SUPABASE_SERVICE_ROLE_KEY") ?? "",
 );
 
-Deno.serve(async () => {
+Deno.serve(async (req) => {
+  // One-off cleanup helper: POST { delete_form_responses: ['Test Test', 'Anonymous submission'] }
+  // deletes any form_responses whose respondent_name matches.
+  if (req.method === "POST") {
+    try {
+      const body = await req.json().catch(() => null) as { delete_form_response_names?: string[] } | null;
+      if (body?.delete_form_response_names && Array.isArray(body.delete_form_response_names)) {
+        const names = body.delete_form_response_names;
+        const { error, count } = await sb.from("form_responses").delete({ count: "exact" }).in("respondent_name", names);
+        if (error) return new Response(JSON.stringify({ ok: false, error: error.message }), { headers: { "Content-Type": "application/json" } });
+        return new Response(JSON.stringify({ ok: true, deleted: count, by_name: names }), { headers: { "Content-Type": "application/json" } });
+      }
+      if ((body as { delete_garbage_multipart?: boolean } | null)?.delete_garbage_multipart) {
+        // Drop the corrupt multipart-boundary rows (RZR1KPQNDH5Fm…).
+        const { error, count } = await sb
+          .from("form_responses")
+          .delete({ count: "exact" })
+          .ilike("search_text", "%RZR1KPQNDH5Fm%");
+        if (error) return new Response(JSON.stringify({ ok: false, error: error.message }), { headers: { "Content-Type": "application/json" } });
+        return new Response(JSON.stringify({ ok: true, deleted: count, kind: "garbage_multipart" }), { headers: { "Content-Type": "application/json" } });
+      }
+    } catch { /* fall through to GET-style diag */ }
+  }
+
   const [{ data: forms }, { data: responses }, { data: notifs }, { data: amani }, { data: latest }, { data: florRows }] = await Promise.all([
     sb.from("forms").select("id, name, provider, provider_form_id, webhook_secret, active, response_count").order("created_at", { ascending: false }),
     sb.from("form_responses").select("id, form_id, respondent_email, respondent_name, submitted_at, created_at, search_text, outreach_status").order("created_at", { ascending: false, nullsFirst: false }).limit(8),

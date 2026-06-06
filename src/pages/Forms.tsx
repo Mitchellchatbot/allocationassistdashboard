@@ -37,6 +37,7 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@
 import {
   useForms, useFormResponsesInfinite, useFormStats, useCreateForm, useUpdateForm, useDeleteForm,
   useUpdateFormResponseOutreach, useBackfillFormCsv, useLinkFormResponseToDoctor,
+  useDeleteFormResponse,
   type OutreachStatus,
   useSyncTypeformHistory, useSyncJotformHistory, generateWebhookSecret,
   type Form, type FormResponse,
@@ -1106,6 +1107,19 @@ function ResponseRow({
    *   3. Navigate to /doctors?tab=profiles&open=<newId> so the rich
    *      inline editor (same dialog as "New profile" from Doctors)
    *      opens on the new row — the team finishes review there. */
+  const delResponse = useDeleteFormResponse();
+  const handleDeleteResponse = async (e: React.MouseEvent) => {
+    e.stopPropagation();
+    const label = display.label || response.respondent_email || `submission ${response.id.slice(0, 8)}`;
+    if (!confirm(`Delete "${label}"?\n\nThis removes the form response from the dashboard. Doesn't touch JotForm / Typeform on the source side.`)) return;
+    try {
+      await delResponse.mutateAsync(response.id);
+      toast.success(`Removed ${label}`);
+    } catch (err) {
+      toast.error("Couldn't delete", { description: (err as Error).message });
+    }
+  };
+
   const handleCreateWpProfile = async (e: React.MouseEvent) => {
     e.stopPropagation();
     if (creatingWp) return;
@@ -1167,10 +1181,12 @@ function ResponseRow({
 
   return (
     <div className={`rounded-md border bg-white ${isPaid ? "border-amber-200 shadow-[0_0_0_1px_rgba(245,158,11,0.12)]" : ""}`}>
-      <button
-        type="button"
+      <div
+        role="button"
+        tabIndex={0}
         onClick={() => setOpen(o => !o)}
-        className="w-full flex items-center gap-2 px-3 py-2 text-left hover:bg-slate-50"
+        onKeyDown={(e) => { if (e.key === "Enter" || e.key === " ") { e.preventDefault(); setOpen(o => !o); } }}
+        className="w-full flex items-center gap-2 px-3 py-2 text-left hover:bg-slate-50 cursor-pointer"
       >
         <ChevronRight className={`h-3.5 w-3.5 text-slate-400 shrink-0 transition-transform ${effectivelyOpen ? "rotate-90" : ""}`} />
         {/* Avatar — JotForm "professional picture" widget answer if the
@@ -1260,7 +1276,19 @@ function ResponseRow({
           ) : null
         )}
         <div className="text-[10px] text-muted-foreground shrink-0">{relativeTime(response.submitted_at)}</div>
-      </button>
+        {/* Trash icon — destructive, hover-only. Native confirm to avoid
+            accidental clicks. e.stopPropagation in the handler keeps the
+            row from toggling. */}
+        <button
+          type="button"
+          onClick={handleDeleteResponse}
+          disabled={delResponse.isPending}
+          title="Delete this submission from the dashboard. Doesn't touch the source form."
+          className="h-6 w-6 rounded-full flex items-center justify-center text-slate-300 hover:text-rose-600 hover:bg-rose-50 transition-colors shrink-0 disabled:opacity-50"
+        >
+          {delResponse.isPending ? <Loader2 className="h-3 w-3 animate-spin" /> : <Trash2 className="h-3 w-3" />}
+        </button>
+      </div>
       {effectivelyOpen && (
         <div className="border-t bg-slate-50/30 px-3 py-2 space-y-3">
           {/* Outreach panel — keeps the team's working state on the
@@ -1841,13 +1869,60 @@ function jotformImageUrl(url: string, formId: string | undefined): string {
   return url;
 }
 
-/** Scan a response's `raw_payload.answers` for the first picture-shaped
- *  widget answer and return its proxy URL — used as the row avatar so
- *  the team scans by face instead of by email. Returns null if the
- *  response has no image-widget answer. */
+/** Scan a response for the first picture-shaped widget answer and
+ *  return its proxy URL — used as the row avatar.
+ *
+ *  Looks in three places, in order:
+ *   1. raw_payload.answers (the JotForm API shape — {3: {text, answer}})
+ *   2. response.answers     (our flattened map — "Type A52": "<JSON>")
+ *   3. raw_payload.rawRequest  (the live-webhook multipart JSON blob —
+ *                               keyed by q52_typeA52 → "<JSON>")
+ *
+ *  Live webhook submissions land via multipart, so the API-shaped
+ *  `answers` key is absent. We have to fall through to the flat
+ *  answers / rawRequest payload to find widget_metadata for those. */
 function pictureUrlFor(response: FormResponse): string | null {
-  const rawAnswers = (response.raw_payload as { answers?: Record<string, unknown> } | undefined)?.answers;
-  if (!rawAnswers || typeof rawAnswers !== "object") return null;
+  const apiAnswers = (response.raw_payload as { answers?: Record<string, unknown> } | undefined)?.answers;
+  if (apiAnswers && typeof apiAnswers === "object") {
+    const hit = scanWidgetMetadataApiShape(apiAnswers, response.form_id);
+    if (hit) return hit;
+  }
+  // Flat-answers fallback: "Type A52": '{"widget_metadata":...}'
+  const flat = response.answers ?? {};
+  for (const v of Object.values(flat)) {
+    const url = extractWidgetUrl(v);
+    if (url) return jotformImageUrl(url, response.form_id);
+  }
+  // rawRequest fallback: multipart payload's JSON blob
+  const rr = (response.raw_payload as { rawRequest?: string } | undefined)?.rawRequest;
+  if (typeof rr === "string") {
+    try {
+      const obj = JSON.parse(rr) as Record<string, unknown>;
+      for (const v of Object.values(obj)) {
+        const url = extractWidgetUrl(typeof v === "string" ? v : JSON.stringify(v));
+        if (url) return jotformImageUrl(url, response.form_id);
+      }
+    } catch { /* skip */ }
+  }
+  return null;
+}
+
+/** Pull the first /widget-uploads/imagepreview/... URL out of a string
+ *  value that looks like a widget_metadata JSON blob. Returns null if
+ *  the value doesn't contain a picture URL. */
+function extractWidgetUrl(raw: unknown): string | null {
+  if (typeof raw !== "string" || !raw.includes("widget_metadata")) return null;
+  try {
+    const parsed = JSON.parse(raw) as { widget_metadata?: { value?: Array<{ url?: string }> } };
+    const items  = parsed?.widget_metadata?.value;
+    const url    = items?.find(it => typeof it?.url === "string")?.url;
+    return url ?? null;
+  } catch { return null; }
+}
+
+/** The original API-shape scan, factored out so the multi-fallback
+ *  pictureUrlFor stays readable. */
+function scanWidgetMetadataApiShape(rawAnswers: Record<string, unknown>, formId: string | undefined): string | null {
   for (const v of Object.values(rawAnswers)) {
     if (!v || typeof v !== "object") continue;
     const obj = v as { text?: string; answer?: unknown };
@@ -1859,7 +1934,7 @@ function pictureUrlFor(response: FormResponse): string | null {
       const parsed = typeof obj.answer === "string" ? JSON.parse(obj.answer) : obj.answer;
       const items = (parsed as { widget_metadata?: { value?: Array<{ url?: string }> } })?.widget_metadata?.value;
       const url   = items?.find(it => typeof it?.url === "string")?.url;
-      if (url) return jotformImageUrl(url, response.form_id);
+      if (url) return jotformImageUrl(url, formId);
     } catch { /* fall through to next answer */ }
   }
   return null;
