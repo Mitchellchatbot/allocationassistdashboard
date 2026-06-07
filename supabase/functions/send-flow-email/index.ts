@@ -162,17 +162,6 @@ const SERIF_STACK = "Cambria, Georgia, 'Times New Roman', serif";
 // hot-link without auth.
 const LOGO_URL = `${Deno.env.get("SUPABASE_URL") ?? ""}/storage/v1/object/public/email-assets/logo.png`;
 
-function logoHeaderHtml(): string {
-  return `
-<table role="presentation" cellpadding="0" cellspacing="0" style="border-collapse:collapse;margin:0 0 24px;">
-  <tr>
-    <td style="padding:0;">
-      <img src="${LOGO_URL}" alt="Allocation Assist" width="140" height="auto" style="display:block;border:0;outline:none;max-width:140px;width:140px;height:auto;" />
-    </td>
-  </tr>
-</table>`;
-}
-
 function signatureHtml(first: string, last: string, title: string, phone: string): string {
   const fullName = [first, last].filter(Boolean).join(" ") || "Allocation Assist";
   const teal     = `color:#14b8a6;font-weight:700;font-size:14px;margin:0 0 2px;line-height:1.45;font-family:${SERIF_STACK};`;
@@ -186,7 +175,14 @@ ${title ? `<p style="${teal}">${escapeHtml(title)}</p>` : ""}
 ${phone ? `<p style="${teal}">${escapeHtml(phone)}</p>` : ""}
 <p style="${grey}"><span style="color:#14b8a6;">&#x1F4CD;</span> Jumeirah Lakes Towers, Dubai, UAE</p>
 <p style="${linkLine}"><a href="https://www.allocationassist.com" style="color:#1d4ed8;text-decoration:underline;">www.allocationassist.com</a></p>
-<p style="color:#14b8a6;font-weight:700;font-size:16px;margin:0;letter-spacing:-0.2px;font-family:${SERIF_STACK};">Allocation Assist</p>
+<table role="presentation" cellpadding="0" cellspacing="0" style="border-collapse:collapse;margin:8px 0 0;">
+  <tr>
+    <td style="padding:0;">
+      <img src="${LOGO_URL}" alt="Allocation Assist" width="64" height="64" style="display:block;border:0;outline:none;max-width:64px;width:64px;height:auto;" />
+    </td>
+  </tr>
+</table>
+<p style="color:#14b8a6;font-weight:700;font-size:16px;margin:6px 0 0;letter-spacing:-0.2px;font-family:${SERIF_STACK};">Allocation Assist</p>
 <p style="color:#94a3b8;font-size:11px;margin:2px 0 0;letter-spacing:0.4px;font-family:${SERIF_STACK};">The source of workforce</p>`;
 }
 function signatureText(first: string, last: string, title: string, phone: string): string {
@@ -605,11 +601,13 @@ Deno.serve(async (req: Request) => {
     joining_date:       String(md.joining_date ?? ""),
     signature:          signatureHtml(sender.first, sender.last, sender.title, sender.phone),
     signature_text:     signatureText(sender.first, sender.last, sender.title, sender.phone),
-    // Logo header — emitted at the top of every Plinky-style template.
-    // The signature already brands the bottom; this gives the top the
-    // same recognition without the heavy teal banner the old templates
-    // had.
-    logo_header:        logoHeaderHtml(),
+    // logo_header used to live here as a top-of-email image. Pulled in
+    // favour of putting the icon directly above the "Allocation Assist"
+    // line in signatureHtml() — keeps the brand at the bottom (matching
+    // the user's reference) AND avoids leaving a literal {{logo_header}}
+    // token in the dashboard's template-editor preview, which doesn't
+    // render server-side tokens.
+    logo_header:        "",
   };
 
   const subject = render(tpl.subject ?? "", vars);
