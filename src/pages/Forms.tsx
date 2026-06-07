@@ -37,7 +37,7 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@
 import {
   useForms, useFormResponsesInfinite, useFormStats, useCreateForm, useUpdateForm, useDeleteForm,
   useUpdateFormResponseOutreach, useBackfillFormCsv, useLinkFormResponseToDoctor,
-  useDeleteFormResponse,
+  useArchiveFormResponse, useRestoreFormResponse, useHardDeleteFormResponse,
   type OutreachStatus,
   useSyncTypeformHistory, useSyncJotformHistory, generateWebhookSecret,
   type Form, type FormResponse,
@@ -171,6 +171,9 @@ function FormDetail({ form }: { form: Form }) {
   // lives in a separate table. Pre-fetched email + phone sets +
   // Set.has lookups keep this O(1) per row.
   const [wpFilter, setWpFilter] = useState<"all" | "in" | "out">("all");
+  // Live vs Archived view. Default 'live' — archived rows are hidden
+  // until the user explicitly switches.
+  const [view, setView] = useState<"live" | "archived">("live");
   const wpContacts = useWpContactSet();
   const { user } = useAuth();
 
@@ -183,6 +186,7 @@ function FormDetail({ form }: { form: Form }) {
     sort:             sortDir,
     outreach:         outreachFilter,
     currentOwnerEmail: user?.email ?? undefined,
+    view,
   });
   const responses = useMemo(() => {
     const flat = feed.data?.pages.flatMap(p => p.rows) ?? [];
@@ -437,6 +441,18 @@ function FormDetail({ form }: { form: Form }) {
             }}
           />
           <div className="flex items-center gap-2 flex-wrap text-[11px]">
+            {/* Live / Archived view toggle — left-most so it's the
+                first thing the user can flip when looking for
+                something they archived earlier. */}
+            <FilterChipGroup
+              value={view}
+              onChange={(v) => setView(v as typeof view)}
+              options={[
+                { value: "live",     label: "Live" },
+                { value: "archived", label: "Archived" },
+              ]}
+            />
+            <span className="text-muted-foreground/40">·</span>
             {/* Date chips */}
             <FilterChipGroup
               value={dateFilter}
@@ -1107,14 +1123,39 @@ function ResponseRow({
    *   3. Navigate to /doctors?tab=profiles&open=<newId> so the rich
    *      inline editor (same dialog as "New profile" from Doctors)
    *      opens on the new row — the team finishes review there. */
-  const delResponse = useDeleteFormResponse();
-  const handleDeleteResponse = async (e: React.MouseEvent) => {
+  const archiveResponse = useArchiveFormResponse();
+  const restoreResponse = useRestoreFormResponse();
+  const hardDelete      = useHardDeleteFormResponse();
+  const isArchived = !!response.archived_at;
+
+  const handleArchive = async (e: React.MouseEvent) => {
     e.stopPropagation();
     const label = display.label || response.respondent_email || `submission ${response.id.slice(0, 8)}`;
-    if (!confirm(`Delete "${label}"?\n\nThis removes the form response from the dashboard. Doesn't touch JotForm / Typeform on the source side.`)) return;
     try {
-      await delResponse.mutateAsync(response.id);
-      toast.success(`Removed ${label}`);
+      await archiveResponse.mutateAsync(response.id);
+      toast.success(`Archived ${label}`, {
+        description: "Hidden from the live feed. Flip 'Archived' chip to view + restore.",
+      });
+    } catch (err) {
+      toast.error("Couldn't archive", { description: (err as Error).message });
+    }
+  };
+  const handleRestore = async (e: React.MouseEvent) => {
+    e.stopPropagation();
+    try {
+      await restoreResponse.mutateAsync(response.id);
+      toast.success("Restored");
+    } catch (err) {
+      toast.error("Couldn't restore", { description: (err as Error).message });
+    }
+  };
+  const handleHardDelete = async (e: React.MouseEvent) => {
+    e.stopPropagation();
+    const label = display.label || response.respondent_email || `submission ${response.id.slice(0, 8)}`;
+    if (!confirm(`Permanently delete "${label}"?\n\nThis removes the record from our dashboard forever. Doesn't touch JotForm / Typeform on the source side.`)) return;
+    try {
+      await hardDelete.mutateAsync(response.id);
+      toast.success(`Deleted ${label}`);
     } catch (err) {
       toast.error("Couldn't delete", { description: (err as Error).message });
     }
@@ -1276,18 +1317,42 @@ function ResponseRow({
           ) : null
         )}
         <div className="text-[10px] text-muted-foreground shrink-0">{relativeTime(response.submitted_at)}</div>
-        {/* Trash icon — destructive, hover-only. Native confirm to avoid
-            accidental clicks. e.stopPropagation in the handler keeps the
-            row from toggling. */}
-        <button
-          type="button"
-          onClick={handleDeleteResponse}
-          disabled={delResponse.isPending}
-          title="Delete this submission from the dashboard. Doesn't touch the source form."
-          className="h-6 w-6 rounded-full flex items-center justify-center text-slate-300 hover:text-rose-600 hover:bg-rose-50 transition-colors shrink-0 disabled:opacity-50"
-        >
-          {delResponse.isPending ? <Loader2 className="h-3 w-3 animate-spin" /> : <Trash2 className="h-3 w-3" />}
-        </button>
+        {/* Trash / Restore / hard-delete actions. In live view the
+            trash archives (soft delete). In archived view the same
+            icon RESTORES, and a small permanent-delete (x) appears
+            alongside it. Native confirm only on the permanent path. */}
+        {!isArchived ? (
+          <button
+            type="button"
+            onClick={handleArchive}
+            disabled={archiveResponse.isPending}
+            title="Archive this submission. Hidden from the live feed; flip the Archived chip to view + restore. Doesn't touch JotForm/Typeform."
+            className="h-6 w-6 rounded-full flex items-center justify-center text-slate-300 hover:text-amber-600 hover:bg-amber-50 transition-colors shrink-0 disabled:opacity-50"
+          >
+            {archiveResponse.isPending ? <Loader2 className="h-3 w-3 animate-spin" /> : <Inbox className="h-3 w-3" />}
+          </button>
+        ) : (
+          <>
+            <button
+              type="button"
+              onClick={handleRestore}
+              disabled={restoreResponse.isPending}
+              title="Restore — moves the row back to the live feed."
+              className="h-6 w-6 rounded-full flex items-center justify-center text-slate-300 hover:text-emerald-700 hover:bg-emerald-50 transition-colors shrink-0 disabled:opacity-50"
+            >
+              {restoreResponse.isPending ? <Loader2 className="h-3 w-3 animate-spin" /> : <RefreshCw className="h-3 w-3" />}
+            </button>
+            <button
+              type="button"
+              onClick={handleHardDelete}
+              disabled={hardDelete.isPending}
+              title="Permanently delete from the dashboard. Cannot be undone. Doesn't touch JotForm/Typeform."
+              className="h-6 w-6 rounded-full flex items-center justify-center text-slate-300 hover:text-rose-600 hover:bg-rose-50 transition-colors shrink-0 disabled:opacity-50"
+            >
+              {hardDelete.isPending ? <Loader2 className="h-3 w-3 animate-spin" /> : <Trash2 className="h-3 w-3" />}
+            </button>
+          </>
+        )}
       </div>
       {effectivelyOpen && (
         <div className="border-t bg-slate-50/30 px-3 py-2 space-y-3">

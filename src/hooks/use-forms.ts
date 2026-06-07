@@ -63,6 +63,10 @@ export interface FormResponse {
   last_contacted_at:     string | null;
   next_followup_at:      string | null;
 
+  /** Archive marker. Null = visible in the live feed; set = hidden
+   *  unless the Forms page's Archive chip is on. */
+  archived_at:           string | null;
+
   created_at:            string;
 }
 
@@ -130,6 +134,14 @@ export interface FormResponseFilters {
   /** When set, the calling page's current user. Filters 'mine' to
    *  rows owned by this email (or unowned + new). */
   currentOwnerEmail?: string;
+  /** What slice of archive state to show:
+   *  - 'live'     (default) — only rows where archived_at is null
+   *  - 'archived' — only rows where archived_at is set
+   *  - 'all'      — both
+   *  Trashed rows on the Forms page move to 'archived' via
+   *  useArchiveFormResponse; they reappear here when the user picks
+   *  the Archive view. */
+  view?: "live" | "archived" | "all";
 }
 
 /** Page sizes. First page is big so the user sees a lot at once, then
@@ -138,7 +150,7 @@ export const FORM_RESPONSES_FIRST_PAGE  = 200;
 export const FORM_RESPONSES_NEXT_PAGE   = 50;
 
 const RESP_INF_KEY = (formId: string | null, f: FormResponseFilters) =>
-  ["form-responses-infinite", formId ?? "_", f.search ?? "", f.date ?? "all", f.link ?? "all", f.sort ?? "newest"] as const;
+  ["form-responses-infinite", formId ?? "_", f.search ?? "", f.date ?? "all", f.link ?? "all", f.sort ?? "newest", f.view ?? "live"] as const;
 
 /** Paginated + filterable response feed for one form. All filters
  *  including the search query are pushed down to PostgREST so we
@@ -170,6 +182,14 @@ export function useFormResponsesInfinite(formId: string | null, filters: FormRes
         // minor cost: paid leads are ~1 per page, so the secondary sort
         // dominates for free leads.
         .order("submitted_at", { ascending: filters.sort === "oldest", nullsFirst: false });
+
+      // Archive view filter — default to live (archived_at is null).
+      // Switch to archived when the user picks the Archive chip, or 'all'
+      // to see both.
+      const view = filters.view ?? "live";
+      if (view === "live")          query = query.is("archived_at", null);
+      else if (view === "archived") query = query.not("archived_at", "is", null);
+      // 'all' → no archived_at filter
 
       if (filters.date && filters.date !== "all") {
         const days = filters.date === "7d" ? 7 : filters.date === "30d" ? 30 : 90;
@@ -641,11 +661,70 @@ export function useSyncTypeformHistory() {
   });
 }
 
-/** Delete a form_response row outright. Used by the row-level trash
- *  button on the Forms page to clear out test data / broken submissions
- *  without having to drop into SQL. Authenticated users have INSERT/
- *  UPDATE policies on form_responses, so DELETE works too via RLS. */
-export function useDeleteFormResponse() {
+/** Archive a form_response row (set archived_at = now()) so it
+ *  vanishes from the live Forms feed but stays in the DB. The user
+ *  can flip the Archive chip to see archived rows + restore them.
+ *  This is the row-level trash button's action — it NEVER touches
+ *  JotForm / Typeform on the source side, only our dashboard mirror. */
+export function useArchiveFormResponse() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: async (id: string) => {
+      const { error } = await supabase
+        .from("form_responses")
+        .update({ archived_at: new Date().toISOString() })
+        .eq("id", id);
+      if (error) throw error;
+      return id;
+    },
+    onSuccess: (id) => {
+      // Optimistic pull-out from any cached LIVE-view feed; the
+      // archived-view caches get invalidated below so they refetch
+      // and pick the row up.
+      qc.setQueriesData<{ pages: Array<{ rows: FormResponse[] }> } | undefined>(
+        { queryKey: ["form-responses-infinite"] },
+        (prev) => {
+          if (!prev?.pages) return prev;
+          return { ...prev, pages: prev.pages.map(p => ({ ...p, rows: p.rows.filter(r => r.id !== id) })) };
+        },
+      );
+      qc.invalidateQueries({ queryKey: ["form-responses-infinite"] });
+      qc.invalidateQueries({ queryKey: ["form-stats"] });
+    },
+  });
+}
+
+/** Restore an archived form_response (archived_at = null). The row
+ *  reappears in the live feed on the next refetch. */
+export function useRestoreFormResponse() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: async (id: string) => {
+      const { error } = await supabase
+        .from("form_responses")
+        .update({ archived_at: null })
+        .eq("id", id);
+      if (error) throw error;
+      return id;
+    },
+    onSuccess: (id) => {
+      qc.setQueriesData<{ pages: Array<{ rows: FormResponse[] }> } | undefined>(
+        { queryKey: ["form-responses-infinite"] },
+        (prev) => {
+          if (!prev?.pages) return prev;
+          return { ...prev, pages: prev.pages.map(p => ({ ...p, rows: p.rows.filter(r => r.id !== id) })) };
+        },
+      );
+      qc.invalidateQueries({ queryKey: ["form-responses-infinite"] });
+      qc.invalidateQueries({ queryKey: ["form-stats"] });
+    },
+  });
+}
+
+/** Hard-delete a form_response (DB row gone for good). Only the
+ *  Archive view exposes this — it's the second click after Archive.
+ *  Still NEVER touches the source form on JotForm / Typeform. */
+export function useHardDeleteFormResponse() {
   const qc = useQueryClient();
   return useMutation({
     mutationFn: async (id: string) => {
@@ -653,16 +732,12 @@ export function useDeleteFormResponse() {
       if (error) throw error;
       return id;
     },
-    onSuccess: (deletedId) => {
-      // Optimistic pull-out across every infinite-feed page cached for any form.
+    onSuccess: (id) => {
       qc.setQueriesData<{ pages: Array<{ rows: FormResponse[] }> } | undefined>(
         { queryKey: ["form-responses-infinite"] },
         (prev) => {
           if (!prev?.pages) return prev;
-          return {
-            ...prev,
-            pages: prev.pages.map(p => ({ ...p, rows: p.rows.filter(r => r.id !== deletedId) })),
-          };
+          return { ...prev, pages: prev.pages.map(p => ({ ...p, rows: p.rows.filter(r => r.id !== id) })) };
         },
       );
       qc.invalidateQueries({ queryKey: ["form-responses-infinite"] });
