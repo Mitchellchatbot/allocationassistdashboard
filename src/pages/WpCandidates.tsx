@@ -1357,6 +1357,7 @@ function StagedRow({ profile }: { profile: StagedProfile }) {
       onOpenChange={setDetailOpen}
       onPublish={() => { setDetailOpen(false); handlePublish("publish"); }}
       onSaveDraft={() => { setDetailOpen(false); handlePublish("draft"); }}
+      onDelete={() => { setDetailOpen(false); handleDelete(); }}
     />
     </>
   );
@@ -1370,13 +1371,14 @@ function StagedRow({ profile }: { profile: StagedProfile }) {
  *  candidate will look like on WordPress was the user's ask — this is
  *  it, just before the Publish click. */
 function StagedProfileDetailDialog({
-  profile, open, onOpenChange, onPublish, onSaveDraft,
+  profile, open, onOpenChange, onPublish, onSaveDraft, onDelete,
 }: {
   profile: StagedProfile;
   open: boolean;
   onOpenChange: (open: boolean) => void;
   onPublish:    () => void;
   onSaveDraft:  () => void;
+  onDelete:     () => void;
 }) {
   const acf = (profile.acf ?? {}) as Record<string, unknown>;
   const cv  = (profile.extracted_cv_data ?? {}) as Record<string, unknown>;
@@ -1457,21 +1459,28 @@ function StagedProfileDetailDialog({
       }))
     : slotExp;
 
+  const memberSince = profile.created_at
+    ? new Date(profile.created_at).toLocaleDateString("en-GB", { day: "numeric", month: "long", year: "numeric" })
+    : null;
+
+  const heading = jobTitle ? `${fullName} – ${jobTitle}` : fullName;
+
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
-      <DialogContent className="max-w-5xl max-h-[92vh] overflow-y-auto p-0">
-        <DialogHeader className="px-6 pt-5 pb-2">
-          <DialogTitle className="text-base font-semibold">{fullName}</DialogTitle>
-          <DialogDescription className="text-[11px]">
-            Preview the merged data — this is exactly what will appear on the WordPress candidate page after Publish.
-          </DialogDescription>
+      <DialogContent className="max-w-[1100px] w-[96vw] max-h-[92vh] overflow-y-auto p-0">
+        {/* The teal-on-white WP candidate profile dialog, ported to
+            staging. Same component shape (no inline edits — this is a
+            preview), same icons, same tabs. */}
+        <DialogHeader className="px-7 pt-6 pb-1">
+          <DialogTitle className="text-[22px] md:text-[24px] font-semibold text-slate-900 leading-tight">{heading}</DialogTitle>
+          <DialogDescription className="sr-only">Preview the staged profile before publishing to WordPress.</DialogDescription>
         </DialogHeader>
 
-        <div className="grid grid-cols-1 md:grid-cols-[280px,1fr] gap-5 px-6 pb-4">
+        <div className="grid grid-cols-1 md:grid-cols-[300px,1fr] gap-6 px-7 pb-4 pt-2">
           {/* ── Left: teal avatar card ─────────────────────────────────── */}
           <div className="space-y-3">
-            <div className="rounded-2xl bg-gradient-to-br from-teal-400 to-teal-600 text-white p-5 text-center shadow">
-              <div className="mx-auto h-32 w-32 rounded-full bg-white/15 ring-4 ring-white/30 overflow-hidden flex items-center justify-center">
+            <div className="rounded-2xl bg-gradient-to-b from-teal-400 to-teal-500 text-white p-6 text-center shadow-sm">
+              <div className="mx-auto h-40 w-40 rounded-full bg-white ring-4 ring-white/40 overflow-hidden flex items-center justify-center">
                 {photoSrc ? (
                   <img
                     src={photoSrc}
@@ -1480,56 +1489,65 @@ function StagedProfileDetailDialog({
                     onError={e => { (e.currentTarget as HTMLImageElement).style.display = "none"; }}
                   />
                 ) : (
-                  <Avatar src={null} name={fullName} size={128} />
+                  <Avatar src={null} name={fullName} size={160} />
                 )}
               </div>
-              <div className="mt-4 text-[17px] font-semibold leading-tight">{fullName}</div>
-              {jobTitle && <div className="mt-1 text-[12px] text-white/90">{jobTitle}</div>}
-              <div className="my-4 border-t border-white/25" />
-              <div className="space-y-2 text-[12px]">
+              <div className="mt-4 text-[19px] font-semibold leading-tight">{fullName}</div>
+              {jobTitle && <div className="mt-1 text-[12.5px] text-white/95">{jobTitle}</div>}
+              {memberSince && (
+                <div className="inline-flex mt-3 text-[10.5px] bg-white/15 rounded-full px-2.5 py-0.5">
+                  Member Since: {memberSince}
+                </div>
+              )}
+              <div className="my-5 border-t border-white/25" />
+              <div className="space-y-2.5 text-[12.5px]">
                 {ageVal && <div>Age: {ageVal} Years Old</div>}
-                {phone && <div className="flex items-center justify-center gap-2"><Phone className="h-3.5 w-3.5" />{phone}</div>}
-                {email && <div className="flex items-center justify-center gap-2 break-all"><Mail className="h-3.5 w-3.5" />{email}</div>}
+                {phone && (
+                  <div className="flex items-center justify-center gap-2">
+                    <Phone className="h-3.5 w-3.5" /> {phone}
+                  </div>
+                )}
+                {email && (
+                  <div className="flex items-center justify-center gap-2 break-all">
+                    <Mail className="h-3.5 w-3.5" /> {email}
+                  </div>
+                )}
               </div>
             </div>
-            {/* Source breadcrumbs from Zoho — recruiter, lead source. */}
+
             {(recruiter || leadSource) && (
               <div className="rounded-xl border border-slate-200 bg-slate-50/50 p-3 space-y-1 text-[11px]">
-                {recruiter && <div><span className="text-muted-foreground">Recruiter:</span> <span className="font-medium">{recruiter}</span></div>}
+                {recruiter  && <div><span className="text-muted-foreground">Recruiter:</span> <span className="font-medium">{recruiter}</span></div>}
                 {leadSource && <div><span className="text-muted-foreground">Lead source:</span> <span className="font-medium">{leadSource}</span></div>}
               </div>
             )}
-            {/* Status chips so it's obvious what landed. */}
-            <div className="flex flex-wrap gap-1">
-              <Badge variant="outline" className="text-[9px] bg-slate-100 text-slate-600 border-slate-200">not on WP</Badge>
-              {photoSrc && <Badge variant="outline" className="text-[9px] bg-blue-50 text-blue-700 border-blue-200">+ photo</Badge>}
-              {Object.keys(cv).length > 0 && <Badge variant="outline" className="text-[9px] bg-emerald-50 text-emerald-700 border-emerald-200">+ CV parsed</Badge>}
+
+            <div className="flex flex-wrap gap-1.5">
+              <Badge variant="outline" className="text-[10px] bg-amber-50 text-amber-700 border-amber-200">not on WP</Badge>
+              {photoSrc && <Badge variant="outline" className="text-[10px] bg-blue-50 text-blue-700 border-blue-200">+ photo</Badge>}
+              {Object.keys(cv).length > 0 && <Badge variant="outline" className="text-[10px] bg-emerald-50 text-emerald-700 border-emerald-200">+ CV parsed</Badge>}
             </div>
           </div>
 
-          {/* ── Right: heading + tile grid + Education/Experience ──────── */}
+          {/* ── Right: areas of interest + tile grid + Edu/Exp tabs ─── */}
           <div className="space-y-5 min-w-0">
             {(bio || areas) && (
               <div>
-                {bio && <p className="text-[13px] text-slate-700 leading-relaxed">{bio}</p>}
-                {areas && (
-                  <>
-                    <p className="mt-3 text-[13px] text-slate-500">Specific areas of interest within the specialization</p>
-                    <div className="mt-1 h-px bg-gradient-to-r from-teal-300 to-transparent" />
-                    <p className="mt-2 text-[12.5px] text-slate-700">{areas}</p>
-                  </>
-                )}
+                <p className="text-[13.5px] text-slate-500">Specific areas of interest within the specialization</p>
+                <div className="mt-1 h-px bg-gradient-to-r from-teal-300 to-transparent" />
+                <p className="mt-3 text-[13.5px] text-slate-800 leading-relaxed">{bio ?? areas}</p>
+                {bio && areas && <p className="mt-2 text-[12.5px] text-slate-700">{areas}</p>}
               </div>
             )}
 
-            <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-x-5 gap-y-3">
+            <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-x-6 gap-y-4">
               <PreviewTile icon={<Globe className="h-4 w-4" />}        label="Nationality"            value={get("nationality")} />
-              <PreviewTile icon={<Calendar className="h-4 w-4" />}     label="Date of Birth"          value={prettyDate(get("date_of_birth"))} />
+              <PreviewTile icon={<Calendar className="h-4 w-4" />}     label="Date of Birth"          value={prettyDate(get("date_of_birth"))} hint={get("date_of_birth") ? `(${formatLongDate(get("date_of_birth"))})` : undefined} />
               <PreviewTile icon={<Stethoscope className="h-4 w-4" />}  label="Specialty"              value={get("specialty")} />
-              <PreviewTile icon={<Stethoscope className="h-4 w-4" />}  label="Subspecialty"           value={get("subspecialty")} />
+              <PreviewTile icon={<Stethoscope className="h-4 w-4" />}  label="Subspecialty"           value={get("subspecialty")} placeholder="Add subspecialty…" />
               <PreviewTile icon={<BadgeCheck className="h-4 w-4" />}   label="Specialist / Consultant" value={get("specialist__consultant")} />
-              <PreviewTile icon={<CalendarDays className="h-4 w-4" />} label="Years of Experience"    value={get("years_of_experience_post_specialization")} suffix=" Years" />
-              <PreviewTile icon={<Award className="h-4 w-4" />}        label="License"                value={get("dha__haad__moh_license")} />
+              <PreviewTile icon={<CalendarDays className="h-4 w-4" />} label="Years of Experience"    value={get("years_of_experience_post_specialization")} hint={get("years_of_experience_post_specialization") ? `(${get("years_of_experience_post_specialization")} Years)` : undefined} />
+              <PreviewTile icon={<Award className="h-4 w-4" />}        label="DHA / DOH / MOH / SCFHS / QCHP Licenses?" value={get("dha__haad__moh_license")} />
               <PreviewTile icon={<ClockIcon className="h-4 w-4" />}    label="Notice Period"          value={get("notice_period")} />
               <PreviewTile icon={<MapPin className="h-4 w-4" />}       label="Targeted Location"      value={getList("targeted_locations").join(", ") || null} />
               <PreviewTile icon={<LanguagesIcon className="h-4 w-4" />} label="Languages"             value={get("languages")} />
@@ -1538,44 +1556,48 @@ function StagedProfileDetailDialog({
               <PreviewTile icon={<Baby className="h-4 w-4" />}         label="Have Children / Dependent" value={childrenStr} />
               <PreviewTile icon={<MapPin className="h-4 w-4" />}       label="Country of Training"    value={get("country_of_training")} />
               <PreviewTile icon={<MapPin className="h-4 w-4" />}       label="Current Location"       value={get("current_location")} />
-              <PreviewTile icon={<CalendarDays className="h-4 w-4" />} label="Current Salary"         value={get("current_salary")} />
+              <PreviewTile icon={<Award className="h-4 w-4" />}        label="License type tags"      value={getList("license_type").join(", ") || (get("dha__haad__moh_license") ? "DHA, DOH, MOH, …" : null)} />
+              <PreviewTile icon={<CalendarDays className="h-4 w-4" />} label="Current Salary"         value={get("current_salary")} placeholder="Add current salary…" />
               <PreviewTile icon={<CalendarDays className="h-4 w-4" />} label="Expected Salary"        value={get("expected_salary")} />
-              <PreviewTile icon={<IdCard className="h-4 w-4" />}       label="Marital Status"         value={get("marital_status")} />
             </div>
 
             <div className="rounded-xl border border-slate-200 overflow-hidden">
               <div className="grid grid-cols-2">
                 <button
                   type="button"
-                  className={`h-10 text-[12px] font-medium ${tab === "education" ? "bg-teal-500 text-white" : "bg-white text-slate-600 hover:bg-slate-50"}`}
+                  className={`h-11 text-[12.5px] font-semibold tracking-wide uppercase ${tab === "education" ? "bg-teal-500 text-white" : "bg-white text-slate-500 hover:bg-slate-50"}`}
                   onClick={() => setTab("education")}
-                >Education ({education.length})</button>
+                >Education</button>
                 <button
                   type="button"
-                  className={`h-10 text-[12px] font-medium ${tab === "experience" ? "bg-teal-500 text-white" : "bg-white text-slate-600 hover:bg-slate-50"}`}
+                  className={`h-11 text-[12.5px] font-semibold tracking-wide uppercase ${tab === "experience" ? "bg-teal-500 text-white" : "bg-white text-slate-500 hover:bg-slate-50"}`}
                   onClick={() => setTab("experience")}
-                >Experience ({experience.length})</button>
+                >Experience</button>
               </div>
-              <div className="p-4 bg-white space-y-3">
+              <div className="p-5 bg-white space-y-4">
                 {(tab === "education" ? education : experience).length === 0 ? (
-                  <div className="text-[11px] text-muted-foreground py-2">
-                    No {tab} entries detected. {Object.keys(cv).length === 0 ? "CV extraction hasn't finished yet — give it a few seconds and re-open." : "The CV didn't list any."}
+                  <div className="text-[12px] text-muted-foreground py-2">
+                    No {tab} entries detected. {Object.keys(cv).length === 0
+                      ? "CV extraction hasn't finished yet — re-open in ~15s."
+                      : "The CV didn't list any."}
                   </div>
                 ) : (
                   (tab === "education" ? education : experience).map((entry, i) => (
-                    <div key={i} className="flex items-start gap-2.5">
-                      <div className="mt-0.5 shrink-0">
-                        {tab === "education" ? <GraduationCap className="h-4 w-4 text-teal-600" /> : <Briefcase className="h-4 w-4 text-teal-600" />}
-                      </div>
+                    <div key={i} className="flex items-start gap-3">
+                      <GraduationCap className="h-4 w-4 text-teal-600 mt-1 shrink-0" hidden={tab !== "education"} />
+                      <Briefcase className="h-4 w-4 text-teal-600 mt-1 shrink-0" hidden={tab !== "experience"} />
                       <div className="min-w-0 flex-1">
-                        <div className="text-[13px] font-medium text-slate-800">{entry.title ?? "—"}</div>
-                        {entry.org && <div className="text-[12px] text-slate-600">{entry.org}</div>}
+                        <div className="text-[12.5px] uppercase tracking-wide text-teal-700 font-semibold">
+                          {tab === "education" ? "Specialty Training:" : "Role:"}
+                        </div>
+                        <div className="text-[14.5px] font-semibold text-slate-900 mt-0.5">{entry.title ?? "—"}</div>
+                        {entry.org && <div className="text-[13px] text-teal-700 mt-0.5">{entry.org}</div>}
                         {(entry.start || entry.end || entry.present) && (
-                          <div className="text-[11px] text-muted-foreground mt-0.5">
+                          <div className="text-[11.5px] text-muted-foreground mt-1">
                             {entry.start ?? "—"} – {entry.present ? "Present" : (entry.end ?? "—")}
                           </div>
                         )}
-                        {entry.description && <div className="text-[11.5px] text-slate-600 mt-1 leading-snug">{entry.description}</div>}
+                        {entry.description && <div className="text-[12px] text-slate-700 mt-1.5 leading-snug">{entry.description}</div>}
                       </div>
                     </div>
                   ))
@@ -1585,35 +1607,82 @@ function StagedProfileDetailDialog({
           </div>
         </div>
 
-        <DialogFooter className="px-6 py-3 border-t bg-slate-50/60 gap-2">
-          <Button variant="ghost" size="sm" onClick={() => onOpenChange(false)}>Close</Button>
-          <Button variant="outline" size="sm" onClick={onSaveDraft}>
-            <FileText className="h-3 w-3 mr-1" /> Save as draft
+        {/* Action bar — Delete (red), Save as draft (green primary,
+            because that's the WP review state the team usually wants),
+            Publish (outlined teal). Matches user spec: 'delete, draft
+            on WP, publish on WP, with the draft being the one
+            highlighted in green'. */}
+        <DialogFooter className="px-7 py-4 border-t bg-slate-50/60 flex sm:justify-between gap-2">
+          <Button
+            variant="outline"
+            className="border-rose-300 text-rose-700 hover:bg-rose-50"
+            onClick={onDelete}
+          >
+            <Trash2 className="h-4 w-4 mr-1.5" /> Delete
           </Button>
-          <Button size="sm" onClick={onPublish}>
-            <Send className="h-3 w-3 mr-1" /> Publish to WordPress
-          </Button>
+          <div className="flex gap-2">
+            <Button
+              className="bg-emerald-500 hover:bg-emerald-600 text-white"
+              onClick={onSaveDraft}
+            >
+              <FileText className="h-4 w-4 mr-1.5" /> Save as Draft on WP
+            </Button>
+            <Button
+              variant="outline"
+              className="border-teal-300 text-teal-700 hover:bg-teal-50"
+              onClick={onPublish}
+            >
+              <Send className="h-4 w-4 mr-1.5" /> Publish to WP
+            </Button>
+          </div>
         </DialogFooter>
       </DialogContent>
     </Dialog>
   );
 }
 
-/** Read-only tile: icon + label + value. Renders an em-dash when value
- *  is null so the grid stays visually consistent (matches the WP profile
- *  dialog's behaviour where empty fields still show a placeholder). */
-function PreviewTile({ icon, label, value, suffix }: { icon: React.ReactNode; label: string; value: string | null; suffix?: string }) {
+/** Read-only WP-profile-style tile. Icon goes in a 36-px rounded
+ *  background to match the live profile dialog's EditableTile (same
+ *  exact pattern, just no inline edit). Empty values render with a
+ *  green-outlined 'Add …' placeholder so the layout stays visually
+ *  consistent with the editable WP version. */
+function PreviewTile({
+  icon, label, value, placeholder, hint,
+}: {
+  icon: React.ReactNode;
+  label: string;
+  value: string | null;
+  placeholder?: string;
+  hint?: string;
+}) {
   return (
-    <div className="flex items-start gap-2">
-      <div className="mt-0.5 text-slate-400 shrink-0">{icon}</div>
-      <div className="min-w-0">
-        <div className="text-[10.5px] font-medium text-slate-500">{label}</div>
-        <div className={`text-[12.5px] mt-0.5 ${value ? "text-slate-800" : "text-slate-300"}`}>
-          {value ? `${value}${suffix ?? ""}` : "—"}
-        </div>
+    <div className="flex items-start gap-3">
+      <div className="h-9 w-9 rounded-full bg-slate-100 text-slate-500 flex items-center justify-center shrink-0">{icon}</div>
+      <div className="min-w-0 flex-1">
+        <div className="text-[11.5px] text-slate-500">{label}</div>
+        {value ? (
+          <div className="text-[13.5px] mt-0.5 text-slate-800 break-words">
+            {value}
+            {hint && <span className="text-[11px] text-slate-400 ml-1">{hint}</span>}
+          </div>
+        ) : (
+          <div className="mt-1 inline-block rounded-md border border-teal-300 px-2 py-0.5 text-[11.5px] text-teal-600 italic">
+            {placeholder ?? `Add ${label.toLowerCase().split("/")[0].trim()}…`}
+          </div>
+        )}
       </div>
     </div>
   );
+}
+
+/** Format a YYYYMMDD or YYYY-MM-DD string into "DD Month YYYY". */
+function formatLongDate(raw: string | null): string {
+  if (!raw) return "";
+  const m = /^(\d{4})[-]?(\d{2})[-]?(\d{2})$/.exec(raw.trim());
+  if (!m) return raw;
+  const d = new Date(`${m[1]}-${m[2]}-${m[3]}T00:00:00Z`);
+  if (Number.isNaN(+d)) return raw;
+  return d.toLocaleDateString("en-GB", { day: "numeric", month: "long", year: "numeric" });
 }
 
 /** Match the WP profile dialog's prettyDate for consistency. JotForm
