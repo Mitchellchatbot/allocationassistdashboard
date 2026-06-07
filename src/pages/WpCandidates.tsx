@@ -1279,6 +1279,7 @@ function StagedRow({ profile }: { profile: StagedProfile }) {
   const hasPicture = !!profile.picture_url;
 
   return (
+    <>
     <div
       className="rounded-md border border-amber-200/70 bg-white px-3 py-2 flex items-center gap-3 hover:bg-amber-50/50 transition-colors cursor-pointer"
       onClick={() => setDetailOpen(true)}
@@ -1343,14 +1344,21 @@ function StagedRow({ profile }: { profile: StagedProfile }) {
           {del.isPending ? <Loader2 className="h-3 w-3 animate-spin" /> : <Trash2 className="h-3 w-3" />}
         </Button>
       </div>
-      <StagedProfileDetailDialog
-        profile={profile}
-        open={detailOpen}
-        onOpenChange={setDetailOpen}
-        onPublish={() => { setDetailOpen(false); handlePublish("publish"); }}
-        onSaveDraft={() => { setDetailOpen(false); handlePublish("draft"); }}
-      />
     </div>
+    {/* Render the preview dialog OUTSIDE the clickable row. Radix
+        Dialog uses a Portal at the DOM level, but React events still
+        bubble up the React component tree — clicking Close inside a
+        dialog rendered inside the row was bubbling back to the row's
+        onClick and re-opening itself. Sibling-of-row placement breaks
+        that loop entirely. */}
+    <StagedProfileDetailDialog
+      profile={profile}
+      open={detailOpen}
+      onOpenChange={setDetailOpen}
+      onPublish={() => { setDetailOpen(false); handlePublish("publish"); }}
+      onSaveDraft={() => { setDetailOpen(false); handlePublish("draft"); }}
+    />
+    </>
   );
 }
 

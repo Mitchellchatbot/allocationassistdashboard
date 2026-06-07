@@ -102,14 +102,27 @@ Deno.serve(async (req) => {
         }
         return new Response(JSON.stringify({ ok: true, rerun: out }, null, 2), { headers: { "Content-Type": "application/json" } });
       }
+      if ((body as { inspect_response?: string } | null)?.inspect_response) {
+        const id = (body as { inspect_response: string }).inspect_response;
+        const { data } = await sb.from("form_responses").select("id, respondent_name, respondent_email, answers, raw_payload, search_text, form_id, submitted_at").eq("id", id).single();
+        return new Response(JSON.stringify({ ok: true, response: data }, null, 2), { headers: { "Content-Type": "application/json" } });
+      }
       if ((body as { find_doctor?: string } | null)?.find_doctor) {
         const q = (body as { find_doctor: string }).find_doctor;
         const [wp, staged, forms] = await Promise.all([
           sb.from("wordpress_candidates").select("id, full_name, email, status").or(`full_name.ilike.%${q}%,email.ilike.%${q}%`),
-          sb.from("staged_doctor_profiles").select("id, full_name, email").or(`full_name.ilike.%${q}%,email.ilike.%${q}%`),
+          sb.from("staged_doctor_profiles").select("*").or(`full_name.ilike.%${q}%,email.ilike.%${q}%`),
           sb.from("form_responses").select("id, respondent_name, respondent_email, archived_at, submitted_at").or(`respondent_name.ilike.%${q}%,respondent_email.ilike.%${q}%`),
         ]);
-        return new Response(JSON.stringify({ ok: true, wp: wp.data ?? [], staged: staged.data ?? [], forms: forms.data ?? [] }, null, 2), { headers: { "Content-Type": "application/json" } });
+        // Pull cv_upload status for each staged row so we can debug
+        // why an extraction didn't land.
+        const uploadIds = (staged.data ?? []).map((s: { cv_upload_id?: string }) => s.cv_upload_id).filter(Boolean) as string[];
+        let cvUploads: unknown[] = [];
+        if (uploadIds.length) {
+          const { data } = await sb.from("cv_uploads").select("id, status, file_path, file_mime, extraction_error, extracted_at, extracted_data").in("id", uploadIds);
+          cvUploads = data ?? [];
+        }
+        return new Response(JSON.stringify({ ok: true, wp: wp.data ?? [], staged: staged.data ?? [], forms: forms.data ?? [], cv_uploads: cvUploads }, null, 2), { headers: { "Content-Type": "application/json" } });
       }
       if ((body as { delete_wp_candidate?: number } | null)?.delete_wp_candidate) {
         const id = (body as { delete_wp_candidate: number }).delete_wp_candidate;
