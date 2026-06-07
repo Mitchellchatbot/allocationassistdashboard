@@ -33,7 +33,7 @@ import {
   type WpCandidate, type StagedProfile,
 } from "@/hooks/use-wp-candidates";
 import { toast } from "sonner";
-import { Plus, Camera, Loader2, Check, AlertCircle, Pencil, Trash2, Send, FileText } from "lucide-react";
+import { Plus, Camera, Loader2, Check, AlertCircle, Pencil, Trash2, Send } from "lucide-react";
 import { Textarea } from "@/components/ui/textarea";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 
