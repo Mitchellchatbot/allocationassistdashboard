@@ -1285,7 +1285,11 @@ function StagedRow({ profile }: { profile: StagedProfile }) {
       onClick={() => setDetailOpen(true)}
       title="Click to preview the merged data before publishing"
     >
-      <Avatar src={null} name={profile.full_name ?? profile.email ?? "?"} size={28} />
+      <Avatar
+        src={buildPhotoProxyUrl(profile.picture_url, profile.form_id)}
+        name={profile.full_name ?? profile.email ?? "?"}
+        size={28}
+      />
       <div className="flex-1 min-w-0">
         <div className="text-[12px] font-medium text-slate-800 truncate">
           {profile.full_name ?? profile.email ?? "Unnamed submission"}
