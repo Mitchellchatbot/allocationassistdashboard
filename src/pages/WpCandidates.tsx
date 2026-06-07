@@ -1685,16 +1685,6 @@ function formatLongDate(raw: string | null): string {
   return d.toLocaleDateString("en-GB", { day: "numeric", month: "long", year: "numeric" });
 }
 
-/** Match the WP profile dialog's prettyDate for consistency. JotForm
- *  date answers usually come through as YYYYMMDD; we want YYYY-MM-DD
- *  in the preview. */
-function prettyDate(raw: string | null): string | null {
-  if (!raw) return null;
-  const m = /^(\d{4})(\d{2})(\d{2})$/.exec(raw.trim());
-  if (m) return `${m[1]}-${m[2]}-${m[3]}`;
-  return raw;
-}
-
 /** Small destructive action inside the detail dialog. Confirms via
  *  native confirm() (low ceremony) before firing — wraps useDeleteWpCandidate. */
 function DeleteCandidateButton({ candidate, onDone }: { candidate: WpCandidate; onDone: () => void }) {
