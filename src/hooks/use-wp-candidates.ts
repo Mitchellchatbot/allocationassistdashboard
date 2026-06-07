@@ -149,6 +149,10 @@ export interface WpCandidateUpsertPayload {
   status?:    "publish" | "private" | "draft";
   title?:     string;                              // post title
   doctor_id?: string | null;                       // our linkage field
+  /** REQUIRED when omitting `id` (i.e. on create). The edge function
+   *  rejects unattributed create calls so a future webhook/cron can't
+   *  accidentally post to WordPress without an explicit user action. */
+  intent?:    "publish_from_staging" | "manual_create" | "edit";
   acf?: {
     full_name?:                                              string;
     job_title?:                                              string;
@@ -403,8 +407,9 @@ export function usePublishStagedProfile() {
 
       const payload: WpCandidateUpsertPayload = {
         status,
-        title: profile.full_name ?? undefined,
-        acf:   mergedAcf as WpCandidateUpsertPayload["acf"],
+        title:  profile.full_name ?? undefined,
+        acf:    mergedAcf as WpCandidateUpsertPayload["acf"],
+        intent: "publish_from_staging",
       };
       const { data, error } = await supabase.functions.invoke("wordpress-candidate-upsert", { body: payload });
       if (error) throw error;

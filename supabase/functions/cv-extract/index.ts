@@ -236,42 +236,14 @@ Deno.serve(async (req: Request) => {
     console.log(`[cv-extract] wrote extracted_cv_data onto staged profile ${stagedId}`);
   }
 
-  // ── Route 2: legacy direct-WP path. Kept for back-compat in case
-  //    any existing cv_uploads rows still use the wp:<id> prefix.
+  // ── Route 2 was a legacy direct-WP write that fired on `wp:<id>`
+  //    prefixed cv_uploads rows. REMOVED on purpose. Hard rule from
+  //    the team: NOTHING lands on WordPress until a human clicks
+  //    Publish on the staging row. cv-extract now only writes back
+  //    onto staged_doctor_profiles.extracted_cv_data above — the
+  //    Publish click in the dashboard is the only WP-create path.
   if (did.startsWith("wp:")) {
-    const wpId = Number(did.slice(3));
-    if (Number.isFinite(wpId) && wpId > 0) {
-      const acf: Record<string, unknown> = {};
-      const map = {
-        job_title:                                              extracted.title,
-        bio:                                                    extracted.bio,
-        specific_areas_of_interests_within_the_specialization:  extracted.area_of_interest,
-        country_of_training:                                    extracted.country_training,
-        years_of_experience_post_specialization:                extracted.years_experience,
-        nationality:                                            extracted.nationality,
-        family_status:                                          extracted.family_status,
-        dha__haad__moh_license:                                 extracted.license,
-        expected_salary:                                        extracted.salary_expectation,
-        notice_period:                                          extracted.notice_period,
-        languages:                                              extracted.languages,
-      } as const;
-      for (const [k, v] of Object.entries(map)) {
-        if (v !== null && v !== undefined && v !== "") acf[k] = v;
-      }
-      if (Object.keys(acf).length > 0) {
-        const upsertRes = await fetch(`${Deno.env.get("SUPABASE_URL")}/functions/v1/wordpress-candidate-upsert`, {
-          method:  "POST",
-          headers: { Authorization: `Bearer ${Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")}`, "Content-Type": "application/json" },
-          body:    JSON.stringify({ id: wpId, acf }),
-        });
-        if (!upsertRes.ok) {
-          const text = await upsertRes.text().catch(() => "");
-          console.error("[cv-extract] WP candidate ACF merge failed:", upsertRes.status, text.slice(0, 200));
-        } else {
-          console.log(`[cv-extract] merged ${Object.keys(acf).length} CV fields into WP candidate #${wpId}`);
-        }
-      }
-    }
+    console.warn(`[cv-extract] legacy wp:<id> prefix seen on ${row.id}; ignoring — staged-only policy in effect.`);
   }
 
   return json({ ok: true, extracted, profile_updated: !upsertErr }, 200);

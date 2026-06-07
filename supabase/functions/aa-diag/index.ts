@@ -80,6 +80,77 @@ Deno.serve(async (req) => {
         if (error) return new Response(JSON.stringify({ ok: false, error: error.message }), { headers: { "Content-Type": "application/json" } });
         return new Response(JSON.stringify({ ok: true, restored: data?.length ?? 0, rows: data }), { headers: { "Content-Type": "application/json" } });
       }
+      if ((body as { find_doctor?: string } | null)?.find_doctor) {
+        const q = (body as { find_doctor: string }).find_doctor;
+        const [wp, staged, forms] = await Promise.all([
+          sb.from("wordpress_candidates").select("id, full_name, email, status").or(`full_name.ilike.%${q}%,email.ilike.%${q}%`),
+          sb.from("staged_doctor_profiles").select("id, full_name, email").or(`full_name.ilike.%${q}%,email.ilike.%${q}%`),
+          sb.from("form_responses").select("id, respondent_name, respondent_email, archived_at, submitted_at").or(`respondent_name.ilike.%${q}%,respondent_email.ilike.%${q}%`),
+        ]);
+        return new Response(JSON.stringify({ ok: true, wp: wp.data ?? [], staged: staged.data ?? [], forms: forms.data ?? [] }, null, 2), { headers: { "Content-Type": "application/json" } });
+      }
+      if ((body as { delete_wp_candidate?: number } | null)?.delete_wp_candidate) {
+        const id = (body as { delete_wp_candidate: number }).delete_wp_candidate;
+        // Reuse the dashboard's regular delete pathway — it deletes
+        // from WP via REST AND drops the mirror row.
+        const wpDel = await fetch(`${Deno.env.get("SUPABASE_URL")}/functions/v1/wordpress-candidate-delete`, {
+          method:  "POST",
+          headers: { Authorization: `Bearer ${Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")}`, "Content-Type": "application/json" },
+          body:    JSON.stringify({ id }),
+        });
+        const txt = await wpDel.text();
+        return new Response(JSON.stringify({ ok: wpDel.ok, status: wpDel.status, body: txt.slice(0, 400) }), { headers: { "Content-Type": "application/json" } });
+      }
+      if ((body as { delete_staged?: string } | null)?.delete_staged) {
+        const id = (body as { delete_staged: string }).delete_staged;
+        const { error } = await sb.from("staged_doctor_profiles").delete().eq("id", id);
+        if (error) return new Response(JSON.stringify({ ok: false, error: error.message }), { headers: { "Content-Type": "application/json" } });
+        return new Response(JSON.stringify({ ok: true }), { headers: { "Content-Type": "application/json" } });
+      }
+      if ((body as { test_jotform?: boolean } | null)?.test_jotform) {
+        // Hit JotForm's /user endpoint with the stored api_token to
+        // confirm the key still works. Used after password / API-key
+        // rotation in JotForm: if /user comes back 401, the team
+        // generated a new key and we need a new one in forms.api_token.
+        const { data: forms } = await sb
+          .from("forms")
+          .select("id, name, provider_form_id, api_token")
+          .eq("provider", "jotform")
+          .limit(5);
+        const out: unknown[] = [];
+        for (const f of (forms ?? []) as Array<{ id: string; name: string; provider_form_id: string | null; api_token: string | null }>) {
+          if (!f.api_token) { out.push({ name: f.name, token: "MISSING" }); continue; }
+          // /user is the cheapest auth check.
+          const uRes = await fetch(`https://api.jotform.com/user?apiKey=${encodeURIComponent(f.api_token)}`);
+          const uTxt = await uRes.text();
+          // Then probe the form itself + a recent submissions request — the
+          // historical-sync path uses /form/{id}/submissions.
+          const sRes = await fetch(`https://api.jotform.com/form/${f.provider_form_id}/submissions?limit=1&apiKey=${encodeURIComponent(f.api_token)}`);
+          const sTxt = await sRes.text();
+          out.push({
+            name: f.name,
+            form_id: f.provider_form_id,
+            token_preview: `${f.api_token.slice(0, 4)}…${f.api_token.slice(-4)} (${f.api_token.length} chars)`,
+            user_status: uRes.status,
+            user_excerpt: uTxt.slice(0, 200),
+            submissions_status: sRes.status,
+            submissions_excerpt: sTxt.slice(0, 200),
+          });
+        }
+        return new Response(JSON.stringify({ ok: true, jotform_probe: out }, null, 2), { headers: { "Content-Type": "application/json" } });
+      }
+      if ((body as { set_jotform_token?: { form_id: string; api_token: string } } | null)?.set_jotform_token) {
+        // Rotate the JotForm api_token on a specific forms row in-place.
+        const { form_id, api_token } = (body as { set_jotform_token: { form_id: string; api_token: string } }).set_jotform_token;
+        if (!form_id || !api_token) return new Response(JSON.stringify({ ok: false, error: "form_id + api_token required" }), { headers: { "Content-Type": "application/json" } });
+        const { data, error } = await sb
+          .from("forms")
+          .update({ api_token })
+          .eq("id", form_id)
+          .select("id, name");
+        if (error) return new Response(JSON.stringify({ ok: false, error: error.message }), { headers: { "Content-Type": "application/json" } });
+        return new Response(JSON.stringify({ ok: true, updated: data }), { headers: { "Content-Type": "application/json" } });
+      }
       if ((body as { delete_garbage_multipart?: boolean } | null)?.delete_garbage_multipart) {
         // Drop the corrupt multipart-boundary rows (RZR1KPQNDH5Fm…).
         const { error, count } = await sb

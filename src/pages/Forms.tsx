@@ -47,7 +47,7 @@ import { toast } from "sonner";
 import { supabase } from "@/lib/supabase";
 import { useWpCandidateByContact, useWpContactSet, normalizePhone } from "@/hooks/use-wp-candidates";
 import { useNavigate } from "react-router-dom";
-import { useUpsertWpCandidate } from "@/hooks/use-wp-candidates";
+import { useCreateStagedProfile } from "@/hooks/use-wp-candidates";
 import { mapAnswersToWp } from "@/lib/jotform-to-wp";
 
 const supabaseUrl = (import.meta.env.VITE_SUPABASE_URL as string) ?? "";
@@ -1120,7 +1120,7 @@ function ResponseRow({
   formProvider?: string;
 }) {
   const [open, setOpen] = useState(false);
-  const upsertWp = useUpsertWpCandidate();
+  const stageProfile = useCreateStagedProfile();
   const [creatingWp, setCreatingWp] = useState(false);
   const entries = Object.entries(response.answers ?? {});
   const display = useMemo(() => displayNameFor(response), [response]);
@@ -1136,12 +1136,10 @@ function ResponseRow({
     navigate(`/doctors?tab=${tab}${q ? `&q=${encodeURIComponent(q)}` : ""}`);
   };
 
-  /** Create-WP-profile flow. Replaces the old staging sheet:
-   *   1. Map the form's flat answers → WP-ACF payload.
-   *   2. POST a draft via wordpress-candidate-upsert.
-   *   3. Navigate to /doctors?tab=profiles&open=<newId> so the rich
-   *      inline editor (same dialog as "New profile" from Doctors)
-   *      opens on the new row — the team finishes review there. */
+  /** Send-to-staging flow. Inserts a staged_doctor_profiles row from
+   *  the form answers and lets the team review + click Publish in the
+   *  staging area before anything lands on WordPress. NEVER posts to
+   *  WordPress directly — the user's hard rule. */
   const archiveResponse = useArchiveFormResponse();
   const restoreResponse = useRestoreFormResponse();
   const hardDelete      = useHardDeleteFormResponse();
@@ -1185,27 +1183,36 @@ function ResponseRow({
     if (creatingWp) return;
     setCreatingWp(true);
     try {
+      // STAGING-ONLY policy: this button used to POST a WP draft directly
+      // via wordpress-candidate-upsert. That bypassed review and meant
+      // half-mapped profiles landed on production WordPress before anyone
+      // looked at them. We now only insert into staged_doctor_profiles —
+      // the user has to click Publish in the staging area to push to WP.
       const mapped = mapAnswersToWp(response.answers ?? {});
       const fullName = mapped.full_name || display.label || "New profile";
-      // Strip ACF fields the WP REST endpoint refuses on POST. cv_resume
-      // is a File-type ACF — it wants an attachment id, not a raw URL,
-      // and rejects the entire body with 400 rest_invalid_param if we
-      // pass a string. The CV stays in our doctor-cvs bucket + the
-      // cv_uploads table; the team accesses it from the Forms page via
-      // the jotform-file-proxy.
       const safeAcf: Record<string, unknown> = { ...(mapped.acf ?? {}), full_name: fullName };
       delete safeAcf.cv_resume;
-      const r = await upsertWp.mutateAsync({
-        status:    "draft",
-        title:     fullName,
-        doctor_id: response.doctor_id ?? null,
-        acf:       safeAcf,
+      await stageProfile.mutateAsync({
+        source:             `form:${response.id}`,
+        source_response_id: response.id,
+        full_name:          fullName,
+        email:              response.respondent_email ?? null,
+        phone:              (mapped.acf?.phone_number as string | undefined) ?? null,
+        specialty:          (mapped.acf?.specialty as string | undefined) ?? null,
+        subspecialty:       (mapped.acf?.subspecialty as string | undefined) ?? null,
+        nationality:        (mapped.acf?.nationality as string | undefined) ?? null,
+        job_title:          (mapped.acf?.job_title as string | undefined) ?? null,
+        current_location:   (mapped.acf?.current_location as string | undefined) ?? null,
+        country_of_training: (mapped.acf?.country_of_training as string | undefined) ?? null,
+        years_experience:   (mapped.acf?.years_of_experience_post_specialization as string | undefined) ?? null,
+        acf:                safeAcf,
       });
-      if (r.id) {
-        navigate(`/doctors?tab=profiles&open=${r.id}`);
-      }
+      toast.success("Sent to staging area", {
+        description: "Review the merged data, then click Publish to push to WordPress.",
+        action: { label: "Open staging", onClick: () => navigate("/doctors?tab=profiles") },
+      });
     } catch (err) {
-      toast.error("Couldn't create draft", { description: (err as Error).message });
+      toast.error("Couldn't stage profile", { description: (err as Error).message });
     } finally {
       setCreatingWp(false);
     }
@@ -1436,7 +1443,7 @@ function ResponseRow({
                   {creatingWp
                     ? <Loader2 className="h-3 w-3 mr-1 animate-spin" />
                     : <Sparkles className="h-3 w-3 mr-1 text-emerald-600" />}
-                  {creatingWp ? "Creating draft…" : "Create WP profile"}
+                  {creatingWp ? "Sending to staging…" : "Send to staging"}
                 </Button>
               )}
             </div>

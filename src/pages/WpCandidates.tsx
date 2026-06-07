@@ -68,6 +68,8 @@ export default function WpCandidates({ embedded }: WpCandidatesProps = {}) {
         status: "draft",
         title: "New profile",
         acf: { full_name: "New profile" },
+        // Allowed-create intent — explicit user click on "New profile".
+        intent: "manual_create",
       });
       if (r.id) setOpenDetailId(r.id);
       toast.success("Blank profile created — fill in the fields inline.");

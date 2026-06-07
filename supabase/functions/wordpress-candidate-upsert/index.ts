@@ -46,7 +46,15 @@ interface UpsertBody {
   title?:     string;
   acf?:       Record<string, unknown>;
   doctor_id?: string | null;
+  /** Required for CREATE (no id) calls. The team's hard rule is that
+   *  nothing lands on WordPress until a human clicks Publish or the
+   *  edit-doctor dialog explicitly creates one. We require the caller
+   *  to set this so a future webhook/cron can't accidentally CREATE
+   *  a WP post — the guard only allows known intents. */
+  intent?:    "publish_from_staging" | "manual_create" | "edit";
 }
+
+const ALLOWED_CREATE_INTENTS = new Set(["publish_from_staging", "manual_create"]);
 
 Deno.serve(async (req: Request) => {
   // Top-level try/catch turns any uncaught throw (WP timeout, malformed
@@ -72,6 +80,22 @@ async function handleUpsert(req: Request): Promise<Response> {
   let body: UpsertBody;
   try { body = await req.json() as UpsertBody; }
   catch { return json({ ok: false, error: "Bad JSON body" }, 400); }
+
+  // Intent guard. Required for CREATE; edits don't need it (a partial
+  // edit on an existing WP post is fine from any path that already
+  // had access). The user's rule is 'NO WP posts until press upload',
+  // which is exactly what this enforces server-side.
+  const isCreateCall = !(typeof body.id === "number" && body.id > 0);
+  if (isCreateCall) {
+    if (!body.intent || !ALLOWED_CREATE_INTENTS.has(body.intent)) {
+      console.warn("[wordpress-candidate-upsert] BLOCKED unattributed create:", { intent: body.intent, title: body.title });
+      return json({
+        ok: false,
+        error: "Create blocked: missing or invalid intent. Staging-area Publish or the manual New-profile dialog are the only allowed paths.",
+      }, 403);
+    }
+    console.log(`[wordpress-candidate-upsert] create intent=${body.intent} title="${body.title ?? ""}"`);
+  }
 
   const basic = "Basic " + btoa(`${wpUsername}:${wpAppPassword}`);
 
