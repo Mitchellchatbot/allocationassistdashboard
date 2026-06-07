@@ -369,10 +369,14 @@ export function usePublishStagedProfile() {
       if (!candidateEmail || !String(candidateEmail).includes("@")) {
         throw new Error("This submission has no email — add one in the form fields before publishing.");
       }
-      // Merge precedence: form ACF (manual edits in the staging row)
-      // wins over CV-extracted fields, which fill the gaps.
+      // The staged row's `acf` IS the merged view — cv-extract folds
+      // form + Zoho + CV into staged_doctor_profiles.acf as soon as
+      // the CV extraction finishes. So we just send it through. If
+      // the user submitted without a CV (extracted_cv_data is empty)
+      // we still need the lightweight fallback that maps the few
+      // direct CV keys onto WP ACF keys — covers the legacy case.
       const cv = profile.extracted_cv_data ?? {};
-      const cvAcf: Record<string, unknown> = {
+      const cvAcfFallback: Record<string, unknown> = Object.keys(cv).length === 0 ? {} : {
         job_title:                                              cv.title,
         bio:                                                    cv.bio,
         specific_areas_of_interests_within_the_specialization:  cv.area_of_interest,
@@ -385,8 +389,7 @@ export function usePublishStagedProfile() {
         notice_period:                                          cv.notice_period,
         languages:                                              cv.languages,
       };
-      const mergedAcf: Record<string, unknown> = { ...cvAcf };
-      // Form values win — only overwrite where the form has a real value.
+      const mergedAcf: Record<string, unknown> = { ...cvAcfFallback };
       for (const [k, v] of Object.entries(profile.acf ?? {})) {
         if (v !== null && v !== undefined && v !== "") mergedAcf[k] = v;
       }

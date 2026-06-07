@@ -19,6 +19,7 @@
  */
 
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2";
+import { enrichProfile } from "../_shared/enrich-profile.ts";
 
 const supabase = createClient(
   Deno.env.get("SUPABASE_URL")!,
@@ -41,7 +42,10 @@ Return a JSON object with these exact keys:
 {
   "title":              string | null,   // Their stated professional title. Medical CV: UAE-style like "Consultant Pediatrician", "Specialist Urologist". Non-medical: whatever title they hold, e.g. "SEO & Email Marketing Specialist".
   "bio":                string | null,   // 3-5 sentence prose paragraph summarising their professional background. Third person, professional tone. Use ONLY facts in the CV.
-  "area_of_interest":   string | null,   // Comma-separated areas of expertise. Medical: sub-specialties / procedures (e.g. "Endourology, Robotic Surgery"). Non-medical: domains / skills (e.g. "Technical SEO, Email Automation, Local SEO").
+  "specialty":          string | null,   // Broad medical specialty inferred from title/training (e.g. "Rheumatology", "Internal Medicine", "Cardiology", "General Surgery"). One canonical specialty name — not a list. Non-medical: their primary domain (e.g. "Marketing", "Software Engineering").
+  "subspecialty":       string | null,   // More specific area inside the specialty (e.g. "Pediatric Rheumatology", "Interventional Cardiology", "Hepatobiliary Surgery"). Null if the CV doesn't go deeper than the specialty.
+  "current_location":   string | null,   // City + country of current residence / workplace if stated (e.g. "Dubai, UAE", "London, UK").
+  "area_of_interest":   string | null,   // Comma-separated specific procedures / interests beyond the subspecialty (e.g. "Endourology, Robotic Surgery, Stone Disease"). Different from specialty/subspecialty — this is the very fine-grained "areas of interest" within the field.
   "country_training":   string | null,   // Where they trained / studied. Medical: board (e.g. "German Board", "UK Trained"). Non-medical: country of education or career base (e.g. "Pakistan", "USA").
   "years_experience":   number | null,   // Integer total years of professional experience, stated or computable from work history dates.
   "nationality":        string | null,   // Only if explicitly stated.
@@ -184,7 +188,8 @@ Deno.serve(async (req: Request) => {
     .maybeSingle();
 
   const fieldsToCopy: Array<keyof typeof extracted> = [
-    "title", "bio", "area_of_interest", "country_training",
+    "title", "bio", "specialty", "subspecialty", "current_location",
+    "area_of_interest", "country_training",
     "years_experience", "nationality", "age", "marital_status",
     "family_status", "license", "salary_expectation", "notice_period",
     "languages",
@@ -221,19 +226,72 @@ Deno.serve(async (req: Request) => {
     extraction_error: null,
   }).eq("id", uploadId);
 
-  // ── Route 1: extracted on top of a STAGED profile. The jotform
-  //    webhook now inserts into staged_doctor_profiles (not WP) and
-  //    keys the cv_uploads row with `staged:<uuid>`. We mirror the
-  //    extracted fields onto the staged row's extracted_cv_data
-  //    column so the StagedRow Publish handler can splice them into
-  //    the WP upsert at click-time.
+  // ── Route 1: STAGED profile path. Fold the CV-extracted fields
+  //    into the staged row's `acf` AND flat fields, so the staging-area
+  //    list + detail dialog reflect the full picture without waiting
+  //    for the Publish click. Doctors should see the CV's specialty /
+  //    education / experience / license / languages / nationality /
+  //    country of training / job_title / bio / years_experience etc.
+  //    appear on the staging row as soon as extraction lands.
   const did = String(row.doctor_id ?? "");
   if (did.startsWith("staged:")) {
     const stagedId = did.slice(7);
-    await supabase.from("staged_doctor_profiles")
-      .update({ extracted_cv_data: extracted })
+
+    // Fetch the current staged row so we can re-merge: form ACF +
+    // Zoho lookups + the just-extracted CV data.
+    const { data: staged } = await supabase
+      .from("staged_doctor_profiles")
+      .select("id, email, acf, source_response_id")
+      .eq("id", stagedId)
+      .single();
+
+    let responseRow: { raw_payload: Record<string, unknown> | null; answers: Record<string, string> | null } | null = null;
+    if (staged?.source_response_id) {
+      const { data: resp } = await supabase
+        .from("form_responses")
+        .select("raw_payload, answers")
+        .eq("id", staged.source_response_id)
+        .single();
+      responseRow = (resp as typeof responseRow) ?? null;
+    }
+
+    const enrichResult = await enrichProfile({
+      supabase,
+      email:       (staged?.email as string | null) ?? null,
+      formAcf:     ((staged?.acf as Record<string, unknown>) ?? {}),
+      responseRow,
+      cvExtracted: extracted,
+    });
+
+    // Pull flat fields off the merged ACF so the staging-list row
+    // shows the CV-enriched view (specialty, job_title, country, etc.).
+    const mergedAcf = enrichResult.mergedAcf;
+    const flatPatch: Record<string, unknown> = {
+      extracted_cv_data:   extracted,
+      acf:                 mergedAcf,
+      full_name:           (mergedAcf.full_name as string | undefined)                                                     ?? (staged?.acf as Record<string, unknown> | undefined)?.full_name ?? null,
+      specialty:           (mergedAcf.specialty as string | undefined)                                                     ?? null,
+      subspecialty:        (mergedAcf.subspecialty as string | undefined)                                                  ?? null,
+      nationality:         (mergedAcf.nationality as string | undefined)                                                   ?? null,
+      job_title:           (mergedAcf.job_title as string | undefined)                                                     ?? null,
+      country_of_training: (mergedAcf.country_of_training as string | undefined)                                           ?? null,
+      current_location:    (mergedAcf.current_location as string | undefined)                                              ?? null,
+      years_experience:    String((mergedAcf.years_of_experience_post_specialization as string | number | undefined) ?? ""),
+      phone:               (mergedAcf.phone_number as string | undefined)                                                  ?? null,
+    };
+    // Strip empties so we don't blank out fields with "" / null.
+    for (const k of Object.keys(flatPatch)) {
+      const v = flatPatch[k];
+      if (k === "extracted_cv_data" || k === "acf") continue;
+      if (v === null || v === undefined || v === "") delete flatPatch[k];
+    }
+
+    const { error: stagedErr } = await supabase
+      .from("staged_doctor_profiles")
+      .update(flatPatch)
       .eq("id", stagedId);
-    console.log(`[cv-extract] wrote extracted_cv_data onto staged profile ${stagedId}`);
+    if (stagedErr) console.error(`[cv-extract] staged ${stagedId} merge failed:`, stagedErr.message);
+    else           console.log(`[cv-extract] enriched staged ${stagedId} — ${Object.keys(mergedAcf).length} ACF fields, photo=${enrichResult.pictureUrl ? "yes" : "no"}`);
   }
 
   // ── Route 2 was a legacy direct-WP write that fired on `wp:<id>`

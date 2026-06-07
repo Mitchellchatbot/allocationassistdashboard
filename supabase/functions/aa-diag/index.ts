@@ -80,6 +80,28 @@ Deno.serve(async (req) => {
         if (error) return new Response(JSON.stringify({ ok: false, error: error.message }), { headers: { "Content-Type": "application/json" } });
         return new Response(JSON.stringify({ ok: true, restored: data?.length ?? 0, rows: data }), { headers: { "Content-Type": "application/json" } });
       }
+      if ((body as { rerun_cv_extract_for_staged?: boolean } | null)?.rerun_cv_extract_for_staged) {
+        // For each currently-staged row with an extracted_cv_data
+        // already populated, re-fire cv-extract (with the existing
+        // upload_id) so the new merge path lands the CV fields onto
+        // staged.acf + flat columns. Useful right after deploying
+        // the enrich expansion — backfills the staging area without
+        // a user resubmitting their form.
+        const { data: stagedRows } = await sb
+          .from("staged_doctor_profiles")
+          .select("id, cv_upload_id, extracted_cv_data, full_name");
+        const out: unknown[] = [];
+        for (const s of (stagedRows ?? []) as Array<{ id: string; cv_upload_id: string | null; extracted_cv_data: unknown; full_name: string | null }>) {
+          if (!s.cv_upload_id) { out.push({ id: s.id, name: s.full_name, skipped: "no cv_upload_id" }); continue; }
+          const r = await fetch(`${Deno.env.get("SUPABASE_URL")}/functions/v1/cv-extract`, {
+            method:  "POST",
+            headers: { Authorization: `Bearer ${Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")}`, "Content-Type": "application/json" },
+            body:    JSON.stringify({ upload_id: s.cv_upload_id }),
+          });
+          out.push({ id: s.id, name: s.full_name, status: r.status });
+        }
+        return new Response(JSON.stringify({ ok: true, rerun: out }, null, 2), { headers: { "Content-Type": "application/json" } });
+      }
       if ((body as { find_doctor?: string } | null)?.find_doctor) {
         const q = (body as { find_doctor: string }).find_doctor;
         const [wp, staged, forms] = await Promise.all([

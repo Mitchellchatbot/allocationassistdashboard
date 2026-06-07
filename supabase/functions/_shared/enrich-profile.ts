@@ -128,11 +128,14 @@ export async function enrichProfile(input: EnrichmentInput): Promise<EnrichmentR
   set("phone_number", pickFirst(dob.Mobile, dob.Phone, lead.Mobile, lead.Phone));
 
   // Specialty — Zoho's Speciality (British spelling on DoB) or
-  // Specialty_New override.
-  set("specialty", pickFirst(dob.Specialty_New, dob.Speciality, dob.Specialty, lead.Specialty_New, lead.Specialty));
+  // Specialty_New override. CV-derived specialty is the fallback when
+  // Zoho doesn't have a record on this email.
+  set("specialty", pickFirst(dob.Specialty_New, dob.Speciality, dob.Specialty, lead.Specialty_New, lead.Specialty, cv.specialty));
+  set("subspecialty", cv.subspecialty);
+  set("current_location", cv.current_location);
 
   // Country of training.
-  set("country_of_training", pickFirst(dob.Country_of_Specialty_training, lead.Country_of_Specialty_training));
+  set("country_of_training", pickFirst(dob.Country_of_Specialty_training, lead.Country_of_Specialty_training, cv.country_training));
 
   // Nationality.
   set("nationality", pickFirst(dob.Nationality, lead.Nationality, cv.nationality));
