@@ -87,6 +87,12 @@ export function useDeleteEmailTemplate() {
  *
  *  Missing tokens are left as `{{token}}` literals so authors can see what
  *  didn't resolve during testing. */
+/** Tokens whose VALUE is already pre-rendered HTML (signature block,
+ *  the doctors-batch table, etc.) and must NOT be HTML-escaped during
+ *  substitution. Kept in sync with the server-side RAW_HTML_TOKENS in
+ *  supabase/functions/send-flow-email/index.ts. */
+const RAW_HTML_TOKENS = new Set<string>(["signature", "doctors_table_html", "logo_header"]);
+
 export function renderTemplate(
   body: string,
   vars: Record<string, string | number | null | undefined>,
@@ -105,7 +111,8 @@ export function renderTemplate(
     const v = vars[key];
     if (v === undefined || v === null) return `{{${key}}}`;
     const s = String(v);
-    return opts?.html ? escapeHtml(s) : s;
+    if (!opts?.html) return s;
+    return RAW_HTML_TOKENS.has(key) ? s : escapeHtml(s);
   });
 }
 

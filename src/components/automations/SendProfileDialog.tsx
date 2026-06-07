@@ -595,23 +595,28 @@ function PreviewConfirm({
   );
 }
 
-// Branded signature mirror — kept in sync with the HTML in
-// send-flow-email + send-batch edge functions. Used in the preview so
-// the doctor-side body shows the same closing block the recipient will
-// see, instead of a literal `{{signature}}` token.
+// Preview-side mirror of the server's signatureHtml() in
+// supabase/functions/send-flow-email/index.ts. Kept in sync so the
+// dashboard preview shows the same Cambria-serif signature + logo
+// block the recipient will see, rather than a literal `{{signature}}`
+// token. When the server-side signature changes, update both.
+const PREVIEW_LOGO_URL = `${import.meta.env.VITE_SUPABASE_URL}/storage/v1/object/public/email-assets/logo.png`;
+const PREVIEW_SERIF    = `Cambria, Georgia, 'Times New Roman', serif`;
 const PREVIEW_SIGNATURE_HTML = `
-<div style="margin-top:32px;font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Helvetica,Arial,sans-serif;color:#1a2332;">
-  <p style="margin:0 0 4px;color:#14b8a6;font-weight:700;font-size:15px;">Warmest Regards,</p>
-  <p style="margin:0 0 4px;color:#14b8a6;font-weight:700;font-size:15px;">The Allocation Assist team,</p>
-  <p style="margin:0 0 14px;color:#14b8a6;font-weight:700;font-size:15px;">Allocation Assist</p>
-  <p style="margin:0 0 4px;color:#475569;font-size:14px;">
-    <span style="display:inline-block;width:14px;color:#14b8a6;">&#9737;</span>
-    <strong style="color:#475569;font-weight:600;">Jumeirah Lakes Towers, Dubai, UAE</strong>
-  </p>
-  <p style="margin:0 0 12px;font-size:14px;">
-    <a href="https://www.allocationassist.com" style="color:#1d4ed8;text-decoration:underline;">www.allocationassist.com</a>
-  </p>
-</div>`;
+<p style="margin:24px 0 0;font-family:${PREVIEW_SERIF};font-size:14px;color:#1a2332;line-height:1.5;">&nbsp;</p>
+<p style="color:#14b8a6;font-weight:700;font-size:14px;margin:0 0 2px;line-height:1.45;font-family:${PREVIEW_SERIF};">Warmest Regards,</p>
+<p style="color:#14b8a6;font-weight:700;font-size:14px;margin:0 0 2px;line-height:1.45;font-family:${PREVIEW_SERIF};">The Allocation Assist team</p>
+<p style="color:#475569;font-size:13px;margin:6px 0 2px;line-height:1.45;font-family:${PREVIEW_SERIF};"><span style="color:#14b8a6;">&#x1F4CD;</span> Jumeirah Lakes Towers, Dubai, UAE</p>
+<p style="font-size:13px;margin:2px 0 16px;line-height:1.45;font-family:${PREVIEW_SERIF};"><a href="https://www.allocationassist.com" style="color:#1d4ed8;text-decoration:underline;">www.allocationassist.com</a></p>
+<table role="presentation" cellpadding="0" cellspacing="0" style="border-collapse:collapse;margin:8px 0 0;">
+  <tr>
+    <td style="padding:0;">
+      <img src="${PREVIEW_LOGO_URL}" alt="Allocation Assist" width="64" height="64" style="display:block;border:0;outline:none;max-width:64px;width:64px;height:auto;" />
+    </td>
+  </tr>
+</table>
+<p style="color:#14b8a6;font-weight:700;font-size:16px;margin:6px 0 0;letter-spacing:-0.2px;font-family:${PREVIEW_SERIF};">Allocation Assist</p>
+<p style="color:#94a3b8;font-size:11px;margin:2px 0 0;letter-spacing:0.4px;font-family:${PREVIEW_SERIF};">The source of workforce</p>`;
 const PREVIEW_SIGNATURE_TEXT = `
 
 Warmest Regards,
@@ -619,6 +624,9 @@ The Allocation Assist team
 
 Jumeirah Lakes Towers, Dubai, UAE
 www.allocationassist.com
+
+Allocation Assist
+The source of workforce
 `;
 
 /** True when the string is recognisably HTML (has at least one tag). The
