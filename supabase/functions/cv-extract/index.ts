@@ -51,7 +51,25 @@ Return a JSON object with these exact keys:
   "license":            string | null,   // UAE/GCC MEDICAL license info ONLY (e.g. "DHA Registration", "SCFHS in process"). For non-medical CVs, this is null — don't pretend they have a medical license.
   "salary_expectation": string | null,   // Free text — only if stated.
   "notice_period":      string | null,   // Free text — only if stated.
-  "languages":          string | null    // Comma-separated languages they speak (e.g. "English, Arabic, Urdu"). Reasonable to infer from explicit language certifications (e.g. "IELTS 6 Bands" → English) or stated language proficiency.
+  "languages":          string | null,   // Comma-separated languages they speak (e.g. "English, Arabic, Urdu"). Reasonable to infer from explicit language certifications (e.g. "IELTS 6 Bands" → English) or stated language proficiency.
+  "education":          [                 // Up to 3 entries, most recent first. Omit the array entirely if not present.
+    {
+      "institution": string | null,       // e.g. "Cairo University"
+      "degree":      string | null,       // e.g. "MBBCh", "MD Internal Medicine"
+      "start":       string | null,       // Year as a string ("2008") or "YYYY-MM"
+      "end":         string | null,       // Year, "Present", or null
+      "description": string | null        // Optional one-line gloss
+    }
+  ] | null,
+  "experience":         [                 // Up to 3 entries, most recent first. Omit the array entirely if not present.
+    {
+      "company":     string | null,       // e.g. "Sheikh Khalifa Medical City"
+      "title":       string | null,       // Role at that company
+      "start":       string | null,       // Year as a string ("2018") or "YYYY-MM"
+      "end":         string | null,       // Year, "Present", or null
+      "description": string | null        // 1-2 sentence summary of responsibilities / scope
+    }
+  ] | null
 }
 
 Output ONLY the JSON object. No markdown fences, no commentary, no preamble.`;

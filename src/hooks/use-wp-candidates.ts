@@ -358,6 +358,13 @@ export function usePublishStagedProfile() {
   const qc = useQueryClient();
   return useMutation({
     mutationFn: async ({ profile, status }: { profile: StagedProfile; status: "draft" | "publish" }) => {
+      // No-email guard. WP candidate uses email as the dedupe key, so
+      // publishing without one comes back as a 400 with a confusing
+      // rest_invalid_param error. Surface the real problem instead.
+      const candidateEmail = profile.email ?? (profile.acf as Record<string, unknown> | null)?.email as string | undefined;
+      if (!candidateEmail || !String(candidateEmail).includes("@")) {
+        throw new Error("This submission has no email — add one in the form fields before publishing.");
+      }
       // Merge precedence: form ACF (manual edits in the staging row)
       // wins over CV-extracted fields, which fill the gaps.
       const cv = profile.extracted_cv_data ?? {};

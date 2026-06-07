@@ -22,6 +22,7 @@ import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "@/com
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Badge } from "@/components/ui/badge";
+import { Skeleton } from "@/components/ui/skeleton";
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from "@/components/ui/dialog";
 import { Tabs, TabsList, TabsTrigger, TabsContent } from "@/components/ui/tabs";
 import {
@@ -95,7 +96,15 @@ export default function Forms() {
         </div>
 
         {isLoading ? (
-          <Card><CardContent className="py-8 text-[12px] text-muted-foreground">Loading forms…</CardContent></Card>
+          <div className="grid gap-3 md:grid-cols-2">
+            {Array.from({ length: 4 }).map((_, i) => (
+              <Card key={i}><CardContent className="py-4 space-y-2">
+                <Skeleton className="h-4 w-1/2" />
+                <Skeleton className="h-3 w-3/4" />
+                <Skeleton className="h-3 w-1/3" />
+              </CardContent></Card>
+            ))}
+          </div>
         ) : forms.length === 0 ? (
           <Card>
             <CardContent className="py-12 text-center text-[12px] text-muted-foreground">
@@ -544,7 +553,17 @@ function FormDetail({ form }: { form: Form }) {
       <Card>
         <CardContent className="pt-3 space-y-2">
           {isLoading ? (
-            <p className="text-[11px] text-muted-foreground py-2">Loading submissions…</p>
+            <div className="space-y-2 py-1">
+              {Array.from({ length: 5 }).map((_, i) => (
+                <div key={i} className="flex items-center gap-3 p-2 rounded-md border border-dashed">
+                  <Skeleton className="h-9 w-9 rounded-full" />
+                  <div className="flex-1 space-y-1.5">
+                    <Skeleton className="h-3 w-1/3" />
+                    <Skeleton className="h-2.5 w-2/3" />
+                  </div>
+                </div>
+              ))}
+            </div>
           ) : responses.length === 0 ? (
             isSearching || dateFilter !== "all" || outreachFilter !== "all" || wpFilter !== "all" ? (
               <div className="rounded-md border border-dashed py-8 text-center">

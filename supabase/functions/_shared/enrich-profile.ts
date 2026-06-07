@@ -21,6 +21,9 @@ import { type SupabaseClient } from "https://esm.sh/@supabase/supabase-js@2.45.0
 interface ZohoRow {
   Phone?:                          string | null;
   Mobile?:                         string | null;
+  Full_Name?:                      string | null;
+  First_Name?:                     string | null;
+  Last_Name?:                      string | null;
   Specialty?:                      string | null;
   Specialty_New?:                  string | null;
   Speciality?:                     string | null;
@@ -31,8 +34,13 @@ interface ZohoRow {
   Has_DOH?:                        string | null;
   Has_MOH?:                        string | null;
   Age?:                            number | null;
+  Recruiter?:                      string | null;
+  Lead_Source?:                    string | null;
   Owner?:                          { name?: string; email?: string } | null;
 }
+
+interface CvEducation { institution?: string; degree?: string; start?: string | number; end?: string | number; description?: string }
+interface CvExperience { company?: string; title?: string; start?: string | number; end?: string | number; description?: string }
 
 function nonEmpty(v: unknown): boolean {
   return v !== null && v !== undefined && v !== "" && v !== "false" && v !== false;
@@ -142,6 +150,51 @@ export async function enrichProfile(input: EnrichmentInput): Promise<EnrichmentR
   set("notice_period",                                          cv.notice_period);
   set("languages",                                              cv.languages);
 
+  // Name — fall back to Zoho's typed-in name when the form didn't carry one.
+  set("full_name", pickFirst(
+    dob.Full_Name, lead.Full_Name,
+    joinName(dob.First_Name, dob.Last_Name),
+    joinName(lead.First_Name, lead.Last_Name),
+  ));
+
+  // Age — typed into Zoho or stated on CV.
+  set("age", pickFirst(cv.age, dob.Age, lead.Age));
+
+  // Marital status — usually only on the CV.
+  set("marital_status", cv.marital_status);
+
+  // License status — if we don't have free-text license info, derive a
+  // human-friendly label from the boolean Has_DHA / Has_DOH / Has_MOH
+  // Zoho tags so the WP profile at least flags registration intent.
+  if (!nonEmpty(fa("dha__haad__moh_license")) && !nonEmpty(acf.dha__haad__moh_license)) {
+    const tags: string[] = [];
+    if (yes(dob.Has_DHA) || yes(lead.Has_DHA)) tags.push("DHA Registered");
+    if (yes(dob.Has_DOH) || yes(lead.Has_DOH)) tags.push("DOH Registered");
+    if (yes(dob.Has_MOH) || yes(lead.Has_MOH)) tags.push("MOH Registered");
+    if (tags.length > 0) acf.dha__haad__moh_license = tags.join(", ");
+  }
+
+  // Recruiter / owner — useful breadcrumb on the WP record.
+  set("recruiter", pickFirst(dob.Recruiter, lead.Recruiter, lead.Owner?.name, dob.Owner?.name));
+  set("lead_source", pickFirst(dob.Lead_Source, lead.Lead_Source));
+
+  // Children flag — parse "2 children" / "no children" out of family_status.
+  if (!nonEmpty(fa("have_children_or_any_dependent"))) {
+    const fs = String(cv.family_status ?? acf.family_status ?? "");
+    if (fs) {
+      if (/\b(no|none|0)\s+(?:children|dependents?)/i.test(fs))           acf.have_children_or_any_dependent = false;
+      else if (/(\d+)\s*(?:children|kids|dependents?)/i.test(fs))         acf.have_children_or_any_dependent = true;
+      else if (/\bchildren|kids|dependents?\b/i.test(fs))                 acf.have_children_or_any_dependent = true;
+    }
+  }
+
+  // Education + Experience — pluck first two of each from the CV's
+  // structured arrays into WP's repeating fields (title1/academy1/…,
+  // title2/company2/…). Falls back gracefully if Claude returns
+  // single-string `education` / `experience` fields instead.
+  applyEducation(acf, cv.education as CvEducation[] | string | undefined, fa);
+  applyExperience(acf, cv.experience as CvExperience[] | string | undefined, fa);
+
   // Picture URL — store it as a sidecar (NOT in acf.profile_picture
   // because that's a WP attachment id, not a URL). The caller is
   // responsible for the WP-media upload step if it wants the image
@@ -149,4 +202,70 @@ export async function enrichProfile(input: EnrichmentInput): Promise<EnrichmentR
   const pictureUrl = responseRow ? pictureUrlFromFormResponse(responseRow.raw_payload as Record<string, unknown> | null) : null;
 
   return { mergedAcf: acf, pictureUrl, zohoLead, zohoDob };
+}
+
+/** Zoho Has_DHA / Has_DOH / Has_MOH come back as "Yes"/"No" (strings)
+ *  or sometimes booleans. Be lenient. */
+function yes(v: unknown): boolean {
+  if (v === true) return true;
+  if (typeof v !== "string") return false;
+  return /^(y|yes|true|1)$/i.test(v.trim());
+}
+
+function joinName(first: unknown, last: unknown): string | null {
+  const a = typeof first === "string" ? first.trim() : "";
+  const b = typeof last  === "string" ? last.trim()  : "";
+  const out = `${a} ${b}`.trim();
+  return out || null;
+}
+
+function applyEducation(
+  acf: Record<string, unknown>,
+  src: CvEducation[] | string | undefined,
+  fa:  (k: string) => unknown,
+) {
+  if (!src) return;
+  const rows: CvEducation[] = Array.isArray(src)
+    ? src
+    : (typeof src === "string" && src.trim() ? [{ description: src } as CvEducation] : []);
+  const slots: Array<[string, string, string, string, string, string]> = [
+    ["title1", "academy1", "start_date1", "end_date1", "present1", "description1"],
+    ["title2", "academy2", "start_date2", "end_date2", "present2", "description2"],
+  ];
+  rows.slice(0, 2).forEach((row, i) => {
+    const [t, a, s, e, p, d] = slots[i];
+    if (!nonEmpty(fa(t)) && row.degree)      acf[t] = row.degree;
+    if (!nonEmpty(fa(a)) && row.institution) acf[a] = row.institution;
+    if (!nonEmpty(fa(s)) && row.start)       acf[s] = String(row.start);
+    if (!nonEmpty(fa(e)) && row.end && !/present|current/i.test(String(row.end))) acf[e] = String(row.end);
+    if (!nonEmpty(fa(p)) && row.end && /present|current/i.test(String(row.end))) acf[p] = true;
+    if (!nonEmpty(fa(d)) && row.description) acf[d] = row.description;
+  });
+}
+
+function applyExperience(
+  acf: Record<string, unknown>,
+  src: CvExperience[] | string | undefined,
+  fa:  (k: string) => unknown,
+) {
+  if (!src) return;
+  const rows: CvExperience[] = Array.isArray(src)
+    ? src
+    : (typeof src === "string" && src.trim() ? [{ description: src } as CvExperience] : []);
+  // WP candidate ACF uses experience_title1/experience_company1/... — keep the
+  // names in sync with the WP schema; safe to add unknown ACF keys, WP will
+  // ignore any it doesn't have.
+  const slots: Array<[string, string, string, string, string, string]> = [
+    ["experience_title1", "experience_company1", "experience_start1", "experience_end1", "experience_present1", "experience_description1"],
+    ["experience_title2", "experience_company2", "experience_start2", "experience_end2", "experience_present2", "experience_description2"],
+  ];
+  rows.slice(0, 2).forEach((row, i) => {
+    const [t, c, s, e, p, d] = slots[i];
+    if (!nonEmpty(fa(t)) && row.title)       acf[t] = row.title;
+    if (!nonEmpty(fa(c)) && row.company)     acf[c] = row.company;
+    if (!nonEmpty(fa(s)) && row.start)       acf[s] = String(row.start);
+    if (!nonEmpty(fa(e)) && row.end && !/present|current/i.test(String(row.end))) acf[e] = String(row.end);
+    if (!nonEmpty(fa(p)) && row.end && /present|current/i.test(String(row.end))) acf[p] = true;
+    if (!nonEmpty(fa(d)) && row.description) acf[d] = row.description;
+  });
 }

@@ -11,6 +11,7 @@ import type { FlowRun } from "@/hooks/use-automation-flows";
 import type { Vacancy } from "@/hooks/use-vacancies";
 import { useNotifications, useDismissNotification, useMarkAllNotificationsRead, useDismissAllOfKind, type AppNotification } from "@/hooks/use-notifications";
 import { Button } from "@/components/ui/button";
+import { Skeleton } from "@/components/ui/skeleton";
 
 /**
  * Surface "what does the team need to look at right now?" on the main
@@ -73,7 +74,19 @@ export function PendingActionsCard() {
                      + staleVacancies.length
                      + notifications.length;
 
-  if (isLoading) return null;
+  if (isLoading) {
+    // Holds vertical space so the dashboard doesn't reflow as the
+    // pending-actions data arrives.
+    return (
+      <Card className="border-slate-200 mb-6">
+        <CardContent className="py-4 space-y-2">
+          <Skeleton className="h-4 w-1/3" />
+          <Skeleton className="h-3 w-2/3" />
+          <Skeleton className="h-3 w-1/2" />
+        </CardContent>
+      </Card>
+    );
+  }
   if (totalPending === 0) {
     return (
       <Card className="border-emerald-200 bg-emerald-50/40 mb-6">
