@@ -107,6 +107,40 @@ Deno.serve(async (req) => {
         const { data } = await sb.from("form_responses").select("id, respondent_name, respondent_email, answers, raw_payload, search_text, form_id, submitted_at").eq("id", id).single();
         return new Response(JSON.stringify({ ok: true, response: data }, null, 2), { headers: { "Content-Type": "application/json" } });
       }
+      if ((body as { list_templates?: boolean } | null)?.list_templates) {
+        const { data } = await sb.from("email_templates").select("key, subject, body_html");
+        return new Response(JSON.stringify({ ok: true, templates: data ?? [] }, null, 2), { headers: { "Content-Type": "application/json" } });
+      }
+      if ((body as { inspect_run?: string } | null)?.inspect_run) {
+        const id = (body as { inspect_run: string }).inspect_run;
+        const { data } = await sb.from("automation_flow_runs").select("*").eq("id", id).single();
+        return new Response(JSON.stringify({ ok: true, run: data }, null, 2), { headers: { "Content-Type": "application/json" } });
+      }
+      if ((body as { make_test_run?: { staged_id: string; flow_key?: string; current_stage?: string } } | null)?.make_test_run) {
+        // Create a throwaway profile_sent run pointing at a staged row.
+        // Used to dry-run-render the email template against a real
+        // staged profile without touching the real flow tables.
+        const { staged_id, flow_key, current_stage } = (body as { make_test_run: { staged_id: string; flow_key?: string; current_stage?: string } }).make_test_run;
+        const { data: s } = await sb.from("staged_doctor_profiles").select("*").eq("id", staged_id).single();
+        if (!s) return new Response(JSON.stringify({ ok: false, error: "staged not found" }), { headers: { "Content-Type": "application/json" } });
+        const { data: run, error } = await sb.from("automation_flow_runs").insert({
+          flow_key:      flow_key ?? "profile_sent",
+          current_stage: current_stage ?? "email_hospital",
+          status:        "in_progress",
+          doctor_id:     `staged:${staged_id}`,
+          doctor_name:   s.full_name,
+          doctor_email:  s.email,
+          doctor_phone:  s.phone,
+          assigned_to:   "ammar@allocationassist.com",
+          metadata:      { test_run: true },
+        }).select("id").single();
+        if (error) return new Response(JSON.stringify({ ok: false, error: error.message }), { headers: { "Content-Type": "application/json" } });
+        return new Response(JSON.stringify({ ok: true, run_id: run.id }), { headers: { "Content-Type": "application/json" } });
+      }
+      if ((body as { recent_runs?: boolean } | null)?.recent_runs) {
+        const { data } = await sb.from("automation_flow_runs").select("id, flow_key, current_stage, doctor_id, assigned_to, last_event_at, metadata").order("last_event_at", { ascending: false, nullsFirst: false }).limit(5);
+        return new Response(JSON.stringify({ ok: true, runs: data ?? [] }, null, 2), { headers: { "Content-Type": "application/json" } });
+      }
       if ((body as { find_doctor?: string } | null)?.find_doctor) {
         const q = (body as { find_doctor: string }).find_doctor;
         const [wp, staged, forms] = await Promise.all([

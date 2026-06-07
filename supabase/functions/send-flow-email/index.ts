@@ -385,6 +385,59 @@ Deno.serve(async (req: Request) => {
     }
   }
 
+  // ── Staged-profile fallback (works WITHOUT a doctor_id too) ──────────────
+  // If WP + legacy doctor_profiles left tokens empty, look the candidate up
+  // in staged_doctor_profiles. Match priority:
+  //   1. doctor_id literal `staged:<uuid>` if present
+  //   2. run.doctor_email
+  //   3. run.doctor_name
+  // This is what makes test-sends and pre-publish demos work: the staging
+  // area is the canonical source of truth right up until Publish, so the
+  // email rendering should be too.
+  const needsStagedFallback = !profileTokens.doctor_bio && !profileTokens.doctor_title;
+  if (needsStagedFallback) {
+    let stagedRow: Record<string, unknown> | null = null;
+    const did = String(run.doctor_id ?? "");
+    if (did.startsWith("staged:")) {
+      const { data } = await supabase.from("staged_doctor_profiles").select("*").eq("id", did.slice(7)).maybeSingle();
+      stagedRow = data;
+    }
+    if (!stagedRow && run.doctor_email) {
+      const { data } = await supabase.from("staged_doctor_profiles").select("*").eq("email", run.doctor_email).order("created_at", { ascending: false }).limit(1).maybeSingle();
+      stagedRow = data;
+    }
+    if (!stagedRow && run.doctor_name) {
+      const { data } = await supabase.from("staged_doctor_profiles").select("*").eq("full_name", run.doctor_name).order("created_at", { ascending: false }).limit(1).maybeSingle();
+      stagedRow = data;
+    }
+    if (stagedRow) {
+      const sacf = (stagedRow.acf ?? {}) as Record<string, unknown>;
+      const age = computeAgeFromDob(sacf.date_of_birth as string | undefined);
+      const sFallback: Record<string, string> = {
+        doctor_title:              String(sacf.job_title              ?? ""),
+        doctor_bio:                String(sacf.bio                    ?? ""),
+        doctor_area_of_interest:   String(sacf.specific_areas_of_interests_within_the_specialization ?? ""),
+        doctor_country_training:   String(sacf.country_of_training    ?? ""),
+        doctor_years_experience:   sacf.years_of_experience_post_specialization != null ? String(sacf.years_of_experience_post_specialization) : "",
+        doctor_nationality:        String(sacf.nationality            ?? ""),
+        doctor_age:                age != null ? String(age) : "",
+        doctor_marital_status:     String(sacf.marital_status         ?? ""),
+        doctor_family_status:      String(sacf.family_status          ?? ""),
+        doctor_license:            String(sacf.dha__haad__moh_license ?? ""),
+        doctor_salary_expectation: String(sacf.expected_salary        ?? ""),
+        doctor_notice_period:      String(sacf.notice_period          ?? ""),
+        doctor_specialty:          String(sacf.specialty              ?? (stagedRow.specialty as string ?? "")),
+        doctor_subspecialty:       String(sacf.subspecialty           ?? ""),
+        doctor_languages:          String(sacf.languages              ?? ""),
+        doctor_english_level:      String(sacf.english_level          ?? ""),
+        doctor_current_location:   String(sacf.current_location       ?? ""),
+        doctor_targeted_locations: Array.isArray(sacf.targeted_locations) ? (sacf.targeted_locations as string[]).join(", ") : "",
+      };
+      for (const [k, v] of Object.entries(sFallback)) if (v && !profileTokens[k]) profileTokens[k] = v;
+      console.log(`[send-flow-email] staged fallback applied (id=${stagedRow.id}) — ${Object.keys(profileTokens).length} tokens`);
+    }
+  }
+
   // ── Lookup per-emirate relocation guide URL ─────────────────────────────
   // Ammar 2026-06-03: 'we sent it for Dubai Abu Dhabi and all of them'.
   // Resolve by the hospital's city → relocation_articles.url, used to
