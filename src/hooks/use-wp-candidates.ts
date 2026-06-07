@@ -244,6 +244,7 @@ export interface StagedProfile {
   id:                  string;
   source:              string;
   source_response_id:  string | null;
+  form_id:             string | null;
   full_name:           string | null;
   email:               string | null;
   phone:               string | null;

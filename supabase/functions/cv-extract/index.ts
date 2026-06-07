@@ -47,14 +47,14 @@ Return a JSON object with these exact keys:
   "current_location":   string | null,   // City + country of current residence / workplace if stated (e.g. "Dubai, UAE", "London, UK").
   "area_of_interest":   string | null,   // Comma-separated specific procedures / interests beyond the subspecialty (e.g. "Endourology, Robotic Surgery, Stone Disease"). Different from specialty/subspecialty — this is the very fine-grained "areas of interest" within the field.
   "country_training":   string | null,   // Where they trained / studied. Medical: board (e.g. "German Board", "UK Trained"). Non-medical: country of education or career base (e.g. "Pakistan", "USA").
-  "years_experience":   number | null,   // Integer total years of professional experience, stated or computable from work history dates.
-  "nationality":        string | null,   // Only if explicitly stated.
-  "age":                number | null,   // Only if explicitly stated; don't infer from graduation year.
-  "marital_status":     string | null,   // "Married" / "Single" / "Divorced" — only if explicitly stated.
-  "family_status":      string | null,   // e.g. "2 Children" — only if explicitly stated.
+  "years_experience":   number | null,   // Integer total years of professional experience, stated or computable from work history dates. Compute from the first listed job to present.
+  "nationality":        string | null,   // Extract when stated explicitly (e.g. "Nationality: Egyptian", "Passport: UK", "American citizen", "I am a Sudanese national") OR strongly implied by an explicit passport/citizenship/national-ID line. DO NOT infer from training country, work location, or medical school country alone — those are not nationality.
+  "age":                number | null,   // Compute from DOB if the CV lists one ("DOB: 12/04/1985"). Don't infer from graduation year alone.
+  "marital_status":     string | null,   // "Married" / "Single" / "Divorced" / "Widowed". Extract from a Personal Information section, an explicit "Marital Status: …" line, or phrasing like "married with two children".
+  "family_status":      string | null,   // e.g. "Married, 2 children", "Single", "Spouse and children". Extract from explicit Personal Information lines (Marital Status, Dependents, Family). Combine related lines into one phrase when present.
   "license":            string | null,   // UAE/GCC MEDICAL license info ONLY (e.g. "DHA Registration", "SCFHS in process"). For non-medical CVs, this is null — don't pretend they have a medical license.
-  "salary_expectation": string | null,   // Free text — only if stated.
-  "notice_period":      string | null,   // Free text — only if stated.
+  "salary_expectation": string | null,   // Free text — extract when stated. Capture both numbers if the CV lists "Current Salary" and "Expected Salary" separately (return the expected one here).
+  "notice_period":      string | null,   // Free text — extract when stated, e.g. "1 month", "Immediate".
   "languages":          string | null,   // Comma-separated languages they speak (e.g. "English, Arabic, Urdu"). Reasonable to infer from explicit language certifications (e.g. "IELTS 6 Bands" → English) or stated language proficiency.
   "education":          [                 // Up to 3 entries, most recent first. Omit the array entirely if not present.
     {

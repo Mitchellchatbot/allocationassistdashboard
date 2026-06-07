@@ -1403,7 +1403,11 @@ function StagedProfileDetailDialog({
   const email    = profile.email ?? get("email");
   const recruiter   = get("recruiter");
   const leadSource  = get("lead_source");
-  const photoSrc = profile.picture_url ?? null;
+  // Route the JotForm /widget-uploads/ URL through our edge proxy so
+  // the APIKEY auth happens server-side AND the response comes back
+  // with image/jpeg (raw GET against the imagepreview URL returns an
+  // HTML wrapper page that browsers won't render in an <img>).
+  const photoSrc = buildPhotoProxyUrl(profile.picture_url, profile.form_id);
   const bio      = get("bio");
   const areas    = get("specific_areas_of_interests_within_the_specialization");
 
@@ -1673,6 +1677,28 @@ function PreviewTile({
       </div>
     </div>
   );
+}
+
+/** JotForm /widget-uploads/imagepreview/ URLs are NOT rendered by
+ *  browsers — a raw GET returns an HTML wrapper that sets a guest
+ *  cookie and serves a page, not the JPG. We route through the
+ *  jotform-file-proxy edge function which fetches with APIKEY auth
+ *  and streams back the raw bytes with the right image/* MIME. */
+function buildPhotoProxyUrl(rawUrl: string | null, formId: string | null): string | null {
+  if (!rawUrl) return null;
+  if (!formId) return rawUrl;  // Old staged rows pre-migration; let the browser try.
+  // Extract the /widget-uploads/... or /uploads/... path. JotForm URLs
+  // look like https://www.jotform.com/widget-uploads/imagepreview/<formId>/<file>.
+  try {
+    const u = new URL(rawUrl.startsWith("http") ? rawUrl : `https://www.jotform.com${rawUrl.startsWith("/") ? "" : "/"}${rawUrl}`);
+    if (!u.pathname.startsWith("/widget-uploads/") && !u.pathname.startsWith("/uploads/")) {
+      return rawUrl;  // Not a JotForm-gated URL; let it through as-is.
+    }
+    const supabaseUrl = import.meta.env.VITE_SUPABASE_URL as string;
+    return `${supabaseUrl}/functions/v1/jotform-file-proxy?form_id=${encodeURIComponent(formId)}&path=${encodeURIComponent(u.pathname)}`;
+  } catch {
+    return rawUrl;
+  }
 }
 
 /** Format a YYYYMMDD or YYYY-MM-DD string into "DD Month YYYY". */

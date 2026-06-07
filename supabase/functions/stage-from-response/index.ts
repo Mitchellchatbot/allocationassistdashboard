@@ -85,6 +85,7 @@ Deno.serve(async (req: Request) => {
   const stagedInsert: Record<string, unknown> = {
     source:              `form:${response.id}`,
     source_response_id:  response.id,
+    form_id:             response.form_id,
     full_name:           profile.full_name || response.respondent_name || null,
     email:               profile.email     || response.respondent_email || null,
     phone:               profile.phone     || (safeAcf.phone_number as string | undefined) || null,

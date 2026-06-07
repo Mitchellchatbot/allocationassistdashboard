@@ -196,11 +196,25 @@ export async function enrichProfile(input: EnrichmentInput): Promise<EnrichmentR
   set("job_title",                                              cv.title);
   set("bio",                                                    cv.bio);
   set("specific_areas_of_interests_within_the_specialization",  cv.area_of_interest);
-  set("years_of_experience_post_specialization",                cv.years_experience);
   set("family_status",                                          cv.family_status);
   set("expected_salary",                                        cv.salary_expectation);
   set("notice_period",                                          cv.notice_period);
   set("languages",                                              cv.languages);
+
+  // Years of experience: form normally wins. But occasionally the
+  // doctor enters a silly form value (we've seen "1" from a Consultant
+  // with a multi-decade CV — likely they thought it meant 'years at
+  // this current job'). When form < 3 AND CV ≥ form + 5, the CV is
+  // overwhelmingly likely to be the right value, so we override.
+  const formYears = parseInt(String(formAcf.years_of_experience_post_specialization ?? ""), 10);
+  const cvYears   = parseInt(String(cv.years_experience ?? ""), 10);
+  if (Number.isFinite(cvYears) && cvYears > 0) {
+    if (!Number.isFinite(formYears) || formYears <= 0) {
+      acf.years_of_experience_post_specialization = cvYears;
+    } else if (formYears < 3 && cvYears >= formYears + 5) {
+      acf.years_of_experience_post_specialization = cvYears;
+    }
+  }
 
   // Name — fall back to Zoho's typed-in name when the form didn't carry one.
   set("full_name", pickFirst(

@@ -230,20 +230,61 @@ export function mapToProfile(flat: Record<string, string>): {
   const englishLevel = pick("englishlevel") || pickContains("englishlevel", "english");
   if (englishLevel) acf.english_level = englishLevel;
 
-  const currentSalary = pick("currentsalary") || pickContains("currentsalary");
+  // Salary fields. The JotForm question is often labelled
+  // "Current Salary/Expectation" — one answer for both numbers. When
+  // we see that combined label (key contains both 'salary' AND
+  // 'expect') we copy the value into BOTH ACF fields so the candidate
+  // page shows expected salary instead of leaving it blank.
+  const currentSalary = pick("currentsalary") || pickContains("currentsalary", "salaryexpectation", "salarycurrent");
   if (currentSalary) acf.current_salary = currentSalary;
 
-  const expectedSalary = pick("expectedsalary") || pickContains("expectedsalary");
+  const expectedSalary = pick("expectedsalary") || pickContains("expectedsalary", "expectedsalaryexpectation");
   if (expectedSalary) acf.expected_salary = expectedSalary;
+  // Combined "Current Salary/Expectation" — if expected is still
+  // unset and any answer key contains BOTH 'salary' and 'expect',
+  // mirror current into expected.
+  if (!acf.expected_salary && acf.current_salary) {
+    const hasCombined = Object.keys(lower).some(k =>
+      k.includes("salary") && (k.includes("expect") || k.includes("salaryexpectation")));
+    if (hasCombined) acf.expected_salary = acf.current_salary;
+  }
 
   const noticePeriod = pick("noticeperiod") || pickContains("noticeperiod", "notice");
   if (noticePeriod) acf.notice_period = noticePeriod;
 
-  const familyStatus = pick("familystatus", "maritalstatus");
+  // Family status — the JotForm label is often a long descriptive
+  // sentence ("Family Status (Who Would Be Relocating With You To
+  // The Middle East/UAE)?") that normalises to a 60+ char key. The
+  // exact-key pick misses it; the substring fallback catches it.
+  const familyStatus = pick("familystatus", "maritalstatus")
+                    || pickContains("familystatus", "maritalstatus", "familystatuswho", "whowould");
   if (familyStatus) acf.family_status = familyStatus;
 
+  // Have children / dependents. First check for an explicit dedicated
+  // form key (some forms have a yes/no toggle). If absent, derive
+  // from the family-status value — "Spouse and Children",
+  // "Family of 4", "2 kids" etc. all imply Yes; "Single" implies No.
   const dependents = pick("haschildren", "children", "dependents", "havechildren", "havedependents");
-  if (dependents) acf.have_children_or_any_dependent = /yes|true|1/i.test(dependents) ? "Yes" : "No";
+  if (dependents) {
+    acf.have_children_or_any_dependent = /yes|true|1/i.test(dependents) ? "Yes" : "No";
+  } else if (familyStatus) {
+    if (/\b(no|none|0)\s+(?:children|dependents?)/i.test(familyStatus)) {
+      acf.have_children_or_any_dependent = "No";
+    } else if (/single|unmarried|alone/i.test(familyStatus) && !/with/i.test(familyStatus)) {
+      acf.have_children_or_any_dependent = "No";
+    } else if (/spouse|children|kids|family|dependent|wife|husband|partner/i.test(familyStatus)) {
+      acf.have_children_or_any_dependent = "Yes";
+    }
+  }
+
+  // Marital status — derive from family_status when not explicit.
+  // 'Spouse and Children' / 'Married' → Married; 'Single' → Single.
+  if (!acf.marital_status && familyStatus) {
+    if (/married|spouse|wife|husband|partner/i.test(familyStatus)) acf.marital_status = "Married";
+    else if (/single|unmarried/i.test(familyStatus))               acf.marital_status = "Single";
+    else if (/divorced/i.test(familyStatus))                       acf.marital_status = "Divorced";
+    else if (/widow/i.test(familyStatus))                          acf.marital_status = "Widowed";
+  }
 
   const rank = pick("specialistorconsultant", "rank", "level");
   if (rank) acf.specialist__consultant = rank;
