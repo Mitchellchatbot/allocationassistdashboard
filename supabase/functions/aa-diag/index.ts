@@ -116,6 +116,20 @@ Deno.serve(async (req) => {
         const { data } = await sb.from("automation_flow_runs").select("*").eq("id", id).single();
         return new Response(JSON.stringify({ ok: true, run: data }, null, 2), { headers: { "Content-Type": "application/json" } });
       }
+      if ((body as { upload_email_asset?: { path: string; base64: string; mime?: string } } | null)?.upload_email_asset) {
+        const { path, base64, mime } = (body as { upload_email_asset: { path: string; base64: string; mime?: string } }).upload_email_asset;
+        // Decode base64 → bytes. The bucket policy allows service-role inserts only.
+        const bin = atob(base64);
+        const arr = new Uint8Array(bin.length);
+        for (let i = 0; i < bin.length; i++) arr[i] = bin.charCodeAt(i);
+        const { error } = await sb.storage.from("email-assets").upload(path, arr, {
+          contentType: mime ?? "image/png",
+          upsert: true,
+        });
+        if (error) return new Response(JSON.stringify({ ok: false, error: error.message }), { headers: { "Content-Type": "application/json" } });
+        const publicUrl = `${Deno.env.get("SUPABASE_URL")}/storage/v1/object/public/email-assets/${path}`;
+        return new Response(JSON.stringify({ ok: true, public_url: publicUrl }), { headers: { "Content-Type": "application/json" } });
+      }
       if ((body as { make_test_run?: { staged_id: string; flow_key?: string; current_stage?: string } } | null)?.make_test_run) {
         // Create a throwaway profile_sent run pointing at a staged row.
         // Used to dry-run-render the email template against a real

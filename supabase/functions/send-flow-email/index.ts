@@ -152,21 +152,42 @@ function pickSender(assignedTo: string | null | undefined): { fromHeader: string
  *  blue website link → bottom teal "Allocation Assist" + grey tagline.
  *  No box, no logo image, no card frame — just a plain text-only block
  *  that lands looking identical to Plinky's manual sends. */
+// Serif stack that matches Plinky / Cambria / Georgia look in the
+// hospital intro reference. Outlook / Apple Mail / Gmail all fall back
+// to a sensible serif. Used by signature AND by the body wrapper.
+const SERIF_STACK = "Cambria, Georgia, 'Times New Roman', serif";
+
+// Public URL for the logo image (uploaded to the email-assets bucket,
+// migration 20260608000004). Lives on Supabase Storage so email clients
+// hot-link without auth.
+const LOGO_URL = `${Deno.env.get("SUPABASE_URL") ?? ""}/storage/v1/object/public/email-assets/logo.png`;
+
+function logoHeaderHtml(): string {
+  return `
+<table role="presentation" cellpadding="0" cellspacing="0" style="border-collapse:collapse;margin:0 0 24px;">
+  <tr>
+    <td style="padding:0;">
+      <img src="${LOGO_URL}" alt="Allocation Assist" width="140" height="auto" style="display:block;border:0;outline:none;max-width:140px;width:140px;height:auto;" />
+    </td>
+  </tr>
+</table>`;
+}
+
 function signatureHtml(first: string, last: string, title: string, phone: string): string {
   const fullName = [first, last].filter(Boolean).join(" ") || "Allocation Assist";
-  const teal     = "color:#14b8a6;font-weight:700;font-size:14px;margin:0 0 2px;line-height:1.45;";
-  const grey     = "color:#475569;font-size:13px;margin:6px 0 2px;line-height:1.45;";
-  const linkLine = "font-size:13px;margin:2px 0 16px;line-height:1.45;";
+  const teal     = `color:#14b8a6;font-weight:700;font-size:14px;margin:0 0 2px;line-height:1.45;font-family:${SERIF_STACK};`;
+  const grey     = `color:#475569;font-size:13px;margin:6px 0 2px;line-height:1.45;font-family:${SERIF_STACK};`;
+  const linkLine = `font-size:13px;margin:2px 0 16px;line-height:1.45;font-family:${SERIF_STACK};`;
   return `
-<p style="margin:24px 0 0;font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Helvetica,Arial,sans-serif;font-size:14px;color:#1a2332;line-height:1.5;">&nbsp;</p>
+<p style="margin:24px 0 0;font-family:${SERIF_STACK};font-size:14px;color:#1a2332;line-height:1.5;">&nbsp;</p>
 <p style="${teal}">Warmest Regards,</p>
 <p style="${teal}">${escapeHtml(fullName)}</p>
 ${title ? `<p style="${teal}">${escapeHtml(title)}</p>` : ""}
 ${phone ? `<p style="${teal}">${escapeHtml(phone)}</p>` : ""}
 <p style="${grey}"><span style="color:#14b8a6;">&#x1F4CD;</span> Jumeirah Lakes Towers, Dubai, UAE</p>
 <p style="${linkLine}"><a href="https://www.allocationassist.com" style="color:#1d4ed8;text-decoration:underline;">www.allocationassist.com</a></p>
-<p style="color:#14b8a6;font-weight:700;font-size:16px;margin:0;letter-spacing:-0.2px;">Allocation Assist</p>
-<p style="color:#94a3b8;font-size:11px;margin:2px 0 0;letter-spacing:0.4px;">The source of workforce</p>`;
+<p style="color:#14b8a6;font-weight:700;font-size:16px;margin:0;letter-spacing:-0.2px;font-family:${SERIF_STACK};">Allocation Assist</p>
+<p style="color:#94a3b8;font-size:11px;margin:2px 0 0;letter-spacing:0.4px;font-family:${SERIF_STACK};">The source of workforce</p>`;
 }
 function signatureText(first: string, last: string, title: string, phone: string): string {
   const fullName = [first, last].filter(Boolean).join(" ") || "Allocation Assist";
@@ -584,6 +605,11 @@ Deno.serve(async (req: Request) => {
     joining_date:       String(md.joining_date ?? ""),
     signature:          signatureHtml(sender.first, sender.last, sender.title, sender.phone),
     signature_text:     signatureText(sender.first, sender.last, sender.title, sender.phone),
+    // Logo header — emitted at the top of every Plinky-style template.
+    // The signature already brands the bottom; this gives the top the
+    // same recognition without the heavy teal banner the old templates
+    // had.
+    logo_header:        logoHeaderHtml(),
   };
 
   const subject = render(tpl.subject ?? "", vars);
@@ -598,7 +624,12 @@ Deno.serve(async (req: Request) => {
   // logo block) so plainify runs only on the body source.
   const rawBody       = tpl.body_html || wrapHtml(tpl.body_text);
   const plainBody     = plainifyBody(rawBody);
-  const html          = render(plainBody, vars, true);
+  const renderedBody  = render(plainBody, vars, true);
+  // Wrap the rendered body in a serif container so every <p>/<table>
+  // inherits the Cambria/Georgia look from the Plinky reference email.
+  // Inline styles on individual elements still win (signature keeps
+  // its teal-bold weight, link colour, etc.).
+  const html          = `<div style="font-family:${SERIF_STACK};font-size:14px;color:#1a2332;line-height:1.55;">${renderedBody}</div>`;
   const text          = render(tpl.body_text ?? "", vars);
 
   // Refuse to send templates that still carry the PLACEHOLDER stub copy
@@ -834,7 +865,7 @@ Deno.serve(async (req: Request) => {
 // Tokens whose values are pre-rendered HTML (signature block, etc) and so
 // must NOT be HTML-escaped during template substitution. Anything not in
 // this set is treated as untrusted text and escaped.
-const RAW_HTML_TOKENS = new Set(["signature", "doctors_table_html"]);
+const RAW_HTML_TOKENS = new Set(["signature", "doctors_table_html", "logo_header"]);
 
 /** Age from WP date_of_birth. Accepts "YYYYMMDD", "YYYY-MM-DD", or
  *  human-formatted "4 September 1987". Returns null if unparseable. */
