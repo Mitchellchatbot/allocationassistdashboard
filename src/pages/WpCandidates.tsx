@@ -28,12 +28,12 @@ import {
 import {
   useWpCandidates, useSyncWpCandidates, useLinkWpCandidate,
   useUpsertWpCandidate, useUploadWpPhoto, useDeleteWpCandidate,
-  useStagedProfiles, useDeleteStagedProfile, usePublishStagedProfile,
+  useStagedProfiles, useDeleteStagedProfile, usePublishStagedProfile, useUpdateStagedProfile,
   useWpCandidateById,
-  type WpCandidate, type StagedProfile,
+  type WpCandidate, type StagedProfile, type StagedProfileInput,
 } from "@/hooks/use-wp-candidates";
 import { toast } from "sonner";
-import { Plus, Camera, Loader2, Check, AlertCircle, Pencil, Trash2, Send } from "lucide-react";
+import { Plus, Camera, Loader2, Check, AlertCircle, Pencil, Trash2, Send, Sparkles } from "lucide-react";
 import { Textarea } from "@/components/ui/textarea";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 
@@ -1383,6 +1383,39 @@ function StagedProfileDetailDialog({
   const acf = (profile.acf ?? {}) as Record<string, unknown>;
   const cv  = (profile.extracted_cv_data ?? {}) as Record<string, unknown>;
   const [tab, setTab] = useState<"education" | "experience">("education");
+  const update = useUpdateStagedProfile();
+
+  // Save handler. Writes acf[key] = value AND mirrors the flat
+  // denormalised column (specialty, full_name, phone, etc.) so the
+  // staging-list row reflects the edit too. Returns a Promise so
+  // EditableText can show its saving/saved spinner.
+  const saveAcf = async (patch: Record<string, unknown>): Promise<void> => {
+    const FLAT_MAP: Record<string, string> = {
+      full_name:           "full_name",
+      email:               "email",
+      phone_number:        "phone",
+      specialty:           "specialty",
+      subspecialty:        "subspecialty",
+      nationality:         "nationality",
+      job_title:           "job_title",
+      current_location:    "current_location",
+      country_of_training: "country_of_training",
+      years_of_experience_post_specialization: "years_experience",
+    };
+    const nextAcf = { ...acf, ...patch };
+    // Strip empty strings so the row stays clean.
+    for (const k of Object.keys(patch)) {
+      if (nextAcf[k] === "") delete nextAcf[k];
+    }
+    const flatPatch: Record<string, unknown> = { acf: nextAcf };
+    for (const [acfKey, flatCol] of Object.entries(FLAT_MAP)) {
+      if (acfKey in patch) {
+        const v = patch[acfKey];
+        flatPatch[flatCol] = v === "" ? null : v;
+      }
+    }
+    await update.mutateAsync({ id: profile.id, patch: flatPatch as Partial<StagedProfileInput> });
+  };
 
   const get = (k: string): string | null => {
     const v = acf[k];
@@ -1496,8 +1529,24 @@ function StagedProfileDetailDialog({
                   <Avatar src={null} name={fullName} size={160} />
                 )}
               </div>
-              <div className="mt-4 text-[19px] font-semibold leading-tight">{fullName}</div>
-              {jobTitle && <div className="mt-1 text-[12.5px] text-white/95">{jobTitle}</div>}
+              <div className="mt-4 text-[19px] font-semibold leading-tight">
+                <EditableText
+                  value={fullName}
+                  onSave={v => saveAcf({ full_name: v ?? "" })}
+                  placeholder="Add full name…"
+                  className="text-white"
+                  hoverClass="hover:bg-white/25 hover:ring-white/40"
+                />
+              </div>
+              <div className="mt-1 text-[12.5px] text-white/95">
+                <EditableText
+                  value={jobTitle}
+                  onSave={v => saveAcf({ job_title: v ?? "" })}
+                  placeholder="Add job title…"
+                  className="text-white/95"
+                  hoverClass="hover:bg-white/25 hover:ring-white/40"
+                />
+              </div>
               {memberSince && (
                 <div className="inline-flex mt-3 text-[10.5px] bg-white/15 rounded-full px-2.5 py-0.5">
                   Member Since: {memberSince}
@@ -1506,16 +1555,26 @@ function StagedProfileDetailDialog({
               <div className="my-5 border-t border-white/25" />
               <div className="space-y-2.5 text-[12.5px]">
                 {ageVal && <div>Age: {ageVal} Years Old</div>}
-                {phone && (
-                  <div className="flex items-center justify-center gap-2">
-                    <Phone className="h-3.5 w-3.5" /> {phone}
-                  </div>
-                )}
-                {email && (
-                  <div className="flex items-center justify-center gap-2 break-all">
-                    <Mail className="h-3.5 w-3.5" /> {email}
-                  </div>
-                )}
+                <div className="flex items-center justify-center gap-2">
+                  <Phone className="h-3.5 w-3.5" />
+                  <EditableText
+                    value={phone}
+                    onSave={v => saveAcf({ phone_number: v ?? "" })}
+                    placeholder="Add phone…"
+                    className="text-white"
+                    hoverClass="hover:bg-white/25 hover:ring-white/40"
+                  />
+                </div>
+                <div className="flex items-center justify-center gap-2 break-all">
+                  <Mail className="h-3.5 w-3.5" />
+                  <EditableText
+                    value={email}
+                    onSave={v => saveAcf({ email: v ?? "" })}
+                    placeholder="Add email…"
+                    className="text-white"
+                    hoverClass="hover:bg-white/25 hover:ring-white/40"
+                  />
+                </div>
               </div>
             </div>
 
@@ -1535,34 +1594,68 @@ function StagedProfileDetailDialog({
 
           {/* ── Right: areas of interest + tile grid + Edu/Exp tabs ─── */}
           <div className="space-y-5 min-w-0">
-            {(bio || areas) && (
-              <div>
-                <p className="text-[13.5px] text-slate-500">Specific areas of interest within the specialization</p>
-                <div className="mt-1 h-px bg-gradient-to-r from-teal-300 to-transparent" />
-                <p className="mt-3 text-[13.5px] text-slate-800 leading-relaxed">{bio ?? areas}</p>
-                {bio && areas && <p className="mt-2 text-[12.5px] text-slate-700">{areas}</p>}
+            <div>
+              <p className="text-[13.5px] text-slate-500">Specific areas of interest within the specialization</p>
+              <div className="mt-1 h-px bg-gradient-to-r from-teal-300 to-transparent" />
+              <div className="mt-3">
+                {/* Bio with AI-shorten affordance. Clicking the bio
+                    text opens the inline textarea; clicking the
+                    purple ✨ button opens the Shorten menu. */}
+                <EditableText
+                  value={bio}
+                  onSave={v => saveAcf({ bio: v ?? "" })}
+                  placeholder="Click to add bio…"
+                  className="text-[13.5px] text-slate-800 leading-relaxed block"
+                  multiline
+                />
+                <AiBioMenu
+                  bio={bio}
+                  onApply={async (newBio) => { await saveAcf({ bio: newBio }); }}
+                />
               </div>
-            )}
+              <div className="mt-3">
+                <EditableText
+                  value={areas}
+                  onSave={v => saveAcf({ specific_areas_of_interests_within_the_specialization: v ?? "" })}
+                  placeholder="Click to add areas of interest…"
+                  className="text-[12.5px] text-slate-700 block"
+                  multiline
+                />
+              </div>
+            </div>
 
             <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-x-6 gap-y-4">
-              <PreviewTile icon={<Globe className="h-4 w-4" />}        label="Nationality"            value={get("nationality")} />
-              <PreviewTile icon={<Calendar className="h-4 w-4" />}     label="Date of Birth"          value={prettyDate(get("date_of_birth"))} hint={get("date_of_birth") ? `(${formatLongDate(get("date_of_birth"))})` : undefined} />
-              <PreviewTile icon={<Stethoscope className="h-4 w-4" />}  label="Specialty"              value={get("specialty")} />
-              <PreviewTile icon={<Stethoscope className="h-4 w-4" />}  label="Subspecialty"           value={get("subspecialty")} placeholder="Add subspecialty…" />
-              <PreviewTile icon={<BadgeCheck className="h-4 w-4" />}   label="Specialist / Consultant" value={get("specialist__consultant")} />
-              <PreviewTile icon={<CalendarDays className="h-4 w-4" />} label="Years of Experience"    value={get("years_of_experience_post_specialization")} hint={get("years_of_experience_post_specialization") ? `(${get("years_of_experience_post_specialization")} Years)` : undefined} />
-              <PreviewTile icon={<Award className="h-4 w-4" />}        label="DHA / DOH / MOH / SCFHS / QCHP Licenses?" value={get("dha__haad__moh_license")} />
-              <PreviewTile icon={<ClockIcon className="h-4 w-4" />}    label="Notice Period"          value={get("notice_period")} />
-              <PreviewTile icon={<MapPin className="h-4 w-4" />}       label="Targeted Location"      value={getList("targeted_locations").join(", ") || null} />
-              <PreviewTile icon={<LanguagesIcon className="h-4 w-4" />} label="Languages"             value={get("languages")} />
-              <PreviewTile icon={<LanguagesIcon className="h-4 w-4" />} label="English Level"         value={get("english_level")} />
-              <PreviewTile icon={<UsersIcon className="h-4 w-4" />}    label="Family Status"          value={get("family_status")} />
-              <PreviewTile icon={<Baby className="h-4 w-4" />}         label="Have Children / Dependent" value={childrenStr} />
-              <PreviewTile icon={<MapPin className="h-4 w-4" />}       label="Country of Training"    value={get("country_of_training")} />
-              <PreviewTile icon={<MapPin className="h-4 w-4" />}       label="Current Location"       value={get("current_location")} />
-              <PreviewTile icon={<Award className="h-4 w-4" />}        label="License type tags"      value={getList("license_type").join(", ") || (get("dha__haad__moh_license") ? "DHA, DOH, MOH, …" : null)} />
-              <PreviewTile icon={<CalendarDays className="h-4 w-4" />} label="Current Salary"         value={get("current_salary")} placeholder="Add current salary…" />
-              <PreviewTile icon={<CalendarDays className="h-4 w-4" />} label="Expected Salary"        value={get("expected_salary")} />
+              <EditableTile icon={<Globe className="h-4 w-4" />}        label="Nationality"            value={get("nationality")}                         onSave={v => saveAcf({ nationality: v ?? "" })} />
+              <EditableTile icon={<Calendar className="h-4 w-4" />}     label="Date of Birth"          value={get("date_of_birth")}
+                                                                                                       display={prettyDate(get("date_of_birth"))}
+                                                                                                       hint="YYYY-MM-DD or YYYYMMDD"
+                                                                                                       onSave={v => saveAcf({ date_of_birth: v ?? "" })} />
+              <EditableTile icon={<Stethoscope className="h-4 w-4" />}  label="Specialty"              value={get("specialty")}                           onSave={v => saveAcf({ specialty: v ?? "" })} />
+              <EditableTile icon={<Stethoscope className="h-4 w-4" />}  label="Subspecialty"           value={get("subspecialty")}                        onSave={v => saveAcf({ subspecialty: v ?? "" })} />
+              <EditableTile icon={<BadgeCheck className="h-4 w-4" />}   label="Specialist / Consultant" value={get("specialist__consultant")}             onSave={v => saveAcf({ specialist__consultant: v ?? "" })} />
+              <EditableTile icon={<CalendarDays className="h-4 w-4" />} label="Years of Experience"    value={get("years_of_experience_post_specialization")}
+                                                                                                       display={get("years_of_experience_post_specialization") ? `${get("years_of_experience_post_specialization")} Years` : null}
+                                                                                                       onSave={v => saveAcf({ years_of_experience_post_specialization: v ?? "" })} />
+              <EditableTile icon={<Award className="h-4 w-4" />}        label="DHA / DOH / MOH / SCFHS / QCHP Licenses?" value={get("dha__haad__moh_license")} onSave={v => saveAcf({ dha__haad__moh_license: v ?? "" })} />
+              <EditableTile icon={<ClockIcon className="h-4 w-4" />}    label="Notice Period"          value={get("notice_period")}                       onSave={v => saveAcf({ notice_period: v ?? "" })} />
+              <EditableTile icon={<MapPin className="h-4 w-4" />}       label="Targeted Location"      value={getList("targeted_locations").join(", ") || null}
+                                                                                                       hint="Comma-separated"
+                                                                                                       onSave={v => saveAcf({ targeted_locations: v ? v.split(",").map(s => s.trim()).filter(Boolean) : [] })} />
+              <EditableTile icon={<LanguagesIcon className="h-4 w-4" />} label="Languages"             value={get("languages")}                           onSave={v => saveAcf({ languages: v ?? "" })} />
+              <EditableTile icon={<LanguagesIcon className="h-4 w-4" />} label="English Level"         value={get("english_level")}                       onSave={v => saveAcf({ english_level: v ?? "" })} />
+              <EditableTile icon={<UsersIcon className="h-4 w-4" />}    label="Family Status"          value={get("family_status")}                       onSave={v => saveAcf({ family_status: v ?? "" })} />
+              <EditableTileSelect icon={<Baby className="h-4 w-4" />}   label="Have Children / Dependent"
+                                                                                                       value={childrenStr ?? UNSET}
+                                                                                                       options={[{ value: UNSET, label: "—" }, { value: "Yes", label: "Yes" }, { value: "No", label: "No" }]}
+                                                                                                       onSave={v => saveAcf({ have_children_or_any_dependent: v === UNSET ? "" : v })} />
+              <EditableTile icon={<MapPin className="h-4 w-4" />}       label="Country of Training"    value={get("country_of_training")}                 onSave={v => saveAcf({ country_of_training: v ?? "" })} />
+              <EditableTile icon={<MapPin className="h-4 w-4" />}       label="Current Location"       value={get("current_location")}                    onSave={v => saveAcf({ current_location: v ?? "" })} />
+              <EditableTile icon={<Award className="h-4 w-4" />}        label="License type tags"
+                                                                                                       value={getList("license_type").join(", ") || null}
+                                                                                                       hint="DHA, DOH, MOH, …"
+                                                                                                       onSave={v => saveAcf({ license_type: v ? v.split(",").map(s => s.trim()).filter(Boolean) : [] })} />
+              <EditableTile icon={<CalendarDays className="h-4 w-4" />} label="Current Salary"         value={get("current_salary")}                      onSave={v => saveAcf({ current_salary: v ?? "" })} />
+              <EditableTile icon={<CalendarDays className="h-4 w-4" />} label="Expected Salary"        value={get("expected_salary")}                     onSave={v => saveAcf({ expected_salary: v ?? "" })} />
             </div>
 
             <div className="rounded-xl border border-slate-200 overflow-hidden">
@@ -1645,37 +1738,141 @@ function StagedProfileDetailDialog({
   );
 }
 
-/** Read-only WP-profile-style tile. Icon goes in a 36-px rounded
- *  background to match the live profile dialog's EditableTile (same
- *  exact pattern, just no inline edit). Empty values render with a
- *  green-outlined 'Add …' placeholder so the layout stays visually
- *  consistent with the editable WP version. */
-function PreviewTile({
-  icon, label, value, placeholder, hint,
+/** ✨ AI bio shortener. Renders a small purple button under the bio
+ *  that pops a tiny menu of preset rewrites. Calls the rewrite-bio
+ *  edge function, then hands the rewritten text back to the parent
+ *  via onApply (which writes it to staged.acf.bio). */
+function AiBioMenu({
+  bio, onApply,
 }: {
-  icon: React.ReactNode;
-  label: string;
-  value: string | null;
-  placeholder?: string;
-  hint?: string;
+  bio: string | null;
+  onApply: (newBio: string) => Promise<void>;
 }) {
+  const [open,     setOpen]     = useState(false);
+  const [busy,     setBusy]     = useState<null | string>(null);
+  const [preview,  setPreview]  = useState<{ text: string; instruction: string } | null>(null);
+
+  const run = async (instruction: "shorten_100" | "shorten_60" | "tighten" | "professional", label: string) => {
+    if (!bio) {
+      toast.error("Add a bio first, then I can shorten it.");
+      return;
+    }
+    setBusy(label);
+    try {
+      const { data, error } = await supabase.functions.invoke("rewrite-bio", {
+        body: { text: bio, instruction },
+      });
+      if (error) throw error;
+      const resp = data as { ok: boolean; rewritten?: string; error?: string };
+      if (!resp.ok || !resp.rewritten) throw new Error(resp.error ?? "Empty rewrite");
+      setPreview({ text: resp.rewritten, instruction });
+    } catch (e) {
+      toast.error("AI rewrite failed", { description: (e as Error).message });
+    } finally {
+      setBusy(null);
+    }
+  };
+
+  const wordCount = bio ? bio.trim().split(/\s+/).length : 0;
+
   return (
-    <div className="flex items-start gap-3">
-      <div className="h-9 w-9 rounded-full bg-slate-100 text-slate-500 flex items-center justify-center shrink-0">{icon}</div>
-      <div className="min-w-0 flex-1">
-        <div className="text-[11.5px] text-slate-500">{label}</div>
-        {value ? (
-          <div className="text-[13.5px] mt-0.5 text-slate-800 break-words">
-            {value}
-            {hint && <span className="text-[11px] text-slate-400 ml-1">{hint}</span>}
-          </div>
-        ) : (
-          <div className="mt-1 inline-block rounded-md border border-teal-300 px-2 py-0.5 text-[11.5px] text-teal-600 italic">
-            {placeholder ?? `Add ${label.toLowerCase().split("/")[0].trim()}…`}
-          </div>
+    <>
+      <div className="mt-2 flex items-center gap-2">
+        <div className="relative">
+          <Button
+            type="button"
+            size="sm"
+            variant="outline"
+            className="h-7 text-[11px] border-purple-300 text-purple-700 hover:bg-purple-50"
+            onClick={() => setOpen(o => !o)}
+            disabled={!!busy}
+          >
+            {busy ? <Loader2 className="h-3 w-3 mr-1 animate-spin" /> : <Sparkles className="h-3 w-3 mr-1" />}
+            {busy ?? "AI rewrite"}
+          </Button>
+          {open && (
+            <div className="absolute left-0 top-full mt-1 z-50 w-64 rounded-lg border border-slate-200 bg-white shadow-lg p-1">
+              <MenuButton onClick={() => { setOpen(false); void run("shorten_100", "Shortening…"); }}>
+                <span className="font-medium">Shorten</span>
+                <span className="text-[10.5px] text-muted-foreground">Under 100 words</span>
+              </MenuButton>
+              <MenuButton onClick={() => { setOpen(false); void run("shorten_60", "Shortening…"); }}>
+                <span className="font-medium">One-paragraph pitch</span>
+                <span className="text-[10.5px] text-muted-foreground">Under 60 words</span>
+              </MenuButton>
+              <MenuButton onClick={() => { setOpen(false); void run("tighten", "Tightening…"); }}>
+                <span className="font-medium">Tighten</span>
+                <span className="text-[10.5px] text-muted-foreground">Remove filler, keep facts</span>
+              </MenuButton>
+              <MenuButton onClick={() => { setOpen(false); void run("professional", "Polishing…"); }}>
+                <span className="font-medium">Professionalize</span>
+                <span className="text-[10.5px] text-muted-foreground">Recruiter / hospital-intro tone</span>
+              </MenuButton>
+            </div>
+          )}
+        </div>
+        {bio && (
+          <span className="text-[10.5px] text-muted-foreground">{wordCount} words</span>
         )}
       </div>
-    </div>
+
+      {/* Preview-and-apply dialog. Shows the rewritten text side-by-side
+          with the original so the user can compare before saving. */}
+      <Dialog open={!!preview} onOpenChange={(v) => { if (!v) setPreview(null); }}>
+        <DialogContent className="max-w-3xl">
+          <DialogHeader>
+            <DialogTitle className="text-base">AI rewrite</DialogTitle>
+            <DialogDescription className="text-[11px]">
+              Compare with the original. Apply replaces the bio on the staged row.
+            </DialogDescription>
+          </DialogHeader>
+          <div className="grid grid-cols-1 md:grid-cols-2 gap-3 mt-2">
+            <div>
+              <div className="text-[10.5px] uppercase tracking-wider text-slate-500 mb-1">Original ({wordCount} words)</div>
+              <div className="rounded-md border border-slate-200 bg-slate-50 p-3 text-[12.5px] text-slate-700 whitespace-pre-wrap">{bio}</div>
+            </div>
+            <div>
+              <div className="text-[10.5px] uppercase tracking-wider text-purple-700 mb-1">
+                Rewritten ({preview ? preview.text.trim().split(/\s+/).length : 0} words)
+              </div>
+              <div className="rounded-md border border-purple-200 bg-purple-50/50 p-3 text-[12.5px] text-slate-800 whitespace-pre-wrap">{preview?.text}</div>
+            </div>
+          </div>
+          <DialogFooter className="mt-3 gap-2">
+            <Button variant="ghost" size="sm" onClick={() => setPreview(null)}>Cancel</Button>
+            <Button
+              size="sm"
+              className="bg-purple-600 hover:bg-purple-700 text-white"
+              onClick={async () => {
+                if (!preview) return;
+                try {
+                  await onApply(preview.text);
+                  toast.success("Bio updated");
+                } catch (e) {
+                  toast.error("Couldn't save", { description: (e as Error).message });
+                }
+                setPreview(null);
+              }}
+            >
+              <Sparkles className="h-3 w-3 mr-1" /> Apply
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+    </>
+  );
+}
+
+/** Bare menu-item button used by AiBioMenu's dropdown. */
+function MenuButton({ onClick, children }: { onClick: () => void; children: React.ReactNode }) {
+  return (
+    <button
+      type="button"
+      onClick={onClick}
+      className="w-full flex flex-col items-start text-left px-2.5 py-1.5 rounded-md hover:bg-purple-50 text-[12px] text-slate-800"
+    >
+      {children}
+    </button>
   );
 }
 
