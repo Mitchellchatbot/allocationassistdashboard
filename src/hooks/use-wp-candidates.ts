@@ -416,6 +416,38 @@ export function usePublishStagedProfile() {
       const resp = data as { ok: boolean; id?: number; row?: WpCandidate; created?: boolean; error?: string };
       if (!resp.ok) throw new Error(resp.error ?? "Publish failed");
 
+      // ── Photo attach. If the staged row captured a JotForm picture
+      //    URL, resolve the form_id (via source_response_id → form_responses)
+      //    and hand it to wordpress-candidate-upload-photo, which does the
+      //    APIKEY-gated JotForm fetch + WP media upload + ACF attach.
+      //    Non-fatal: log + continue on failure so the team can attach
+      //    manually if something's off (e.g. JotForm key rotated). The
+      //    WP draft is already created; the picture is a nice-to-have.
+      if (resp.id && profile.picture_url && profile.source_response_id) {
+        try {
+          const { data: respRow } = await supabase
+            .from("form_responses")
+            .select("form_id")
+            .eq("id", profile.source_response_id)
+            .single();
+          const formId = (respRow as { form_id?: string } | null)?.form_id;
+          if (formId) {
+            const photoRes = await supabase.functions.invoke("wordpress-candidate-upload-photo", {
+              body: {
+                candidate_id: resp.id,
+                jotform_url:  profile.picture_url,
+                form_id:      formId,
+              },
+            });
+            if (photoRes.error) {
+              console.warn("[publish] photo attach failed:", photoRes.error.message);
+            }
+          }
+        } catch (e) {
+          console.warn("[publish] photo attach threw:", e);
+        }
+      }
+
       // Drop the staging row only after WP write succeeds — leaves the
       // row in place if WP errors so the user can retry without losing
       // their edits.

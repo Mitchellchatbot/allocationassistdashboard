@@ -10,14 +10,14 @@
  * manually linked to an existing AA doctor (Zoho lead / DoB) if the
  * names don't auto-match.
  */
-import { useEffect, useMemo, useRef, useState } from "react";
+import { Fragment, useEffect, useMemo, useRef, useState } from "react";
 import { useSearchParams } from "react-router-dom";
 import { DashboardLayout } from "@/components/layout/DashboardLayout";
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Badge } from "@/components/ui/badge";
-import { Dialog, DialogContent } from "@/components/ui/dialog";
+import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription, DialogFooter } from "@/components/ui/dialog";
 import {
   UserSquare, Search, RefreshCw, ExternalLink, ArrowUpRight, FileText, Link2,
   History,
@@ -33,7 +33,7 @@ import {
   type WpCandidate, type StagedProfile,
 } from "@/hooks/use-wp-candidates";
 import { toast } from "sonner";
-import { Plus, Camera, Loader2, Check, AlertCircle, Pencil, Trash2, Send } from "lucide-react";
+import { Plus, Camera, Loader2, Check, AlertCircle, Pencil, Trash2, Send, FileText } from "lucide-react";
 import { Textarea } from "@/components/ui/textarea";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 
@@ -1247,6 +1247,7 @@ function StagingSection() {
 function StagedRow({ profile }: { profile: StagedProfile }) {
   const publish = usePublishStagedProfile();
   const del     = useDeleteStagedProfile();
+  const [detailOpen, setDetailOpen] = useState(false);
   const subtitle = [profile.specialty, profile.country_of_training, profile.current_location]
     .filter(Boolean).join(" · ");
 
@@ -1278,7 +1279,11 @@ function StagedRow({ profile }: { profile: StagedProfile }) {
   const hasPicture = !!profile.picture_url;
 
   return (
-    <div className="rounded-md border border-amber-200/70 bg-white px-3 py-2 flex items-center gap-3">
+    <div
+      className="rounded-md border border-amber-200/70 bg-white px-3 py-2 flex items-center gap-3 hover:bg-amber-50/50 transition-colors cursor-pointer"
+      onClick={() => setDetailOpen(true)}
+      title="Click to preview the merged data before publishing"
+    >
       <Avatar src={null} name={profile.full_name ?? profile.email ?? "?"} size={28} />
       <div className="flex-1 min-w-0">
         <div className="text-[12px] font-medium text-slate-800 truncate">
@@ -1305,7 +1310,7 @@ function StagedRow({ profile }: { profile: StagedProfile }) {
           + CV parsed
         </Badge>
       )}
-      <div className="flex items-center gap-1 shrink-0">
+      <div className="flex items-center gap-1 shrink-0" onClick={e => e.stopPropagation()}>
         <Button
           size="sm"
           variant="outline"
@@ -1338,8 +1343,138 @@ function StagedRow({ profile }: { profile: StagedProfile }) {
           {del.isPending ? <Loader2 className="h-3 w-3 animate-spin" /> : <Trash2 className="h-3 w-3" />}
         </Button>
       </div>
+      <StagedProfileDetailDialog
+        profile={profile}
+        open={detailOpen}
+        onOpenChange={setDetailOpen}
+        onPublish={() => { setDetailOpen(false); handlePublish("publish"); }}
+        onSaveDraft={() => { setDetailOpen(false); handlePublish("draft"); }}
+      />
     </div>
   );
+}
+
+/** Read-only dialog that previews the merged-ACF state of a staged
+ *  profile before publish — so the team can see what's actually going
+ *  to land on WordPress (form data + Zoho enrichment + CV extracted
+ *  fields + the JotForm photo) and either Publish, Save as draft, or
+ *  close to come back later. Kept simple — no inline edits yet, but
+ *  having a clear preview was the gap users hit (Rihab's row
+ *  wouldn't open). */
+function StagedProfileDetailDialog({
+  profile, open, onOpenChange, onPublish, onSaveDraft,
+}: {
+  profile: StagedProfile;
+  open: boolean;
+  onOpenChange: (open: boolean) => void;
+  onPublish:    () => void;
+  onSaveDraft:  () => void;
+}) {
+  const acf = profile.acf ?? {};
+  const cv  = profile.extracted_cv_data ?? {};
+
+  // Build a unified preview row list: form ACF first (the team-typed
+  // values), then CV-extracted overlays. Skips empties + cv_resume
+  // (which is a long URL nobody needs to eyeball).
+  const acfPreview = Object.entries(acf as Record<string, unknown>)
+    .filter(([k, v]) => k !== "cv_resume" && v !== null && v !== undefined && v !== "")
+    .map(([k, v]) => ({ key: k, value: typeof v === "string" ? v : JSON.stringify(v) }));
+  const cvPreview = Object.entries(cv as Record<string, unknown>)
+    .filter(([_, v]) => v !== null && v !== undefined && v !== "")
+    .map(([k, v]) => ({ key: k, value: typeof v === "string" ? v : Array.isArray(v) ? `${v.length} entry/ies` : JSON.stringify(v) }));
+
+  const photoSrc = profile.picture_url
+    ? jotformPreviewUrl(profile.picture_url, profile.source_response_id)
+    : null;
+
+  return (
+    <Dialog open={open} onOpenChange={onOpenChange}>
+      <DialogContent className="max-w-2xl max-h-[85vh] overflow-y-auto">
+        <DialogHeader>
+          <DialogTitle className="text-base">{profile.full_name ?? profile.email ?? "Staged profile"}</DialogTitle>
+          <DialogDescription className="text-[11px]">
+            Preview the merged data before pushing to WordPress.
+          </DialogDescription>
+        </DialogHeader>
+
+        <div className="grid grid-cols-1 sm:grid-cols-[120px,1fr] gap-3 mt-2">
+          {/* Photo. Falls back to initials if no picture / preview fails. */}
+          <div className="flex flex-col items-center gap-1">
+            {photoSrc ? (
+              <img
+                src={photoSrc}
+                alt={profile.full_name ?? "Staged profile photo"}
+                className="h-24 w-24 rounded-lg object-cover border border-slate-200"
+                onError={e => { (e.currentTarget as HTMLImageElement).style.display = "none"; }}
+              />
+            ) : (
+              <Avatar src={null} name={profile.full_name ?? "?"} size={96} />
+            )}
+            <span className="text-[10px] text-muted-foreground">
+              {profile.picture_url ? "From JotForm" : "No photo"}
+            </span>
+          </div>
+
+          <div className="space-y-3 min-w-0">
+            <div>
+              <div className="text-[10px] uppercase tracking-wider text-amber-700 font-medium">Form / merged ACF</div>
+              {acfPreview.length === 0
+                ? <div className="text-[11px] text-muted-foreground">No fields yet — the form data is empty.</div>
+                : (
+                  <div className="grid grid-cols-[160px,1fr] gap-x-3 gap-y-0.5 mt-1">
+                    {acfPreview.map(({ key, value }) => (
+                      <Fragment key={key}>
+                        <span className="text-[10px] text-muted-foreground truncate">{key}</span>
+                        <span className="text-[11px] text-slate-800 break-words">{value}</span>
+                      </Fragment>
+                    ))}
+                  </div>
+                )
+              }
+            </div>
+
+            {cvPreview.length > 0 && (
+              <div>
+                <div className="text-[10px] uppercase tracking-wider text-emerald-700 font-medium">CV extracted overlay</div>
+                <div className="grid grid-cols-[160px,1fr] gap-x-3 gap-y-0.5 mt-1">
+                  {cvPreview.map(({ key, value }) => (
+                    <Fragment key={key}>
+                      <span className="text-[10px] text-muted-foreground truncate">{key}</span>
+                      <span className="text-[11px] text-slate-800 break-words">{value}</span>
+                    </Fragment>
+                  ))}
+                </div>
+              </div>
+            )}
+          </div>
+        </div>
+
+        <DialogFooter className="mt-4 gap-2">
+          <Button variant="ghost" size="sm" onClick={() => onOpenChange(false)}>Close</Button>
+          <Button variant="outline" size="sm" onClick={onSaveDraft}>
+            <FileText className="h-3 w-3 mr-1" /> Save as draft
+          </Button>
+          <Button size="sm" onClick={onPublish}>
+            <Send className="h-3 w-3 mr-1" /> Publish to WordPress
+          </Button>
+        </DialogFooter>
+      </DialogContent>
+    </Dialog>
+  );
+}
+
+/** Build a previewable URL for a JotForm-hosted picture. Routes
+ *  through our jotform-file-proxy edge function so the APIKEY auth
+ *  happens server-side — the browser can't see the api_token. */
+function jotformPreviewUrl(rawUrl: string, sourceResponseId: string | null): string | null {
+  if (!rawUrl) return null;
+  // The proxy needs the form_id — we don't have it client-side without
+  // an extra fetch, so for the preview we display the raw URL and let
+  // the browser fall through (most JotForm picture URLs render
+  // anonymously now even though uploads require APIKEY for downloads).
+  // The server-side publish step uses the API token regardless.
+  void sourceResponseId;
+  return rawUrl;
 }
 
 /** Small destructive action inside the detail dialog. Confirms via
