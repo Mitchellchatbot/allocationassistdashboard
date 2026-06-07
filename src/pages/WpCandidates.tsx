@@ -1362,13 +1362,13 @@ function StagedRow({ profile }: { profile: StagedProfile }) {
   );
 }
 
-/** Read-only dialog that previews the merged-ACF state of a staged
- *  profile before publish — so the team can see what's actually going
- *  to land on WordPress (form data + Zoho enrichment + CV extracted
- *  fields + the JotForm photo) and either Publish, Save as draft, or
- *  close to come back later. Kept simple — no inline edits yet, but
- *  having a clear preview was the gap users hit (Rihab's row
- *  wouldn't open). */
+/** Rich, read-only preview of a staged profile that mirrors the WP
+ *  candidate dialog's two-column layout: teal avatar card on the left
+ *  (photo, name, job title, age, phone, email, the merged ACF
+ *  recruiter/lead-source breadcrumbs) and a tiled stat grid + Education
+ *  / Experience tabs on the right. Looking exactly like what the
+ *  candidate will look like on WordPress was the user's ask — this is
+ *  it, just before the Publish click. */
 function StagedProfileDetailDialog({
   profile, open, onOpenChange, onPublish, onSaveDraft,
 }: {
@@ -1378,86 +1378,214 @@ function StagedProfileDetailDialog({
   onPublish:    () => void;
   onSaveDraft:  () => void;
 }) {
-  const acf = profile.acf ?? {};
-  const cv  = profile.extracted_cv_data ?? {};
+  const acf = (profile.acf ?? {}) as Record<string, unknown>;
+  const cv  = (profile.extracted_cv_data ?? {}) as Record<string, unknown>;
+  const [tab, setTab] = useState<"education" | "experience">("education");
 
-  // Build a unified preview row list: form ACF first (the team-typed
-  // values), then CV-extracted overlays. Skips empties + cv_resume
-  // (which is a long URL nobody needs to eyeball).
-  const acfPreview = Object.entries(acf as Record<string, unknown>)
-    .filter(([k, v]) => k !== "cv_resume" && v !== null && v !== undefined && v !== "")
-    .map(([k, v]) => ({ key: k, value: typeof v === "string" ? v : JSON.stringify(v) }));
-  const cvPreview = Object.entries(cv as Record<string, unknown>)
-    .filter(([_, v]) => v !== null && v !== undefined && v !== "")
-    .map(([k, v]) => ({ key: k, value: typeof v === "string" ? v : Array.isArray(v) ? `${v.length} entry/ies` : JSON.stringify(v) }));
+  const get = (k: string): string | null => {
+    const v = acf[k];
+    if (v === null || v === undefined || v === "") return null;
+    return typeof v === "string" ? v : String(v);
+  };
+  const getList = (k: string): string[] => {
+    const v = acf[k];
+    if (Array.isArray(v)) return v.filter(x => x != null && x !== "").map(String);
+    if (typeof v === "string" && v.trim()) return v.split(/[,;]+/).map(s => s.trim()).filter(Boolean);
+    return [];
+  };
 
-  const photoSrc = profile.picture_url
-    ? jotformPreviewUrl(profile.picture_url, profile.source_response_id)
+  const fullName = profile.full_name ?? get("full_name") ?? profile.email ?? "Unnamed";
+  const jobTitle = get("job_title");
+  const ageVal   = get("age");
+  const phone    = profile.phone ?? get("phone_number");
+  const email    = profile.email ?? get("email");
+  const recruiter   = get("recruiter");
+  const leadSource  = get("lead_source");
+  const photoSrc = profile.picture_url ?? null;
+  const bio      = get("bio");
+  const areas    = get("specific_areas_of_interests_within_the_specialization");
+
+  // Has-children: a bool, a string ("Yes"/"No"), or absent.
+  const childrenVal = acf.have_children_or_any_dependent;
+  const childrenStr =
+      childrenVal === true || childrenVal === "Yes" ? "Yes"
+    : childrenVal === false || childrenVal === "No" ? "No"
     : null;
+
+  // Education / Experience entries — drawn from the CV-extracted
+  // arrays AND/OR the per-slot ACF fields (title1/academy1 etc.)
+  // that enrich-profile may have populated. CV array wins because
+  // it's the canonical source; the slots are a fallback.
+  type Entry = { title: string | null; org: string | null; start: string | null; end: string | null; present: boolean; description: string | null };
+  const cvEdu = (Array.isArray(cv.education) ? cv.education : []) as Array<{ institution?: string; degree?: string; start?: string | number; end?: string | number; description?: string }>;
+  const cvExp = (Array.isArray(cv.experience) ? cv.experience : []) as Array<{ company?: string;     title?:  string; start?: string | number; end?: string | number; description?: string }>;
+
+  const slotEdu: Entry[] = ["1", "2"].map(n => ({
+    title:       get(`title${n}`),
+    org:         get(`academy${n}`),
+    start:       get(`start_date${n}`),
+    end:         get(`end_date${n}`),
+    present:     acf[`present${n}`] === true,
+    description: get(`description${n}`),
+  })).filter(e => e.title || e.org || e.description);
+
+  const slotExp: Entry[] = ["1", "2"].map(n => ({
+    title:       get(`experience_title${n}`),
+    org:         get(`experience_company${n}`),
+    start:       get(`experience_start${n}`),
+    end:         get(`experience_end${n}`),
+    present:     acf[`experience_present${n}`] === true,
+    description: get(`experience_description${n}`),
+  })).filter(e => e.title || e.org || e.description);
+
+  const education: Entry[] = cvEdu.length > 0
+    ? cvEdu.map(e => ({
+        title: e.degree ?? null, org: e.institution ?? null,
+        start: e.start != null ? String(e.start) : null,
+        end:   e.end != null && !/present|current/i.test(String(e.end)) ? String(e.end) : null,
+        present: !!(e.end && /present|current/i.test(String(e.end))),
+        description: e.description ?? null,
+      }))
+    : slotEdu;
+  const experience: Entry[] = cvExp.length > 0
+    ? cvExp.map(x => ({
+        title: x.title ?? null, org: x.company ?? null,
+        start: x.start != null ? String(x.start) : null,
+        end:   x.end != null && !/present|current/i.test(String(x.end)) ? String(x.end) : null,
+        present: !!(x.end && /present|current/i.test(String(x.end))),
+        description: x.description ?? null,
+      }))
+    : slotExp;
 
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
-      <DialogContent className="max-w-2xl max-h-[85vh] overflow-y-auto">
-        <DialogHeader>
-          <DialogTitle className="text-base">{profile.full_name ?? profile.email ?? "Staged profile"}</DialogTitle>
+      <DialogContent className="max-w-5xl max-h-[92vh] overflow-y-auto p-0">
+        <DialogHeader className="px-6 pt-5 pb-2">
+          <DialogTitle className="text-base font-semibold">{fullName}</DialogTitle>
           <DialogDescription className="text-[11px]">
-            Preview the merged data before pushing to WordPress.
+            Preview the merged data — this is exactly what will appear on the WordPress candidate page after Publish.
           </DialogDescription>
         </DialogHeader>
 
-        <div className="grid grid-cols-1 sm:grid-cols-[120px,1fr] gap-3 mt-2">
-          {/* Photo. Falls back to initials if no picture / preview fails. */}
-          <div className="flex flex-col items-center gap-1">
-            {photoSrc ? (
-              <img
-                src={photoSrc}
-                alt={profile.full_name ?? "Staged profile photo"}
-                className="h-24 w-24 rounded-lg object-cover border border-slate-200"
-                onError={e => { (e.currentTarget as HTMLImageElement).style.display = "none"; }}
-              />
-            ) : (
-              <Avatar src={null} name={profile.full_name ?? "?"} size={96} />
-            )}
-            <span className="text-[10px] text-muted-foreground">
-              {profile.picture_url ? "From JotForm" : "No photo"}
-            </span>
-          </div>
-
-          <div className="space-y-3 min-w-0">
-            <div>
-              <div className="text-[10px] uppercase tracking-wider text-amber-700 font-medium">Form / merged ACF</div>
-              {acfPreview.length === 0
-                ? <div className="text-[11px] text-muted-foreground">No fields yet — the form data is empty.</div>
-                : (
-                  <div className="grid grid-cols-[160px,1fr] gap-x-3 gap-y-0.5 mt-1">
-                    {acfPreview.map(({ key, value }) => (
-                      <Fragment key={key}>
-                        <span className="text-[10px] text-muted-foreground truncate">{key}</span>
-                        <span className="text-[11px] text-slate-800 break-words">{value}</span>
-                      </Fragment>
-                    ))}
-                  </div>
-                )
-              }
+        <div className="grid grid-cols-1 md:grid-cols-[280px,1fr] gap-5 px-6 pb-4">
+          {/* ── Left: teal avatar card ─────────────────────────────────── */}
+          <div className="space-y-3">
+            <div className="rounded-2xl bg-gradient-to-br from-teal-400 to-teal-600 text-white p-5 text-center shadow">
+              <div className="mx-auto h-32 w-32 rounded-full bg-white/15 ring-4 ring-white/30 overflow-hidden flex items-center justify-center">
+                {photoSrc ? (
+                  <img
+                    src={photoSrc}
+                    alt={fullName}
+                    className="h-full w-full object-cover"
+                    onError={e => { (e.currentTarget as HTMLImageElement).style.display = "none"; }}
+                  />
+                ) : (
+                  <Avatar src={null} name={fullName} size={128} />
+                )}
+              </div>
+              <div className="mt-4 text-[17px] font-semibold leading-tight">{fullName}</div>
+              {jobTitle && <div className="mt-1 text-[12px] text-white/90">{jobTitle}</div>}
+              <div className="my-4 border-t border-white/25" />
+              <div className="space-y-2 text-[12px]">
+                {ageVal && <div>Age: {ageVal} Years Old</div>}
+                {phone && <div className="flex items-center justify-center gap-2"><Phone className="h-3.5 w-3.5" />{phone}</div>}
+                {email && <div className="flex items-center justify-center gap-2 break-all"><Mail className="h-3.5 w-3.5" />{email}</div>}
+              </div>
             </div>
-
-            {cvPreview.length > 0 && (
-              <div>
-                <div className="text-[10px] uppercase tracking-wider text-emerald-700 font-medium">CV extracted overlay</div>
-                <div className="grid grid-cols-[160px,1fr] gap-x-3 gap-y-0.5 mt-1">
-                  {cvPreview.map(({ key, value }) => (
-                    <Fragment key={key}>
-                      <span className="text-[10px] text-muted-foreground truncate">{key}</span>
-                      <span className="text-[11px] text-slate-800 break-words">{value}</span>
-                    </Fragment>
-                  ))}
-                </div>
+            {/* Source breadcrumbs from Zoho — recruiter, lead source. */}
+            {(recruiter || leadSource) && (
+              <div className="rounded-xl border border-slate-200 bg-slate-50/50 p-3 space-y-1 text-[11px]">
+                {recruiter && <div><span className="text-muted-foreground">Recruiter:</span> <span className="font-medium">{recruiter}</span></div>}
+                {leadSource && <div><span className="text-muted-foreground">Lead source:</span> <span className="font-medium">{leadSource}</span></div>}
               </div>
             )}
+            {/* Status chips so it's obvious what landed. */}
+            <div className="flex flex-wrap gap-1">
+              <Badge variant="outline" className="text-[9px] bg-slate-100 text-slate-600 border-slate-200">not on WP</Badge>
+              {photoSrc && <Badge variant="outline" className="text-[9px] bg-blue-50 text-blue-700 border-blue-200">+ photo</Badge>}
+              {Object.keys(cv).length > 0 && <Badge variant="outline" className="text-[9px] bg-emerald-50 text-emerald-700 border-emerald-200">+ CV parsed</Badge>}
+            </div>
+          </div>
+
+          {/* ── Right: heading + tile grid + Education/Experience ──────── */}
+          <div className="space-y-5 min-w-0">
+            {(bio || areas) && (
+              <div>
+                {bio && <p className="text-[13px] text-slate-700 leading-relaxed">{bio}</p>}
+                {areas && (
+                  <>
+                    <p className="mt-3 text-[13px] text-slate-500">Specific areas of interest within the specialization</p>
+                    <div className="mt-1 h-px bg-gradient-to-r from-teal-300 to-transparent" />
+                    <p className="mt-2 text-[12.5px] text-slate-700">{areas}</p>
+                  </>
+                )}
+              </div>
+            )}
+
+            <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-x-5 gap-y-3">
+              <PreviewTile icon={<Globe className="h-4 w-4" />}        label="Nationality"            value={get("nationality")} />
+              <PreviewTile icon={<Calendar className="h-4 w-4" />}     label="Date of Birth"          value={prettyDate(get("date_of_birth"))} />
+              <PreviewTile icon={<Stethoscope className="h-4 w-4" />}  label="Specialty"              value={get("specialty")} />
+              <PreviewTile icon={<Stethoscope className="h-4 w-4" />}  label="Subspecialty"           value={get("subspecialty")} />
+              <PreviewTile icon={<BadgeCheck className="h-4 w-4" />}   label="Specialist / Consultant" value={get("specialist__consultant")} />
+              <PreviewTile icon={<CalendarDays className="h-4 w-4" />} label="Years of Experience"    value={get("years_of_experience_post_specialization")} suffix=" Years" />
+              <PreviewTile icon={<Award className="h-4 w-4" />}        label="License"                value={get("dha__haad__moh_license")} />
+              <PreviewTile icon={<ClockIcon className="h-4 w-4" />}    label="Notice Period"          value={get("notice_period")} />
+              <PreviewTile icon={<MapPin className="h-4 w-4" />}       label="Targeted Location"      value={getList("targeted_locations").join(", ") || null} />
+              <PreviewTile icon={<LanguagesIcon className="h-4 w-4" />} label="Languages"             value={get("languages")} />
+              <PreviewTile icon={<LanguagesIcon className="h-4 w-4" />} label="English Level"         value={get("english_level")} />
+              <PreviewTile icon={<UsersIcon className="h-4 w-4" />}    label="Family Status"          value={get("family_status")} />
+              <PreviewTile icon={<Baby className="h-4 w-4" />}         label="Have Children / Dependent" value={childrenStr} />
+              <PreviewTile icon={<MapPin className="h-4 w-4" />}       label="Country of Training"    value={get("country_of_training")} />
+              <PreviewTile icon={<MapPin className="h-4 w-4" />}       label="Current Location"       value={get("current_location")} />
+              <PreviewTile icon={<CalendarDays className="h-4 w-4" />} label="Current Salary"         value={get("current_salary")} />
+              <PreviewTile icon={<CalendarDays className="h-4 w-4" />} label="Expected Salary"        value={get("expected_salary")} />
+              <PreviewTile icon={<IdCard className="h-4 w-4" />}       label="Marital Status"         value={get("marital_status")} />
+            </div>
+
+            <div className="rounded-xl border border-slate-200 overflow-hidden">
+              <div className="grid grid-cols-2">
+                <button
+                  type="button"
+                  className={`h-10 text-[12px] font-medium ${tab === "education" ? "bg-teal-500 text-white" : "bg-white text-slate-600 hover:bg-slate-50"}`}
+                  onClick={() => setTab("education")}
+                >Education ({education.length})</button>
+                <button
+                  type="button"
+                  className={`h-10 text-[12px] font-medium ${tab === "experience" ? "bg-teal-500 text-white" : "bg-white text-slate-600 hover:bg-slate-50"}`}
+                  onClick={() => setTab("experience")}
+                >Experience ({experience.length})</button>
+              </div>
+              <div className="p-4 bg-white space-y-3">
+                {(tab === "education" ? education : experience).length === 0 ? (
+                  <div className="text-[11px] text-muted-foreground py-2">
+                    No {tab} entries detected. {Object.keys(cv).length === 0 ? "CV extraction hasn't finished yet — give it a few seconds and re-open." : "The CV didn't list any."}
+                  </div>
+                ) : (
+                  (tab === "education" ? education : experience).map((entry, i) => (
+                    <div key={i} className="flex items-start gap-2.5">
+                      <div className="mt-0.5 shrink-0">
+                        {tab === "education" ? <GraduationCap className="h-4 w-4 text-teal-600" /> : <Briefcase className="h-4 w-4 text-teal-600" />}
+                      </div>
+                      <div className="min-w-0 flex-1">
+                        <div className="text-[13px] font-medium text-slate-800">{entry.title ?? "—"}</div>
+                        {entry.org && <div className="text-[12px] text-slate-600">{entry.org}</div>}
+                        {(entry.start || entry.end || entry.present) && (
+                          <div className="text-[11px] text-muted-foreground mt-0.5">
+                            {entry.start ?? "—"} – {entry.present ? "Present" : (entry.end ?? "—")}
+                          </div>
+                        )}
+                        {entry.description && <div className="text-[11.5px] text-slate-600 mt-1 leading-snug">{entry.description}</div>}
+                      </div>
+                    </div>
+                  ))
+                )}
+              </div>
+            </div>
           </div>
         </div>
 
-        <DialogFooter className="mt-4 gap-2">
+        <DialogFooter className="px-6 py-3 border-t bg-slate-50/60 gap-2">
           <Button variant="ghost" size="sm" onClick={() => onOpenChange(false)}>Close</Button>
           <Button variant="outline" size="sm" onClick={onSaveDraft}>
             <FileText className="h-3 w-3 mr-1" /> Save as draft
@@ -1471,18 +1599,31 @@ function StagedProfileDetailDialog({
   );
 }
 
-/** Build a previewable URL for a JotForm-hosted picture. Routes
- *  through our jotform-file-proxy edge function so the APIKEY auth
- *  happens server-side — the browser can't see the api_token. */
-function jotformPreviewUrl(rawUrl: string, sourceResponseId: string | null): string | null {
-  if (!rawUrl) return null;
-  // The proxy needs the form_id — we don't have it client-side without
-  // an extra fetch, so for the preview we display the raw URL and let
-  // the browser fall through (most JotForm picture URLs render
-  // anonymously now even though uploads require APIKEY for downloads).
-  // The server-side publish step uses the API token regardless.
-  void sourceResponseId;
-  return rawUrl;
+/** Read-only tile: icon + label + value. Renders an em-dash when value
+ *  is null so the grid stays visually consistent (matches the WP profile
+ *  dialog's behaviour where empty fields still show a placeholder). */
+function PreviewTile({ icon, label, value, suffix }: { icon: React.ReactNode; label: string; value: string | null; suffix?: string }) {
+  return (
+    <div className="flex items-start gap-2">
+      <div className="mt-0.5 text-slate-400 shrink-0">{icon}</div>
+      <div className="min-w-0">
+        <div className="text-[10.5px] font-medium text-slate-500">{label}</div>
+        <div className={`text-[12.5px] mt-0.5 ${value ? "text-slate-800" : "text-slate-300"}`}>
+          {value ? `${value}${suffix ?? ""}` : "—"}
+        </div>
+      </div>
+    </div>
+  );
+}
+
+/** Match the WP profile dialog's prettyDate for consistency. JotForm
+ *  date answers usually come through as YYYYMMDD; we want YYYY-MM-DD
+ *  in the preview. */
+function prettyDate(raw: string | null): string | null {
+  if (!raw) return null;
+  const m = /^(\d{4})(\d{2})(\d{2})$/.exec(raw.trim());
+  if (m) return `${m[1]}-${m[2]}-${m[3]}`;
+  return raw;
 }
 
 /** Small destructive action inside the detail dialog. Confirms via
