@@ -1183,32 +1183,26 @@ function ResponseRow({
     if (creatingWp) return;
     setCreatingWp(true);
     try {
-      // STAGING-ONLY policy: this button used to POST a WP draft directly
-      // via wordpress-candidate-upsert. That bypassed review and meant
-      // half-mapped profiles landed on production WordPress before anyone
-      // looked at them. We now only insert into staged_doctor_profiles —
-      // the user has to click Publish in the staging area to push to WP.
-      const mapped = mapAnswersToWp(response.answers ?? {});
-      const fullName = mapped.full_name || display.label || "New profile";
-      const safeAcf: Record<string, unknown> = { ...(mapped.acf ?? {}), full_name: fullName };
-      delete safeAcf.cv_resume;
-      await stageProfile.mutateAsync({
-        source:             `form:${response.id}`,
-        source_response_id: response.id,
-        full_name:          fullName,
-        email:              response.respondent_email ?? null,
-        phone:              (mapped.acf?.phone_number as string | undefined) ?? null,
-        specialty:          (mapped.acf?.specialty as string | undefined) ?? null,
-        subspecialty:       (mapped.acf?.subspecialty as string | undefined) ?? null,
-        nationality:        (mapped.acf?.nationality as string | undefined) ?? null,
-        job_title:          (mapped.acf?.job_title as string | undefined) ?? null,
-        current_location:   (mapped.acf?.current_location as string | undefined) ?? null,
-        country_of_training: (mapped.acf?.country_of_training as string | undefined) ?? null,
-        years_experience:   (mapped.acf?.years_of_experience_post_specialization as string | undefined) ?? null,
-        acf:                safeAcf,
+      // Use the server-side stage-from-response endpoint. Runs the
+      // SAME pipeline as a live JotForm webhook submission — Zoho
+      // enrichment, picture-URL extraction from widget_metadata, CV
+      // download + extraction queue. Earlier we did this in the
+      // browser, which skipped the CV download (the doctor-cvs
+      // bucket only accepts service-role writes) and the picture
+      // (the raw_payload widget_metadata parse only ran server-side).
+      const { data, error } = await supabase.functions.invoke("stage-from-response", {
+        body: { response_id: response.id },
       });
+      if (error) throw error;
+      const resp = data as { ok: boolean; picture_captured?: boolean; cv_queued?: boolean; error?: string };
+      if (!resp.ok) throw new Error(resp.error ?? "Staging failed");
+      const extras: string[] = [];
+      if (resp.picture_captured) extras.push("photo");
+      if (resp.cv_queued)        extras.push("CV (extracting…)");
       toast.success("Sent to staging area", {
-        description: "Review the merged data, then click Publish to push to WordPress.",
+        description: extras.length
+          ? `Captured: ${extras.join(", ")}. Open the staging row to preview, then Publish.`
+          : "Review the merged data, then click Publish to push to WordPress.",
         action: { label: "Open staging", onClick: () => navigate("/doctors?tab=profiles") },
       });
     } catch (err) {

@@ -142,6 +142,17 @@ Deno.serve(async (req) => {
         if (error) return new Response(JSON.stringify({ ok: false, error: error.message }), { headers: { "Content-Type": "application/json" } });
         return new Response(JSON.stringify({ ok: true }), { headers: { "Content-Type": "application/json" } });
       }
+      if ((body as { probe_cv_url?: string } | null)?.probe_cv_url) {
+        const url = (body as { probe_cv_url: string }).probe_cv_url;
+        const { data: forms } = await sb.from("forms").select("api_token").eq("provider", "jotform").limit(1);
+        const tok = (forms as Array<{ api_token: string }> | null)?.[0]?.api_token;
+        if (!tok) return new Response(JSON.stringify({ ok: false, error: "no api_token" }), { headers: { "Content-Type": "application/json" } });
+        const r = await fetch(url, { headers: { APIKEY: tok } });
+        const ct = r.headers.get("content-type");
+        const len = r.headers.get("content-length");
+        const peek = ct?.startsWith("text/") || ct?.includes("json") ? (await r.text()).slice(0, 300) : null;
+        return new Response(JSON.stringify({ ok: true, status: r.status, content_type: ct, content_length: len, text_peek: peek }, null, 2), { headers: { "Content-Type": "application/json" } });
+      }
       if ((body as { test_jotform?: boolean } | null)?.test_jotform) {
         // Hit JotForm's /user endpoint with the stored api_token to
         // confirm the key still works. Used after password / API-key

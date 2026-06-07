@@ -52,29 +52,78 @@ function pickFirst<T>(...values: T[]): T | null {
   return null;
 }
 
-/** Extract the first JotForm picture URL from a form_responses row's
- *  raw_payload. JotForm stores it as widget_metadata.value[0].url —
- *  the URL itself is APIKEY-gated so consumers should route through
- *  the jotform-file-proxy. We return the raw URL; the caller decides
- *  how to serve it. */
-function pictureUrlFromFormResponse(raw: Record<string, unknown> | null): string | null {
-  const answers = (raw?.answers as Record<string, unknown> | undefined);
-  if (!answers || typeof answers !== "object") return null;
-  for (const v of Object.values(answers)) {
-    if (!v || typeof v !== "object") continue;
-    const obj = v as { text?: string; answer?: unknown };
-    const text = String(obj.text ?? "").toLowerCase();
-    const looksLikePic = text.includes("picture") || text.includes("photo") || text.includes("image");
-    const answerStr = typeof obj.answer === "string" ? obj.answer : JSON.stringify(obj.answer ?? "");
-    if (!answerStr.includes("widget_metadata") && !looksLikePic) continue;
-    try {
-      const parsed = typeof obj.answer === "string" ? JSON.parse(obj.answer) : obj.answer;
-      const items  = (parsed as { widget_metadata?: { value?: Array<{ url?: string }> } })?.widget_metadata?.value;
-      const url    = items?.find(it => typeof it?.url === "string")?.url;
+/** Extract the first JotForm picture URL from any of the three shapes
+ *  we've seen on form_responses rows:
+ *    1. raw_payload.answers — API shape, { qid: { text, answer } }.
+ *    2. raw_payload.rawRequest — JSON string of the submission body.
+ *    3. flat answers dict — { "Label name": "<json string>" } where
+ *       the answer for a widget question is the stringified
+ *       { widget_metadata: { value: [{ url }] } } object.
+ *  The webhook hits #1 on JSON submissions, #2 on multipart, and
+ *  the stage-from-response path hits #3 because the form_response
+ *  column already flattens labels. */
+function pictureUrlFromFormResponse(
+  raw:     Record<string, unknown> | null,
+  answers: Record<string, string>  | null = null,
+): string | null {
+  // ── Shape 1: raw_payload.answers (JotForm API shape) ───────────────
+  const apiShape = (raw?.answers as Record<string, unknown> | undefined);
+  if (apiShape && typeof apiShape === "object") {
+    for (const v of Object.values(apiShape)) {
+      if (!v || typeof v !== "object") continue;
+      const obj = v as { text?: string; answer?: unknown };
+      const text = String(obj.text ?? "").toLowerCase();
+      const looksLikePic = text.includes("picture") || text.includes("photo") || text.includes("image");
+      const answerStr = typeof obj.answer === "string" ? obj.answer : JSON.stringify(obj.answer ?? "");
+      if (!answerStr.includes("widget_metadata") && !looksLikePic) continue;
+      const url = extractWidgetUrl(obj.answer);
       if (url) return url;
-    } catch { /* try next */ }
+    }
   }
+
+  // ── Shape 2: raw_payload.rawRequest (multipart payload as JSON string) ─
+  const rawReq = raw?.rawRequest;
+  if (typeof rawReq === "string") {
+    try {
+      const parsed = JSON.parse(rawReq) as Record<string, unknown>;
+      for (const v of Object.values(parsed)) {
+        const url = extractWidgetUrl(v);
+        if (url) return url;
+      }
+    } catch { /* not JSON */ }
+  } else if (rawReq && typeof rawReq === "object") {
+    for (const v of Object.values(rawReq as Record<string, unknown>)) {
+      const url = extractWidgetUrl(v);
+      if (url) return url;
+    }
+  }
+
+  // ── Shape 3: flat answers (label-keyed string values) ─────────────
+  if (answers) {
+    for (const [label, v] of Object.entries(answers)) {
+      if (!v) continue;
+      // Cheap pre-filter on the label so we don't try to parse every value as JSON.
+      const looksLikePic = /picture|photo|image|profilepic|headshot/i.test(label);
+      if (!looksLikePic && !v.includes("widget_metadata")) continue;
+      const url = extractWidgetUrl(v);
+      if (url) return url;
+    }
+  }
+
   return null;
+}
+
+/** Parse a value (string, object, or anything) and pull the first
+ *  widget_metadata.value[].url out of it. Returns absolute URL when
+ *  JotForm gives a /widget-uploads/ relative path. */
+function extractWidgetUrl(v: unknown): string | null {
+  try {
+    const parsed = typeof v === "string" ? JSON.parse(v) : v;
+    const items  = (parsed as { widget_metadata?: { value?: Array<{ url?: string }> } })?.widget_metadata?.value;
+    const u      = items?.find(it => typeof it?.url === "string")?.url;
+    if (!u) return null;
+    return u.startsWith("http") ? u : `https://www.jotform.com${u.startsWith("/") ? "" : "/"}${u}`;
+  } catch { return null; }
 }
 
 export interface EnrichmentInput {
@@ -201,8 +250,14 @@ export async function enrichProfile(input: EnrichmentInput): Promise<EnrichmentR
   // Picture URL — store it as a sidecar (NOT in acf.profile_picture
   // because that's a WP attachment id, not a URL). The caller is
   // responsible for the WP-media upload step if it wants the image
-  // bound to the profile.
-  const pictureUrl = responseRow ? pictureUrlFromFormResponse(responseRow.raw_payload as Record<string, unknown> | null) : null;
+  // bound to the profile. We check all three shapes (raw_payload.answers,
+  // raw_payload.rawRequest, and the flat answers dict).
+  const pictureUrl = responseRow
+    ? pictureUrlFromFormResponse(
+        responseRow.raw_payload as Record<string, unknown> | null,
+        responseRow.answers as Record<string, string> | null,
+      )
+    : null;
 
   return { mergedAcf: acf, pictureUrl, zohoLead, zohoDob };
 }
