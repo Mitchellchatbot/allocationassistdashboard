@@ -120,19 +120,19 @@ function buildChainVars(profile: StagedProfile): Record<string, string> {
   };
 
   const supabaseUrl = import.meta.env.VITE_SUPABASE_URL as string;
-  const PREVIEW_SERIF = `Cambria, Georgia, 'Times New Roman', serif`;
+  const PREVIEW_SANS = `-apple-system, BlinkMacSystemFont, 'Segoe UI', Helvetica, Arial, sans-serif`;
   const PREVIEW_LOGO  = `${supabaseUrl}/storage/v1/object/public/email-assets/logo.png`;
   const SIGNATURE_HTML = `
-<p style="margin:24px 0 0;font-family:${PREVIEW_SERIF};font-size:14px;color:#1a2332;line-height:1.5;">&nbsp;</p>
-<p style="color:#14b8a6;font-weight:700;font-size:14px;margin:0 0 2px;line-height:1.45;font-family:${PREVIEW_SERIF};">Warmest Regards,</p>
-<p style="color:#14b8a6;font-weight:700;font-size:14px;margin:0 0 2px;line-height:1.45;font-family:${PREVIEW_SERIF};">The Allocation Assist team</p>
-<p style="color:#475569;font-size:13px;margin:6px 0 2px;line-height:1.45;font-family:${PREVIEW_SERIF};"><span style="color:#14b8a6;">&#x1F4CD;</span> Jumeirah Lakes Towers, Dubai, UAE</p>
-<p style="font-size:13px;margin:2px 0 16px;line-height:1.45;font-family:${PREVIEW_SERIF};"><a href="https://www.allocationassist.com" style="color:#1d4ed8;text-decoration:underline;">www.allocationassist.com</a></p>
+<p style="margin:24px 0 0;font-family:${PREVIEW_SANS};font-size:14px;color:#1a2332;line-height:1.5;">&nbsp;</p>
+<p style="color:#14b8a6;font-weight:700;font-size:14px;margin:0 0 2px;line-height:1.45;font-family:${PREVIEW_SANS};">Warmest Regards,</p>
+<p style="color:#14b8a6;font-weight:700;font-size:14px;margin:0 0 2px;line-height:1.45;font-family:${PREVIEW_SANS};">The Allocation Assist team</p>
+<p style="color:#475569;font-size:13px;margin:6px 0 2px;line-height:1.45;font-family:${PREVIEW_SANS};"><span style="color:#14b8a6;">&#x1F4CD;</span> Jumeirah Lakes Towers, Dubai, UAE</p>
+<p style="font-size:13px;margin:2px 0 16px;line-height:1.45;font-family:${PREVIEW_SANS};"><a href="https://www.allocationassist.com" style="color:#1d4ed8;text-decoration:underline;">www.allocationassist.com</a></p>
 <table role="presentation" cellpadding="0" cellspacing="0" style="border-collapse:collapse;margin:8px 0 0;">
   <tr><td style="padding:0;"><img src="${PREVIEW_LOGO}" alt="Allocation Assist" width="64" height="64" style="display:block;border:0;outline:none;max-width:64px;width:64px;height:auto;" /></td></tr>
 </table>
-<p style="color:#14b8a6;font-weight:700;font-size:16px;margin:6px 0 0;letter-spacing:-0.2px;font-family:${PREVIEW_SERIF};">Allocation Assist</p>
-<p style="color:#94a3b8;font-size:11px;margin:2px 0 0;letter-spacing:0.4px;font-family:${PREVIEW_SERIF};">The source of workforce</p>`;
+<p style="color:#14b8a6;font-weight:700;font-size:16px;margin:6px 0 0;letter-spacing:-0.2px;font-family:${PREVIEW_SANS};">Allocation Assist</p>
+<p style="color:#94a3b8;font-size:11px;margin:2px 0 0;letter-spacing:0.4px;font-family:${PREVIEW_SANS};">The source of workforce</p>`;
   const SIGNATURE_TEXT = `
 Warmest Regards,
 The Allocation Assist team

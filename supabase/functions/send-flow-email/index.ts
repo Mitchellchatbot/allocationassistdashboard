@@ -152,10 +152,10 @@ function pickSender(assignedTo: string | null | undefined): { fromHeader: string
  *  blue website link → bottom teal "Allocation Assist" + grey tagline.
  *  No box, no logo image, no card frame — just a plain text-only block
  *  that lands looking identical to Plinky's manual sends. */
-// Serif stack that matches Plinky / Cambria / Georgia look in the
-// hospital intro reference. Outlook / Apple Mail / Gmail all fall back
-// to a sensible serif. Used by signature AND by the body wrapper.
-const SERIF_STACK = "Cambria, Georgia, 'Times New Roman', serif";
+// Sans-serif stack matching the user's reference (clean system font,
+// like Gmail / Apple Mail defaults). Used by signature AND by the
+// body wrapper so the whole email reads as a single typeface.
+const SANS_STACK = "-apple-system, BlinkMacSystemFont, 'Segoe UI', Helvetica, Arial, sans-serif";
 
 // Public URL for the logo image (uploaded to the email-assets bucket,
 // migration 20260608000004). Lives on Supabase Storage so email clients
@@ -164,11 +164,11 @@ const LOGO_URL = `${Deno.env.get("SUPABASE_URL") ?? ""}/storage/v1/object/public
 
 function signatureHtml(first: string, last: string, title: string, phone: string): string {
   const fullName = [first, last].filter(Boolean).join(" ") || "Allocation Assist";
-  const teal     = `color:#14b8a6;font-weight:700;font-size:14px;margin:0 0 2px;line-height:1.45;font-family:${SERIF_STACK};`;
-  const grey     = `color:#475569;font-size:13px;margin:6px 0 2px;line-height:1.45;font-family:${SERIF_STACK};`;
-  const linkLine = `font-size:13px;margin:2px 0 16px;line-height:1.45;font-family:${SERIF_STACK};`;
+  const teal     = `color:#14b8a6;font-weight:700;font-size:14px;margin:0 0 2px;line-height:1.45;font-family:${SANS_STACK};`;
+  const grey     = `color:#475569;font-size:13px;margin:6px 0 2px;line-height:1.45;font-family:${SANS_STACK};`;
+  const linkLine = `font-size:13px;margin:2px 0 16px;line-height:1.45;font-family:${SANS_STACK};`;
   return `
-<p style="margin:24px 0 0;font-family:${SERIF_STACK};font-size:14px;color:#1a2332;line-height:1.5;">&nbsp;</p>
+<p style="margin:24px 0 0;font-family:${SANS_STACK};font-size:14px;color:#1a2332;line-height:1.5;">&nbsp;</p>
 <p style="${teal}">Warmest Regards,</p>
 <p style="${teal}">${escapeHtml(fullName)}</p>
 ${title ? `<p style="${teal}">${escapeHtml(title)}</p>` : ""}
@@ -182,8 +182,8 @@ ${phone ? `<p style="${teal}">${escapeHtml(phone)}</p>` : ""}
     </td>
   </tr>
 </table>
-<p style="color:#14b8a6;font-weight:700;font-size:16px;margin:6px 0 0;letter-spacing:-0.2px;font-family:${SERIF_STACK};">Allocation Assist</p>
-<p style="color:#94a3b8;font-size:11px;margin:2px 0 0;letter-spacing:0.4px;font-family:${SERIF_STACK};">The source of workforce</p>`;
+<p style="color:#14b8a6;font-weight:700;font-size:16px;margin:6px 0 0;letter-spacing:-0.2px;font-family:${SANS_STACK};">Allocation Assist</p>
+<p style="color:#94a3b8;font-size:11px;margin:2px 0 0;letter-spacing:0.4px;font-family:${SANS_STACK};">The source of workforce</p>`;
 }
 function signatureText(first: string, last: string, title: string, phone: string): string {
   const fullName = [first, last].filter(Boolean).join(" ") || "Allocation Assist";
@@ -624,10 +624,10 @@ Deno.serve(async (req: Request) => {
   const plainBody     = plainifyBody(rawBody);
   const renderedBody  = render(plainBody, vars, true);
   // Wrap the rendered body in a serif container so every <p>/<table>
-  // inherits the Cambria/Georgia look from the Plinky reference email.
+  // inherits the sans-serif look from the user's reference email.
   // Inline styles on individual elements still win (signature keeps
   // its teal-bold weight, link colour, etc.).
-  const html          = `<div style="font-family:${SERIF_STACK};font-size:14px;color:#1a2332;line-height:1.55;">${renderedBody}</div>`;
+  const html          = `<div style="font-family:${SANS_STACK};font-size:14px;color:#1a2332;line-height:1.55;">${renderedBody}</div>`;
   const text          = render(tpl.body_text ?? "", vars);
 
   // Refuse to send templates that still carry the PLACEHOLDER stub copy

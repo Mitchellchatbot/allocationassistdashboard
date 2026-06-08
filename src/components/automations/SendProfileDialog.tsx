@@ -597,17 +597,17 @@ function PreviewConfirm({
 
 // Preview-side mirror of the server's signatureHtml() in
 // supabase/functions/send-flow-email/index.ts. Kept in sync so the
-// dashboard preview shows the same Cambria-serif signature + logo
+// dashboard preview shows the same sans-serif signature + logo
 // block the recipient will see, rather than a literal `{{signature}}`
 // token. When the server-side signature changes, update both.
 const PREVIEW_LOGO_URL = `${import.meta.env.VITE_SUPABASE_URL}/storage/v1/object/public/email-assets/logo.png`;
-const PREVIEW_SERIF    = `Cambria, Georgia, 'Times New Roman', serif`;
+const PREVIEW_SANS    = `-apple-system, BlinkMacSystemFont, 'Segoe UI', Helvetica, Arial, sans-serif`;
 const PREVIEW_SIGNATURE_HTML = `
-<p style="margin:24px 0 0;font-family:${PREVIEW_SERIF};font-size:14px;color:#1a2332;line-height:1.5;">&nbsp;</p>
-<p style="color:#14b8a6;font-weight:700;font-size:14px;margin:0 0 2px;line-height:1.45;font-family:${PREVIEW_SERIF};">Warmest Regards,</p>
-<p style="color:#14b8a6;font-weight:700;font-size:14px;margin:0 0 2px;line-height:1.45;font-family:${PREVIEW_SERIF};">The Allocation Assist team</p>
-<p style="color:#475569;font-size:13px;margin:6px 0 2px;line-height:1.45;font-family:${PREVIEW_SERIF};"><span style="color:#14b8a6;">&#x1F4CD;</span> Jumeirah Lakes Towers, Dubai, UAE</p>
-<p style="font-size:13px;margin:2px 0 16px;line-height:1.45;font-family:${PREVIEW_SERIF};"><a href="https://www.allocationassist.com" style="color:#1d4ed8;text-decoration:underline;">www.allocationassist.com</a></p>
+<p style="margin:24px 0 0;font-family:${PREVIEW_SANS};font-size:14px;color:#1a2332;line-height:1.5;">&nbsp;</p>
+<p style="color:#14b8a6;font-weight:700;font-size:14px;margin:0 0 2px;line-height:1.45;font-family:${PREVIEW_SANS};">Warmest Regards,</p>
+<p style="color:#14b8a6;font-weight:700;font-size:14px;margin:0 0 2px;line-height:1.45;font-family:${PREVIEW_SANS};">The Allocation Assist team</p>
+<p style="color:#475569;font-size:13px;margin:6px 0 2px;line-height:1.45;font-family:${PREVIEW_SANS};"><span style="color:#14b8a6;">&#x1F4CD;</span> Jumeirah Lakes Towers, Dubai, UAE</p>
+<p style="font-size:13px;margin:2px 0 16px;line-height:1.45;font-family:${PREVIEW_SANS};"><a href="https://www.allocationassist.com" style="color:#1d4ed8;text-decoration:underline;">www.allocationassist.com</a></p>
 <table role="presentation" cellpadding="0" cellspacing="0" style="border-collapse:collapse;margin:8px 0 0;">
   <tr>
     <td style="padding:0;">
@@ -615,8 +615,8 @@ const PREVIEW_SIGNATURE_HTML = `
     </td>
   </tr>
 </table>
-<p style="color:#14b8a6;font-weight:700;font-size:16px;margin:6px 0 0;letter-spacing:-0.2px;font-family:${PREVIEW_SERIF};">Allocation Assist</p>
-<p style="color:#94a3b8;font-size:11px;margin:2px 0 0;letter-spacing:0.4px;font-family:${PREVIEW_SERIF};">The source of workforce</p>`;
+<p style="color:#14b8a6;font-weight:700;font-size:16px;margin:6px 0 0;letter-spacing:-0.2px;font-family:${PREVIEW_SANS};">Allocation Assist</p>
+<p style="color:#94a3b8;font-size:11px;margin:2px 0 0;letter-spacing:0.4px;font-family:${PREVIEW_SANS};">The source of workforce</p>`;
 const PREVIEW_SIGNATURE_TEXT = `
 
 Warmest Regards,
