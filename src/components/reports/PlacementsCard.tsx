@@ -173,6 +173,17 @@ export function PlacementsCard({ rangeDays, hospital, specialty }: PlacementsCar
     );
   }, [rows, search]);
 
+  // Pagination — show 5 rows by default, bump +10 each click. Reset
+  // whenever the filter changes so the user always starts at the top
+  // of the new result set. Pure UI state; no fetching involved since
+  // the placement set is small enough to load in one shot.
+  const PAGE_FIRST = 5;
+  const PAGE_STEP  = 10;
+  const [visibleCount, setVisibleCount] = useState(PAGE_FIRST);
+  useEffect(() => { setVisibleCount(PAGE_FIRST); }, [search, hospital, specialty, rangeDays]);
+  const visibleRows = filtered.slice(0, visibleCount);
+  const remaining   = filtered.length - visibleRows.length;
+
   return (
     <Card>
       <CardHeader className="pb-2">
@@ -252,7 +263,7 @@ export function PlacementsCard({ rangeDays, hospital, specialty }: PlacementsCar
                 </TableRow>
               </TableHeader>
               <TableBody>
-                {filtered.map(r => (
+                {visibleRows.map(r => (
                   <TableRow
                     key={r.id}
                     onClick={() => setEditingId(r.id)}
@@ -272,6 +283,49 @@ export function PlacementsCard({ rangeDays, hospital, specialty }: PlacementsCar
                 ))}
               </TableBody>
             </Table>
+            {/* Show-more footer. Bumps +10 per click, or 'Show all' to
+                expand the rest in one go. Hidden once we're showing
+                everything, replaced with a small 'All N shown' note. */}
+            {filtered.length > 0 && (
+              <div className="flex items-center justify-between px-3 py-2 border-t bg-slate-50/50 text-[11px]">
+                <span className="text-muted-foreground tabular-nums">
+                  Showing {visibleRows.length} of {filtered.length}
+                </span>
+                {remaining > 0 ? (
+                  <div className="flex items-center gap-2">
+                    <Button
+                      size="sm"
+                      variant="outline"
+                      className="h-7 text-[11px]"
+                      onClick={() => setVisibleCount(c => c + PAGE_STEP)}
+                    >
+                      Show {Math.min(remaining, PAGE_STEP)} more
+                    </Button>
+                    {remaining > PAGE_STEP && (
+                      <Button
+                        size="sm"
+                        variant="ghost"
+                        className="h-7 text-[11px] text-muted-foreground"
+                        onClick={() => setVisibleCount(filtered.length)}
+                      >
+                        Show all {filtered.length}
+                      </Button>
+                    )}
+                  </div>
+                ) : (
+                  filtered.length > PAGE_FIRST && (
+                    <Button
+                      size="sm"
+                      variant="ghost"
+                      className="h-7 text-[11px] text-muted-foreground"
+                      onClick={() => setVisibleCount(PAGE_FIRST)}
+                    >
+                      Collapse to {PAGE_FIRST}
+                    </Button>
+                  )
+                )}
+              </div>
+            )}
           </div>
         )}
       </CardContent>
