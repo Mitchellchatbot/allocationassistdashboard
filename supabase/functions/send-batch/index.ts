@@ -26,32 +26,27 @@ const SUPABASE_SERVICE_ROLE_KEY = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY") ?? "
 const RESEND_API_KEY            = Deno.env.get("RESEND_API_KEY") ?? "";
 const MAIL_FROM                 = Deno.env.get("MAIL_FROM") ?? "Hospital Intro <onboarding@resend.dev>";
 
-// Allocation Assist branded signature — same block as send-flow-email,
-// duplicated here because Supabase edge functions can't share imports
-// without a _shared dir. Keep these two definitions in lock-step.
+// Plinky-style plain signature — mirrors signatureHtml() in
+// send-flow-email exactly. The "Allocation Assist" / "source of
+// workforce" lines are baked into the AA logo image (uploaded to
+// email-assets/logo.png), so the signature ends with that image
+// instead of duplicating the text below it.
+const SANS_STACK = "-apple-system, BlinkMacSystemFont, 'Segoe UI', Helvetica, Arial, sans-serif";
+const LOGO_URL   = `${Deno.env.get("SUPABASE_URL") ?? ""}/storage/v1/object/public/email-assets/logo.png`;
 const SIGNATURE_HTML = `
-<div style="margin-top:32px;font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Helvetica,Arial,sans-serif;color:#1a2332;">
-  <p style="margin:0 0 4px;color:#14b8a6;font-weight:700;font-size:15px;">Warmest Regards,</p>
-  <p style="margin:0 0 4px;color:#14b8a6;font-weight:700;font-size:15px;">The Allocation Assist team,</p>
-  <p style="margin:0 0 14px;color:#14b8a6;font-weight:700;font-size:15px;">Allocation Assist</p>
-  <p style="margin:0 0 4px;color:#475569;font-size:14px;">
-    <span style="display:inline-block;width:14px;color:#14b8a6;">&#9737;</span>
-    <strong style="color:#475569;font-weight:600;">Jumeirah Lakes Towers, Dubai, UAE</strong>
-  </p>
-  <p style="margin:0 0 12px;font-size:14px;">
-    <a href="https://www.allocationassist.com" style="color:#1d4ed8;text-decoration:underline;">www.allocationassist.com</a>
-  </p>
-  <p style="margin:0;color:#14b8a6;font-weight:700;font-size:18px;letter-spacing:-0.3px;">
-    Allocation Assist
-  </p>
-  <p style="margin:2px 0 0;color:#94a3b8;font-size:11px;letter-spacing:0.5px;">The source of workforce</p>
-</div>`;
+<p style="margin:24px 0 0;font-family:${SANS_STACK};font-size:14px;color:#1a2332;line-height:1.5;">&nbsp;</p>
+<p style="color:#14b8a6;font-weight:700;font-size:14px;margin:0 0 2px;line-height:1.45;font-family:${SANS_STACK};">Warmest Regards,</p>
+<p style="color:#14b8a6;font-weight:700;font-size:14px;margin:0 0 2px;line-height:1.45;font-family:${SANS_STACK};">The Allocation Assist team</p>
+<p style="color:#475569;font-size:13px;margin:6px 0 2px;line-height:1.45;font-family:${SANS_STACK};"><span style="color:#14b8a6;">&#x1F4CD;</span> Jumeirah Lakes Towers, Dubai, UAE</p>
+<p style="font-size:13px;margin:2px 0 16px;line-height:1.45;font-family:${SANS_STACK};"><a href="https://www.allocationassist.com" style="color:#1d4ed8;text-decoration:underline;">www.allocationassist.com</a></p>
+<table role="presentation" cellpadding="0" cellspacing="0" style="border-collapse:collapse;margin:8px 0 0;">
+  <tr><td style="padding:0;"><img src="${LOGO_URL}" alt="Allocation Assist — The source of workforce" width="180" height="119" style="display:block;border:0;outline:none;max-width:180px;width:180px;height:auto;" /></td></tr>
+</table>`;
 
 const SIGNATURE_TEXT = `
 
 Warmest Regards,
 The Allocation Assist team
-Allocation Assist
 
 Jumeirah Lakes Towers, Dubai, UAE
 www.allocationassist.com
@@ -190,8 +185,12 @@ Deno.serve(async (req: Request) => {
     .maybeSingle();
   if (tplErr || !tpl) return json({ ok: false, error: "Template profile_sent_hospital_batch not found" }, 500);
 
-  const subject = renderText(String(tpl.subject ?? ""), { specialty: specialtyLabel, hospital_contact_name: "Team" });
-  const html    = renderText(String(tpl.body_html ?? ""), { specialty: specialtyLabel, hospital_contact_name: "Team", doctors_table_html: doctorsTableHtml, signature: SIGNATURE_HTML });
+  const subject     = renderText(String(tpl.subject ?? ""), { specialty: specialtyLabel, hospital_contact_name: "Team" });
+  const renderedBody = renderText(String(tpl.body_html ?? ""), { specialty: specialtyLabel, hospital_contact_name: "Team", doctors_table_html: doctorsTableHtml, signature: SIGNATURE_HTML });
+  // Match send-flow-email: wrap the rendered body in a sans-serif
+  // <div> so every <p>/<table> inherits the AA dashboard's standard
+  // typeface unless the element overrides explicitly.
+  const html    = `<div style="font-family:${SANS_STACK};font-size:14px;color:#1a2332;line-height:1.55;">${renderedBody}</div>`;
   const text    = renderText(String(tpl.body_text ?? ""), { specialty: specialtyLabel, hospital_contact_name: "Team", doctors_table_html: stripHtml(doctorsTableHtml), signature: SIGNATURE_TEXT });
 
   // ── Dry run? ──────────────────────────────────────────────────────────

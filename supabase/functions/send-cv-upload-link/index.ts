@@ -94,24 +94,26 @@ Deno.serve(async (req: Request) => {
   // Resend
   const effectiveTo = TEST_OVERRIDE || doctor_email;
   const subject = `Quick step — upload your CV for Allocation Assist`;
-  const html = `<!DOCTYPE html>
-<html><body style="font-family: -apple-system, system-ui, sans-serif; color: #111; line-height: 1.5; padding: 24px; max-width: 560px; margin: 0 auto;">
-  <p>Hi ${escapeHtml(doctor_name)},</p>
-  <p>Quick step to keep your application moving — please upload your latest CV using the secure link below. It takes about 30 seconds.</p>
-  <p style="margin: 24px 0;">
-    <a href="${uploadUrl}" style="display: inline-block; background: #14a098; color: white; text-decoration: none; padding: 11px 22px; border-radius: 6px; font-size: 14px; font-weight: 600;">
-      Upload my CV
-    </a>
-  </p>
-  <p style="font-size: 12px; color: #555;">
-    Or paste this link into your browser:<br>
-    <a href="${uploadUrl}" style="color: #14a098; word-break: break-all;">${uploadUrl}</a>
-  </p>
-  <p style="font-size: 12px; color: #888; margin-top: 28px;">
-    This link is unique to you and expires in 90 days. PDF or Word docs work best (max 10MB).
-  </p>
-  <p>Thanks!<br>The Allocation Assist team</p>
-</body></html>`;
+  // Plain-text Plinky style — matches the automations templates (no teal
+  // button, no card frame, no rounded chrome). Single-image AA logo at
+  // the bottom of the signature picks up from email-assets bucket.
+  const sans       = "-apple-system, BlinkMacSystemFont, 'Segoe UI', Helvetica, Arial, sans-serif";
+  const logoUrl    = `${Deno.env.get("SUPABASE_URL") ?? ""}/storage/v1/object/public/email-assets/logo.png`;
+  const html = `<div style="font-family:${sans};font-size:14px;color:#1a2332;line-height:1.55;">
+<p>Hi ${escapeHtml(doctor_name)},</p>
+<p>Quick step to keep your application moving — please upload your latest CV using the secure link below. It takes about 30 seconds.</p>
+<p><a href="${uploadUrl}" style="color:#1d4ed8;text-decoration:underline;">${uploadUrl}</a></p>
+<p>This link is unique to you and expires in 90 days. PDF or Word docs work best (max 10MB).</p>
+<p>Thanks!</p>
+<p style="margin:24px 0 0;font-family:${sans};font-size:14px;color:#1a2332;line-height:1.5;">&nbsp;</p>
+<p style="color:#14b8a6;font-weight:700;font-size:14px;margin:0 0 2px;line-height:1.45;font-family:${sans};">Warmest Regards,</p>
+<p style="color:#14b8a6;font-weight:700;font-size:14px;margin:0 0 2px;line-height:1.45;font-family:${sans};">The Allocation Assist team</p>
+<p style="color:#475569;font-size:13px;margin:6px 0 2px;line-height:1.45;font-family:${sans};"><span style="color:#14b8a6;">&#x1F4CD;</span> Jumeirah Lakes Towers, Dubai, UAE</p>
+<p style="font-size:13px;margin:2px 0 16px;line-height:1.45;font-family:${sans};"><a href="https://www.allocationassist.com" style="color:#1d4ed8;text-decoration:underline;">www.allocationassist.com</a></p>
+<table role="presentation" cellpadding="0" cellspacing="0" style="border-collapse:collapse;margin:8px 0 0;">
+  <tr><td style="padding:0;"><img src="${logoUrl}" alt="Allocation Assist — The source of workforce" width="180" height="119" style="display:block;border:0;outline:none;max-width:180px;width:180px;height:auto;" /></td></tr>
+</table>
+</div>`;
   const text = `Hi ${doctor_name},
 
 Quick step to keep your application moving — please upload your latest CV using the secure link below. It takes about 30 seconds.
@@ -121,7 +123,12 @@ ${uploadUrl}
 This link is unique to you and expires in 90 days. PDF or Word docs work best (max 10MB).
 
 Thanks!
-The Allocation Assist team`;
+
+Warmest Regards,
+The Allocation Assist team
+
+Jumeirah Lakes Towers, Dubai, UAE
+www.allocationassist.com`;
 
   const resendRes = await fetch("https://api.resend.com/emails", {
     method: "POST",
