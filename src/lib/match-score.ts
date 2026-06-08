@@ -1,26 +1,29 @@
 /**
- * Phase 3 — Doctor ↔ Vacancy match scoring.
+ * Doctor ↔ Vacancy match scoring (max 100).
  *
- * Scores a doctor against a vacancy on every signal we have, not just
- * specialty. Returns the score plus a per-factor breakdown so the UI can
- * explain WHY it ranked a match high or low — "Specialty matches · DHA
- * license fits Dubai · 7 years experience · short notice fits high-priority
- * vacancy". Auditable, not a black box.
+ * User spec (2026-06-08): "specialty match should be half the score,
+ * then certificates and licenses on top." Rebalanced to:
  *
- * Factors (max 125 total):
- *   - Specialty match        (0-50)   exact / partial / none
- *   - License / region fit   (0-25)   DHA→Dubai, DOH→Abu Dhabi, MOH→UAE, etc.
- *   - Training country       (0-15)   trained in hospital's country / top-tier source
- *   - Years of experience    (0-10)   8+ best, scaled down
- *   - Notice ↔ urgency       (0-15)   short notice + high-pri vacancy = strong
- *   - Notes keyword overlap  (0-10)   bio/area_of_interest words mentioned in notes
+ *   Specialty match           (0-50)   = 50% baseline
+ *   Region-fit license        (0-25)   = the license the hospital's emirate needs (DHA/DOH/MOH/SCFHS/QCHP)
+ *   Extra licenses held       (0-10)   = +5 per additional regional license the doctor holds beyond the region-fit one
+ *   Training country          (0-7)    = trained in hospital's country / top-source (US/UK/CA/AU)
+ *   Years of experience       (0-5)    = 8+ best, scaled down
+ *   Notice ↔ urgency          (0-3)    = short notice on a high-priority vacancy
+ *   ───────────────────────────────────
+ *   TOTAL                       100
+ *
+ * A doctor with the right specialty + the right regional license alone
+ * scores 75 → 'strong', which is the team's intuition: those two
+ * factors together should already mark someone as a real candidate.
  *
  * Tiers used for badge colour:
- *   ≥ 80  strong
- *   ≥ 50  decent
- *   <  50 weak
+ *   ≥ 70  strong   (specialty + region-fit license alone clears this)
+ *   ≥ 40  decent   (specialty alone)
+ *   >  0  weak     (partial-tier specialty only)
+ *   =  0  none     (no specialty match — gated out)
  *
- * Source: meeting with Saif Ullah, May 20 2026.
+ * Source: original spec May 20 2026 (Saif); rebalance Jun 8 2026.
  */
 import type { Vacancy } from "@/hooks/use-vacancies";
 import { groupSpecialty, rollupSpecialty } from "@/lib/specialty-groups";
@@ -65,7 +68,7 @@ export interface MatchScore {
   summary:  string;
 }
 
-const MAX_SCORE = 125;
+const MAX_SCORE = 100;
 
 const TOP_SOURCE_COUNTRIES = new Set(["united states", "usa", "us", "canada", "united kingdom", "uk", "australia"]);
 
@@ -75,14 +78,6 @@ const NORTHERN_EMIRATES = new Set(["sharjah", "ras al khaimah", "rak", "ajman", 
 const SAUDI_CITIES = new Set(["riyadh", "jeddah", "dammam", "khobar", "mecca", "medina"]);
 const QATAR_CITIES = new Set(["doha", "al rayyan"]);
 
-const NOISE_WORDS = new Set([
-  "the","a","an","of","in","at","on","for","to","and","or","but","with","by","from",
-  "is","are","be","been","being","was","were","has","have","had","do","does","did",
-  "this","that","these","those","it","its","as","such","any","all","need","needs",
-  "looking","required","requires","minimum","experience","years","year","please",
-  "candidate","candidates","doctor","doctors","specialist","consultant","senior","junior",
-  "hospital","preferred","ideal","must","should","would","ability","skills","strong",
-]);
 
 export function scoreMatch(d: MatchCandidateDoctor, v: Vacancy, h: MatchCandidateHospital | null): MatchScore {
   const factors: MatchFactor[] = [];
@@ -111,33 +106,37 @@ export function scoreMatch(d: MatchCandidateDoctor, v: Vacancy, h: MatchCandidat
   const licResult = scoreLicense(d, h);
   if (licResult) factors.push(licResult);
 
-  // ── 3. Training country (0-15)
+  // ── 2b. Extra licenses the doctor holds beyond the region-fit one
+  //       (0-10, +5 each, capped). Two extra regional licenses = a
+  //       fully-credentialed doctor edge — the team's intuition.
+  const extras = scoreExtraLicenses(d, h);
+  if (extras.points > 0) factors.push(extras);
+
+  // ── 3. Training country (0-7)
   const trainPts = scoreTraining(d.country_training, h?.country, d.nationality);
   if (trainPts.points > 0) factors.push(trainPts);
 
-  // ── 4. Years of experience (0-10)
+  // ── 4. Years of experience (0-5)
   const expPts = scoreExperience(d.years_experience);
   if (expPts.points > 0) factors.push(expPts);
 
-  // ── 5. Notice period vs urgency (0-15)
+  // ── 5. Notice period vs urgency (0-3)
   const urg = scoreUrgency(d.notice_period, v.priority);
   if (urg.points > 0) factors.push(urg);
 
-  // ── 6. Notes keyword overlap (0-10)
-  const notes = scoreNotes(d, v.notes);
-  if (notes.points > 0) factors.push(notes);
+  // Notes overlap dropped from the rebalanced model — it was a 0-10
+  // signal that often noised up the score with coincidental keyword
+  // matches. License weight absorbs the budget instead.
+  void v.notes;
 
   const total = factors.reduce((s, f) => s + f.points, 0);
   const clamped = Math.max(0, Math.min(MAX_SCORE, total));
   const pct = Math.round((clamped / MAX_SCORE) * 100);
-  // Tier thresholds calibrated against real Zoho data. License coverage in
-  // Saudi/Qatar is rare; many otherwise-good candidates score in the 35–60
-  // range from specialty + partial training/experience alone. Old cutoffs
-  // (80/50) sent almost everyone to "Long shots" — which is collapsed by
-  // default → user saw "50 matches" but no rows.
+  // Tier thresholds. Specialty + region-fit license = 75 → strong;
+  // specialty alone = 50 → decent; partial-tier specialty only = weak.
   const tier: MatchScore["tier"] =
-    clamped >= 65 ? "strong" :
-    clamped >= 35 ? "decent" :
+    clamped >= 70 ? "strong" :
+    clamped >= 40 ? "decent" :
     clamped > 0   ? "weak"   : "none";
 
   return {
@@ -301,29 +300,55 @@ function scoreLicense(d: MatchCandidateDoctor, h: MatchCandidateHospital | null)
   return null;
 }
 
+/** Bonus for regional licenses beyond the one the hospital's emirate
+ *  specifically needs. +5 per extra, capped at +10 (i.e. holding TWO
+ *  extra regional licenses ≈ a fully-credentialed doctor edge). Doesn't
+ *  fire when there's no hospital context (the region-fit factor itself
+ *  is null in that case). */
+function scoreExtraLicenses(d: MatchCandidateDoctor, h: MatchCandidateHospital | null): MatchFactor {
+  if (!h) return { label: "", points: 0 };
+  const city    = normalize(h.city ?? "");
+  const country = normalize(h.country ?? "");
+
+  // Identify which of the doctor's regional licenses is the "region-fit"
+  // one (already credited via scoreLicense) so we don't double-count it.
+  let regionFit: "dha" | "doh" | "moh" | null = null;
+  if      (DUBAI_CITIES.has(city))      regionFit = "dha";
+  else if (ABU_DHABI_CITIES.has(city))  regionFit = "doh";
+  else if (NORTHERN_EMIRATES.has(city) || country === "uae" || country === "united arab emirates") regionFit = "moh";
+
+  const extras: string[] = [];
+  if (d.has_dha && regionFit !== "dha") extras.push("DHA");
+  if (d.has_doh && regionFit !== "doh") extras.push("DOH");
+  if (d.has_moh && regionFit !== "moh") extras.push("MOH");
+  if (extras.length === 0) return { label: "", points: 0 };
+  const points = Math.min(10, extras.length * 5);
+  return { label: `Also holds ${extras.join(" + ")} (extra licenses)`, points };
+}
+
 function scoreTraining(country: string | null, hospitalCountry: string | null | undefined, nationality: string | null): MatchFactor {
   const c  = normalize(country ?? "");
   const hc = normalize(hospitalCountry ?? "");
   const n  = normalize(nationality ?? "");
   if (!c && !n) return { label: "", points: 0 };
   if (c && hc && (c === hc || c.includes(hc) || hc.includes(c))) {
-    return { label: `Trained in ${country}`, points: 15 };
+    return { label: `Trained in ${country}`, points: 7 };
   }
   if (c && TOP_SOURCE_COUNTRIES.has(c)) {
-    return { label: `Trained in ${country} (top-source)`, points: 10 };
+    return { label: `Trained in ${country} (top-source)`, points: 5 };
   }
   if (n && TOP_SOURCE_COUNTRIES.has(n)) {
-    return { label: `${nationality} national`, points: 6 };
+    return { label: `${nationality} national`, points: 3 };
   }
   return { label: "", points: 0 };
 }
 
 function scoreExperience(years: number | null): MatchFactor {
   if (years == null) return { label: "", points: 0 };
-  if (years >= 8)   return { label: `${years}y experience`, points: 10 };
-  if (years >= 5)   return { label: `${years}y experience`, points: 7 };
-  if (years >= 3)   return { label: `${years}y experience`, points: 5 };
-  if (years >= 1)   return { label: `${years}y experience`, points: 2 };
+  if (years >= 8)   return { label: `${years}y experience`, points: 5 };
+  if (years >= 5)   return { label: `${years}y experience`, points: 4 };
+  if (years >= 3)   return { label: `${years}y experience`, points: 2 };
+  if (years >= 1)   return { label: `${years}y experience`, points: 1 };
   return { label: "", points: 0 };
 }
 
@@ -332,34 +357,15 @@ function scoreUrgency(notice: string | null, priority: Vacancy["priority"]): Mat
   const weeks = parseNoticeWeeks(notice);
   if (weeks == null) return { label: "", points: 0 };
   if (priority === "high") {
-    if (weeks <= 2) return { label: `Short notice (${notice}) · high-pri fit`, points: 15 };
-    if (weeks <= 4) return { label: `${notice} notice · high-pri fit`,        points: 10 };
-    return { label: `${notice} notice (long for high-pri)`, points: 2 };
+    if (weeks <= 2) return { label: `Short notice (${notice}) · high-pri fit`, points: 3 };
+    if (weeks <= 4) return { label: `${notice} notice · high-pri fit`,        points: 2 };
+    return { label: `${notice} notice (long for high-pri)`, points: 0 };
   }
   if (priority === "medium") {
-    if (weeks <= 8) return { label: `${notice} notice fits medium-pri`,       points: 8 };
+    if (weeks <= 8) return { label: `${notice} notice fits medium-pri`,       points: 1 };
     return { label: "", points: 0 };
   }
-  // low priority: any notice is fine
-  return { label: `${notice} notice`, points: 3 };
-}
-
-function scoreNotes(d: MatchCandidateDoctor, notes: string | null): MatchFactor {
-  if (!notes) return { label: "", points: 0 };
-  const bag = ((d.bio ?? "") + " " + (d.area_of_interest ?? "")).toLowerCase();
-  if (!bag.trim()) return { label: "", points: 0 };
-  const keywords = notes.toLowerCase()
-    .split(/[^a-z]+/)
-    .filter(w => w.length > 4 && !NOISE_WORDS.has(w));
-  if (keywords.length === 0) return { label: "", points: 0 };
-  const hits = new Set<string>();
-  for (const k of keywords) {
-    if (bag.includes(k)) hits.add(k);
-  }
-  if (hits.size === 0) return { label: "", points: 0 };
-  const points = Math.min(10, hits.size * 2);
-  const sample = Array.from(hits).slice(0, 3).join(", ");
-  return { label: `Notes match: ${sample}`, points };
+  return { label: `${notice} notice`, points: 1 };
 }
 
 function parseNoticeWeeks(notice: string): number | null {
