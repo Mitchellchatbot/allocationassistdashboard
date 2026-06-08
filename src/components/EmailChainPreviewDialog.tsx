@@ -14,11 +14,11 @@ import type { StagedProfile } from "@/hooks/use-wp-candidates";
  * anything goes out). Mirrors the STAGE_ROUTES order in
  * supabase/functions/send-flow-email/index.ts.
  *
- * Grouped by flow (Onboarding → Profile Sent → Shortlist → Interview
- * → Contract Check-in → Relocation → Second Payment) with each entry
- * collapsible. The default-expanded section is whichever flow the
- * caller is most likely about to send (passed via initialFlowKey),
- * fallback to profile_sent since that's the demo's centerpiece.
+ * Grouped by flow (Profile Sent → Shortlist → Interview → Contract
+ * Check-in → Relocation → Second Payment) with each entry collapsible.
+ * The default-expanded section is whichever flow the caller is most
+ * likely about to send (passed via initialFlowKey), fallback to
+ * profile_sent since that's the demo's centerpiece.
  */
 
 interface ChainEntry {
@@ -37,15 +37,6 @@ interface ChainGroup {
 }
 
 const CHAIN: ChainGroup[] = [
-  {
-    flowKey: "onboarding",
-    title:   "Onboarding",
-    emoji:   "📝",
-    steps: [
-      { templateKey: "onboarding_welcome",        label: "Welcome",                  recipient: "doctor",   trigger: "Fires when a new doctor is added." },
-      { templateKey: "onboarding_form_reminder",  label: "Reminder to fill form",    recipient: "doctor",   trigger: "Fires if the form isn't returned in 24h." },
-    ],
-  },
   {
     flowKey: "profile_sent",
     title:   "Profile Sent",
@@ -215,7 +206,7 @@ export function EmailChainPreviewDialog({
             Full email chain for {profile.full_name ?? profile.email ?? "this doctor"}
           </DialogTitle>
           <DialogDescription className="text-[11px]">
-            Every email that fires across the lifecycle, rendered with this doctor's data. {totalEmails} emails in 7 flows. Tokens use a placeholder hospital — actual send swaps in the real one.
+            Every email that fires across the lifecycle, rendered with this doctor's data. {totalEmails} emails in {CHAIN.length} flows. Tokens use a placeholder hospital — actual send swaps in the real one.
           </DialogDescription>
         </DialogHeader>
 
