@@ -611,12 +611,10 @@ const PREVIEW_SIGNATURE_HTML = `
 <table role="presentation" cellpadding="0" cellspacing="0" style="border-collapse:collapse;margin:8px 0 0;">
   <tr>
     <td style="padding:0;">
-      <img src="${PREVIEW_LOGO_URL}" alt="Allocation Assist" width="64" height="64" style="display:block;border:0;outline:none;max-width:64px;width:64px;height:auto;" />
+      <img src="${PREVIEW_LOGO_URL}" alt="Allocation Assist — The source of workforce" width="180" height="119" style="display:block;border:0;outline:none;max-width:180px;width:180px;height:auto;" />
     </td>
   </tr>
-</table>
-<p style="color:#14b8a6;font-weight:700;font-size:16px;margin:6px 0 0;letter-spacing:-0.2px;font-family:${PREVIEW_SANS};">Allocation Assist</p>
-<p style="color:#94a3b8;font-size:11px;margin:2px 0 0;letter-spacing:0.4px;font-family:${PREVIEW_SANS};">The source of workforce</p>`;
+</table>`;
 const PREVIEW_SIGNATURE_TEXT = `
 
 Warmest Regards,
@@ -625,8 +623,6 @@ The Allocation Assist team
 Jumeirah Lakes Towers, Dubai, UAE
 www.allocationassist.com
 
-Allocation Assist
-The source of workforce
 `;
 
 /** True when the string is recognisably HTML (has at least one tag). The

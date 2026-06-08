@@ -129,10 +129,8 @@ function buildChainVars(profile: StagedProfile): Record<string, string> {
 <p style="color:#475569;font-size:13px;margin:6px 0 2px;line-height:1.45;font-family:${PREVIEW_SANS};"><span style="color:#14b8a6;">&#x1F4CD;</span> Jumeirah Lakes Towers, Dubai, UAE</p>
 <p style="font-size:13px;margin:2px 0 16px;line-height:1.45;font-family:${PREVIEW_SANS};"><a href="https://www.allocationassist.com" style="color:#1d4ed8;text-decoration:underline;">www.allocationassist.com</a></p>
 <table role="presentation" cellpadding="0" cellspacing="0" style="border-collapse:collapse;margin:8px 0 0;">
-  <tr><td style="padding:0;"><img src="${PREVIEW_LOGO}" alt="Allocation Assist" width="64" height="64" style="display:block;border:0;outline:none;max-width:64px;width:64px;height:auto;" /></td></tr>
-</table>
-<p style="color:#14b8a6;font-weight:700;font-size:16px;margin:6px 0 0;letter-spacing:-0.2px;font-family:${PREVIEW_SANS};">Allocation Assist</p>
-<p style="color:#94a3b8;font-size:11px;margin:2px 0 0;letter-spacing:0.4px;font-family:${PREVIEW_SANS};">The source of workforce</p>`;
+  <tr><td style="padding:0;"><img src="${PREVIEW_LOGO}" alt="Allocation Assist — The source of workforce" width="180" height="119" style="display:block;border:0;outline:none;max-width:180px;width:180px;height:auto;" /></td></tr>
+</table>`;
   const SIGNATURE_TEXT = `
 Warmest Regards,
 The Allocation Assist team
@@ -140,8 +138,6 @@ The Allocation Assist team
 Jumeirah Lakes Towers, Dubai, UAE
 www.allocationassist.com
 
-Allocation Assist
-The source of workforce
 `;
 
   return {
