@@ -474,6 +474,41 @@ Deno.serve(async (req: Request) => {
     }
   }
 
+  // ── Attach the relocation-guide PDFs ────────────────────────────────────
+  // Ammar sends the guide as PDF attachments, not a link. The files live in
+  // the public `relocation-guides` bucket: the shared pack (schools, apps,
+  // rental prices) sits in `_default/`, and each city's own relocation guide
+  // sits in its slug folder (dubai/, abu-dhabi/, al-ain/, sharjah/…). We
+  // attach `_default` + the city folder, so each doctor gets the shared pack
+  // PLUS their city's guide. (A same-named file in the city folder overrides
+  // the default.) Resend fetches each `path` URL; we encode it so filenames
+  // with spaces work.
+  const relocationAttachments: Array<{ filename: string; path: string }> = [];
+  if (run.current_stage === "send_relocation_email") {
+    try {
+      const sbUrl    = Deno.env.get("SUPABASE_URL") ?? "";
+      const citySlug = String(hospital?.city ?? "")
+        .toLowerCase().trim().replace(/\s+/g, "-");
+      const byName = new Map<string, string>();   // filename → public URL
+      for (const folder of ["_default", citySlug].filter(Boolean)) {
+        const { data: files } = await supabase.storage
+          .from("relocation-guides")
+          .list(folder, { limit: 100, sortBy: { column: "name", order: "asc" } });
+        for (const f of (files ?? [])) {
+          if (!f.name.toLowerCase().endsWith(".pdf")) continue;
+          byName.set(
+            f.name,
+            `${sbUrl}/storage/v1/object/public/relocation-guides/${folder}/${encodeURIComponent(f.name)}`,
+          );
+        }
+      }
+      for (const [filename, path] of byName) relocationAttachments.push({ filename, path });
+      console.log(`[send-flow-email] relocation attachments for "${hospital?.city ?? "?"}": ${relocationAttachments.length}`);
+    } catch (e) {
+      console.warn("[send-flow-email] relocation attachment listing failed (non-fatal):", e);
+    }
+  }
+
   // ── Mint shared-profile token for profile_sent_hospital sends ───────────
   // Each hospital recipient gets their own tokenised URL pointing at the
   // dashboard's /shared-profile/:token route (Ammar 2026-06-03 — hospitals
@@ -744,6 +779,9 @@ Deno.serve(async (req: Request) => {
         html,
         text,
         headers,
+        // Resend fetches each `path` URL and attaches it. Only the relocation
+        // stage populates this; everything else sends with no attachments.
+        attachments: relocationAttachments.length > 0 ? relocationAttachments : undefined,
       }),
     });
   } catch (e) {
