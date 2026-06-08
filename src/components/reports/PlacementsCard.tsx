@@ -23,7 +23,8 @@ import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from "@/components/ui/dialog";
-import { Briefcase, ListChecks, Calendar, AlertCircle, CheckCircle2, Plus, Search, UserSquare, Trash2, Upload, Link2 } from "lucide-react";
+import { Briefcase, ListChecks, Calendar, AlertCircle, CheckCircle2, Plus, Search, UserSquare, Trash2, Upload, Link2, ChevronDown, ChevronRight } from "lucide-react";
+import { Collapsible, CollapsibleTrigger, CollapsibleContent } from "@/components/ui/collapsible";
 import { supabase } from "@/lib/supabase";
 import {
   usePlacementAttempts, useUpsertPlacementAttempt, useDeletePlacementAttempt,
@@ -68,6 +69,11 @@ export interface PlacementsCardProps {
   hospital?:  string | null;
   /** Specialty filter (case-insensitive substring on doctor_specialty). */
   specialty?: string | null;
+  /** Collapsible control (summary-first restructure). When provided, the
+   *  card header doubles as a Collapsible trigger so the heavy table can
+   *  stay closed on first paint. Omit to render always-expanded. */
+  open?:         boolean;
+  onOpenChange?: (open: boolean) => void;
 }
 
 /** Most recent milestone date on a placement_attempt — used to decide
@@ -76,7 +82,11 @@ function latestMilestone(r: PlacementAttempt): string | null {
   return r.paid_at || r.joined_at || r.start_date || r.signed_at || r.offered_at || r.interviewed_at || r.shortlisted_at;
 }
 
-export function PlacementsCard({ rangeDays, hospital, specialty }: PlacementsCardProps = {}) {
+export function PlacementsCard({ rangeDays, hospital, specialty, open, onOpenChange }: PlacementsCardProps = {}) {
+  // When the caller drives a Collapsible, header is the trigger + body is
+  // gated. When not, the section is permanently open (legacy behaviour).
+  const collapsible = onOpenChange !== undefined;
+  const isOpen = collapsible ? !!open : true;
   const { data: rawRows = [], isLoading } = usePlacementAttempts();
   // Apply rangeDays + hospital + specialty filters from the Reports
   // top-bar before anything else. Search-bar filtering happens on the
@@ -184,22 +194,41 @@ export function PlacementsCard({ rangeDays, hospital, specialty }: PlacementsCar
   const visibleRows = filtered.slice(0, visibleCount);
   const remaining   = filtered.length - visibleRows.length;
 
+  // The header title + chevron is the collapse trigger; the action
+  // buttons sit OUTSIDE it so clicking Import / New placement doesn't
+  // toggle the section. When not collapsible, the trigger is a plain div.
+  const titleBlock = (
+    <div className="min-w-0">
+      <CardTitle className="text-base flex items-center gap-2">
+        {collapsible && (
+          isOpen
+            ? <ChevronDown  className="h-4 w-4 text-slate-400 shrink-0" />
+            : <ChevronRight className="h-4 w-4 text-slate-400 shrink-0" />
+        )}
+        <Briefcase className="h-4 w-4 text-emerald-600" />
+        Placements
+        <Badge variant="outline" className="text-[10px] bg-slate-50">
+          {rows.length === rawRows.length ? rows.length : `${rows.length} of ${rawRows.length}`}
+        </Badge>
+      </CardTitle>
+      <CardDescription className="text-[11px]">
+        One row per (doctor, hospital) pair — the same doctor can appear multiple times (e.g. shortlisted at 4 hospitals). Replaces Ammar's Hammad Google sheet. Stored in our portal, <strong>not Zoho</strong>. 45-day clock starts on Joined.
+      </CardDescription>
+    </div>
+  );
+
   return (
     <Card>
+      <Collapsible open={isOpen} onOpenChange={onOpenChange ?? (() => {})}>
       <CardHeader className="pb-2">
         <div className="flex items-start justify-between gap-3 flex-wrap">
-          <div>
-            <CardTitle className="text-base flex items-center gap-2">
-              <Briefcase className="h-4 w-4 text-emerald-600" />
-              Placements
-              <Badge variant="outline" className="text-[10px] bg-slate-50">
-                {rows.length === rawRows.length ? rows.length : `${rows.length} of ${rawRows.length}`}
-              </Badge>
-            </CardTitle>
-            <CardDescription className="text-[11px]">
-              One row per (doctor, hospital) pair — the same doctor can appear multiple times (e.g. shortlisted at 4 hospitals). Replaces Ammar's Hammad Google sheet. Stored in our portal, <strong>not Zoho</strong>. 45-day clock starts on Joined.
-            </CardDescription>
-          </div>
+          {collapsible ? (
+            <CollapsibleTrigger asChild>
+              <button type="button" className="text-left min-w-0 cursor-pointer">
+                {titleBlock}
+              </button>
+            </CollapsibleTrigger>
+          ) : titleBlock}
           <div className="flex items-center gap-2 flex-wrap">
             {unlinkedCount > 0 && (
               <Button size="sm" variant="outline" onClick={handleRelinkToZoho} disabled={relinking}
@@ -217,6 +246,7 @@ export function PlacementsCard({ rangeDays, hospital, specialty }: PlacementsCar
           </div>
         </div>
       </CardHeader>
+      <CollapsibleContent>
       <CardContent className="px-0 pt-0">
         {/* Search */}
         <div className="px-4 pb-2">
@@ -329,6 +359,8 @@ export function PlacementsCard({ rangeDays, hospital, specialty }: PlacementsCar
           </div>
         )}
       </CardContent>
+      </CollapsibleContent>
+      </Collapsible>
 
       {editing && (
         <AttemptEditDialog

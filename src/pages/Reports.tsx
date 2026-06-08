@@ -12,6 +12,7 @@ import {
   BarChart3, Users, Building2, TrendingUp, TrendingDown, Minus,
   AlertCircle, Calendar, Activity, Sparkles, Send, UserCheck,
   CalendarCheck, FileSignature, MapPin, CreditCard, CheckCircle2, ArrowRight,
+  Inbox, CalendarRange, ServerCog,
 } from "lucide-react";
 import { ResponsiveContainer, LineChart, Line, XAxis, YAxis, Tooltip as ChartTooltip, CartesianGrid, Legend } from "recharts";
 import { useReportingMetrics } from "@/hooks/use-reporting-metrics";
@@ -24,6 +25,9 @@ import type { DoctorLifecycle } from "@/hooks/use-doctor-lifecycle";
 import { PlacementsCard } from "@/components/reports/PlacementsCard";
 import { RecapCard } from "@/components/reports/RecapCard";
 import { DoctorTable } from "@/components/reports/DoctorTable";
+import { CollapsibleSection, ScopeChip } from "@/components/reports/CollapsibleSection";
+import { TopOfFunnelContent, useTopOfFunnelStats } from "@/components/reports/TopOfFunnelCard";
+import { OperationsContent, useOperationsSummary } from "@/components/reports/OperationsCard";
 
 /**
  * Phase 5 — Hospital Introduction Department reporting page.
@@ -52,6 +56,21 @@ export default function Reports() {
 
   const bundle = useReportingMetrics(filters);
 
+  // Summary-first restructure (2026-06-08): one open-section map drives
+  // every Collapsible. Everything starts CLOSED except the KPI strip +
+  // trend chart (which aren't in the map — always rendered open). Pure
+  // UI state, nothing persisted.
+  const [open, setOpen] = useState<Record<string, boolean>>({});
+  const toggle = (k: string) => (v: boolean) => setOpen(s => ({ ...s, [k]: v }));
+
+  // Headline numbers for the collapsed triggers, so the key figure is
+  // visible WITHOUT expanding the section.
+  const { data: funnelStats, isLoading: funnelLoading } = useTopOfFunnelStats();
+  const opsSummary = useOperationsSummary();
+
+  const hospitalFilter  = hospital  === "__all" ? null : hospital;
+  const specialtyFilter = specialty === "__all" ? null : specialty;
+
   return (
     <DashboardLayout>
       <div className="space-y-6">
@@ -74,19 +93,34 @@ export default function Reports() {
           />
         </div>
 
+        {/* ── KPI strip — the single canonical home for absolute totals.
+            Split into two labeled clusters so the 7-wide rainbow reads as
+            two ideas (work-in-progress vs results) instead of one flat
+            row. Always open. ─────────────────────────────────────────── */}
         <KpiStrip bundle={bundle} />
 
-        {/* This week vs last week + this month vs last month, per
-            placement milestone (Mitchell asked on the 2026-06-03 call:
-            'so we could see the KPIs trending here week to week and
-            month to month'). The recap is fixed-period by design —
-            it ignores rangeDays but DOES honour hospital + specialty
-            so the filter feels consistent. */}
-        <RecapCard
-          hospital={hospital   === "__all" ? null : hospital}
-          specialty={specialty === "__all" ? null : specialty}
-        />
+        {/* ── Top of funnel — what's arriving before the HI pipeline even
+            starts (submissions + outreach coverage). Default-collapsed;
+            the trigger shows the all-time submission count. ──────────── */}
+        <CollapsibleSection
+          title="Top of funnel"
+          icon={<Inbox className="h-4 w-4 text-slate-600" />}
+          description="Form submissions + outreach coverage (new → contacted → qualified). Independent of the date filter above."
+          summary={
+            <SummaryBadge
+              loading={funnelLoading}
+              value={funnelStats?.total ?? 0}
+              label="submissions"
+            />
+          }
+          open={!!open.funnel}
+          onOpenChange={toggle("funnel")}
+        >
+          <TopOfFunnelContent stats={funnelStats} loading={funnelLoading} />
+        </CollapsibleSection>
 
+        {/* ── Weekly trend + Doctors on the way — kept OPEN (the trend is
+            the at-a-glance health line; the chase list is actionable). ── */}
         <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
           <Card className="lg:col-span-2">
             <CardHeader className="pb-2">
@@ -119,59 +153,122 @@ export default function Reports() {
           </Card>
         </div>
 
-        <Card>
-          <CardHeader className="pb-2">
-            <CardTitle className="text-base flex items-center gap-2">
-              <Users className="h-4 w-4 text-violet-600" />
-              Team member breakdown
-            </CardTitle>
-            <CardDescription className="text-[11px]">
-              Rolls up flow actions by whoever triggered them. Signed counts will populate as new contracts are completed under this version.
-            </CardDescription>
-          </CardHeader>
-          <CardContent className="p-0">
-            <TeamTable rows={bundle.team} loading={bundle.isLoading} />
-          </CardContent>
-        </Card>
+        {/* ── Recap — week/month deltas. DELTAS ONLY now (absolutes live
+            in the KPI strip). Fixed-week by design, so a scope chip flags
+            that it ignores the date filter. ─────────────────────────── */}
+        <CollapsibleSection
+          title="Weekly + Monthly recap"
+          icon={<CalendarRange className="h-4 w-4 text-teal-600" />}
+          scope={<ScopeChip>This / last week + month</ScopeChip>}
+          description="Change in each placement-attempt milestone vs the prior period (the KPI strip up top holds the absolute totals). One doctor shortlisted at 4 hospitals = 4 shortlists."
+          open={!!open.recap}
+          onOpenChange={toggle("recap")}
+        >
+          <RecapCard hospital={hospitalFilter} specialty={specialtyFilter} />
+        </CollapsibleSection>
 
-        {/* Placements (Ammar 2026-06-03) — replaces the Hammad sheet.
-            Per-(doctor, hospital) milestones + 45-day payment clock.
-            Honours the Reports top-bar filters (range / hospital /
-            specialty). */}
-        <PlacementsCard
-          rangeDays={rangeDays}
-          hospital={hospital   === "__all" ? null : hospital}
-          specialty={specialty === "__all" ? null : specialty}
-        />
+        {/* ── Pipeline health / Operations — the machinery behind the
+            funnel: contracts, CV backlog, batch sends, candidate pool.
+            Default-collapsed; trigger flags anything that needs a chase. ── */}
+        <CollapsibleSection
+          title="Pipeline health / Operations"
+          icon={<ServerCog className="h-4 w-4 text-slate-600" />}
+          scope={<ScopeChip>Recent ops</ScopeChip>}
+          description="Contracts e-sign funnel, CV upload backlog, batch sends, and the candidate pool. Reflects recent operations, not the date filter."
+          summary={
+            <div className="flex items-center gap-1.5 justify-end flex-wrap">
+              <Badge variant="outline" className="text-[9px] bg-emerald-50 text-emerald-700 border-emerald-200">
+                {opsSummary.contractsSigned} signed
+              </Badge>
+              {opsSummary.cvPending > 0 && (
+                <Badge variant="outline" className="text-[9px] bg-amber-50 text-amber-700 border-amber-200">
+                  {opsSummary.cvPending} CV pending
+                </Badge>
+              )}
+              {opsSummary.failedBatches > 0 && (
+                <Badge variant="outline" className="text-[9px] bg-rose-50 text-rose-700 border-rose-200">
+                  {opsSummary.failedBatches} batch failed
+                </Badge>
+              )}
+            </div>
+          }
+          open={!!open.ops}
+          onOpenChange={toggle("ops")}
+        >
+          <OperationsContent />
+        </CollapsibleSection>
 
-        {/* Hospital relationships — surfaced above the per-doctor
-            table so the team scans accounts first (who's warming /
-            cooling) before drilling into individual doctors. */}
-        <Card>
-          <CardHeader className="pb-2">
-            <CardTitle className="text-base flex items-center gap-2">
-              <Building2 className="h-4 w-4 text-sky-600" />
-              Hospital relationships
-            </CardTitle>
-            <CardDescription className="text-[11px]">
-              Open vacancies + activity + relationship health. Warming/cooling vs the prior {rangeDays}-day window.
-            </CardDescription>
-          </CardHeader>
-          <CardContent className="p-0">
-            <HospitalTable rows={bundle.hospitals} loading={bundle.isLoading} />
-          </CardContent>
-        </Card>
+        {/* ── Breakdowns — the heavy per-entity tables, grouped under one
+            labeled region. All default-collapsed so first paint stays
+            light. ───────────────────────────────────────────────────── */}
+        <div className="pt-2">
+          <h2 className="text-[11px] font-semibold uppercase tracking-wider text-muted-foreground mb-3">
+            Breakdowns
+          </h2>
+          <div className="space-y-6">
+            {/* By team */}
+            <CollapsibleSection
+              title="By team member"
+              icon={<Users className="h-4 w-4 text-violet-600" />}
+              description="Rolls up flow actions by whoever triggered them. Signed counts will populate as new contracts are completed under this version."
+              summary={<SummaryBadge loading={bundle.isLoading} value={bundle.team.length} label="members" />}
+              open={!!open.team}
+              onOpenChange={toggle("team")}
+              flush
+            >
+              <TeamTable rows={bundle.team} loading={bundle.isLoading} />
+            </CollapsibleSection>
 
-        {/* Per-doctor breakdown — companion to the hospital table above.
-            Ammar 2026-06-03: 'add another table over here for the
-            individual doctors themselves'. */}
-        <DoctorTable
-          rangeDays={rangeDays}
-          hospital={hospital   === "__all" ? null : hospital}
-          specialty={specialty === "__all" ? null : specialty}
-        />
+            {/* By hospital — surfaced above the per-doctor table so the team
+                scans accounts first (who's warming / cooling). */}
+            <CollapsibleSection
+              title="By hospital"
+              icon={<Building2 className="h-4 w-4 text-sky-600" />}
+              description={`Open vacancies + activity + relationship health. Warming/cooling vs the prior ${rangeDays}-day window.`}
+              summary={<SummaryBadge loading={bundle.isLoading} value={bundle.hospitals.length} label="hospitals" />}
+              open={!!open.hospital}
+              onOpenChange={toggle("hospital")}
+              flush
+            >
+              <HospitalTable rows={bundle.hospitals} loading={bundle.isLoading} />
+            </CollapsibleSection>
+
+            {/* Placements (Ammar 2026-06-03) — replaces the Hammad sheet.
+                Per-(doctor, hospital) milestones + 45-day payment clock.
+                Carries its own action header + its own 5-row window, so it
+                stays a self-contained collapsible Card. */}
+            <PlacementsCard
+              rangeDays={rangeDays}
+              hospital={hospitalFilter}
+              specialty={specialtyFilter}
+              open={!!open.placements}
+              onOpenChange={toggle("placements")}
+            />
+
+            {/* Per-doctor breakdown — companion to the hospital table.
+                Ammar 2026-06-03: 'add another table over here for the
+                individual doctors themselves'. */}
+            <DoctorTable
+              rangeDays={rangeDays}
+              hospital={hospitalFilter}
+              specialty={specialtyFilter}
+              open={!!open.doctors}
+              onOpenChange={toggle("doctors")}
+            />
+          </div>
+        </div>
       </div>
     </DashboardLayout>
+  );
+}
+
+/** Compact "N label" pill for collapsed-section triggers. */
+function SummaryBadge({ loading, value, label }: { loading: boolean; value: number; label: string }) {
+  if (loading) return <Skeleton className="h-5 w-20" />;
+  return (
+    <Badge variant="outline" className="text-[10px] bg-slate-50 tabular-nums">
+      {value.toLocaleString()} {label}
+    </Badge>
   );
 }
 
@@ -305,13 +402,18 @@ function KpiStrip({ bundle }: { bundle: ReturnType<typeof useReportingMetrics> }
     onClickThrough: () => void;
     meaning: string;
     source: string;
+    /** Which cluster the tile belongs to — "pipeline" = work in
+     *  progress (sends → offered), "outcomes" = results (signed → paid).
+     *  Realises the grouping the old grid-cols-7 only hinted at in a
+     *  comment. */
+    group: "pipeline" | "outcomes";
   }> = [
     // Palette is deliberately quieter than v1: every tile sits on the same
     // bg-card neutral, only the thin accent stripe + icon carry stage color.
     // Reads as one visual unit, not a 7-colour rainbow.
     {
       label: "Profile sends",   value: bundle.kpis.profilesSent, icon: Send,
-      color: "text-slate-600",  bg: "bg-card",
+      color: "text-slate-600",  bg: "bg-card", group: "pipeline",
       meaning: "Doctor profiles emailed to a hospital recruiter in the selected window.",
       source:  "automation_flow_runs · flow_key=profile_sent",
       onClickThrough: () => navigate("/automations?flow=profile_sent"),
@@ -319,7 +421,7 @@ function KpiStrip({ bundle }: { bundle: ReturnType<typeof useReportingMetrics> }
     },
     {
       label: "Shortlisted",     value: bundle.kpis.shortlisted, icon: UserCheck,
-      color: "text-indigo-600", bg: "bg-card",
+      color: "text-indigo-600", bg: "bg-card", group: "pipeline",
       meaning: "Doctors a hospital marked shortlisted in the window.",
       source: "automation_flow_runs · flow_key=shortlist",
       onClickThrough: () => navigate("/automations?flow=shortlist"),
@@ -327,7 +429,7 @@ function KpiStrip({ bundle }: { bundle: ReturnType<typeof useReportingMetrics> }
     },
     {
       label: "Interviews",      value: bundle.kpis.interviews, icon: CalendarCheck,
-      color: "text-sky-600",    bg: "bg-card",
+      color: "text-sky-600",    bg: "bg-card", group: "pipeline",
       meaning: "Interviews scheduled in the window (interview flow triggered).",
       source: "automation_flow_runs · flow_key=interview",
       onClickThrough: () => navigate("/automations?flow=interview"),
@@ -335,7 +437,7 @@ function KpiStrip({ bundle }: { bundle: ReturnType<typeof useReportingMetrics> }
     },
     {
       label: "Offered",         value: bundle.kpis.offered, icon: FileSignature,
-      color: "text-amber-600",  bg: "bg-card",
+      color: "text-amber-600",  bg: "bg-card", group: "pipeline",
       meaning: "Contracts sent for signature in the window (contract_signing flow started).",
       source: "automation_flow_runs · flow_key=contract_signing",
       onClickThrough: () => navigate("/automations?flow=contract_signing"),
@@ -345,7 +447,7 @@ function KpiStrip({ bundle }: { bundle: ReturnType<typeof useReportingMetrics> }
     // related milestones rather than three different states.
     {
       label: "Signed",          value: bundle.kpis.signed, icon: CheckCircle2,
-      color: "text-emerald-600", bg: "bg-card",
+      color: "text-emerald-600", bg: "bg-card", group: "outcomes",
       meaning: "Doctors who signed their contract in the window.",
       source: "doctor_lifecycle.signed_at",
       onClickThrough: () => navigate("/doctors?tab=profiles"),
@@ -353,7 +455,7 @@ function KpiStrip({ bundle }: { bundle: ReturnType<typeof useReportingMetrics> }
     },
     {
       label: "Joined",          value: bundle.kpis.joined, icon: MapPin,
-      color: "text-emerald-700", bg: "bg-card",
+      color: "text-emerald-700", bg: "bg-card", group: "outcomes",
       meaning: "Doctors whose hospital-confirmed joining date fell in the window.",
       source: "doctor_lifecycle.joined_at",
       onClickThrough: () => navigate("/doctors?tab=profiles"),
@@ -361,7 +463,7 @@ function KpiStrip({ bundle }: { bundle: ReturnType<typeof useReportingMetrics> }
     },
     {
       label: "Paid",            value: bundle.kpis.paid, icon: CreditCard,
-      color: "text-emerald-800", bg: "bg-card",
+      color: "text-emerald-800", bg: "bg-card", group: "outcomes",
       meaning: "Doctors whose second-payment invoice was marked paid in the window.",
       source: "doctor_lifecycle.paid_at",
       onClickThrough: () => navigate("/doctors?tab=profiles"),
@@ -369,34 +471,61 @@ function KpiStrip({ bundle }: { bundle: ReturnType<typeof useReportingMetrics> }
     },
   ];
 
+  const pipeline = tiles.filter(t => t.group === "pipeline");
+  const outcomes = tiles.filter(t => t.group === "outcomes");
+
+  // Two labeled clusters: "Pipeline" (work in progress) + "Outcomes"
+  // (results). Realises the grouping the old single grid-cols-7 only
+  // gestured at in a comment.
   return (
-    <div className="grid grid-cols-2 sm:grid-cols-4 lg:grid-cols-7 gap-3">
-      {tiles.map((t, idx) => (
-        <div key={t.label} className="aa-fade-up" style={{ animationDelay: `${idx * 50}ms` }}>
-        <ExpandableKPICard
-          title={t.label}
-          value={t.value.toLocaleString()}
-          icon={t.icon}
-          color={t.color}
-          bg={t.bg}
-          hintMeaning={t.meaning}
-          hintSource={t.source}
-          expandedHeight={260}
-          expandedContent={
-            <div className="space-y-2">
-              {t.drilldown}
-              <button
-                onClick={(e) => { e.stopPropagation(); t.onClickThrough(); }}
-                className="w-full text-[10px] text-teal-700 hover:text-teal-900 hover:bg-teal-50 px-2 py-1.5 rounded-md border border-teal-200/60 mt-2 flex items-center justify-center gap-1 transition-colors"
-              >
-                View all
-                <ArrowRight className="h-3 w-3" />
-              </button>
-            </div>
-          }
-        />
-        </div>
-      ))}
+    <div className="grid grid-cols-1 lg:grid-cols-7 gap-4">
+      <KpiCluster label="Pipeline" tiles={pipeline} className="lg:col-span-4" innerCols="lg:grid-cols-4" />
+      <KpiCluster label="Outcomes" tiles={outcomes} className="lg:col-span-3" innerCols="lg:grid-cols-3" baseDelay={pipeline.length} />
+    </div>
+  );
+}
+
+function KpiCluster({ label, tiles, className, innerCols, baseDelay = 0 }: {
+  label: string;
+  tiles: Array<{
+    label: string; value: number; icon: typeof Send; color: string; bg: string;
+    drilldown: React.ReactNode; onClickThrough: () => void; meaning: string; source: string;
+  }>;
+  className?: string;
+  innerCols: string;
+  baseDelay?: number;
+}) {
+  return (
+    <div className={className}>
+      <div className="text-[10px] font-semibold uppercase tracking-wider text-muted-foreground mb-2">{label}</div>
+      <div className={`grid grid-cols-2 sm:grid-cols-3 ${innerCols} gap-3`}>
+        {tiles.map((t, idx) => (
+          <div key={t.label} className="aa-fade-up" style={{ animationDelay: `${(baseDelay + idx) * 50}ms` }}>
+            <ExpandableKPICard
+              title={t.label}
+              value={t.value.toLocaleString()}
+              icon={t.icon}
+              color={t.color}
+              bg={t.bg}
+              hintMeaning={t.meaning}
+              hintSource={t.source}
+              expandedHeight={260}
+              expandedContent={
+                <div className="space-y-2">
+                  {t.drilldown}
+                  <button
+                    onClick={(e) => { e.stopPropagation(); t.onClickThrough(); }}
+                    className="w-full text-[10px] text-teal-700 hover:text-teal-900 hover:bg-teal-50 px-2 py-1.5 rounded-md border border-teal-200/60 mt-2 flex items-center justify-center gap-1 transition-colors"
+                  >
+                    View all
+                    <ArrowRight className="h-3 w-3" />
+                  </button>
+                </div>
+              }
+            />
+          </div>
+        ))}
+      </div>
     </div>
   );
 }

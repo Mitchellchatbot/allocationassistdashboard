@@ -9,13 +9,15 @@
  *   - this week / last week    (Mon-Sun bucket centered on today)
  *   - this month / last month  (calendar month)
  *
- * Surfaces a per-metric delta vs the prior period so the team can see
- * at a glance whether last week was up, down, or flat.
+ * DELTAS-ONLY by design (2026-06-08 summary-first restructure). The KPI
+ * strip up top is the single canonical home for the absolute milestone
+ * totals — printing them again here was one of six duplicate copies. So
+ * this card leads with the DIRECTION + change vs the prior period (up /
+ * down / flat), with the raw counts demoted to small "x → y" context.
  */
 import { useMemo } from "react";
-import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
-import { CalendarRange, TrendingUp, TrendingDown, Minus, ListChecks, Calendar, CheckCircle2, Plane } from "lucide-react";
+import { TrendingUp, TrendingDown, Minus, ListChecks, Calendar, CheckCircle2, Plane } from "lucide-react";
 import { usePlacementAttempts, type PlacementAttempt } from "@/hooks/use-placement-attempts";
 
 type Period = "this_week" | "last_week" | "this_month" | "last_month";
@@ -108,40 +110,32 @@ export function RecapCard({ hospital, specialty }: RecapCardProps = {}) {
     lastMonth: countInPeriod(attempts, m.col, "last_month"),
   })), [attempts]);
 
+  // Bare content — the CollapsibleSection shell on Reports.tsx owns the
+  // Card/Header/description + the fixed-week scope chip. This renders
+  // only the delta grid.
+  if (isLoading) {
+    return <div className="text-[11px] text-muted-foreground py-3">Loading…</div>;
+  }
   return (
-    <Card>
-      <CardHeader className="pb-2">
-        <CardTitle className="text-base flex items-center gap-2">
-          <CalendarRange className="h-4 w-4 text-teal-600" />
-          Weekly + Monthly recap
-        </CardTitle>
-        <CardDescription className="text-[11px]">
-          Counts each placement-attempt milestone in this week vs last week, and this month vs last month. One doctor shortlisted at 4 hospitals = 4 shortlists. Joined → fires the 45-day AA-payment clock.
-        </CardDescription>
-      </CardHeader>
-      <CardContent>
-        {isLoading ? (
-          <div className="text-[11px] text-muted-foreground py-3">Loading…</div>
-        ) : (
-          <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-5 gap-3">
-            {counts.map(c => (
-              <div key={c.label} className="rounded-lg border bg-slate-50/40 p-3">
-                <div className="flex items-center gap-1.5 text-[11px] font-medium text-slate-700">
-                  {c.icon}{c.label}
-                </div>
-                <div className="mt-2 grid grid-cols-2 gap-2">
-                  <PeriodTile label="This week"  count={c.thisWeek}  prior={c.lastWeek} />
-                  <PeriodTile label="This month" count={c.thisMonth} prior={c.lastMonth} />
-                </div>
-              </div>
-            ))}
+    <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-5 gap-3">
+      {counts.map(c => (
+        <div key={c.label} className="rounded-lg border bg-slate-50/40 p-3">
+          <div className="flex items-center gap-1.5 text-[11px] font-medium text-slate-700">
+            {c.icon}{c.label}
           </div>
-        )}
-      </CardContent>
-    </Card>
+          <div className="mt-2 grid grid-cols-2 gap-2">
+            <PeriodTile label="This week"  count={c.thisWeek}  prior={c.lastWeek} />
+            <PeriodTile label="This month" count={c.thisMonth} prior={c.lastMonth} />
+          </div>
+        </div>
+      ))}
+    </div>
   );
 }
 
+/** DELTAS-FIRST tile. The KPI strip owns the absolute totals; here the
+ *  big number is the CHANGE vs the prior period (signed +N / -N), with
+ *  the raw "x → y" shown small underneath for context. */
 function PeriodTile({ label, count, prior }: { label: string; count: number; prior: number }) {
   const delta = count - prior;
   const TrendIcon = delta > 0 ? TrendingUp : delta < 0 ? TrendingDown : Minus;
@@ -150,13 +144,15 @@ function PeriodTile({ label, count, prior }: { label: string; count: number; pri
     <div>
       <div className="text-[9px] uppercase tracking-wider text-muted-foreground">{label}</div>
       <div className="flex items-baseline gap-1.5">
-        <div className="text-[18px] font-semibold text-slate-900 leading-none">{count}</div>
+        <div className={`text-[18px] font-semibold leading-none ${trendCls}`}>
+          {delta > 0 ? "+" : ""}{delta}
+        </div>
         <Badge variant="outline" className={`h-4 px-1 text-[9px] inline-flex items-center gap-0.5 ${trendCls} bg-white border-current/30`}>
           <TrendIcon className="h-2.5 w-2.5" />
-          {delta > 0 ? "+" : ""}{delta}
+          {delta > 0 ? "up" : delta < 0 ? "down" : "flat"}
         </Badge>
       </div>
-      <div className="text-[9px] text-muted-foreground/80 mt-0.5">vs {prior} prior</div>
+      <div className="text-[9px] text-muted-foreground/80 mt-0.5 tabular-nums">{prior} → {count}</div>
     </div>
   );
 }

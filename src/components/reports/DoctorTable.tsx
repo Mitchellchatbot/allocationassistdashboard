@@ -8,12 +8,14 @@
  * shortlist, interview, contract_signing) + the lifecycle row for
  * signed / joined.
  */
-import { useMemo } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { useQuery } from "@tanstack/react-query";
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "@/components/ui/card";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import { Badge } from "@/components/ui/badge";
-import { User2 } from "lucide-react";
+import { Button } from "@/components/ui/button";
+import { Collapsible, CollapsibleTrigger, CollapsibleContent } from "@/components/ui/collapsible";
+import { User2, ChevronDown, ChevronRight } from "lucide-react";
 import { supabase } from "@/lib/supabase";
 import type { FlowRun } from "@/hooks/use-automation-flows";
 import type { DoctorLifecycle } from "@/hooks/use-doctor-lifecycle";
@@ -141,9 +143,16 @@ export interface DoctorTableProps {
   rangeDays?: number | null;
   hospital?:  string | null;
   specialty?: string | null;
+  /** Collapsible control (summary-first restructure). When provided, the
+   *  header doubles as a Collapsible trigger so the table can stay closed
+   *  on first paint. Omit to render always-expanded. */
+  open?:         boolean;
+  onOpenChange?: (open: boolean) => void;
 }
 
-export function DoctorTable({ rangeDays, hospital, specialty }: DoctorTableProps = {}) {
+export function DoctorTable({ rangeDays, hospital, specialty, open, onOpenChange }: DoctorTableProps = {}) {
+  const collapsible = onOpenChange !== undefined;
+  const isOpen = collapsible ? !!open : true;
   // Paginate both queries — Supabase API gateway caps at 1000 server-
   // side regardless of .limit().
   const { data: runs = [], isLoading: rl } = useQuery<FlowRun[]>({
@@ -232,17 +241,48 @@ export function DoctorTable({ rangeDays, hospital, specialty }: DoctorTableProps
   }, [allRows, rangeDays, hospital, specialty]);
   const loading = rl || ll;
 
+  // Show 10 doctors by default, +10 per click (mirrors PlacementsCard).
+  // Reset back to the first page whenever the filters change the set.
+  const PAGE_FIRST = 10;
+  const PAGE_STEP  = 10;
+  const [visibleCount, setVisibleCount] = useState(PAGE_FIRST);
+  useEffect(() => { setVisibleCount(PAGE_FIRST); }, [rangeDays, hospital, specialty]);
+  const visibleRows = rows.slice(0, visibleCount);
+  const remaining   = rows.length - visibleRows.length;
+
+  const titleBlock = (
+    <div className="min-w-0">
+      <CardTitle className="text-base flex items-center gap-2">
+        {collapsible && (
+          isOpen
+            ? <ChevronDown  className="h-4 w-4 text-slate-400 shrink-0" />
+            : <ChevronRight className="h-4 w-4 text-slate-400 shrink-0" />
+        )}
+        <User2 className="h-4 w-4 text-indigo-600" />
+        Per-doctor breakdown
+        {!loading && (
+          <Badge variant="outline" className="text-[10px] bg-slate-50 tabular-nums">{rows.length} doctors</Badge>
+        )}
+      </CardTitle>
+      <CardDescription className="text-[11px]">
+        Each row is one doctor across their pipeline. Mirrors the hospital table; useful for tracking individual journeys.
+      </CardDescription>
+    </div>
+  );
+
   return (
     <Card>
+      <Collapsible open={isOpen} onOpenChange={onOpenChange ?? (() => {})}>
       <CardHeader className="pb-2">
-        <CardTitle className="text-base flex items-center gap-2">
-          <User2 className="h-4 w-4 text-indigo-600" />
-          Per-doctor breakdown
-        </CardTitle>
-        <CardDescription className="text-[11px]">
-          Each row is one doctor across their pipeline. Mirrors the hospital table; useful for tracking individual journeys.
-        </CardDescription>
+        {collapsible ? (
+          <CollapsibleTrigger asChild>
+            <button type="button" className="text-left w-full cursor-pointer">
+              {titleBlock}
+            </button>
+          </CollapsibleTrigger>
+        ) : titleBlock}
       </CardHeader>
+      <CollapsibleContent>
       <CardContent className="p-0">
         {loading ? (
           <div className="px-4 py-6 text-[11px] text-muted-foreground">Loading…</div>
@@ -267,7 +307,7 @@ export function DoctorTable({ rangeDays, hospital, specialty }: DoctorTableProps
                 </TableRow>
               </TableHeader>
               <TableBody>
-                {rows.map(r => (
+                {visibleRows.map(r => (
                   <TableRow key={r.doctor_id}>
                     <TableCell className="text-[12px] font-medium">{r.doctor_name}</TableCell>
                     <TableCell className="text-[12px]">{r.specialty ?? "—"}</TableCell>
@@ -299,9 +339,54 @@ export function DoctorTable({ rangeDays, hospital, specialty }: DoctorTableProps
                 ))}
               </TableBody>
             </Table>
+            {/* Show-more footer. Bumps +10 per click, or 'Show all' to
+                expand the rest in one go. Hidden once we're showing
+                everything, replaced with a small 'Collapse' note. */}
+            {rows.length > 0 && (
+              <div className="flex items-center justify-between px-3 py-2 border-t bg-slate-50/50 text-[11px]">
+                <span className="text-muted-foreground tabular-nums">
+                  Showing {visibleRows.length} of {rows.length}
+                </span>
+                {remaining > 0 ? (
+                  <div className="flex items-center gap-2">
+                    <Button
+                      size="sm"
+                      variant="outline"
+                      className="h-7 text-[11px]"
+                      onClick={() => setVisibleCount(c => c + PAGE_STEP)}
+                    >
+                      Show {Math.min(remaining, PAGE_STEP)} more
+                    </Button>
+                    {remaining > PAGE_STEP && (
+                      <Button
+                        size="sm"
+                        variant="ghost"
+                        className="h-7 text-[11px] text-muted-foreground"
+                        onClick={() => setVisibleCount(rows.length)}
+                      >
+                        Show all {rows.length}
+                      </Button>
+                    )}
+                  </div>
+                ) : (
+                  rows.length > PAGE_FIRST && (
+                    <Button
+                      size="sm"
+                      variant="ghost"
+                      className="h-7 text-[11px] text-muted-foreground"
+                      onClick={() => setVisibleCount(PAGE_FIRST)}
+                    >
+                      Collapse to {PAGE_FIRST}
+                    </Button>
+                  )
+                )}
+              </div>
+            )}
           </div>
         )}
       </CardContent>
+      </CollapsibleContent>
+      </Collapsible>
     </Card>
   );
 }
