@@ -16,6 +16,7 @@ import { useHospitals } from "@/hooks/use-hospitals";
 import { useDoctorProfile, useDoctorProfiles, type DoctorProfile } from "@/hooks/use-doctor-profiles";
 import { useZohoData } from "@/hooks/use-zoho-data";
 import type { ZohoLead, ZohoDoctorOnBoard } from "@/hooks/use-zoho-data";
+import { useWpCandidates, type WpCandidate } from "@/hooks/use-wp-candidates";
 
 export type VacancyStatus   = "open" | "filled" | "closed";
 export type VacancyPriority = "high" | "medium" | "low";
@@ -102,6 +103,7 @@ export function useMatchingVacancies(doctorId: string | null | undefined): Score
   const vacanciesQ = useVacancies();
   const { data: profile = null } = useDoctorProfile(doctorId ?? null);
   const { data: hospitals = [] } = useHospitals();
+  const { data: wpCandidates = [] } = useWpCandidates();
   const zoho = useZohoData();
 
   // Find the underlying Zoho row (lead or DOB) for this prefixed doctorId.
@@ -125,7 +127,13 @@ export function useMatchingVacancies(doctorId: string | null | undefined): Score
 
   return useMemo<ScoredVacancy[]>(() => {
     if (!doctorId) return [];
-    const candidate = buildDoctorCandidate(doctorId, zohoRow.lead ?? null, zohoRow.dob ?? null, profile);
+    // Find the linked WP candidate (richest profile source) by doctor_id
+    // first, then by email if the linkage hasn't been wired.
+    const candidateEmail = zohoRow.lead?.Email ?? zohoRow.dob?.Email ?? null;
+    const wp = wpCandidates.find(c => c.doctor_id === doctorId)
+            ?? (candidateEmail ? wpCandidates.find(c => c.email && c.email.toLowerCase().trim() === candidateEmail.toLowerCase().trim()) : undefined)
+            ?? null;
+    const candidate = buildDoctorCandidate(doctorId, zohoRow.lead ?? null, zohoRow.dob ?? null, profile, wp);
     if (!candidate) return [];
     const hospMap = new Map<string, MatchCandidateHospital>();
     for (const h of hospitals) {
@@ -152,31 +160,88 @@ export function buildDoctorCandidate(
   lead: ZohoLead | null,
   dob:  ZohoDoctorOnBoard | null,
   profile: DoctorProfile | null,
+  wp:   WpCandidate | null = null,
 ): MatchCandidateDoctor | null {
-  if (!lead && !dob && !profile) return null;
-  // Specialty: prefer lead (which has Specialty_New + Specialty), fall
-  // back to DOB (Zoho's Contacts module uses British `Speciality` plus a
-  // `Specialty_New` override).
-  const speciality =
-    lead?.Specialty_New ?? lead?.Specialty ?? dob?.Specialty_New ?? dob?.Speciality ?? null;
-  // License flags only exist on leads. DOB doctors are already placed, so
-  // most license signal isn't relevant — but the profile may still carry a
-  // free-text license that we can pattern-match.
-  const licenseText = profile?.license ?? lead?.License ?? null;
+  if (!lead && !dob && !profile && !wp) return null;
+
+  // Zoho's DoctorsOnBoard JSON often carries fields that aren't in our
+  // strict TS interface (Has_DHA/DOH/MOH, License, Nationality,
+  // Years_of_Experience, Notice_Period, Family_Status, Age, Bio,
+  // Area_of_Interest, Marital_Status). Cast through Record so we can
+  // read them. Same applies to leads for the handful that don't.
+  const dobRich  = (dob  ?? {}) as Record<string, unknown>;
+  const leadRich = (lead ?? {}) as Record<string, unknown>;
+  const str = (v: unknown): string | null => (typeof v === "string" && v.trim() ? v : null);
+  const num = (v: unknown): number | null => (typeof v === "number" && Number.isFinite(v) ? v : null);
+
+  // Source priority for every field: WP candidate (canonical, hand-edited)
+  // → Zoho DoB (placed-before doctor) → Zoho Lead → doctor_profiles
+  // (legacy). First non-null wins.
+  const pickStr = (...candidates: Array<string | null | undefined>): string | null => {
+    for (const v of candidates) if (v) return v;
+    return null;
+  };
+  const pickNum = (...candidates: Array<number | null | undefined>): number | null => {
+    for (const v of candidates) if (v != null) return v;
+    return null;
+  };
+
+  const speciality = pickStr(
+    wp?.specialty,
+    lead?.Specialty_New, lead?.Specialty,
+    dob?.Specialty_New, dob?.Speciality,
+    profile?.title,
+  );
+  const licenseText = pickStr(
+    wp?.license_status,
+    profile?.license,
+    lead?.License,
+    str(dobRich.License),
+  );
   return {
     id:               doctorId,
-    name:             lead?.Full_Name ?? dob?.Full_Name ?? "",
+    name:             pickStr(wp?.full_name, lead?.Full_Name, dob?.Full_Name, profile?.doctor_name) ?? "",
     speciality,
     license:          licenseText,
-    has_dha:          truthyFlag(lead?.Has_DHA) || /dha/i.test(licenseText ?? ""),
-    has_doh:          truthyFlag(lead?.Has_DOH) || /doh/i.test(licenseText ?? ""),
-    has_moh:          truthyFlag(lead?.Has_MOH) || /moh/i.test(licenseText ?? ""),
-    country_training: profile?.country_training ?? lead?.Country_of_Specialty_training ?? null,
-    nationality:      profile?.nationality ?? null,
-    years_experience: profile?.years_experience ?? null,
-    notice_period:    profile?.notice_period ?? null,
-    area_of_interest: profile?.area_of_interest ?? null,
-    bio:              profile?.bio ?? null,
+    has_dha:          truthyFlag(lead?.Has_DHA) || truthyFlag(dobRich.Has_DHA) || /dha/i.test(licenseText ?? ""),
+    has_doh:          truthyFlag(lead?.Has_DOH) || truthyFlag(dobRich.Has_DOH) || /doh/i.test(licenseText ?? ""),
+    has_moh:          truthyFlag(lead?.Has_MOH) || truthyFlag(dobRich.Has_MOH) || /moh/i.test(licenseText ?? ""),
+    country_training: pickStr(
+      wp?.country_of_training,
+      lead?.Country_of_Specialty_training,
+      dob?.Country_of_Specialty_training,
+      str(dobRich.Country_of_Specialty_training),
+      profile?.country_training,
+    ),
+    nationality:      pickStr(
+      wp?.nationality,
+      str(leadRich.Nationality),
+      str(dobRich.Nationality),
+      profile?.nationality,
+    ),
+    years_experience: pickNum(
+      wp?.years_experience,
+      num(leadRich.Years_of_Experience),
+      num(dobRich.Years_of_Experience),
+      profile?.years_experience,
+    ),
+    notice_period:    pickStr(
+      wp?.notice_period,
+      str(leadRich.Notice_Period),
+      str(dobRich.Notice_Period),
+      profile?.notice_period,
+    ),
+    area_of_interest: pickStr(
+      wp?.area_of_interest,
+      str(leadRich.Area_of_Interest),
+      str(dobRich.Area_of_Interest),
+      profile?.area_of_interest,
+    ),
+    bio:              pickStr(
+      str(leadRich.Bio),
+      str(dobRich.Bio),
+      profile?.bio,
+    ),
   };
 }
 
@@ -202,6 +267,7 @@ function truthyFlag(v: unknown): boolean {
 export function useMatchingDoctors(vacancy: Vacancy | null | undefined): ScoredMatchingDoctor[] {
   const { data: profiles = [] } = useDoctorProfiles();
   const { data: hospitals = [] } = useHospitals();
+  const { data: wpCandidates = [] } = useWpCandidates();
   const zoho = useZohoData();
 
   return useMemo<ScoredMatchingDoctor[]>(() => {
@@ -211,6 +277,18 @@ export function useMatchingDoctors(vacancy: Vacancy | null | undefined): ScoredM
 
     const profileById = new Map<string, typeof profiles[number]>();
     for (const p of profiles) profileById.set(p.doctor_id, p);
+    // WP candidates carry the richest profile data (manually edited
+    // post-publish: bio, country of training, nationality, years
+    // experience, family/marital status, license). Index by both the
+    // linked doctor_id (when set) AND by email lowercase so we can
+    // still surface a match when the linkage hasn't been wired.
+    const wpByDoctorId = new Map<string, WpCandidate>();
+    const wpByEmail    = new Map<string, WpCandidate>();
+    for (const c of wpCandidates) {
+      if (c.doctor_id) wpByDoctorId.set(c.doctor_id, c);
+      if (c.email)     wpByEmail.set(c.email.toLowerCase().trim(), c);
+    }
+
     const hospital = vacancy.hospital_id
       ? (hospitals.find(h => h.id === vacancy.hospital_id) ?? null)
       : null;
@@ -224,15 +302,16 @@ export function useMatchingDoctors(vacancy: Vacancy | null | undefined): ScoredM
       if (!name) continue;
       const prefixedId = `dob:${dob.id}`;
       const profile = profileById.get(prefixedId) ?? null;
-      const candidate = buildDoctorCandidate(prefixedId, null, dob, profile);
+      const wp = wpByDoctorId.get(prefixedId) ?? (dob.Email ? wpByEmail.get(dob.Email.toLowerCase().trim()) : undefined) ?? null;
+      const candidate = buildDoctorCandidate(prefixedId, null, dob, profile, wp);
       if (!candidate) continue;
       const score = scoreMatch(candidate, vacancy, h);
       if (score.tier === "none") continue;
       out.push({
         doctor_id:        prefixedId,
         doctor_name:      name,
-        doctor_email:     dob.Email,
-        doctor_phone:     dob.Phone ?? dob.Mobile ?? null,
+        doctor_email:     wp?.email ?? dob.Email,
+        doctor_phone:     wp?.phone ?? dob.Phone ?? dob.Mobile ?? null,
         speciality:       candidate.speciality,
         score,
         has_dha:          candidate.has_dha,
@@ -248,7 +327,7 @@ export function useMatchingDoctors(vacancy: Vacancy | null | undefined): ScoredM
 
     out.sort((a, b) => b.score.score - a.score.score);
     return out.slice(0, 50);
-  }, [vacancy, profiles, hospitals, zoho.data]);
+  }, [vacancy, profiles, hospitals, wpCandidates, zoho.data]);
 }
 
 export interface ScoredMatchingDoctor {
