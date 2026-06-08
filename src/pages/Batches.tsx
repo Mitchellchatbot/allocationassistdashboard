@@ -20,6 +20,7 @@ import { useZohoData, type ZohoLead, type ZohoDoctorOnBoard } from "@/hooks/use-
 import { useDoctorLifecycleMap } from "@/hooks/use-doctor-lifecycle";
 import { groupSpecialty } from "@/lib/specialty-groups";
 import { scoreCandidate, type MatchScore } from "@/lib/match-score";
+import { useWpCandidates, type WpCandidate } from "@/hooks/use-wp-candidates";
 import { MatchScoreChip } from "@/components/DoctorVacancyMatches";
 
 /**
@@ -225,6 +226,7 @@ function SpecialtyRotationCard({ rotation }: { rotation: ReturnType<typeof useSp
   const update = useUpdateSpecialtyRotation();
   const { data: zoho } = useZohoData();
   const lifecycleMap  = useDoctorLifecycleMap();
+  const { data: wpCandidates = [] } = useWpCandidates();
   const [editing, setEditing] = useState(false);
   const [draft, setDraft]     = useState("");
 
@@ -237,6 +239,28 @@ function SpecialtyRotationCard({ rotation }: { rotation: ReturnType<typeof useSp
     const z = zoho as { rawLeads?: ZohoLead[]; rawDoctorsOnBoard?: ZohoDoctorOnBoard[] } | undefined;
     const eligible = (id: string) => lifecycleMap[id]?.eligible_for_sending !== false;
     const yes = (v: unknown) => typeof v === "string" && /^y/i.test(v.trim());
+
+    // WP candidate lookup so the rank picks up the rich post-publish
+    // fields (country of training, license status, years experience,
+    // etc.) instead of dead-ending at Zoho's sparser snapshot.
+    const wpByDoctorId = new Map<string, WpCandidate>();
+    const wpByEmail    = new Map<string, WpCandidate>();
+    for (const c of wpCandidates) {
+      if (c.doctor_id) wpByDoctorId.set(c.doctor_id, c);
+      if (c.email)     wpByEmail.set(c.email.toLowerCase().trim(), c);
+    }
+    const findWp = (id: string, email: string | null): WpCandidate | null =>
+      wpByDoctorId.get(id) ??
+      (email ? wpByEmail.get(email.toLowerCase().trim()) ?? null : null);
+    const pickStr = (...vs: Array<string | null | undefined>): string | null => {
+      for (const v of vs) if (v != null && v !== "") return v;
+      return null;
+    };
+    const pickNum = (...vs: Array<number | null | undefined>): number | null => {
+      for (const v of vs) if (v != null) return v;
+      return null;
+    };
+
     interface R {
       id:               string;
       name:             string;
@@ -258,44 +282,54 @@ function SpecialtyRotationCard({ rotation }: { rotation: ReturnType<typeof useSp
       const name = d.Full_Name || `${d.First_Name ?? ""} ${d.Last_Name ?? ""}`.trim();
       const id   = `dob:${d.id}`;
       if (!name || !eligible(id)) continue;
+      const wp = findWp(id, d.Email);
+      const dRich = d as Record<string, unknown>;
+      const dStr = (k: string) => typeof dRich[k] === "string" && (dRich[k] as string).trim() ? (dRich[k] as string) : null;
+      const dNum = (k: string) => typeof dRich[k] === "number" && Number.isFinite(dRich[k] as number) ? (dRich[k] as number) : null;
       out.push({
-        id, name,
-        speciality:       d.Specialty_New ?? d.Speciality ?? null,
+        id,
+        name:             pickStr(wp?.full_name, name) ?? name,
+        speciality:       pickStr(wp?.specialty, d.Specialty_New, d.Speciality),
         source:           "dob",
-        license:          d.License ?? null,
-        has_dha:          yes((d as { Has_DHA?: unknown }).Has_DHA),
-        has_doh:          yes((d as { Has_DOH?: unknown }).Has_DOH),
-        has_moh:          yes((d as { Has_MOH?: unknown }).Has_MOH),
-        country_training: (d as { Country_of_Specialty_training?: string | null }).Country_of_Specialty_training ?? null,
-        nationality:      (d as { Nationality?: string | null }).Nationality ?? null,
-        years_experience: typeof (d as { Years_of_Experience?: number }).Years_of_Experience === "number" ? (d as { Years_of_Experience?: number }).Years_of_Experience! : null,
-        notice_period:    (d as { Notice_Period?: string | null }).Notice_Period ?? null,
-        area_of_interest: (d as { Area_of_Interest?: string | null }).Area_of_Interest ?? null,
-        bio:              (d as { Bio?: string | null }).Bio ?? null,
+        license:          pickStr(wp?.license_status, d.License),
+        has_dha:          yes(dRich.Has_DHA) || /dha/i.test(wp?.license_status ?? ""),
+        has_doh:          yes(dRich.Has_DOH) || /doh/i.test(wp?.license_status ?? ""),
+        has_moh:          yes(dRich.Has_MOH) || /moh/i.test(wp?.license_status ?? ""),
+        country_training: pickStr(wp?.country_of_training, dStr("Country_of_Specialty_training")),
+        nationality:      pickStr(wp?.nationality, dStr("Nationality")),
+        years_experience: pickNum(wp?.years_experience, dNum("Years_of_Experience")),
+        notice_period:    pickStr(wp?.notice_period, dStr("Notice_Period")),
+        area_of_interest: pickStr(wp?.area_of_interest, dStr("Area_of_Interest")),
+        bio:              dStr("Bio"),
       });
     }
     for (const l of z?.rawLeads ?? []) {
       const name = l.Full_Name || `${l.First_Name ?? ""} ${l.Last_Name ?? ""}`.trim();
       const id   = `lead:${l.id}`;
       if (!name || !eligible(id)) continue;
+      const wp = findWp(id, l.Email);
+      const lRich = l as Record<string, unknown>;
+      const lStr = (k: string) => typeof lRich[k] === "string" && (lRich[k] as string).trim() ? (lRich[k] as string) : null;
+      const lNum = (k: string) => typeof lRich[k] === "number" && Number.isFinite(lRich[k] as number) ? (lRich[k] as number) : null;
       out.push({
-        id, name,
-        speciality:       l.Specialty ?? l.Specialty_New ?? null,
+        id,
+        name:             pickStr(wp?.full_name, name) ?? name,
+        speciality:       pickStr(wp?.specialty, l.Specialty, l.Specialty_New),
         source:           "lead",
-        license:          l.License ?? null,
-        has_dha:          yes(l.Has_DHA),
-        has_doh:          yes(l.Has_DOH),
-        has_moh:          yes(l.Has_MOH),
-        country_training: l.Country_of_Specialty_training ?? null,
-        nationality:      (l as { Nationality?: string | null }).Nationality ?? null,
-        years_experience: typeof (l as { Years_of_Experience?: number }).Years_of_Experience === "number" ? (l as { Years_of_Experience?: number }).Years_of_Experience! : null,
-        notice_period:    (l as { Notice_Period?: string | null }).Notice_Period ?? null,
-        area_of_interest: (l as { Area_of_Interest?: string | null }).Area_of_Interest ?? null,
-        bio:              (l as { Bio?: string | null }).Bio ?? null,
+        license:          pickStr(wp?.license_status, l.License),
+        has_dha:          yes(l.Has_DHA) || /dha/i.test(wp?.license_status ?? ""),
+        has_doh:          yes(l.Has_DOH) || /doh/i.test(wp?.license_status ?? ""),
+        has_moh:          yes(l.Has_MOH) || /moh/i.test(wp?.license_status ?? ""),
+        country_training: pickStr(wp?.country_of_training, l.Country_of_Specialty_training),
+        nationality:      pickStr(wp?.nationality, lStr("Nationality")),
+        years_experience: pickNum(wp?.years_experience, lNum("Years_of_Experience")),
+        notice_period:    pickStr(wp?.notice_period, lStr("Notice_Period")),
+        area_of_interest: pickStr(wp?.area_of_interest, lStr("Area_of_Interest")),
+        bio:              lStr("Bio"),
       });
     }
     return out;
-  }, [zoho, lifecycleMap]);
+  }, [zoho, lifecycleMap, wpCandidates]);
 
   const queue = rotation?.queue ?? [];
   // Use the derived cursor — the daily-walked position. The persisted
@@ -790,7 +824,8 @@ function BatchDialog({ target, onTargetChange, batches, suggestedSpecialty }: {
   const sendNow = useSendBatchNow();
   const { data: zoho } = useZohoData();
   const lifecycleMap = useDoctorLifecycleMap();
-  const allDoctors = useMemoDoctors(zoho, lifecycleMap);
+  const { data: wpCandidates = [] } = useWpCandidates();
+  const allDoctors = useMemoDoctors(zoho, lifecycleMap, wpCandidates);
 
   // Create-form local state — only used while target === "new".
   const [kind, setKind] = useState<BatchKind>("daily_duo");
@@ -1325,7 +1360,11 @@ interface DoctorOption {
   createdAt:            number | null;   // ms epoch
 }
 
-function useMemoDoctors(zoho: unknown, lifecycleMap: Record<string, { eligible_for_sending: boolean }>): DoctorOption[] {
+function useMemoDoctors(
+  zoho:          unknown,
+  lifecycleMap:  Record<string, { eligible_for_sending: boolean }>,
+  wpCandidates:  WpCandidate[] = [],
+): DoctorOption[] {
   return useMemoReact(() => {
     const z = zoho as { rawLeads?: ZohoLead[]; rawDoctorsOnBoard?: ZohoDoctorOnBoard[] } | undefined;
     const out: DoctorOption[] = [];
@@ -1334,6 +1373,31 @@ function useMemoDoctors(zoho: unknown, lifecycleMap: Record<string, { eligible_f
       if (!s) return null;
       const t = new Date(s).getTime();
       return Number.isFinite(t) ? t : null;
+    };
+
+    // WP candidate lookup — by linked doctor_id first, then by email.
+    // WP rows hold the richest profile data (manually edited
+    // post-publish: bio, country of training, nationality, years
+    // experience, license status). When a Zoho doctor has a matching
+    // WP candidate, WP fields win every per-field merge below.
+    const wpByDoctorId = new Map<string, WpCandidate>();
+    const wpByEmail    = new Map<string, WpCandidate>();
+    for (const c of wpCandidates) {
+      if (c.doctor_id) wpByDoctorId.set(c.doctor_id, c);
+      if (c.email)     wpByEmail.set(c.email.toLowerCase().trim(), c);
+    }
+    const findWp = (id: string, email: string | null): WpCandidate | null =>
+      wpByDoctorId.get(id) ??
+      (email ? wpByEmail.get(email.toLowerCase().trim()) ?? null : null);
+
+    /** Pick the first non-null/non-empty value in priority order. */
+    const pickStr = (...vs: Array<string | null | undefined>): string | null => {
+      for (const v of vs) if (v != null && v !== "") return v;
+      return null;
+    };
+    const pickNum = (...vs: Array<number | null | undefined>): number | null => {
+      for (const v of vs) if (v != null) return v;
+      return null;
     };
 
     // Build lookup tables from Leads so DoB rows missing their own
@@ -1373,23 +1437,36 @@ function useMemoDoctors(zoho: unknown, lifecycleMap: Record<string, { eligible_f
       // strings (also sometimes booleans). Treat anything starting with
       // 'Y' as licensed.
       const yes = (v: unknown) => typeof v === "string" && /^y/i.test(v.trim());
+      const dobRich = d as Record<string, unknown>;
+      const dobStr = (k: string): string | null => {
+        const v = dobRich[k];
+        return typeof v === "string" && v.trim() ? v : null;
+      };
+      const dobNum = (k: string): number | null => {
+        const v = dobRich[k];
+        return typeof v === "number" && Number.isFinite(v) ? v : null;
+      };
+      const wp = findWp(id, d.Email);
       out.push({
-        id, name,
-        email:       d.Email,
-        speciality:  dobSpec ?? fallbackSpec,
+        id, name: pickStr(wp?.full_name, name) ?? name,
+        email:       pickStr(wp?.email, d.Email),
+        speciality:  pickStr(wp?.specialty, dobSpec ?? fallbackSpec),
         eligible:    eligibleOf(id),
         source:      "dob",
-        license:             d.License ?? null,
-        has_dha:             yes((d as { Has_DHA?: unknown }).Has_DHA),
-        has_doh:             yes((d as { Has_DOH?: unknown }).Has_DOH),
-        has_moh:             yes((d as { Has_MOH?: unknown }).Has_MOH),
-        country_training:    (d as { Country_of_Specialty_training?: string | null }).Country_of_Specialty_training ?? null,
-        nationality:         (d as { Nationality?: string | null }).Nationality ?? null,
-        years_experience:    typeof (d as { Years_of_Experience?: number }).Years_of_Experience === "number" ? (d as { Years_of_Experience?: number }).Years_of_Experience! : null,
-        notice_period:       (d as { Notice_Period?: string | null }).Notice_Period ?? null,
-        area_of_interest:    (d as { Area_of_Interest?: string | null }).Area_of_Interest ?? null,
-        bio:                 (d as { Bio?: string | null }).Bio ?? null,
-        hasLicense:          yes((d as { Has_DHA?: unknown }).Has_DHA) || yes((d as { Has_DOH?: unknown }).Has_DOH) || yes((d as { Has_MOH?: unknown }).Has_MOH) || !!d.License,
+        // License signal cascade: WP license_status → Zoho DoB Has_*
+        // booleans + License free text. WP keeps the canonical
+        // hand-edited value; Zoho fills the rest.
+        license:             pickStr(wp?.license_status, d.License),
+        has_dha:             yes(dobRich.Has_DHA) || /dha/i.test(wp?.license_status ?? ""),
+        has_doh:             yes(dobRich.Has_DOH) || /doh/i.test(wp?.license_status ?? ""),
+        has_moh:             yes(dobRich.Has_MOH) || /moh/i.test(wp?.license_status ?? ""),
+        country_training:    pickStr(wp?.country_of_training, dobStr("Country_of_Specialty_training")),
+        nationality:         pickStr(wp?.nationality, dobStr("Nationality")),
+        years_experience:    pickNum(wp?.years_experience, dobNum("Years_of_Experience")),
+        notice_period:       pickStr(wp?.notice_period, dobStr("Notice_Period")),
+        area_of_interest:    pickStr(wp?.area_of_interest, dobStr("Area_of_Interest")),
+        bio:                 dobStr("Bio"),
+        hasLicense:          !!wp?.license_status || yes(dobRich.Has_DHA) || yes(dobRich.Has_DOH) || yes(dobRich.Has_MOH) || !!d.License,
         highPriority:        false,
         primeClassification: null,
         createdAt:           toMs(d.Modified_Time ?? d.Created_Time),
@@ -1402,30 +1479,40 @@ function useMemoDoctors(zoho: unknown, lifecycleMap: Record<string, { eligible_f
       const yes = (v: unknown) => typeof v === "string" && /^y/i.test(v.trim());
       const hasLic = yes(l.Has_DOH) || yes(l.Has_DHA) || yes(l.Has_MOH) || !!l.License;
       const prime  = (l.Prime_Classification ?? "").trim();
+      const leadRich = l as Record<string, unknown>;
+      const leadStr = (k: string): string | null => {
+        const v = leadRich[k];
+        return typeof v === "string" && v.trim() ? v : null;
+      };
+      const leadNum = (k: string): number | null => {
+        const v = leadRich[k];
+        return typeof v === "number" && Number.isFinite(v) ? v : null;
+      };
+      const wp = findWp(id, l.Email);
       out.push({
-        id, name,
-        email:       l.Email,
-        speciality:  l.Specialty ?? l.Specialty_New,
+        id, name: pickStr(wp?.full_name, name) ?? name,
+        email:       pickStr(wp?.email, l.Email),
+        speciality:  pickStr(wp?.specialty, l.Specialty, l.Specialty_New),
         eligible:    eligibleOf(id),
         source:      "lead",
-        license:             l.License ?? null,
-        has_dha:             yes(l.Has_DHA),
-        has_doh:             yes(l.Has_DOH),
-        has_moh:             yes(l.Has_MOH),
-        country_training:    l.Country_of_Specialty_training ?? null,
-        nationality:         (l as { Nationality?: string | null }).Nationality ?? null,
-        years_experience:    typeof (l as { Years_of_Experience?: number }).Years_of_Experience === "number" ? (l as { Years_of_Experience?: number }).Years_of_Experience! : null,
-        notice_period:       (l as { Notice_Period?: string | null }).Notice_Period ?? null,
-        area_of_interest:    (l as { Area_of_Interest?: string | null }).Area_of_Interest ?? null,
-        bio:                 (l as { Bio?: string | null }).Bio ?? null,
-        hasLicense:          hasLic,
+        license:             pickStr(wp?.license_status, l.License),
+        has_dha:             yes(l.Has_DHA) || /dha/i.test(wp?.license_status ?? ""),
+        has_doh:             yes(l.Has_DOH) || /doh/i.test(wp?.license_status ?? ""),
+        has_moh:             yes(l.Has_MOH) || /moh/i.test(wp?.license_status ?? ""),
+        country_training:    pickStr(wp?.country_of_training, l.Country_of_Specialty_training),
+        nationality:         pickStr(wp?.nationality, leadStr("Nationality")),
+        years_experience:    pickNum(wp?.years_experience, leadNum("Years_of_Experience")),
+        notice_period:       pickStr(wp?.notice_period, leadStr("Notice_Period")),
+        area_of_interest:    pickStr(wp?.area_of_interest, leadStr("Area_of_Interest")),
+        bio:                 leadStr("Bio"),
+        hasLicense:          !!wp?.license_status || hasLic,
         highPriority:        /high/i.test(l.Lead_Status ?? ""),
         primeClassification: prime || null,
         createdAt:           toMs(l.Created_Time),
       });
     }
     return out;
-  }, [zoho, lifecycleMap]);
+  }, [zoho, lifecycleMap, wpCandidates]);
 }
 
 function todayISO(): string {
