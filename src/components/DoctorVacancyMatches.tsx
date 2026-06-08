@@ -181,21 +181,27 @@ function ScoredVacancyRow({ vacancy, score, disabled, onLink }: {
   );
 }
 
+/** Single source of truth for displaying a doctor's match score.
+ *  Used by Vacancy → Doctors, Doctor → Vacancies, Batches picker,
+ *  and Today's Pick. Format: `X / 100` with tier-coloured background
+ *  (strong / decent / weak / none). Hover tooltip lists every factor
+ *  and its contribution. */
 export function MatchScoreChip({ score }: { score: MatchScore }) {
   const cls =
     score.tier === "strong" ? "bg-emerald-100 text-emerald-800 border-emerald-200" :
-    score.tier === "decent" ? "bg-sky-100      text-sky-800      border-sky-200"      :
-                              "bg-slate-100    text-slate-700    border-slate-200";
+    score.tier === "decent" ? "bg-teal-100    text-teal-800    border-teal-200"    :
+    score.tier === "weak"   ? "bg-amber-100   text-amber-800   border-amber-200"   :
+                              "bg-slate-100   text-slate-600   border-slate-200";
   const tooltip = score.factors
     .map(f => `${f.label} (${f.points > 0 ? "+" : ""}${f.points})`)
-    .join("\n");
+    .join("\n") || "No matching factors";
   return (
     <Badge
       variant="outline"
-      className={`${cls} text-[9px] uppercase tracking-wider tabular-nums`}
+      className={`${cls} text-[10px] tabular-nums font-semibold`}
       title={tooltip}
     >
-      {score.pct}
+      {score.score}/{score.max}
     </Badge>
   );
 }

@@ -8,7 +8,7 @@ import { Label } from "@/components/ui/label";
 import { Textarea } from "@/components/ui/textarea";
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription, DialogFooter } from "@/components/ui/dialog";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
-import { Mailbox, Plus, Send, X, CheckCircle2, Calendar, ChevronRight, ChevronDown, RefreshCw, AlertCircle, Sparkles, UserSquare, GripVertical, Star, Wand2, Pencil } from "lucide-react";
+import { Mailbox, Plus, Send, X, CheckCircle2, Calendar, ChevronRight, ChevronDown, RefreshCw, AlertCircle, Sparkles, UserSquare, GripVertical, Wand2, Pencil } from "lucide-react";
 import { Checkbox } from "@/components/ui/checkbox";
 import { toast } from "sonner";
 import { useScheduledBatches, useUpsertBatch, useUpdateBatch, useCancelBatch, useSendBatchNow,
@@ -19,7 +19,8 @@ import { useHospitals } from "@/hooks/use-hospitals";
 import { useZohoData, type ZohoLead, type ZohoDoctorOnBoard } from "@/hooks/use-zoho-data";
 import { useDoctorLifecycleMap } from "@/hooks/use-doctor-lifecycle";
 import { groupSpecialty } from "@/lib/specialty-groups";
-import { scoreCandidate } from "@/lib/match-score";
+import { scoreCandidate, type MatchScore } from "@/lib/match-score";
+import { MatchScoreChip } from "@/components/DoctorVacancyMatches";
 
 /**
  * Phase 6 — Recurring batch sends. Source: Saif Ullah, May 20 2026.
@@ -700,18 +701,7 @@ function SpecialtyRotationCard({ rotation }: { rotation: ReturnType<typeof useSp
                       <div className="space-y-1">
                         {ranked.map(({ r, m }) => (
                           <div key={r.id} className="flex items-center gap-2 text-[11px]">
-                            <Badge
-                              variant="outline"
-                              className={`shrink-0 text-[9px] tabular-nums ${
-                                m.tier === "strong" ? "bg-emerald-50 text-emerald-700 border-emerald-200" :
-                                m.tier === "decent" ? "bg-teal-50    text-teal-700    border-teal-200"    :
-                                m.tier === "weak"   ? "bg-amber-50   text-amber-700   border-amber-200"   :
-                                                      "bg-slate-100  text-slate-600   border-slate-200"
-                              }`}
-                              title={m.summary}
-                            >
-                              {m.score}/100
-                            </Badge>
+                            <MatchScoreChip score={m} />
                             <span className="font-medium text-slate-800 truncate">{r.name}</span>
                             <span className="text-muted-foreground truncate">· {r.speciality ?? "—"}</span>
                             <span className="ml-auto text-[9px] uppercase tracking-wider text-muted-foreground shrink-0">{r.source}</span>
@@ -923,7 +913,7 @@ function BatchDialog({ target, onTargetChange, batches, suggestedSpecialty }: {
       (d.email ?? "").toLowerCase().includes(q)
     );
     const scored = filtered.map(d => ({ ...d, _score: scoreDoctor(d, batch, effectiveSpecialty) }));
-    scored.sort((a, b) => b._score.total - a._score.total);
+    scored.sort((a, b) => b._score.score - a._score.score);
     return scored.slice(0, 30);
   })();
 
@@ -955,7 +945,7 @@ function BatchDialog({ target, onTargetChange, batches, suggestedSpecialty }: {
     const pool = allDoctors
       .filter(d => d.eligible && !batch.doctor_ids.includes(d.id))
       .filter(d => sourceFilter === "all" || d.source === sourceFilter)
-      .map(d => ({ d, score: scoreDoctor(d, batch, effectiveSpecialty).total }))
+      .map(d => ({ d, score: scoreDoctor(d, batch, effectiveSpecialty).score }))
       .sort((a, b) => b.score - a.score)
       .slice(0, need)
       .map(x => x.d.id);
@@ -1074,7 +1064,7 @@ function BatchDialog({ target, onTargetChange, batches, suggestedSpecialty }: {
                     <div className="flex-1 min-w-0">
                       <div className="text-[12px] font-medium truncate flex items-center gap-1.5">
                         {d.name}
-                        <ScoreBadge score={s.total} reasons={s.reasons} />
+                        <MatchScoreChip score={s} />
                         <SourceBadge source={d.source} />
                       </div>
                       <div className="text-[10px] text-muted-foreground truncate">{d.speciality ?? "—"}{d.email && ` · ${d.email}`}</div>
@@ -1156,7 +1146,7 @@ function BatchDialog({ target, onTargetChange, batches, suggestedSpecialty }: {
                         <div className="flex-1 min-w-0">
                           <div className="text-[12px] font-medium truncate flex items-center gap-1.5">
                             {d.name}
-                            <ScoreBadge score={d._score.total} reasons={d._score.reasons} />
+                            <MatchScoreChip score={d._score} />
                             <SourceBadge source={d.source} />
                           </div>
                           <div className="text-[10px] text-muted-foreground truncate">{d.speciality ?? "—"}{d.email && ` · ${d.email}`}</div>
@@ -1241,29 +1231,6 @@ function SourceBadge({ source }: { source: "lead" | "dob" }) {
   );
 }
 
-/** Tiny pill that shows a doctor's readiness score and the criteria that
- *  contributed to it (tooltip on hover via the native title attribute). */
-function ScoreBadge({ score, reasons }: { score: number; reasons: string[] }) {
-  const tone =
-    score >= 70 ? "bg-emerald-100 text-emerald-800 border-emerald-200" :
-    score >= 40 ? "bg-amber-100 text-amber-800 border-amber-200" :
-                  "bg-slate-100 text-slate-700 border-slate-200";
-  return (
-    <span
-      title={reasons.length ? reasons.join(" · ") : "No bonuses"}
-      className={`inline-flex items-center gap-0.5 rounded-full border px-1.5 py-[1px] text-[9px] font-semibold tabular-nums ${tone}`}
-    >
-      <Star className="h-2.5 w-2.5" />
-      {score}
-    </span>
-  );
-}
-
-interface DoctorScore {
-  total:   number;
-  reasons: string[];   // human-readable contributors, for the tooltip
-}
-
 /** Rank a doctor's readiness for a batch send.
  *
  *  Signals (highest → lowest weight):
@@ -1277,17 +1244,12 @@ interface DoctorScore {
  *
  *  Numbers are deliberately small + bounded so users still recognise the
  *  rank order intuitively. Score caps at 100. */
-function scoreDoctor(d: DoctorOption, batch: ScheduledBatch, effectiveSpecialty?: string | null): DoctorScore {
-  // Delegates to the canonical scoreCandidate so every surface that
-  // ranks doctors uses the SAME algorithm. Hospital context is null
-  // here (a Batch doesn't have an emirate the way a vacancy does), so
-  // licenses are credited via the "no-hospital" branch of
-  // scoreCandidate — all regional licenses held count, capped at 25.
-  //
-  // Specialty fallback: batch.specialty wins; otherwise today's
-  // rotation hint provides a softer specialty target. When neither
-  // is set, scoreCandidate scores 0 / "none" which still surfaces in
-  // the picker (it's a sort key, not a hard filter).
+/** Returns the canonical MatchScore for a doctor against a batch.
+ *  Single algorithm — same as the vacancy matcher, Today's Pick tile,
+ *  Doctor → Vacancies rank, everything. Picker UIs feed this straight
+ *  into MatchScoreChip so every number reads X/100 with the same
+ *  strong / decent / weak tier colours. */
+function scoreDoctor(d: DoctorOption, batch: ScheduledBatch, effectiveSpecialty?: string | null): MatchScore {
   const targetSpecialty = batch.specialty ?? effectiveSpecialty ?? "";
   const ms = scoreCandidate(
     {
@@ -1308,15 +1270,25 @@ function scoreDoctor(d: DoctorOption, batch: ScheduledBatch, effectiveSpecialty?
     targetSpecialty,
     {},
   );
-  // Rotation hint is a softer signal than a hard batch.specialty —
-  // halve the specialty contribution so a perfect-license DoB with
-  // a different specialty can still surface for a daily_duo batch.
-  // We don't recompute; we just scale here.
-  const total = (batch.specialty || !effectiveSpecialty)
-    ? ms.score
-    : Math.round(ms.score / 2);
-  const reasons = ms.factors.map(f => `+${f.points} ${f.label}`);
-  return { total: Math.min(100, total), reasons };
+  // When the batch has no hard specialty but we're biasing toward
+  // today's rotation pick, halve the specialty factor's contribution
+  // so a perfect-license DoB with a different specialty can still
+  // surface for daily_duo / tuesday_top_15 batches. Rebuilds the
+  // score with the recomputed factor list so the chip still shows
+  // the per-factor breakdown.
+  if (!batch.specialty && effectiveSpecialty && ms.factors.length > 0) {
+    const halved = ms.factors.map((f, i) => i === 0 ? { ...f, points: Math.round(f.points / 2), label: `${f.label} (rotation hint, halved)` } : f);
+    const total = halved.reduce((s, f) => s + f.points, 0);
+    const clamped = Math.max(0, Math.min(ms.max, total));
+    return {
+      ...ms,
+      score: clamped,
+      pct:   Math.round((clamped / ms.max) * 100),
+      tier:  clamped >= 70 ? "strong" : clamped >= 40 ? "decent" : clamped > 0 ? "weak" : "none",
+      factors: halved,
+    };
+  }
+  return ms;
 }
 
 function normaliseSpec(s: string): string {
