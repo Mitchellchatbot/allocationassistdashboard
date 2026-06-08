@@ -231,56 +231,144 @@ function MatchGroup({ label, tone, matches, linkedIds, busyId, onLink, collapsib
       </button>
       {expanded && (
         <div className="space-y-1.5">
-          {matches.map(m => {
-            const linked = linkedIds.has(m.doctor_id);
-            return (
-              <div key={m.doctor_id} className="flex items-center gap-2 rounded-md border bg-white px-2.5 py-1.5">
-                <UserSquare className="h-3.5 w-3.5 text-slate-400 shrink-0" />
-                <div className="flex-1 min-w-0">
-                  <div className="flex items-center gap-1.5 flex-wrap">
-                    <span className="text-[12px] font-medium truncate">{m.doctor_name}</span>
-                    <DoctorLicensePills
-                      has_dha={m.has_dha}
-                      has_doh={m.has_doh}
-                      has_moh={m.has_moh}
-                      license_text={m.license_text}
-                      hideWhenEmpty
-                    />
-                  </div>
-                  <div className="text-[10px] text-muted-foreground truncate" title={m.score.factors.map(f => `${f.label} (${f.points > 0 ? "+" : ""}${f.points})`).join("  ·  ")}>
-                    {m.score.summary || m.speciality}
-                  </div>
-                </div>
-                <MatchScoreChip score={m.score} />
-                {m.doctor_email && (
-                  <a
-                    href={`mailto:${m.doctor_email}`}
-                    className="text-slate-400 hover:text-teal-600"
-                    title={m.doctor_email}
-                    onClick={(e) => e.stopPropagation()}
-                  >
-                    <Mail className="h-3 w-3" />
-                  </a>
-                )}
-                {linked
-                  ? <Badge variant="outline" className="bg-teal-50 text-teal-700 border-teal-200 text-[9px] uppercase tracking-wider">Linked</Badge>
-                  : (
-                    <Button
-                      size="sm"
-                      variant="outline"
-                      className="h-6 text-[10px] px-2"
-                      disabled={busyId === m.doctor_id}
-                      onClick={() => onLink(m)}
-                    >
-                      <Plus className="h-3 w-3 mr-0.5" /> Link
-                    </Button>
-                  )
-                }
-              </div>
-            );
-          })}
+          {matches.map(m => (
+            <MatchRow
+              key={m.doctor_id}
+              m={m}
+              linked={linkedIds.has(m.doctor_id)}
+              busy={busyId === m.doctor_id}
+              onLink={onLink}
+            />
+          ))}
         </div>
       )}
+    </div>
+  );
+}
+
+/** A single doctor row in the matches list. Click the row to expand
+ *  an inline details panel with the full score-factor breakdown,
+ *  contact info, training country, years experience, nationality —
+ *  every signal the matcher used, plus a deep-link to open the
+ *  doctor's full profile in the Doctors page. Action buttons
+ *  (mailto, Link) stay clickable without triggering the toggle. */
+function MatchRow({ m, linked, busy, onLink }: {
+  m:       ReturnType<typeof useMatchingDoctors>[number];
+  linked:  boolean;
+  busy:    boolean;
+  onLink:  (m: ReturnType<typeof useMatchingDoctors>[number]) => void;
+}) {
+  const [open, setOpen] = useState(false);
+  return (
+    <div className="rounded-md border bg-white overflow-hidden">
+      <div
+        className="flex items-center gap-2 px-2.5 py-1.5 cursor-pointer hover:bg-slate-50/60 transition-colors"
+        onClick={() => setOpen(o => !o)}
+        title="Click to see this doctor's full match details"
+      >
+        <UserSquare className="h-3.5 w-3.5 text-slate-400 shrink-0" />
+        <div className="flex-1 min-w-0">
+          <div className="flex items-center gap-1.5 flex-wrap">
+            <span className="text-[12px] font-medium truncate">{m.doctor_name}</span>
+            <DoctorLicensePills
+              has_dha={m.has_dha}
+              has_doh={m.has_doh}
+              has_moh={m.has_moh}
+              license_text={m.license_text}
+              hideWhenEmpty
+            />
+          </div>
+          <div className="text-[10px] text-muted-foreground truncate">
+            {m.score.summary || m.speciality}
+          </div>
+        </div>
+        <MatchScoreChip score={m.score} />
+        {m.doctor_email && (
+          <a
+            href={`mailto:${m.doctor_email}`}
+            className="text-slate-400 hover:text-teal-600"
+            title={m.doctor_email}
+            onClick={(e) => e.stopPropagation()}
+          >
+            <Mail className="h-3 w-3" />
+          </a>
+        )}
+        {linked
+          ? <Badge variant="outline" className="bg-teal-50 text-teal-700 border-teal-200 text-[9px] uppercase tracking-wider">Linked</Badge>
+          : (
+            <Button
+              size="sm"
+              variant="outline"
+              className="h-6 text-[10px] px-2"
+              disabled={busy}
+              onClick={(e) => { e.stopPropagation(); onLink(m); }}
+            >
+              <Plus className="h-3 w-3 mr-0.5" /> Link
+            </Button>
+          )
+        }
+      </div>
+
+      {open && (
+        <div className="border-t bg-slate-50/60 px-3 py-2.5 space-y-2.5">
+          {/* Contact + key fields */}
+          <div className="grid grid-cols-2 gap-x-3 gap-y-1 text-[11px]">
+            <DetailField label="Specialty"        value={m.speciality} />
+            <DetailField label="Country of training" value={m.country_training} />
+            <DetailField label="Nationality"      value={m.nationality} />
+            <DetailField label="Years experience" value={m.years_experience != null ? `${m.years_experience} years` : null} />
+            <DetailField label="Notice period"    value={m.notice_period} />
+            <DetailField label="License (raw)"    value={m.license_text} />
+            <DetailField label="Email"            value={m.doctor_email} mono />
+            <DetailField label="Phone"            value={m.doctor_phone} mono />
+          </div>
+
+          {/* Factor-by-factor breakdown of the match score */}
+          <div>
+            <div className="text-[9.5px] uppercase tracking-wider text-slate-500 font-semibold mb-1">
+              Score breakdown · {m.score.score}/{m.score.max}
+            </div>
+            <div className="space-y-0.5">
+              {m.score.factors.length === 0 ? (
+                <div className="text-[11px] text-muted-foreground italic">No matching factors.</div>
+              ) : m.score.factors.map((f, i) => (
+                <div key={i} className="flex items-center gap-2 text-[11px]">
+                  <span className={`tabular-nums font-semibold w-9 text-right shrink-0 ${f.negative ? "text-rose-600" : f.points > 0 ? "text-emerald-700" : "text-slate-500"}`}>
+                    {f.points > 0 ? "+" : ""}{f.points}
+                  </span>
+                  <span className="text-slate-700">{f.label}</span>
+                </div>
+              ))}
+            </div>
+          </div>
+
+          {/* Deep-link to the full doctor profile (Doctors page) when
+              available. Falls back to a name-search on Doctors so the
+              team can pull up the rich profile editor. */}
+          <div className="flex gap-2 pt-1">
+            <a
+              href={`/doctors?tab=profiles&q=${encodeURIComponent(m.doctor_email ?? m.doctor_name)}`}
+              target="_blank"
+              rel="noreferrer"
+              className="inline-flex items-center gap-1 text-[10.5px] text-teal-700 hover:underline"
+              onClick={(e) => e.stopPropagation()}
+            >
+              Open full profile in Doctors →
+            </a>
+          </div>
+        </div>
+      )}
+    </div>
+  );
+}
+
+function DetailField({ label, value, mono = false }: { label: string; value: string | null; mono?: boolean }) {
+  return (
+    <div className="flex gap-2 min-w-0">
+      <span className="text-muted-foreground shrink-0 w-[110px]">{label}</span>
+      <span className={`text-slate-800 break-words min-w-0 ${mono ? "font-mono text-[10.5px]" : ""} ${!value ? "text-slate-300 italic" : ""}`}>
+        {value || "—"}
+      </span>
     </div>
   );
 }

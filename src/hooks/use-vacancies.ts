@@ -229,15 +229,20 @@ export function useMatchingDoctors(vacancy: Vacancy | null | undefined): ScoredM
       const score = scoreMatch(candidate, vacancy, h);
       if (score.tier === "none") continue;
       out.push({
-        doctor_id:    prefixedId,
-        doctor_name:  name,
-        doctor_email: dob.Email,
-        speciality:   candidate.speciality,
+        doctor_id:        prefixedId,
+        doctor_name:      name,
+        doctor_email:     dob.Email,
+        doctor_phone:     dob.Phone ?? dob.Mobile ?? null,
+        speciality:       candidate.speciality,
         score,
-        has_dha:      candidate.has_dha,
-        has_doh:      candidate.has_doh,
-        has_moh:      candidate.has_moh,
-        license_text: candidate.license,
+        has_dha:          candidate.has_dha,
+        has_doh:          candidate.has_doh,
+        has_moh:          candidate.has_moh,
+        license_text:     candidate.license,
+        country_training: candidate.country_training,
+        nationality:      candidate.nationality,
+        years_experience: candidate.years_experience,
+        notice_period:    candidate.notice_period,
       });
     }
 
@@ -250,6 +255,7 @@ export interface ScoredMatchingDoctor {
   doctor_id:    string;
   doctor_name:  string;
   doctor_email: string | null;
+  doctor_phone: string | null;
   speciality:   string | null;
   score:        MatchScore;
   // License signals — surfaced so the match drawer can render DHA / DOH / MOH
@@ -259,6 +265,11 @@ export interface ScoredMatchingDoctor {
   has_doh:      boolean;
   has_moh:      boolean;
   license_text: string | null;
+  // Rich-detail fields used by the click-to-expand row panel.
+  country_training: string | null;
+  nationality:      string | null;
+  years_experience: number | null;
+  notice_period:    string | null;
 }
 
 export function useCreateVacancy() {
