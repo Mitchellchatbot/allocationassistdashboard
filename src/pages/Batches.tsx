@@ -1230,55 +1230,55 @@ function scoreDoctor(d: DoctorOption, batch: ScheduledBatch, effectiveSpecialty?
   const reasons: string[] = [];
   let total = 0;
 
-  // Prefer the batch's own specialty (specialty_of_day) when set; otherwise
-  // fall back to the caller's hint (typically today's rotation specialty,
-  // so even daily_duo / tuesday_top_15 ranks rotation-matching doctors up).
+  // Specialty is HALF the score — mirrors the model the user spec'd
+  // for scoreMatch on 2026-06-08. Uses the same scoreSpecialty ladder
+  // so exact / canonical-group / substring / parent / token-overlap
+  // all award proportional points. When the batch has a hard specialty
+  // (specialty_of_day), full weight. When we're just biasing toward
+  // today's rotation pick (daily_duo / tuesday_top_15), half weight
+  // so a perfectly-licensed DoB doctor in a different specialty still
+  // ranks reasonably.
   const targetSpecialty = batch.specialty ?? effectiveSpecialty ?? null;
-  if (targetSpecialty && d.speciality) {
-    const docGroup   = groupSpecialty(d.speciality);
-    const batchGroup = groupSpecialty(targetSpecialty) ?? targetSpecialty;
-    const directHit  = normaliseSpec(d.speciality) === normaliseSpec(targetSpecialty);
-    const bucketHit  = !!docGroup && normaliseSpec(docGroup) === normaliseSpec(batchGroup);
-    // Promote rare-spec / cousin matches via the canonical scoreSpecialty
-    // ladder: catches partial / parent / token-overlap cases the raw
-    // exact-bucket compare above would miss (e.g. 'Cardiothoracic
-    // Surgery' ↔ 'Cardiac Surgery'). Anchored at 1/4 of the bucket boost
-    // for the weakest tier so it never outranks a clean directHit.
-    const specPts50 = scoreSpecialty(d.speciality, targetSpecialty);
-    if (directHit || bucketHit) {
-      const pts = batch.specialty ? 40 : 20;
-      total += pts;
-      reasons.push(`+${pts} ${batch.specialty ? "specialty matches" : "rotation pick"} "${targetSpecialty}"${bucketHit && !directHit ? ` (via ${docGroup} bucket)` : ""}`);
-    } else if (specPts50 > 0) {
-      // Map the 0-50 ladder onto the batch-picker's narrower 0-25 boost
-      // so a partial / parent / token match still moves the doctor up
-      // the list without outranking exact-bucket peers above.
-      const pts = Math.round((specPts50 / 50) * (batch.specialty ? 25 : 12));
-      total += pts;
-      const tierLabel =
-        specPts50 === 35 ? "substring match" :
-        specPts50 === 30 ? "same parent specialty" :
-                           "specialty keyword overlap";
-      reasons.push(`+${pts} ${tierLabel} ("${d.speciality}" ↔ "${targetSpecialty}")`);
-    }
+  const specPts50 = targetSpecialty ? scoreSpecialty(d.speciality, targetSpecialty) : 0;
+  if (specPts50 > 0) {
+    const pts = batch.specialty ? specPts50 : Math.round(specPts50 / 2);
+    total += pts;
+    const tierLabel =
+      specPts50 === 50 ? "specialty exact match" :
+      specPts50 === 40 ? `specialty group match (via ${groupSpecialty(targetSpecialty!) ?? targetSpecialty})` :
+      specPts50 === 35 ? "specialty substring match" :
+      specPts50 === 30 ? "same parent specialty" :
+                         "specialty keyword overlap";
+    reasons.push(`+${pts} ${tierLabel}${batch.specialty ? "" : " (rotation hint)"}`);
   }
-  if (d.source === "dob") {
-    total += 20; reasons.push("+20 placed before (Doctor on Board)");
-  }
+
+  // License — the next biggest signal after specialty.
+  // Batch context has no specific emirate, so any regional license
+  // counts as the primary +15; each additional regional license stacks
+  // +5 each (capped at +10). A fully-licensed multi-regional doctor
+  // tops out at +25, half what specialty can reach.
+  const licenseCount = (d.hasLicense ? 1 : 0); // raw count not exposed on DoctorOption; treat hasLicense as "≥1"
   if (d.hasLicense) {
-    total += 20; reasons.push("+20 has DOH/DHA/MOH or other license");
+    total += 15;
+    reasons.push("+15 has regional license (DHA / DOH / MOH / etc.)");
   }
-  if (d.highPriority) {
-    total += 15; reasons.push("+15 high-priority lead");
+  void licenseCount;
+
+  // Track record — placed-before-doctor (DoB) is a strong signal,
+  // worth bumping a candidate above peers WITHOUT specialty match.
+  if (d.source === "dob") {
+    total += 12;
+    reasons.push("+12 placed before (Doctor on Board)");
   }
-  if (d.primeClassification) {
-    total += 10; reasons.push(`+10 prime classification (${d.primeClassification})`);
-  }
-  if (d.email)     { total += 5; reasons.push("+5 has email"); }
-  if (d.speciality){ total += 5; reasons.push("+5 specialty filled"); }
-  if (d.createdAt) {
-    const days = (Date.now() - d.createdAt) / 86_400_000;
-    if (days <= 90) { total += 10; reasons.push("+10 added in last 90 days"); }
+
+  // Soft signals — small additive bonuses.
+  if (d.highPriority)        { total += 8;  reasons.push("+8 high-priority lead"); }
+  if (d.primeClassification) { total += 5;  reasons.push(`+5 prime classification (${d.primeClassification})`); }
+  if (d.email)               { total += 3;  reasons.push("+3 has email"); }
+  if (d.speciality)          { total += 2;  reasons.push("+2 specialty field filled"); }
+  if (d.createdAt && (Date.now() - d.createdAt) / 86_400_000 <= 90) {
+    total += 5;
+    reasons.push("+5 added in last 90 days");
   }
 
   return { total: Math.min(100, total), reasons };
