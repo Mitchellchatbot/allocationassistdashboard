@@ -79,12 +79,41 @@ const SAUDI_CITIES = new Set(["riyadh", "jeddah", "dammam", "khobar", "mecca", "
 const QATAR_CITIES = new Set(["doha", "al rayyan"]);
 
 
-export function scoreMatch(d: MatchCandidateDoctor, v: Vacancy, h: MatchCandidateHospital | null): MatchScore {
+/** Optional context for scoreCandidate. Every field is optional —
+ *  surfaces with less context (e.g. the Batches specialty-rotation
+ *  picker, which has no hospital) just pass {} and the corresponding
+ *  factors quietly score 0 or fall back to a context-free variant. */
+export interface ScoreOpts {
+  /** Hospital city + country. Drives the region-fit license factor
+   *  (DHA→Dubai, DOH→Abu Dhabi, MOH→UAE, SCFHS→Saudi, QCHP→Qatar)
+   *  and the training-country factor. */
+  hospital?:        MatchCandidateHospital | null;
+  /** Vacancy priority — drives the notice-period urgency factor. */
+  vacancyPriority?: Vacancy["priority"] | null;
+}
+
+/**
+ * The canonical doctor-match scorer. Used by:
+ *   - scoreMatch (vacancy + hospital context)
+ *   - Batches doctor picker (specialty + nothing else)
+ *   - Anywhere else that needs a 100-point doctor score
+ *
+ * Every factor is conditional on its required context being passed in.
+ * Specialty is the only mandatory input; everything else is optional
+ * and absent factors silently score 0. This way one algorithm produces
+ * a consistent X/100 score across every surface — the user's request
+ * that 'they need to be the same in the scoring method'.
+ */
+export function scoreCandidate(
+  d: MatchCandidateDoctor,
+  targetSpecialty: string,
+  opts: ScoreOpts = {},
+): MatchScore {
+  const { hospital: h = null, vacancyPriority = null } = opts;
   const factors: MatchFactor[] = [];
 
-  // ── 1. Specialty (0-50) — also gates everything: if zero, the whole score
-  //      is zero. Spec is the only required signal.
-  const specPts = scoreSpecialtyInner(d.speciality, v.specialty);
+  // ── 1. Specialty (0-50) — gates everything.
+  const specPts = scoreSpecialtyInner(d.speciality, targetSpecialty);
   if (specPts === 0) {
     return {
       score: 0, max: MAX_SCORE, pct: 0, tier: "none",
@@ -95,45 +124,55 @@ export function scoreMatch(d: MatchCandidateDoctor, v: Vacancy, h: MatchCandidat
   factors.push({
     label:
       specPts === 50 ? `Specialty exact: ${d.speciality}` :
-      specPts === 40 ? `Specialty group match: ${d.speciality} → ${groupSpecialty(v.specialty) ?? v.specialty}` :
-      specPts === 35 ? `Specialty partial: ${d.speciality} ↔ ${v.specialty}` :
-      specPts === 30 ? `Same parent specialty: ${d.speciality} ↔ ${v.specialty}` :
-                       `Specialty token overlap: ${d.speciality} ↔ ${v.specialty}`,
+      specPts === 40 ? `Specialty group match: ${d.speciality} → ${groupSpecialty(targetSpecialty) ?? targetSpecialty}` :
+      specPts === 35 ? `Specialty partial: ${d.speciality} ↔ ${targetSpecialty}` :
+      specPts === 30 ? `Same parent specialty: ${d.speciality} ↔ ${targetSpecialty}` :
+                       `Specialty token overlap: ${d.speciality} ↔ ${targetSpecialty}`,
     points: specPts,
   });
 
-  // ── 2. License × hospital region (0-25, can go negative -5)
-  const licResult = scoreLicense(d, h);
-  if (licResult) factors.push(licResult);
+  if (h) {
+    // ── 2a. License × hospital region (0-25, can go negative -5).
+    const licResult = scoreLicense(d, h);
+    if (licResult) factors.push(licResult);
+    // ── 2b. Extra licenses beyond the region-fit one (0-10).
+    const extras = scoreExtraLicenses(d, h);
+    if (extras.points > 0) factors.push(extras);
+  } else {
+    // No hospital context (Batches picker, specialty-only surfaces).
+    // Credit every regional license the doctor holds, +10 each up to
+    // 25 — same total ceiling as the region-fit + extras combo so the
+    // score range stays consistent across surfaces.
+    const held: string[] = [];
+    if (d.has_dha) held.push("DHA");
+    if (d.has_doh) held.push("DOH");
+    if (d.has_moh) held.push("MOH");
+    if (held.length > 0) {
+      const pts = Math.min(25, held.length * 10);
+      factors.push({ label: `Holds ${held.join(" + ")} (regional licenses)`, points: pts });
+    } else if (d.license) {
+      // Free-text license info (SCFHS, QCHP, etc.) — partial credit.
+      factors.push({ label: `Has license: ${d.license}`, points: 10 });
+    }
+  }
 
-  // ── 2b. Extra licenses the doctor holds beyond the region-fit one
-  //       (0-10, +5 each, capped). Two extra regional licenses = a
-  //       fully-credentialed doctor edge — the team's intuition.
-  const extras = scoreExtraLicenses(d, h);
-  if (extras.points > 0) factors.push(extras);
-
-  // ── 3. Training country (0-7)
+  // ── 3. Training country (0-7) — requires hospital country to compare.
   const trainPts = scoreTraining(d.country_training, h?.country, d.nationality);
   if (trainPts.points > 0) factors.push(trainPts);
 
-  // ── 4. Years of experience (0-5)
+  // ── 4. Years of experience (0-5) — always applies.
   const expPts = scoreExperience(d.years_experience);
   if (expPts.points > 0) factors.push(expPts);
 
-  // ── 5. Notice period vs urgency (0-3)
-  const urg = scoreUrgency(d.notice_period, v.priority);
-  if (urg.points > 0) factors.push(urg);
-
-  // Notes overlap dropped from the rebalanced model — it was a 0-10
-  // signal that often noised up the score with coincidental keyword
-  // matches. License weight absorbs the budget instead.
-  void v.notes;
+  // ── 5. Notice ↔ urgency (0-3) — requires vacancy priority.
+  if (vacancyPriority) {
+    const urg = scoreUrgency(d.notice_period, vacancyPriority);
+    if (urg.points > 0) factors.push(urg);
+  }
 
   const total = factors.reduce((s, f) => s + f.points, 0);
   const clamped = Math.max(0, Math.min(MAX_SCORE, total));
   const pct = Math.round((clamped / MAX_SCORE) * 100);
-  // Tier thresholds. Specialty + region-fit license = 75 → strong;
-  // specialty alone = 50 → decent; partial-tier specialty only = weak.
   const tier: MatchScore["tier"] =
     clamped >= 70 ? "strong" :
     clamped >= 40 ? "decent" :
@@ -143,6 +182,13 @@ export function scoreMatch(d: MatchCandidateDoctor, v: Vacancy, h: MatchCandidat
     score: clamped, max: MAX_SCORE, pct, tier, factors,
     summary: summarise(factors),
   };
+}
+
+/** Thin wrapper kept for back-compat: scoreMatch is the original
+ *  vacancy-specific entry point. New code should call scoreCandidate
+ *  directly. */
+export function scoreMatch(d: MatchCandidateDoctor, v: Vacancy, h: MatchCandidateHospital | null): MatchScore {
+  return scoreCandidate(d, v.specialty, { hospital: h, vacancyPriority: v.priority });
 }
 
 /** Per-factor specialty scorer, exported so other surfaces (Batches

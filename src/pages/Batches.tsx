@@ -19,7 +19,7 @@ import { useHospitals } from "@/hooks/use-hospitals";
 import { useZohoData, type ZohoLead, type ZohoDoctorOnBoard } from "@/hooks/use-zoho-data";
 import { useDoctorLifecycleMap } from "@/hooks/use-doctor-lifecycle";
 import { groupSpecialty } from "@/lib/specialty-groups";
-import { rankBySpecialty, scoreSpecialty, type SpecialtyRankEntry } from "@/lib/match-score";
+import { rankBySpecialty, scoreCandidate, type SpecialtyRankEntry } from "@/lib/match-score";
 
 /**
  * Phase 6 — Recurring batch sends. Source: Saif Ullah, May 20 2026.
@@ -1227,60 +1227,44 @@ interface DoctorScore {
  *  Numbers are deliberately small + bounded so users still recognise the
  *  rank order intuitively. Score caps at 100. */
 function scoreDoctor(d: DoctorOption, batch: ScheduledBatch, effectiveSpecialty?: string | null): DoctorScore {
-  const reasons: string[] = [];
-  let total = 0;
-
-  // Specialty is HALF the score — mirrors the model the user spec'd
-  // for scoreMatch on 2026-06-08. Uses the same scoreSpecialty ladder
-  // so exact / canonical-group / substring / parent / token-overlap
-  // all award proportional points. When the batch has a hard specialty
-  // (specialty_of_day), full weight. When we're just biasing toward
-  // today's rotation pick (daily_duo / tuesday_top_15), half weight
-  // so a perfectly-licensed DoB doctor in a different specialty still
-  // ranks reasonably.
-  const targetSpecialty = batch.specialty ?? effectiveSpecialty ?? null;
-  const specPts50 = targetSpecialty ? scoreSpecialty(d.speciality, targetSpecialty) : 0;
-  if (specPts50 > 0) {
-    const pts = batch.specialty ? specPts50 : Math.round(specPts50 / 2);
-    total += pts;
-    const tierLabel =
-      specPts50 === 50 ? "specialty exact match" :
-      specPts50 === 40 ? `specialty group match (via ${groupSpecialty(targetSpecialty!) ?? targetSpecialty})` :
-      specPts50 === 35 ? "specialty substring match" :
-      specPts50 === 30 ? "same parent specialty" :
-                         "specialty keyword overlap";
-    reasons.push(`+${pts} ${tierLabel}${batch.specialty ? "" : " (rotation hint)"}`);
-  }
-
-  // License — the next biggest signal after specialty.
-  // Batch context has no specific emirate, so any regional license
-  // counts as the primary +15; each additional regional license stacks
-  // +5 each (capped at +10). A fully-licensed multi-regional doctor
-  // tops out at +25, half what specialty can reach.
-  const licenseCount = (d.hasLicense ? 1 : 0); // raw count not exposed on DoctorOption; treat hasLicense as "≥1"
-  if (d.hasLicense) {
-    total += 15;
-    reasons.push("+15 has regional license (DHA / DOH / MOH / etc.)");
-  }
-  void licenseCount;
-
-  // Track record — placed-before-doctor (DoB) is a strong signal,
-  // worth bumping a candidate above peers WITHOUT specialty match.
-  if (d.source === "dob") {
-    total += 12;
-    reasons.push("+12 placed before (Doctor on Board)");
-  }
-
-  // Soft signals — small additive bonuses.
-  if (d.highPriority)        { total += 8;  reasons.push("+8 high-priority lead"); }
-  if (d.primeClassification) { total += 5;  reasons.push(`+5 prime classification (${d.primeClassification})`); }
-  if (d.email)               { total += 3;  reasons.push("+3 has email"); }
-  if (d.speciality)          { total += 2;  reasons.push("+2 specialty field filled"); }
-  if (d.createdAt && (Date.now() - d.createdAt) / 86_400_000 <= 90) {
-    total += 5;
-    reasons.push("+5 added in last 90 days");
-  }
-
+  // Delegates to the canonical scoreCandidate so every surface that
+  // ranks doctors uses the SAME algorithm. Hospital context is null
+  // here (a Batch doesn't have an emirate the way a vacancy does), so
+  // licenses are credited via the "no-hospital" branch of
+  // scoreCandidate — all regional licenses held count, capped at 25.
+  //
+  // Specialty fallback: batch.specialty wins; otherwise today's
+  // rotation hint provides a softer specialty target. When neither
+  // is set, scoreCandidate scores 0 / "none" which still surfaces in
+  // the picker (it's a sort key, not a hard filter).
+  const targetSpecialty = batch.specialty ?? effectiveSpecialty ?? "";
+  const ms = scoreCandidate(
+    {
+      id:               d.id,
+      name:             d.name,
+      speciality:       d.speciality,
+      license:          d.license,
+      has_dha:          d.has_dha,
+      has_doh:          d.has_doh,
+      has_moh:          d.has_moh,
+      country_training: d.country_training,
+      nationality:      d.nationality,
+      years_experience: d.years_experience,
+      notice_period:    d.notice_period,
+      area_of_interest: d.area_of_interest,
+      bio:              d.bio,
+    },
+    targetSpecialty,
+    {},
+  );
+  // Rotation hint is a softer signal than a hard batch.specialty —
+  // halve the specialty contribution so a perfect-license DoB with
+  // a different specialty can still surface for a daily_duo batch.
+  // We don't recompute; we just scale here.
+  const total = (batch.specialty || !effectiveSpecialty)
+    ? ms.score
+    : Math.round(ms.score / 2);
+  const reasons = ms.factors.map(f => `+${f.points} ${f.label}`);
   return { total: Math.min(100, total), reasons };
 }
 
@@ -1296,8 +1280,22 @@ interface DoctorOption {
   email:                string | null;
   speciality:           string | null;
   eligible:             boolean;
-  // Ranking signals — see scoreDoctor().
   source:               "lead" | "dob";
+  // ── Full match-score input fields. Surfaced so the picker can
+  //    call the shared scoreCandidate() with the same shape as
+  //    vacancy matching, keeping one algorithm across all surfaces.
+  license:              string | null;
+  has_dha:              boolean;
+  has_doh:              boolean;
+  has_moh:              boolean;
+  country_training:     string | null;
+  nationality:          string | null;
+  years_experience:     number | null;
+  notice_period:        string | null;
+  area_of_interest:     string | null;
+  bio:                  string | null;
+  // ── Legacy boolean shortcuts kept for the small set of UI bits
+  //    that still read them (badge colours, source filter, etc.).
   hasLicense:           boolean;
   highPriority:         boolean;
   primeClassification:  string | null;
@@ -1348,15 +1346,27 @@ function useMemoDoctors(zoho: unknown, lifecycleMap: Record<string, { eligible_f
         leadSpecByName.get(normName(name)) ||
         null
       );
+      // Zoho's Has_DHA/DOH/MOH come back as "Yes"/"No"/"In Progress"
+      // strings (also sometimes booleans). Treat anything starting with
+      // 'Y' as licensed.
+      const yes = (v: unknown) => typeof v === "string" && /^y/i.test(v.trim());
       out.push({
         id, name,
         email:       d.Email,
         speciality:  dobSpec ?? fallbackSpec,
         eligible:    eligibleOf(id),
         source:      "dob",
-        // DoB rows don't carry license fields — but being a DoB at all is
-        // already validation (they were placed somewhere before).
-        hasLicense:          false,
+        license:             d.License ?? null,
+        has_dha:             yes((d as { Has_DHA?: unknown }).Has_DHA),
+        has_doh:             yes((d as { Has_DOH?: unknown }).Has_DOH),
+        has_moh:             yes((d as { Has_MOH?: unknown }).Has_MOH),
+        country_training:    (d as { Country_of_Specialty_training?: string | null }).Country_of_Specialty_training ?? null,
+        nationality:         (d as { Nationality?: string | null }).Nationality ?? null,
+        years_experience:    typeof (d as { Years_of_Experience?: number }).Years_of_Experience === "number" ? (d as { Years_of_Experience?: number }).Years_of_Experience! : null,
+        notice_period:       (d as { Notice_Period?: string | null }).Notice_Period ?? null,
+        area_of_interest:    (d as { Area_of_Interest?: string | null }).Area_of_Interest ?? null,
+        bio:                 (d as { Bio?: string | null }).Bio ?? null,
+        hasLicense:          yes((d as { Has_DHA?: unknown }).Has_DHA) || yes((d as { Has_DOH?: unknown }).Has_DOH) || yes((d as { Has_MOH?: unknown }).Has_MOH) || !!d.License,
         highPriority:        false,
         primeClassification: null,
         createdAt:           toMs(d.Modified_Time ?? d.Created_Time),
@@ -1366,7 +1376,8 @@ function useMemoDoctors(zoho: unknown, lifecycleMap: Record<string, { eligible_f
       const name = l.Full_Name || `${l.First_Name ?? ""} ${l.Last_Name ?? ""}`.trim();
       if (!name) continue;
       const id = `lead:${l.id}`;
-      const hasLic = !!(l.Has_DOH || l.Has_DHA || l.Has_MOH || l.License);
+      const yes = (v: unknown) => typeof v === "string" && /^y/i.test(v.trim());
+      const hasLic = yes(l.Has_DOH) || yes(l.Has_DHA) || yes(l.Has_MOH) || !!l.License;
       const prime  = (l.Prime_Classification ?? "").trim();
       out.push({
         id, name,
@@ -1374,7 +1385,17 @@ function useMemoDoctors(zoho: unknown, lifecycleMap: Record<string, { eligible_f
         speciality:  l.Specialty ?? l.Specialty_New,
         eligible:    eligibleOf(id),
         source:      "lead",
-        hasLicense:  hasLic,
+        license:             l.License ?? null,
+        has_dha:             yes(l.Has_DHA),
+        has_doh:             yes(l.Has_DOH),
+        has_moh:             yes(l.Has_MOH),
+        country_training:    l.Country_of_Specialty_training ?? null,
+        nationality:         (l as { Nationality?: string | null }).Nationality ?? null,
+        years_experience:    typeof (l as { Years_of_Experience?: number }).Years_of_Experience === "number" ? (l as { Years_of_Experience?: number }).Years_of_Experience! : null,
+        notice_period:       (l as { Notice_Period?: string | null }).Notice_Period ?? null,
+        area_of_interest:    (l as { Area_of_Interest?: string | null }).Area_of_Interest ?? null,
+        bio:                 (l as { Bio?: string | null }).Bio ?? null,
+        hasLicense:          hasLic,
         highPriority:        /high/i.test(l.Lead_Status ?? ""),
         primeClassification: prime || null,
         createdAt:           toMs(l.Created_Time),
