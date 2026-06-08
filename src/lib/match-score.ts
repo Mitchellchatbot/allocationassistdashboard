@@ -89,7 +89,7 @@ export function scoreMatch(d: MatchCandidateDoctor, v: Vacancy, h: MatchCandidat
 
   // ── 1. Specialty (0-50) — also gates everything: if zero, the whole score
   //      is zero. Spec is the only required signal.
-  const specPts = scoreSpecialty(d.speciality, v.specialty);
+  const specPts = scoreSpecialtyInner(d.speciality, v.specialty);
   if (specPts === 0) {
     return {
       score: 0, max: MAX_SCORE, pct: 0, tier: "none",
@@ -146,9 +146,80 @@ export function scoreMatch(d: MatchCandidateDoctor, v: Vacancy, h: MatchCandidat
   };
 }
 
+/** Per-factor specialty scorer, exported so other surfaces (Batches
+ *  Today's-Pick tile, specialty_of_day doctor picker, anywhere we have
+ *  a specialty string but no full vacancy/hospital) can rank doctors
+ *  on the same scale the vacancy matcher uses. 0–50.
+ *
+ *  Tiers (also returned from rankBySpecialty as `tier`):
+ *    50  exact                    e.g. "Cardiology" ↔ "Cardiology"
+ *    40  canonical-group match    e.g. "Retinal Specialist" ↔ "Ophthalmology" (same groupSpecialty bucket)
+ *    35  substring                e.g. "Adult Cardiology" ↔ "Cardiology"
+ *    30  same parent specialty    e.g. "Pediatric Cardiology" ↔ "Cardiology"
+ *    25  token-overlap fallback   e.g. "Cath Lab Fellow Cardiologist" ↔ "Cardiology"
+ *     0  no match                 the rank list drops these. */
+export function scoreSpecialty(doctor: string | null, target: string): number {
+  return scoreSpecialtyInner(doctor, target);
+}
+
+export type SpecialtyMatchTier = "exact" | "group" | "partial" | "parent" | "tokens" | "none";
+
+export interface SpecialtyRankEntry {
+  doctor_id:   string;
+  doctor_name: string;
+  speciality:  string | null;
+  source?:     string;        // "dob" | "lead" | etc. — passthrough from caller
+  points:      number;        // 0..50
+  tier:        SpecialtyMatchTier;
+  /** One-line "why it ranked here" — for the tooltip / inline label. */
+  reason:      string;
+}
+
+/** Rank a roster against a target specialty string. Returns only doctors
+ *  scoring > 0, sorted highest first, limited to `limit`. Used by the
+ *  Batches Today's-Pick tile when the canonical bucket has zero entries
+ *  but a fuzzy / partial / token-overlap pass would still surface useful
+ *  candidates (e.g. "Cardiac Surgery" → Cardiothoracic Surgeons). */
+export function rankBySpecialty<T extends { id: string; name: string; speciality: string | null; source?: string }>(
+  doctors: T[],
+  target:  string,
+  limit  = 10,
+): SpecialtyRankEntry[] {
+  return doctors
+    .map(d => {
+      const pts = scoreSpecialtyInner(d.speciality, target);
+      const tier: SpecialtyMatchTier =
+        pts === 50 ? "exact"   :
+        pts === 40 ? "group"   :
+        pts === 35 ? "partial" :
+        pts === 30 ? "parent"  :
+        pts === 25 ? "tokens"  :
+                     "none";
+      const reason =
+        pts === 50 ? "exact match" :
+        pts === 40 ? `same bucket → ${groupSpecialty(target) ?? target}` :
+        pts === 35 ? "substring match" :
+        pts === 30 ? `same parent → ${rollupSpecialty(target) ?? target}` :
+        pts === 25 ? "shared keywords" :
+                     "no overlap";
+      return {
+        doctor_id:   d.id,
+        doctor_name: d.name,
+        speciality:  d.speciality,
+        source:      d.source,
+        points:      pts,
+        tier,
+        reason,
+      };
+    })
+    .filter(r => r.points > 0)
+    .sort((a, b) => b.points - a.points || a.doctor_name.localeCompare(b.doctor_name))
+    .slice(0, limit);
+}
+
 // ── Per-factor scorers ──────────────────────────────────────────────────────
 
-function scoreSpecialty(doctor: string | null, vacancy: string): number {
+function scoreSpecialtyInner(doctor: string | null, vacancy: string): number {
   if (!doctor) return 0;
   const a = normalize(doctor);
   const b = normalize(vacancy);

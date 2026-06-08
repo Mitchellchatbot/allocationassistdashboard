@@ -19,6 +19,7 @@ import { useHospitals } from "@/hooks/use-hospitals";
 import { useZohoData, type ZohoLead, type ZohoDoctorOnBoard } from "@/hooks/use-zoho-data";
 import { useDoctorLifecycleMap } from "@/hooks/use-doctor-lifecycle";
 import { groupSpecialty } from "@/lib/specialty-groups";
+import { rankBySpecialty, scoreSpecialty, type SpecialtyRankEntry } from "@/lib/match-score";
 
 /**
  * Phase 6 — Recurring batch sends. Source: Saif Ullah, May 20 2026.
@@ -222,8 +223,31 @@ function BatchRow({ batch, onEdit, compact = false }: { batch: ScheduledBatch; o
 function SpecialtyRotationCard({ rotation }: { rotation: ReturnType<typeof useSpecialtyRotation>["data"] }) {
   const update = useUpdateSpecialtyRotation();
   const { data: zoho } = useZohoData();
+  const lifecycleMap  = useDoctorLifecycleMap();
   const [editing, setEditing] = useState(false);
   const [draft, setDraft]     = useState("");
+
+  // Doctor roster used by the fuzzy-match fallback below the Today's-pick
+  // tile. Lighter shape than DoctorOption since the rank only needs id +
+  // name + speciality + source.
+  const rankableDoctors = useMemoReact(() => {
+    const z = zoho as { rawLeads?: ZohoLead[]; rawDoctorsOnBoard?: ZohoDoctorOnBoard[] } | undefined;
+    const eligible = (id: string) => lifecycleMap[id]?.eligible_for_sending !== false;
+    const out: { id: string; name: string; speciality: string | null; source: "lead" | "dob" }[] = [];
+    for (const d of z?.rawDoctorsOnBoard ?? []) {
+      const name = d.Full_Name || `${d.First_Name ?? ""} ${d.Last_Name ?? ""}`.trim();
+      const id   = `dob:${d.id}`;
+      if (!name || !eligible(id)) continue;
+      out.push({ id, name, speciality: d.Specialty_New ?? d.Speciality ?? null, source: "dob" });
+    }
+    for (const l of z?.rawLeads ?? []) {
+      const name = l.Full_Name || `${l.First_Name ?? ""} ${l.Last_Name ?? ""}`.trim();
+      const id   = `lead:${l.id}`;
+      if (!name || !eligible(id)) continue;
+      out.push({ id, name, speciality: l.Specialty ?? l.Specialty_New ?? null, source: "lead" });
+    }
+    return out;
+  }, [zoho, lifecycleMap]);
 
   const queue = rotation?.queue ?? [];
   // Use the derived cursor — the daily-walked position. The persisted
@@ -555,54 +579,99 @@ function SpecialtyRotationCard({ rotation }: { rotation: ReturnType<typeof useSp
         ) : (
           <div className="space-y-3">
             {/* Today's pick — hero card. The cursor specialty is what the
-                scheduler will fire next, i.e. today's send. */}
+                scheduler will fire next, i.e. today's send. When no exact
+                bucket exists in Zoho, fall back to the multi-tier specialty
+                matcher (exact → group → substring → parent → token-overlap)
+                so 'Cardiac Surgery' surfaces Cardiothoracic Surgeons etc.
+                instead of dead-ending at 'pick doctors manually'. */}
             {(() => {
               const today = queue[cursor] ?? null;
               const todayGroup = today ? zohoSpecialties.groups.find(g => g.name.toLowerCase() === today.toLowerCase()) : null;
+              const ranked: SpecialtyRankEntry[] = today && !todayGroup
+                ? rankBySpecialty(rankableDoctors, today, 5)
+                : [];
               return today ? (
-                <div className="rounded-xl border border-violet-200 bg-gradient-to-br from-violet-50 to-fuchsia-50/40 px-4 py-3 flex items-center gap-3">
-                  <div className="h-9 w-9 rounded-full bg-violet-100 flex items-center justify-center shrink-0">
-                    <Sparkles className="h-4 w-4 text-violet-600" />
-                  </div>
-                  <div className="flex-1 min-w-0">
-                    <div className="text-[9px] uppercase tracking-[0.12em] text-violet-700/80 font-semibold">
-                      Today's pick
+                <div className="space-y-2">
+                  <div className="rounded-xl border border-violet-200 bg-gradient-to-br from-violet-50 to-fuchsia-50/40 px-4 py-3 flex items-center gap-3">
+                    <div className="h-9 w-9 rounded-full bg-violet-100 flex items-center justify-center shrink-0">
+                      <Sparkles className="h-4 w-4 text-violet-600" />
                     </div>
-                    <div className="text-[15px] font-semibold text-violet-900 truncate">{today}</div>
-                    <div className="text-[10px] text-violet-700/80 mt-0.5">
-                      {todayGroup
-                        ? <>{todayGroup.doctorCount} eligible doctor{todayGroup.doctorCount === 1 ? "" : "s"} in this bucket · {todayGroup.sources.length} Zoho variant{todayGroup.sources.length === 1 ? "" : "s"}</>
-                        : "Not currently in Zoho — pick doctors manually"}
+                    <div className="flex-1 min-w-0">
+                      <div className="text-[9px] uppercase tracking-[0.12em] text-violet-700/80 font-semibold">
+                        Today's pick
+                      </div>
+                      <div className="text-[15px] font-semibold text-violet-900 truncate">{today}</div>
+                      <div className="text-[10px] text-violet-700/80 mt-0.5">
+                        {todayGroup
+                          ? <>{todayGroup.doctorCount} eligible doctor{todayGroup.doctorCount === 1 ? "" : "s"} in this bucket · {todayGroup.sources.length} Zoho variant{todayGroup.sources.length === 1 ? "" : "s"}</>
+                          : ranked.length > 0
+                            ? <>No exact bucket — {ranked.length} closest match{ranked.length === 1 ? "" : "es"} below</>
+                            : "Not currently in Zoho — pick doctors manually"}
+                      </div>
+                    </div>
+                    <div className="text-right shrink-0 flex flex-col items-end gap-2">
+                      <div>
+                        <div className="text-[9px] uppercase tracking-wider text-violet-700/70">Day</div>
+                        <div className="text-[14px] font-semibold text-violet-900 tabular-nums">{cursor + 1}<span className="text-[10px] text-violet-700/60">/{queue.length}</span></div>
+                      </div>
+                      <Button
+                        size="sm"
+                        variant="outline"
+                        className="h-6 text-[10px] gap-1 border-violet-300 text-violet-800 hover:bg-violet-100"
+                        onClick={async () => {
+                          const next = (cursor + 1) % queue.length;
+                          try {
+                            await update.mutateAsync({ cursor_index: next });
+                            toast.success(`Advanced to ${queue[next]}`);
+                          } catch (e) {
+                            toast.error(e instanceof Error ? e.message : "Advance failed");
+                          }
+                        }}
+                        disabled={update.isPending || queue.length === 0}
+                        title="Skip to the next specialty"
+                      >
+                        <ChevronRight className="h-2.5 w-2.5" /> Advance
+                      </Button>
                     </div>
                   </div>
-                  <div className="text-right shrink-0 flex flex-col items-end gap-2">
-                    <div>
-                      <div className="text-[9px] uppercase tracking-wider text-violet-700/70">Day</div>
-                      <div className="text-[14px] font-semibold text-violet-900 tabular-nums">{cursor + 1}<span className="text-[10px] text-violet-700/60">/{queue.length}</span></div>
+
+                  {/* Fuzzy-match suggestions when there's no exact Zoho
+                      bucket. Pulls partial / canonical-group / parent /
+                      token-overlap matches via scoreSpecialty so the team
+                      isn't dead-ended on rare specialties (Cardiac Surgery
+                      → Cardiothoracic Surgeons, etc.). */}
+                  {!todayGroup && ranked.length > 0 && (
+                    <div className="rounded-lg border border-violet-200/70 bg-white px-3 py-2">
+                      <div className="text-[9.5px] uppercase tracking-wider text-violet-700/80 font-semibold mb-1.5">
+                        Closest matches in Zoho
+                      </div>
+                      <div className="space-y-1">
+                        {ranked.map(r => (
+                          <div key={r.doctor_id} className="flex items-center gap-2 text-[11px]">
+                            <Badge
+                              variant="outline"
+                              className={`shrink-0 text-[9px] tabular-nums ${
+                                r.tier === "exact"   ? "bg-emerald-50 text-emerald-700 border-emerald-200" :
+                                r.tier === "group"   ? "bg-teal-50    text-teal-700    border-teal-200"    :
+                                r.tier === "partial" ? "bg-sky-50     text-sky-700     border-sky-200"     :
+                                r.tier === "parent"  ? "bg-amber-50   text-amber-700   border-amber-200"   :
+                                                       "bg-slate-100  text-slate-600   border-slate-200"
+                              }`}
+                              title={r.reason}
+                            >
+                              {r.points}/50
+                            </Badge>
+                            <span className="font-medium text-slate-800 truncate">{r.doctor_name}</span>
+                            <span className="text-muted-foreground truncate">· {r.speciality ?? "—"}</span>
+                            <span className="ml-auto text-[9px] uppercase tracking-wider text-muted-foreground shrink-0">{r.source}</span>
+                          </div>
+                        ))}
+                      </div>
+                      <div className="text-[9.5px] text-muted-foreground mt-1.5">
+                        Tier scale: <span className="text-emerald-700">exact 50</span> · <span className="text-teal-700">group 40</span> · <span className="text-sky-700">substring 35</span> · <span className="text-amber-700">parent 30</span> · <span className="text-slate-600">keyword 25</span>
+                      </div>
                     </div>
-                    {/* Manual advance — the scheduler advances after every
-                        successful specialty_of_day send, but the team
-                        sometimes wants to skip a day (e.g. weekends, gaps
-                        in the cycle). One click moves the cursor forward. */}
-                    <Button
-                      size="sm"
-                      variant="outline"
-                      className="h-6 text-[10px] gap-1 border-violet-300 text-violet-800 hover:bg-violet-100"
-                      onClick={async () => {
-                        const next = (cursor + 1) % queue.length;
-                        try {
-                          await update.mutateAsync({ cursor_index: next });
-                          toast.success(`Advanced to ${queue[next]}`);
-                        } catch (e) {
-                          toast.error(e instanceof Error ? e.message : "Advance failed");
-                        }
-                      }}
-                      disabled={update.isPending || queue.length === 0}
-                      title="Skip to the next specialty"
-                    >
-                      <ChevronRight className="h-2.5 w-2.5" /> Advance
-                    </Button>
-                  </div>
+                  )}
                 </div>
               ) : null;
             })()}
@@ -1170,13 +1239,27 @@ function scoreDoctor(d: DoctorOption, batch: ScheduledBatch, effectiveSpecialty?
     const batchGroup = groupSpecialty(targetSpecialty) ?? targetSpecialty;
     const directHit  = normaliseSpec(d.speciality) === normaliseSpec(targetSpecialty);
     const bucketHit  = !!docGroup && normaliseSpec(docGroup) === normaliseSpec(batchGroup);
+    // Promote rare-spec / cousin matches via the canonical scoreSpecialty
+    // ladder: catches partial / parent / token-overlap cases the raw
+    // exact-bucket compare above would miss (e.g. 'Cardiothoracic
+    // Surgery' ↔ 'Cardiac Surgery'). Anchored at 1/4 of the bucket boost
+    // for the weakest tier so it never outranks a clean directHit.
+    const specPts50 = scoreSpecialty(d.speciality, targetSpecialty);
     if (directHit || bucketHit) {
-      // Full boost when this batch is explicitly that specialty;
-      // half-boost when it's just today's rotation hint (still want
-      // sub-specialty exact matches to win).
       const pts = batch.specialty ? 40 : 20;
       total += pts;
       reasons.push(`+${pts} ${batch.specialty ? "specialty matches" : "rotation pick"} "${targetSpecialty}"${bucketHit && !directHit ? ` (via ${docGroup} bucket)` : ""}`);
+    } else if (specPts50 > 0) {
+      // Map the 0-50 ladder onto the batch-picker's narrower 0-25 boost
+      // so a partial / parent / token match still moves the doctor up
+      // the list without outranking exact-bucket peers above.
+      const pts = Math.round((specPts50 / 50) * (batch.specialty ? 25 : 12));
+      total += pts;
+      const tierLabel =
+        specPts50 === 35 ? "substring match" :
+        specPts50 === 30 ? "same parent specialty" :
+                           "specialty keyword overlap";
+      reasons.push(`+${pts} ${tierLabel} ("${d.speciality}" ↔ "${targetSpecialty}")`);
     }
   }
   if (d.source === "dob") {
