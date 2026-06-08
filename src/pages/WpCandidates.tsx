@@ -33,7 +33,8 @@ import {
   type WpCandidate, type StagedProfile, type StagedProfileInput,
 } from "@/hooks/use-wp-candidates";
 import { toast } from "sonner";
-import { Plus, Camera, Loader2, Check, AlertCircle, Pencil, Trash2, Send, Sparkles } from "lucide-react";
+import { Plus, Camera, Loader2, Check, AlertCircle, Pencil, Trash2, Send, Sparkles, Mail } from "lucide-react";
+import { EmailChainPreviewDialog } from "@/components/EmailChainPreviewDialog";
 import { Textarea } from "@/components/ui/textarea";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 
@@ -1388,6 +1389,7 @@ function StagedProfileDetailDialog({
   const cv  = (profile.extracted_cv_data ?? {}) as Record<string, unknown>;
   const [tab, setTab] = useState<"education" | "experience">("education");
   const update = useUpdateStagedProfile();
+  const [chainOpen, setChainOpen] = useState(false);
 
   // Save handler. Writes acf[key] = value AND mirrors the flat
   // denormalised column (specialty, full_name, phone, etc.) so the
@@ -1723,6 +1725,14 @@ function StagedProfileDetailDialog({
           </Button>
           <div className="flex gap-2">
             <Button
+              variant="outline"
+              className="border-purple-300 text-purple-700 hover:bg-purple-50"
+              onClick={() => setChainOpen(true)}
+              title="See every email in the lifecycle, rendered with this doctor's data"
+            >
+              <Mail className="h-4 w-4 mr-1.5" /> Preview email chain
+            </Button>
+            <Button
               className="bg-emerald-500 hover:bg-emerald-600 text-white"
               onClick={onSaveDraft}
             >
@@ -1738,6 +1748,11 @@ function StagedProfileDetailDialog({
           </div>
         </DialogFooter>
       </DialogContent>
+      <EmailChainPreviewDialog
+        profile={profile}
+        open={chainOpen}
+        onOpenChange={setChainOpen}
+      />
     </Dialog>
   );
 }
