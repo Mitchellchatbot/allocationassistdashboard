@@ -19,7 +19,7 @@ import { useHospitals } from "@/hooks/use-hospitals";
 import { useZohoData, type ZohoLead, type ZohoDoctorOnBoard } from "@/hooks/use-zoho-data";
 import { useDoctorLifecycleMap } from "@/hooks/use-doctor-lifecycle";
 import { groupSpecialty } from "@/lib/specialty-groups";
-import { rankBySpecialty, scoreCandidate, type SpecialtyRankEntry } from "@/lib/match-score";
+import { scoreCandidate } from "@/lib/match-score";
 
 /**
  * Phase 6 — Recurring batch sends. Source: Saif Ullah, May 20 2026.
@@ -227,24 +227,71 @@ function SpecialtyRotationCard({ rotation }: { rotation: ReturnType<typeof useSp
   const [editing, setEditing] = useState(false);
   const [draft, setDraft]     = useState("");
 
-  // Doctor roster used by the fuzzy-match fallback below the Today's-pick
-  // tile. Lighter shape than DoctorOption since the rank only needs id +
-  // name + speciality + source.
+  // Doctor roster for the Today's-Pick "Closest matches" tile.
+  // Carries the FULL match-input shape so scoreCandidate ranks these
+  // doctors with the same algorithm the batch picker uses — same
+  // numbers in both places (user's spec: 'rank these by whatever
+  // shows up when you click the doctors view').
   const rankableDoctors = useMemoReact(() => {
     const z = zoho as { rawLeads?: ZohoLead[]; rawDoctorsOnBoard?: ZohoDoctorOnBoard[] } | undefined;
     const eligible = (id: string) => lifecycleMap[id]?.eligible_for_sending !== false;
-    const out: { id: string; name: string; speciality: string | null; source: "lead" | "dob" }[] = [];
+    const yes = (v: unknown) => typeof v === "string" && /^y/i.test(v.trim());
+    interface R {
+      id:               string;
+      name:             string;
+      speciality:       string | null;
+      source:           "lead" | "dob";
+      license:          string | null;
+      has_dha:          boolean;
+      has_doh:          boolean;
+      has_moh:          boolean;
+      country_training: string | null;
+      nationality:      string | null;
+      years_experience: number | null;
+      notice_period:    string | null;
+      area_of_interest: string | null;
+      bio:              string | null;
+    }
+    const out: R[] = [];
     for (const d of z?.rawDoctorsOnBoard ?? []) {
       const name = d.Full_Name || `${d.First_Name ?? ""} ${d.Last_Name ?? ""}`.trim();
       const id   = `dob:${d.id}`;
       if (!name || !eligible(id)) continue;
-      out.push({ id, name, speciality: d.Specialty_New ?? d.Speciality ?? null, source: "dob" });
+      out.push({
+        id, name,
+        speciality:       d.Specialty_New ?? d.Speciality ?? null,
+        source:           "dob",
+        license:          d.License ?? null,
+        has_dha:          yes((d as { Has_DHA?: unknown }).Has_DHA),
+        has_doh:          yes((d as { Has_DOH?: unknown }).Has_DOH),
+        has_moh:          yes((d as { Has_MOH?: unknown }).Has_MOH),
+        country_training: (d as { Country_of_Specialty_training?: string | null }).Country_of_Specialty_training ?? null,
+        nationality:      (d as { Nationality?: string | null }).Nationality ?? null,
+        years_experience: typeof (d as { Years_of_Experience?: number }).Years_of_Experience === "number" ? (d as { Years_of_Experience?: number }).Years_of_Experience! : null,
+        notice_period:    (d as { Notice_Period?: string | null }).Notice_Period ?? null,
+        area_of_interest: (d as { Area_of_Interest?: string | null }).Area_of_Interest ?? null,
+        bio:              (d as { Bio?: string | null }).Bio ?? null,
+      });
     }
     for (const l of z?.rawLeads ?? []) {
       const name = l.Full_Name || `${l.First_Name ?? ""} ${l.Last_Name ?? ""}`.trim();
       const id   = `lead:${l.id}`;
       if (!name || !eligible(id)) continue;
-      out.push({ id, name, speciality: l.Specialty ?? l.Specialty_New ?? null, source: "lead" });
+      out.push({
+        id, name,
+        speciality:       l.Specialty ?? l.Specialty_New ?? null,
+        source:           "lead",
+        license:          l.License ?? null,
+        has_dha:          yes(l.Has_DHA),
+        has_doh:          yes(l.Has_DOH),
+        has_moh:          yes(l.Has_MOH),
+        country_training: l.Country_of_Specialty_training ?? null,
+        nationality:      (l as { Nationality?: string | null }).Nationality ?? null,
+        years_experience: typeof (l as { Years_of_Experience?: number }).Years_of_Experience === "number" ? (l as { Years_of_Experience?: number }).Years_of_Experience! : null,
+        notice_period:    (l as { Notice_Period?: string | null }).Notice_Period ?? null,
+        area_of_interest: (l as { Area_of_Interest?: string | null }).Area_of_Interest ?? null,
+        bio:              (l as { Bio?: string | null }).Bio ?? null,
+      });
     }
     return out;
   }, [zoho, lifecycleMap]);
@@ -587,8 +634,16 @@ function SpecialtyRotationCard({ rotation }: { rotation: ReturnType<typeof useSp
             {(() => {
               const today = queue[cursor] ?? null;
               const todayGroup = today ? zohoSpecialties.groups.find(g => g.name.toLowerCase() === today.toLowerCase()) : null;
-              const ranked: SpecialtyRankEntry[] = today && !todayGroup
-                ? rankBySpecialty(rankableDoctors, today, 5)
+              // Use the canonical scoreCandidate so this ranking matches
+              // exactly what shows up when the team clicks into the
+              // doctor picker. Same algorithm, same numbers, same tier
+              // badges across all surfaces.
+              const ranked = today
+                ? rankableDoctors
+                    .map(r => ({ r, m: scoreCandidate(r, today, {}) }))
+                    .filter(x => x.m.score > 0)
+                    .sort((a, b) => b.m.score - a.m.score)
+                    .slice(0, 5)
                 : [];
               return today ? (
                 <div className="space-y-2">
@@ -603,10 +658,10 @@ function SpecialtyRotationCard({ rotation }: { rotation: ReturnType<typeof useSp
                       <div className="text-[15px] font-semibold text-violet-900 truncate">{today}</div>
                       <div className="text-[10px] text-violet-700/80 mt-0.5">
                         {todayGroup
-                          ? <>{todayGroup.doctorCount} eligible doctor{todayGroup.doctorCount === 1 ? "" : "s"} in this bucket · {todayGroup.sources.length} Zoho variant{todayGroup.sources.length === 1 ? "" : "s"}</>
+                          ? <>{todayGroup.doctorCount} eligible doctor{todayGroup.doctorCount === 1 ? "" : "s"} in this bucket · top {Math.min(5, ranked.length)} ranked below</>
                           : ranked.length > 0
-                            ? <>No exact bucket — {ranked.length} closest match{ranked.length === 1 ? "" : "es"} below</>
-                            : "Not currently in Zoho — pick doctors manually"}
+                            ? <>Top {ranked.length} ranked doctor{ranked.length === 1 ? "" : "s"} below</>
+                            : "Nothing in Zoho — pick doctors manually"}
                       </div>
                     </div>
                     <div className="text-right shrink-0 flex flex-col items-end gap-2">
@@ -635,40 +690,36 @@ function SpecialtyRotationCard({ rotation }: { rotation: ReturnType<typeof useSp
                     </div>
                   </div>
 
-                  {/* Fuzzy-match suggestions when there's no exact Zoho
-                      bucket. Pulls partial / canonical-group / parent /
-                      token-overlap matches via scoreSpecialty so the team
-                      isn't dead-ended on rare specialties (Cardiac Surgery
-                      → Cardiothoracic Surgeons, etc.). */}
-                  {!todayGroup && ranked.length > 0 && (
+                  {/* Top matches by the canonical scoreCandidate. Same
+                      algorithm + same numbers as the doctor picker. */}
+                  {ranked.length > 0 && (
                     <div className="rounded-lg border border-violet-200/70 bg-white px-3 py-2">
                       <div className="text-[9.5px] uppercase tracking-wider text-violet-700/80 font-semibold mb-1.5">
-                        Closest matches in Zoho
+                        {todayGroup ? "Top-ranked doctors" : "Closest matches in Zoho"}
                       </div>
                       <div className="space-y-1">
-                        {ranked.map(r => (
-                          <div key={r.doctor_id} className="flex items-center gap-2 text-[11px]">
+                        {ranked.map(({ r, m }) => (
+                          <div key={r.id} className="flex items-center gap-2 text-[11px]">
                             <Badge
                               variant="outline"
                               className={`shrink-0 text-[9px] tabular-nums ${
-                                r.tier === "exact"   ? "bg-emerald-50 text-emerald-700 border-emerald-200" :
-                                r.tier === "group"   ? "bg-teal-50    text-teal-700    border-teal-200"    :
-                                r.tier === "partial" ? "bg-sky-50     text-sky-700     border-sky-200"     :
-                                r.tier === "parent"  ? "bg-amber-50   text-amber-700   border-amber-200"   :
-                                                       "bg-slate-100  text-slate-600   border-slate-200"
+                                m.tier === "strong" ? "bg-emerald-50 text-emerald-700 border-emerald-200" :
+                                m.tier === "decent" ? "bg-teal-50    text-teal-700    border-teal-200"    :
+                                m.tier === "weak"   ? "bg-amber-50   text-amber-700   border-amber-200"   :
+                                                      "bg-slate-100  text-slate-600   border-slate-200"
                               }`}
-                              title={r.reason}
+                              title={m.summary}
                             >
-                              {r.points}/50
+                              {m.score}/100
                             </Badge>
-                            <span className="font-medium text-slate-800 truncate">{r.doctor_name}</span>
+                            <span className="font-medium text-slate-800 truncate">{r.name}</span>
                             <span className="text-muted-foreground truncate">· {r.speciality ?? "—"}</span>
                             <span className="ml-auto text-[9px] uppercase tracking-wider text-muted-foreground shrink-0">{r.source}</span>
                           </div>
                         ))}
                       </div>
                       <div className="text-[9.5px] text-muted-foreground mt-1.5">
-                        Tier scale: <span className="text-emerald-700">exact 50</span> · <span className="text-teal-700">group 40</span> · <span className="text-sky-700">substring 35</span> · <span className="text-amber-700">parent 30</span> · <span className="text-slate-600">keyword 25</span>
+                        Tier: <span className="text-emerald-700">strong ≥70</span> · <span className="text-teal-700">decent ≥40</span> · <span className="text-amber-700">weak &lt;40</span>
                       </div>
                     </div>
                   )}
