@@ -581,18 +581,11 @@ Deno.serve(async (req: Request) => {
     console.error("[boldsign-webhook] Zoho automation threw:", e);
   }
 
-  // Notify admins via Resend. Done regardless of Zoho outcome — we don't
-  // want a Contact-creation error to prevent the team from learning that a
-  // contract got signed.
-  const emailErr = await notifyAdminsOfSigning({
-    doctor_name:          existing.doctor_name,
-    doctor_email:         existing.doctor_email,
-    boldsign_document_id: documentId,
-    zoho_contact_id:      contactId,
-  }).catch(e => {
-    console.error("[boldsign-webhook] notifyAdminsOfSigning threw:", e);
-    return String(e);
-  });
+  // Contract-signed used to fan out twice for one event: a Resend admin
+  // email AND the notify() Slack+bell ping below. That's redundant — the
+  // notify() path (action severity) already reaches the team in Slack and
+  // the dashboard. Single channel now; the Resend blast is retired.
+  const emailErr: string | null = null;
 
   await supabase.from("contract_sends").update({
     status:           "signed",

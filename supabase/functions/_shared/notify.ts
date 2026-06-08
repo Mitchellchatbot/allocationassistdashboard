@@ -74,22 +74,29 @@ interface KindRule {
 const KIND_RULES: Record<string, KindRule> = {
   // — actionable —
   shortlist_suggested:    { severity: "action",   cta_label: "Review reply",      cta_kind: "open_run" },
+  interview_proposed:     { severity: "action",   cta_label: "Pick a time",       cta_kind: "open_run" },
   hospital_reply_overdue: { severity: "action",   cta_label: "Chase hospital",    cta_kind: "open_run" },
   interview_followup:     { severity: "action",   cta_label: "Log follow-up",     cta_kind: "open_run" },
   signed_not_joined:      { severity: "action",   cta_label: "Set joining date",  cta_kind: "open_doctor" },
   availability_checkin:   { severity: "action",   cta_label: "Confirm available", cta_kind: "open_doctor" },
   // — high-signal events —
   contract_signed:        { severity: "action",   cta_label: "Log in Reports",    cta_kind: "open_doctor" },
+  cv_uploaded:            { severity: "action",   cta_label: "Review CV",         cta_kind: "open_doctor" },
+  slack_archive_due:      { severity: "action",   cta_label: "Archive channel",   cta_kind: "open_doctor" },
+  batch_send_failed:      { severity: "action",   cta_label: "Open automations",  cta_kind: "navigate" },
   // — escalations —
   placement_payment_overdue: { severity: "critical", cta_label: "Send invoice reminder", cta_kind: "open_doctor" },
-  sla_breach:                { severity: "critical", cta_label: "Open lead",            cta_kind: "open_doctor" },
+  sla_breach:                { severity: "critical", cta_label: "Open connection",       cta_kind: "navigate" },
   // — for awareness —
   vacancy_match:          { severity: "info",     cta_label: "View match",        cta_kind: "open_vacancy" },
-  // Bumped from info → action: every new form submission warrants
-  // a "review the doctor profile" nudge to the team. Slack channel
-  // post + dashboard. Owner @-mention falls back to nobody since
-  // these come in unowned; the team picks one up from the channel.
-  new_form_submission:    { severity: "action",   cta_label: "Review profile",    cta_kind: "navigate" },
+  wp_sync_summary:        { severity: "info",     cta_label: "View candidates",   cta_kind: "navigate" },
+  // A new form submission is real but routine. Kept at info so it
+  // sits in the bell's quiet tier WITHOUT Slack-blasting the channel
+  // or amber-highlighting the bell for every intake. The Slack-worthy
+  // signal is the once-daily `form_digest` ("N new submissions") fired
+  // from tick-scheduler — one consolidated nudge, not per-submission spam.
+  new_form_submission:    { severity: "info",     cta_label: "Review profile",    cta_kind: "navigate" },
+  form_digest:            { severity: "action",   cta_label: "Review submissions", cta_kind: "navigate" },
 };
 
 const fallbackRule: KindRule = { severity: "info", cta_label: "Open", cta_kind: "navigate" };
@@ -193,34 +200,15 @@ export async function notify(input: NotifyInput): Promise<{ id: string | null; s
     {
       type: "actions",
       elements: [
-        // Primary CTA — labelled with what the click ACCOMPLISHES
-        // ("Chase hospital", "Review reply", …). Coloured by severity.
+        // One CTA — labelled with what the click ACCOMPLISHES
+        // ("Chase hospital", "Review reply", …) and coloured by
+        // severity. A single button lands on the deep-link; a second
+        // "View in dashboard" pointing at the same URL was just noise.
         {
           type: "button",
           text: { type: "plain_text", text: ctaLabel },
           url:  deepLink,
           style: severity === "critical" ? "danger" : "primary",
-        },
-        // Secondary CTA — a plain "View in dashboard" so users who
-        // aren't ready to act still have a clear, system-labelled
-        // entry point. Both buttons land on the same deep-link, but
-        // the framing is different — some people read action labels,
-        // others read system labels.
-        {
-          type: "button",
-          text: { type: "plain_text", text: "View in dashboard" },
-          url:  deepLink,
-        },
-      ],
-    },
-    // Tiny context line so the recipient sees WHY this fired without
-    // having to remember the kind catalog.
-    {
-      type: "context",
-      elements: [
-        {
-          type: "mrkdwn",
-          text: `Triggered by *${input.kind}* — ${severity === "critical" ? "team-wide escalation" : severity === "action" ? "needs a human decision" : "for awareness"}`,
         },
       ],
     },

@@ -16,6 +16,7 @@
  */
 
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2";
+import { notify } from "../_shared/notify.ts";
 
 const supabase = createClient(
   Deno.env.get("SUPABASE_URL")!,
@@ -142,6 +143,18 @@ Deno.serve(async (req: Request) => {
     },
     body: JSON.stringify({ upload_id: row.id }),
   }).catch(e => console.error("[cv-upload-public] cv-extract invoke threw:", e));
+
+  // Tell the team the CV they chased for has landed. Action-severity so it
+  // pings the person who sent the link (created_by) — a chased-for CV
+  // arriving is exactly the moment to act on the profile.
+  await notify({
+    kind:              "cv_uploaded",
+    title:             `CV uploaded — ${row.doctor_name}`,
+    body:              `${row.doctor_name} just uploaded their CV. It's extracting now; review the profile once it's ready.`,
+    link_path:         `/doctors?tab=profiles&q=${encodeURIComponent(row.doctor_name ?? "")}`,
+    related_doctor_id: row.doctor_id,
+    for_user:          row.created_by ?? null,
+  }).catch(e => console.error("[cv-upload-public] notify failed:", e));
 
   return json({ ok: true, status: "extracting", upload_id: row.id }, 200);
 });

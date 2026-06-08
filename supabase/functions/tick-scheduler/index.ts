@@ -355,8 +355,23 @@ Deno.serve(async (req: Request) => {
   // ── Sheet connection auto-sync ───────────────────────────────────────────
   // Re-pull every active sheet whose last_synced_at is older than its
   // configured schedule_minutes. Mirrors what "Sync now" does manually.
+  // Also escalates (sla_breach) when a connection has been failing long
+  // enough that the data pipeline is effectively down.
   const syncActs = await runSheetSyncSweep(supabase, now);
   for (const a of syncActs) actions.push(a);
+
+  // ── Placement payment overdue (critical) ─────────────────────────────────
+  // The 45-day payment clock starts on joined_at. Anyone joined > 45d with
+  // no paid_at logged is a money event the team must chase. Deduped weekly.
+  const paymentActs = await runPlacementPaymentSweep(supabase, now);
+  for (const a of paymentActs) actions.push(a);
+
+  // ── Daily form-submission digest ─────────────────────────────────────────
+  // Per-submission pings are info-only (quiet bell tier). Once a day we post
+  // ONE consolidated "N new submissions" action nudge so the channel still
+  // gets the Slack-worthy signal without per-form spam.
+  const digestActs = await runFormDigestSweep(supabase, now);
+  for (const a of digestActs) actions.push(a);
 
   const summary = {
     inspected:  runs?.length ?? 0,
@@ -626,6 +641,107 @@ async function runDoctorsOnTheWaySweep(
   return acts;
 }
 
+// ── Placement payment overdue (critical) ───────────────────────────────────
+// The 45-day payment clock starts on joined_at; paid_at closes it. A
+// placement joined > 45 days ago with no paid_at is overdue money. One
+// critical nudge per doctor per week (deduped like the on-the-way sweep).
+async function runPlacementPaymentSweep(
+  supabase: ReturnType<typeof createClient>,
+  now: Date,
+): Promise<TickAction[]> {
+  const acts: TickAction[] = [];
+  try {
+    const cutoff = new Date(now.getTime() - 45 * 86_400_000).toISOString();
+    const { data: rows, error } = await supabase
+      .from("placement_attempts")
+      .select("doctor_id, doctor_name, hospital_name, joined_at")
+      .not("joined_at", "is", null)
+      .is("paid_at", null)
+      .lte("joined_at", cutoff);
+    if (error) throw error;
+
+    const oneWeekAgo = new Date(now.getTime() - 7 * 86_400_000).toISOString();
+
+    for (const r of (rows ?? []) as Array<{ doctor_id: string; doctor_name: string; hospital_name: string; joined_at: string }>) {
+      const { data: recent } = await supabase
+        .from("notifications")
+        .select("id")
+        .eq("kind",              "placement_payment_overdue")
+        .eq("related_doctor_id", r.doctor_id)
+        .gt("created_at",        oneWeekAgo)
+        .limit(1);
+      if (recent && recent.length > 0) continue;
+
+      const days = Math.floor((now.getTime() - new Date(r.joined_at).getTime()) / 86_400_000);
+      await notify({
+        kind:              "placement_payment_overdue",
+        title:             `Payment overdue — ${r.doctor_name} @ ${r.hospital_name}`,
+        body:              `Joined ${days}d ago (clock is 45d) and no payment logged. Chase the invoice, then mark paid in Reports → Placements.`,
+        link_path:         `/reports`,
+        related_doctor_id: r.doctor_id,
+      });
+      acts.push({
+        run_id: r.doctor_id, doctor: r.doctor_name,
+        flow:   "placement_payment_overdue", stage: "payment",
+        reason: `${days}d since joining, unpaid`,
+        result: "sent",
+        detail: r.hospital_name,
+      });
+    }
+  } catch (e) {
+    console.error("[tick-scheduler] placement_payment sweep failed:", e);
+  }
+  return acts;
+}
+
+// ── Daily form-submission digest ───────────────────────────────────────────
+// Per-submission notifications are info-only (quiet bell tier, no Slack).
+// Once a day, in the morning window (06:xx UTC ≈ 10:xx Dubai), post one
+// consolidated action nudge with the 24h count. Deduped so multiple ticks
+// in the window only post once.
+async function runFormDigestSweep(
+  supabase: ReturnType<typeof createClient>,
+  now: Date,
+): Promise<TickAction[]> {
+  const acts: TickAction[] = [];
+  try {
+    if (now.getUTCHours() !== 6) return acts;   // morning window only
+
+    const twentyHoursAgo = new Date(now.getTime() - 20 * 3_600_000).toISOString();
+    const { data: recent } = await supabase
+      .from("notifications")
+      .select("id")
+      .eq("kind",       "form_digest")
+      .gt("created_at", twentyHoursAgo)
+      .limit(1);
+    if (recent && recent.length > 0) return acts;
+
+    const dayAgo = new Date(now.getTime() - 24 * 3_600_000).toISOString();
+    const { count, error } = await supabase
+      .from("form_responses")
+      .select("id", { count: "exact", head: true })
+      .gt("submitted_at", dayAgo);
+    if (error) throw error;
+    if (!count || count === 0) return acts;
+
+    await notify({
+      kind:      "form_digest",
+      title:     `${count} new form submission${count === 1 ? "" : "s"} in the last 24h`,
+      body:      `Review and assign the new intake in the Forms tab so leads get contacted while they're warm.`,
+      link_path: `/forms`,
+    });
+    acts.push({
+      run_id: "form_digest", doctor: "(forms)",
+      flow:   "form_digest", stage: "daily",
+      reason: `${count} submissions in last 24h`,
+      result: "sent",
+    });
+  } catch (e) {
+    console.error("[tick-scheduler] form digest sweep failed:", e);
+  }
+  return acts;
+}
+
 // ── Sheet-connection auto-sync sweep ───────────────────────────────────────
 async function runSheetSyncSweep(
   supabase: ReturnType<typeof createClient>,
@@ -658,15 +774,58 @@ async function runSheetSyncSweep(
           acts.push({ run_id: c.id, doctor: c.label, flow: "sheets-sync", stage: c.target_kind, reason: "auto-pull due", result: "sent", detail: txt.slice(0, 120) });
         } else {
           acts.push({ run_id: c.id, doctor: c.label, flow: "sheets-sync", stage: c.target_kind, reason: `HTTP ${r.status}`, result: "error", detail: txt.slice(0, 120) });
+          await maybeEscalateSyncBreach(supabase, now, c, `HTTP ${r.status}: ${txt.slice(0, 160)}`);
         }
       } catch (e) {
         acts.push({ run_id: c.id, doctor: c.label, flow: "sheets-sync", stage: c.target_kind, reason: String(e), result: "error" });
+        await maybeEscalateSyncBreach(supabase, now, c, String(e));
       }
     }
   } catch (e) {
     console.error("[tick-scheduler] sheet-sync sweep failed:", e);
   }
   return acts;
+}
+
+// A single failed pull is a blip, not an escalation. But if a connection
+// has now ALSO gone stale — no successful sync in max(6h, 3× its schedule)
+// — the pipeline is effectively down and the team needs to know. Fires
+// sla_breach (critical), deduped to once per connection per 24h.
+async function maybeEscalateSyncBreach(
+  supabase: ReturnType<typeof createClient>,
+  now: Date,
+  conn: { id: string; label: string; last_synced_at: string | null; schedule_minutes: number },
+  detail: string,
+): Promise<void> {
+  try {
+    const staleThresholdMs = Math.max(6 * 3_600_000, (conn.schedule_minutes ?? 60) * 60_000 * 3);
+    const lastMs = conn.last_synced_at ? new Date(conn.last_synced_at).getTime() : 0;
+    const isStale = now.getTime() - lastMs > staleThresholdMs;
+    if (!isStale) return;
+
+    const linkPath = `/connections?id=${conn.id}`;
+    const dayAgo = new Date(now.getTime() - 24 * 3_600_000).toISOString();
+    const { data: recent } = await supabase
+      .from("notifications")
+      .select("id")
+      .eq("kind",       "sla_breach")
+      .eq("link_path",  linkPath)
+      .gt("created_at", dayAgo)
+      .limit(1);
+    if (recent && recent.length > 0) return;
+
+    const hoursStale = conn.last_synced_at
+      ? Math.floor((now.getTime() - lastMs) / 3_600_000)
+      : null;
+    await notify({
+      kind:      "sla_breach",
+      title:     `Data sync down — ${conn.label}`,
+      body:      `"${conn.label}" hasn't synced ${hoursStale != null ? `in ${hoursStale}h` : "successfully yet"} and is still failing: ${detail}. The pipeline feeding the dashboard is stale — reconnect or re-auth in Connections.`,
+      link_path: linkPath,
+    });
+  } catch (e) {
+    console.error("[tick-scheduler] maybeEscalateSyncBreach threw:", e);
+  }
 }
 
 // ── Phase 6 · Auto-fire scheduled batches ──────────────────────────────────
@@ -723,15 +882,50 @@ async function runBatchSendSweep(
           acts.push({ run_id: b.id, doctor: "(batch)", flow: "batch_send", stage: b.kind, reason: "auto-fired", result: "sent", detail: txt.slice(0, 120) });
         } else {
           acts.push({ run_id: b.id, doctor: "(batch)", flow: "batch_send", stage: b.kind, reason: `HTTP ${r.status}`, result: "error", detail: txt.slice(0, 120) });
+          await notifyBatchFailure(supabase, now, b.id, b.kind, `HTTP ${r.status}: ${txt.slice(0, 160)}`);
         }
       } catch (e) {
         acts.push({ run_id: b.id, doctor: "(batch)", flow: "batch_send", stage: b.kind, reason: String(e), result: "error" });
+        await notifyBatchFailure(supabase, now, b.id, b.kind, String(e));
       }
     }
   } catch (e) {
     console.error("[tick-scheduler] batch sweep failed:", e);
   }
   return acts;
+}
+
+// A failed scheduled batch stays in 'draft' and would re-fire (and re-fail)
+// every tick, so dedupe on the batch's deep-link: at most one
+// batch_send_failed alert per batch per 6 hours.
+async function notifyBatchFailure(
+  supabase: ReturnType<typeof createClient>,
+  now: Date,
+  batchId: string,
+  kind: string,
+  detail: string,
+): Promise<void> {
+  try {
+    const linkPath = `/automations?batch=${batchId}`;
+    const sixHoursAgo = new Date(now.getTime() - 6 * 3_600_000).toISOString();
+    const { data: recent } = await supabase
+      .from("notifications")
+      .select("id")
+      .eq("kind",       "batch_send_failed")
+      .eq("link_path",  linkPath)
+      .gt("created_at", sixHoursAgo)
+      .limit(1);
+    if (recent && recent.length > 0) return;
+
+    await notify({
+      kind:      "batch_send_failed",
+      title:     `Scheduled batch failed to send — ${kind}`,
+      body:      `The "${kind}" batch couldn't be sent: ${detail}. It's still in draft and will keep retrying. Check Resend / the batch in Automations.`,
+      link_path: linkPath,
+    });
+  } catch (e) {
+    console.error("[tick-scheduler] notifyBatchFailure threw:", e);
+  }
 }
 
 // ── Light scorer (Deno mirror of src/lib/match-score.ts, signals-only) ─────

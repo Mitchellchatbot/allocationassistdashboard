@@ -19,6 +19,7 @@
  * existing rows. Status=any (publish / draft / private) included.
  */
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2.45.0";
+import { notify } from "../_shared/notify.ts";
 
 const supabaseUrl  = Deno.env.get("SUPABASE_URL") ?? "";
 const serviceKey   = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY") ?? "";
@@ -258,6 +259,19 @@ Deno.serve(async (req: Request) => {
   // has to think about "step 2" — a new candidate that maps to a
   // Zoho record gets stamped on the way in.
   const linkResult = await autoLinkCandidates();
+
+  // Info-level (bell only, no Slack) summary — and only when the sync
+  // actually linked new candidates to Zoho records, since those are the
+  // ones that feed vacancy matching. Routine no-op re-syncs stay silent so
+  // the bell doesn't fill up with "synced 0 new" noise.
+  if (linkResult.updated > 0) {
+    await notify({
+      kind:      "wp_sync_summary",
+      title:     `WordPress sync — ${linkResult.updated} candidate${linkResult.updated === 1 ? "" : "s"} linked`,
+      body:      `${upserted} candidate record${upserted === 1 ? "" : "s"} refreshed from WordPress; ${linkResult.updated} newly linked to Zoho (${linkResult.matched_by_email} by email, ${linkResult.matched_by_name} by name).`,
+      link_path: `/wp-candidates`,
+    }).catch(e => console.error("[wordpress-candidates-sync] notify failed:", e));
+  }
 
   return json({
     ok:            true,

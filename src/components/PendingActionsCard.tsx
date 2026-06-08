@@ -3,7 +3,7 @@ import { useQuery } from "@tanstack/react-query";
 import { useNavigate } from "react-router-dom";
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
-import { Bell, Clock, Mail, FileSignature, MapPin, ChevronRight, ChevronDown, AlertCircle, ClipboardList, Sparkles, X, CheckCheck, Trash2, CalendarCheck, UserCheck, Eye, EyeOff, Inbox } from "lucide-react";
+import { Bell, Clock, Mail, FileSignature, MapPin, ChevronRight, ChevronDown, AlertCircle, ClipboardList, Sparkles, X, CheckCheck, Trash2, CalendarCheck, UserCheck, Eye, EyeOff, Inbox, MessageSquare, FileText, Archive, DollarSign, AlertOctagon, RefreshCw } from "lucide-react";
 import { EmptyState } from "@/components/ui/empty-state";
 import { supabase } from "@/lib/supabase";
 import { FLOW_DEFINITIONS, type FlowKey } from "@/lib/automation-flows";
@@ -154,16 +154,37 @@ interface KindMeta {
 // Centralised metadata for every notification kind tick-scheduler can produce.
 // Anything not listed here falls through to a generic "Notification" bucket.
 const KIND_META: Record<string, KindMeta> = {
-  vacancy_match:        { label: "Vacancy matches",      icon: Sparkles,     accent: "text-violet-600",  bg: "bg-violet-50/60 border-violet-200" },
+  // — escalations —
+  placement_payment_overdue: { label: "Payment overdue",        icon: DollarSign,    accent: "text-rose-600",    bg: "bg-rose-50/60 border-rose-200" },
+  sla_breach:                { label: "Data sync down",         icon: AlertOctagon,  accent: "text-rose-600",    bg: "bg-rose-50/60 border-rose-200" },
+  // — actionable —
+  shortlist_suggested:  { label: "Shortlist suggestions",  icon: MessageSquare, accent: "text-violet-600",  bg: "bg-violet-50/60 border-violet-200" },
+  interview_proposed:   { label: "Interview times proposed", icon: CalendarCheck, accent: "text-amber-600",  bg: "bg-amber-50/60 border-amber-200" },
+  hospital_reply_overdue: { label: "Hospital reply overdue", icon: Mail,        accent: "text-blue-600",    bg: "bg-blue-50/60 border-blue-200" },
   interview_followup:   { label: "Interview follow-ups", icon: CalendarCheck, accent: "text-amber-600",  bg: "bg-amber-50/60 border-amber-200" },
   availability_checkin: { label: "Availability check-ins", icon: UserCheck,  accent: "text-sky-600",     bg: "bg-sky-50/60 border-sky-200" },
   signed_not_joined:    { label: "Signed, not joined yet", icon: FileSignature, accent: "text-emerald-600", bg: "bg-emerald-50/60 border-emerald-200" },
+  contract_signed:      { label: "Contracts signed",     icon: FileSignature, accent: "text-emerald-600", bg: "bg-emerald-50/60 border-emerald-200" },
+  cv_uploaded:          { label: "CVs uploaded",         icon: FileText,      accent: "text-indigo-600",  bg: "bg-indigo-50/60 border-indigo-200" },
+  batch_send_failed:    { label: "Batch send failures",  icon: AlertCircle,   accent: "text-rose-600",    bg: "bg-rose-50/60 border-rose-200" },
+  slack_archive_due:    { label: "Slack channels to archive", icon: Archive,  accent: "text-slate-600",   bg: "bg-slate-50/60 border-slate-200" },
+  form_digest:          { label: "New form submissions", icon: Inbox,         accent: "text-teal-600",    bg: "bg-teal-50/60 border-teal-200" },
+  // — for awareness —
+  vacancy_match:        { label: "Vacancy matches",      icon: Sparkles,     accent: "text-violet-600",  bg: "bg-violet-50/60 border-violet-200" },
+  new_form_submission:  { label: "New form submissions", icon: Inbox,         accent: "text-teal-600",    bg: "bg-teal-50/60 border-teal-200" },
+  wp_sync_summary:      { label: "WordPress sync",       icon: RefreshCw,     accent: "text-sky-600",     bg: "bg-sky-50/60 border-sky-200" },
 };
 
 const GENERIC_META: KindMeta = { label: "Other", icon: Bell, accent: "text-slate-500", bg: "bg-slate-50/60 border-slate-200" };
 
 // Display order — most actionable first.
-const KIND_ORDER = ["vacancy_match", "interview_followup", "availability_checkin", "signed_not_joined"];
+const KIND_ORDER = [
+  "placement_payment_overdue", "sla_breach",
+  "shortlist_suggested", "interview_proposed", "hospital_reply_overdue", "interview_followup",
+  "availability_checkin", "signed_not_joined", "contract_signed",
+  "cv_uploaded", "batch_send_failed", "slack_archive_due", "form_digest",
+  "vacancy_match", "new_form_submission", "wp_sync_summary",
+];
 
 function NotificationsBucket({ notifications, unreadCount, onDismiss, onDismissAllOfKind, onMarkAllRead, onJump }: {
   notifications:       AppNotification[];

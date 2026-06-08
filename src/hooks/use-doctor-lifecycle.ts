@@ -228,6 +228,10 @@ export function useMarkLifecycle() {
       if (action.kind === "mark_approved") {
         // We don't have a Slack API yet — write a notification so the team
         // remembers to archive the channel manually.
+        // Inserted client-side (we can't call the edge notify() helper from
+        // the browser), so we set severity + CTA explicitly here to match
+        // the kind catalog — otherwise it silently defaults to 'info' and
+        // hides in the bell's quiet tier despite being actionable.
         await supabase.from("notifications").insert({
           kind:                "slack_archive_due",
           title:               `Archive Slack channel — ${doctorName}`,
@@ -235,6 +239,9 @@ export function useMarkLifecycle() {
           link_path:           `/doctor-profiles`,
           related_doctor_id:   doctorId,
           for_user:            updatedBy,
+          severity:            "action",
+          cta_label:           "Archive channel",
+          cta_kind:            "open_doctor",
         });
       }
 

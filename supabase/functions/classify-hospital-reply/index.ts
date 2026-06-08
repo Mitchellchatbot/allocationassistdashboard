@@ -236,7 +236,22 @@ Output ONLY the JSON object. No markdown fences, no commentary, no preamble.`;
       run_id, stage_key: "awaiting_response", event_type: "note",
       message: `${run.hospital ?? "Hospital"} proposed ${times.length} interview time${times.length === 1 ? "" : "s"} (confidence ${parsedResult.confidence.toFixed(2)}): ${times.map(t => t.label).join(" · ") || "(could not parse specific times)"}. ${parsedResult.summary}`,
     });
-    action_taken = `Stored ${times.length} proposed interview times on run metadata`;
+
+    // Same Slack + bell ping as the shortlist case — a hospital offering
+    // interview times is just as strong a "they want to go forward" signal,
+    // and it's time-sensitive (the team has to pick a slot and confirm with
+    // the doctor before the offered times pass).
+    await notify({
+      kind:              "interview_proposed",
+      title:             `${run.hospital ?? "Hospital"} proposed interview times for ${run.doctor_name ?? "the doctor"}`,
+      body:              `${times.length} slot${times.length === 1 ? "" : "s"}: ${times.map(t => t.label).join(" · ") || "(times unclear — open the reply)"}. ${parsedResult.summary} Pick a slot and confirm with the doctor.`,
+      link_path:         `/automations?flow=profile_sent&run=${run_id}`,
+      related_run_id:    run_id,
+      related_doctor_id: run.doctor_id,
+      for_user:          (run as { assigned_to?: string | null }).assigned_to ?? null,
+    });
+
+    action_taken = `Stored ${times.length} proposed interview times on run metadata; team notified`;
   } else if (parsedResult.classification === "declined") {
     await supabase.from("automation_flow_runs").update({
       current_stage: "introduction_complete",
