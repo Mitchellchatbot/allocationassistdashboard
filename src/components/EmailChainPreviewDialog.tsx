@@ -174,6 +174,10 @@ www.allocationassist.com
     joining_date:          "1 August 2026",
     signature:             SIGNATURE_HTML,
     signature_text:        SIGNATURE_TEXT,
+    // Real sends render {{logo_header}} as "" (the brand lives in the
+    // signature at the bottom). Mirror that here so the preview doesn't show
+    // a literal "{{logo_header}}" at the top of every plain template.
+    logo_header:           "",
   };
 }
 
