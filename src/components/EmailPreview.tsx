@@ -1,5 +1,5 @@
 import { useState, type ReactNode } from "react";
-import { ChevronDown, ChevronRight, Mail } from "lucide-react";
+import { ChevronDown, ChevronRight, Mail, Paperclip } from "lucide-react";
 import { cn } from "@/lib/utils";
 
 interface EmailPreviewProps {
@@ -17,6 +17,8 @@ interface EmailPreviewProps {
   templateKey?: string;
   /** Optional extra slot rendered above the email body — e.g. a "this is a preview, not sent" warning. */
   banner?: ReactNode;
+  /** Filenames to show as attachment chips (e.g. the relocation-guide PDFs). */
+  attachments?: string[];
   className?: string;
 }
 
@@ -32,7 +34,7 @@ interface EmailPreviewProps {
  *   2. Token values inserted via renderTemplate({ html: true }) are escaped
  */
 export function EmailPreview({
-  subject, html, text, from, to, templateKey, banner, className,
+  subject, html, text, from, to, templateKey, banner, attachments, className,
 }: EmailPreviewProps) {
   const [showPlainText, setShowPlainText] = useState(false);
 
@@ -78,6 +80,28 @@ export function EmailPreview({
           </div>
         </div>
       </div>
+
+      {/* Attachments — paperclip chips, like an inbox. Shown for emails that
+          carry files (e.g. the relocation guide pack). */}
+      {attachments && attachments.length > 0 && (
+        <div className="px-6 py-3 bg-white border-b border-slate-100">
+          <div className="text-[9px] uppercase tracking-wider text-slate-400 mb-1.5 flex items-center gap-1">
+            <Paperclip className="h-3 w-3" /> {attachments.length} attachment{attachments.length === 1 ? "" : "s"}
+          </div>
+          <div className="flex flex-wrap gap-1.5">
+            {attachments.map((name, i) => (
+              <span
+                key={i}
+                title={name}
+                className="inline-flex items-center gap-1.5 rounded-md border border-slate-200 bg-slate-50 px-2 py-1 text-[10px] text-slate-600 max-w-[230px]"
+              >
+                <span className="text-[9px] font-semibold text-rose-500 shrink-0">PDF</span>
+                <span className="truncate">{name}</span>
+              </span>
+            ))}
+          </div>
+        </div>
+      )}
 
       {banner && <div className="px-6 py-2 bg-amber-50 border-b border-amber-200 text-[11px] text-amber-900">{banner}</div>}
 

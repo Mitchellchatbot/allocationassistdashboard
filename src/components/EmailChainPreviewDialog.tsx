@@ -27,6 +27,8 @@ interface ChainEntry {
   recipient:   "hospital" | "doctor" | "team";
   /** Optional description for the step header — when does this fire. */
   trigger?:    string;
+  /** Filenames this email attaches (shown as chips in the preview). */
+  attachments?: string[];
 }
 
 interface ChainGroup {
@@ -77,7 +79,19 @@ const CHAIN: ChainGroup[] = [
     title:   "Relocation",
     emoji:   "✈️",
     steps: [
-      { templateKey: "relocation_guide",        label: "Relocation guide → doctor", recipient: "doctor", trigger: "Fires once the contract is signed." },
+      { templateKey: "relocation_guide",        label: "Relocation guide → doctor", recipient: "doctor", trigger: "Fires once the contract is signed.",
+        // Placeholder pack for the preview — the real send attaches the shared
+        // _default guides + the doctor's city guide from the relocation-guides
+        // bucket (here, the Dubai set, since the sample hospital is in Dubai).
+        attachments: [
+          "Dubai Relocation Guide.pdf",
+          "British Curriculum Schools.pdf",
+          "Dubai Schools Information.pdf",
+          "IB & European Curriculum Schools.pdf",
+          "US Curriculum Schools.pdf",
+          "Property Rental Prices.pdf",
+          "Useful Apps & Websites.pdf",
+        ] },
       { templateKey: "relocation_attestation",  label: "Attestation info → doctor", recipient: "doctor", trigger: "Fires right after the relocation guide." },
     ],
   },
@@ -203,7 +217,7 @@ export function EmailChainPreviewDialog({
 
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
-      <DialogContent className="max-w-[1100px] w-[96vw] max-h-[92vh] overflow-y-auto p-0">
+      <DialogContent overlayClassName="bg-slate-900/40 backdrop-blur-[2px]" className="max-w-[1100px] w-[96vw] max-h-[92vh] overflow-y-auto p-0">
         <DialogHeader className="px-7 pt-5 pb-3 border-b">
           <DialogTitle className="text-base flex items-center gap-2">
             <Mail className="h-4 w-4 text-teal-600" />
@@ -317,6 +331,7 @@ function ChainStep({
         html={html}
         text={text}
         templateKey={step.templateKey}
+        attachments={step.attachments}
       />
     </div>
   );
