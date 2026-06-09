@@ -7,7 +7,7 @@ import { Label } from "@/components/ui/label";
 import { Switch } from "@/components/ui/switch";
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from "@/components/ui/dialog";
 import { useAuth, ROLE_PRESETS, ALL_PAGES } from "@/hooks/use-auth";
-import { Trash2, Plus, UserCog, Slack as SlackIcon, Send, Loader2, CheckCircle2, AlertCircle } from "lucide-react";
+import { Trash2, Plus, UserCog, Slack as SlackIcon, Send, Loader2, CheckCircle2, AlertCircle, Pencil } from "lucide-react";
 import { supabase } from "@/lib/supabase";
 import { toast } from "sonner";
 
@@ -185,6 +185,138 @@ function AddUserDialog({
   );
 }
 
+// ── Edit User Dialog ──────────────────────────────────────────────────────────
+// Change an existing user's role + page access after they've been created.
+// Email/password are fixed here (auth-level); this just edits who-sees-what.
+
+function EditUserDialog({
+  user,
+  onClose,
+  onUpdated,
+  session,
+}: {
+  user: UserRow | null;
+  onClose: () => void;
+  onUpdated: () => void;
+  session: { access_token: string } | null;
+}) {
+  const [fullName, setFullName] = useState("");
+  const [role,     setRole]     = useState("custom");
+  const [pages,    setPages]    = useState<string[]>([]);
+  const [saving,   setSaving]   = useState(false);
+
+  // Re-seed the form whenever a different user is opened for editing.
+  useEffect(() => {
+    if (!user) return;
+    setFullName(user.full_name ?? "");
+    setRole(user.role);
+    setPages(user.allowed_pages ?? []);
+  }, [user?.id]);
+
+  function handleRoleChange(r: string) {
+    setRole(r);
+    if (r !== "custom") setPages(ROLE_PRESETS[r] ?? []);
+  }
+  function togglePage(p: string) {
+    setPages(prev => prev.includes(p) ? prev.filter(x => x !== p) : [...prev, p]);
+  }
+
+  async function handleSave() {
+    if (!user) return;
+    setSaving(true);
+    try {
+      const res = await fetch(`${SUPABASE_URL}/functions/v1/update-user`, {
+        method:  "POST",
+        headers: {
+          "apikey":        SUPABASE_ANON_KEY,
+          "Authorization": `Bearer ${session?.access_token}`,
+          "Content-Type":  "application/json",
+        },
+        body: JSON.stringify({ userId: user.id, email: user.email, full_name: fullName || null, role, allowed_pages: pages }),
+      });
+      const json = await res.json();
+      if (!res.ok) throw new Error(json.error ?? "Failed to update user");
+      toast.success(`Access updated for ${user.email}`);
+      onUpdated();
+      onClose();
+    } catch (err) {
+      toast.error(String(err instanceof Error ? err.message : err));
+    } finally {
+      setSaving(false);
+    }
+  }
+
+  // Every real role (admin/sales/finance/worker/hi_member) plus "custom" for
+  // a hand-picked page set.
+  const ROLES = [...Object.keys(ROLE_PRESETS), "custom"];
+
+  return (
+    <Dialog open={!!user} onOpenChange={v => !v && onClose()}>
+      <DialogContent className="max-w-md">
+        <DialogHeader>
+          <DialogTitle className="text-[15px]">Edit access{user ? ` — ${user.full_name ?? user.email}` : ""}</DialogTitle>
+        </DialogHeader>
+
+        <div className="space-y-3 py-1">
+          <div className="space-y-1">
+            <Label className="text-[11px]">Email</Label>
+            <Input value={user?.email ?? ""} disabled className="h-8 text-[12px] opacity-60" />
+          </div>
+          <div className="space-y-1">
+            <Label className="text-[11px]">Full Name</Label>
+            <Input value={fullName} onChange={e => setFullName(e.target.value)} className="h-8 text-[12px]" placeholder="Jane Smith" />
+          </div>
+
+          {/* Role selector — picking a preset re-fills the page list; "custom" leaves it as-is */}
+          <div className="space-y-1.5">
+            <Label className="text-[11px]">Role</Label>
+            <div className="flex flex-wrap gap-1.5">
+              {ROLES.map(r => (
+                <button
+                  key={r}
+                  onClick={() => handleRoleChange(r)}
+                  className={`px-3 py-1 rounded-full text-[11px] font-medium border transition-colors capitalize ${
+                    role === r
+                      ? "bg-primary text-white border-primary"
+                      : "border-border text-muted-foreground hover:border-primary/50"
+                  }`}
+                >
+                  {r.replace(/_/g, " ")}
+                </button>
+              ))}
+            </div>
+          </div>
+
+          {/* Pages checklist */}
+          <div className="space-y-1.5">
+            <Label className="text-[11px]">Page Access</Label>
+            <div className="grid grid-cols-2 gap-1">
+              {ALL_PAGES.map(p => (
+                <label key={p} className="flex items-center gap-2 cursor-pointer">
+                  <input
+                    type="checkbox"
+                    checked={pages.includes(p)}
+                    onChange={() => togglePage(p)}
+                    className="h-3 w-3 accent-primary"
+                  />
+                  <span className="text-[11px] text-foreground">{PAGE_LABELS[p] ?? p}</span>
+                </label>
+              ))}
+            </div>
+          </div>
+        </div>
+
+        <DialogFooter>
+          <Button variant="outline" size="sm" onClick={onClose} className="h-7 text-[11px]">Cancel</Button>
+          <Button size="sm" onClick={handleSave} disabled={saving} className="h-7 text-[11px]">
+            {saving ? "Saving…" : "Save changes"}
+          </Button>
+        </DialogFooter>
+      </DialogContent>
+    </Dialog>
+  );
+}
+
 // ── Users Tab ────────────────────────────────────────────────────────────────
 
 function UsersTab({ session }: { session: { access_token: string } | null }) {
@@ -192,6 +324,7 @@ function UsersTab({ session }: { session: { access_token: string } | null }) {
   const [loading,    setLoading]    = useState(true);
   const [dialogOpen, setDialogOpen] = useState(false);
   const [deleting,   setDeleting]   = useState<string | null>(null);
+  const [editingUser, setEditingUser] = useState<UserRow | null>(null);
 
   async function loadUsers() {
     setLoading(true);
@@ -285,8 +418,16 @@ function UsersTab({ session }: { session: { access_token: string } | null }) {
                 )}
               </div>
               <button
+                onClick={() => setEditingUser(u)}
+                title="Edit role & page access"
+                className="shrink-0 flex h-6 w-6 items-center justify-center rounded text-muted-foreground hover:text-primary hover:bg-primary/10 transition-colors"
+              >
+                <Pencil className="h-3.5 w-3.5" />
+              </button>
+              <button
                 onClick={() => handleDelete(u.id, u.email)}
                 disabled={deleting === u.id}
+                title="Delete user"
                 className="shrink-0 flex h-6 w-6 items-center justify-center rounded text-muted-foreground hover:text-destructive hover:bg-destructive/10 transition-colors disabled:opacity-40"
               >
                 <Trash2 className="h-3.5 w-3.5" />
@@ -300,6 +441,13 @@ function UsersTab({ session }: { session: { access_token: string } | null }) {
         open={dialogOpen}
         onClose={() => setDialogOpen(false)}
         onCreated={loadUsers}
+        session={session}
+      />
+
+      <EditUserDialog
+        user={editingUser}
+        onClose={() => setEditingUser(null)}
+        onUpdated={loadUsers}
         session={session}
       />
     </div>
