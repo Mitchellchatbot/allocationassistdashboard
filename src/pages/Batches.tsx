@@ -848,6 +848,14 @@ function BatchDialog({ target, onTargetChange, batches, suggestedSpecialty }: {
   // rotation match instead of filtering by it.
   const [specialtyOnly, setSpecialtyOnly] = useState(false);
   const [sourceFilter, setSourceFilter] = useState<"all" | "lead" | "dob">("all");
+  // Which rows have their score breakdown expanded (collapsed by default so
+  // the candidate list stays short — click a row to see the why).
+  const [expandedDocs, setExpandedDocs] = useState<Set<string>>(new Set());
+  const toggleExpand = (id: string) => setExpandedDocs(prev => {
+    const next = new Set(prev);
+    if (next.has(id)) next.delete(id); else next.add(id);
+    return next;
+  });
 
   // When the dialog swaps to a different batch, default specialtyOnly to
   // ON for specialty_of_day (batch is explicitly that specialty) and OFF
@@ -1099,14 +1107,14 @@ function BatchDialog({ target, onTargetChange, batches, suggestedSpecialty }: {
                   <div key={d.id} className="flex items-center gap-2 rounded-md border bg-white px-2.5 py-1.5">
                     <span className="text-[10px] tabular-nums text-muted-foreground w-5 text-right">{idx + 1}.</span>
                     <UserSquare className="h-3.5 w-3.5 text-slate-400" />
-                    <div className="flex-1 min-w-0">
+                    <div className="flex-1 min-w-0 cursor-pointer" onClick={() => toggleExpand(d.id)}>
                       <div className="text-[12px] font-medium truncate flex items-center gap-1.5">
                         {d.name}
                         <MatchScoreChip score={s} />
                         <SourceBadge source={d.source} />
                       </div>
                       <div className="text-[10px] text-muted-foreground truncate">{d.speciality ?? "—"}{d.email && ` · ${d.email}`}</div>
-                      <MatchReasons score={s} className="mt-0.5" />
+                      {expandedDocs.has(d.id) && <MatchReasons score={s} max={20} wrap className="mt-1" />}
                     </div>
                     {batch.status === "draft" && (
                       <>
@@ -1175,13 +1183,22 @@ function BatchDialog({ target, onTargetChange, batches, suggestedSpecialty }: {
                 />
                 {candidatePool.length > 0 && (
                   <div className="rounded-md border max-h-[300px] overflow-y-auto divide-y">
-                    {candidatePool.map(d => (
-                      <button
+                    {candidatePool.map(d => {
+                      const isOpen = expandedDocs.has(d.id);
+                      return (
+                      <div
                         key={d.id}
-                        onClick={() => add(d.id)}
-                        className="w-full text-left px-3 py-2 hover:bg-slate-50 flex items-center gap-2"
+                        onClick={() => toggleExpand(d.id)}
+                        className="px-3 py-2 hover:bg-slate-50 flex items-start gap-2 cursor-pointer"
                       >
-                        <Plus className="h-3 w-3 text-teal-600 shrink-0" />
+                        {/* + adds to the batch; click anywhere else expands the breakdown */}
+                        <button
+                          onClick={(e) => { e.stopPropagation(); add(d.id); }}
+                          title="Add to batch"
+                          className="shrink-0 mt-0.5 flex h-5 w-5 items-center justify-center rounded text-teal-600 hover:bg-teal-100 transition-colors"
+                        >
+                          <Plus className="h-3.5 w-3.5" />
+                        </button>
                         <div className="flex-1 min-w-0">
                           <div className="text-[12px] font-medium truncate flex items-center gap-1.5">
                             {d.name}
@@ -1189,10 +1206,12 @@ function BatchDialog({ target, onTargetChange, batches, suggestedSpecialty }: {
                             <SourceBadge source={d.source} />
                           </div>
                           <div className="text-[10px] text-muted-foreground truncate">{d.speciality ?? "—"}{d.email && ` · ${d.email}`}</div>
-                          <MatchReasons score={d._score} className="mt-0.5" />
+                          {isOpen && <MatchReasons score={d._score} max={20} wrap className="mt-1" />}
                         </div>
-                      </button>
-                    ))}
+                        <ChevronDown className={`h-3.5 w-3.5 text-slate-400 shrink-0 mt-0.5 transition-transform ${isOpen ? "rotate-180" : ""}`} />
+                      </div>
+                      );
+                    })}
                   </div>
                 )}
                 {!q && candidatePool.length === 0 && specialtyOnly && effectiveSpecialty && (
@@ -1310,24 +1329,11 @@ function scoreDoctor(d: DoctorOption, batch: ScheduledBatch, effectiveSpecialty?
     targetSpecialty,
     {},
   );
-  // When the batch has no hard specialty but we're biasing toward
-  // today's rotation pick, halve the specialty factor's contribution
-  // so a perfect-license DoB with a different specialty can still
-  // surface for daily_duo / tuesday_top_15 batches. Rebuilds the
-  // score with the recomputed factor list so the chip still shows
-  // the per-factor breakdown.
-  if (!batch.specialty && effectiveSpecialty && ms.factors.length > 0) {
-    const halved = ms.factors.map((f, i) => i === 0 ? { ...f, points: Math.round(f.points / 2), label: `${f.label} (rotation hint, halved)` } : f);
-    const total = halved.reduce((s, f) => s + f.points, 0);
-    const clamped = Math.max(0, Math.min(ms.max, total));
-    return {
-      ...ms,
-      score: clamped,
-      pct:   Math.round((clamped / ms.max) * 100),
-      tier:  clamped >= 70 ? "strong" : clamped >= 40 ? "decent" : clamped > 0 ? "weak" : "none",
-      factors: halved,
-    };
-  }
+  // One algorithm, one number across every surface: the picker now shows
+  // the exact same score as the Today's-Pick / Top-Ranked rotation preview
+  // and the vacancy matcher (all go through scoreCandidate). We used to
+  // halve the specialty factor here for open-ended batches, which made the
+  // same doctor score differently in the picker vs the preview — confusing.
   return ms;
 }
 

@@ -211,14 +211,14 @@ export function MatchScoreChip({ score }: { score: MatchScore }) {
  *  the Batches picker so the ranking isn't a black box: the team can see at a
  *  glance that a doctor ranks high because of specialty + license, not magic.
  *  Mirrors what the score chip already exposes on hover, but always-visible. */
-export function MatchReasons({ score, max = 3, className = "" }: { score: MatchScore; max?: number; className?: string }) {
+export function MatchReasons({ score, max = 3, wrap = false, className = "" }: { score: MatchScore; max?: number; wrap?: boolean; className?: string }) {
   const meaningful = score.factors.filter(f => f.label && f.label.trim());
   if (meaningful.length === 0) return null;
   const shown = meaningful.slice(0, max);
   const extra = meaningful.length - shown.length;
   const full  = meaningful.map(f => `${f.label} (${f.points > 0 ? "+" : ""}${f.points})`).join("\n");
   return (
-    <div className={`text-[10px] text-muted-foreground truncate ${className}`} title={full}>
+    <div className={`text-[10px] text-muted-foreground ${wrap ? "leading-relaxed" : "truncate"} ${className}`} title={full}>
       {shown.map((f, i) => (
         <span key={i} className={f.negative ? "text-rose-500" : ""}>
           {i > 0 && " · "}{f.label}{" "}
