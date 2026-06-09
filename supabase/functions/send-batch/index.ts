@@ -20,6 +20,7 @@
  */
 
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2";
+import { summarizeAreaOfInterest } from "../_shared/summarize.ts";
 
 const SUPABASE_URL              = Deno.env.get("SUPABASE_URL") ?? "";
 const SUPABASE_SERVICE_ROLE_KEY = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY") ?? "";
@@ -166,6 +167,14 @@ Deno.serve(async (req: Request) => {
       specialty:    (lead?.Specialty_New as string) ?? (lead?.Specialty as string) ?? (dob?.Specialty as string) ?? "",
     };
   });
+
+  // Condense long "Area of Interest" values so the multi-column table stays
+  // compact (Ammar 2026-06-09: summarise with Claude). Parallel across the
+  // queued doctors; each call no-ops when short / key unset / on error, so a
+  // slow or failed summary never blocks the batch.
+  await Promise.all(rows.map(async (r) => {
+    if (r.areas) r.areas = await summarizeAreaOfInterest(r.areas);
+  }));
 
   // Specialty label for the email subject + template token.
   const specialtyLabel: string = batch.specialty
