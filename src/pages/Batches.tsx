@@ -20,7 +20,7 @@ import { useZohoData, type ZohoLead, type ZohoDoctorOnBoard } from "@/hooks/use-
 import { useDoctorLifecycleMap } from "@/hooks/use-doctor-lifecycle";
 import { groupSpecialty } from "@/lib/specialty-groups";
 import { scoreCandidate, type MatchScore } from "@/lib/match-score";
-import { useWpCandidates, type WpCandidate } from "@/hooks/use-wp-candidates";
+import { useWpCandidates, wpCandidateProfileText, type WpCandidate } from "@/hooks/use-wp-candidates";
 import { MatchScoreChip, MatchReasons } from "@/components/DoctorVacancyMatches";
 
 /**
@@ -848,6 +848,10 @@ function BatchDialog({ target, onTargetChange, batches, suggestedSpecialty }: {
   // rotation match instead of filtering by it.
   const [specialtyOnly, setSpecialtyOnly] = useState(false);
   const [sourceFilter, setSourceFilter] = useState<"all" | "lead" | "dob">("all");
+  // Website-only pool — default ON. Ammar 2026-06-09: batches should pull
+  // from doctors who are actually live on the AA website (have a matching
+  // WP candidate), not the whole Zoho roster. Toggle off to widen the pool.
+  const [websiteOnly, setWebsiteOnly] = useState(true);
   // Which rows have their score breakdown expanded (collapsed by default so
   // the candidate list stays short — click a row to see the why).
   const [expandedDocs, setExpandedDocs] = useState<Set<string>>(new Set());
@@ -935,7 +939,13 @@ function BatchDialog({ target, onTargetChange, batches, suggestedSpecialty }: {
   const q = search.trim().toLowerCase();
   const candidatePool = !batch ? [] : (() => {
     const batchGroup = effectiveSpecialty ? (groupSpecialty(effectiveSpecialty) ?? effectiveSpecialty) : null;
-    const base = allDoctors.filter(d => d.eligible && !batch.doctor_ids.includes(d.id));
+    // Default pool = doctors live on the AA website (have a WP candidate).
+    // Toggle off to fall back to the full Zoho roster.
+    const base = allDoctors.filter(d =>
+      d.eligible &&
+      !batch.doctor_ids.includes(d.id) &&
+      (!websiteOnly || d.onWebsite),
+    );
 
     // When the batch (or today's rotation) has a specialty + the user opts
     // in, restrict to doctors whose specialty falls in the SAME canonical
@@ -953,13 +963,24 @@ function BatchDialog({ target, onTargetChange, batches, suggestedSpecialty }: {
       ? specialtyFiltered
       : specialtyFiltered.filter(d => d.source === sourceFilter);
 
+    // Keyword search scans the doctor's WHOLE profile blob (headline
+    // specialty + sub-specialty + area of interest + bio + WP education /
+    // experience / job-title text) — so "electrophysiology" surfaces
+    // website cardiologists whose profile names it anywhere, even when the
+    // headline specialty is just "Cardiology" (Ammar 2026-06-09).
     const filtered = !q ? sourceFiltered : sourceFiltered.filter(d =>
-      d.name.toLowerCase().includes(q) ||
-      (d.speciality ?? "").toLowerCase().includes(q) ||
-      (d.email ?? "").toLowerCase().includes(q)
+      d.profileText.includes(q) || (d.email ?? "").toLowerCase().includes(q)
     );
     const scored = filtered.map(d => ({ ...d, _score: scoreDoctor(d, batch, effectiveSpecialty) }));
-    scored.sort((a, b) => b._score.score - a._score.score);
+    // When the user is searching, rank by WHERE the keyword hit first
+    // (sub-specialty > area of interest > headline specialty > anywhere in
+    // the profile), then by readiness score — so the doctor who genuinely
+    // owns that sub-specialty is the top recommendation, not just whoever
+    // scores highest overall.
+    scored.sort((a, b) =>
+      (q ? keywordRelevance(b, q) - keywordRelevance(a, q) : 0) ||
+      b._score.score - a._score.score,
+    );
     return scored.slice(0, 30);
   })();
 
@@ -990,6 +1011,7 @@ function BatchDialog({ target, onTargetChange, batches, suggestedSpecialty }: {
     // auto-pick should match what they're seeing.
     const pool = allDoctors
       .filter(d => d.eligible && !batch.doctor_ids.includes(d.id))
+      .filter(d => !websiteOnly || d.onWebsite)
       .filter(d => sourceFilter === "all" || d.source === sourceFilter)
       .map(d => ({ d, score: scoreDoctor(d, batch, effectiveSpecialty).score }))
       .sort((a, b) => b.score - a.score)
@@ -1162,6 +1184,13 @@ function BatchDialog({ target, onTargetChange, batches, suggestedSpecialty }: {
                       </button>
                     ))}
                   </div>
+                  <label className="flex items-center gap-1.5 text-[10px] text-muted-foreground cursor-pointer">
+                    <Checkbox
+                      checked={websiteOnly}
+                      onCheckedChange={(v) => setWebsiteOnly(!!v)}
+                    />
+                    On website only
+                  </label>
                   {effectiveSpecialty && (
                     <label className="flex items-center gap-1.5 text-[10px] text-muted-foreground cursor-pointer">
                       <Checkbox
@@ -1178,7 +1207,7 @@ function BatchDialog({ target, onTargetChange, batches, suggestedSpecialty }: {
                 <Input
                   value={search}
                   onChange={e => setSearch(e.target.value)}
-                  placeholder="Filter by name, specialty, or email..."
+                  placeholder="Filter by name, specialty, sub-specialty, area of interest, or email..."
                   className="h-9 text-[12px]"
                 />
                 {candidatePool.length > 0 && (
@@ -1205,7 +1234,12 @@ function BatchDialog({ target, onTargetChange, batches, suggestedSpecialty }: {
                             <MatchScoreChip score={d._score} />
                             <SourceBadge source={d.source} />
                           </div>
-                          <div className="text-[10px] text-muted-foreground truncate">{d.speciality ?? "—"}{d.email && ` · ${d.email}`}</div>
+                          <div className="text-[10px] text-muted-foreground truncate">
+                            {d.speciality ?? "—"}{d.email && ` · ${d.email}`}
+                            {q && keywordHitLabel(d, q) && (
+                              <span className="text-teal-600"> · “{search.trim()}” in {keywordHitLabel(d, q)}</span>
+                            )}
+                          </div>
                           {isOpen && <MatchReasons score={d._score} max={20} wrap className="mt-1" />}
                         </div>
                         <ChevronDown className={`h-3.5 w-3.5 text-slate-400 shrink-0 mt-0.5 transition-transform ${isOpen ? "rotate-180" : ""}`} />
@@ -1217,6 +1251,11 @@ function BatchDialog({ target, onTargetChange, batches, suggestedSpecialty }: {
                 {!q && candidatePool.length === 0 && specialtyOnly && effectiveSpecialty && (
                   <div className="text-[11px] text-muted-foreground italic px-1">
                     No doctors in the <strong>{effectiveSpecialty}</strong> bucket. Uncheck "{effectiveSpecialty} only" to see all candidates.
+                  </div>
+                )}
+                {!q && candidatePool.length === 0 && websiteOnly && !(specialtyOnly && effectiveSpecialty) && (
+                  <div className="text-[11px] text-muted-foreground italic px-1">
+                    No website-listed doctors here. Uncheck "On website only" to include doctors not yet on the AA website.
                   </div>
                 )}
                 {q && candidatePool.length === 0 && (
@@ -1325,6 +1364,7 @@ function scoreDoctor(d: DoctorOption, batch: ScheduledBatch, effectiveSpecialty?
       notice_period:    d.notice_period,
       area_of_interest: d.area_of_interest,
       bio:              d.bio,
+      profile_text:     d.profileText,
     },
     targetSpecialty,
     {},
@@ -1339,6 +1379,32 @@ function scoreDoctor(d: DoctorOption, batch: ScheduledBatch, effectiveSpecialty?
 
 function normaliseSpec(s: string): string {
   return s.trim().toLowerCase().replace(/[^a-z0-9]/g, "");
+}
+
+/** How strongly a doctor's profile matches the search keyword, weighted
+ *  by WHERE it hit. A sub-specialty / area-of-interest hit is a far
+ *  stronger "this is their thing" signal than a passing mention in the
+ *  bio or experience blurb, so it ranks higher. `q` is already lowercased. */
+function keywordRelevance(d: DoctorOption, q: string): number {
+  if (!q) return 0;
+  let r = 0;
+  if ((d.subspecialty ?? "").toLowerCase().includes(q))     r += 4;
+  if ((d.area_of_interest ?? "").toLowerCase().includes(q)) r += 3;
+  if ((d.speciality ?? "").toLowerCase().includes(q))       r += 2;
+  if ((d.bio ?? "").toLowerCase().includes(q))              r += 1;
+  return r;
+}
+
+/** Short label for WHERE the search keyword hit a doctor's profile, so
+ *  the recommendation is explainable ("‘electrophysiology’ in
+ *  sub-specialty"). Mirrors keywordRelevance's priority order. */
+function keywordHitLabel(d: DoctorOption, q: string): string | null {
+  if (!q) return null;
+  if ((d.subspecialty ?? "").toLowerCase().includes(q))     return "sub-specialty";
+  if ((d.area_of_interest ?? "").toLowerCase().includes(q)) return "area of interest";
+  if ((d.speciality ?? "").toLowerCase().includes(q))       return "specialty";
+  if (d.profileText.includes(q))                            return "profile";
+  return null;
 }
 
 // ── Helpers ───────────────────────────────────────────────────────────────
@@ -1362,7 +1428,17 @@ interface DoctorOption {
   years_experience:     number | null;
   notice_period:        string | null;
   area_of_interest:     string | null;
+  subspecialty:         string | null;
   bio:                  string | null;
+  // ── Full profile free-text blob (name + WP education/experience/job
+  //    title + Zoho bio/area). Powers the "search the whole profile for a
+  //    sub-specialty keyword" filter + the scorer's sub-specialty bonus.
+  profileText:          string;
+  // ── Whether this doctor is live on the AA website (i.e. has a matching
+  //    WP candidate). The picker defaults to website-only per Ammar's
+  //    2026-06-09 spec — batches should feature doctors who actually
+  //    appear on the site, not the whole Zoho roster.
+  onWebsite:            boolean;
   // ── Legacy boolean shortcuts kept for the small set of UI bits
   //    that still read them (badge colours, source filter, etc.).
   hasLicense:           boolean;
@@ -1476,7 +1552,10 @@ function useMemoDoctors(
         years_experience:    pickNum(wp?.years_experience, dobNum("Years_of_Experience")),
         notice_period:       pickStr(wp?.notice_period, dobStr("Notice_Period")),
         area_of_interest:    pickStr(wp?.area_of_interest, dobStr("Area_of_Interest")),
+        subspecialty:        wp?.subspecialty ?? null,
         bio:                 dobStr("Bio"),
+        profileText:         [name, wpCandidateProfileText(wp), dobStr("Area_of_Interest"), dobStr("Bio"), dobSpec ?? fallbackSpec ?? ""].filter(Boolean).join(" ").toLowerCase(),
+        onWebsite:           !!wp,
         hasLicense:          !!wp?.license_status || yes(dobRich.Has_DHA) || yes(dobRich.Has_DOH) || yes(dobRich.Has_MOH) || !!d.License,
         highPriority:        false,
         primeClassification: null,
@@ -1515,7 +1594,10 @@ function useMemoDoctors(
         years_experience:    pickNum(wp?.years_experience, leadNum("Years_of_Experience")),
         notice_period:       pickStr(wp?.notice_period, leadStr("Notice_Period")),
         area_of_interest:    pickStr(wp?.area_of_interest, leadStr("Area_of_Interest")),
+        subspecialty:        wp?.subspecialty ?? null,
         bio:                 leadStr("Bio"),
+        profileText:         [name, wpCandidateProfileText(wp), leadStr("Area_of_Interest"), leadStr("Bio"), l.Specialty ?? l.Specialty_New ?? ""].filter(Boolean).join(" ").toLowerCase(),
+        onWebsite:           !!wp,
         hasLicense:          !!wp?.license_status || hasLic,
         highPriority:        /high/i.test(l.Lead_Status ?? ""),
         primeClassification: prime || null,

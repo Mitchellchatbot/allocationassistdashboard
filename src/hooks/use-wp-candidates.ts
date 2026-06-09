@@ -65,6 +65,23 @@ export interface WpCandidate {
   last_synced_at:      string;
 }
 
+/** Concatenate every free-text field on a WP candidate into one
+ *  lowercased blob — used to "scan the whole profile" for a keyword or
+ *  sub-specialty term (Ammar 2026-06-09: searching "electrophysiology"
+ *  should find the cardiologist whose profile names it, not just those
+ *  whose headline specialty is an exact string). Covers headline fields
+ *  plus education + experience free text where sub-specialties usually
+ *  surface. */
+export function wpCandidateProfileText(c: WpCandidate | null | undefined): string {
+  if (!c) return "";
+  return [
+    c.full_name, c.job_title, c.specialty, c.subspecialty, c.area_of_interest,
+    c.rank, c.languages, c.current_location, c.nationality, c.country_of_training,
+    c.education_title, c.education_academy, c.education_description,
+    c.experience_title, c.experience_company, c.experience_description,
+  ].filter(Boolean).join(" ").toLowerCase();
+}
+
 const KEY = ["wp-candidates"] as const;
 
 export function useWpCandidates() {

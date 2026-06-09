@@ -16,7 +16,7 @@ import { useHospitals } from "@/hooks/use-hospitals";
 import { useDoctorProfile, useDoctorProfiles, type DoctorProfile } from "@/hooks/use-doctor-profiles";
 import { useZohoData } from "@/hooks/use-zoho-data";
 import type { ZohoLead, ZohoDoctorOnBoard } from "@/hooks/use-zoho-data";
-import { useWpCandidates, type WpCandidate } from "@/hooks/use-wp-candidates";
+import { useWpCandidates, wpCandidateProfileText, type WpCandidate } from "@/hooks/use-wp-candidates";
 
 export type VacancyStatus   = "open" | "filled" | "closed";
 export type VacancyPriority = "high" | "medium" | "low";
@@ -242,6 +242,9 @@ export function buildDoctorCandidate(
       str(dobRich.Bio),
       profile?.bio,
     ),
+    // Full WP profile blob so the scorer can spot a sub-specialty named
+    // anywhere in the doctor's education/experience/job-title text.
+    profile_text:     wpCandidateProfileText(wp),
   };
 }
 
@@ -303,6 +306,12 @@ export function useMatchingDoctors(vacancy: Vacancy | null | undefined): ScoredM
       const prefixedId = `dob:${dob.id}`;
       const profile = profileById.get(prefixedId) ?? null;
       const wp = wpByDoctorId.get(prefixedId) ?? (dob.Email ? wpByEmail.get(dob.Email.toLowerCase().trim()) : undefined) ?? null;
+      // Website-only pool (Ammar 2026-06-09): vacancy matches should only
+      // surface doctors who are live on the AA website (have a matching WP
+      // candidate) — the site is the source of truth for who hospitals can
+      // be shown, and matching keys off the same canonical specialty list
+      // (specialty-groups.ts) the website filter + rotation use.
+      if (!wp) continue;
       const candidate = buildDoctorCandidate(prefixedId, null, dob, profile, wp);
       if (!candidate) continue;
       const score = scoreMatch(candidate, vacancy, h);
