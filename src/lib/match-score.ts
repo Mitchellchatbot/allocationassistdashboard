@@ -26,7 +26,7 @@
  * Source: original spec May 20 2026 (Saif); rebalance Jun 8 2026.
  */
 import type { Vacancy } from "@/hooks/use-vacancies";
-import { groupSpecialty, rollupSpecialty } from "@/lib/specialty-groups";
+import { groupSpecialty, rollupSpecialty, asSubspecialty, textMentionsSpecialty } from "@/lib/specialty-groups";
 
 export interface MatchCandidateDoctor {
   id:                 string;
@@ -42,6 +42,12 @@ export interface MatchCandidateDoctor {
   notice_period:      string | null;
   area_of_interest:   string | null;
   bio:                string | null;
+  /** Full profile free-text blob (job title, sub-specialty, education,
+   *  experience, …). Optional — when present, lets the matcher reward a
+   *  doctor whose profile names the target SUB-specialty even though their
+   *  headline specialty is only the parent. Callers that don't build it
+   *  simply don't get that bonus. */
+  profile_text?:      string | null;
 }
 
 export interface MatchCandidateHospital {
@@ -130,6 +136,21 @@ export function scoreCandidate(
                        `Specialty token overlap: ${d.speciality} ↔ ${targetSpecialty}`,
     points: specPts,
   });
+
+  // ── 1b. Sub-specialty profile match (0 or +15). When the target is a
+  //    niche term within a broader specialty (e.g. "Electrophysiology"
+  //    under "Cardiology") and the doctor's HEADLINE specialty didn't
+  //    already nail it, scan their profile text — if they actually name
+  //    the sub-specialty, recommend them over a generic parent-specialty
+  //    doctor (Ammar 2026-06-09). Skipped when specPts === 50 (their
+  //    specialty IS the sub-specialty, already maxed).
+  const sub = asSubspecialty(targetSpecialty);
+  if (sub && specPts < 50) {
+    const profileBlob = [d.area_of_interest, d.bio, d.profile_text].filter(Boolean).join(" ");
+    if (textMentionsSpecialty(profileBlob, sub.name)) {
+      factors.push({ label: `Profile names sub-specialty: ${sub.name}`, points: 15 });
+    }
+  }
 
   if (h) {
     // ── 2a. License × hospital region (0-25, can go negative -5).

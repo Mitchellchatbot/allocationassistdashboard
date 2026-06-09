@@ -26,9 +26,16 @@ export interface SpecialtyGroup {
   keywords: RegExp[];      // patterns matched against normalized raw text
 }
 
-/** Build a default keyword regex from a name. */
+/** Build a default keyword regex from a name.
+ *
+ *  Anchored at the START of a word (`\b`) but NOT the end — the entries
+ *  below deliberately use truncated STEMS ("cardiolog", "neurolog",
+ *  "electrophysiolog") so a single stem catches every inflection
+ *  ("cardiology", "cardiologist", "cardiological"). A trailing `\b` would
+ *  defeat that (it demands a word boundary right after the stem, which
+ *  fails on "cardiolog|y"), so we omit it and let the stem prefix-match. */
 const kw = (s: string): RegExp =>
-  new RegExp(`\\b${s.toLowerCase().replace(/[^a-z0-9]+/g, "\\s*")}\\b`);
+  new RegExp(`\\b${s.toLowerCase().replace(/[^a-z0-9]+/g, "\\s*")}`);
 
 /** Build several keywords from a parent name + extra aliases. */
 const kws = (...patterns: (string | RegExp)[]): RegExp[] =>
@@ -261,6 +268,31 @@ export function rollupSpecialty(raw: string | null | undefined): string | null {
   const wp = groupSpecialtyWithParent(raw);
   if (!wp) return null;
   return wp.parent ?? wp.group;
+}
+
+/** If `raw` resolves to a SUB-specialty (a canonical entry that has a
+ *  parent — e.g. "Electrophysiology" under "Cardiology"), return its
+ *  canonical name + parent. Returns null for top-level specialties and
+ *  unmatched text. Lets the matcher tell "this target is a niche term
+ *  within a broader specialty" so it can scan profiles for it. */
+export function asSubspecialty(raw: string | null | undefined): { name: string; parent: string } | null {
+  const wp = groupSpecialtyWithParent(raw);
+  if (wp && wp.parent) return { name: wp.group, parent: wp.parent };
+  return null;
+}
+
+/** Does this free-text blob mention the given canonical specialty, by
+ *  its keyword patterns? Used to detect a sub-specialty named anywhere
+ *  in a doctor's profile even when their headline specialty is just the
+ *  parent (e.g. profile bio says "electrophysiology", specialty column
+ *  says "Cardiology"). */
+export function textMentionsSpecialty(text: string | null | undefined, canonicalName: string): boolean {
+  if (!text) return false;
+  const g = byName().get(canonicalName);
+  if (!g) return false;
+  const s = text.toLowerCase().replace(/[._\-/\\]+/g, " ").replace(/\s+/g, " ").trim();
+  if (!s) return false;
+  return g.keywords.some(re => re.test(s));
 }
 
 /** All canonical specialty names from the AA website list, in display
