@@ -2,7 +2,7 @@
  * "Leads to contact & follow-ups due" — the top actionable card on My
  * Workspace. Sourced from form_responses I own (or unowned/new) where a
  * follow-up is overdue or the lead was never contacted. PAID leads
- * ($750 DoctorsFinder, lead_value_cents > 0) are pinned to the top and
+ * ($150 DoctorsFinder, lead_value_cents > 0) are pinned to the top and
  * visually flagged; the page-side query already does the sort.
  *
  * Rows deep-link to /forms so the user lands in the response feed where

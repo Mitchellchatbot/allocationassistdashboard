@@ -724,7 +724,7 @@ function SetupDialog({ form, open, onClose }: { form: Form; open: boolean; onClo
 }
 
 /** CSV import for backfilling historical submissions. Works for any
- *  form — useful for the DoctorsFinder $750 leads where there's no
+ *  form — useful for the DoctorsFinder $150 leads where there's no
  *  Typeform / Elementor history API to pull from, so a CSV export
  *  from the source system is the only way in.
  *
@@ -1277,7 +1277,7 @@ function ResponseRow({
           </div>
         </div>
         {/* Paid-lead chip — shows the dollar value when the form has one
-            (DoctorsFinder = $750). Keeps high-value rows visually loud. */}
+            (DoctorsFinder = $150). Keeps high-value rows visually loud. */}
         {isPaid && (
           <Badge variant="outline" className="text-[9px] bg-amber-50 text-amber-800 border-amber-300 shrink-0 font-semibold">
             <DollarSign className="h-2.5 w-2.5 mr-0.5" /> ${(leadValueCents / 100).toLocaleString()} collected

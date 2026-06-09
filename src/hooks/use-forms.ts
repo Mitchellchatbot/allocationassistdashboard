@@ -33,7 +33,7 @@ export interface Form {
   last_response_at:  string | null;
   active:            boolean;
   /** Per-response monetary value (cents). 0 = free signal (Typeform,
-   *  Consultation). 75 000 = DoctorsFinder $750 paid lead. Used to
+   *  Consultation). 15 000 = DoctorsFinder $150 paid lead. Used to
    *  flag responses as PAID LEAD in the UI + sort them on top. */
   lead_value_cents:  number;
   created_by:        string | null;

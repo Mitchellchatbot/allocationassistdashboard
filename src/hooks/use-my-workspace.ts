@@ -53,7 +53,7 @@ export interface WorkspaceEvent {
 }
 
 /** A form_response that needs contact, enriched with its form's per-lead
- *  value so the page can flag + pin PAID leads ($750 DoctorsFinder). */
+ *  value so the page can flag + pin PAID leads ($150 DoctorsFinder). */
 export interface WorkspaceLead extends FormResponse {
   /** Per-lead value in cents, copied from the parent form. >0 = paid. */
   lead_value_cents: number;
@@ -197,7 +197,7 @@ export function useMyWorkspace() {
   // touch — overdue follow-ups + uncontacted leads. Mirrors the Forms
   // page's 'mine' filter (use-forms.ts ~203-213): open lifecycle, owner =
   // me OR null. Each row is enriched with its parent form's
-  // lead_value_cents so PAID leads ($750 DoctorsFinder) can be pinned +
+  // lead_value_cents so PAID leads ($150 DoctorsFinder) can be pinned +
   // flagged on top.
   const leadsQ = useQuery({
     queryKey: ["workspace-leads", myEmail, scoped],
