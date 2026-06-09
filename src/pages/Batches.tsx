@@ -21,7 +21,7 @@ import { useDoctorLifecycleMap } from "@/hooks/use-doctor-lifecycle";
 import { groupSpecialty } from "@/lib/specialty-groups";
 import { scoreCandidate, type MatchScore } from "@/lib/match-score";
 import { useWpCandidates, type WpCandidate } from "@/hooks/use-wp-candidates";
-import { MatchScoreChip } from "@/components/DoctorVacancyMatches";
+import { MatchScoreChip, MatchReasons } from "@/components/DoctorVacancyMatches";
 
 /**
  * Phase 6 — Recurring batch sends. Source: Saif Ullah, May 20 2026.
@@ -734,11 +734,14 @@ function SpecialtyRotationCard({ rotation }: { rotation: ReturnType<typeof useSp
                       </div>
                       <div className="space-y-1">
                         {ranked.map(({ r, m }) => (
-                          <div key={r.id} className="flex items-center gap-2 text-[11px]">
-                            <MatchScoreChip score={m} />
-                            <span className="font-medium text-slate-800 truncate">{r.name}</span>
-                            <span className="text-muted-foreground truncate">· {r.speciality ?? "—"}</span>
-                            <span className="ml-auto text-[9px] uppercase tracking-wider text-muted-foreground shrink-0">{r.source}</span>
+                          <div key={r.id} className="text-[11px]">
+                            <div className="flex items-center gap-2">
+                              <MatchScoreChip score={m} />
+                              <span className="font-medium text-slate-800 truncate">{r.name}</span>
+                              <span className="text-muted-foreground truncate">· {r.speciality ?? "—"}</span>
+                              <span className="ml-auto text-[9px] uppercase tracking-wider text-muted-foreground shrink-0">{r.source}</span>
+                            </div>
+                            <MatchReasons score={m} className="pl-[3.1rem]" />
                           </div>
                         ))}
                       </div>
@@ -1103,6 +1106,7 @@ function BatchDialog({ target, onTargetChange, batches, suggestedSpecialty }: {
                         <SourceBadge source={d.source} />
                       </div>
                       <div className="text-[10px] text-muted-foreground truncate">{d.speciality ?? "—"}{d.email && ` · ${d.email}`}</div>
+                      <MatchReasons score={s} className="mt-0.5" />
                     </div>
                     {batch.status === "draft" && (
                       <>
@@ -1185,6 +1189,7 @@ function BatchDialog({ target, onTargetChange, batches, suggestedSpecialty }: {
                             <SourceBadge source={d.source} />
                           </div>
                           <div className="text-[10px] text-muted-foreground truncate">{d.speciality ?? "—"}{d.email && ` · ${d.email}`}</div>
+                          <MatchReasons score={d._score} className="mt-0.5" />
                         </div>
                       </button>
                     ))}

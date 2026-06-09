@@ -206,6 +206,30 @@ export function MatchScoreChip({ score }: { score: MatchScore }) {
   );
 }
 
+/** Visible "why this score" breakdown — the top contributing factors shown
+ *  inline (with their point values), full list in the tooltip. Surfaced in
+ *  the Batches picker so the ranking isn't a black box: the team can see at a
+ *  glance that a doctor ranks high because of specialty + license, not magic.
+ *  Mirrors what the score chip already exposes on hover, but always-visible. */
+export function MatchReasons({ score, max = 3, className = "" }: { score: MatchScore; max?: number; className?: string }) {
+  const meaningful = score.factors.filter(f => f.label && f.label.trim());
+  if (meaningful.length === 0) return null;
+  const shown = meaningful.slice(0, max);
+  const extra = meaningful.length - shown.length;
+  const full  = meaningful.map(f => `${f.label} (${f.points > 0 ? "+" : ""}${f.points})`).join("\n");
+  return (
+    <div className={`text-[10px] text-muted-foreground truncate ${className}`} title={full}>
+      {shown.map((f, i) => (
+        <span key={i} className={f.negative ? "text-rose-500" : ""}>
+          {i > 0 && " · "}{f.label}{" "}
+          <span className="tabular-nums text-muted-foreground/60">{f.points > 0 ? "+" : ""}{f.points}</span>
+        </span>
+      ))}
+      {extra > 0 && <span className="text-muted-foreground/50"> · +{extra} more</span>}
+    </div>
+  );
+}
+
 function PriorityChip({ priority }: { priority: "high" | "medium" | "low" }) {
   const cls = {
     high:   "bg-rose-100 text-rose-700 border-rose-200",
