@@ -28,7 +28,7 @@ import {
 import {
   useWpCandidates, useSyncWpCandidates, useLinkWpCandidate,
   useUpsertWpCandidate, useUploadWpPhoto, useDeleteWpCandidate,
-  useStagedProfiles, useDeleteStagedProfile, usePublishStagedProfile, useUpdateStagedProfile,
+  useStagedProfiles, useCreateStagedProfile, useDeleteStagedProfile, usePublishStagedProfile, useUpdateStagedProfile,
   useWpCandidateById,
   type WpCandidate, type StagedProfile, type StagedProfileInput,
 } from "@/hooks/use-wp-candidates";
@@ -44,7 +44,10 @@ export default function WpCandidates({ embedded }: WpCandidatesProps = {}) {
   const { data: candidates = [], isLoading } = useWpCandidates();
   const sync = useSyncWpCandidates();
   const upsert = useUpsertWpCandidate();
+  const createStaged = useCreateStagedProfile();
   const [openDetailId, setOpenDetailId] = useState<number | null>(null);
+  // Newly-created staged profile to auto-open in the staging editor.
+  const [autoOpenStagedId, setAutoOpenStagedId] = useState<string | null>(null);
   // Deep-link support: when Forms (or anything else) navigates here
   // with ?open=<wp_id>, auto-open that profile's detail dialog so the
   // user lands directly in the inline editor instead of having to
@@ -60,20 +63,15 @@ export default function WpCandidates({ embedded }: WpCandidatesProps = {}) {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [searchParamsForDeepLink]);
 
-  // Click "New profile" → POST a draft to WP immediately, then open the
-  // detail dialog on the new row. The detail dialog is fully inline-
-  // editable, so the user just fills in the empty fields from there.
+  // Click "New profile" → create a STAGING row (not a WordPress draft).
+  // The team's rule is stage-first: nothing lands on WordPress until an
+  // explicit Publish. This is a fast local insert (no WP round trip), and
+  // we auto-open the staging editor so the user fills it in, then Publishes.
   const handleNewProfile = async () => {
     try {
-      const r = await upsert.mutateAsync({
-        status: "draft",
-        title: "New profile",
-        acf: { full_name: "New profile" },
-        // Allowed-create intent — explicit user click on "New profile".
-        intent: "manual_create",
-      });
-      if (r.id) setOpenDetailId(r.id);
-      toast.success("Blank profile created — fill in the fields inline.");
+      const r = await createStaged.mutateAsync({ source: "manual", full_name: "New profile" });
+      setAutoOpenStagedId(r.id);
+      toast.success("New profile added to staging — fill it in, then Publish to WordPress.");
     } catch (e) {
       toast.error(e instanceof Error ? e.message : "Failed to create");
     }
@@ -187,8 +185,8 @@ export default function WpCandidates({ embedded }: WpCandidatesProps = {}) {
 
   const headerButtons = (
     <div className="flex items-center gap-2">
-      <Button size="sm" onClick={handleNewProfile} disabled={upsert.isPending}>
-        {upsert.isPending ? <Loader2 className="h-3.5 w-3.5 mr-1 animate-spin" /> : <Plus className="h-3.5 w-3.5 mr-1" />}
+      <Button size="sm" onClick={handleNewProfile} disabled={createStaged.isPending}>
+        {createStaged.isPending ? <Loader2 className="h-3.5 w-3.5 mr-1 animate-spin" /> : <Plus className="h-3.5 w-3.5 mr-1" />}
         New profile
       </Button>
       <Button size="sm" variant="outline" onClick={handleSync} disabled={sync.isPending}>
@@ -285,7 +283,7 @@ export default function WpCandidates({ embedded }: WpCandidatesProps = {}) {
         {/* Staging area — profiles staged from JotForm but not yet
             pushed to WordPress. Only renders when there's something to
             show so the published list stays the default view. */}
-        <StagingSection />
+        <StagingSection autoOpenId={autoOpenStagedId} onConsumed={() => setAutoOpenStagedId(null)} />
 
         {/* List */}
         <Card>
@@ -1224,7 +1222,7 @@ function useDebounce<T>(value: T, delay: number): T {
  * the header when there's queued work.
  * ─────────────────────────────────────────────────────────────────── */
 
-function StagingSection() {
+function StagingSection({ autoOpenId, onConsumed }: { autoOpenId?: string | null; onConsumed?: () => void }) {
   const { data: staged = [] } = useStagedProfiles();
   if (staged.length === 0) return null;
   return (
@@ -1238,17 +1236,22 @@ function StagingSection() {
           Imported from JotForm. Pick Publish or Save as draft to push them to WordPress, or discard.
         </p>
         <div className="space-y-1.5">
-          {staged.map(s => <StagedRow key={s.id} profile={s} />)}
+          {staged.map(s => <StagedRow key={s.id} profile={s} autoOpen={s.id === autoOpenId} onAutoOpened={onConsumed} />)}
         </div>
       </CardContent>
     </Card>
   );
 }
 
-function StagedRow({ profile }: { profile: StagedProfile }) {
+function StagedRow({ profile, autoOpen, onAutoOpened }: { profile: StagedProfile; autoOpen?: boolean; onAutoOpened?: () => void }) {
   const publish = usePublishStagedProfile();
   const del     = useDeleteStagedProfile();
   const [detailOpen, setDetailOpen] = useState(false);
+  // Auto-open the editor when this row was just created via "New profile".
+  useEffect(() => {
+    if (autoOpen) { setDetailOpen(true); onAutoOpened?.(); }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [autoOpen]);
   const subtitle = [profile.specialty, profile.country_of_training, profile.current_location]
     .filter(Boolean).join(" · ");
 
