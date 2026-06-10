@@ -1273,7 +1273,10 @@ function StagingSection({ autoOpenId, onConsumed }: { autoOpenId?: string | null
 function StagedRow({ profile, autoOpen, onAutoOpened }: { profile: StagedProfile; autoOpen?: boolean; onAutoOpened?: () => void }) {
   const publish = usePublishStagedProfile();
   const del     = useDeleteStagedProfile();
+  const uploadCv = useUploadWpCv();
   const [detailOpen, setDetailOpen] = useState(false);
+  // CV the user attached in the editor — auto-uploaded to WordPress on Publish.
+  const [cvFile, setCvFile] = useState<File | null>(null);
   // Auto-open the editor when this row was just created via "New profile".
   useEffect(() => {
     if (autoOpen) { setDetailOpen(true); onAutoOpened?.(); }
@@ -1283,17 +1286,30 @@ function StagedRow({ profile, autoOpen, onAutoOpened }: { profile: StagedProfile
     .filter(Boolean).join(" · ");
 
   const handlePublish = async (status: "draft" | "publish") => {
+    // A persistent loading toast that updates through the phases — the staged
+    // row unmounts the moment Publish succeeds, so an in-row progress bar
+    // would vanish; the toast survives and communicates "still working".
+    const tid = toast.loading(status === "publish" ? "Publishing to WordPress…" : "Saving draft to WordPress…", {
+      description: cvFile ? "Step 1 of 2 — creating the profile." : undefined,
+    });
     try {
       const r = await publish.mutateAsync({ profile, status });
       const dropped = (r as { dropped_fields?: string[] })?.dropped_fields ?? [];
+      const wpId    = (r as { id?: number })?.id;
+      // Auto-upload the attached résumé to the freshly-created WP candidate.
+      if (cvFile && wpId) {
+        toast.loading("Uploading résumé…", { id: tid, description: "Step 2 of 2 — attaching the CV." });
+        try { await uploadCv.mutateAsync({ file: cvFile, candidateId: wpId }); }
+        catch (e) { toast.warning("Profile saved — but the résumé upload failed", { description: (e as Error).message }); }
+      }
       const base = status === "publish" ? "Published to WordPress" : "Saved as WordPress draft";
       if (dropped.length) {
-        toast.warning(base, { description: `Couldn't set: ${dropped.join(", ")} — WordPress rejected the value(s). Set them by hand on the profile.` });
+        toast.warning(base, { id: tid, description: `Couldn't set: ${dropped.join(", ")} — WordPress rejected the value(s). Set them by hand on the profile.` });
       } else {
-        toast.success(base);
+        toast.success(base, { id: tid });
       }
     } catch (e) {
-      toast.error("Couldn't push to WordPress", { description: (e as Error).message });
+      toast.error("Couldn't push to WordPress", { id: tid, description: (e as Error).message });
     }
   };
 
@@ -1396,6 +1412,8 @@ function StagedRow({ profile, autoOpen, onAutoOpened }: { profile: StagedProfile
       profile={profile}
       open={detailOpen}
       onOpenChange={setDetailOpen}
+      cvFileName={cvFile?.name ?? null}
+      onPickCv={setCvFile}
       onPublish={() => { setDetailOpen(false); handlePublish("publish"); }}
       onSaveDraft={() => { setDetailOpen(false); handlePublish("draft"); }}
       onDelete={() => { setDetailOpen(false); handleDelete(); }}
@@ -1412,11 +1430,13 @@ function StagedRow({ profile, autoOpen, onAutoOpened }: { profile: StagedProfile
  *  candidate will look like on WordPress was the user's ask — this is
  *  it, just before the Publish click. */
 function StagedProfileDetailDialog({
-  profile, open, onOpenChange, onPublish, onSaveDraft, onDelete,
+  profile, open, onOpenChange, cvFileName, onPickCv, onPublish, onSaveDraft, onDelete,
 }: {
   profile: StagedProfile;
   open: boolean;
   onOpenChange: (open: boolean) => void;
+  cvFileName:   string | null;
+  onPickCv:     (file: File | null) => void;
   onPublish:    () => void;
   onSaveDraft:  () => void;
   onDelete:     () => void;
@@ -1424,6 +1444,7 @@ function StagedProfileDetailDialog({
   const acf = (profile.acf ?? {}) as Record<string, unknown>;
   const cv  = (profile.extracted_cv_data ?? {}) as Record<string, unknown>;
   const [tab, setTab] = useState<"education" | "experience">("education");
+  const cvInputRef = useRef<HTMLInputElement | null>(null);
   const update = useUpdateStagedProfile();
   const [chainOpen, setChainOpen] = useState(false);
 
@@ -1752,13 +1773,33 @@ function StagedProfileDetailDialog({
             on WP, publish on WP, with the draft being the one
             highlighted in green'. */}
         <DialogFooter className="px-7 py-4 border-t bg-slate-50/60 flex sm:justify-between gap-2">
-          <Button
-            variant="outline"
-            className="border-rose-300 text-rose-700 hover:bg-rose-50"
-            onClick={onDelete}
-          >
-            <Trash2 className="h-4 w-4 mr-1.5" /> Delete
-          </Button>
+          <div className="flex items-center gap-2">
+            <Button
+              variant="outline"
+              className="border-rose-300 text-rose-700 hover:bg-rose-50"
+              onClick={onDelete}
+            >
+              <Trash2 className="h-4 w-4 mr-1.5" /> Delete
+            </Button>
+            {/* Attach a résumé — held until Publish/Draft, then auto-uploaded
+                to the WP candidate's CV/Résumé field. */}
+            <input
+              ref={cvInputRef}
+              type="file"
+              accept=".pdf,.doc,.docx,application/pdf,application/msword,application/vnd.openxmlformats-officedocument.wordprocessingml.document"
+              onChange={e => { const f = e.target.files?.[0] ?? null; onPickCv(f); e.target.value = ""; }}
+              className="hidden"
+            />
+            <Button
+              variant="outline"
+              className={cvFileName ? "border-emerald-300 text-emerald-700 hover:bg-emerald-50" : "border-slate-300 text-slate-600 hover:bg-slate-50"}
+              onClick={() => cvInputRef.current?.click()}
+              title={cvFileName ? `Résumé attached: ${cvFileName} — uploads to WordPress on Publish` : "Attach a résumé — uploads to WordPress on Publish"}
+            >
+              <Upload className="h-4 w-4 mr-1.5" />
+              {cvFileName ? "Résumé attached ✓" : "Attach résumé"}
+            </Button>
+          </div>
           <div className="flex gap-2">
             <Button
               variant="outline"
