@@ -21,6 +21,23 @@ export interface MappedProfile {
 
 const norm = (s: string) => s.toLowerCase().replace(/[^a-z]/g, "");
 
+/** JotForm's phone control is a {area, phone} object; once flattened it can
+ *  land as that object's raw JSON string. Coerce to a plain "+area phone"
+ *  so it never reaches WordPress (or the staging editor) as JSON. */
+function normalizePhone(raw: string): string {
+  const s = (raw ?? "").trim();
+  if (!s.startsWith("{") || !s.includes("phone")) return s;
+  try {
+    const o = JSON.parse(s) as { area?: unknown; phone?: unknown; full?: unknown };
+    if (typeof o.full === "string" && o.full.trim()) return o.full.trim();
+    const a = o.area  != null ? String(o.area).trim()  : "";
+    const p = o.phone != null ? String(o.phone).trim() : "";
+    return [a, p].filter(Boolean).join(" ") || s;
+  } catch {
+    return s;
+  }
+}
+
 /** Walk a stored form_response and map it to the WP-shaped payload.
  *  `flatAnswers` is the {label: value} map we already persist on the
  *  row (`form_responses.answers`); for JotForm it was produced server
@@ -45,7 +62,7 @@ export function mapAnswersToWp(flat: Record<string, string>): MappedProfile {
   const last  = pick("lastname", "lname", "surname", "familyname");
   const full  = pick("fullname", "name") || [first, last].filter(Boolean).join(" ");
   const email = pick("email", "emailaddress");
-  const phone = pick("phone", "phonenumber", "mobile", "tel", "telephone", "whatsapp");
+  const phone = normalizePhone(pick("phone", "phonenumber", "mobile", "tel", "telephone", "whatsapp"));
 
   const acf: Record<string, unknown> = {};
   if (full)  acf.full_name    = full;

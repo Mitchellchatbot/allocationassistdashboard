@@ -368,6 +368,31 @@ function parseYesNo(v: unknown): boolean | null {
   return /yes|true|1/i.test(String(v));
 }
 
+/** Coerce a phone value to a plain "+area phone" string. Handles JotForm's
+ *  {area, phone(, full)} object, that object as a raw JSON string, or an
+ *  already-plain string. Returns "" only for genuinely empty input. */
+function normalizePhone(v: unknown): string {
+  let o: { area?: unknown; phone?: unknown; full?: unknown } | null = null;
+  if (v && typeof v === "object") {
+    o = v as typeof o;
+  } else if (typeof v === "string") {
+    const s = v.trim();
+    if (s.startsWith("{") && s.includes("phone")) {
+      try { o = JSON.parse(s); } catch { /* not JSON — treat as plain */ }
+    }
+    if (!o) return s; // already a plain phone string
+  } else {
+    return v == null ? "" : String(v).trim();
+  }
+  if (typeof o?.full === "string" && o.full.trim()) return o.full.trim();
+  const a = o?.area  != null ? String(o.area).trim()  : "";
+  const p = o?.phone != null ? String(o.phone).trim() : "";
+  const joined = [a, p].filter(Boolean).join(" ");
+  if (joined) return joined;
+  // Object with no usable parts → fall back to the original string form.
+  return typeof v === "string" ? v.trim() : "";
+}
+
 /** Parse the ACF field name(s) WP rejected out of a rest_invalid_param
  *  response. WP only names the parent "acf" in `message`, but data.params /
  *  data.details spell out e.g. "acf[country_of_training] is not one of …". */
@@ -507,6 +532,15 @@ function sanitizeAcf(acf: Record<string, unknown> | undefined): Record<string, u
     // "not one of …", the retry loop drops it.
     if (k === "country_of_training") {
       out[k] = normalizeCountry(String(v));
+      continue;
+    }
+    // Phone — JotForm's phone control is a {area, phone} object; depending on
+    // the ingest path it can arrive here as that object OR its raw JSON
+    // string, which WP then stores verbatim ('{"area":"+49",...}'). Always
+    // coerce to a plain "+area phone" string before it reaches the field.
+    if (k === "phone_number") {
+      const clean = normalizePhone(v);
+      if (clean) out[k] = clean;
       continue;
     }
     // Checkbox / multi-select → array.

@@ -254,6 +254,158 @@ Deno.serve(async (req) => {
         if (error) return new Response(JSON.stringify({ ok: false, error: error.message }), { headers: { "Content-Type": "application/json" } });
         return new Response(JSON.stringify({ ok: true, deleted: count, kind: "garbage_multipart" }), { headers: { "Content-Type": "application/json" } });
       }
+      if ((body as { clear_cv?: number } | null)?.clear_cv) {
+        // Clear cv_resume on a candidate. ACF File fields don't clear with
+        // `false`; try null then "" and report which emptied it.
+        const cid = (body as { clear_cv: number }).clear_cv;
+        const wpBase = (Deno.env.get("WP_BASE_URL") ?? "").replace(/\/+$/, "");
+        const basic = "Basic " + btoa(`${Deno.env.get("WP_USERNAME")}:${(Deno.env.get("WP_APP_PASSWORD") ?? "").replace(/\s/g, "")}`);
+        const getField = async () => {
+          const r = await fetch(`${wpBase}/wp-json/wp/v2/candidate/${cid}?_fields=acf.cv_resume`, { headers: { Authorization: basic } });
+          return r.ok ? ((await r.json()) as { acf?: { cv_resume?: unknown } })?.acf?.cv_resume ?? null : `GET ${r.status}`;
+        };
+        const steps: unknown[] = [];
+        for (const shape of [null, ""] as unknown[]) {
+          const pr = await fetch(`${wpBase}/wp-json/wp/v2/candidate/${cid}`, {
+            method: "POST", headers: { Authorization: basic, "Content-Type": "application/json" },
+            body: JSON.stringify({ acf: { cv_resume: shape } }),
+          });
+          const after = await getField();
+          steps.push({ shape, status: pr.status, after });
+          if (after === null || after === "" || after === false || after === 0) break;
+        }
+        return new Response(JSON.stringify({ ok: true, candidate_id: cid, steps, final: await getField() }, null, 2), { headers: { "Content-Type": "application/json" } });
+      }
+      if ((body as { test_upload_cv?: number } | null)?.test_upload_cv) {
+        // End-to-end test of the deployed wordpress-candidate-upload-cv:
+        // upload a tiny real PDF to a candidate and report the function's
+        // response (attached_key proves cv_resume took). Clear afterwards.
+        const cid = (body as { test_upload_cv: number }).test_upload_cv;
+        const pdf = "%PDF-1.4\n1 0 obj<</Type/Catalog/Pages 2 0 R>>endobj\n2 0 obj<</Type/Pages/Kids[3 0 R]/Count 1>>endobj\n3 0 obj<</Type/Page/Parent 2 0 R/MediaBox[0 0 200 200]>>endobj\nxref\n0 4\n0000000000 65535 f \ntrailer<</Root 1 0 R/Size 4>>\nstartxref\n0\n%%EOF";
+        const fd = new FormData();
+        fd.append("file", new File([pdf], "diagnostic-cv.pdf", { type: "application/pdf" }));
+        fd.append("candidate_id", String(cid));
+        const r = await fetch(`${Deno.env.get("SUPABASE_URL")}/functions/v1/wordpress-candidate-upload-cv`, {
+          method: "POST", headers: { Authorization: `Bearer ${Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")}` }, body: fd,
+        });
+        const j = await r.json().catch(() => null);
+        return new Response(JSON.stringify({ ok: true, http_status: r.status, function_response: j }, null, 2), { headers: { "Content-Type": "application/json" } });
+      }
+      if ((body as { probe_cv_write?: boolean } | null)?.probe_cv_write) {
+        // Definitively learn what write SHAPE the cv_resume ACF File field
+        // accepts: PATCH a known-valid media id as int, numeric-string, and
+        // {id} object, re-reading after each; then restore the field to empty.
+        // Reveals whether the verify-loop's bare-int write actually sticks.
+        const wpBase = (Deno.env.get("WP_BASE_URL") ?? "").replace(/\/+$/, "");
+        const basic = "Basic " + btoa(`${Deno.env.get("WP_USERNAME")}:${(Deno.env.get("WP_APP_PASSWORD") ?? "").replace(/\s/g, "")}`);
+        const { data: rows } = await sb
+          .from("wordpress_candidates")
+          .select("id, full_name, raw_acf")
+          .not("raw_acf", "is", null)
+          .limit(80);
+        let cid: number | null = null, name: string | null = null, mediaId: number | null = null;
+        for (const r of (rows ?? []) as Array<{ id: number; full_name: string; raw_acf: Record<string, unknown> }>) {
+          const pp = r.raw_acf?.profile_picture;
+          const id = typeof pp === "number" ? pp : (/^\d+$/.test(String(pp)) ? parseInt(String(pp), 10) : null);
+          if (id) { cid = r.id; name = r.full_name; mediaId = id; break; }
+        }
+        if (!cid || !mediaId) return new Response(JSON.stringify({ ok: false, error: "no candidate with a valid media id" }), { headers: { "Content-Type": "application/json" } });
+        const getField = async () => {
+          const r = await fetch(`${wpBase}/wp-json/wp/v2/candidate/${cid}?_fields=acf.cv_resume`, { headers: { Authorization: basic } });
+          return r.ok ? ((await r.json()) as { acf?: { cv_resume?: unknown } })?.acf?.cv_resume ?? null : `GET ${r.status}`;
+        };
+        const before = await getField();
+        const tries: unknown[] = [];
+        for (const shape of [mediaId, String(mediaId), { id: mediaId }] as unknown[]) {
+          const pr = await fetch(`${wpBase}/wp-json/wp/v2/candidate/${cid}`, {
+            method: "POST", headers: { Authorization: basic, "Content-Type": "application/json" },
+            body: JSON.stringify({ acf: { cv_resume: shape } }),
+          });
+          const pj = await pr.json().catch(() => null) as { code?: string; message?: string } | null;
+          const after = await getField();
+          tries.push({ shape, patch_status: pr.status, patch_code: pj?.code ?? null, patch_msg: pj?.message ?? null, after });
+        }
+        // Restore to empty (false clears an ACF File field).
+        await fetch(`${wpBase}/wp-json/wp/v2/candidate/${cid}`, {
+          method: "POST", headers: { Authorization: basic, "Content-Type": "application/json" },
+          body: JSON.stringify({ acf: { cv_resume: false } }),
+        });
+        const restored = await getField();
+        return new Response(JSON.stringify({ ok: true, candidate: { id: cid, name }, media_id: mediaId, before, tries, restored }, null, 2), { headers: { "Content-Type": "application/json" } });
+      }
+      if ((body as { fix_phones?: boolean } | null)?.fix_phones) {
+        // Repair every WP candidate whose phone_number is the raw
+        // {area,phone} JSON: normalise to "+area phone", PATCH WP, and
+        // refresh the mirror. body.dry_run=true to preview without writing.
+        const dry = (body as { dry_run?: boolean }).dry_run === true;
+        const wpBase = (Deno.env.get("WP_BASE_URL") ?? "").replace(/\/+$/, "");
+        const basic = "Basic " + btoa(`${Deno.env.get("WP_USERNAME")}:${(Deno.env.get("WP_APP_PASSWORD") ?? "").replace(/\s/g, "")}`);
+        const norm = (raw: unknown): string | null => {
+          let o: { area?: unknown; phone?: unknown; full?: unknown } | null = null;
+          if (raw && typeof raw === "object") o = raw as typeof o;
+          else if (typeof raw === "string" && raw.trim().startsWith("{") && raw.includes("phone")) {
+            try { o = JSON.parse(raw); } catch { /* not json */ }
+          }
+          if (!o) return null; // already plain or not a phone object
+          if (typeof o.full === "string" && o.full.trim()) return o.full.trim();
+          const a = o.area != null ? String(o.area).trim() : "";
+          const p = o.phone != null ? String(o.phone).trim() : "";
+          const j = [a, p].filter(Boolean).join(" ");
+          return j || null;
+        };
+        const { data: rows } = await sb
+          .from("wordpress_candidates")
+          .select("id, full_name, phone, raw_acf")
+          .not("raw_acf", "is", null)
+          .limit(1000);
+        const fixed: unknown[] = [];
+        for (const r of (rows ?? []) as Array<{ id: number; full_name: string; phone: string | null; raw_acf: Record<string, unknown> }>) {
+          const cur = r.raw_acf?.phone_number;
+          const clean = norm(cur);
+          if (!clean) continue; // nothing to fix
+          if (dry) { fixed.push({ id: r.id, name: r.full_name, from: cur, to: clean, dry: true }); continue; }
+          const pr = await fetch(`${wpBase}/wp-json/wp/v2/candidate/${r.id}`, {
+            method: "POST", headers: { Authorization: basic, "Content-Type": "application/json" },
+            body: JSON.stringify({ acf: { phone_number: clean } }),
+          });
+          const ok = pr.ok;
+          if (ok) {
+            await sb.from("wordpress_candidates").update({ phone: clean, updated_at: new Date().toISOString() }).eq("id", r.id);
+          }
+          fixed.push({ id: r.id, name: r.full_name, from: cur, to: clean, patch_status: pr.status, ok });
+        }
+        return new Response(JSON.stringify({ ok: true, dry_run: dry, count: fixed.length, fixed }, null, 2), { headers: { "Content-Type": "application/json" } });
+      }
+      if ((body as { dump_acf?: boolean } | null)?.dump_acf) {
+        // Union of every ACF key across real WP candidates (from the
+        // mirror's raw_acf), plus a sample value for any cv/resume/file/
+        // phone key — reveals the real "CV/ Resume" slug + how phone is
+        // actually stored, without touching a specific (now-deleted) record.
+        const { data } = await sb
+          .from("wordpress_candidates")
+          .select("id, full_name, raw_acf")
+          .not("raw_acf", "is", null)
+          .limit(40);
+        const keyCounts: Record<string, number> = {};
+        const samples: Record<string, unknown> = {};
+        for (const row of (data ?? []) as Array<{ raw_acf: Record<string, unknown> | null }>) {
+          const acf = row.raw_acf ?? {};
+          for (const k of Object.keys(acf)) {
+            keyCounts[k] = (keyCounts[k] ?? 0) + 1;
+            const val = acf[k];
+            if (/cv|resume|curriculum|file|document|phone/i.test(k) &&
+                samples[k] === undefined && val !== null && val !== "") {
+              samples[k] = val;
+            }
+          }
+        }
+        return new Response(JSON.stringify({
+          ok: true,
+          candidates_scanned: data?.length ?? 0,
+          all_keys: Object.keys(keyCounts).sort(),
+          cv_phone_file_samples: samples,
+        }, null, 2), { headers: { "Content-Type": "application/json" } });
+      }
     } catch { /* fall through to GET-style diag */ }
   }
 

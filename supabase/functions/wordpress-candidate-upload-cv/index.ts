@@ -90,7 +90,10 @@ Deno.serve(async (req: Request) => {
   const CV_WEAK   = /document|\bfile\b/i;
   const strong = acfKeys.filter(k => CV_STRONG.test(k));
   const weak   = acfKeys.filter(k => CV_WEAK.test(k) && !CV_STRONG.test(k));
-  const candidateKeys = [...new Set([...strong, ...weak, "cv__resume", "cv_resume", "cv_resume_file"])];
+  // cv_resume is the CONFIRMED real slug (probed against live WP — a bare
+  // integer attachment id writes and sticks), so try it first regardless of
+  // discovery ordering; the rest are defensive fallbacks.
+  const candidateKeys = [...new Set(["cv_resume", ...strong, ...weak, "cv__resume", "cv_resume_file"])];
 
   // ACF File fields return an int id, a numeric string, or an {id|url} object
   // depending on the field's "Return Format" — accept any of them as "set".
