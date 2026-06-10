@@ -285,22 +285,38 @@ export function useMatchingDoctors(vacancy: Vacancy | null | undefined): ScoredM
 
   return useMemo<ScoredMatchingDoctor[]>(() => {
     if (!vacancy) return [];
-    const z = zoho.data as { rawDoctorsOnBoard?: ZohoDoctorOnBoard[] } | undefined;
-    const dobs  = z?.rawDoctorsOnBoard ?? [];
+    const z = zoho.data as { rawDoctorsOnBoard?: ZohoDoctorOnBoard[]; rawLeads?: ZohoLead[] } | undefined;
 
     const profileById = new Map<string, typeof profiles[number]>();
     for (const p of profiles) profileById.set(p.doctor_id, p);
-    // WP candidates carry the richest profile data (manually edited
-    // post-publish: bio, country of training, nationality, years
-    // experience, family/marital status, license). Index by both the
-    // linked doctor_id (when set) AND by email lowercase so we can
-    // still surface a match when the linkage hasn't been wired.
-    const wpByDoctorId = new Map<string, WpCandidate>();
-    const wpByEmail    = new Map<string, WpCandidate>();
-    for (const c of wpCandidates) {
-      if (c.doctor_id) wpByDoctorId.set(c.doctor_id, c);
-      if (c.email)     wpByEmail.set(c.email.toLowerCase().trim(), c);
-    }
+
+    // Pool SPINE = the website (published WP candidates). Each is matched to
+    // a Zoho record — Doctors on Board first, then Leads — by PHONE → EMAIL →
+    // NAME (Ammar 2026-06-11). So every published doctor is matchable, with
+    // Zoho data layered on for augmentation when found.
+    const normName = (n: string | null | undefined) => (n ?? "").toLowerCase().replace(/\s+/g, " ").trim();
+    const phoneKey = (p: string | null | undefined) => {
+      const d = (p ?? "").replace(/\D/g, "");
+      return d.length >= 9 ? d.slice(-9) : (d || null);
+    };
+    type ZIdx = { phone: Map<string, Record<string, unknown>>; email: Map<string, Record<string, unknown>>; name: Map<string, Record<string, unknown>> };
+    const buildIdx = (rows: Array<Record<string, unknown>>): ZIdx => {
+      const idx: ZIdx = { phone: new Map(), email: new Map(), name: new Map() };
+      for (const r of rows) {
+        const ph = phoneKey((r.Phone ?? r.Mobile) as string | null); if (ph && !idx.phone.has(ph)) idx.phone.set(ph, r);
+        const em = String(r.Email ?? "").toLowerCase().trim();        if (em && !idx.email.has(em)) idx.email.set(em, r);
+        const nm = normName((r.Full_Name as string) || `${r.First_Name ?? ""} ${r.Last_Name ?? ""}`); if (nm && !idx.name.has(nm)) idx.name.set(nm, r);
+      }
+      return idx;
+    };
+    const idxDob  = buildIdx((z?.rawDoctorsOnBoard ?? []) as unknown as Array<Record<string, unknown>>);
+    const idxLead = buildIdx((z?.rawLeads ?? []) as unknown as Array<Record<string, unknown>>);
+    const matchZoho = (c: WpCandidate, idx: ZIdx): Record<string, unknown> | null => {
+      const ph = phoneKey(c.phone);            if (ph && idx.phone.has(ph)) return idx.phone.get(ph)!;
+      const em = (c.email ?? "").toLowerCase().trim(); if (em && idx.email.has(em)) return idx.email.get(em)!;
+      const nm = normName(c.full_name);        if (nm && idx.name.has(nm)) return idx.name.get(nm)!;
+      return null;
+    };
 
     const hospital = vacancy.hospital_id
       ? (hospitals.find(h => h.id === vacancy.hospital_id) ?? null)
@@ -310,27 +326,25 @@ export function useMatchingDoctors(vacancy: Vacancy | null | undefined): ScoredM
       : { id: null, name: vacancy.hospital_name, city: null, country: null };
 
     const out: ScoredMatchingDoctor[] = [];
-    for (const dob of dobs) {
-      const name = dob.Full_Name || `${dob.First_Name ?? ""} ${dob.Last_Name ?? ""}`.trim();
-      if (!name) continue;
-      const prefixedId = `dob:${dob.id}`;
+    const usedIds = new Set<string>();
+    for (const c of wpCandidates) {
+      const dob  = matchZoho(c, idxDob);
+      const lead = dob ? null : matchZoho(c, idxLead);
+      const zr   = (dob ?? lead ?? {}) as Record<string, unknown>;
+      let prefixedId = dob ? `dob:${dob.id as string}` : lead ? `lead:${lead.id as string}` : `wp:${c.id}`;
+      if (usedIds.has(prefixedId)) prefixedId = `wp:${c.id}`;
+      if (usedIds.has(prefixedId)) continue;
+      usedIds.add(prefixedId);
       const profile = profileById.get(prefixedId) ?? null;
-      const wp = wpByDoctorId.get(prefixedId) ?? (dob.Email ? wpByEmail.get(dob.Email.toLowerCase().trim()) : undefined) ?? null;
-      // Website-only pool (Ammar 2026-06-09): vacancy matches should only
-      // surface doctors who are live on the AA website (have a matching WP
-      // candidate) — the site is the source of truth for who hospitals can
-      // be shown, and matching keys off the same canonical specialty list
-      // (specialty-groups.ts) the website filter + rotation use.
-      if (!wp) continue;
-      const candidate = buildDoctorCandidate(prefixedId, null, dob, profile, wp);
+      const candidate = buildDoctorCandidate(prefixedId, lead as ZohoLead | null, dob as ZohoDoctorOnBoard | null, profile, c);
       if (!candidate) continue;
       const score = scoreMatch(candidate, vacancy, h);
       if (score.tier === "none") continue;
       out.push({
         doctor_id:        prefixedId,
-        doctor_name:      name,
-        doctor_email:     wp?.email ?? dob.Email,
-        doctor_phone:     wp?.phone ?? dob.Phone ?? dob.Mobile ?? null,
+        doctor_name:      candidate.name || c.full_name || "",
+        doctor_email:     c.email ?? (zr.Email as string | undefined) ?? null,
+        doctor_phone:     c.phone ?? (zr.Phone as string | undefined) ?? (zr.Mobile as string | undefined) ?? null,
         speciality:       candidate.speciality,
         score,
         has_dha:          candidate.has_dha,

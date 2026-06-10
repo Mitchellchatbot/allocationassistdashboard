@@ -1292,18 +1292,18 @@ function BatchDialog({ target, onTargetChange, batches, suggestedSpecialty }: {
 /** Where the doctor's record lives in Zoho — "Doctors on Board" rows are
  *  doctors who've been placed at least once and tend to be higher-quality
  *  candidates than raw Leads. */
-function SourceBadge({ source }: { source: "lead" | "dob" }) {
-  const isDob = source === "dob";
+function SourceBadge({ source }: { source: "lead" | "dob" | "wp" }) {
+  const meta = source === "dob"
+    ? { label: "DoB",  title: "Matched to Zoho Doctors on Board (previously placed)", cls: "bg-emerald-50 text-emerald-700 border-emerald-200" }
+    : source === "lead"
+    ? { label: "Lead", title: "Matched to a Zoho Lead (raw applicant)",                cls: "bg-sky-50 text-sky-700 border-sky-200" }
+    : { label: "Web",  title: "Live on the website — no Zoho match found",             cls: "bg-violet-50 text-violet-700 border-violet-200" };
   return (
     <span
-      title={isDob ? "From Zoho Doctors on Board (previously placed)" : "From Zoho Leads (raw applicant)"}
-      className={`inline-flex items-center rounded-full border px-1.5 py-[1px] text-[9px] font-medium uppercase tracking-wider ${
-        isDob
-          ? "bg-emerald-50 text-emerald-700 border-emerald-200"
-          : "bg-sky-50 text-sky-700 border-sky-200"
-      }`}
+      title={meta.title}
+      className={`inline-flex items-center rounded-full border px-1.5 py-[1px] text-[9px] font-medium uppercase tracking-wider ${meta.cls}`}
     >
-      {isDob ? "DoB" : "Lead"}
+      {meta.label}
     </span>
   );
 }
@@ -1394,7 +1394,7 @@ interface DoctorOption {
   email:                string | null;
   speciality:           string | null;
   eligible:             boolean;
-  source:               "lead" | "dob";
+  source:               "lead" | "dob" | "wp";
   // ── Full match-score input fields. Surfaced so the picker can
   //    call the shared scoreCandidate() with the same shape as
   //    vacancy matching, keeping one algorithm across all surfaces.
@@ -1441,22 +1441,11 @@ function useMemoDoctors(
       return Number.isFinite(t) ? t : null;
     };
 
-    // WP candidate lookup — by linked doctor_id first, then by email.
-    // WP rows hold the richest profile data (manually edited
-    // post-publish: bio, country of training, nationality, years
-    // experience, license status). When a Zoho doctor has a matching
-    // WP candidate, WP fields win every per-field merge below.
-    const wpByDoctorId = new Map<string, WpCandidate>();
-    const wpByEmail    = new Map<string, WpCandidate>();
-    for (const c of wpCandidates) {
-      if (c.doctor_id) wpByDoctorId.set(c.doctor_id, c);
-      if (c.email)     wpByEmail.set(c.email.toLowerCase().trim(), c);
-    }
-    const findWp = (id: string, email: string | null): WpCandidate | null =>
-      wpByDoctorId.get(id) ??
-      (email ? wpByEmail.get(email.toLowerCase().trim()) ?? null : null);
-
-    /** Pick the first non-null/non-empty value in priority order. */
+    // Pool SPINE = the website (published WP candidates). Each is matched to
+    // a Zoho record — Doctors on Board first, then Leads — by PHONE → EMAIL →
+    // NAME (Ammar 2026-06-11: "the spine should be website, match it to zoho
+    // by phone, then email, then name"). So EVERY published doctor appears,
+    // enriched with Zoho data when we can find them; WP fields always win.
     const pickStr = (...vs: Array<string | null | undefined>): string | null => {
       for (const v of vs) if (v != null && v !== "") return v;
       return null;
@@ -1465,87 +1454,75 @@ function useMemoDoctors(
       for (const v of vs) if (v != null) return v;
       return null;
     };
+    const normName = (n: string | null | undefined) => (n ?? "").toLowerCase().replace(/\s+/g, " ").trim();
+    // Last 9 digits — ignores country-code / formatting differences.
+    const phoneKey = (p: string | null | undefined) => {
+      const d = (p ?? "").replace(/\D/g, "");
+      return d.length >= 9 ? d.slice(-9) : (d || null);
+    };
+    const yes = (v: unknown) => typeof v === "string" && /^y/i.test(v.trim());
 
-    // Build lookup tables from Leads so DoB rows missing their own
-    // Specialty field can fall back to the matching Lead's specialty.
-    // Match by email, phone (digits only), or normalised name.
-    const leadSpecByEmail = new Map<string, string>();
-    const leadSpecByPhone = new Map<string, string>();
-    const leadSpecByName  = new Map<string, string>();
-    const normPhone = (p: string | null | undefined) => (p ?? "").replace(/\D/g, "");
-    const normName  = (n: string | null | undefined) => (n ?? "").toLowerCase().trim();
-    for (const l of z?.rawLeads ?? []) {
-      const sp = l.Specialty || l.Specialty_New;
-      if (!sp) continue;
-      if (l.Email) leadSpecByEmail.set(l.Email.toLowerCase().trim(), sp);
-      const ph = normPhone(l.Phone ?? l.Mobile);
-      if (ph) leadSpecByPhone.set(ph, sp);
-      const nm = normName(l.Full_Name || `${l.First_Name ?? ""} ${l.Last_Name ?? ""}`);
-      if (nm) leadSpecByName.set(nm, sp);
-    }
+    // Phone / email / name indexes over Zoho DoB + Leads (first writer wins).
+    type ZIdx<T> = { phone: Map<string, T>; email: Map<string, T>; name: Map<string, T> };
+    const buildIdx = <T extends Record<string, unknown>>(rows: T[]): ZIdx<T> => {
+      const idx: ZIdx<T> = { phone: new Map(), email: new Map(), name: new Map() };
+      for (const r of rows) {
+        const ph = phoneKey((r.Phone ?? r.Mobile) as string | null); if (ph && !idx.phone.has(ph)) idx.phone.set(ph, r);
+        const em = String(r.Email ?? "").toLowerCase().trim();        if (em && !idx.email.has(em)) idx.email.set(em, r);
+        const nm = normName((r.Full_Name as string) || `${r.First_Name ?? ""} ${r.Last_Name ?? ""}`); if (nm && !idx.name.has(nm)) idx.name.set(nm, r);
+      }
+      return idx;
+    };
+    const idxDob  = buildIdx((z?.rawDoctorsOnBoard ?? []) as unknown as Array<Record<string, unknown>>);
+    const idxLead = buildIdx((z?.rawLeads ?? []) as unknown as Array<Record<string, unknown>>);
+    const matchZoho = <T,>(c: WpCandidate, idx: ZIdx<T>): T | null => {
+      const ph = phoneKey(c.phone);            if (ph && idx.phone.has(ph)) return idx.phone.get(ph)!;
+      const em = (c.email ?? "").toLowerCase().trim(); if (em && idx.email.has(em)) return idx.email.get(em)!;
+      const nm = normName(c.full_name);        if (nm && idx.name.has(nm)) return idx.name.get(nm)!;
+      return null;
+    };
 
-    for (const d of z?.rawDoctorsOnBoard ?? []) {
-      const name = d.Full_Name || `${d.First_Name ?? ""} ${d.Last_Name ?? ""}`.trim();
+    const usedIds = new Set<string>();
+    for (const c of wpCandidates) {
+      const dob  = matchZoho(c, idxDob);
+      const lead = dob ? null : matchZoho(c, idxLead);
+      const zr   = (dob ?? lead ?? {}) as Record<string, unknown>;
+      const zStr = (k: string): string | null => { const v = zr[k]; return typeof v === "string" && v.trim() ? v : null; };
+      const zNum = (k: string): number | null => { const v = zr[k]; return typeof v === "number" && Number.isFinite(v) ? v : null; };
+      // Stable id: prefer the matched Zoho record so existing batch
+      // references keep resolving; else the WP candidate's own id.
+      let id = dob ? `dob:${(dob as { id: string }).id}` : lead ? `lead:${(lead as { id: string }).id}` : `wp:${c.id}`;
+      if (usedIds.has(id)) id = `wp:${c.id}`;     // two WP rows → same Zoho match
+      if (usedIds.has(id)) continue;
+      usedIds.add(id);
+      const name = pickStr(c.full_name, zStr("Full_Name")) ?? `${zStr("First_Name") ?? ""} ${zStr("Last_Name") ?? ""}`.trim();
       if (!name) continue;
-      const id = `dob:${d.id}`;
-      // Prefer the DoB's own Specialty fields (Zoho uses British spelling
-      // `Speciality` + a `Specialty_New` override), then cross-reference a
-      // matching Lead. Without this fallback the picker shows "—" for
-      // older DoB rows that have no specialty set.
-      const dobSpec = d.Specialty_New || d.Speciality || null;
-      const fallbackSpec = dobSpec ? null : (
-        (d.Email && leadSpecByEmail.get(d.Email.toLowerCase().trim())) ||
-        (() => { const p = normPhone(d.Phone ?? d.Mobile); return p ? leadSpecByPhone.get(p) : null; })() ||
-        leadSpecByName.get(normName(name)) ||
-        null
-      );
-      // Zoho's Has_DHA/DOH/MOH come back as "Yes"/"No"/"In Progress"
-      // strings (also sometimes booleans). Treat anything starting with
-      // 'Y' as licensed.
-      const yes = (v: unknown) => typeof v === "string" && /^y/i.test(v.trim());
-      const dobRich = d as Record<string, unknown>;
-      const dobStr = (k: string): string | null => {
-        const v = dobRich[k];
-        return typeof v === "string" && v.trim() ? v : null;
-      };
-      const dobNum = (k: string): number | null => {
-        const v = dobRich[k];
-        return typeof v === "number" && Number.isFinite(v) ? v : null;
-      };
-      const wp = findWp(id, d.Email);
+      const license = pickStr(c.license_status, zStr("License"));
       out.push({
-        id, name: pickStr(wp?.full_name, name) ?? name,
-        email:       pickStr(wp?.email, d.Email),
-        speciality:  pickStr(wp?.specialty, dobSpec ?? fallbackSpec),
+        id, name,
+        email:       pickStr(c.email, zStr("Email")),
+        speciality:  pickStr(c.specialty, zStr("Specialty_New"), zStr("Speciality"), zStr("Specialty")),
         eligible:    eligibleOf(id),
-        source:      "dob",
-        // License signal cascade: WP license_status → Zoho DoB Has_*
-        // booleans + License free text. WP keeps the canonical
-        // hand-edited value; Zoho fills the rest.
-        license:             pickStr(wp?.license_status, d.License),
-        // Read structured license_types[] too, not just the free-text status.
-        has_dha:             yes(dobRich.Has_DHA) || /dha/i.test(wp?.license_status ?? "")       || (wp?.license_types ?? []).some(t => /dha/i.test(t)),
-        has_doh:             yes(dobRich.Has_DOH) || /doh|haad/i.test(wp?.license_status ?? "")  || (wp?.license_types ?? []).some(t => /doh|haad/i.test(t)),
-        has_moh:             yes(dobRich.Has_MOH) || /moh/i.test(wp?.license_status ?? "")       || (wp?.license_types ?? []).some(t => /moh/i.test(t)),
-        country_training:    pickStr(wp?.country_of_training, dobStr("Country_of_Specialty_training")),
-        nationality:         pickStr(wp?.nationality, dobStr("Nationality")),
-        years_experience:    pickNum(wp?.years_experience, dobNum("Years_of_Experience")),
-        notice_period:       pickStr(wp?.notice_period, dobStr("Notice_Period")),
-        area_of_interest:    pickStr(wp?.area_of_interest, dobStr("Area_of_Interest")),
-        subspecialty:        wp?.subspecialty ?? null,
-        bio:                 dobStr("Bio"),
-        profileText:         [name, wpCandidateProfileText(wp), dobStr("Area_of_Interest"), dobStr("Bio"), dobSpec ?? fallbackSpec ?? ""].filter(Boolean).join(" ").toLowerCase(),
-        onWebsite:           !!wp,
-        hasLicense:          !!wp?.license_status || yes(dobRich.Has_DHA) || yes(dobRich.Has_DOH) || yes(dobRich.Has_MOH) || !!d.License,
+        source:      dob ? "dob" : lead ? "lead" : "wp",
+        license,
+        has_dha:     /dha/i.test(license ?? "")      || (c.license_types ?? []).some(t => /dha/i.test(t))      || yes(zr.Has_DHA),
+        has_doh:     /doh|haad/i.test(license ?? "") || (c.license_types ?? []).some(t => /doh|haad/i.test(t)) || yes(zr.Has_DOH),
+        has_moh:     /moh/i.test(license ?? "")      || (c.license_types ?? []).some(t => /moh/i.test(t))      || yes(zr.Has_MOH),
+        country_training:    pickStr(c.country_of_training, zStr("Country_of_Specialty_training")),
+        nationality:         pickStr(c.nationality, zStr("Nationality")),
+        years_experience:    pickNum(c.years_experience, zNum("Years_of_Experience")),
+        notice_period:       pickStr(c.notice_period, zStr("Notice_Period")),
+        area_of_interest:    pickStr(c.area_of_interest, zStr("Area_of_Interest")),
+        subspecialty:        c.subspecialty ?? null,
+        bio:                 zStr("Bio"),
+        profileText:         [c.full_name, wpCandidateProfileText(c), zStr("Area_of_Interest"), zStr("Bio"), c.specialty ?? ""].filter(Boolean).join(" ").toLowerCase(),
+        onWebsite:           true,
+        hasLicense:          !!license || yes(zr.Has_DHA) || yes(zr.Has_DOH) || yes(zr.Has_MOH),
         highPriority:        false,
         primeClassification: null,
-        createdAt:           toMs(d.Modified_Time ?? d.Created_Time),
+        createdAt:           toMs(zStr("Modified_Time") ?? zStr("Created_Time")),
       });
     }
-    // Leads removed — the batch picker queues ONLY website (WP) doctors,
-    // augmented from Doctors on Board (Ammar/Shaheer 2026-06-10: "should not
-    // have leads info, just the ones on wordpress"). The lead lookup above is
-    // kept only to backfill a DoB row's missing specialty.
     return out;
   }, [zoho, lifecycleMap, wpCandidates]);
 }

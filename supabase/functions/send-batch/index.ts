@@ -154,6 +154,19 @@ Deno.serve(async (req: Request) => {
     for (const w of (wpById ?? []) as Array<Record<string, unknown>>) {
       if (w.doctor_id) wpByDoctorId.set(String(w.doctor_id), w);
     }
+    // Website-only doctors (no Zoho link) are queued as `wp:<numericId>` —
+    // resolve them straight from wordpress_candidates by id and key them by
+    // that same `wp:<id>` so the row builder below finds them.
+    const wpNumericIds = doctorIds
+      .filter(did => did.startsWith("wp:"))
+      .map(did => Number(did.slice(3)))
+      .filter(n => Number.isFinite(n));
+    if (wpNumericIds.length) {
+      const { data: wpRows } = await supabase.from("wordpress_candidates").select("*").in("id", wpNumericIds);
+      for (const w of (wpRows ?? []) as Array<Record<string, unknown>>) {
+        wpByDoctorId.set(`wp:${w.id}`, w);
+      }
+    }
     if (docEmails.length) {
       const { data: wpByEm } = await supabase.from("wordpress_candidates").select("*").in("email", docEmails);
       for (const w of (wpByEm ?? []) as Array<Record<string, unknown>>) {
