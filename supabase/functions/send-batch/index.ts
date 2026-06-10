@@ -139,32 +139,60 @@ Deno.serve(async (req: Request) => {
   const dobById  = new Map<string, Record<string, unknown>>();
   for (const d of dobsArr)  dobById.set(`dob:${d.id}`, d);
 
+  // ── WP candidate is the RICHEST profile source (specialty, area of
+  //    interest, country of training, years, nationality, license, salary…).
+  //    The single-doctor email already reads it; the batch path didn't — so
+  //    cards came out near-empty (just name + "Market Range" + contact). Load
+  //    by the linked doctor_id, and fall back to email for any unlinked row.
+  const wpByDoctorId = new Map<string, Record<string, unknown>>();
+  const wpByEmail    = new Map<string, Record<string, unknown>>();
+  {
+    const docEmails = [...new Set(doctorIds.map(did => {
+      const l = leadById.get(did); const d = dobById.get(did);
+      return String((l?.Email ?? d?.Email ?? "")).toLowerCase().trim();
+    }).filter(Boolean))];
+    const { data: wpById } = await supabase.from("wordpress_candidates").select("*").in("doctor_id", doctorIds);
+    for (const w of (wpById ?? []) as Array<Record<string, unknown>>) {
+      if (w.doctor_id) wpByDoctorId.set(String(w.doctor_id), w);
+    }
+    if (docEmails.length) {
+      const { data: wpByEm } = await supabase.from("wordpress_candidates").select("*").in("email", docEmails);
+      for (const w of (wpByEm ?? []) as Array<Record<string, unknown>>) {
+        const e = String(w.email ?? "").toLowerCase().trim();
+        if (e && !wpByEmail.has(e)) wpByEmail.set(e, w);
+      }
+    }
+  }
+
+  const pick = (...vs: unknown[]): string => {
+    for (const v of vs) { const x = v == null ? "" : String(v).trim(); if (x) return x; }
+    return "";
+  };
+
   // ── Build per-doctor row objects in the order the team queued them ────
   const rows = doctorIds.map((did, idx) => {
     const p    = profileById.get(did) ?? null;
     const lead = leadById.get(did);
     const dob  = dobById.get(did);
-    const name =
-      (lead?.Full_Name as string) ??
-      (dob?.Full_Name  as string) ??
-      ((p?.doctor_name as string) ?? "(unknown)");
+    const email = String((lead?.Email ?? dob?.Email ?? "")).toLowerCase().trim();
+    const wp   = wpByDoctorId.get(did) ?? (email ? wpByEmail.get(email) : undefined) ?? null;
     return {
       idx:        idx + 1,
-      name,
-      title:        (p?.title              as string) ?? "",
-      areas:        (p?.area_of_interest   as string) ?? "",
-      training:     (p?.country_training   as string) ?? (lead?.Country_of_Specialty_training as string) ?? "",
-      years:        p?.years_experience != null ? String(p?.years_experience) : "",
-      nationality:  (p?.nationality        as string) ?? "",
-      age:          p?.age != null ? String(p?.age) : (lead?.Age != null ? String(lead?.Age) : ""),
-      marital:      (p?.marital_status     as string) ?? "",
-      family:       (p?.family_status      as string) ?? "",
-      license:      (p?.license            as string) ?? (lead?.License as string) ?? "",
-      salary:       (p?.salary_expectation as string) ?? "",
-      notice:       (p?.notice_period      as string) ?? "",
-      mobile:       (lead?.Mobile as string) ?? (lead?.Phone as string) ?? (dob?.Mobile as string) ?? (dob?.Phone as string) ?? "",
-      email:        (lead?.Email as string) ?? (dob?.Email as string) ?? "",
-      specialty:    (lead?.Specialty_New as string) ?? (lead?.Specialty as string) ?? (dob?.Specialty as string) ?? "",
+      name:         pick(wp?.full_name, lead?.Full_Name, dob?.Full_Name, p?.doctor_name) || "(unknown)",
+      title:        pick(wp?.job_title, p?.title),
+      areas:        pick(wp?.area_of_interest, p?.area_of_interest),
+      training:     pick(wp?.country_of_training, p?.country_training, lead?.Country_of_Specialty_training),
+      years:        pick(wp?.years_experience, p?.years_experience),
+      nationality:  pick(wp?.nationality, p?.nationality),
+      age:          pick(p?.age, lead?.Age) || ageFromDob(wp?.date_of_birth),
+      marital:      pick(wp?.family_status, p?.marital_status),
+      family:       pick(wp?.family_status, p?.family_status),
+      license:      pick(wp?.license_status, p?.license, lead?.License),
+      salary:       pick(wp?.expected_salary, p?.salary_expectation),
+      notice:       pick(wp?.notice_period, p?.notice_period),
+      mobile:       pick(wp?.phone, lead?.Mobile, lead?.Phone, dob?.Mobile, dob?.Phone),
+      email:        pick(wp?.email, lead?.Email, dob?.Email),
+      specialty:    pick(wp?.specialty, lead?.Specialty_New, lead?.Specialty, dob?.Specialty),
     };
   });
 
@@ -389,6 +417,22 @@ function esc(s: string | undefined | null): string {
 
 function stripHtml(s: string): string {
   return s.replace(/<[^>]+>/g, "").replace(/\s+/g, " ").trim();
+}
+
+/** Age in years from a WP date_of_birth ("YYYYMMDD", "YYYY-MM-DD", or a
+ *  free-text date). Returns "" when it can't parse a sane age. */
+function ageFromDob(dob: unknown): string {
+  const s = dob == null ? "" : String(dob).trim();
+  if (!s) return "";
+  let d: Date | null = null;
+  if (/^\d{8}$/.test(s))                 d = new Date(`${s.slice(0, 4)}-${s.slice(4, 6)}-${s.slice(6, 8)}`);
+  else                                   { const p = new Date(s); if (!isNaN(p.valueOf())) d = p; }
+  if (!d || isNaN(d.valueOf())) return "";
+  const now = new Date();
+  let a = now.getFullYear() - d.getFullYear();
+  const m = now.getMonth() - d.getMonth();
+  if (m < 0 || (m === 0 && now.getDate() < d.getDate())) a--;
+  return a >= 18 && a < 100 ? String(a) : "";
 }
 
 /** Mustache-ish renderer (mirrors send-flow-email). Supports {{token}} and
