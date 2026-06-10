@@ -27,13 +27,13 @@ import {
 } from "lucide-react";
 import {
   useWpCandidates, useSyncWpCandidates, useLinkWpCandidate,
-  useUpsertWpCandidate, useUploadWpPhoto, useDeleteWpCandidate,
+  useUpsertWpCandidate, useUploadWpPhoto, useUploadWpCv, useDeleteWpCandidate,
   useStagedProfiles, useCreateStagedProfile, useDeleteStagedProfile, usePublishStagedProfile, useUpdateStagedProfile,
   useWpCandidateById,
   type WpCandidate, type StagedProfile, type StagedProfileInput,
 } from "@/hooks/use-wp-candidates";
 import { toast } from "sonner";
-import { Plus, Camera, Loader2, Check, AlertCircle, Pencil, Trash2, Send, Sparkles } from "lucide-react";
+import { Plus, Camera, Loader2, Check, AlertCircle, Pencil, Trash2, Send, Sparkles, Upload } from "lucide-react";
 import { EmailChainPreviewDialog } from "@/components/EmailChainPreviewDialog";
 import { Textarea } from "@/components/ui/textarea";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
@@ -454,8 +454,10 @@ function CandidateDetailDialog({ candidate, open, onClose }: { candidate: WpCand
 function CandidateDetailDialogInner({ candidate, open, onClose }: { candidate: WpCandidate; open: boolean; onClose: () => void }) {
   const upsert = useUpsertWpCandidate();
   const upload = useUploadWpPhoto();
+  const uploadCv = useUploadWpCv();
   const link   = useLinkWpCandidate();
   const fileRef = useRef<HTMLInputElement | null>(null);
+  const cvRef   = useRef<HTMLInputElement | null>(null);
   const [tab, setTab] = useState<"education" | "experience">("education");
   const [doctorIdInput, setDoctorIdInput] = useState(candidate.doctor_id ?? "");
 
@@ -487,6 +489,20 @@ function CandidateDetailDialogInner({ candidate, open, onClose }: { candidate: W
     }
   };
 
+  const handleCvPick = () => cvRef.current?.click();
+  const handleCvFile = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+    try {
+      await uploadCv.mutateAsync({ file, candidateId: candidate.id });
+      toast.success("Resume uploaded to WordPress.");
+    } catch (err) {
+      toast.error(err instanceof Error ? err.message : "CV upload failed");
+    } finally {
+      e.target.value = "";
+    }
+  };
+
   const saveLink = async () => {
     try {
       await link.mutateAsync({ id: candidate.id, doctorId: doctorIdInput.trim() || null });
@@ -503,6 +519,7 @@ function CandidateDetailDialogInner({ candidate, open, onClose }: { candidate: W
     <Dialog open={open} onOpenChange={v => !v && onClose()}>
       <DialogContent className="sm:max-w-[1080px] max-h-[92vh] overflow-y-auto p-0">
         <input ref={fileRef} type="file" accept="image/*" onChange={handlePhotoFile} className="hidden" />
+        <input ref={cvRef} type="file" accept=".pdf,.doc,.docx,application/pdf,application/msword,application/vnd.openxmlformats-officedocument.wordprocessingml.document" onChange={handleCvFile} className="hidden" />
         <div className="p-5 md:p-7">
           <div className="grid grid-cols-1 md:grid-cols-[280px_1fr] gap-6">
 
@@ -580,12 +597,22 @@ function CandidateDetailDialogInner({ candidate, open, onClose }: { candidate: W
               {/* Action buttons — Edit profile button is gone; the card
                   IS the editor now. */}
               <div className="space-y-2">
-                {candidate.cv_url && (
-                  <a href={candidate.cv_url} target="_blank" rel="noreferrer" className="block">
-                    <Button variant="outline" className="w-full justify-center h-10 rounded-full border-slate-200 shadow-sm">
-                      <FileText className="h-4 w-4 mr-2" /> View Resume
+                {candidate.cv_url ? (
+                  <div className="flex gap-2">
+                    <a href={candidate.cv_url} target="_blank" rel="noreferrer" className="flex-1 min-w-0">
+                      <Button variant="outline" className="w-full justify-center h-10 rounded-full border-slate-200 shadow-sm">
+                        <FileText className="h-4 w-4 mr-2" /> View Resume
+                      </Button>
+                    </a>
+                    <Button variant="outline" onClick={handleCvPick} disabled={uploadCv.isPending} title="Replace résumé" className="h-10 rounded-full border-slate-200 shadow-sm px-3 shrink-0">
+                      {uploadCv.isPending ? <Loader2 className="h-4 w-4 animate-spin" /> : <Upload className="h-4 w-4" />}
                     </Button>
-                  </a>
+                  </div>
+                ) : (
+                  <Button variant="outline" onClick={handleCvPick} disabled={uploadCv.isPending} className="w-full justify-center h-10 rounded-full border-slate-200 shadow-sm">
+                    {uploadCv.isPending ? <Loader2 className="h-4 w-4 mr-2 animate-spin" /> : <Upload className="h-4 w-4 mr-2" />}
+                    {uploadCv.isPending ? "Uploading résumé…" : "Upload Resume"}
+                  </Button>
                 )}
                 {/* Status-aware label: only call it 'View on WordPress'
                     (i.e. the public allocationassist.com page) when the

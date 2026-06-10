@@ -531,6 +531,32 @@ export function useUploadWpPhoto() {
   });
 }
 
+/** Upload a CV / résumé to a candidate's WP profile (the cv_resume File ACF
+ *  field) + refresh the mirror so "View Resume" works immediately. candidateId
+ *  is required. Raw fetch with FormData, same as useUploadWpPhoto. */
+export function useUploadWpCv() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: async ({ file, candidateId }: { file: File; candidateId: number }) => {
+      const form = new FormData();
+      form.append("file", file);
+      form.append("candidate_id", String(candidateId));
+      const { data: { session } } = await supabase.auth.getSession();
+      const projectUrl = (import.meta.env.VITE_SUPABASE_URL as string) ?? "";
+      const anonKey    = (import.meta.env.VITE_SUPABASE_ANON_KEY as string) ?? "";
+      const res = await fetch(`${projectUrl}/functions/v1/wordpress-candidate-upload-cv`, {
+        method: "POST",
+        headers: { Authorization: `Bearer ${session?.access_token ?? anonKey}`, apikey: anonKey },
+        body: form,
+      });
+      const json = await res.json().catch(() => null) as { ok: boolean; media_id?: number; source_url?: string; attached_to?: number; error?: string } | null;
+      if (!res.ok || !json?.ok) throw new Error(json?.error ?? `Upload failed (${res.status})`);
+      return json;
+    },
+    onSuccess: () => qc.invalidateQueries({ queryKey: KEY }),
+  });
+}
+
 /** Fetch a single WP candidate by its WordPress id. Used by the detail
  *  dialog as a fast-path when the row isn't in the main paged-list cache
  *  yet (e.g. deep-linked from Slack moments after the upsert). Skips
