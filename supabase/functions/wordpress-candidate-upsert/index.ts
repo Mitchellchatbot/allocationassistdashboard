@@ -383,9 +383,14 @@ function badAcfFields(wpJson: { message?: string; data?: { params?: Record<strin
   return [...fields];
 }
 
-/** Map common country aliases to the canonical name WP's country select uses
- *  (the choice list is full English country names). Anything unrecognised is
- *  returned trimmed; the upsert retry loop drops it if WP still rejects it. */
+/** WP's country select choices (full English names). Used to resolve a
+ *  case/spacing variant back to the exact choice so it isn't rejected. */
+const CANONICAL_COUNTRIES = [
+  "Afghanistan","Albania","Algeria","Andorra","Angola","Antigua and Barbuda","Argentina","Armenia","Australia","Austria","Azerbaijan","Bahamas","Bahrain","Bangladesh","Barbados","Belarus","Belgium","Belize","Benin","Bhutan","Bolivia","Bosnia and Herzegovina","Botswana","Brazil","Brunei","Bulgaria","Burkina Faso","Burundi","Cabo Verde","Cambodia","Cameroon","Canada","Central African Republic","Chad","Chile","China","Colombia","Comoros","Congo (Brazzaville)","Congo (Kinshasa)","Costa Rica","Croatia","Cuba","Cyprus","Czech Republic (Czechia)","Denmark","Djibouti","Dominica","Dominican Republic","East Timor (Timor-Leste)","Ecuador","Egypt","El Salvador","Equatorial Guinea","Eritrea","Estonia","Eswatini","Ethiopia","Fiji","Finland","France","Gabon","Gambia","Georgia","Germany","Ghana","Greece","Grenada","Guatemala","Guinea","Guinea-Bissau","Guyana","Haiti","Honduras","Hungary","Hong Kong","Iceland","India","Indonesia","Iran","Iraq","Ireland","Israel","Italy","Ivory Coast (Côte d'Ivoire)","Jamaica","Japan","Jordan","Kazakhstan","Kenya","Kiribati","Korea, North","Korea, South","Kosovo","Kuwait","Kyrgyzstan","Laos","Latvia","Lebanon","Lesotho","Liberia","Libya","Liechtenstein","Lithuania","Luxembourg","Madagascar","Malawi","Malaysia","Maldives","Mali","Malta","Marshall Islands","Mauritania","Mauritius","Mexico","Micronesia","Moldova","Monaco","Mongolia","Montenegro","Morocco","Mozambique","Macedonia","Myanmar (Burma)","Namibia","Nauru","Nepal","Netherlands","New Zealand","Nicaragua","Niger","Nigeria","North Macedonia","Norway","Oman","Pakistan","Palau","Palestine","Panama","Papua New Guinea","Paraguay","Peru","Philippines","Poland","Portugal","Qatar","Romania","Russia","Rwanda","Saint Kitts and Nevis","Saint Lucia","Saint Vincent and the Grenadines","Samoa","San Marino","Sao Tome and Principe","Saudi Arabia","Senegal","Serbia","Seychelles","Sierra Leone","Singapore","Slovakia","Slovenia","Solomon Islands","Somalia","South Africa","South Sudan","Spain","Sri Lanka","Sudan","Suriname","Sweden","Switzerland","Syria","Taiwan","Tajikistan","Tanzania","Thailand","Togo","Tonga","Trinidad and Tobago","Tunisia","Turkey","Turkmenistan","Tuvalu","Uganda","Ukraine","United Arab Emirates","United Kingdom","United States","Uruguay","Uzbekistan","Vanuatu","Vatican City","Venezuela","Vietnam","Yemen","Zambia","Zimbabwe",
+];
+const COUNTRY_BY_LOWER = new Map(CANONICAL_COUNTRIES.map(c => [c.toLowerCase(), c]));
+
+/** Common aliases → canonical WP choice. */
 const COUNTRY_ALIASES: Record<string, string> = {
   "uk": "United Kingdom", "u.k.": "United Kingdom", "gb": "United Kingdom",
   "great britain": "United Kingdom", "britain": "United Kingdom",
@@ -393,13 +398,23 @@ const COUNTRY_ALIASES: Record<string, string> = {
   "northern ireland": "United Kingdom",
   "usa": "United States", "us": "United States", "u.s.": "United States",
   "u.s.a.": "United States", "america": "United States", "united states of america": "United States",
+  "united states of america (usa)": "United States",
   "uae": "United Arab Emirates", "u.a.e.": "United Arab Emirates", "emirates": "United Arab Emirates",
   "ksa": "Saudi Arabia", "saudi": "Saudi Arabia", "saudi arabia (ksa)": "Saudi Arabia",
   "republic of ireland": "Ireland", "roi": "Ireland",
+  "south korea": "Korea, South", "north korea": "Korea, North",
+  "ivory coast": "Ivory Coast (Côte d'Ivoire)", "cote d'ivoire": "Ivory Coast (Côte d'Ivoire)",
+  "czechia": "Czech Republic (Czechia)", "czech republic": "Czech Republic (Czechia)",
+  "myanmar": "Myanmar (Burma)", "burma": "Myanmar (Burma)",
+  "timor-leste": "East Timor (Timor-Leste)", "east timor": "East Timor (Timor-Leste)",
 };
 function normalizeCountry(v: string): string {
-  const key = v.toLowerCase().trim().replace(/\s+/g, " ");
-  return COUNTRY_ALIASES[key] ?? v.trim();
+  const raw = v.trim();
+  if (!raw) return raw;
+  const key = raw.toLowerCase().replace(/\s+/g, " ");
+  if (COUNTRY_ALIASES[key])    return COUNTRY_ALIASES[key];
+  if (COUNTRY_BY_LOWER.has(key)) return COUNTRY_BY_LOWER.get(key)!;  // fixes casing/spacing
+  return raw;  // truly unknown → retry loop drops it
 }
 
 /** ACF fields that WP registers as checkbox / multi-select — they want an

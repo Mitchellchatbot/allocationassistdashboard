@@ -1108,6 +1108,10 @@ function EditableTimelineEntry({
  *  WP profile-card ring when `ring` is on. */
 function Avatar({ src, name, size, ring }: { src: string | null; name: string; size: number; ring?: boolean }) {
   const [errored, setErrored] = useState(false);
+  // Reset the error flag whenever the src changes — otherwise a single failed
+  // load (slow WP, transient blip, a row reused for a different candidate)
+  // sticks this Avatar on initials forever, even once the photo is valid.
+  useEffect(() => { setErrored(false); }, [src]);
   const initials = name.replace(/^Dr\.?\s+/i, "").split(/\s+/).map(s => s[0]).filter(Boolean).slice(0, 2).join("").toUpperCase() || "?";
   const showImage = src && !errored;
   const ringClass = ring ? "ring-4 ring-white/40 shadow-lg" : "";
@@ -1277,6 +1281,8 @@ function StagedRow({ profile, autoOpen, onAutoOpened }: { profile: StagedProfile
   const [detailOpen, setDetailOpen] = useState(false);
   // CV the user attached in the editor — auto-uploaded to WordPress on Publish.
   const [cvFile, setCvFile] = useState<File | null>(null);
+  // Live publish progress, rendered as an actual bar in the row.
+  const [pubProgress, setPubProgress] = useState<{ pct: number; label: string } | null>(null);
   // Auto-open the editor when this row was just created via "New profile".
   useEffect(() => {
     if (autoOpen) { setDetailOpen(true); onAutoOpened?.(); }
@@ -1286,30 +1292,36 @@ function StagedRow({ profile, autoOpen, onAutoOpened }: { profile: StagedProfile
     .filter(Boolean).join(" · ");
 
   const handlePublish = async (status: "draft" | "publish") => {
-    // A persistent loading toast that updates through the phases — the staged
-    // row unmounts the moment Publish succeeds, so an in-row progress bar
-    // would vanish; the toast survives and communicates "still working".
-    const tid = toast.loading(status === "publish" ? "Publishing to WordPress…" : "Saving draft to WordPress…", {
-      description: cvFile ? "Step 1 of 2 — creating the profile." : undefined,
-    });
+    setPubProgress({ pct: 8, label: status === "publish" ? "Publishing to WordPress…" : "Saving draft to WordPress…" });
+    // Creep the bar while the (indeterminate) WP create runs so it visibly
+    // moves instead of sitting frozen — eases toward 85% then jumps on each
+    // real milestone.
+    const creep = setInterval(() => {
+      setPubProgress(p => (p && p.pct < 85 ? { ...p, pct: p.pct + Math.max(1, (85 - p.pct) * 0.06) } : p));
+    }, 200);
     try {
       const r = await publish.mutateAsync({ profile, status });
       const dropped = (r as { dropped_fields?: string[] })?.dropped_fields ?? [];
       const wpId    = (r as { id?: number })?.id;
       // Auto-upload the attached résumé to the freshly-created WP candidate.
       if (cvFile && wpId) {
-        toast.loading("Uploading résumé…", { id: tid, description: "Step 2 of 2 — attaching the CV." });
+        clearInterval(creep);
+        setPubProgress({ pct: 90, label: "Uploading résumé…" });
         try { await uploadCv.mutateAsync({ file: cvFile, candidateId: wpId }); }
         catch (e) { toast.warning("Profile saved — but the résumé upload failed", { description: (e as Error).message }); }
       }
+      setPubProgress({ pct: 100, label: "Done" });
       const base = status === "publish" ? "Published to WordPress" : "Saved as WordPress draft";
       if (dropped.length) {
-        toast.warning(base, { id: tid, description: `Couldn't set: ${dropped.join(", ")} — WordPress rejected the value(s). Set them by hand on the profile.` });
+        toast.warning(base, { description: `Couldn't set: ${dropped.join(", ")} — WordPress rejected the value(s). Set them by hand on the profile.` });
       } else {
-        toast.success(base, { id: tid });
+        toast.success(base);
       }
     } catch (e) {
-      toast.error("Couldn't push to WordPress", { id: tid, description: (e as Error).message });
+      toast.error("Couldn't push to WordPress", { description: (e as Error).message });
+      setPubProgress(null);
+    } finally {
+      clearInterval(creep);
     }
   };
 
@@ -1369,6 +1381,15 @@ function StagedRow({ profile, autoOpen, onAutoOpened }: { profile: StagedProfile
         </Badge>
       )}
       <div className="flex items-center gap-1 shrink-0" onClick={e => e.stopPropagation()}>
+        {pubProgress ? (
+          <div className="w-[220px]" title={pubProgress.label}>
+            <div className="text-[9px] text-slate-500 mb-0.5 truncate">{pubProgress.label}</div>
+            <div className="h-1.5 rounded-full bg-slate-200 overflow-hidden">
+              <div className="h-full rounded-full bg-teal-500 transition-[width] duration-200 ease-out" style={{ width: `${pubProgress.pct}%` }} />
+            </div>
+          </div>
+        ) : (
+        <>
         <Button
           size="sm"
           variant="outline"
@@ -1400,6 +1421,8 @@ function StagedRow({ profile, autoOpen, onAutoOpened }: { profile: StagedProfile
         >
           {del.isPending ? <Loader2 className="h-3 w-3 animate-spin" /> : <Trash2 className="h-3 w-3" />}
         </Button>
+        </>
+        )}
       </div>
     </div>
     {/* Render the preview dialog OUTSIDE the clickable row. Radix
