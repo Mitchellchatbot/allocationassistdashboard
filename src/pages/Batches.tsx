@@ -847,7 +847,6 @@ function BatchDialog({ target, onTargetChange, batches, suggestedSpecialty }: {
   // — those kinds aren't specialty-bound, so we only score-boost the
   // rotation match instead of filtering by it.
   const [specialtyOnly, setSpecialtyOnly] = useState(false);
-  const [sourceFilter, setSourceFilter] = useState<"all" | "lead" | "dob">("all");
   // Website-only pool — default ON. Ammar 2026-06-09: batches should pull
   // from doctors who are actually live on the AA website (have a matching
   // WP candidate), not the whole Zoho roster. Toggle off to widen the pool.
@@ -961,16 +960,12 @@ function BatchDialog({ target, onTargetChange, batches, suggestedSpecialty }: {
         })
       : base;
 
-    const sourceFiltered = sourceFilter === "all"
-      ? specialtyFiltered
-      : specialtyFiltered.filter(d => d.source === sourceFilter);
-
     // Keyword search scans the doctor's WHOLE profile blob (headline
     // specialty + sub-specialty + area of interest + bio + WP education /
     // experience / job-title text) — so "electrophysiology" surfaces
     // website cardiologists whose profile names it anywhere, even when the
     // headline specialty is just "Cardiology" (Ammar 2026-06-09).
-    const filtered = !q ? sourceFiltered : sourceFiltered.filter(d =>
+    const filtered = !q ? specialtyFiltered : specialtyFiltered.filter(d =>
       d.profileText.includes(q) || (d.email ?? "").toLowerCase().includes(q)
     );
     const scored = filtered.map(d => ({ ...d, _score: scoreDoctor(d, batch, effectiveSpecialty) }));
@@ -1009,12 +1004,10 @@ function BatchDialog({ target, onTargetChange, batches, suggestedSpecialty }: {
     if (!batch) return;
     const need = Math.max(0, expectedCount - batch.doctor_ids.length);
     if (need === 0) { toast.info("Already at the target count."); return; }
-    // Respect the same source filter the user has on the candidate list —
-    // auto-pick should match what they're seeing.
+    // Match what the list shows — website-only when that toggle is on.
     const pool = allDoctors
       .filter(d => d.eligible && !batch.doctor_ids.includes(d.id))
       .filter(d => !websiteOnly || d.onWebsite)
-      .filter(d => sourceFilter === "all" || d.source === sourceFilter)
       .map(d => ({ d, score: scoreDoctor(d, batch, effectiveSpecialty).score }))
       .sort((a, b) => b.score - a.score)
       .slice(0, need)
@@ -1165,27 +1158,6 @@ function BatchDialog({ target, onTargetChange, batches, suggestedSpecialty }: {
                   </Button>
                 </div>
                 <div className="flex items-center gap-3 flex-wrap">
-                  {/* Source segmented toggle — All / Leads / Doctors on Board. */}
-                  <div className="inline-flex rounded-full border border-slate-200 bg-slate-50 p-0.5 text-[10px]">
-                    {(["all", "lead", "dob"] as const).map(opt => (
-                      <button
-                        key={opt}
-                        type="button"
-                        onClick={() => setSourceFilter(opt)}
-                        className={`px-2.5 py-1 rounded-full font-medium transition-colors ${
-                          sourceFilter === opt
-                            ? opt === "lead"
-                              ? "bg-sky-100 text-sky-700 shadow-sm"
-                              : opt === "dob"
-                                ? "bg-emerald-100 text-emerald-700 shadow-sm"
-                                : "bg-white text-slate-800 shadow-sm"
-                            : "text-slate-500 hover:text-slate-700"
-                        }`}
-                      >
-                        {opt === "all" ? "Both" : opt === "lead" ? "Leads only" : "Doctors on Board"}
-                      </button>
-                    ))}
-                  </div>
                   <label className="flex items-center gap-1.5 text-[10px] text-muted-foreground cursor-pointer">
                     <Checkbox
                       checked={websiteOnly}
@@ -1564,48 +1536,10 @@ function useMemoDoctors(
         createdAt:           toMs(d.Modified_Time ?? d.Created_Time),
       });
     }
-    for (const l of z?.rawLeads ?? []) {
-      const name = l.Full_Name || `${l.First_Name ?? ""} ${l.Last_Name ?? ""}`.trim();
-      if (!name) continue;
-      const id = `lead:${l.id}`;
-      const yes = (v: unknown) => typeof v === "string" && /^y/i.test(v.trim());
-      const hasLic = yes(l.Has_DOH) || yes(l.Has_DHA) || yes(l.Has_MOH) || !!l.License;
-      const prime  = (l.Prime_Classification ?? "").trim();
-      const leadRich = l as Record<string, unknown>;
-      const leadStr = (k: string): string | null => {
-        const v = leadRich[k];
-        return typeof v === "string" && v.trim() ? v : null;
-      };
-      const leadNum = (k: string): number | null => {
-        const v = leadRich[k];
-        return typeof v === "number" && Number.isFinite(v) ? v : null;
-      };
-      const wp = findWp(id, l.Email);
-      out.push({
-        id, name: pickStr(wp?.full_name, name) ?? name,
-        email:       pickStr(wp?.email, l.Email),
-        speciality:  pickStr(wp?.specialty, l.Specialty, l.Specialty_New),
-        eligible:    eligibleOf(id),
-        source:      "lead",
-        license:             pickStr(wp?.license_status, l.License),
-        has_dha:             yes(l.Has_DHA) || /dha/i.test(wp?.license_status ?? ""),
-        has_doh:             yes(l.Has_DOH) || /doh/i.test(wp?.license_status ?? ""),
-        has_moh:             yes(l.Has_MOH) || /moh/i.test(wp?.license_status ?? ""),
-        country_training:    pickStr(wp?.country_of_training, l.Country_of_Specialty_training),
-        nationality:         pickStr(wp?.nationality, leadStr("Nationality")),
-        years_experience:    pickNum(wp?.years_experience, leadNum("Years_of_Experience")),
-        notice_period:       pickStr(wp?.notice_period, leadStr("Notice_Period")),
-        area_of_interest:    pickStr(wp?.area_of_interest, leadStr("Area_of_Interest")),
-        subspecialty:        wp?.subspecialty ?? null,
-        bio:                 leadStr("Bio"),
-        profileText:         [name, wpCandidateProfileText(wp), leadStr("Area_of_Interest"), leadStr("Bio"), l.Specialty ?? l.Specialty_New ?? ""].filter(Boolean).join(" ").toLowerCase(),
-        onWebsite:           !!wp,
-        hasLicense:          !!wp?.license_status || hasLic,
-        highPriority:        /high/i.test(l.Lead_Status ?? ""),
-        primeClassification: prime || null,
-        createdAt:           toMs(l.Created_Time),
-      });
-    }
+    // Leads removed — the batch picker queues ONLY website (WP) doctors,
+    // augmented from Doctors on Board (Ammar/Shaheer 2026-06-10: "should not
+    // have leads info, just the ones on wordpress"). The lead lookup above is
+    // kept only to backfill a DoB row's missing specialty.
     return out;
   }, [zoho, lifecycleMap, wpCandidates]);
 }
