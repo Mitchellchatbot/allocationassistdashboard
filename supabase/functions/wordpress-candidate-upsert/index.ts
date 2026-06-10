@@ -187,9 +187,7 @@ async function handleUpsert(req: Request): Promise<Response> {
   const hasDeps = parseYesNo(a.have_children_or_any_dependent);
   const licenseTypes = parseStringArray(a.license_type);
   const targeted     = parseStringArray(a.targeted_locations);
-  const cvUrl = typeof a.cv_resume === "string"
-    ? a.cv_resume
-    : ((a.cv_resume as { url?: string } | undefined)?.url ?? null);
+  const cvUrl = readCvUrl(a);
 
   // photo_url: a number (attachment id) needs resolving — skip on upsert
   // path; the next full sync (or the user re-uploading) will fill it.
@@ -537,6 +535,31 @@ function cleanText(s: string | null | undefined): string | null {
   if (s == null) return null;
   const decoded = decodeEntities(String(s)).trim();
   return decoded === "" ? null : decoded;
+}
+
+/** Read a CV URL out of an acf object regardless of the real field slug
+ *  (cv_resume / cv__resume / …), then any /resume|curriculum/i key. Accepts a
+ *  string URL or an ACF File object ({url}). Mirrors the sync function. */
+function readCvUrl(a: Record<string, unknown>): string | null {
+  const fromVal = (v: unknown): string | null => {
+    if (typeof v === "string") return v.trim() || null;
+    if (v && typeof v === "object") {
+      const o = v as { url?: string; source_url?: string };
+      return (o.url || o.source_url) ?? null;
+    }
+    return null;
+  };
+  for (const k of ["cv_resume", "cv__resume", "cv_resume_file"]) {
+    const u = fromVal(a[k]);
+    if (u) return u;
+  }
+  for (const k of Object.keys(a)) {
+    if (/resume|curriculum/i.test(k)) {
+      const u = fromVal(a[k]);
+      if (u) return u;
+    }
+  }
+  return null;
 }
 
 async function resolvePhotoUrl(pp: unknown, basic: string): Promise<string | null> {

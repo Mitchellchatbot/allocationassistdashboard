@@ -1310,15 +1310,20 @@ function StagedRow({ profile, autoOpen, onAutoOpened }: { profile: StagedProfile
       const dropped = (r as { dropped_fields?: string[] })?.dropped_fields ?? [];
       const wpId    = (r as { id?: number })?.id;
       // Auto-upload the attached résumé to the freshly-created WP candidate.
+      let cvError: string | null = null;
       if (cvFile && wpId) {
         clearInterval(creep);
         setPubProgress({ pct: 90, label: "Uploading résumé…" });
         try { await uploadCv.mutateAsync({ file: cvFile, candidateId: wpId }); }
-        catch (e) { toast.warning("Profile saved — but the résumé upload failed", { description: (e as Error).message }); }
+        catch (e) { cvError = (e as Error).message; }
       }
       setPubProgress({ pct: 100, label: "Done" });
       const base = status === "publish" ? "Published to WordPress" : "Saved as WordPress draft";
-      if (dropped.length) {
+      if (cvError) {
+        // The profile DID land on WP — only the résumé attach failed. Make that
+        // the headline so it isn't masked by a green success toast.
+        toast.error(`${base}, but the résumé did NOT attach`, { description: cvError });
+      } else if (dropped.length) {
         toast.warning(base, { description: `Couldn't set: ${dropped.join(", ")} — WordPress rejected the value(s). Set them by hand on the profile.` });
       } else {
         toast.success(base);

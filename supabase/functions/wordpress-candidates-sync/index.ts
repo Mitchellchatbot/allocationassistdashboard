@@ -171,9 +171,7 @@ Deno.serve(async (req: Request) => {
       const targeted = Array.isArray(a.targeted_locations)
         ? a.targeted_locations.map(l => typeof l === "string" ? l : (l.name || "")).filter(Boolean)
         : [];
-      const cvUrl = typeof a.cv_resume === "string"
-        ? a.cv_resume
-        : (a.cv_resume?.url ?? null);
+      const cvUrl = readCvUrl(a);
 
       // Resolve profile picture — accept either a media ID, a string ID,
       // or an ACF image object that already carries source_url/url.
@@ -452,6 +450,32 @@ function json(payload: unknown, status: number): Response {
     status,
     headers: { ...CORS, "Content-Type": "application/json" },
   });
+}
+
+/** Read a CV URL out of an acf object regardless of the real field slug.
+ *  The "CV/ Resume" field's slug isn't fixed (cv_resume / cv__resume / …),
+ *  so check the known variants, then any /resume|curriculum/i key. Accepts a
+ *  string URL or an ACF File object ({url}). */
+function readCvUrl(a: Record<string, unknown>): string | null {
+  const fromVal = (v: unknown): string | null => {
+    if (typeof v === "string") return v.trim() || null;
+    if (v && typeof v === "object") {
+      const o = v as { url?: string; source_url?: string };
+      return (o.url || o.source_url) ?? null;
+    }
+    return null;
+  };
+  for (const k of ["cv_resume", "cv__resume", "cv_resume_file"]) {
+    const u = fromVal(a[k]);
+    if (u) return u;
+  }
+  for (const k of Object.keys(a)) {
+    if (/resume|curriculum/i.test(k)) {
+      const u = fromVal(a[k]);
+      if (u) return u;
+    }
+  }
+  return null;
 }
 
 /** Batch-resolve attachment IDs → source_url via /wp/v2/media?include[]=…
