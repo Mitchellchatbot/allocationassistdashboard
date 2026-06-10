@@ -168,20 +168,12 @@ async function handleUpsert(req: Request): Promise<Response> {
     return json({ ok: false, error: `WP returned no id after upsert${droppedFields.length ? ` (dropped invalid: ${droppedFields.join(", ")})` : ""}` }, 502);
   }
 
-  // 3. Re-fetch the row so our mirror reflects WP's truth (including
-  //    fields WP normalises, e.g. status defaults, slug generation).
-  let refetchRes: Response;
-  try {
-    refetchRes = await fetchWithTimeout(`${wpBaseUrl}/wp-json/wp/v2/candidate/${newId}?_fields=id,slug,status,link,date,modified,title,acf`, {
-      headers: { Authorization: basic, Accept: "application/json" },
-    }, 20_000);
-  } catch (e) {
-    return json({ ok: false, error: `WP refetch timed out: ${(e as Error).message}` }, 504);
-  }
-  if (!refetchRes.ok) {
-    return json({ ok: false, error: `WP refetch ${refetchRes.status}` }, 502);
-  }
-  const c = await refetchRes.json() as {
+  // 3. The create/edit POST already returned the full object (id, slug,
+  //    status, link, acf, …) in WP's normalised form, so use it directly
+  //    instead of a second round trip — that refetch was the slow half of
+  //    "New profile". The mirror is still exact (next sync reconciles anything
+  //    WP changes server-side later).
+  const c = wpJson as unknown as {
     id: number; slug: string; status?: string; link: string;
     date?: string; modified?: string;
     title?: { rendered?: string };
@@ -276,8 +268,11 @@ async function handleUpsert(req: Request): Promise<Response> {
   //    existing AA doctor_id by email or unique normalised name.
   //    Only fires when doctor_id is currently null — manual links
   //    are sacred. The RPC has the same guard, so this is doubly safe.
+  //    Skipped for blank "New profile" creates: there's no email/name to
+  //    match yet, and loading + indexing the Zoho cache is the slow part —
+  //    the next sync auto-links it once the team fills in the fields.
   let autoLinked: string | null = null;
-  if (!body.doctor_id) {
+  if (!body.doctor_id && body.intent !== "manual_create") {
     autoLinked = await autoLinkOne({
       id:        newId,
       full_name: cleanText(a.full_name as string | undefined),
