@@ -68,18 +68,36 @@ Deno.serve(async (req: Request) => {
   const mediaId   = mediaJson.id!;
   const sourceUrl = mediaJson.source_url ?? null;
 
-  // 2. Attach to the candidate's cv_resume ACF File field (attachment id).
+  // 2. Discover the CV field's real ACF key. ACF derives "CV/ Resume" to a
+  //    slug like "cv__resume" (double underscore, same scheme as
+  //    dha__haad__moh_license) — NOT necessarily "cv_resume", so a hard-coded
+  //    key silently no-ops. Read the candidate's acf and find the résumé key.
+  let cvKey = "cv__resume";
+  try {
+    const getRes = await fetch(`${wpBaseUrl}/wp-json/wp/v2/candidate/${candidateId}?_fields=acf`, {
+      headers: { Authorization: basic, Accept: "application/json" },
+    });
+    if (getRes.ok) {
+      const g = await getRes.json() as { acf?: Record<string, unknown> } | null;
+      const keys = Object.keys(g?.acf ?? {});
+      const match = keys.find(k => /resume/i.test(k)) ?? keys.find(k => /^cv(_|$)/i.test(k));
+      if (match) cvKey = match;
+    }
+  } catch { /* keep the best-guess key */ }
+
+  // 3. Attach the uploaded file (attachment id) to that File field.
   const patchRes = await fetch(`${wpBaseUrl}/wp-json/wp/v2/candidate/${candidateId}`, {
     method: "POST",
     headers: { Authorization: basic, "Content-Type": "application/json" },
-    body: JSON.stringify({ acf: { cv_resume: mediaId } }),
+    body: JSON.stringify({ acf: { [cvKey]: mediaId } }),
   });
-  if (!patchRes.ok) {
-    const t = await patchRes.text().catch(() => "");
-    return json({ ok: false, error: `Attach failed ${patchRes.status}: ${t.slice(0, 200)}`, media_id: mediaId, source_url: sourceUrl }, 502);
+  const patchJson = await patchRes.json().catch(() => null) as { code?: string; message?: string; data?: { params?: Record<string, unknown> } } | null;
+  if (!patchRes.ok || patchJson?.code) {
+    const extra = patchJson?.data?.params ? ` (${Object.values(patchJson.data.params).join("; ")})` : "";
+    return json({ ok: false, error: `Attach failed ${patchRes.status}: ${patchJson?.code ?? ""} ${patchJson?.message ?? ""}${extra} [key=${cvKey}]`, media_id: mediaId, source_url: sourceUrl }, 502);
   }
 
-  // 3. Mirror the URL so the dashboard's "View Resume" works right away.
+  // 5. Mirror the URL so the dashboard's "View Resume" works right away.
   if (sourceUrl) {
     await supabase.from("wordpress_candidates")
       .update({ cv_url: sourceUrl, updated_at: new Date().toISOString() })

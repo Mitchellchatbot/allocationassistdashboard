@@ -477,6 +477,11 @@ function sanitizeAcf(acf: Record<string, unknown> | undefined): Record<string, u
     let v: unknown = raw;
     if (v === null || v === undefined || v === "") continue;
 
+    // CV / résumé is an ACF File field — only ever set via the dedicated
+    // upload-cv path (an attachment id). A raw URL/string here trips
+    // rest_invalid_param, so never send it through a normal upsert.
+    if (k === "cv_resume" || k === "cv__resume" || k === "cv_resume_file") continue;
+
     // Image field → attachment ID (integer). A URL / object / non-numeric
     // string is rejected; the photo is attached separately via
     // wordpress-candidate-upload-photo, so just drop anything that isn't a
