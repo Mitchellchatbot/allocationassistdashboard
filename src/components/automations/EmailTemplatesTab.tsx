@@ -55,11 +55,11 @@ const SAMPLE_VARS: Record<string, string> = {
   hospital_contact_name: "Hassan",
   city:               "Dubai",
   country:            "UAE",
-  form_link:          "https://care-assist.io/forms/abc123",
-  upload_link:        "https://care-assist.io/upload-cv/abc123",
-  profile_link:       "https://care-assist.io/shared-profile/heena-sharma",
-  guide_link:         "https://care-assist.io/guides/dubai.pdf",
-  payment_link:       "https://care-assist.io/pay/xyz789",
+  form_link:          "https://allocationassist.com/forms/abc123",
+  upload_link:        "https://allocationassist.com/upload-cv/abc123",
+  profile_link:       "https://allocationassist.com/shared-profile/heena-sharma",
+  guide_link:         "https://allocationassist.com/guides/dubai.pdf",
+  payment_link:       "https://allocationassist.com/pay/xyz789",
   amount:             "AED 21,000",
   due_date:           "May 30, 2026",
   days_overdue:       "12",
@@ -325,7 +325,7 @@ function TemplateEditor({ template }: { template: EmailTemplate }) {
             subject={previewSubject}
             html={previewHtml}
             text={previewText}
-            from="Hospital Intro <hospitalintro@care-assist.io>"
+            from="Hospital Intro <hospitalintro@allocationassist.com>"
             to="[Recipient]"
             templateKey={template.key}
             banner={<>Rendered with <strong>sample values</strong> — real sends use the live doctor/hospital data.</>}

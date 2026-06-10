@@ -14,8 +14,8 @@
  * Required env (supabase secrets set ...):
  *   GOOGLE_OAUTH_CLIENT_ID
  *   GOOGLE_OAUTH_CLIENT_SECRET
- *   APP_ORIGIN  ← e.g. https://care-assist.io (the URL we redirect back to
- *                 after the callback completes; defaults to https://care-assist.io)
+ *   APP_ORIGIN  ← e.g. https://allocationassist.com (the URL we redirect back to
+ *                 after the callback completes; defaults to https://allocationassist.com)
  *
  * The redirect_uri Google needs to know about is THIS function's public URL:
  *   https://<project-ref>.functions.supabase.co/google-oauth-callback
@@ -28,7 +28,7 @@ const SUPABASE_URL              = Deno.env.get("SUPABASE_URL") ?? "";
 const SUPABASE_SERVICE_ROLE_KEY = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY") ?? "";
 const GOOGLE_CLIENT_ID          = Deno.env.get("GOOGLE_OAUTH_CLIENT_ID")     ?? "";
 const GOOGLE_CLIENT_SECRET      = Deno.env.get("GOOGLE_OAUTH_CLIENT_SECRET") ?? "";
-const APP_ORIGIN                = Deno.env.get("APP_ORIGIN") ?? "https://care-assist.io";
+const APP_ORIGIN                = Deno.env.get("APP_ORIGIN") ?? "https://allocationassist.com";
 
 // Compute our own URL — that's what we tell Google as the redirect URI.
 // IMPORTANT: this MUST exactly match the redirect_uri the frontend sent

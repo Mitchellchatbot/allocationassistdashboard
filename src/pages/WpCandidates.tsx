@@ -48,6 +48,10 @@ export default function WpCandidates({ embedded }: WpCandidatesProps = {}) {
   const [openDetailId, setOpenDetailId] = useState<number | null>(null);
   // Newly-created staged profile to auto-open in the staging editor.
   const [autoOpenStagedId, setAutoOpenStagedId] = useState<string | null>(null);
+  // Progress bar for "New profile" → staging (mirrors the publish bar in
+  // StagedRow). The insert is one round trip but the refetch makes it feel
+  // slow, so we creep a bar to ~85% then snap to 100% on success.
+  const [stagingProgress, setStagingProgress] = useState<{ pct: number; label: string } | null>(null);
   // Deep-link support: when Forms (or anything else) navigates here
   // with ?open=<wp_id>, auto-open that profile's detail dialog so the
   // user lands directly in the inline editor instead of having to
@@ -68,11 +72,20 @@ export default function WpCandidates({ embedded }: WpCandidatesProps = {}) {
   // explicit Publish. This is a fast local insert (no WP round trip), and
   // we auto-open the staging editor so the user fills it in, then Publishes.
   const handleNewProfile = async () => {
+    setStagingProgress({ pct: 10, label: "Adding to staging…" });
+    const creep = setInterval(() => {
+      setStagingProgress(p => (p && p.pct < 85 ? { ...p, pct: p.pct + Math.max(1, (85 - p.pct) * 0.12) } : p));
+    }, 150);
     try {
       const r = await createStaged.mutateAsync({ source: "manual", full_name: "New profile" });
+      clearInterval(creep);
+      setStagingProgress({ pct: 100, label: "Added" });
       setAutoOpenStagedId(r.id);
       toast.success("New profile added to staging — fill it in, then Publish to WordPress.");
+      setTimeout(() => setStagingProgress(null), 400);
     } catch (e) {
+      clearInterval(creep);
+      setStagingProgress(null);
       toast.error(e instanceof Error ? e.message : "Failed to create");
     }
   };
@@ -186,10 +199,19 @@ export default function WpCandidates({ embedded }: WpCandidatesProps = {}) {
 
   const headerButtons = (
     <div className="flex items-center gap-2">
-      <Button size="sm" onClick={handleNewProfile} disabled={createStaged.isPending}>
-        {createStaged.isPending ? <Loader2 className="h-3.5 w-3.5 mr-1 animate-spin" /> : <Plus className="h-3.5 w-3.5 mr-1" />}
-        New profile
-      </Button>
+      {stagingProgress ? (
+        <div className="w-[160px]" title={stagingProgress.label}>
+          <div className="text-[9px] text-slate-500 mb-0.5 truncate">{stagingProgress.label}</div>
+          <div className="h-1.5 rounded-full bg-slate-200 overflow-hidden">
+            <div className="h-full rounded-full bg-teal-500 transition-[width] duration-200 ease-out" style={{ width: `${stagingProgress.pct}%` }} />
+          </div>
+        </div>
+      ) : (
+        <Button size="sm" onClick={handleNewProfile} disabled={createStaged.isPending}>
+          {createStaged.isPending ? <Loader2 className="h-3.5 w-3.5 mr-1 animate-spin" /> : <Plus className="h-3.5 w-3.5 mr-1" />}
+          New profile
+        </Button>
+      )}
       <Button size="sm" variant="outline" onClick={handleSync} disabled={sync.isPending}>
         {sync.isPending ? <RefreshCw className="h-3.5 w-3.5 mr-1 animate-spin" /> : <History className="h-3.5 w-3.5 mr-1" />}
         {sync.isPending ? "Syncing…" : "Sync from WordPress"}

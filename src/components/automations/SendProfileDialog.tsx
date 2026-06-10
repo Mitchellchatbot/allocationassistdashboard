@@ -520,7 +520,7 @@ function PreviewConfirm({
     // send-flow-email (shared_profile token, ${APP_ORIGIN}/shared-profile/<token>).
     // Use the production app origin here so the preview reads like
     // what hospitals actually receive, not 'aa.example'.
-    profile_link:       `https://care-assist.io/shared-profile/${doctor.id}`,
+    profile_link:       `https://allocationassist.com/shared-profile/${doctor.id}`,
     // The {{signature}} token is injected by send-flow-email at send time;
     // for the preview we render the same Allocation Assist branded block
     // inline so the doctor-side preview shows it too.

@@ -1282,10 +1282,14 @@ function ResponseRow({
             <DollarSign className="h-2.5 w-2.5 mr-0.5" /> ${(leadValueCents / 100).toLocaleString()} collected
           </Badge>
         )}
-        {/* Outreach status pill */}
-        <Badge variant="outline" className={`text-[9px] shrink-0 ${statusStyle.className}`}>
-          {statusStyle.label}
-        </Badge>
+        {/* Outreach status pill — hidden for the default "new" state (every
+            uncontacted row would otherwise scream "New"); only the meaningful
+            states (Contacted / Qualified / Declined / Closed) get a pill. */}
+        {response.outreach_status !== "new" && (
+          <Badge variant="outline" className={`text-[9px] shrink-0 ${statusStyle.className}`}>
+            {statusStyle.label}
+          </Badge>
+        )}
         {isDueForFollowup && (
           <Badge variant="outline" className="text-[9px] bg-rose-50 text-rose-700 border-rose-200 shrink-0">
             <CalendarClock className="h-2.5 w-2.5 mr-0.5" /> follow-up due

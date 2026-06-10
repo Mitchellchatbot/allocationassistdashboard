@@ -81,7 +81,7 @@ const STAGE_ROUTES: Record<string, StageRoute> = {
 };
 
 const RESEND_API_KEY = Deno.env.get("RESEND_API_KEY") ?? "";
-const MAIL_FROM      = Deno.env.get("MAIL_FROM") ?? "Hospital Intro <onboarding@resend.dev>";
+const MAIL_FROM      = Deno.env.get("MAIL_FROM") ?? "Hospital Intro <hospitalintro@allocationassist.com>";
 // When set, EVERY outbound email is redirected here regardless of the
 // real recipient. Required while sending from onboarding@resend.dev (Resend
 // only allows that to deliver to the account owner). Drop this env var once
@@ -95,10 +95,10 @@ const TEST_OVERRIDE      = TEST_OVERRIDE_LIST[0] ?? "";
 // `Reply-To: reply-<run_id>@<MAIL_REPLY_DOMAIN>`, so a hospital reply lands
 // at Resend Inbound carrying the run_id right in the address. Strongest
 // matching strategy in inbound-hospital-reply.
-const MAIL_REPLY_DOMAIN = Deno.env.get("MAIL_REPLY_DOMAIN") ?? "reply.care-assist.io";
+const MAIL_REPLY_DOMAIN = Deno.env.get("MAIL_REPLY_DOMAIN") ?? "reply.allocationassist.com";
 // App's public origin — used to render the CV upload link the onboarding
-// email embeds. e.g. https://care-assist.io
-const APP_ORIGIN = Deno.env.get("APP_ORIGIN") ?? "https://care-assist.io";
+// email embeds. e.g. https://allocationassist.com
+const APP_ORIGIN = Deno.env.get("APP_ORIGIN") ?? "https://allocationassist.com";
 
 // ── Per-sender From / signature registry ─────────────────────────────────────
 // Each HI team member sends from their own @allocationassist.com address

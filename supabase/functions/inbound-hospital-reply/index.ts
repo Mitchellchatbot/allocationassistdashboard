@@ -129,7 +129,7 @@ Deno.serve(async (req: Request) => {
   const replyText    = email.text ?? "";
   const replyHtml    = email.html ?? "";
   // The `to` field is an array of recipient addresses. For replies to our
-  // Profile Sent emails, this includes `reply-<run_id>@reply.care-assist.io`
+  // Profile Sent emails, this includes `reply-<run_id>@reply.allocationassist.com`
   // — the unique address we set as Reply-To on the outbound. Parsing that
   // address gives us 100% match accuracy.
   const toList: string[] = [
@@ -165,7 +165,7 @@ Deno.serve(async (req: Request) => {
   let matchMethod = "none";
 
   // Match strategy 0 (PRIMARY): unique reply-to address with embedded run_id.
-  // send-flow-email sets `Reply-To: reply-<run_id>@reply.care-assist.io` on
+  // send-flow-email sets `Reply-To: reply-<run_id>@reply.allocationassist.com` on
   // every outbound, so any hospital reply lands here with the run_id literally
   // in the recipient address. 100% accuracy, no header dependency.
   const REPLY_ADDR_RE = /reply-([0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12})@/i;
