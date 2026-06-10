@@ -84,6 +84,31 @@ export function wpCandidateProfileText(c: WpCandidate | null | undefined): strin
 
 const KEY = ["wp-candidates"] as const;
 
+/** Invoke an edge function and surface the REAL error on failure.
+ *
+ *  supabase.functions.invoke collapses ANY non-2xx response into a generic
+ *  "Edge Function returned a non-2xx status code" and throws away the
+ *  response body — so our WP functions' useful { ok, error } detail (e.g.
+ *  "WP 400: rest_cannot_create — Sorry, you are not allowed to create…")
+ *  was hidden behind that opaque message. That's the "drafting gets a
+ *  non-2xx code" the team sees. Dig the body out of error.context and
+ *  throw the actual message so the real WordPress rejection is visible. */
+async function invokeFn<T>(name: string, body: unknown): Promise<T> {
+  const { data, error } = await supabase.functions.invoke(name, { body });
+  if (error) {
+    let detail = error.message;
+    const ctx = (error as { context?: Response }).context;
+    if (ctx && typeof ctx.json === "function") {
+      try {
+        const b = await ctx.json() as { error?: string };
+        if (b?.error) detail = b.error;
+      } catch { /* body wasn't JSON — keep the generic message */ }
+    }
+    throw new Error(detail);
+  }
+  return data as T;
+}
+
 export function useWpCandidates() {
   const qc = useQueryClient();
   const q = useQuery<WpCandidate[]>({
@@ -214,9 +239,7 @@ export function useUpsertWpCandidate() {
   const qc = useQueryClient();
   return useMutation({
     mutationFn: async (payload: WpCandidateUpsertPayload) => {
-      const { data, error } = await supabase.functions.invoke("wordpress-candidate-upsert", { body: payload });
-      if (error) throw error;
-      const resp = data as { ok: boolean; id?: number; row?: WpCandidate; created?: boolean; error?: string };
+      const resp = await invokeFn<{ ok: boolean; id?: number; row?: WpCandidate; created?: boolean; error?: string }>("wordpress-candidate-upsert", payload);
       if (!resp.ok) throw new Error(resp.error ?? "Upsert failed");
       return resp;
     },
@@ -432,9 +455,7 @@ export function usePublishStagedProfile() {
         acf:    mergedAcf as WpCandidateUpsertPayload["acf"],
         intent: "publish_from_staging",
       };
-      const { data, error } = await supabase.functions.invoke("wordpress-candidate-upsert", { body: payload });
-      if (error) throw error;
-      const resp = data as { ok: boolean; id?: number; row?: WpCandidate; created?: boolean; error?: string };
+      const resp = await invokeFn<{ ok: boolean; id?: number; row?: WpCandidate; created?: boolean; error?: string }>("wordpress-candidate-upsert", payload);
       if (!resp.ok) throw new Error(resp.error ?? "Publish failed");
 
       // ── Photo attach. If the staged row captured a JotForm picture
