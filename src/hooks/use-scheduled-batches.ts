@@ -150,7 +150,9 @@ export function useUpsertBatch() {
         .upsert(payload, { onConflict: "id" })
         .select("*")
         .single();
-      if (error) throw error;
+      // Throw a real Error — a raw PostgrestError object stringifies to
+      // "[object Object]", hiding the actual cause (e.g. a unique-violation).
+      if (error) throw new Error(error.message || error.details || error.hint || "Batch upsert failed");
       return data as ScheduledBatch;
     },
     onSuccess: () => qc.invalidateQueries({ queryKey: BATCHES_KEY }),
@@ -167,7 +169,7 @@ export function useUpdateBatch() {
         .eq("id", id)
         .select("*")
         .single();
-      if (error) throw error;
+      if (error) throw new Error(error.message || error.details || error.hint || "Batch update failed");
       return data as ScheduledBatch;
     },
     onSuccess: () => qc.invalidateQueries({ queryKey: BATCHES_KEY }),

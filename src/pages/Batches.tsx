@@ -912,8 +912,10 @@ function BatchDialog({ target, onTargetChange, batches, suggestedSpecialty }: {
       onTargetChange(created.id);
     } catch (e) {
       // Surface the actual Postgres / Supabase error so users see "duplicate
-      // key" or RLS rejections instead of a generic "Create failed".
-      const msg = e instanceof Error ? e.message : String(e);
+      // key" or RLS rejections instead of a generic "[object Object]".
+      const msg = e instanceof Error ? e.message
+        : (e && typeof e === "object" && "message" in e) ? String((e as { message?: unknown }).message)
+        : String(e);
       toast.error(`Create failed: ${msg}`);
       console.error("[Batches] create failed:", e);
     } finally { setCreating(false); }
