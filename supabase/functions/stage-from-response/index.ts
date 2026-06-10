@@ -115,7 +115,13 @@ Deno.serve(async (req: Request) => {
   //    so fire-and-forget loses the work. The Claude extraction
   //    call inside cv-extract IS still fire-and-forget downstream
   //    (it's a long Anthropic call we don't need to block on).
-  const cvUrl = (profile.acf?.cv_resume as string | undefined) ?? extractCvUrlFromAnswers(flat) ?? "";
+  // CV URL can hide in three places, in priority order: the mapped ACF, the
+  // flat answers, or ONLY in raw_payload (widget uploads / answers the
+  // flattener didn't surface — e.g. Flor's CV lived solely in raw_payload).
+  const cvUrl = (profile.acf?.cv_resume as string | undefined)
+    ?? extractCvUrlFromAnswers(flat)
+    ?? extractCvUrlFromRaw(response.raw_payload)
+    ?? "";
   let cvQueued = false;
   let cvError: string | null = null;
   if (cvUrl && form?.api_token) {
@@ -154,6 +160,18 @@ function extractCvUrlFromAnswers(flat: Record<string, string>): string | null {
     if (m && /jotform\.com\/uploads\//i.test(m[1])) return m[1];
   }
   return null;
+}
+
+/** Last-resort CV URL scan: JotForm file-upload answers sometimes appear
+ *  ONLY in raw_payload (widget uploads, or answers the flattener didn't
+ *  surface into the flat answers map). Stringify the whole payload and grab
+ *  the first /uploads/ document URL. */
+function extractCvUrlFromRaw(raw: unknown): string | null {
+  if (!raw) return null;
+  let s: string;
+  try { s = typeof raw === "string" ? raw : JSON.stringify(raw); } catch { return null; }
+  const m = /(https?:\/\/[^\s,;"'\\]+\/uploads\/[^\s,;"'\\]+\.(?:pdf|doc|docx))/i.exec(s);
+  return m ? m[1] : null;
 }
 
 /** Mirrors fireCvPipeline in jotform-webhook. Kept in-file so this

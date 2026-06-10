@@ -254,6 +254,52 @@ Deno.serve(async (req) => {
         if (error) return new Response(JSON.stringify({ ok: false, error: error.message }), { headers: { "Content-Type": "application/json" } });
         return new Response(JSON.stringify({ ok: true, deleted: count, kind: "garbage_multipart" }), { headers: { "Content-Type": "application/json" } });
       }
+      if ((body as { jotform_cv_to_wp?: { response_id: string; wp_search?: string; wp_candidate_id?: number } } | null)?.jotform_cv_to_wp) {
+        // One-shot: pull a CV URL out of a form_response's raw_payload,
+        // download it from JotForm (APIKEY), and attach to a WP candidate's
+        // cv_resume. Pass wp_search first to find the candidate id, then call
+        // again with wp_candidate_id to actually attach. Repairs records
+        // whose CV was missed (URL was only in raw_payload).
+        const p = (body as { jotform_cv_to_wp: { response_id: string; wp_search?: string; wp_candidate_id?: number } }).jotform_cv_to_wp;
+        const wpBase = (Deno.env.get("WP_BASE_URL") ?? "").replace(/\/+$/, "");
+        const basic = "Basic " + btoa(`${Deno.env.get("WP_USERNAME")}:${(Deno.env.get("WP_APP_PASSWORD") ?? "").replace(/\s/g, "")}`);
+        const { data: resp } = await sb.from("form_responses").select("raw_payload, form_id, respondent_name").eq("id", p.response_id).single();
+        if (!resp) return new Response(JSON.stringify({ ok: false, error: "response not found" }), { headers: { "Content-Type": "application/json" } });
+        const rawStr = (() => { try { return JSON.stringify((resp as { raw_payload?: unknown }).raw_payload ?? ""); } catch { return ""; } })();
+        const cvMatch = /(https?:\/\/[^\s,;"'\\]+\/uploads\/[^\s,;"'\\]+\.(?:pdf|doc|docx))/i.exec(rawStr);
+        const cvUrl = cvMatch ? cvMatch[1].replace(/\\\//g, "/") : null;
+        if (!cvUrl) return new Response(JSON.stringify({ ok: false, error: "no CV url in raw_payload" }), { headers: { "Content-Type": "application/json" } });
+        // Find the candidate if not given.
+        if (!p.wp_candidate_id) {
+          const q = encodeURIComponent(p.wp_search ?? (resp as { respondent_name?: string }).respondent_name ?? "");
+          // status[]=… needs auth (we have it) — default REST search only
+          // returns published posts, so a draft candidate would be invisible.
+          const statusQ = "&status[]=publish&status[]=draft&status[]=pending&status[]=private&status[]=future";
+          const sRes = await fetch(`${wpBase}/wp-json/wp/v2/candidate?search=${q}${statusQ}&_fields=id,title,status&per_page=30`, { headers: { Authorization: basic } });
+          const cands = await sRes.json().catch(() => []) as Array<{ id: number; title?: { rendered?: string }; status?: string }>;
+          return new Response(JSON.stringify({ ok: true, cv_url: cvUrl, search_status: sRes.status, candidates: Array.isArray(cands) ? cands.map(c => ({ id: c.id, title: c.title?.rendered, status: c.status })) : cands }, null, 2), { headers: { "Content-Type": "application/json" } });
+        }
+        // Download the CV from JotForm with the form's APIKEY.
+        const { data: formRow } = await sb.from("forms").select("api_token").eq("id", (resp as { form_id: string }).form_id).single();
+        const tok = (formRow as { api_token?: string } | null)?.api_token;
+        const dl = await fetch(cvUrl, { headers: tok ? { APIKEY: tok } : {} });
+        if (!dl.ok) return new Response(JSON.stringify({ ok: false, error: `CV download ${dl.status}` }), { headers: { "Content-Type": "application/json" } });
+        const bytes = await dl.arrayBuffer();
+        const fileName = (cvUrl.split("/").pop() || "cv.pdf").replace(/[^a-zA-Z0-9._-]/g, "_");
+        const mime = dl.headers.get("content-type") || "application/pdf";
+        const mediaRes = await fetch(`${wpBase}/wp-json/wp/v2/media`, {
+          method: "POST", headers: { Authorization: basic, "Content-Type": mime, "Content-Disposition": `attachment; filename="${fileName}"` }, body: bytes,
+        });
+        const mj = await mediaRes.json().catch(() => null) as { id?: number; source_url?: string; code?: string } | null;
+        if (!mediaRes.ok || !mj?.id) return new Response(JSON.stringify({ ok: false, error: `media upload ${mediaRes.status}: ${mj?.code ?? ""}` }), { headers: { "Content-Type": "application/json" } });
+        const patch = await fetch(`${wpBase}/wp-json/wp/v2/candidate/${p.wp_candidate_id}`, {
+          method: "POST", headers: { Authorization: basic, "Content-Type": "application/json" }, body: JSON.stringify({ acf: { cv_resume: mj.id } }),
+        });
+        const vRes = await fetch(`${wpBase}/wp-json/wp/v2/candidate/${p.wp_candidate_id}?_fields=acf.cv_resume`, { headers: { Authorization: basic } });
+        const after = vRes.ok ? ((await vRes.json()) as { acf?: { cv_resume?: unknown } })?.acf?.cv_resume : null;
+        if (mj.source_url) await sb.from("wordpress_candidates").update({ cv_url: mj.source_url }).eq("id", p.wp_candidate_id);
+        return new Response(JSON.stringify({ ok: true, cv_url: cvUrl, media_id: mj.id, source_url: mj.source_url, patch_status: patch.status, cv_resume_after: after }, null, 2), { headers: { "Content-Type": "application/json" } });
+      }
       if ((body as { clear_cv?: number } | null)?.clear_cv) {
         // Clear cv_resume on a candidate. ACF File fields don't clear with
         // `false`; try null then "" and report which emptied it.
