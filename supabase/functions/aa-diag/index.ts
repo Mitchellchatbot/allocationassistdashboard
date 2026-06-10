@@ -422,6 +422,32 @@ Deno.serve(async (req) => {
         }
         return new Response(JSON.stringify({ ok: true, dry_run: dry, count: fixed.length, fixed }, null, 2), { headers: { "Content-Type": "application/json" } });
       }
+      if ((body as { edu_exp_probe?: number } | null)?.edu_exp_probe) {
+        // Inspect a candidate's education/experience/years ACF + find
+        // populated examples to learn the (cryptic) repeater field schema.
+        const targetId = (body as { edu_exp_probe: number }).edu_exp_probe;
+        const EDU_KEYS = ["years_of_experience_post_specialization", "academy1", "level_1", "start_date1", "end_date1", "present1", "description1", "company2", "title1", "title2", "title3", "title4", "start_date_2", "end_date2", "present2", "description2", "description4", "year4", "label", "label1", "percentage", "percentage1"];
+        const pickKeys = (acf: Record<string, unknown>) => {
+          const o: Record<string, unknown> = {};
+          for (const k of EDU_KEYS) if (acf[k] !== undefined && acf[k] !== null && acf[k] !== "") o[k] = acf[k];
+          return o;
+        };
+        const { data: target } = await sb.from("wordpress_candidates").select("id, full_name, raw_acf").eq("id", targetId).maybeSingle();
+        const { data: rows } = await sb.from("wordpress_candidates").select("id, full_name, raw_acf").not("raw_acf", "is", null).limit(120);
+        const populated: unknown[] = [];
+        for (const r of (rows ?? []) as Array<{ id: number; full_name: string; raw_acf: Record<string, unknown> }>) {
+          const acf = r.raw_acf ?? {};
+          if ((acf.academy1 && acf.academy1 !== "") || (acf.title1 && acf.title1 !== "") || (acf.company2 && acf.company2 !== "")) {
+            populated.push({ id: r.id, name: r.full_name, fields: pickKeys(acf) });
+            if (populated.length >= 3) break;
+          }
+        }
+        return new Response(JSON.stringify({
+          ok: true,
+          target: target ? { id: (target as { id: number }).id, name: (target as { full_name: string }).full_name, edu_exp_fields: pickKeys((target as { raw_acf: Record<string, unknown> }).raw_acf ?? {}) } : null,
+          populated_examples: populated,
+        }, null, 2), { headers: { "Content-Type": "application/json" } });
+      }
       if ((body as { dump_acf?: boolean } | null)?.dump_acf) {
         // Union of every ACF key across real WP candidates (from the
         // mirror's raw_acf), plus a sample value for any cv/resume/file/

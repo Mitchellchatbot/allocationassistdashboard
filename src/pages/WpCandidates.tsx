@@ -1320,6 +1320,20 @@ function StagedRow({ profile, autoOpen, onAutoOpened }: { profile: StagedProfile
     .filter(Boolean).join(" · ");
 
   const handlePublish = async (status: "draft" | "publish") => {
+    // Guard against the race that left Reason Ford with "…" years + empty
+    // Education/Experience: the CV's fields (years of experience, education &
+    // experience history, bio) are merged onto the staged row only when
+    // cv-extract finishes (~10-30s after staging). Publishing before that
+    // ships an incomplete profile. If a résumé is attached but not yet read,
+    // warn before pushing so the user can wait the few seconds it needs.
+    const cvStillReading = !!profile.cv_upload_id &&
+      !(profile.extracted_cv_data && Object.keys(profile.extracted_cv_data).length > 0);
+    if (cvStillReading) {
+      const proceed = window.confirm(
+        "The résumé is still being read, so years of experience, education, and work history may be missing. Wait a few seconds for it to finish — or publish now anyway?",
+      );
+      if (!proceed) return;
+    }
     setPubProgress({ pct: 8, label: status === "publish" ? "Publishing to WordPress…" : "Saving draft to WordPress…" });
     // Creep the bar while the (indeterminate) WP create runs so it visibly
     // moves instead of sitting frozen — eases toward 85% then jumps on each
