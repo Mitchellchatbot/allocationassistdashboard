@@ -337,7 +337,9 @@ function applyEducation(
   const start = toWpDate(row.start);
   if (!nonEmpty(fa("start_date1")) && start) acf.start_date1 = start;
   if (isPresentDate(row.end)) {
-    if (!nonEmpty(fa("present1"))) acf.present1 = true;
+    // WP's "present" field is a select that stores the string "Yes" — a
+    // boolean true is rejected (rest_invalid_param → dropped).
+    if (!nonEmpty(fa("present1"))) acf.present1 = "Yes";
   } else {
     const end = toWpDate(row.end);
     if (!nonEmpty(fa("end_date1")) && end) acf.end_date1 = end;
@@ -367,7 +369,8 @@ function applyExperience(
   const start = toWpDate(row.start);
   if (!nonEmpty(fa("start_date_2")) && start) acf.start_date_2 = start;
   if (isPresentDate(row.end)) {
-    if (!nonEmpty(fa("present2"))) acf.present2 = true;
+    // WP's "present" field stores the string "Yes" — boolean true is rejected.
+    if (!nonEmpty(fa("present2"))) acf.present2 = "Yes";
   } else {
     const end = toWpDate(row.end);
     if (!nonEmpty(fa("end_date2")) && end) acf.end_date2 = end;
