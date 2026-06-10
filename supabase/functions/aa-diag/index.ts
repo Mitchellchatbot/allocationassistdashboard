@@ -442,6 +442,9 @@ Deno.serve(async (req) => {
         const KEYS = ["years_of_experience_post_specialization", "academy1", "level_1", "start_date1", "end_date1", "present1", "description1", "title1", "company2", "title2", "title3", "title4", "start_date_2", "end_date2", "present2", "description2", "description4", "year4", "bio", "job_title", "subspecialty", "specific_areas_of_interests_within_the_specialization"];
         const patchAcf: Record<string, unknown> = {};
         for (const k of KEYS) if (mergedAcf[k] !== undefined && mergedAcf[k] !== null && mergedAcf[k] !== "") patchAcf[k] = mergedAcf[k];
+        if ((body as { backfill_wp_from_cv: { dry_run?: boolean } }).backfill_wp_from_cv.dry_run) {
+          return new Response(JSON.stringify({ ok: true, dry_run: true, mapped: patchAcf }, null, 2), { headers: { "Content-Type": "application/json" } });
+        }
         const wpBase = (Deno.env.get("WP_BASE_URL") ?? "").replace(/\/+$/, "");
         const basic = "Basic " + btoa(`${Deno.env.get("WP_USERNAME")}:${(Deno.env.get("WP_APP_PASSWORD") ?? "").replace(/\s/g, "")}`);
         const patch = await fetch(`${wpBase}/wp-json/wp/v2/candidate/${p.wp_candidate_id}`, {

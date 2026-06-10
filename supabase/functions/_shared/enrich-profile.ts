@@ -291,6 +291,36 @@ function joinName(first: unknown, last: unknown): string | null {
   return out || null;
 }
 
+const MONTHS: Record<string, string> = {
+  jan: "01", feb: "02", mar: "03", apr: "04", may: "05", jun: "06",
+  jul: "07", aug: "08", sep: "09", oct: "10", nov: "11", dec: "12",
+};
+
+/** Convert a CV date ("2007", "2018-06", "Jun 2018", "20180604", "Present")
+ *  to WP's ACF date-picker storage format YYYYMMDD. Year-only → Jan 1 of
+ *  that year. Returns null for present/current/unparseable so we NEVER write
+ *  an empty/invalid value that WP stores as epoch 0 → "1 January 1970". */
+function toWpDate(raw: unknown): string | null {
+  const s = String(raw ?? "").trim();
+  if (!s || /present|current|now|ongoing|to date/i.test(s)) return null;
+  if (/^\d{8}$/.test(s)) return s;                                       // already YYYYMMDD
+  let m = /^(\d{4})[-/.](\d{1,2})(?:[-/.](\d{1,2}))?$/.exec(s);          // YYYY-MM(-DD)
+  if (m) return m[1] + m[2].padStart(2, "0") + (m[3] ? m[3].padStart(2, "0") : "01");
+  m = /^(\d{1,2})[-/.](\d{4})$/.exec(s);                                // MM/YYYY
+  if (m) return m[2] + m[1].padStart(2, "0") + "01";
+  m = /^([A-Za-z]{3,9})\.?\s+(\d{4})$/.exec(s);                         // Mon YYYY
+  if (m) { const mo = MONTHS[m[1].slice(0, 3).toLowerCase()]; if (mo) return m[2] + mo + "01"; }
+  m = /^(\d{4})$/.exec(s);                                              // year only
+  if (m) return m[1] + "0101";
+  return null;                                                         // unknown → leave empty
+}
+
+const isPresentDate = (v: unknown) => /present|current|now|ongoing|to date/i.test(String(v ?? ""));
+
+/** Education → WP's single education slot: academy1 (institution),
+ *  title1 (degree), start_date1, end_date1, present1, description1.
+ *  Only the most-recent entry (Claude returns newest first) — the WP
+ *  candidate UI shows one education entry. */
 function applyEducation(
   acf: Record<string, unknown>,
   src: CvEducation[] | string | undefined,
@@ -300,21 +330,27 @@ function applyEducation(
   const rows: CvEducation[] = Array.isArray(src)
     ? src
     : (typeof src === "string" && src.trim() ? [{ description: src } as CvEducation] : []);
-  const slots: Array<[string, string, string, string, string, string]> = [
-    ["title1", "academy1", "start_date1", "end_date1", "present1", "description1"],
-    ["title2", "academy2", "start_date2", "end_date2", "present2", "description2"],
-  ];
-  rows.slice(0, 2).forEach((row, i) => {
-    const [t, a, s, e, p, d] = slots[i];
-    if (!nonEmpty(fa(t)) && row.degree)      acf[t] = row.degree;
-    if (!nonEmpty(fa(a)) && row.institution) acf[a] = row.institution;
-    if (!nonEmpty(fa(s)) && row.start)       acf[s] = String(row.start);
-    if (!nonEmpty(fa(e)) && row.end && !/present|current/i.test(String(row.end))) acf[e] = String(row.end);
-    if (!nonEmpty(fa(p)) && row.end && /present|current/i.test(String(row.end))) acf[p] = true;
-    if (!nonEmpty(fa(d)) && row.description) acf[d] = row.description;
-  });
+  const row = rows[0];
+  if (!row) return;
+  if (!nonEmpty(fa("title1"))   && row.degree)      acf.title1   = row.degree;
+  if (!nonEmpty(fa("academy1")) && row.institution) acf.academy1 = row.institution;
+  const start = toWpDate(row.start);
+  if (!nonEmpty(fa("start_date1")) && start) acf.start_date1 = start;
+  if (isPresentDate(row.end)) {
+    if (!nonEmpty(fa("present1"))) acf.present1 = true;
+  } else {
+    const end = toWpDate(row.end);
+    if (!nonEmpty(fa("end_date1")) && end) acf.end_date1 = end;
+  }
+  if (!nonEmpty(fa("description1")) && row.description) acf.description1 = row.description;
 }
 
+/** Experience → WP's single experience slot: company2 (employer),
+ *  title2 (role), start_date_2, end_date2, present2, description2.
+ *  (NOTE the inconsistent WP field names: start_date_2 has an underscore,
+ *  end_date2 does not — verified against live records.) The old code wrote
+ *  to experience_* fields that don't exist on this CPT, so work history
+ *  never appeared. */
 function applyExperience(
   acf: Record<string, unknown>,
   src: CvExperience[] | string | undefined,
@@ -324,20 +360,17 @@ function applyExperience(
   const rows: CvExperience[] = Array.isArray(src)
     ? src
     : (typeof src === "string" && src.trim() ? [{ description: src } as CvExperience] : []);
-  // WP candidate ACF uses experience_title1/experience_company1/... — keep the
-  // names in sync with the WP schema; safe to add unknown ACF keys, WP will
-  // ignore any it doesn't have.
-  const slots: Array<[string, string, string, string, string, string]> = [
-    ["experience_title1", "experience_company1", "experience_start1", "experience_end1", "experience_present1", "experience_description1"],
-    ["experience_title2", "experience_company2", "experience_start2", "experience_end2", "experience_present2", "experience_description2"],
-  ];
-  rows.slice(0, 2).forEach((row, i) => {
-    const [t, c, s, e, p, d] = slots[i];
-    if (!nonEmpty(fa(t)) && row.title)       acf[t] = row.title;
-    if (!nonEmpty(fa(c)) && row.company)     acf[c] = row.company;
-    if (!nonEmpty(fa(s)) && row.start)       acf[s] = String(row.start);
-    if (!nonEmpty(fa(e)) && row.end && !/present|current/i.test(String(row.end))) acf[e] = String(row.end);
-    if (!nonEmpty(fa(p)) && row.end && /present|current/i.test(String(row.end))) acf[p] = true;
-    if (!nonEmpty(fa(d)) && row.description) acf[d] = row.description;
-  });
+  const row = rows[0];
+  if (!row) return;
+  if (!nonEmpty(fa("title2"))   && row.title)   acf.title2   = row.title;
+  if (!nonEmpty(fa("company2")) && row.company) acf.company2 = row.company;
+  const start = toWpDate(row.start);
+  if (!nonEmpty(fa("start_date_2")) && start) acf.start_date_2 = start;
+  if (isPresentDate(row.end)) {
+    if (!nonEmpty(fa("present2"))) acf.present2 = true;
+  } else {
+    const end = toWpDate(row.end);
+    if (!nonEmpty(fa("end_date2")) && end) acf.end_date2 = end;
+  }
+  if (!nonEmpty(fa("description2")) && row.description) acf.description2 = row.description;
 }
