@@ -10,7 +10,7 @@ import {
   Select, SelectContent, SelectItem, SelectTrigger, SelectValue,
 } from "@/components/ui/select";
 import {
-  useFathomCalls, useFathomCall, useFathomAutoSync, useFathomSync,
+  useFathomCalls, useFathomCall, useFathomCallStats, useFathomAutoSync, useFathomSync,
   type FathomCall,
 } from "@/hooks/use-fathom-calls";
 import { Button } from "@/components/ui/button";
@@ -99,6 +99,8 @@ export default function Calls() {
   }), [search, hostFilter]);
 
   const { data: calls, isLoading, error, isFetching } = useFathomCalls(filters);
+  // Real totals over the WHOLE table (the list above caps at 500 rows).
+  const { data: callStats } = useFathomCallStats(useMemo(() => ({ host: hostFilter || null }), [hostFilter]));
   const { lastSyncAt, syncing, lastError, enriching } = useFathomAutoSync();
   const manualSync = useFathomSync();
   const now = useNowTick(1000);
@@ -113,15 +115,26 @@ export default function Calls() {
 
   const stats = useMemo(() => {
     const list = calls ?? [];
-    const externals = list.filter(c => (c.external_domains?.length ?? 0) > 0).length;
-    const totalSecs = totalSecondsIn(list);
+    const searching = !!search.trim();
+    // While searching, the KPIs reflect the matches shown. Otherwise use the
+    // full-table aggregate so the totals aren't pinned at the 500-row list cap.
+    if (searching || !callStats) {
+      const externals = list.filter(c => (c.external_domains?.length ?? 0) > 0).length;
+      const totalSecs = totalSecondsIn(list);
+      return {
+        count:    list.length,
+        totalHrs: fmtDuration(totalSecs),
+        avgMins:  list.length ? fmtDuration(Math.round(totalSecs / list.length)) : "—",
+        externals,
+      };
+    }
     return {
-      count:    list.length,
-      totalHrs: fmtDuration(totalSecs),
-      avgMins:  list.length ? fmtDuration(Math.round(totalSecs / list.length)) : "—",
-      externals,
+      count:    callStats.count,
+      totalHrs: fmtDuration(callStats.totalSecs),
+      avgMins:  callStats.count ? fmtDuration(Math.round(callStats.totalSecs / callStats.count)) : "—",
+      externals: callStats.externals,
     };
-  }, [calls]);
+  }, [calls, callStats, search]);
 
   return (
     <DashboardLayout
@@ -211,8 +224,13 @@ export default function Calls() {
             All calls
             {calls && (
               <Badge variant="secondary" className={`ml-1 text-[10px] ${CANDY.lilac.chip} ${CANDY.lilac.fg} border-0`}>
-                {calls.length}
+                {search.trim() ? calls.length : (callStats?.count ?? calls.length)}
               </Badge>
+            )}
+            {!search.trim() && callStats && calls && calls.length < callStats.count && (
+              <span className="text-[10px] font-normal text-muted-foreground">
+                showing latest {calls.length}
+              </span>
             )}
           </CardTitle>
         </CardHeader>

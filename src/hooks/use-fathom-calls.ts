@@ -106,6 +106,48 @@ export function useFathomCalls(filters: FathomCallsFilters = {}) {
   });
 }
 
+// ─── Aggregate stats over ALL calls (KPIs) ──────────────────────────────────
+
+export interface FathomCallStats { count: number; totalSecs: number; externals: number; }
+
+/** Count + talk-time + external-guest totals across EVERY call, not just the
+ *  500-row list cap. Uses a lightweight projection (no transcript columns) so
+ *  it's safe to page through the whole table — that's what fixes the KPIs
+ *  pinning at "Total calls 500". Respects the host filter; search is a
+ *  list-only concern so it's ignored here. */
+export function useFathomCallStats(filters: Pick<FathomCallsFilters, "from" | "to" | "host"> = {}) {
+  return useQuery({
+    queryKey: ["fathom-call-stats", filters.from ?? "", filters.to ?? "", filters.host ?? ""],
+    queryFn: async (): Promise<FathomCallStats> => {
+      let count = 0, totalSecs = 0, externals = 0;
+      const PAGE = 1000;
+      for (let from = 0; from < 200_000; from += PAGE) {
+        let q = supabase
+          .from("fathom_calls")
+          .select("duration_seconds, external_domains")
+          .order("recording_start", { ascending: false, nullsFirst: false })
+          .range(from, from + PAGE - 1);
+        if (filters.from) q = q.gte("recording_start", filters.from);
+        if (filters.to)   q = q.lte("recording_start", filters.to);
+        if (filters.host) q = q.eq("host_email", filters.host);
+        const { data, error } = await q;
+        if (error) throw error;
+        const batch = (data ?? []) as Array<{ duration_seconds: number | null; external_domains: string[] | null }>;
+        for (const r of batch) {
+          count++;
+          totalSecs += r.duration_seconds ?? 0;
+          if ((r.external_domains?.length ?? 0) > 0) externals++;
+        }
+        if (batch.length < PAGE) break;
+      }
+      return { count, totalSecs, externals };
+    },
+    staleTime: 30_000,
+    refetchInterval: AUTO_REFETCH_MS,
+    refetchIntervalInBackground: false,
+  });
+}
+
 // ─── Single call (with lazy transcript fetch) ───────────────────────────────
 
 export function useFathomCall(fathomId: string | null) {
