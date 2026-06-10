@@ -1121,6 +1121,10 @@ function ResponseRow({
   const [open, setOpen] = useState(false);
   const stageProfile = useCreateStagedProfile();
   const [creatingWp, setCreatingWp] = useState(false);
+  // Progress bar for "Send to staging" — stage-from-response does real
+  // server work (Zoho enrich, CV download + extract, picture parse), so we
+  // creep a bar to ~85% then snap to 100% on success instead of a spinner.
+  const [stageProgress, setStageProgress] = useState<{ pct: number; label: string } | null>(null);
   const entries = Object.entries(response.answers ?? {});
   const display = useMemo(() => displayNameFor(response), [response]);
   const phone   = useMemo(() => phoneFor(response), [response]);
@@ -1181,6 +1185,10 @@ function ResponseRow({
     e.stopPropagation();
     if (creatingWp) return;
     setCreatingWp(true);
+    setStageProgress({ pct: 10, label: "Sending to staging…" });
+    const creep = setInterval(() => {
+      setStageProgress(p => (p && p.pct < 85 ? { ...p, pct: p.pct + Math.max(1, (85 - p.pct) * 0.08) } : p));
+    }, 200);
     try {
       // Use the server-side stage-from-response endpoint. Runs the
       // SAME pipeline as a live JotForm webhook submission — Zoho
@@ -1198,6 +1206,8 @@ function ResponseRow({
       const extras: string[] = [];
       if (resp.picture_captured) extras.push("photo");
       if (resp.cv_queued)        extras.push("CV (extracting…)");
+      clearInterval(creep);
+      setStageProgress({ pct: 100, label: "Sent" });
       toast.success("Sent to staging area", {
         description: extras.length
           ? `Captured: ${extras.join(", ")}. Open the staging row to preview, then Publish.`
@@ -1205,9 +1215,14 @@ function ResponseRow({
         action: { label: "Open staging", onClick: () => navigate("/doctors?tab=profiles") },
       });
     } catch (err) {
+      clearInterval(creep);
+      setStageProgress(null);
       toast.error("Couldn't stage profile", { description: (err as Error).message });
     } finally {
+      clearInterval(creep);
       setCreatingWp(false);
+      // Let the full bar show briefly before it disappears.
+      setTimeout(() => setStageProgress(null), 500);
     }
   };
 
@@ -1429,6 +1444,13 @@ function ResponseRow({
                   <CheckCircle2 className="h-3 w-3" />
                   WP profile exists — open in WordPress ↗
                 </a>
+              ) : stageProgress ? (
+                <div className="w-[180px]" title={stageProgress.label}>
+                  <div className="text-[10px] text-slate-500 mb-0.5 truncate">{stageProgress.label}</div>
+                  <div className="h-1.5 rounded-full bg-slate-200 overflow-hidden">
+                    <div className="h-full rounded-full bg-emerald-500 transition-[width] duration-200 ease-out" style={{ width: `${stageProgress.pct}%` }} />
+                  </div>
+                </div>
               ) : (
                 <Button
                   size="sm"
@@ -1437,10 +1459,8 @@ function ResponseRow({
                   onClick={handleCreateWpProfile}
                   disabled={creatingWp}
                 >
-                  {creatingWp
-                    ? <Loader2 className="h-3 w-3 mr-1 animate-spin" />
-                    : <Sparkles className="h-3 w-3 mr-1 text-emerald-600" />}
-                  {creatingWp ? "Sending to staging…" : "Send to staging"}
+                  <Sparkles className="h-3 w-3 mr-1 text-emerald-600" />
+                  Send to staging
                 </Button>
               )}
             </div>
