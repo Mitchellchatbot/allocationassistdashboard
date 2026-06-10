@@ -491,6 +491,37 @@ export function usePublishStagedProfile() {
         }
       }
 
+      // ── CV attach. A form-sourced CV was downloaded into the private
+      //    doctor-cvs bucket during staging (cv_upload_id). Hand it to
+      //    wordpress-candidate-upload-cv by reference — it pulls the file
+      //    from storage (service-role) and attaches it to WP's cv_resume.
+      //    Non-fatal: the profile is already created; a CV failure shouldn't
+      //    block publish (the user can re-upload manually). A manually-picked
+      //    CV in the editor (cvFile) is uploaded separately by the caller and
+      //    will overwrite this if both are present.
+      if (resp.id && profile.cv_upload_id) {
+        try {
+          const { data: { session } } = await supabase.auth.getSession();
+          const projectUrl = (import.meta.env.VITE_SUPABASE_URL as string) ?? "";
+          const anonKey    = (import.meta.env.VITE_SUPABASE_ANON_KEY as string) ?? "";
+          const cvRes = await fetch(`${projectUrl}/functions/v1/wordpress-candidate-upload-cv`, {
+            method:  "POST",
+            headers: {
+              Authorization:  `Bearer ${session?.access_token ?? anonKey}`,
+              apikey:         anonKey,
+              "Content-Type": "application/json",
+            },
+            body: JSON.stringify({ candidate_id: resp.id, cv_upload_id: profile.cv_upload_id }),
+          });
+          const cvJson = await cvRes.json().catch(() => null) as { ok?: boolean; error?: string } | null;
+          if (!cvRes.ok || !cvJson?.ok) {
+            console.warn("[publish] form CV attach failed:", cvJson?.error ?? cvRes.status);
+          }
+        } catch (e) {
+          console.warn("[publish] form CV attach threw:", e);
+        }
+      }
+
       // Drop the staging row only after WP write succeeds — leaves the
       // row in place if WP errors so the user can retry without losing
       // their edits.

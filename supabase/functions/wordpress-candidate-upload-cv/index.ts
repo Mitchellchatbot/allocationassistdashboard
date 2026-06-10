@@ -32,34 +32,68 @@ Deno.serve(async (req: Request) => {
     return json({ ok: false, error: "Missing WP env" }, 500);
   }
 
-  const form = await req.formData().catch(() => null);
-  if (!form) return json({ ok: false, error: "Body must be multipart/form-data" }, 400);
+  // Two input modes:
+  //  A) multipart/form-data { file, candidate_id } — a CV the user manually
+  //     picked in the editor.
+  //  B) application/json { candidate_id, cv_upload_id } — a FORM-sourced CV
+  //     already downloaded into the private doctor-cvs bucket during staging.
+  //     We pull it back out (service-role) and attach it, so a JotForm CV
+  //     lands on WP automatically at publish with no manual step.
+  let candidateId: number | null = null;
+  let bytes: ArrayBuffer | null = null;
+  let fileName = "cv.pdf";
+  let fileMime = "application/octet-stream";
 
-  const f = form.get("file");
-  if (!(f instanceof File)) return json({ ok: false, error: "No file" }, 400);
-  if (f.size === 0)               return json({ ok: false, error: "Empty file" }, 400);
-  if (f.size > 15 * 1024 * 1024)  return json({ ok: false, error: "File too large (>15 MB)" }, 413);
-
-  const candidateIdRaw = form.get("candidate_id");
-  const candidateId = candidateIdRaw && typeof candidateIdRaw === "string" && /^\d+$/.test(candidateIdRaw)
-    ? parseInt(candidateIdRaw, 10)
-    : null;
-  if (!candidateId) return json({ ok: false, error: "candidate_id required" }, 400);
+  const contentType = req.headers.get("content-type") ?? "";
+  if (contentType.includes("application/json")) {
+    const body = await req.json().catch(() => null) as { candidate_id?: number | string; cv_upload_id?: string } | null;
+    candidateId = parseId(body?.candidate_id);
+    if (!candidateId)          return json({ ok: false, error: "candidate_id required" }, 400);
+    if (!body?.cv_upload_id)   return json({ ok: false, error: "cv_upload_id required" }, 400);
+    const { data: up, error: upErr } = await supabase
+      .from("cv_uploads")
+      .select("file_path, file_name, file_mime")
+      .eq("id", body.cv_upload_id)
+      .maybeSingle();
+    if (upErr || !up?.file_path) {
+      return json({ ok: false, error: `cv_upload not found: ${upErr?.message ?? body.cv_upload_id}` }, 404);
+    }
+    const { data: blob, error: dlErr } = await supabase.storage.from("doctor-cvs").download(up.file_path as string);
+    if (dlErr || !blob) {
+      return json({ ok: false, error: `CV download from storage failed: ${dlErr?.message ?? "no blob"}` }, 502);
+    }
+    bytes    = await blob.arrayBuffer();
+    fileName = (up.file_name as string) || (up.file_path as string).split("/").pop() || "cv.pdf";
+    fileMime = (up.file_mime as string) || blob.type || "application/octet-stream";
+  } else {
+    const form = await req.formData().catch(() => null);
+    if (!form) return json({ ok: false, error: "Body must be multipart/form-data or JSON" }, 400);
+    const f = form.get("file");
+    if (!(f instanceof File))      return json({ ok: false, error: "No file" }, 400);
+    if (f.size === 0)              return json({ ok: false, error: "Empty file" }, 400);
+    if (f.size > 15 * 1024 * 1024) return json({ ok: false, error: "File too large (>15 MB)" }, 413);
+    candidateId = parseId(form.get("candidate_id"));
+    if (!candidateId) return json({ ok: false, error: "candidate_id required" }, 400);
+    bytes    = await f.arrayBuffer();
+    fileName = f.name || "cv.pdf";
+    fileMime = f.type || "application/octet-stream";
+  }
+  if (!bytes || bytes.byteLength === 0)        return json({ ok: false, error: "Empty file" }, 400);
+  if (bytes.byteLength > 15 * 1024 * 1024)     return json({ ok: false, error: "File too large (>15 MB)" }, 413);
 
   const basic = "Basic " + btoa(`${wpUsername}:${wpAppPassword}`);
 
   // 1. Upload to WP media (raw body + Content-Disposition — no multipart
   //    re-encoding). Any type is fine: PDF, doc, docx.
-  const buf = await f.arrayBuffer();
-  const safeName = (f.name || "cv.pdf").replace(/[^a-zA-Z0-9._-]/g, "_");
+  const safeName = fileName.replace(/[^a-zA-Z0-9._-]/g, "_");
   const mediaRes = await fetch(`${wpBaseUrl}/wp-json/wp/v2/media`, {
     method: "POST",
     headers: {
       Authorization: basic,
-      "Content-Type": f.type || "application/octet-stream",
+      "Content-Type": fileMime,
       "Content-Disposition": `attachment; filename="${safeName}"`,
     },
-    body: buf,
+    body: bytes,
   });
   const mediaJson = await mediaRes.json().catch(() => null) as { id?: number; source_url?: string; code?: string; message?: string } | null;
   if (!mediaRes.ok || !mediaJson || mediaJson.code) {
@@ -171,6 +205,12 @@ Deno.serve(async (req: Request) => {
 
   return json({ ok: true, media_id: mediaId, source_url: sourceUrl, attached_to: candidateId, attached_key: attachedKey }, 200);
 });
+
+function parseId(v: unknown): number | null {
+  if (typeof v === "number" && Number.isFinite(v)) return v;
+  if (typeof v === "string" && /^\d+$/.test(v))    return parseInt(v, 10);
+  return null;
+}
 
 function json(payload: unknown, status: number): Response {
   return new Response(JSON.stringify(payload), {
