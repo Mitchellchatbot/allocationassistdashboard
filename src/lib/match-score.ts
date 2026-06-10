@@ -315,13 +315,26 @@ function scoreSpecialtyInner(doctor: string | null, vacancy: string): number {
 
   // Token overlap fallback for anything the canonical list misses
   // (covers free-text noise like "Adult Cardiologist – cath lab fellow").
-  const aToks = new Set(a.split(/\s+/).filter(t => t.length > 3));
-  const bToks = new Set(b.split(/\s+/).filter(t => t.length > 3));
+  // EXCLUDE generic medical words first — otherwise "Plastic Surgery" ↔
+  // "Cardiac Surgery" (shared "surgery") or "Pediatric Cardiology" ↔
+  // "Pediatric Neurology" (shared "pediatric") match falsely. Only a shared
+  // DISTINCTIVE token counts.
+  const aToks = new Set(a.split(/\s+/).filter(t => t.length > 3 && !GENERIC_SPECIALTY_TOKENS.has(t)));
+  const bToks = new Set(b.split(/\s+/).filter(t => t.length > 3 && !GENERIC_SPECIALTY_TOKENS.has(t)));
   let overlap = 0;
   for (const t of aToks) if (bToks.has(t)) overlap++;
   if (overlap >= 1) return 25;
   return 0;
 }
+
+// Words too generic to imply a specialty match on their own — they appear
+// across many unrelated specialties, so a shared one is not a real signal.
+const GENERIC_SPECIALTY_TOKENS = new Set([
+  "surgery", "surgeon", "surgical", "medicine", "medical", "clinical",
+  "general", "pediatric", "paediatric", "pediatrics", "paediatrics",
+  "consultant", "specialist", "senior", "junior", "registrar", "fellow",
+  "doctor", "physician", "care", "disease", "diseases", "department",
+]);
 
 function scoreLicense(d: MatchCandidateDoctor, h: MatchCandidateHospital | null): MatchFactor | null {
   if (!h) return null;

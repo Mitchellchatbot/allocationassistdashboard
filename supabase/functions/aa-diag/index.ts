@@ -514,6 +514,32 @@ Deno.serve(async (req) => {
           populated_examples: populated,
         }, null, 2), { headers: { "Content-Type": "application/json" } });
       }
+      if ((body as { pool_coverage?: boolean } | null)?.pool_coverage) {
+        // How many PUBLISHED website doctors would the batch/vacancy picker
+        // miss? The picker's spine is Zoho "Doctors on Board"; a published WP
+        // candidate linked to a lead (or unlinked) never appears.
+        const { data } = await sb.from("wordpress_candidates").select("doctor_id, status, license_status, license_types");
+        const pub = ((data ?? []) as Array<{ doctor_id: string | null; status: string | null; license_status: string | null; license_types: string[] | null }>).filter(c => c.status === "publish");
+        const byLink = { dob: 0, lead: 0, none: 0, other: 0 };
+        let licenseTypesButThinText = 0;
+        for (const c of pub) {
+          const d = c.doctor_id;
+          if (!d) byLink.none++;
+          else if (d.startsWith("dob:")) byLink.dob++;
+          else if (d.startsWith("lead:")) byLink.lead++;
+          else byLink.other++;
+          // doctors whose structured licenses wouldn't be detected from the
+          // free-text license_status regex (the license_types[] gap)
+          const types = c.license_types ?? [];
+          const text = c.license_status ?? "";
+          if (types.length && !/dha|doh|moh|scfhs|qchp/i.test(text)) licenseTypesButThinText++;
+        }
+        return new Response(JSON.stringify({
+          ok: true, published_total: pub.length, by_link: byLink,
+          excluded_from_batch_picker: byLink.lead + byLink.none + byLink.other,
+          license_types_invisible_in_text: licenseTypesButThinText,
+        }, null, 2), { headers: { "Content-Type": "application/json" } });
+      }
       if ((body as { dump_acf?: boolean } | null)?.dump_acf) {
         // Union of every ACF key across real WP candidates (from the
         // mirror's raw_acf), plus a sample value for any cv/resume/file/

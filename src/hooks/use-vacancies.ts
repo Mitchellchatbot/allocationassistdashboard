@@ -203,9 +203,12 @@ export function buildDoctorCandidate(
     name:             pickStr(wp?.full_name, lead?.Full_Name, dob?.Full_Name, profile?.doctor_name) ?? "",
     speciality,
     license:          licenseText,
-    has_dha:          truthyFlag(lead?.Has_DHA) || truthyFlag(dobRich.Has_DHA) || /dha/i.test(licenseText ?? ""),
-    has_doh:          truthyFlag(lead?.Has_DOH) || truthyFlag(dobRich.Has_DOH) || /doh/i.test(licenseText ?? ""),
-    has_moh:          truthyFlag(lead?.Has_MOH) || truthyFlag(dobRich.Has_MOH) || /moh/i.test(licenseText ?? ""),
+    // Also read the structured license_types[] array, not just the free-text
+    // license_status — a doctor whose licenses live only in the array would
+    // otherwise score 0 on region-fit.
+    has_dha:          truthyFlag(lead?.Has_DHA) || truthyFlag(dobRich.Has_DHA) || /dha/i.test(licenseText ?? "") || licenseTypeHas(wp, /dha/i),
+    has_doh:          truthyFlag(lead?.Has_DOH) || truthyFlag(dobRich.Has_DOH) || /doh|haad/i.test(licenseText ?? "") || licenseTypeHas(wp, /doh|haad/i),
+    has_moh:          truthyFlag(lead?.Has_MOH) || truthyFlag(dobRich.Has_MOH) || /moh/i.test(licenseText ?? "") || licenseTypeHas(wp, /moh/i),
     country_training: pickStr(
       wp?.country_of_training,
       lead?.Country_of_Specialty_training,
@@ -253,6 +256,11 @@ function truthyFlag(v: unknown): boolean {
   if (typeof v === "boolean") return v;
   const s = String(v).toLowerCase().trim();
   return s === "true" || s === "yes" || s === "1" || s === "y";
+}
+
+/** True if any entry of a WP candidate's structured license_types[] matches. */
+function licenseTypeHas(wp: WpCandidate | null | undefined, re: RegExp): boolean {
+  return (wp?.license_types ?? []).some(t => re.test(String(t)));
 }
 
 /** Reverse direction: which Doctor-on-Board fits THIS vacancy best?

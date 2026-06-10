@@ -988,7 +988,10 @@ function BatchDialog({ target, onTargetChange, batches, suggestedSpecialty }: {
     try { await update.mutateAsync({ id: batch.id, patch: { doctor_ids: next } }); }
     catch (e) { toast.error(e instanceof Error ? e.message : "Update failed"); }
   };
-  const add    = (id: string) => batch && setDoctors([...batch.doctor_ids, id]);
+  // Dedupe guard: doctor_ids comes from the query cache, so a fast double-
+  // click before the refetch lands could otherwise queue the same doctor
+  // twice (→ two identical cards in the send).
+  const add    = (id: string) => batch && !batch.doctor_ids.includes(id) && setDoctors([...batch.doctor_ids, id]);
   const remove = (id: string) => batch && setDoctors(batch.doctor_ids.filter(x => x !== id));
   const move   = (id: string, dir: -1 | 1) => {
     if (!batch) return;
@@ -1520,9 +1523,10 @@ function useMemoDoctors(
         // booleans + License free text. WP keeps the canonical
         // hand-edited value; Zoho fills the rest.
         license:             pickStr(wp?.license_status, d.License),
-        has_dha:             yes(dobRich.Has_DHA) || /dha/i.test(wp?.license_status ?? ""),
-        has_doh:             yes(dobRich.Has_DOH) || /doh/i.test(wp?.license_status ?? ""),
-        has_moh:             yes(dobRich.Has_MOH) || /moh/i.test(wp?.license_status ?? ""),
+        // Read structured license_types[] too, not just the free-text status.
+        has_dha:             yes(dobRich.Has_DHA) || /dha/i.test(wp?.license_status ?? "")       || (wp?.license_types ?? []).some(t => /dha/i.test(t)),
+        has_doh:             yes(dobRich.Has_DOH) || /doh|haad/i.test(wp?.license_status ?? "")  || (wp?.license_types ?? []).some(t => /doh|haad/i.test(t)),
+        has_moh:             yes(dobRich.Has_MOH) || /moh/i.test(wp?.license_status ?? "")       || (wp?.license_types ?? []).some(t => /moh/i.test(t)),
         country_training:    pickStr(wp?.country_of_training, dobStr("Country_of_Specialty_training")),
         nationality:         pickStr(wp?.nationality, dobStr("Nationality")),
         years_experience:    pickNum(wp?.years_experience, dobNum("Years_of_Experience")),
