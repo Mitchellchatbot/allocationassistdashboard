@@ -10,7 +10,7 @@ import {
   Select, SelectContent, SelectItem, SelectTrigger, SelectValue,
 } from "@/components/ui/select";
 import {
-  useFathomCalls, useFathomCall, useFathomCallStats, useFathomAutoSync, useFathomSync,
+  useFathomCalls, useFathomCall, useFathomCallStats, useFathomHosts, useFathomAutoSync, useFathomSync,
   type FathomCall,
 } from "@/hooks/use-fathom-calls";
 import { Button } from "@/components/ui/button";
@@ -105,13 +105,9 @@ export default function Calls() {
   const manualSync = useFathomSync();
   const now = useNowTick(1000);
 
-  const hosts = useMemo(() => {
-    const set = new Map<string, string>();
-    (calls ?? []).forEach(c => {
-      if (c.host_email) set.set(c.host_email, c.host_name || c.host_email);
-    });
-    return [...set.entries()].sort((a, b) => a[1].localeCompare(b[1]));
-  }, [calls]);
+  // Host dropdown is built from the WHOLE table (not the 500-row list) so it's
+  // complete; counts let the team verify the hosts look right.
+  const { data: hostList = [] } = useFathomHosts();
 
   const stats = useMemo(() => {
     const list = calls ?? [];
@@ -159,8 +155,8 @@ export default function Calls() {
             </SelectTrigger>
             <SelectContent>
               <SelectItem value="all" className="text-[12px]">All hosts</SelectItem>
-              {hosts.map(([email, name]) => (
-                <SelectItem key={email} value={email} className="text-[12px]">{name}</SelectItem>
+              {hostList.map(h => (
+                <SelectItem key={h.email} value={h.email} className="text-[12px]">{h.name} ({h.count})</SelectItem>
               ))}
             </SelectContent>
           </Select>

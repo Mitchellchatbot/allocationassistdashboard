@@ -148,6 +148,48 @@ export function useFathomCallStats(filters: Pick<FathomCallsFilters, "from" | "t
   });
 }
 
+// ─── Host roster (for the filter dropdown) ───────────────────────────────────
+
+export interface FathomHost { email: string; name: string; count: number; }
+
+/** Every distinct call host + their call count, across the WHOLE table.
+ *  The Calls page used to build the "All hosts" dropdown from the loaded
+ *  500-row list, so any host whose calls fell outside the latest 500 was
+ *  missing — an inaccurate host list. This pages the full table on a light
+ *  projection (no transcripts) so the dropdown is complete, and the counts
+ *  let you eyeball whether the hosts look right. */
+export function useFathomHosts() {
+  return useQuery({
+    queryKey: ["fathom-hosts"],
+    queryFn: async (): Promise<FathomHost[]> => {
+      const map = new Map<string, FathomHost>();
+      const PAGE = 1000;
+      for (let from = 0; from < 200_000; from += PAGE) {
+        const { data, error } = await supabase
+          .from("fathom_calls")
+          .select("host_email, host_name")
+          .order("recording_start", { ascending: false, nullsFirst: false })
+          .range(from, from + PAGE - 1);
+        if (error) throw error;
+        const batch = (data ?? []) as Array<{ host_email: string | null; host_name: string | null }>;
+        for (const r of batch) {
+          const email = (r.host_email ?? "").toLowerCase().trim();
+          if (!email) continue;
+          const cur = map.get(email) ?? { email, name: r.host_name || email, count: 0 };
+          cur.count++;
+          if ((!cur.name || cur.name === email) && r.host_name) cur.name = r.host_name;
+          map.set(email, cur);
+        }
+        if (batch.length < PAGE) break;
+      }
+      return [...map.values()].sort((a, b) => b.count - a.count);
+    },
+    staleTime: 60_000,
+    refetchInterval: AUTO_REFETCH_MS,
+    refetchIntervalInBackground: false,
+  });
+}
+
 // ─── Single call (with lazy transcript fetch) ───────────────────────────────
 
 export function useFathomCall(fathomId: string | null) {
