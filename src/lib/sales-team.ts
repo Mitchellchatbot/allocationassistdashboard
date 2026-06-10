@@ -39,3 +39,18 @@ export function firstNameKey(name: string | null | undefined): string {
 export function isSalesRepName(name: string | null | undefined): boolean {
   return SALES_FIRST_NAMES.has(firstNameKey(name));
 }
+
+const SALES_EMAILS = new Set(SALES_TEAM.map(r => (r.email ?? "").toLowerCase()).filter(Boolean));
+
+/** True when a Fathom call host belongs to the sales team. Fathom hosts may
+ *  use a work email (not the @sales.com dashboard login), so match on the
+ *  display name's first word, the exact roster email, OR the first-name in
+ *  the email local part (e.g. abraham@allocationassist.com). */
+export function isSalesRepHost(name: string | null | undefined, email: string | null | undefined): boolean {
+  if (isSalesRepName(name)) return true;
+  const e = (email ?? "").toLowerCase().trim();
+  if (!e) return false;
+  if (SALES_EMAILS.has(e)) return true;
+  const local = e.split("@")[0]?.split(/[._-]/)[0] ?? "";
+  return SALES_FIRST_NAMES.has(local);
+}

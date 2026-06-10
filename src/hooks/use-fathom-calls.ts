@@ -62,7 +62,11 @@ export interface FathomCall {
 export interface FathomCallsFilters {
   from?:   string | null;   // ISO date
   to?:     string | null;
-  host?:   string | null;   // host_email
+  host?:   string | null;   // single host_email
+  hosts?:  string[] | null; // restrict to a SET of host_emails (e.g. the sales
+                            // team). An empty array → match nothing (used while
+                            // the host roster is still resolving, or when no
+                            // rep hosts exist). Takes precedence over `host`.
   search?: string | null;   // simple title/transcript search
 }
 
@@ -80,7 +84,9 @@ export function useFathomCalls(filters: FathomCallsFilters = {}) {
 
       if (filters.from) q = q.gte("recording_start", filters.from);
       if (filters.to)   q = q.lte("recording_start", filters.to);
-      if (filters.host) q = q.eq("host_email", filters.host);
+      // hosts (set) wins over host (single). An empty set matches nothing.
+      if (Array.isArray(filters.hosts)) q = q.in("host_email", filters.hosts);
+      else if (filters.host)            q = q.eq("host_email", filters.host);
 
       const { data, error } = await q;
       if (error) throw error;
@@ -115,9 +121,9 @@ export interface FathomCallStats { count: number; totalSecs: number; externals: 
  *  it's safe to page through the whole table — that's what fixes the KPIs
  *  pinning at "Total calls 500". Respects the host filter; search is a
  *  list-only concern so it's ignored here. */
-export function useFathomCallStats(filters: Pick<FathomCallsFilters, "from" | "to" | "host"> = {}) {
+export function useFathomCallStats(filters: Pick<FathomCallsFilters, "from" | "to" | "host" | "hosts"> = {}) {
   return useQuery({
-    queryKey: ["fathom-call-stats", filters.from ?? "", filters.to ?? "", filters.host ?? ""],
+    queryKey: ["fathom-call-stats", filters.from ?? "", filters.to ?? "", filters.host ?? "", (filters.hosts ?? []).join(",")],
     queryFn: async (): Promise<FathomCallStats> => {
       let count = 0, totalSecs = 0, externals = 0;
       const PAGE = 1000;
@@ -129,7 +135,8 @@ export function useFathomCallStats(filters: Pick<FathomCallsFilters, "from" | "t
           .range(from, from + PAGE - 1);
         if (filters.from) q = q.gte("recording_start", filters.from);
         if (filters.to)   q = q.lte("recording_start", filters.to);
-        if (filters.host) q = q.eq("host_email", filters.host);
+        if (Array.isArray(filters.hosts)) q = q.in("host_email", filters.hosts);
+        else if (filters.host)            q = q.eq("host_email", filters.host);
         const { data, error } = await q;
         if (error) throw error;
         const batch = (data ?? []) as Array<{ duration_seconds: number | null; external_domains: string[] | null }>;

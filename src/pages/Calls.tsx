@@ -13,6 +13,7 @@ import {
   useFathomCalls, useFathomCall, useFathomCallStats, useFathomHosts, useFathomAutoSync, useFathomSync,
   type FathomCall,
 } from "@/hooks/use-fathom-calls";
+import { isSalesRepHost } from "@/lib/sales-team";
 import { Button } from "@/components/ui/button";
 import {
   PhoneCall, Loader2, Search, ExternalLink, Clock,
@@ -93,21 +94,33 @@ export default function Calls() {
   const [hostFilter, setHostFilter] = useState<string>("");
   const [activeId,   setActiveId]   = useState<string | null>(null);
 
+  // Host roster across the WHOLE table. The Calls page is scoped to the SALES
+  // TEAM — Abraham, Asser, Asim (Ammar 2026-06-10: "just show calls for these
+  // people"). Match Fathom hosts to the reps by name/email, then restrict
+  // every query below to their host_emails.
+  const { data: hostList = [], isLoading: hostsLoading } = useFathomHosts();
+  const salesHosts  = useMemo(() => hostList.filter(h => isSalesRepHost(h.name, h.email)), [hostList]);
+  const salesEmails = useMemo(() => salesHosts.map(h => h.email), [salesHosts]);
+
+  // A single rep chosen from the dropdown narrows to them; otherwise show all
+  // of the sales team's calls. Empty array (roster still loading / no rep
+  // hosts) → matches nothing, which is correct.
+  const scopedHosts = useMemo(
+    () => (hostFilter ? [hostFilter] : salesEmails),
+    [hostFilter, salesEmails],
+  );
+
   const filters = useMemo(() => ({
     search: search || null,
-    host:   hostFilter || null,
-  }), [search, hostFilter]);
+    hosts:  scopedHosts,
+  }), [search, scopedHosts]);
 
   const { data: calls, isLoading, error, isFetching } = useFathomCalls(filters);
-  // Real totals over the WHOLE table (the list above caps at 500 rows).
-  const { data: callStats } = useFathomCallStats(useMemo(() => ({ host: hostFilter || null }), [hostFilter]));
+  // Real totals over the scoped set (the list itself caps at 500 rows).
+  const { data: callStats } = useFathomCallStats(useMemo(() => ({ hosts: scopedHosts }), [scopedHosts]));
   const { lastSyncAt, syncing, lastError, enriching } = useFathomAutoSync();
   const manualSync = useFathomSync();
   const now = useNowTick(1000);
-
-  // Host dropdown is built from the WHOLE table (not the 500-row list) so it's
-  // complete; counts let the team verify the hosts look right.
-  const { data: hostList = [] } = useFathomHosts();
 
   const stats = useMemo(() => {
     const list = calls ?? [];
@@ -135,7 +148,7 @@ export default function Calls() {
   return (
     <DashboardLayout
       title="Calls"
-      subtitle="Recorded meetings, transcripts, and AI summaries from Fathom"
+      subtitle="Sales team recorded calls (Abraham, Asser, Asim) — transcripts & AI summaries from Fathom"
     >
       {/* ── Top bar: search, host filter, live auto-sync indicator ───────── */}
       <div className="flex flex-col sm:flex-row gap-2 sm:items-center justify-between mb-4">
@@ -155,7 +168,7 @@ export default function Calls() {
             </SelectTrigger>
             <SelectContent>
               <SelectItem value="all" className="text-[12px]">All hosts</SelectItem>
-              {hostList.map(h => (
+              {salesHosts.map(h => (
                 <SelectItem key={h.email} value={h.email} className="text-[12px]">{h.name} ({h.count})</SelectItem>
               ))}
             </SelectContent>
@@ -231,7 +244,7 @@ export default function Calls() {
           </CardTitle>
         </CardHeader>
         <CardContent className="p-0">
-          {isLoading ? (
+          {isLoading || hostsLoading ? (
             <div className="flex items-center justify-center py-12 text-muted-foreground text-[12px]">
               <Loader2 className="h-4 w-4 animate-spin mr-2" /> Loading calls…
             </div>
