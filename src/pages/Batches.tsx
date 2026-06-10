@@ -20,7 +20,7 @@ import { useZohoData, type ZohoLead, type ZohoDoctorOnBoard } from "@/hooks/use-
 import { useDoctorLifecycleMap } from "@/hooks/use-doctor-lifecycle";
 import { groupSpecialty } from "@/lib/specialty-groups";
 import { scoreCandidate, type MatchScore } from "@/lib/match-score";
-import { useWpCandidates, wpCandidateProfileText, type WpCandidate } from "@/hooks/use-wp-candidates";
+import { useWpCandidates, usePublishedWpCandidates, wpCandidateProfileText, type WpCandidate } from "@/hooks/use-wp-candidates";
 import { MatchScoreChip, MatchReasons } from "@/components/DoctorVacancyMatches";
 
 /**
@@ -827,7 +827,9 @@ function BatchDialog({ target, onTargetChange, batches, suggestedSpecialty }: {
   const sendNow = useSendBatchNow();
   const { data: zoho } = useZohoData();
   const lifecycleMap = useDoctorLifecycleMap();
-  const { data: wpCandidates = [] } = useWpCandidates();
+  // Pool = WP PUBLISHED candidates only (the website), augmented from Zoho.
+  // Drafts/private + leads are excluded from the batch picker.
+  const { data: wpCandidates = [] } = usePublishedWpCandidates();
   const allDoctors = useMemoDoctors(zoho, lifecycleMap, wpCandidates);
 
   // Create-form local state — only used while target === "new".

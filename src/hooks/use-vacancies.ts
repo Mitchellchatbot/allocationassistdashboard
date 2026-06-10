@@ -16,7 +16,7 @@ import { useHospitals } from "@/hooks/use-hospitals";
 import { useDoctorProfile, useDoctorProfiles, type DoctorProfile } from "@/hooks/use-doctor-profiles";
 import { useZohoData } from "@/hooks/use-zoho-data";
 import type { ZohoLead, ZohoDoctorOnBoard } from "@/hooks/use-zoho-data";
-import { useWpCandidates, wpCandidateProfileText, type WpCandidate } from "@/hooks/use-wp-candidates";
+import { useWpCandidates, usePublishedWpCandidates, wpCandidateProfileText, type WpCandidate } from "@/hooks/use-wp-candidates";
 
 export type VacancyStatus   = "open" | "filled" | "closed";
 export type VacancyPriority = "high" | "medium" | "low";
@@ -270,7 +270,9 @@ function truthyFlag(v: unknown): boolean {
 export function useMatchingDoctors(vacancy: Vacancy | null | undefined): ScoredMatchingDoctor[] {
   const { data: profiles = [] } = useDoctorProfiles();
   const { data: hospitals = [] } = useHospitals();
-  const { data: wpCandidates = [] } = useWpCandidates();
+  // Pool = WP PUBLISHED candidates only (the website). Drafts/private are
+  // excluded so vacancy matches only surface doctors live on the site.
+  const { data: wpCandidates = [] } = usePublishedWpCandidates();
   const zoho = useZohoData();
 
   return useMemo<ScoredMatchingDoctor[]>(() => {

@@ -9,7 +9,7 @@
  */
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { supabase } from "@/lib/supabase";
-import { useCallback } from "react";
+import { useCallback, useMemo } from "react";
 import { useTableSubscription } from "@/lib/realtime-registry";
 
 export interface WpCandidate {
@@ -136,6 +136,22 @@ export function useWpCandidates() {
     qc.invalidateQueries({ queryKey: KEY });
   }, [qc]));
   return q;
+}
+
+/** Published-only view of the WP pool — the doctors actually LIVE on the
+ *  website. Vacancy + Batch matching use this so drafts/private candidates
+ *  never surface as matchable doctors (Ammar 2026-06-09: the pool is the
+ *  website's published doctors, augmented from Zoho). Derives from the same
+ *  cached useWpCandidates() query — no extra fetch. NOTE: the admin list
+ *  (WpCandidates.tsx) and OperationsCard intentionally keep the full hook so
+ *  they can count publish/private/draft separately — do not swap those. */
+export function usePublishedWpCandidates() {
+  const q = useWpCandidates();
+  const published = useMemo(
+    () => (q.data ?? []).filter(c => c.status === "publish"),
+    [q.data],
+  );
+  return { ...q, data: published };
 }
 
 export function useSyncWpCandidates() {
