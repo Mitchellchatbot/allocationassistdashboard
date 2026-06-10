@@ -122,7 +122,6 @@ export default function Forms() {
                 <TabsTrigger key={f.id} value={f.id} className="text-[12px] px-3 py-1.5 flex items-center gap-1.5">
                   <ProviderDot provider={f.provider} />
                   {f.name}
-                  <Badge variant="outline" className="ml-1 bg-white border-slate-200 text-[9px]">{f.response_count}</Badge>
                 </TabsTrigger>
               ))}
             </TabsList>
