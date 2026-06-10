@@ -105,7 +105,9 @@ async function handleUpsert(req: Request): Promise<Response> {
   const wpPayload: Record<string, unknown> = {};
   if (body.title  !== undefined) wpPayload.title  = body.title;
   if (body.status !== undefined) wpPayload.status = body.status;
-  if (body.acf    !== undefined) wpPayload.acf    = body.acf;
+  // Sanitise the ACF object so typed fields don't trip WP's
+  // rest_invalid_param ("Invalid parameter(s): acf"). See sanitizeAcf.
+  if (body.acf    !== undefined) wpPayload.acf    = sanitizeAcf(body.acf);
 
   // 2. POST (create) or PATCH-via-POST (edit). The WP REST API accepts
   //    POST for both — "POST /wp/v2/candidate/<id>" is the documented
@@ -137,7 +139,10 @@ async function handleUpsert(req: Request): Promise<Response> {
       error: `WP REST didn't respond in 45s. WP may be slow or unreachable. Detail: ${(e as Error).message}`,
     }, 504);
   }
-  const wpJson = await wpRes.json().catch(() => null) as { id?: number; code?: string; message?: string } | null;
+  const wpJson = await wpRes.json().catch(() => null) as {
+    id?: number; code?: string; message?: string;
+    data?: { status?: number; params?: Record<string, unknown>; details?: Record<string, unknown> };
+  } | null;
   if (!wpRes.ok || !wpJson || wpJson.code) {
     // Pass through 4xx as-is so the client sees the actual WP error
     // (rest_invalid_param, rest_forbidden, etc.) instead of an opaque
@@ -145,9 +150,18 @@ async function handleUpsert(req: Request): Promise<Response> {
     const passthrough = wpRes.status >= 400 && wpRes.status < 500
       ? wpRes.status
       : 502;
+    // rest_invalid_param only names the parent param ("acf") in `message`;
+    // the SPECIFIC offending field + reason live in data.params / data.details
+    // (e.g. "acf[years…] is not of type integer"). Surface them so we don't
+    // have to guess which ACF field WP rejected.
+    const extra = wpJson?.data?.params
+      ? ` (${Object.values(wpJson.data.params).join("; ")})`
+      : wpJson?.data?.details
+        ? ` (${JSON.stringify(wpJson.data.details)})`
+        : "";
     return json({
       ok: false,
-      error: `WP ${wpRes.status}: ${wpJson?.code ?? "unknown"} — ${wpJson?.message ?? "no body"}`,
+      error: `WP ${wpRes.status}: ${wpJson?.code ?? "unknown"} — ${wpJson?.message ?? "no body"}${extra}`,
     }, passthrough);
   }
 
@@ -361,6 +375,54 @@ function parseYesNo(v: unknown): boolean | null {
   if (typeof v === "boolean") return v;
   if (v == null || v === "")  return null;
   return /yes|true|1/i.test(String(v));
+}
+
+/** ACF fields that WP registers as checkbox / multi-select — they want an
+ *  array in REST, and a bare string trips rest_invalid_param. */
+const ACF_ARRAY_FIELDS = new Set(["license_type", "targeted_locations"]);
+
+/** Sanitise an ACF payload so typed fields don't trip WordPress's
+ *  rest_invalid_param ("Invalid parameter(s): acf"). WP validates every
+ *  value against the schema ACF registered, but only reports the parent
+ *  param — so one wrong-typed field fails the WHOLE write. We:
+ *    - drop empties (an "" / null on a number/date/image/bool field errors;
+ *      text fields don't need an explicit empty on write),
+ *    - coerce the known typed fields to the type ACF expects,
+ *    - wrap multi-select fields in an array.
+ *  Unknown text fields pass through untouched. */
+function sanitizeAcf(acf: Record<string, unknown> | undefined): Record<string, unknown> | undefined {
+  if (!acf || typeof acf !== "object") return acf;
+  const out: Record<string, unknown> = {};
+  for (const [k, raw] of Object.entries(acf)) {
+    let v: unknown = raw;
+    if (v === null || v === undefined || v === "") continue;
+
+    // Image field → attachment ID (integer). A URL / object / non-numeric
+    // string is rejected; the photo is attached separately via
+    // wordpress-candidate-upload-photo, so just drop anything that isn't a
+    // valid id here.
+    if (k === "profile_picture") {
+      const id = typeof v === "number" ? v : (/^\d+$/.test(String(v)) ? parseInt(String(v), 10) : null);
+      if (id) out[k] = id;
+      continue;
+    }
+    // Number field → coerce a numeric-ish string, drop anything non-numeric.
+    if (k === "years_of_experience_post_specialization") {
+      const n = typeof v === "number" ? v : parseInt(String(v).replace(/[^\d]/g, ""), 10);
+      if (Number.isFinite(n)) out[k] = n;
+      continue;
+    }
+    // True/false field → real boolean (handles "Yes"/"No"/1/0).
+    if (k === "have_children_or_any_dependent") {
+      out[k] = typeof v === "boolean" ? v : /^(yes|true|1|y)$/i.test(String(v));
+      continue;
+    }
+    // Checkbox / multi-select → array.
+    if (ACF_ARRAY_FIELDS.has(k) && !Array.isArray(v)) v = [String(v)];
+
+    out[k] = v;
+  }
+  return out;
 }
 
 function parseStringArray(v: unknown): string[] {
