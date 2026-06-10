@@ -7,6 +7,7 @@ import { useFilteredData } from "@/hooks/use-filtered-data";
 import { useWeeklySales } from "@/hooks/use-weekly-sales";
 import { useWorkerEntries } from "@/hooks/use-worker-entries";
 import { useFilters } from "@/lib/filters";
+import { SALES_TEAM, firstNameKey } from "@/lib/sales-team";
 import { useMemo } from "react";
 import { Trophy, Phone, ThumbsUp } from "lucide-react";
 import { ChannelIcon } from "@/components/ChannelIcon";
@@ -21,13 +22,6 @@ const statusColors: Record<string, string> = {
   completed: "bg-secondary text-muted-foreground",
   paused:    "bg-warning/10 text-warning",
 };
-
-// Match weekly-sales member name to Zoho recruiter name by first word (case-insensitive)
-function matchByFirstName(recruiterName: string, memberName: string) {
-  const a = recruiterName.split(" ")[0].toLowerCase();
-  const b = memberName.split(" ")[0].toLowerCase();
-  return a === b;
-}
 
 const TeamPerformance = () => {
   const { recruiters, campaigns } = useFilteredData();
@@ -87,12 +81,38 @@ const TeamPerformance = () => {
     return map;
   }, [salesData, workerLoggedByName]);
 
-  // Chart data: all members that have sales data (union of Zoho recruiters + weekly_sales members)
-  const chartData = salesData.map(s => ({
-    name:            s.member_name,
-    "Full Sales Calls": s.full_sales_calls,
-    "Good Calls":    s.good_calls,
-    "Good Call Rate (%)": s.good_call_rate,
+  // The board is exactly the active sales team — Abraham, Asser, Asim
+  // (Ammar 2026-06-10: "leave only [them], remove the rest of us"). Each
+  // rep's CALL count is their Zoho call activity (recruiter.calls = outbound
+  // Zoho Calls by owner, date-filtered) — NOT the manual weekly_sales CSV.
+  // That's the "count the activities from Zoho" fix. Leads / contacted /
+  // conversion come from their Zoho lead ownership; Full/Good calls remain a
+  // weekly_sales quality overlay when present.
+  const rows = useMemo(() => {
+    return SALES_TEAM.map(rep => {
+      const recruiter = recruiters.find(r => firstNameKey(r.name) === rep.firstName) as
+        | { name: string; calls?: number; doctors?: number; contacted?: number; conversionRate?: number; score?: number }
+        | undefined;
+      const sales = salesByFirst.get(rep.firstName);
+      return {
+        key:            rep.firstName,
+        name:           recruiter?.name ?? rep.name,
+        zohoCalls:      recruiter?.calls ?? 0,
+        leads:          recruiter?.doctors ?? 0,
+        contacted:      recruiter?.contacted ?? 0,
+        conversionRate: recruiter?.conversionRate ?? 0,
+        score:          recruiter?.score ?? 0,
+        sales,
+      };
+    });
+  }, [recruiters, salesByFirst]);
+
+  // Chart the same three reps; headline series is Zoho call activity.
+  const chartData = rows.map(r => ({
+    name:               r.name,
+    "Calls (Zoho)":     r.zohoCalls,
+    "Full Sales Calls": r.sales?.full_sales_calls ?? 0,
+    "Good Calls":       r.sales?.good_calls ?? 0,
   }));
 
   return (
@@ -114,6 +134,7 @@ const TeamPerformance = () => {
                   <TableHead className="text-[10px] uppercase tracking-wide h-8 w-8">#</TableHead>
                   <TableHead className="text-[10px] uppercase tracking-wide h-8">Name</TableHead>
                   <TableHead className="text-[10px] uppercase tracking-wide h-8 hidden sm:table-cell">Region</TableHead>
+                  <TableHead className="text-[10px] uppercase tracking-wide h-8 text-right">Calls</TableHead>
                   <TableHead className="text-[10px] uppercase tracking-wide h-8 text-right">Leads</TableHead>
                   <TableHead className="text-[10px] uppercase tracking-wide h-8 text-right">Contacted</TableHead>
                   <TableHead className="text-[10px] uppercase tracking-wide h-8 text-right hidden md:table-cell">Conv. Rate</TableHead>
@@ -125,138 +146,93 @@ const TeamPerformance = () => {
                 </TableRow>
               </TableHeader>
               <TableBody>
-                {recruiters.map((m, i) => {
-                  const conversionRate = (m as { conversionRate?: number }).conversionRate ?? 0;
-                  const contacted      = (m as { contacted?: number }).contacted ?? 0;
-                  const sales = salesByFirst.get(m.name.split(" ")[0].toLowerCase());
-
-                  return (
-                    <TableRow key={m.name} className="hover:bg-muted/30">
-                      <TableCell className="py-2.5">
-                        {i < 3 ? (
-                          <Trophy className={`h-3.5 w-3.5 ${i === 0 ? "text-warning" : i === 1 ? "text-muted-foreground" : "text-orange-400"}`} />
-                        ) : (
-                          <span className="text-[11px] text-muted-foreground">{i + 1}</span>
-                        )}
-                      </TableCell>
-                      <TableCell className="py-2.5">
-                        <div className="flex items-center gap-2">
-                          <div className="h-7 w-7 rounded-full bg-primary/10 text-primary flex items-center justify-center text-[9px] font-bold">
-                            {m.name.split(" ").map((n: string) => n[0]).join("")}
-                          </div>
-                          <div>
-                            <p className="text-[12px] font-medium">{m.name}</p>
-                            <p className="text-[10px] text-muted-foreground">{m.role}</p>
-                          </div>
+                {rows.map((r, i) => (
+                  <TableRow key={r.key} className="hover:bg-muted/30">
+                    <TableCell className="py-2.5">
+                      {i < 3 ? (
+                        <Trophy className={`h-3.5 w-3.5 ${i === 0 ? "text-warning" : i === 1 ? "text-muted-foreground" : "text-orange-400"}`} />
+                      ) : (
+                        <span className="text-[11px] text-muted-foreground">{i + 1}</span>
+                      )}
+                    </TableCell>
+                    <TableCell className="py-2.5">
+                      <div className="flex items-center gap-2">
+                        <div className="h-7 w-7 rounded-full bg-primary/10 text-primary flex items-center justify-center text-[9px] font-bold">
+                          {r.name.split(" ").map((n: string) => n[0]).join("")}
                         </div>
-                      </TableCell>
-                      <TableCell className="text-[11px] py-2.5 hidden sm:table-cell">{m.region}</TableCell>
-                      <TableCell className="text-[12px] text-right py-2.5 tabular-nums">{m.doctors}</TableCell>
-                      <TableCell className="text-[12px] text-right py-2.5 tabular-nums">{contacted}</TableCell>
-                      <TableCell className="text-right py-2.5 hidden md:table-cell">
-                        <span className={`text-[12px] font-semibold tabular-nums ${
-                          conversionRate >= 40 ? 'text-success' :
-                          conversionRate >= 20 ? 'text-primary' :
-                          'text-warning'
-                        }`}>
-                          {conversionRate}%
-                        </span>
-                      </TableCell>
-
-                      {/* Weekly sales data */}
-                      <TableCell className="text-[12px] text-right py-2.5 tabular-nums hidden lg:table-cell">
-                        {salesLoading ? (
-                          <div className="h-3 w-8 rounded bg-muted animate-pulse ml-auto" />
-                        ) : sales ? (
-                          <span className="flex items-center justify-end gap-1">
-                            <Phone className="h-3 w-3 text-muted-foreground" />
-                            {sales.full_sales_calls}
-                          </span>
-                        ) : <span className="text-muted-foreground/40">—</span>}
-                      </TableCell>
-                      <TableCell className="text-[12px] text-right py-2.5 tabular-nums hidden lg:table-cell">
-                        {salesLoading ? (
-                          <div className="h-3 w-8 rounded bg-muted animate-pulse ml-auto" />
-                        ) : sales ? (
-                          <span className="flex items-center justify-end gap-1">
-                            <ThumbsUp className="h-3 w-3 text-muted-foreground" />
-                            {sales.good_calls}
-                          </span>
-                        ) : <span className="text-muted-foreground/40">—</span>}
-                      </TableCell>
-                      <TableCell className="text-right py-2.5 hidden xl:table-cell">
-                        {salesLoading ? (
-                          <div className="h-3 w-10 rounded bg-muted animate-pulse ml-auto" />
-                        ) : sales ? (
-                          <span className={`text-[12px] font-semibold tabular-nums ${
-                            sales.good_call_rate >= 50 ? 'text-success' :
-                            sales.good_call_rate >= 30 ? 'text-primary' :
-                            'text-warning'
-                          }`}>
-                            {sales.good_call_rate}%
-                          </span>
-                        ) : <span className="text-muted-foreground/40 text-[12px]">—</span>}
-                      </TableCell>
-
-                      <TableCell className="text-right py-2.5 hidden lg:table-cell">
-                        <div className="flex items-center justify-end gap-1.5">
-                          <div className="w-14 h-1.5 rounded-full bg-muted overflow-hidden">
-                            <div className="h-full rounded-full bg-primary" style={{ width: `${m.score}%` }} />
-                          </div>
-                          <span className="text-[10px] font-medium tabular-nums w-5 text-right">{m.score}</span>
+                        <div>
+                          <p className="text-[12px] font-medium">{r.name}</p>
+                          <p className="text-[10px] text-muted-foreground">Sales</p>
                         </div>
-                      </TableCell>
-                    </TableRow>
-                  );
-                })}
+                      </div>
+                    </TableCell>
+                    <TableCell className="text-[11px] py-2.5 hidden sm:table-cell">GCC</TableCell>
 
-                {/* Show sales-only members not in Zoho recruiters */}
-                {salesData
-                  .filter(s => !recruiters.some(r => matchByFirstName(r.name, s.member_name)))
-                  .map((s, i) => (
-                    <TableRow key={`sales-only-${i}`} className="hover:bg-muted/30 opacity-70">
-                      <TableCell className="py-2.5">
-                        <span className="text-[11px] text-muted-foreground">{recruiters.length + i + 1}</span>
-                      </TableCell>
-                      <TableCell className="py-2.5">
-                        <div className="flex items-center gap-2">
-                          <div className="h-7 w-7 rounded-full bg-muted text-muted-foreground flex items-center justify-center text-[9px] font-bold">
-                            {s.member_name.split(" ").map(n => n[0]).join("")}
-                          </div>
-                          <div>
-                            <p className="text-[12px] font-medium">{s.member_name}</p>
-                            <p className="text-[10px] text-muted-foreground">Sales</p>
-                          </div>
-                        </div>
-                      </TableCell>
-                      <TableCell className="hidden sm:table-cell" />
-                      <TableCell className="text-right py-2.5 text-muted-foreground/40 text-[12px]">—</TableCell>
-                      <TableCell className="text-right py-2.5 text-muted-foreground/40 text-[12px]">—</TableCell>
-                      <TableCell className="text-right py-2.5 hidden md:table-cell text-muted-foreground/40 text-[12px]">—</TableCell>
-                      <TableCell className="text-[12px] text-right py-2.5 tabular-nums hidden lg:table-cell">
+                    {/* Calls — Zoho call activity (outbound Calls logged by this owner) */}
+                    <TableCell className="text-[12px] text-right py-2.5 tabular-nums">
+                      <span className="flex items-center justify-end gap-1 font-semibold">
+                        <Phone className="h-3 w-3 text-muted-foreground" />
+                        {r.zohoCalls}
+                      </span>
+                    </TableCell>
+
+                    <TableCell className="text-[12px] text-right py-2.5 tabular-nums">{r.leads}</TableCell>
+                    <TableCell className="text-[12px] text-right py-2.5 tabular-nums">{r.contacted}</TableCell>
+                    <TableCell className="text-right py-2.5 hidden md:table-cell">
+                      <span className={`text-[12px] font-semibold tabular-nums ${
+                        r.conversionRate >= 40 ? 'text-success' :
+                        r.conversionRate >= 20 ? 'text-primary' :
+                        'text-warning'
+                      }`}>
+                        {r.conversionRate}%
+                      </span>
+                    </TableCell>
+
+                    {/* Weekly-sales quality overlay (manual CSV upload) */}
+                    <TableCell className="text-[12px] text-right py-2.5 tabular-nums hidden lg:table-cell">
+                      {salesLoading ? (
+                        <div className="h-3 w-8 rounded bg-muted animate-pulse ml-auto" />
+                      ) : r.sales ? (
                         <span className="flex items-center justify-end gap-1">
                           <Phone className="h-3 w-3 text-muted-foreground" />
-                          {s.full_sales_calls}
+                          {r.sales.full_sales_calls}
                         </span>
-                      </TableCell>
-                      <TableCell className="text-[12px] text-right py-2.5 tabular-nums hidden lg:table-cell">
+                      ) : <span className="text-muted-foreground/40">—</span>}
+                    </TableCell>
+                    <TableCell className="text-[12px] text-right py-2.5 tabular-nums hidden lg:table-cell">
+                      {salesLoading ? (
+                        <div className="h-3 w-8 rounded bg-muted animate-pulse ml-auto" />
+                      ) : r.sales ? (
                         <span className="flex items-center justify-end gap-1">
                           <ThumbsUp className="h-3 w-3 text-muted-foreground" />
-                          {s.good_calls}
+                          {r.sales.good_calls}
                         </span>
-                      </TableCell>
-                      <TableCell className="text-right py-2.5 hidden xl:table-cell">
+                      ) : <span className="text-muted-foreground/40">—</span>}
+                    </TableCell>
+                    <TableCell className="text-right py-2.5 hidden xl:table-cell">
+                      {salesLoading ? (
+                        <div className="h-3 w-10 rounded bg-muted animate-pulse ml-auto" />
+                      ) : r.sales ? (
                         <span className={`text-[12px] font-semibold tabular-nums ${
-                          s.good_call_rate >= 50 ? 'text-success' :
-                          s.good_call_rate >= 30 ? 'text-primary' :
+                          r.sales.good_call_rate >= 50 ? 'text-success' :
+                          r.sales.good_call_rate >= 30 ? 'text-primary' :
                           'text-warning'
                         }`}>
-                          {s.good_call_rate}%
+                          {r.sales.good_call_rate}%
                         </span>
-                      </TableCell>
-                      <TableCell className="hidden lg:table-cell" />
-                    </TableRow>
-                  ))}
+                      ) : <span className="text-muted-foreground/40 text-[12px]">—</span>}
+                    </TableCell>
+
+                    <TableCell className="text-right py-2.5 hidden lg:table-cell">
+                      <div className="flex items-center justify-end gap-1.5">
+                        <div className="w-14 h-1.5 rounded-full bg-muted overflow-hidden">
+                          <div className="h-full rounded-full bg-primary" style={{ width: `${r.score}%` }} />
+                        </div>
+                        <span className="text-[10px] font-medium tabular-nums w-5 text-right">{r.score}</span>
+                      </div>
+                    </TableCell>
+                  </TableRow>
+                ))}
               </TableBody>
             </Table>
           </div>
@@ -309,7 +285,7 @@ const TeamPerformance = () => {
                   }}
                 />
                 <Legend wrapperStyle={{ fontSize: 11, paddingTop: 8 }} />
-                <Bar dataKey="Full Sales Calls" fill="hsl(var(--primary))" radius={[4, 4, 0, 0]} />
+                <Bar dataKey="Calls (Zoho)" fill="hsl(var(--primary))" radius={[4, 4, 0, 0]} />
                 <Bar dataKey="Good Calls" fill="hsl(var(--success, 142 76% 36%))" radius={[4, 4, 0, 0]} />
               </BarChart>
             </ResponsiveContainer>
