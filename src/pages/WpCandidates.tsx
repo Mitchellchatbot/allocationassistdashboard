@@ -1254,8 +1254,14 @@ function StagedRow({ profile }: { profile: StagedProfile }) {
 
   const handlePublish = async (status: "draft" | "publish") => {
     try {
-      await publish.mutateAsync({ profile, status });
-      toast.success(status === "publish" ? "Published to WordPress" : "Saved as WordPress draft");
+      const r = await publish.mutateAsync({ profile, status });
+      const dropped = (r as { dropped_fields?: string[] })?.dropped_fields ?? [];
+      const base = status === "publish" ? "Published to WordPress" : "Saved as WordPress draft";
+      if (dropped.length) {
+        toast.warning(base, { description: `Couldn't set: ${dropped.join(", ")} — WordPress rejected the value(s). Set them by hand on the profile.` });
+      } else {
+        toast.success(base);
+      }
     } catch (e) {
       toast.error("Couldn't push to WordPress", { description: (e as Error).message });
     }

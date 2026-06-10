@@ -99,75 +99,73 @@ async function handleUpsert(req: Request): Promise<Response> {
 
   const basic = "Basic " + btoa(`${wpUsername}:${wpAppPassword}`);
 
-  // 1. Build the WP payload. Only include fields the caller actually
-  //    set — partial PATCH is the friendly default and avoids us
-  //    accidentally zeroing a field by sending undefined.
+  // 1. Static WP payload (title/status). ACF is applied per-attempt in the
+  //    retry loop below so we can drop a field WP rejects and try again.
   const wpPayload: Record<string, unknown> = {};
   if (body.title  !== undefined) wpPayload.title  = body.title;
   if (body.status !== undefined) wpPayload.status = body.status;
-  // Sanitise the ACF object so typed fields don't trip WP's
-  // rest_invalid_param ("Invalid parameter(s): acf"). See sanitizeAcf.
-  if (body.acf    !== undefined) wpPayload.acf    = sanitizeAcf(body.acf);
+  // Sanitise the ACF object so typed fields don't trip rest_invalid_param.
+  let acfPayload = body.acf !== undefined ? sanitizeAcf(body.acf) : undefined;
 
-  // 2. POST (create) or PATCH-via-POST (edit). The WP REST API accepts
-  //    POST for both — "POST /wp/v2/candidate/<id>" is the documented
-  //    way to edit (uses _method=POST under the hood). PUT also works
-  //    but PATCH is what WP REST actually expects.
+  // 2. POST (create) or PATCH-via-POST (edit). The WP REST API accepts POST
+  //    for both — "POST /wp/v2/candidate/<id>" is the documented edit path.
   const isEdit = typeof body.id === "number" && body.id > 0;
   const wpUrl  = isEdit
     ? `${wpBaseUrl}/wp-json/wp/v2/candidate/${body.id}`
     : `${wpBaseUrl}/wp-json/wp/v2/candidate`;
 
-  // Hard wall on WP REST. The supabase edge-runtime kills functions at
-  // ~150s; a slow WP host can easily eat that and 502 the caller. Cap
-  // at 45s per call so we fail loudly with a useful error before the
-  // runtime nukes us.
-  let wpRes: Response;
-  try {
-    wpRes = await fetchWithTimeout(wpUrl, {
-      method: "POST",
-      headers: {
-        Authorization: basic,
-        "Content-Type": "application/json",
-        Accept:         "application/json",
-      },
-      body: JSON.stringify({ ...wpPayload, ...(isEdit ? {} : { status: body.status ?? "draft" }) }),
-    }, 45_000);
-  } catch (e) {
-    return json({
-      ok: false,
-      error: `WP REST didn't respond in 45s. WP may be slow or unreachable. Detail: ${(e as Error).message}`,
-    }, 504);
-  }
-  const wpJson = await wpRes.json().catch(() => null) as {
+  // Self-healing POST. WP validates every ACF value against the schema ACF
+  // registered — both types AND select-field choice lists — but fails the
+  // WHOLE write naming only the parent "acf". When a specific field is
+  // rejected we parse it out of the error, DROP it, and retry, so one bad
+  // value (e.g. country "UK" not in the choice list, or a stray type) doesn't
+  // sink the entire profile. Dropped fields are reported so the team can set
+  // them by hand. 45s hard wall per attempt — the edge runtime kills at ~150s.
+  const droppedFields: string[] = [];
+  let wpJson: {
     id?: number; code?: string; message?: string;
     data?: { status?: number; params?: Record<string, unknown>; details?: Record<string, unknown> };
-  } | null;
-  if (!wpRes.ok || !wpJson || wpJson.code) {
-    // Pass through 4xx as-is so the client sees the actual WP error
-    // (rest_invalid_param, rest_forbidden, etc.) instead of an opaque
-    // 502. 5xx stays 502 because that's a true upstream gateway issue.
-    const passthrough = wpRes.status >= 400 && wpRes.status < 500
-      ? wpRes.status
-      : 502;
-    // rest_invalid_param only names the parent param ("acf") in `message`;
-    // the SPECIFIC offending field + reason live in data.params / data.details
-    // (e.g. "acf[years…] is not of type integer"). Surface them so we don't
-    // have to guess which ACF field WP rejected.
+  } | null = null;
+  for (let attempt = 0; attempt < 6; attempt++) {
+    const reqBody: Record<string, unknown> = {
+      ...wpPayload,
+      ...(acfPayload !== undefined ? { acf: acfPayload } : {}),
+      ...(isEdit ? {} : { status: body.status ?? "draft" }),
+    };
+    let wpRes: Response;
+    try {
+      wpRes = await fetchWithTimeout(wpUrl, {
+        method: "POST",
+        headers: { Authorization: basic, "Content-Type": "application/json", Accept: "application/json" },
+        body: JSON.stringify(reqBody),
+      }, 45_000);
+    } catch (e) {
+      return json({ ok: false, error: `WP REST didn't respond in 45s. WP may be slow or unreachable. Detail: ${(e as Error).message}` }, 504);
+    }
+    wpJson = await wpRes.json().catch(() => null) as typeof wpJson;
+    if (wpRes.ok && wpJson && !wpJson.code) break;   // success
+
+    // Recoverable? rest_invalid_param naming acf field(s) we still hold — drop
+    // them and retry rather than failing the whole upsert.
+    if (wpJson?.code === "rest_invalid_param" && acfPayload && Object.keys(acfPayload).length) {
+      const bad = badAcfFields(wpJson).filter(f => f in (acfPayload as Record<string, unknown>));
+      if (bad.length) {
+        for (const f of bad) { delete (acfPayload as Record<string, unknown>)[f]; droppedFields.push(f); }
+        console.warn(`[wordpress-candidate-upsert] dropped invalid acf field(s), retrying: ${bad.join(", ")}`);
+        continue;
+      }
+    }
+    // Non-recoverable → surface the real error (data.params names the field).
+    const passthrough = wpRes.status >= 400 && wpRes.status < 500 ? wpRes.status : 502;
     const extra = wpJson?.data?.params
       ? ` (${Object.values(wpJson.data.params).join("; ")})`
-      : wpJson?.data?.details
-        ? ` (${JSON.stringify(wpJson.data.details)})`
-        : "";
-    return json({
-      ok: false,
-      error: `WP ${wpRes.status}: ${wpJson?.code ?? "unknown"} — ${wpJson?.message ?? "no body"}${extra}`,
-    }, passthrough);
+      : wpJson?.data?.details ? ` (${JSON.stringify(wpJson.data.details)})` : "";
+    return json({ ok: false, error: `WP ${wpRes.status}: ${wpJson?.code ?? "unknown"} — ${wpJson?.message ?? "no body"}${extra}` }, passthrough);
   }
 
-  const newId = wpJson.id;
+  const newId = wpJson?.id;
   if (typeof newId !== "number") {
-    return json({ ok: false, error: "WP returned no id after upsert" }, 502);
+    return json({ ok: false, error: `WP returned no id after upsert${droppedFields.length ? ` (dropped invalid: ${droppedFields.join(", ")})` : ""}` }, 502);
   }
 
   // 3. Re-fetch the row so our mirror reflects WP's truth (including
@@ -288,7 +286,7 @@ async function handleUpsert(req: Request): Promise<Response> {
     });
   }
 
-  return json({ ok: true, id: newId, row: mirrorRow, created: !isEdit, auto_linked: autoLinked }, 200);
+  return json({ ok: true, id: newId, row: mirrorRow, created: !isEdit, auto_linked: autoLinked, dropped_fields: droppedFields }, 200);
 }
 
 // ─── one-row auto-link ────────────────────────────────────────────────
@@ -377,6 +375,38 @@ function parseYesNo(v: unknown): boolean | null {
   return /yes|true|1/i.test(String(v));
 }
 
+/** Parse the ACF field name(s) WP rejected out of a rest_invalid_param
+ *  response. WP only names the parent "acf" in `message`, but data.params /
+ *  data.details spell out e.g. "acf[country_of_training] is not one of …". */
+function badAcfFields(wpJson: { message?: string; data?: { params?: Record<string, unknown>; details?: Record<string, unknown> } } | null): string[] {
+  const texts: string[] = [];
+  if (wpJson?.message)       texts.push(String(wpJson.message));
+  if (wpJson?.data?.params)  texts.push(...Object.values(wpJson.data.params).map(v => String(v)));
+  if (wpJson?.data?.details) texts.push(JSON.stringify(wpJson.data.details));
+  const fields = new Set<string>();
+  for (const t of texts) for (const m of t.matchAll(/acf\[([a-zA-Z0-9_]+)\]/g)) fields.add(m[1]);
+  return [...fields];
+}
+
+/** Map common country aliases to the canonical name WP's country select uses
+ *  (the choice list is full English country names). Anything unrecognised is
+ *  returned trimmed; the upsert retry loop drops it if WP still rejects it. */
+const COUNTRY_ALIASES: Record<string, string> = {
+  "uk": "United Kingdom", "u.k.": "United Kingdom", "gb": "United Kingdom",
+  "great britain": "United Kingdom", "britain": "United Kingdom",
+  "england": "United Kingdom", "scotland": "United Kingdom", "wales": "United Kingdom",
+  "northern ireland": "United Kingdom",
+  "usa": "United States", "us": "United States", "u.s.": "United States",
+  "u.s.a.": "United States", "america": "United States", "united states of america": "United States",
+  "uae": "United Arab Emirates", "u.a.e.": "United Arab Emirates", "emirates": "United Arab Emirates",
+  "ksa": "Saudi Arabia", "saudi": "Saudi Arabia", "saudi arabia (ksa)": "Saudi Arabia",
+  "republic of ireland": "Ireland", "roi": "Ireland",
+};
+function normalizeCountry(v: string): string {
+  const key = v.toLowerCase().trim().replace(/\s+/g, " ");
+  return COUNTRY_ALIASES[key] ?? v.trim();
+}
+
 /** ACF fields that WP registers as checkbox / multi-select — they want an
  *  array in REST, and a bare string trips rest_invalid_param. */
 const ACF_ARRAY_FIELDS = new Set(["license_type", "targeted_locations"]);
@@ -417,6 +447,13 @@ function sanitizeAcf(acf: Record<string, unknown> | undefined): Record<string, u
     // stray boolean to "Yes"/"No".
     if (k === "have_children_or_any_dependent") {
       out[k] = typeof v === "boolean" ? (v ? "Yes" : "No") : String(v).trim();
+      continue;
+    }
+    // Country select — map common aliases (UK, USA, UAE…) to the canonical
+    // choice. An unrecognised value still rides through; if WP rejects it as
+    // "not one of …", the retry loop drops it.
+    if (k === "country_of_training") {
+      out[k] = normalizeCountry(String(v));
       continue;
     }
     // Checkbox / multi-select → array.
