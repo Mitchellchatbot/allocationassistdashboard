@@ -412,9 +412,11 @@ function sanitizeAcf(acf: Record<string, unknown> | undefined): Record<string, u
       if (Number.isFinite(n)) out[k] = n;
       continue;
     }
-    // True/false field → real boolean (handles "Yes"/"No"/1/0).
+    // WP registers this as a STRING field ("string,null"), NOT a boolean —
+    // a boolean trips rest_invalid_param. Keep the original string; convert a
+    // stray boolean to "Yes"/"No".
     if (k === "have_children_or_any_dependent") {
-      out[k] = typeof v === "boolean" ? v : /^(yes|true|1|y)$/i.test(String(v));
+      out[k] = typeof v === "boolean" ? (v ? "Yes" : "No") : String(v).trim();
       continue;
     }
     // Checkbox / multi-select → array.
