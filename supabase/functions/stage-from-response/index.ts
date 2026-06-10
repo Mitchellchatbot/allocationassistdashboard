@@ -122,11 +122,12 @@ Deno.serve(async (req: Request) => {
     ?? extractCvUrlFromAnswers(flat)
     ?? extractCvUrlFromRaw(response.raw_payload)
     ?? "";
-  let cvQueued = false;
+  const cvFound = !!cvUrl;
+  let cvExtracted = false;
   let cvError: string | null = null;
   if (cvUrl && form?.api_token) {
     try {
-      await fireCvPipeline({
+      const res = await fireCvPipeline({
         supabaseUrl, serviceKey,
         cvUrl,
         jotformApiKey:   form.api_token,
@@ -134,18 +135,27 @@ Deno.serve(async (req: Request) => {
         candidateName:   profile.full_name || response.respondent_name || "JotForm intake",
         candidateEmail:  profile.email || response.respondent_email || "",
       });
-      cvQueued = true;
+      cvExtracted = res.extracted;
+      cvError     = res.extracted ? null : res.error;
     } catch (e) {
       cvError = e instanceof Error ? e.message : String(e);
       console.error("[stage-from-response] CV pipeline threw:", cvError);
     }
+  } else if (cvUrl && !form?.api_token) {
+    cvError = "A CV was found but no JotForm API key is configured to download it.";
   }
 
+  // cv_complete is the signal the UI uses to decide whether the staged row is
+  // truly READY: either there was no CV, or the CV was found AND fully read.
+  const cvComplete = !cvFound || cvExtracted;
   return json({
     ok:                true,
     staged_id:         stagedId,
     picture_captured:  !!pictureUrl,
-    cv_queued:         cvQueued,
+    cv_found:          cvFound,
+    cv_extracted:      cvExtracted,
+    cv_complete:       cvComplete,
+    cv_queued:         cvExtracted, // back-compat with the existing UI
     cv_error:          cvError,
   }, 200);
 });
@@ -182,7 +192,7 @@ async function fireCvPipeline(args: {
   cvUrl: string; jotformApiKey: string;
   stagedProfileId: string;
   candidateName: string; candidateEmail: string;
-}): Promise<void> {
+}): Promise<{ extracted: boolean; error: string | null }> {
   const { supabaseUrl, serviceKey, cvUrl, jotformApiKey, stagedProfileId, candidateName, candidateEmail } = args;
 
   const jfRes = await fetch(cvUrl, { headers: { APIKEY: jotformApiKey } });
@@ -231,23 +241,37 @@ async function fireCvPipeline(args: {
 
   await sb.from("staged_doctor_profiles").update({ cv_upload_id: row.id }).eq("id", stagedProfileId);
 
-  // Block on cv-extract too — we're inside an awaited call from
-  // the handler, so the isolate stays alive for the duration.
-  // The whole stage-from-response now takes ~20-30s but the user
-  // gets back a row with picture_url + acf populated by enrich +
-  // extracted_cv_data populated by Claude, all visible in the
-  // staging UI on first refresh. Much better demo experience.
-  const extractRes = await fetch(`${supabaseUrl}/functions/v1/cv-extract`, {
-    method:  "POST",
-    headers: { Authorization: `Bearer ${serviceKey}`, "Content-Type": "application/json" },
-    body:    JSON.stringify({ upload_id: row.id }),
-  });
-  if (!extractRes.ok) {
-    const t = await extractRes.text().catch(() => "");
-    console.error(`[stage-from-response] cv-extract ${extractRes.status}: ${t.slice(0, 200)}`);
-  } else {
-    console.log(`[stage-from-response] cv-extract succeeded for staged ${stagedProfileId}`);
+  // Block on cv-extract — we're inside an awaited call from the handler, so
+  // the isolate stays alive. This reads the CV INLINE (Claude extraction +
+  // re-enrich of the staged row), so when "Send to staging" returns the row
+  // is COMPLETE: years of experience + education/experience history + bio,
+  // not just the form fields. Retry once on a transient failure, and report
+  // whether it actually succeeded so the caller can flag an incomplete
+  // profile instead of silently staging a CV-less one.
+  let extractErr: string | null = null;
+  for (let attempt = 1; attempt <= 2; attempt++) {
+    try {
+      const extractRes = await fetch(`${supabaseUrl}/functions/v1/cv-extract`, {
+        method:  "POST",
+        headers: { Authorization: `Bearer ${serviceKey}`, "Content-Type": "application/json" },
+        body:    JSON.stringify({ upload_id: row.id }),
+      });
+      if (extractRes.ok) {
+        const j = await extractRes.json().catch(() => null) as { ok?: boolean; error?: string } | null;
+        if (j?.ok) {
+          console.log(`[stage-from-response] cv-extract succeeded for staged ${stagedProfileId} (attempt ${attempt})`);
+          return { extracted: true, error: null };
+        }
+        extractErr = j?.error ?? "cv-extract returned ok:false";
+      } else {
+        extractErr = `cv-extract ${extractRes.status}: ${(await extractRes.text().catch(() => "")).slice(0, 160)}`;
+      }
+    } catch (e) {
+      extractErr = e instanceof Error ? e.message : String(e);
+    }
+    console.error(`[stage-from-response] cv-extract attempt ${attempt} failed: ${extractErr}`);
   }
+  return { extracted: false, error: extractErr };
 }
 
 /** Map a file extension or fallback header to a concrete MIME the

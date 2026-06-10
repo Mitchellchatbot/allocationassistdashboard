@@ -1201,19 +1201,33 @@ function ResponseRow({
         body: { response_id: response.id },
       });
       if (error) throw error;
-      const resp = data as { ok: boolean; picture_captured?: boolean; cv_queued?: boolean; error?: string };
+      const resp = data as {
+        ok: boolean; picture_captured?: boolean; error?: string;
+        cv_found?: boolean; cv_extracted?: boolean; cv_complete?: boolean; cv_error?: string;
+      };
       if (!resp.ok) throw new Error(resp.error ?? "Staging failed");
-      const extras: string[] = [];
-      if (resp.picture_captured) extras.push("photo");
-      if (resp.cv_queued)        extras.push("CV (extracting…)");
       clearInterval(creep);
       setStageProgress({ pct: 100, label: "Sent" });
-      toast.success("Sent to staging area", {
-        description: extras.length
-          ? `Captured: ${extras.join(", ")}. Open the staging row to preview, then Publish.`
-          : "Review the merged data, then click Publish to push to WordPress.",
-        action: { label: "Open staging", onClick: () => navigate("/doctors?tab=profiles") },
-      });
+      const openAction = { label: "Open staging", onClick: () => navigate("/doctors?tab=profiles") };
+      // The CV is read INLINE during staging, so the row is complete on
+      // arrival. If a CV was found but couldn't be read, say so loudly —
+      // experience / education / years would otherwise be missing.
+      if (resp.cv_found && !resp.cv_extracted) {
+        toast.warning("Staged — but the CV couldn't be read", {
+          description: `Experience, education & years may be missing. ${resp.cv_error ?? ""} Try staging again, or fill those fields by hand.`.trim(),
+          action: openAction,
+        });
+      } else {
+        const captured: string[] = [];
+        if (resp.picture_captured) captured.push("photo");
+        if (resp.cv_extracted)     captured.push("CV ✓");
+        toast.success("Sent to staging area", {
+          description: captured.length
+            ? `Captured: ${captured.join(", ")}. Everything's merged — open the row to preview, then Publish.`
+            : "Review the merged data, then click Publish to push to WordPress.",
+          action: openAction,
+        });
+      }
     } catch (err) {
       clearInterval(creep);
       setStageProgress(null);
