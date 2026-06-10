@@ -30,7 +30,6 @@
  */
 
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2";
-import { summarizeAreaOfInterest } from "../_shared/summarize.ts";
 
 // ── Stage → Template + next-stage routing ──────────────────────────────────
 // Hardcoded here (also defined in src/lib/automation-flows.ts) because the
@@ -451,18 +450,10 @@ Deno.serve(async (req: Request) => {
     }
   }
 
-  // ── Condense a long "Area of Interest" so the wide profile table doesn't
-  //    blow out (Ammar 2026-06-09: summarise it with Claude). No-ops when
-  //    already short, when ANTHROPIC_API_KEY is unset, or on any API error —
-  //    it must never fail the send. Runs once per send; the doctor's stored
-  //    area_of_interest is left untouched.
-  if (profileTokens.doctor_area_of_interest) {
-    const short = await summarizeAreaOfInterest(profileTokens.doctor_area_of_interest);
-    if (short && short !== profileTokens.doctor_area_of_interest) {
-      console.log(`[send-flow-email] area of interest condensed: ${profileTokens.doctor_area_of_interest.length}→${short.length} chars`);
-      profileTokens.doctor_area_of_interest = short;
-    }
-  }
+  // Area of Interest is sent in FULL — Ammar 2026-06-11 reversed the earlier
+  // condense (it dropped sub-specialties / "cut" the list). The template's
+  // area-of-interest column is widened + wraps instead, so the whole value
+  // shows without blowing out the table.
 
   // ── Lookup per-emirate relocation guide URL ─────────────────────────────
   // Ammar 2026-06-03: 'we sent it for Dubai Abu Dhabi and all of them'.
