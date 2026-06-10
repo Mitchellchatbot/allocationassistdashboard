@@ -1107,14 +1107,18 @@ function EditableTimelineEntry({
 /** Square-ish circular avatar with initials fallback. Matches the teal
  *  WP profile-card ring when `ring` is on. */
 function Avatar({ src, name, size, ring }: { src: string | null; name: string; size: number; ring?: boolean }) {
-  const [errored, setErrored] = useState(false);
-  // Reset the error flag whenever the src changes — otherwise a single failed
-  // load (slow WP, transient blip, a row reused for a different candidate)
-  // sticks this Avatar on initials forever, even once the photo is valid.
-  useEffect(() => { setErrored(false); }, [src]);
+  const [failed, setFailed]   = useState(false);
+  const [attempt, setAttempt] = useState(0);
+  // Reset on src change — otherwise a stale failure (or a row reused for a
+  // different candidate) sticks this Avatar on initials forever.
+  useEffect(() => { setFailed(false); setAttempt(0); }, [src]);
   const initials = name.replace(/^Dr\.?\s+/i, "").split(/\s+/).map(s => s[0]).filter(Boolean).slice(0, 2).join("").toUpperCase() || "?";
-  const showImage = src && !errored;
+  const showImage = src && !failed;
   const ringClass = ring ? "ring-4 ring-white/40 shadow-lg" : "";
+  // Retry once on a load error (a slow/transient WP blip is the usual cause of
+  // "some pictures aren't showing") with a cache-bust, then fall back.
+  const onError = () => { if (attempt < 1) setAttempt(a => a + 1); else setFailed(true); };
+  const finalSrc = src && attempt > 0 ? `${src}${src.includes("?") ? "&" : "?"}_retry=${attempt}` : src;
   return (
     <div
       style={{ width: size, height: size }}
@@ -1122,11 +1126,12 @@ function Avatar({ src, name, size, ring }: { src: string | null; name: string; s
     >
       {showImage ? (
         <img
-          src={src!}
+          key={attempt}
+          src={finalSrc!}
           alt={name}
           width={size}
           height={size}
-          onError={() => setErrored(true)}
+          onError={onError}
           className="w-full h-full object-cover"
         />
       ) : (

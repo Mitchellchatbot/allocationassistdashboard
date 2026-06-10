@@ -408,13 +408,53 @@ const COUNTRY_ALIASES: Record<string, string> = {
   "myanmar": "Myanmar (Burma)", "burma": "Myanmar (Burma)",
   "timor-leste": "East Timor (Timor-Leste)", "east timor": "East Timor (Timor-Leste)",
 };
+/** Strip parentheticals + punctuation for fuzzy comparison. */
+function normCountry(s: string): string {
+  return s.toLowerCase().replace(/\(.*?\)/g, " ").replace(/[^a-z\s]/g, " ").replace(/\s+/g, " ").trim();
+}
+const COUNTRY_NORM_TO_CANON = new Map(CANONICAL_COUNTRIES.map(c => [normCountry(c), c] as const));
+
+/** Levenshtein distance (small strings). */
+function lev(a: string, b: string): number {
+  const m = a.length, n = b.length;
+  if (!m) return n; if (!n) return m;
+  let prev = Array.from({ length: n + 1 }, (_, i) => i);
+  for (let i = 1; i <= m; i++) {
+    const cur = [i];
+    for (let j = 1; j <= n; j++) {
+      cur[j] = Math.min(prev[j] + 1, cur[j - 1] + 1, prev[j - 1] + (a[i - 1] === b[j - 1] ? 0 : 1));
+    }
+    prev = cur;
+  }
+  return prev[n];
+}
+
+/** Best-effort canonical country. Exact/alias first, then normalised exact
+ *  (drops parentheticals/commas/punctuation, fixes casing), then "canonical
+ *  appears as a whole phrase inside the input" (extra descriptor words like
+ *  "United Kingdom of Great Britain"), then a tight typo tolerance. Kept
+ *  CONSERVATIVE on purpose: a wrong-but-valid country would be accepted by WP
+ *  and silently mislabel the doctor, so we only auto-correct when confident —
+ *  anything iffy falls through and the upsert retry loop drops it. */
 function normalizeCountry(v: string): string {
   const raw = v.trim();
   if (!raw) return raw;
   const key = raw.toLowerCase().replace(/\s+/g, " ");
-  if (COUNTRY_ALIASES[key])    return COUNTRY_ALIASES[key];
-  if (COUNTRY_BY_LOWER.has(key)) return COUNTRY_BY_LOWER.get(key)!;  // fixes casing/spacing
-  return raw;  // truly unknown → retry loop drops it
+  if (COUNTRY_ALIASES[key])         return COUNTRY_ALIASES[key];
+  if (COUNTRY_BY_LOWER.has(key))     return COUNTRY_BY_LOWER.get(key)!;
+  const n = normCountry(raw);
+  if (!n) return raw;
+  if (COUNTRY_NORM_TO_CANON.has(n))  return COUNTRY_NORM_TO_CANON.get(n)!;
+  for (const [cn, canon] of COUNTRY_NORM_TO_CANON) {
+    if (cn.length >= 5 && (` ${n} `).includes(` ${cn} `)) return canon;
+  }
+  let best: { canon: string; d: number } | null = null;
+  for (const [cn, canon] of COUNTRY_NORM_TO_CANON) {
+    const d = lev(n, cn);
+    if (!best || d < best.d) best = { canon, d };
+  }
+  if (best && best.d <= 2 && best.d <= Math.floor(n.length / 4)) return best.canon;
+  return raw;  // not confident → retry loop drops it
 }
 
 /** ACF fields that WP registers as checkbox / multi-select — they want an
