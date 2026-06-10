@@ -20,6 +20,7 @@
 
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2";
 import { enrichProfile } from "../_shared/enrich-profile.ts";
+import { unzipSync } from "https://esm.sh/fflate@0.8.2";
 
 const supabase = createClient(
   Deno.env.get("SUPABASE_URL")!,
@@ -115,28 +116,41 @@ Deno.serve(async (req: Request) => {
     return failExtraction(uploadId, `Download failed: ${dlErr?.message ?? "unknown"}`);
   }
   const buf = await fileBlob.arrayBuffer();
-  const base64 = base64Encode(new Uint8Array(buf));
+  const bytes = new Uint8Array(buf);
 
-  // Send to Claude via the document content block. PDFs and DOCX are supported.
-  // Claude infers media type from the document.source.media_type field.
-  const mediaType = row.file_mime || "application/pdf";
+  // Claude's document content block accepts ONLY application/pdf (and
+  // text/plain) as a base64 source — NOT Word .docx/.doc (that returns a 400
+  // on document.source). So detect the REAL format by magic bytes (more
+  // reliable than the stored mime) and route accordingly:
+  //   • PDF  ("%PDF")      → native document block (best fidelity).
+  //   • DOCX ("PK", a zip) → unzip word/document.xml, send the text.
+  //   • else (.doc etc.)   → fail clearly; ask for a PDF/DOCX.
+  const isPdf = bytes[0] === 0x25 && bytes[1] === 0x50 && bytes[2] === 0x44 && bytes[3] === 0x46; // %PDF
+  const isZip = bytes[0] === 0x50 && bytes[1] === 0x4B;                                           // PK… (docx)
+
+  let content: unknown[];
+  if (isPdf) {
+    content = [
+      { type: "document", source: { type: "base64", media_type: "application/pdf", data: base64Encode(bytes) } },
+      { type: "text", text: EXTRACTION_PROMPT },
+    ];
+  } else if (isZip) {
+    let cvText: string;
+    try { cvText = extractDocxText(bytes); }
+    catch (e) { return failExtraction(uploadId, `DOCX text extraction failed: ${String(e)}`); }
+    if (!cvText.trim()) return failExtraction(uploadId, "DOCX had no extractable text");
+    content = [
+      { type: "text", text: `The following is the plain text of a doctor's CV (extracted from a Word .docx file):\n\n${cvText}` },
+      { type: "text", text: EXTRACTION_PROMPT },
+    ];
+  } else {
+    return failExtraction(uploadId, `Unsupported CV format (mime=${row.file_mime ?? "?"}). Please upload a PDF or .docx.`);
+  }
+
   const claudeReq = {
     model: ANTHROPIC_MODEL,
     max_tokens: 2048,
-    messages: [{
-      role: "user",
-      content: [
-        {
-          type: "document",
-          source: {
-            type: "base64",
-            media_type: mediaType,
-            data: base64,
-          },
-        },
-        { type: "text", text: EXTRACTION_PROMPT },
-      ],
-    }],
+    messages: [{ role: "user", content }],
   };
 
   let claudeRes: Response;
@@ -314,6 +328,25 @@ async function failExtraction(uploadId: string, error: string): Promise<Response
     extraction_error: error.slice(0, 1000),
   }).eq("id", uploadId);
   return json({ ok: false, error }, 500);
+}
+
+/** Pull readable text out of a .docx (a zip whose body is word/document.xml).
+ *  Claude can't take a .docx as a document block, so we send this text
+ *  instead. Paragraph / break / tab tags become whitespace; all other XML
+ *  tags are stripped; XML entities are decoded. */
+function extractDocxText(bytes: Uint8Array): string {
+  const files = unzipSync(bytes);
+  const xmlBytes = files["word/document.xml"];
+  if (!xmlBytes) throw new Error("no word/document.xml in archive");
+  let xml = new TextDecoder().decode(xmlBytes);
+  xml = xml
+    .replace(/<\/w:p>/g, "\n")        // paragraph end → newline
+    .replace(/<w:tab\/?>/g, "\t")     // tab
+    .replace(/<w:br\/?>/g, "\n")      // line break
+    .replace(/<[^>]+>/g, "")          // drop every remaining tag
+    .replace(/&amp;/g, "&").replace(/&lt;/g, "<").replace(/&gt;/g, ">")
+    .replace(/&quot;/g, '"').replace(/&apos;/g, "'");
+  return xml.replace(/[ \t]+\n/g, "\n").replace(/\n{3,}/g, "\n\n").trim();
 }
 
 function base64Encode(bytes: Uint8Array): string {

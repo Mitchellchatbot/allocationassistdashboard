@@ -7,6 +7,7 @@
  * Delete after the issue is resolved; this bypasses RLS by design.
  */
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2.45.0";
+import { enrichProfile } from "../_shared/enrich-profile.ts";
 
 const sb = createClient(
   Deno.env.get("SUPABASE_URL") ?? "",
@@ -421,6 +422,68 @@ Deno.serve(async (req) => {
           fixed.push({ id: r.id, name: r.full_name, from: cur, to: clean, patch_status: pr.status, ok });
         }
         return new Response(JSON.stringify({ ok: true, dry_run: dry, count: fixed.length, fixed }, null, 2), { headers: { "Content-Type": "application/json" } });
+      }
+      if ((body as { backfill_wp_from_cv?: { upload_id: string; wp_candidate_id: number; email?: string } } | null)?.backfill_wp_from_cv) {
+        // Repair an already-published record: run enrichProfile over a CV
+        // upload's extracted_data and PATCH ONLY the missing education /
+        // experience / years fields onto the WP candidate (a targeted subset
+        // so WP can't reject the whole write on an unrelated field).
+        const p = (body as { backfill_wp_from_cv: { upload_id: string; wp_candidate_id: number; email?: string } }).backfill_wp_from_cv;
+        const { data: up } = await sb.from("cv_uploads").select("extracted_data, doctor_email").eq("id", p.upload_id).single();
+        const extracted = (up as { extracted_data?: Record<string, unknown> } | null)?.extracted_data;
+        if (!extracted) return new Response(JSON.stringify({ ok: false, error: "no extracted_data on that upload" }), { headers: { "Content-Type": "application/json" } });
+        const { mergedAcf } = await enrichProfile({
+          supabase: sb,
+          email: p.email ?? (up as { doctor_email?: string }).doctor_email ?? null,
+          formAcf: {},
+          responseRow: null,
+          cvExtracted: extracted,
+        });
+        const KEYS = ["years_of_experience_post_specialization", "academy1", "level_1", "start_date1", "end_date1", "present1", "description1", "title1", "company2", "title2", "title3", "title4", "start_date_2", "end_date2", "present2", "description2", "description4", "year4", "bio", "job_title", "subspecialty", "specific_areas_of_interests_within_the_specialization"];
+        const patchAcf: Record<string, unknown> = {};
+        for (const k of KEYS) if (mergedAcf[k] !== undefined && mergedAcf[k] !== null && mergedAcf[k] !== "") patchAcf[k] = mergedAcf[k];
+        const wpBase = (Deno.env.get("WP_BASE_URL") ?? "").replace(/\/+$/, "");
+        const basic = "Basic " + btoa(`${Deno.env.get("WP_USERNAME")}:${(Deno.env.get("WP_APP_PASSWORD") ?? "").replace(/\s/g, "")}`);
+        const patch = await fetch(`${wpBase}/wp-json/wp/v2/candidate/${p.wp_candidate_id}`, {
+          method: "POST", headers: { Authorization: basic, "Content-Type": "application/json" }, body: JSON.stringify({ acf: patchAcf }),
+        });
+        const pj = await patch.json().catch(() => null) as { code?: string; message?: string } | null;
+        return new Response(JSON.stringify({ ok: patch.ok && !pj?.code, patch_status: patch.status, code: pj?.code ?? null, message: pj?.message ?? null, fields_sent: Object.keys(patchAcf), years: patchAcf.years_of_experience_post_specialization, academy1: patchAcf.academy1, title1: patchAcf.title1, company2: patchAcf.company2 }, null, 2), { headers: { "Content-Type": "application/json" } });
+      }
+      if ((body as { test_cv_extract?: { email?: string; upload_id?: string } } | null)?.test_cv_extract) {
+        // Find a doctor's most recent cv_upload and re-run cv-extract on it —
+        // verifies the extractor handles the file (e.g. the .docx fix) and
+        // returns the extracted fields.
+        const p = (body as { test_cv_extract: { email?: string; upload_id?: string } }).test_cv_extract;
+        let uploadId = p.upload_id ?? null;
+        let meta: unknown = null;
+        if (!uploadId && p.email) {
+          const { data } = await sb.from("cv_uploads")
+            .select("id, status, file_path, file_mime, extraction_error, uploaded_at, doctor_id")
+            .ilike("doctor_email", `%${p.email}%`)
+            .order("uploaded_at", { ascending: false })
+            .limit(1);
+          const r = (data as Array<{ id: string }> | null)?.[0];
+          uploadId = r?.id ?? null;
+          meta = r ?? null;
+        }
+        if (!uploadId) return new Response(JSON.stringify({ ok: false, error: "no cv_upload found" }), { headers: { "Content-Type": "application/json" } });
+        const res = await fetch(`${Deno.env.get("SUPABASE_URL")}/functions/v1/cv-extract`, {
+          method: "POST", headers: { Authorization: `Bearer ${Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")}`, "Content-Type": "application/json" },
+          body: JSON.stringify({ upload_id: uploadId }),
+        });
+        const j = await res.json().catch(() => null) as { ok?: boolean; error?: string; extracted?: Record<string, unknown> } | null;
+        const ex = j?.extracted ?? {};
+        return new Response(JSON.stringify({
+          ok: true, upload_id: uploadId, cv_upload: meta, http_status: res.status,
+          extract_ok: j?.ok ?? false, extract_error: j?.error ?? null,
+          extracted_summary: {
+            years_experience: ex.years_experience, specialty: ex.specialty, title: ex.title,
+            education_entries: Array.isArray(ex.education) ? ex.education.length : 0,
+            experience_entries: Array.isArray(ex.experience) ? ex.experience.length : 0,
+            keys: Object.keys(ex),
+          },
+        }, null, 2), { headers: { "Content-Type": "application/json" } });
       }
       if ((body as { edu_exp_probe?: number } | null)?.edu_exp_probe) {
         // Inspect a candidate's education/experience/years ACF + find
