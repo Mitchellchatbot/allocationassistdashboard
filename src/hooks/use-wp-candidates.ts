@@ -147,6 +147,7 @@ export function useSyncWpCandidates() {
       const resp = data as {
         ok: boolean; error?: string;
         fetched: number; inserted: number; pages: number; totalReported: number;
+        removed?: number;   // mirror rows dropped because they're gone from WP
         // Sync runs the auto-linker on its way out — these are how many
         // rows got their doctor_id stamped during this run.
         auto_linked?: number; auto_link_email?: number; auto_link_name?: number;

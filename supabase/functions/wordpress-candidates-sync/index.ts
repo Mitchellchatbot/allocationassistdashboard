@@ -112,6 +112,8 @@ Deno.serve(async (req: Request) => {
   let upserted    = 0;
   let totalPages  = 0;
   let totalCands  = 0;
+  // Every WP candidate id seen this run — used to reconcile deletions below.
+  const fetchedIds = new Set<number>();
 
   const PAGE_SIZE = 100;
   // Include every status admins can see (publish / private / draft).
@@ -140,6 +142,7 @@ Deno.serve(async (req: Request) => {
     const items = await res.json() as WpCandidate[];
     if (!Array.isArray(items) || items.length === 0) break;
     fetched += items.length;
+    for (const c of items) if (typeof c.id === "number") fetchedIds.add(c.id);
 
     // Collect profile_picture attachment IDs on this page so we can
     // batch-resolve them with one /wp/v2/media call instead of N.
@@ -254,6 +257,33 @@ Deno.serve(async (req: Request) => {
     if (totalPages && page >= totalPages) break;
   }
 
+  // Reconcile deletions: any mirror row whose WP id wasn't returned in this
+  // FULL sync no longer exists on WordPress (deleted, or trashed) — drop it so
+  // the portal stops showing ghosts. Guarded on a complete fetch (we got at
+  // least everything x-wp-total reported) so a transient empty/partial
+  // response can never wipe the mirror.
+  let removed = 0;
+  if (fetched > 0 && (totalCands === 0 || fetched >= totalCands)) {
+    const mirrorIds: number[] = [];
+    const PAGE = 1000;
+    for (let from = 0; from < 100_000; from += PAGE) {
+      const { data, error } = await supabase
+        .from("wordpress_candidates").select("id").range(from, from + PAGE - 1);
+      if (error) { console.warn("[wordpress-candidates-sync] reconcile read failed:", error.message); break; }
+      const batch = (data ?? []) as Array<{ id: number }>;
+      for (const r of batch) mirrorIds.push(r.id);
+      if (batch.length < PAGE) break;
+    }
+    const stale = mirrorIds.filter(id => !fetchedIds.has(id));
+    for (let i = 0; i < stale.length; i += 200) {
+      const chunk = stale.slice(i, i + 200);
+      const { error } = await supabase.from("wordpress_candidates").delete().in("id", chunk);
+      if (error) { console.warn("[wordpress-candidates-sync] reconcile delete failed:", error.message); break; }
+      removed += chunk.length;
+    }
+    if (removed > 0) console.log(`[wordpress-candidates-sync] reconciled ${removed} candidate(s) deleted on WordPress`);
+  }
+
   // Auto-link freshly synced rows to existing AA doctor_ids by
   // email + normalised name. Runs inside the sync so the user never
   // has to think about "step 2" — a new candidate that maps to a
@@ -277,6 +307,7 @@ Deno.serve(async (req: Request) => {
     ok:            true,
     fetched,
     inserted:      upserted,       // can't cheaply distinguish new vs updated; reports total touched
+    removed,                       // mirror rows dropped because they're gone from WP
     pages:         totalPages,
     totalReported: totalCands,
     auto_linked:   linkResult.updated,

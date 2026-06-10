@@ -166,8 +166,9 @@ export default function WpCandidates({ embedded }: WpCandidatesProps = {}) {
       const r = await sync.mutateAsync();
       // Sync auto-links freshly added rows on its way out, so this single
       // toast covers both phases — no separate "Auto-link" button needed.
-      const linkedNote = r.auto_linked ? ` · auto-linked ${r.auto_linked} new` : "";
-      toast.success(`Synced — ${r.inserted} candidates${linkedNote} · ${(r.durationMs / 1000).toFixed(1)}s`, { duration: 8000 });
+      const linkedNote  = r.auto_linked ? ` · auto-linked ${r.auto_linked} new` : "";
+      const removedNote = r.removed ? ` · removed ${r.removed} deleted` : "";
+      toast.success(`Synced — ${r.inserted} candidates${removedNote}${linkedNote} · ${(r.durationMs / 1000).toFixed(1)}s`, { duration: 8000 });
     } catch (e) {
       toast.error(e instanceof Error ? e.message : "Sync failed");
     }
