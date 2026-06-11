@@ -180,8 +180,13 @@ function FormDetail({ form }: { form: Form }) {
   // - Free-signal forms (Typeform / Consultation) → 'uncontacted-zoho'
   //   (narrowest actionable bucket, where the team starts each day)
   const isPaidFormInit = (form.lead_value_cents ?? 0) > 0;
-  const isJotform      = form.provider === "jotform";
-  const showOutreachChips = !isJotform;
+  // Doctor-intake forms (JotForm OR Typeform doctor profile intake) feed
+  // WordPress, so they share one view: the WP-presence filter + intake KPIs,
+  // and NO Zoho/outreach lifecycle chips. Other forms (leads, consultation)
+  // keep the outreach frame. Keyed off form_type so JotForm + Typeform doctor
+  // intake render identically.
+  const isDoctorIntake    = form.form_type === "doctor_intake";
+  const showOutreachChips = !isDoctorIntake;
   // Every form now defaults to "all" — previously Typeform/Consultation
   // defaulted to 'uncontacted-zoho' (the narrowest actionable bucket),
   // but that hid 99% of submissions on first load and people kept
@@ -215,7 +220,7 @@ function FormDetail({ form }: { form: Form }) {
     // sees an already-trimmed list. While the email set is still
     // loading we pass everything through rather than blanking the
     // list — avoids a momentary empty state on first paint.
-    const filtered = (!isJotform || wpFilter === "all" || !wpContacts.data) ? flat : flat.filter(r => {
+    const filtered = (!isDoctorIntake || wpFilter === "all" || !wpContacts.data) ? flat : flat.filter(r => {
       const e = (r.respondent_email ?? "").toLowerCase().trim();
       const p = normalizePhone(phoneFor(r));
       const inWp = (!!e && wpContacts.data!.emails.has(e))
@@ -224,7 +229,7 @@ function FormDetail({ form }: { form: Form }) {
     });
     if ((form.lead_value_cents ?? 0) > 0) return filtered;
     return filtered;
-  }, [feed.data, form.lead_value_cents, isJotform, wpFilter, wpContacts.data]);
+  }, [feed.data, form.lead_value_cents, isDoctorIntake, wpFilter, wpContacts.data]);
 
   // KPIs from cheap server-side count queries — total / last 7 days /
   // Zoho-linked — no longer dependent on the loaded set.
@@ -361,7 +366,7 @@ function FormDetail({ form }: { form: Form }) {
 
       {/* Analytics strip — server-side counts so it stays accurate as
           the user scrolls / filters / searches. */}
-      <div className={`grid grid-cols-2 ${isJotform ? "sm:grid-cols-3" : "sm:grid-cols-4"} gap-3`}>
+      <div className={`grid grid-cols-2 ${isDoctorIntake ? "sm:grid-cols-3" : "sm:grid-cols-4"} gap-3`}>
         <Kpi label="Total submissions" value={total}      tone="slate" />
         <Kpi label="Last 7 days"       value={last7Days}  tone="sky" />
 
@@ -376,7 +381,7 @@ function FormDetail({ form }: { form: Form }) {
               Uncontacted-in-Zoho. These are the actually-actionable
               buckets after the 'Open outreach' tile turned out to
               be misleading (counted every default-'new' row). */}
-        {isJotform ? (
+        {isDoctorIntake ? (
           <Kpi label="Last 30 days" value={last30Days} tone="emerald" />
         ) : isPaidForm ? (
           <>
@@ -498,7 +503,7 @@ function FormDetail({ form }: { form: Form }) {
             {/* WordPress-presence filter — JotForm only, since other
                 providers don't feed WP. Sits next to date so the team
                 can quickly answer "who do I still need to import?". */}
-            {isJotform && (
+            {isDoctorIntake && (
               <>
                 <span className="text-muted-foreground/40">·</span>
                 <FilterChipGroup
