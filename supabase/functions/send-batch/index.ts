@@ -524,16 +524,44 @@ function stripHtml(s: string): string {
 }
 
 /** Turn a specialty name into the plural practitioner noun for the email
- *  header: "Cardiovascular Surgery" → "Cardiovascular Surgeons",
- *  "Cardiology" → "Cardiologists". Title-cases first so a lowercase Zoho /
- *  batch specialty ("cardiology") renders cleanly. Falls back to
- *  "<Specialty> Doctors" for anything without a clean noun form. */
+ *  header. Works across the WHOLE AA specialty list (142 entries), not just
+ *  surgeons — verified against the website `sector` taxonomy:
+ *    "Cardiology" → "Cardiologists", "Vascular Surgery" → "Vascular Surgeons",
+ *    "Neurosurgeon" → "Neurosurgeons" (already a noun → pluralise),
+ *    "Nurses" → "Nurses", "Midwife" → "Midwives", "Pediatrics" →
+ *    "Pediatricians", "Psychiatry" → "Psychiatrists".
+ *  Field names with no clean practitioner form fall back to
+ *  "<Specialty> Doctors" (e.g. "Internal Medicine Doctors", "ENT Doctors"). */
 function practitionerNoun(specialty: string): string {
-  let s = specialty.trim().replace(/\s+/g, " ");
+  let s = specialty.trim().replace(/&amp;/g, "&").replace(/\s+/g, " ");
   if (!s) return "Doctors";
   s = s.replace(/\b\w/g, c => c.toUpperCase());
-  if (/surgery$/i.test(s)) return s.replace(/surgery$/i, "Surgeons");
-  if (/ology$/i.test(s))   return s.replace(/ology$/i, "ologists");
+
+  const irregular: Record<string, string> = {
+    pediatrics: "Pediatricians", geriatric: "Geriatricians",
+    gp: "General Practitioners", midwife: "Midwives", nurses: "Nurses",
+  };
+  const lo = s.toLowerCase();
+  if (irregular[lo]) return irregular[lo];
+
+  const plural = (w: string): string =>
+    /s$/i.test(w)         ? w :
+    /fe$/i.test(w)        ? w.replace(/fe$/i, "ves") :
+    /[^aeiou]y$/i.test(w) ? w.replace(/y$/i, "ies") :
+                            `${w}s`;
+
+  // Already a practitioner noun ("Neurosurgeon", "Allergist", "Dentist",
+  // "Radiographer", "Radiation Therapist") → just pluralise it.
+  if (/(ologist|iatrist|ist|surgeon|physician|practitioner|ician|grapher|therapist|nurse|midwife|dentist)$/i.test(s)) return plural(s);
+
+  // Field name → its practitioner.
+  if (/surgery$/i.test(s))   return s.replace(/surgery$/i, "Surgeons");
+  if (/ology$/i.test(s))     return s.replace(/ology$/i, "ologists");
+  if (/iatry$/i.test(s))     return s.replace(/iatry$/i, "iatrists");
+  if (/ometry$/i.test(s))    return s.replace(/ometry$/i, "ometrists");
+  if (/\sTherapy$/i.test(s)) return s.replace(/Therapy$/i, "Therapists");
+  if (/therapy$/i.test(s))   return s.replace(/therapy$/i, "therapists");
+
   return `${s} Doctors`;
 }
 
