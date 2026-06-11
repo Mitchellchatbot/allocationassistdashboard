@@ -210,7 +210,16 @@ Deno.serve(async (req) => {
         const key = Deno.env.get("RESEND_API_KEY") ?? "";
         const r = await fetch("https://api.resend.com/domains", { headers: { Authorization: `Bearer ${key}` } });
         const j = await r.json().catch(() => null);
-        return new Response(JSON.stringify({ ok: r.ok, status: r.status, domains: j }, null, 2), { headers: { "Content-Type": "application/json" } });
+        const list = (j?.data ?? []) as Array<{ id: string; name: string; status: string }>;
+        // For the reply.* subdomains, pull full detail so we can compare which
+        // DNS records (esp. inbound MX) are present + verified.
+        const details: Record<string, unknown> = {};
+        for (const dom of list.filter(d => d.name.startsWith("reply."))) {
+          const dr = await fetch(`https://api.resend.com/domains/${dom.id}`, { headers: { Authorization: `Bearer ${key}` } });
+          const dj = await dr.json().catch(() => null);
+          details[dom.name] = dj;
+        }
+        return new Response(JSON.stringify({ ok: r.ok, status: r.status, domains: j, details }, null, 2), { headers: { "Content-Type": "application/json" } });
       }
       if ((body as { recent_inbound?: boolean } | null)?.recent_inbound) {
         const [replies, notifs] = await Promise.all([

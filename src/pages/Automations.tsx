@@ -24,7 +24,7 @@ import {
 import {
   Workflow, Mail, AlertTriangle, Clock, ChevronRight, Settings, Save, StickyNote,
   Hospital as HospitalIcon, Send, Zap, FileSignature, RefreshCw, Inbox, CalendarCheck,
-  Sparkles, X as XIcon, CheckCircle2, Briefcase,
+  Sparkles, X as XIcon, CheckCircle2, Briefcase, MapPin, FileText,
 } from "lucide-react";
 import { toast } from "sonner";
 import { useQueryClient } from "@tanstack/react-query";
@@ -551,7 +551,12 @@ function RunDetailSheet({ run, open, onClose }: { run: FlowRun | null; open: boo
   // kind. Hides itself once an email_sent event already exists for this
   // stage (so users don't accidentally double-send).
   const currentStageDef = flow.stages.find(s => s.key === run.current_stage);
-  const isSendable = currentStageDef && (currentStageDef.kind === "email" || currentStageDef.kind === "reminder");
+  // Relocation runs have their own dedicated panel (guide + attestation
+  // buttons), so suppress the generic "Send now" for them — otherwise the
+  // header button and the panel both target the same stage.
+  const isSendable = currentStageDef
+    && (currentStageDef.kind === "email" || currentStageDef.kind === "reminder")
+    && run.flow_key !== "relocation";
   const alreadySent = (eventsQ.data ?? []).some(e => e.stage_key === run.current_stage && e.event_type === "email_sent");
 
   // "Classify reply" is offered for Profile Sent runs waiting on hospital
@@ -559,11 +564,15 @@ function RunDetailSheet({ run, open, onClose }: { run: FlowRun | null; open: boo
   // auto-advance the flow (shortlisted → fires Shortlist email automatically).
   const showClassifyReply = run.flow_key === "profile_sent" && run.status === "active";
 
-  // Relocation runs land at `select_city_guide` waiting for someone to pick
-  // the right city-specific guide. In production the city should be derived
-  // from the hospital, but if hospital isn't known (e.g. Contract Builder
-  // didn't capture it), the team picks here.
-  const showCityPicker = run.flow_key === "relocation" && run.current_stage === "select_city_guide" && run.status === "active";
+  // Relocation runs walk through two manual, preview-before-send steps:
+  // (1) pick the city + send the city-specific guide, (2) send the attestation
+  // info. They no longer auto-chain — each has its own button so the team can
+  // review both emails. `relocStep` tracks which step the run is on.
+  const RELOC_ORDER = ["trigger_offer_signed", "select_city_guide", "send_relocation_email", "send_attestation_email", "relocation_complete"];
+  const isRelocationRun = run.flow_key === "relocation" && run.status === "active";
+  const relocIdx = RELOC_ORDER.indexOf(run.current_stage);
+  // Guide is done once the run has advanced to the attestation stage (or past).
+  const guideSent = relocIdx >= RELOC_ORDER.indexOf("send_attestation_email");
 
   // Second-payment runs: let the team add the payment link + invoice number to
   // the run before the invoice fires (the amount is fixed at AED 10,500 and the
@@ -620,7 +629,7 @@ function RunDetailSheet({ run, open, onClose }: { run: FlowRun | null; open: boo
     const resp = data as { ok: boolean; error?: string };
     if (!resp.ok) throw new Error(resp.error ?? "Send failed");
 
-    toast.success(`Relocation guide for ${city} sent`);
+    toast.success(`Relocation guide for ${city} sent — now send the attestation info`);
     qc.invalidateQueries({ queryKey: ["automation-flow-runs"] });
     qc.invalidateQueries({ queryKey: ["automation-flow-events", run.id] });
   };
@@ -636,6 +645,44 @@ function RunDetailSheet({ run, open, onClose }: { run: FlowRun | null; open: boo
       title:           `Relocation guide — ${pickedCity.trim()}`,
       confirmLabel:    "Send guide",
       onConfirm:       doSendCityGuide,
+    });
+  };
+
+  // Real send for the attestation email. The guide step leaves the run parked
+  // at send_attestation_email; this makes sure we're on that stage, then fires.
+  const doSendAttestation = async () => {
+    const city = pickedCity.trim();
+    const newMetadata = city ? { ...(run.metadata as Record<string, unknown>), city } : run.metadata;
+    const { error: updateErr } = await supabase
+      .from("automation_flow_runs")
+      .update({
+        current_stage: "send_attestation_email",
+        last_event_at: new Date().toISOString(),
+        metadata:      newMetadata,
+      })
+      .eq("id", run.id);
+    if (updateErr) throw updateErr;
+
+    const { data, error: sendErr } = await supabase.functions.invoke("send-flow-email", {
+      body: { run_id: run.id },
+    });
+    if (sendErr) throw sendErr;
+    const resp = data as { ok: boolean; error?: string };
+    if (!resp.ok) throw new Error(resp.error ?? "Send failed");
+
+    toast.success("Attestation info sent — relocation pack complete");
+    qc.invalidateQueries({ queryKey: ["automation-flow-runs"] });
+    qc.invalidateQueries({ queryKey: ["automation-flow-events", run.id] });
+  };
+
+  // Preview the attestation email before sending (same gate as the guide).
+  const handleSendAttestation = () => {
+    setPreviewCfg({
+      previewStage:    "send_attestation_email",
+      previewMetadata: pickedCity.trim() ? { city: pickedCity.trim() } : undefined,
+      title:           "Attestation info",
+      confirmLabel:    "Send attestation",
+      onConfirm:       doSendAttestation,
     });
   };
 
@@ -741,19 +788,24 @@ function RunDetailSheet({ run, open, onClose }: { run: FlowRun | null; open: boo
           </div>
         </SheetHeader>
 
-        {showCityPicker && (
-          <div className="rounded-md border-2 border-amber-200 bg-amber-50/50 p-4 mt-4">
-            <div className="flex items-start gap-2 mb-3">
+        {isRelocationRun && (
+          <div className="rounded-md border-2 border-amber-200 bg-amber-50/50 p-4 mt-4 space-y-3">
+            <div className="flex items-start gap-2">
               <span className="text-amber-600 leading-none mt-[2px]">📍</span>
               <div className="text-[12px] text-amber-900 leading-relaxed">
-                <strong>Pick the relocation city.</strong> The doctor signed their offer — to send the right city-specific guide, we need to know where they're relocating. In production this auto-fills from the hospital; manually picking here while we wire that.
+                <strong>Relocation pack — two emails.</strong> Pick the city, then send the
+                relocation guide and the attestation info. Each opens a preview first so you can
+                review before it goes out. (In production the city auto-fills from the hospital.)
               </div>
             </div>
-            <div className="flex items-center gap-2">
+
+            <div>
+              <Label className="text-[11px] uppercase tracking-wider text-amber-900/80">Relocation city</Label>
               <select
                 value={pickedCity}
                 onChange={e => setPickedCity(e.target.value)}
-                className="flex-1 rounded-md border border-slate-300 bg-white px-3 py-2 text-[12px]"
+                disabled={guideSent}
+                className="mt-1 w-full rounded-md border border-slate-300 bg-white px-3 py-2 text-[12px] disabled:opacity-60"
               >
                 <option value="">Pick a city...</option>
                 <option value="Dubai">Dubai</option>
@@ -772,13 +824,42 @@ function RunDetailSheet({ run, open, onClose }: { run: FlowRun | null; open: boo
                 <option value="Kuwait City">Kuwait City</option>
                 <option value="Muscat">Muscat (Oman)</option>
               </select>
+            </div>
+
+            {/* Step 1 — relocation guide */}
+            <div className="flex items-center justify-between gap-2 rounded-md border border-amber-200 bg-white/70 px-3 py-2">
+              <div className="flex items-center gap-2 text-[12px] text-amber-900">
+                <span className="font-semibold">1.</span>
+                <MapPin className="h-3.5 w-3.5 text-amber-600" />
+                Relocation guide
+              </div>
+              {guideSent ? (
+                <span className="inline-flex items-center gap-1 text-[11px] font-medium text-emerald-700">
+                  <CheckCircle2 className="h-3.5 w-3.5" /> Sent
+                </span>
+              ) : (
+                <Button size="sm" onClick={handleSendCityGuide} disabled={!pickedCity.trim()}>
+                  <Send className="h-3.5 w-3.5 mr-1.5" />
+                  Send relocation guide
+                </Button>
+              )}
+            </div>
+
+            {/* Step 2 — attestation info */}
+            <div className="flex items-center justify-between gap-2 rounded-md border border-amber-200 bg-white/70 px-3 py-2">
+              <div className="flex items-center gap-2 text-[12px] text-amber-900">
+                <span className="font-semibold">2.</span>
+                <FileText className="h-3.5 w-3.5 text-amber-600" />
+                Attestation info
+              </div>
               <Button
                 size="sm"
-                onClick={handleSendCityGuide}
-                disabled={!pickedCity.trim()}
+                onClick={handleSendAttestation}
+                disabled={!guideSent}
+                title={guideSent ? "Preview & send the attestation email" : "Send the relocation guide first"}
               >
                 <Send className="h-3.5 w-3.5 mr-1.5" />
-                Send guide
+                Send attestation info
               </Button>
             </div>
           </div>
@@ -1495,6 +1576,14 @@ function ContractCheckinAction({ run }: { run: FlowRun }) {
           metadata:      { triggered_via: "contract_checkin_marked_signed", signed_at: iso },
         });
       }
+
+      // 4. Ping the team — this is the doctor signing the HOSPITAL's offer
+      //    (nothing to do with BoldSign). Fires the same Slack + bell signal
+      //    the pipeline uses for shortlists/interviews. Best-effort; the
+      //    signature is already recorded above, so don't block on it.
+      supabase.functions
+        .invoke("flow-notify", { body: { run_id: run.id, event: "contract_signed" } })
+        .catch(e => console.error("[mark-signed] notify failed:", e));
 
       toast.success(`Marked signed. Relocation flow opened — pick a city in the new run.`);
       qc.invalidateQueries({ queryKey: ["automation-flow-runs"] });

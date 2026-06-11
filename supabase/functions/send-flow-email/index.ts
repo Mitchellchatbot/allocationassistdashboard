@@ -67,8 +67,11 @@ const STAGE_ROUTES: Record<string, StageRoute> = {
   checkin_doctor:         { template_key: "contract_checkin_doctor",     next_stage: "checkin_hospital", auto_continue: true },
   checkin_hospital:       { template_key: "contract_checkin_hospital",   next_stage: "awaiting_signature" },
   reminder_signature:     { template_key: "contract_checkin_reminder",   next_stage: "contract_signed", terminal_next: true },
-  // Flow 6 · Relocation — guide + attestation go together (per Saif's spec)
-  send_relocation_email:  { template_key: "relocation_guide",         next_stage: "send_attestation_email", auto_continue: true },
+  // Flow 6 · Relocation — guide then attestation. They used to auto-chain
+  // (guide send fired attestation blind), but the team wants to preview &
+  // send each one explicitly, so the guide advances to send_attestation_email
+  // and PAUSES there for the dedicated "Send attestation info" button.
+  send_relocation_email:  { template_key: "relocation_guide",         next_stage: "send_attestation_email" },
   send_attestation_email: { template_key: "relocation_attestation",   next_stage: "relocation_complete", terminal_next: true },
   // Flow 6 · Second Payment
   send_invoice:           { template_key: "second_payment_invoice",         next_stage: "reminder_25_working" },
