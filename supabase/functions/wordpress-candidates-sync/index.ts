@@ -96,6 +96,12 @@ interface WpCandidate {
   link:      string;
   title?:    { rendered?: string };
   acf?:      CandidateAcf;
+  // The `sector` taxonomy is the doctor's specialty as shown on the
+  // website's "Select Specialty" filter. WP REST returns it as an array
+  // of term IDs; we resolve those to names and treat it as the canonical
+  // specialty (the ACF `specialty` field is often a free-text title like
+  // "Consultant Cardiac Surgeon", which won't match a clean specialty).
+  sector?:   number[];
 }
 
 Deno.serve(async (req: Request) => {
@@ -118,7 +124,12 @@ Deno.serve(async (req: Request) => {
   const PAGE_SIZE = 100;
   // Include every status admins can see (publish / private / draft).
   // status=any requires authenticated request, which we have.
-  const baseUrl   = `${wpBaseUrl}/wp-json/wp/v2/candidate?per_page=${PAGE_SIZE}&status=any&_fields=id,slug,status,link,date,modified,title,acf`;
+  const baseUrl   = `${wpBaseUrl}/wp-json/wp/v2/candidate?per_page=${PAGE_SIZE}&status=any&_fields=id,slug,status,link,date,modified,title,acf,sector`;
+
+  // Resolve the `sector` taxonomy (term id → name) once up front so each
+  // candidate's specialty can be set from the website's specialty filter.
+  const sectorMap = await resolveTaxonomyTerms("sector", basic);
+  console.log(`[wordpress-candidates-sync] loaded ${sectorMap.size} sector terms`);
 
   for (let page = 1; page <= 200; page++) {
     const res = await fetch(`${baseUrl}&page=${page}`, {
@@ -173,6 +184,15 @@ Deno.serve(async (req: Request) => {
         : [];
       const cvUrl = readCvUrl(a);
 
+      // Specialty = the website `sector` taxonomy term (what the site's
+      // "Select Specialty" filter uses), falling back to the free-text ACF
+      // specialty. This makes the dashboard's specialty filter line up with
+      // the website — e.g. "Cardiovascular Surgery" rather than the ACF
+      // title "Consultant Cardiac Surgeon".
+      const sectorName = Array.isArray(c.sector)
+        ? (c.sector.map(id => sectorMap.get(id)).find(Boolean) ?? null)
+        : null;
+
       // Resolve profile picture — accept either a media ID, a string ID,
       // or an ACF image object that already carries source_url/url.
       let photoUrl: string | null = null;
@@ -200,7 +220,7 @@ Deno.serve(async (req: Request) => {
         phone:              cleanText(a.phone_number),
         date_of_birth:      cleanText(a.date_of_birth),
         nationality:        cleanText(a.nationality),
-        specialty:          cleanText(a.specialty),
+        specialty:          cleanText(sectorName) ?? cleanText(a.specialty),
         subspecialty:       cleanText(a.subspecialty),
         area_of_interest:   cleanText(a.specific_areas_of_interests_within_the_specialization),
         years_experience:   years,
@@ -476,6 +496,29 @@ function readCvUrl(a: Record<string, unknown>): string | null {
     }
   }
   return null;
+}
+
+/** Resolve a WP taxonomy (e.g. "sector") to a term-id → name map. Walks
+ *  all pages (100 terms each). Names are entity-decoded so they compare
+ *  cleanly against vacancy / rotation specialty strings. */
+async function resolveTaxonomyTerms(tax: string, basic: string): Promise<Map<number, string>> {
+  const out = new Map<number, string>();
+  for (let page = 1; page <= 50; page++) {
+    const url = `${wpBaseUrl}/wp-json/wp/v2/${tax}?per_page=100&page=${page}&_fields=id,name`;
+    try {
+      const res = await fetch(url, { headers: { Authorization: basic, Accept: "application/json" } });
+      if (res.status === 400) break; // past the last page
+      if (!res.ok) { console.warn(`[wordpress-candidates-sync] ${tax} terms ${res.status}`); break; }
+      const arr = await res.json() as Array<{ id: number; name: string }>;
+      if (!Array.isArray(arr) || arr.length === 0) break;
+      for (const t of arr) if (t?.id && t.name) out.set(t.id, decodeEntities(t.name));
+      if (arr.length < 100) break;
+    } catch (err) {
+      console.warn(`[wordpress-candidates-sync] ${tax} terms error`, err);
+      break;
+    }
+  }
+  return out;
 }
 
 /** Batch-resolve attachment IDs → source_url via /wp/v2/media?include[]=…
