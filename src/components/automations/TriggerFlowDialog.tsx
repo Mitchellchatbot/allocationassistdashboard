@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useState } from "react";
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription, DialogFooter } from "@/components/ui/dialog";
 import { Button } from "@/components/ui/button";
+import { FlowSendPreviewDialog } from "./FlowSendPreviewDialog";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Textarea } from "@/components/ui/textarea";
@@ -68,6 +69,9 @@ export function TriggerFlowDialog({ open, flowKey, onClose }: Props) {
   const [invoiceNumber, setInvoiceNumber] = useState<string>("");
   const [note,          setNote]          = useState<string>("");
   const [submitting,    setSubmitting]    = useState(false);
+  // After creating an autoSend run, hold it here to preview its first email
+  // before actually sending (instead of firing blind).
+  const [pendingPreview, setPendingPreview] = useState<{ runId: string } | null>(null);
 
   const { data: hospitals = [] } = useHospitals();
   const qc = useQueryClient();
@@ -303,31 +307,17 @@ export function TriggerFlowDialog({ open, flowKey, onClose }: Props) {
 
       qc.invalidateQueries({ queryKey: ["automation-flow-runs"] });
 
-      // ── Auto-send the flow's first email if applicable ───────────────────
-      // For email-stage flows (onboarding/shortlist/interview), trigger →
-      // email should feel like one action, not two. second_payment skips
-      // this because its first email fires 15 days later via the scheduler.
+      // ── First email: PREVIEW before sending ──────────────────────────────
+      // For email-stage flows (onboarding/shortlist/interview) the run was
+      // created at its send-stage; open a preview and send only on confirm
+      // instead of firing blind. second_payment has no trigger-time email (its
+      // first email fires 15 days post-join via the scheduler).
       if (flowConfig.autoSend) {
-        try {
-          const { data: sendResp, error: sendErr } = await supabase.functions.invoke("send-flow-email", {
-            body: { run_id: runRow.id },
-          });
-          if (sendErr) throw sendErr;
-          const r = sendResp as { ok: boolean; error?: string; to?: string };
-          if (!r?.ok) throw new Error(r?.error ?? "Send failed");
-          toast.success(`${flow.name} triggered — email sent to ${r.to}`);
-        } catch (sendErr) {
-          // Run was created successfully; only the send failed. Surface
-          // distinctly so the user knows the trigger landed and can retry
-          // the send manually from the run drawer.
-          const msg = sendErr instanceof Error ? sendErr.message : "Send failed";
-          toast.error(`Run created but email send failed: ${msg}`);
-        }
+        setPendingPreview({ runId: runRow.id });  // preview dialog drives send + close
       } else {
         toast.success(`${flow.name} scheduled for ${doctor.name}`);
+        onClose();
       }
-
-      onClose();
     } catch (err) {
       const msg = err instanceof Error ? err.message : "Failed to trigger flow";
       toast.error(msg);
@@ -336,7 +326,20 @@ export function TriggerFlowDialog({ open, flowKey, onClose }: Props) {
     }
   };
 
+  // Real send for the just-created run, fired from the preview's "Send".
+  const doSendTriggered = async (runId: string) => {
+    const { data: sendResp, error: sendErr } = await supabase.functions.invoke("send-flow-email", {
+      body: { run_id: runId },
+    });
+    if (sendErr) throw sendErr;
+    const r = sendResp as { ok: boolean; error?: string; to?: string };
+    if (!r?.ok) throw new Error(r?.error ?? "Send failed");
+    toast.success(`${flow?.name ?? "Flow"} triggered — email sent to ${r.to}`);
+    qc.invalidateQueries({ queryKey: ["automation-flow-runs"] });
+  };
+
   return (
+    <>
     <Dialog open={open} onOpenChange={(v) => !v && onClose()}>
       <DialogContent className="sm:max-w-[560px] max-h-[88vh] overflow-y-auto">
         <DialogHeader>
@@ -534,6 +537,16 @@ export function TriggerFlowDialog({ open, flowKey, onClose }: Props) {
         )}
       </DialogContent>
     </Dialog>
+    {/* Preview the triggered flow's first email before it goes out. */}
+    <FlowSendPreviewDialog
+      open={!!pendingPreview}
+      onClose={() => { setPendingPreview(null); onClose(); }}
+      runId={pendingPreview?.runId ?? null}
+      title="Preview & send"
+      confirmLabel="Send now"
+      onConfirm={async () => { if (pendingPreview) await doSendTriggered(pendingPreview.runId); }}
+    />
+    </>
   );
 }
 
