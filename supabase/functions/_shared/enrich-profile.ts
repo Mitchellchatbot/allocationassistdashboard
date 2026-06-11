@@ -17,6 +17,7 @@
  * function entry point.
  */
 import { type SupabaseClient } from "https://esm.sh/@supabase/supabase-js@2.45.0";
+import { mapToProfile } from "./jotform-extract.ts";
 
 interface ZohoRow {
   Phone?:                          string | null;
@@ -173,9 +174,19 @@ export async function enrichProfile(input: EnrichmentInput): Promise<EnrichmentR
   // Per-field merge. Order in pickFirst is "winner first" — formAcf
   // is checked LAST in the call so its value takes precedence ONLY
   // when present. (Realised by listing it first in pickFirst.)
-  const acf: Record<string, unknown> = { ...formAcf };
+  // Re-map the raw form answers and use them to backfill gaps in the
+  // stored ACF. This makes a re-extraction self-healing: a profile staged
+  // before a mapper fix (e.g. date-of-birth from a verbose Typeform label)
+  // picks up the newly-mapped fields. The live formAcf still wins — this
+  // only fills keys it left empty.
+  const remapped = responseRow?.answers
+    ? ((mapToProfile(responseRow.answers).acf as Record<string, unknown> | undefined) ?? {})
+    : {};
+  const baseForm: Record<string, unknown> = { ...remapped, ...formAcf };
 
-  const fa = (k: string) => formAcf[k];
+  const acf: Record<string, unknown> = { ...baseForm };
+
+  const fa = (k: string) => baseForm[k];
   const set = (k: string, v: unknown) => { if (nonEmpty(v) && !nonEmpty(fa(k))) acf[k] = v; };
 
   // Phone — use a clean concatenation. If formAcf already has a phone
@@ -207,13 +218,14 @@ export async function enrichProfile(input: EnrichmentInput): Promise<EnrichmentR
   set("expected_salary",                                        cv.salary_expectation);
   set("notice_period",                                          cv.notice_period);
   set("languages",                                              cv.languages);
+  set("english_level",                                          cv.english_level);
 
   // Years of experience: form normally wins. But occasionally the
   // doctor enters a silly form value (we've seen "1" from a Consultant
   // with a multi-decade CV — likely they thought it meant 'years at
   // this current job'). When form < 3 AND CV ≥ form + 5, the CV is
   // overwhelmingly likely to be the right value, so we override.
-  const formYears = parseInt(String(formAcf.years_of_experience_post_specialization ?? ""), 10);
+  const formYears = parseInt(String(baseForm.years_of_experience_post_specialization ?? ""), 10);
   const cvYears   = parseInt(String(cv.years_experience ?? ""), 10);
   if (Number.isFinite(cvYears) && cvYears > 0) {
     if (!Number.isFinite(formYears) || formYears <= 0) {

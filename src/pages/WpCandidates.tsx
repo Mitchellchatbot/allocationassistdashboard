@@ -1918,7 +1918,7 @@ function AiBioMenu({
   const [busy,     setBusy]     = useState<null | string>(null);
   const [preview,  setPreview]  = useState<{ text: string; instruction: string } | null>(null);
 
-  const run = async (instruction: "shorten_100" | "shorten_60" | "tighten" | "professional", label: string) => {
+  const run = async (instruction: "shorten_150" | "shorten_100" | "shorten_60" | "tighten" | "professional", label: string) => {
     if (!bio) {
       toast.error("Add a bio first, then I can shorten it.");
       return;
@@ -1958,8 +1958,12 @@ function AiBioMenu({
           </Button>
           {open && (
             <div className="absolute left-0 top-full mt-1 z-50 w-64 rounded-lg border border-slate-200 bg-white shadow-lg p-1">
-              <MenuButton onClick={() => { setOpen(false); void run("shorten_100", "Shortening…"); }}>
+              <MenuButton onClick={() => { setOpen(false); void run("shorten_150", "Shortening…"); }}>
                 <span className="font-medium">Shorten</span>
+                <span className="text-[10.5px] text-muted-foreground">Under 150 words</span>
+              </MenuButton>
+              <MenuButton onClick={() => { setOpen(false); void run("shorten_100", "Shortening…"); }}>
+                <span className="font-medium">Shorten more</span>
                 <span className="text-[10.5px] text-muted-foreground">Under 100 words</span>
               </MenuButton>
               <MenuButton onClick={() => { setOpen(false); void run("shorten_60", "Shortening…"); }}>

@@ -42,7 +42,7 @@ Return a JSON object with these exact keys:
 
 {
   "title":              string | null,   // Their stated professional title. Medical CV: UAE-style like "Consultant Pediatrician", "Specialist Urologist". Non-medical: whatever title they hold, e.g. "SEO & Email Marketing Specialist".
-  "bio":                string | null,   // 3-5 sentence prose paragraph summarising their professional background. Third person, professional tone. Use ONLY facts in the CV.
+  "bio":                string | null,   // 3-5 sentence prose paragraph summarising their professional background. STRICTLY UNDER 150 WORDS. Third person, professional tone. Use ONLY facts in the CV.
   "specialty":          string | null,   // Broad medical specialty inferred from title/training (e.g. "Rheumatology", "Internal Medicine", "Cardiology", "General Surgery"). One canonical specialty name — not a list. Non-medical: their primary domain (e.g. "Marketing", "Software Engineering").
   "subspecialty":       string | null,   // More specific area inside the specialty (e.g. "Pediatric Rheumatology", "Interventional Cardiology", "Hepatobiliary Surgery"). Null if the CV doesn't go deeper than the specialty.
   "current_location":   string | null,   // City + country of current residence / workplace if stated (e.g. "Dubai, UAE", "London, UK").
@@ -56,7 +56,8 @@ Return a JSON object with these exact keys:
   "license":            string | null,   // UAE/GCC MEDICAL license info ONLY (e.g. "DHA Registration", "SCFHS in process"). For non-medical CVs, this is null — don't pretend they have a medical license.
   "salary_expectation": string | null,   // Free text — extract when stated. Capture both numbers if the CV lists "Current Salary" and "Expected Salary" separately (return the expected one here).
   "notice_period":      string | null,   // Free text — extract when stated, e.g. "1 month", "Immediate".
-  "languages":          string | null,   // Comma-separated languages they speak (e.g. "English, Arabic, Urdu"). Reasonable to infer from explicit language certifications (e.g. "IELTS 6 Bands" → English) or stated language proficiency.
+  "languages":          string | null,   // Comma-separated languages they speak (e.g. "English, Arabic, Urdu"). Infer English whenever the CV shows English-medium education/training, an English-language certification (IELTS/OET/TOEFL), or practice in an English-speaking country. Also include a native/regional language clearly implied by the country of training or stated nationality (e.g. India → Hindi, Egypt → Arabic). Use stated proficiency where given.
+  "english_level":      string | null,   // Their English proficiency as ONE short label: "Native", "Fluent", "Professional", "Intermediate", or "Basic". Infer it: English-medium MBBS/training or practice in an English-speaking country → "Fluent" (or "Native" if a native English country); an IELTS/OET band → map (IELTS 7+/OET B → "Fluent", 5.5-6.5 → "Professional"). Null only if there is genuinely no signal.
   "education":          [                 // Up to 3 entries, most recent first. Omit the array entirely if not present.
     {
       "institution": string | null,       // e.g. "Cairo University"
@@ -206,7 +207,7 @@ Deno.serve(async (req: Request) => {
     "area_of_interest", "country_training",
     "years_experience", "nationality", "age", "marital_status",
     "family_status", "license", "salary_expectation", "notice_period",
-    "languages",
+    "languages", "english_level",
   ];
   const profilePatch: Record<string, unknown> = {
     doctor_id:   row.doctor_id,

@@ -177,9 +177,11 @@ Deno.serve(async (req: Request) => {
       respondentName = a.text;
     }
     // CV = a file-upload answer. Prefer one whose question mentions cv/resume;
-    // otherwise the first file_url wins (most forms have a single upload).
+    // otherwise the first non-photo file_url wins. Never treat a photo /
+    // picture upload as the CV (the doctor form has both a CV and a photo).
     if (a.type === "file_url" && a.file_url) {
-      if (!cvUrl || /cv|resume|curriculum/i.test(titleLc)) cvUrl = a.file_url;
+      const isPhoto = /picture|photo|image|headshot|studio/i.test(titleLc);
+      if (!isPhoto && (!cvUrl || /cv|resume|curriculum/i.test(titleLc))) cvUrl = a.file_url;
     }
   }
 

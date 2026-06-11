@@ -18,9 +18,11 @@ const CORS = {
   "Access-Control-Allow-Methods": "POST, OPTIONS",
 };
 
-type Instruction = "shorten_100" | "shorten_60" | "tighten" | "professional";
+type Instruction = "shorten_150" | "shorten_100" | "shorten_60" | "tighten" | "professional";
 
 const PROMPTS: Record<Instruction, string> = {
+  shorten_150:
+    "Rewrite the bio below to STRICTLY UNDER 150 WORDS. Keep every concrete factual detail (institutions, role titles, fellowships, certifications, named procedures, years if mentioned). Drop padding and soft adjectives but preserve substance. Third person, professional tone.",
   shorten_100:
     "Rewrite the bio below to STRICTLY UNDER 100 WORDS. Keep every concrete factual detail (institutions, role titles, certifications, years if mentioned). Drop padding, soft adjectives, and any reference to soft skills. Third person, professional tone.",
   shorten_60:

@@ -192,8 +192,16 @@ export function mapToProfile(flat: Record<string, string>): {
   if (email) acf.email     = email;
   if (phone) acf.phone_number = phone;
 
-  const dob = pick("dateofbirth", "dob", "birthdate", "birthday");
-  if (dob) acf.date_of_birth = dob;
+  // DOB — the exact-key pick misses verbose labels ("What is your date
+  // of birth?" → "whatisyourdateofbirth"), so fall back to a substring
+  // match. Typeform sends an ISO datetime ("1989-06-16T00:00:00.000Z");
+  // trim it down to a clean YYYY-MM-DD.
+  const dobRaw = pick("dateofbirth", "dob", "birthdate", "birthday")
+              || pickContains("dateofbirth", "birthdate", "birthday");
+  if (dobRaw) {
+    const iso = /^(\d{4})-(\d{2})-(\d{2})T/.exec(dobRaw.trim());
+    acf.date_of_birth = iso ? `${iso[1]}-${iso[2]}-${iso[3]}` : dobRaw.trim();
+  }
 
   const nat = pick("nationality");
   if (nat) acf.nationality = nat;
