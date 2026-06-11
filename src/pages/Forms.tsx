@@ -1982,6 +1982,12 @@ function AnswerValue({ k, v, highlight, formId }: { k: string; v: string; highli
  *  back. For any non-widget URL we just return it as-is (still
  *  absolutising relative paths defensively). */
 function jotformImageUrl(url: string, formId: string | undefined): string {
+  // Typeform file uploads (api.typeform.com/.../files/…) need the Bearer
+  // token — route through our typeform-file-proxy so the <img>/download works.
+  if (formId && /^https?:\/\/api\.typeform\.com\//i.test(url)) {
+    const base = (import.meta.env.VITE_SUPABASE_URL as string)?.replace(/\/$/, "") ?? "";
+    return `${base}/functions/v1/typeform-file-proxy?form_id=${encodeURIComponent(formId)}&url=${encodeURIComponent(url)}`;
+  }
   // Full https URLs pointing at jotform.com — extract the path part and
   // route through the proxy. Otherwise the dashboard would link directly
   // to JotForm, which requires the user to be logged in there. Common
