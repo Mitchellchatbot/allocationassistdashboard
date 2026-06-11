@@ -74,13 +74,21 @@ export default function Forms({ embedded = false }: { embedded?: boolean }) {
   const [activeId, setActiveId] = useState<string | null>(null);
   const [createOpen, setCreateOpen] = useState(false);
 
+  // Embedded in the Doctors → Responses tab: show ONLY the doctor-intake
+  // forms (JotForm + Typeform doctor profile intake). Leads / consultation /
+  // DoctorsFinder forms stay on the standalone /forms page.
+  const formsToShow = useMemo(
+    () => embedded ? forms.filter(f => f.form_type === "doctor_intake") : forms,
+    [forms, embedded],
+  );
+
   // Default to first form; ensure activeId is always one that exists.
   const safeActiveId = useMemo(() => {
-    if (activeId && forms.some(f => f.id === activeId)) return activeId;
-    return forms[0]?.id ?? null;
-  }, [forms, activeId]);
+    if (activeId && formsToShow.some(f => f.id === activeId)) return activeId;
+    return formsToShow[0]?.id ?? null;
+  }, [formsToShow, activeId]);
 
-  const active = useMemo(() => forms.find(f => f.id === safeActiveId) ?? null, [forms, safeActiveId]);
+  const active = useMemo(() => formsToShow.find(f => f.id === safeActiveId) ?? null, [formsToShow, safeActiveId]);
 
   const content = (
       <div className="space-y-4">
@@ -106,20 +114,22 @@ export default function Forms({ embedded = false }: { embedded?: boolean }) {
               </CardContent></Card>
             ))}
           </div>
-        ) : forms.length === 0 ? (
+        ) : formsToShow.length === 0 ? (
           <Card>
             <CardContent className="py-12 text-center text-[12px] text-muted-foreground">
               <ClipboardList className="h-6 w-6 mx-auto mb-2 text-muted-foreground/60" />
-              <p>No forms connected yet.</p>
-              <Button size="sm" onClick={() => setCreateOpen(true)} className="mt-3">
-                <Plus className="h-3.5 w-3.5 mr-1" /> Connect your first form
-              </Button>
+              <p>{embedded ? "No doctor-intake form connected yet." : "No forms connected yet."}</p>
+              {!embedded && (
+                <Button size="sm" onClick={() => setCreateOpen(true)} className="mt-3">
+                  <Plus className="h-3.5 w-3.5 mr-1" /> Connect your first form
+                </Button>
+              )}
             </CardContent>
           </Card>
         ) : (
           <Tabs value={safeActiveId ?? undefined} onValueChange={setActiveId}>
             <TabsList className="flex w-full overflow-x-auto h-auto py-1 bg-slate-100 justify-start">
-              {forms.map(f => (
+              {formsToShow.map(f => (
                 <TabsTrigger key={f.id} value={f.id} className="text-[12px] px-3 py-1.5 flex items-center gap-1.5">
                   <ProviderDot provider={f.provider} />
                   {f.name}
@@ -127,7 +137,7 @@ export default function Forms({ embedded = false }: { embedded?: boolean }) {
               ))}
             </TabsList>
 
-            {forms.map(f => (
+            {formsToShow.map(f => (
               <TabsContent key={f.id} value={f.id} className="mt-3">
                 {active?.id === f.id && <FormDetail form={f} />}
               </TabsContent>
