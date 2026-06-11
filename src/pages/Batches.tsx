@@ -11,7 +11,7 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@
 import { Mailbox, Plus, Send, X, CheckCircle2, Calendar, ChevronRight, ChevronDown, RefreshCw, AlertCircle, Sparkles, UserSquare, GripVertical, Wand2, Pencil } from "lucide-react";
 import { Checkbox } from "@/components/ui/checkbox";
 import { toast } from "sonner";
-import { useScheduledBatches, useUpsertBatch, useUpdateBatch, useCancelBatch, useSendBatchNow,
+import { useScheduledBatches, useUpsertBatch, useUpdateBatch, useCancelBatch, useSendBatchNow, useBatchPreview,
   useSpecialtyRotation, useUpdateSpecialtyRotation,
   type ScheduledBatch, type BatchKind,
 } from "@/hooks/use-scheduled-batches";
@@ -825,6 +825,8 @@ function BatchDialog({ target, onTargetChange, batches, suggestedSpecialty }: {
   const upsert = useUpsertBatch();
   const update = useUpdateBatch();
   const sendNow = useSendBatchNow();
+  const previewMut = useBatchPreview();
+  const [emailPreview, setEmailPreview] = useState<{ subject: string; html: string; bcc_count: number } | null>(null);
   const { data: zoho } = useZohoData();
   const lifecycleMap = useDoctorLifecycleMap();
   // Pool = WP PUBLISHED candidates only (the website), augmented from Zoho.
@@ -1025,6 +1027,7 @@ function BatchDialog({ target, onTargetChange, batches, suggestedSpecialty }: {
   const countWarning = batch && batch.status === "draft" && picked.length !== expectedCount;
 
   return (
+    <>
     <Dialog open={open} onOpenChange={(v) => !v && close()}>
       <DialogContent className={batch ? "sm:max-w-[680px] max-h-[88vh] overflow-y-auto" : "sm:max-w-[460px]"}>
         {!batch ? (
@@ -1244,6 +1247,22 @@ function BatchDialog({ target, onTargetChange, batches, suggestedSpecialty }: {
             )}
 
             <DialogFooter>
+              <Button
+                variant="outline"
+                className="mr-auto"
+                onClick={async () => {
+                  if (picked.length === 0) { toast.error("Queue at least one doctor to preview."); return; }
+                  try {
+                    const p = await previewMut.mutateAsync(batch.status === "sent" ? { batchId: batch.id, force: true } : batch.id);
+                    setEmailPreview({ subject: p.subject, html: p.html, bcc_count: p.bcc_count });
+                  } catch (e) {
+                    toast.error(e instanceof Error ? e.message : "Preview failed");
+                  }
+                }}
+                disabled={previewMut.isPending || picked.length === 0}
+              >
+                <Mailbox className="h-3.5 w-3.5 mr-1.5 text-teal-600" /> {previewMut.isPending ? "Building…" : "Preview email"}
+              </Button>
               {batch.status === "draft" && (
                 <Button
                   onClick={async () => {
@@ -1286,6 +1305,31 @@ function BatchDialog({ target, onTargetChange, batches, suggestedSpecialty }: {
         )}
       </DialogContent>
     </Dialog>
+
+    {/* Email preview — the exact HTML hospitals will receive (send-batch
+        dry_run), shown in a sandboxed iframe so the email's own styles
+        can't leak into the dashboard. */}
+    <Dialog open={!!emailPreview} onOpenChange={(v) => !v && setEmailPreview(null)}>
+      <DialogContent className="sm:max-w-[780px] max-h-[92vh] overflow-hidden flex flex-col">
+        <DialogHeader>
+          <DialogTitle className="text-base">Email preview</DialogTitle>
+          <DialogDescription className="text-xs">
+            {emailPreview?.subject && (<><span className="font-medium text-slate-700">Subject:</span> {emailPreview.subject}</>)}
+            {typeof emailPreview?.bcc_count === "number" && (<> · BCC to {emailPreview.bcc_count} hospital{emailPreview.bcc_count === 1 ? "" : "s"}</>)}
+          </DialogDescription>
+        </DialogHeader>
+        <iframe
+          title="Batch email preview"
+          sandbox=""
+          className="w-full flex-1 min-h-[62vh] rounded-md border border-slate-200 bg-white"
+          srcDoc={emailPreview?.html ?? ""}
+        />
+        <DialogFooter>
+          <Button variant="outline" onClick={() => setEmailPreview(null)}>Close preview</Button>
+        </DialogFooter>
+      </DialogContent>
+    </Dialog>
+    </>
   );
 }
 

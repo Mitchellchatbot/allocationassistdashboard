@@ -233,6 +233,23 @@ export function useSendBatchNow() {
   });
 }
 
+/** Build the batch email WITHOUT sending it (send-batch `dry_run`), so the
+ *  user can preview exactly what hospitals will receive before firing.
+ *  Returns the rendered subject + HTML + the BCC recipient count. */
+export function useBatchPreview() {
+  return useMutation({
+    mutationFn: async (input: string | { batchId: string; force?: boolean }): Promise<{ subject: string; html: string; text: string; from: string; bcc_count: number }> => {
+      const batchId = typeof input === "string" ? input : input.batchId;
+      const force   = typeof input === "string" ? false  : !!input.force;
+      const { data, error } = await supabase.functions.invoke("send-batch", { body: { batch_id: batchId, dry_run: true, force } });
+      if (error) throw error;
+      const res = data as { ok: boolean; preview?: { subject: string; html: string; text: string; from: string; bcc_count: number }; error?: string };
+      if (!res.ok || !res.preview) throw new Error(res.error ?? "Preview failed");
+      return res.preview;
+    },
+  });
+}
+
 export function useUpdateSpecialtyRotation() {
   const qc = useQueryClient();
   return useMutation({
