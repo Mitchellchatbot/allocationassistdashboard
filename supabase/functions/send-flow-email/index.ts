@@ -94,6 +94,9 @@ const TEST_OVERRIDE      = TEST_OVERRIDE_LIST[0] ?? "";
 // going out while we're in testing. Only applied when the test-override is
 // active — production sends to real recipients are never CC'd here.
 const TEST_CC_ALWAYS     = "ammar@allocationassist.com";
+// AA's fixed second-payment (placement-fee) amount, used on the invoice +
+// reminder emails when a per-run override isn't set.
+const SECOND_PAYMENT_AMOUNT = "AED 10,500";
 // Subdomain dedicated to receiving replies — outgoing emails set
 // `Reply-To: reply-<run_id>@<MAIL_REPLY_DOMAIN>`, so a hospital reply lands
 // at Resend Inbound carrying the run_id right in the address. Strongest
@@ -591,11 +594,16 @@ Deno.serve(async (req: Request) => {
     payment_link:       String(md.payment_link ?? ""),
     hospital_profile_url:  String(md.hospital_profile_url ?? ""),
     hospital_description:  String(md.hospital_description ?? ""),
-    amount:             String(md.amount ?? ""),
+    // Second-payment fee: fixed at AED 10,500 (Ammar 2026-06-11) unless a
+    // per-run override is set. invoice_number / payment_link stay blank until
+    // we have a source for them.
+    amount:             String(md.amount || SECOND_PAYMENT_AMOUNT),
     invoice_number:     String(md.invoice_number ?? ""),
     invoice_issue_date: String(md.invoice_issue_date ?? ""),
     late_fee_amount:    String(md.late_fee_amount ?? ""),
-    due_date:           String(md.due_date ?? ""),
+    // Due date = explicit override, else 45 days after the logged joining date
+    // (the AA second-payment terms the scheduler already assumes).
+    due_date:           computeDueDate(md),
     days_overdue:       String(md.days_overdue ?? ""),
     interview_datetime: String(md.interview_datetime ?? ""),
     interview_format:   String(md.interview_format ?? ""),
@@ -892,6 +900,20 @@ function computeAgeFromDob(dob: string | null | undefined): number | null {
   const m = now.getMonth() - d.getMonth();
   if (m < 0 || (m === 0 && now.getDate() < d.getDate())) a--;
   return a >= 0 && a < 120 ? a : null;
+}
+
+/** Second-payment due date: an explicit metadata.due_date wins; otherwise
+ *  45 days after the logged joining_date (AA terms). Formats as "23 July 2026".
+ *  Returns "" when neither is available. */
+function computeDueDate(md: Record<string, unknown>): string {
+  const explicit = String(md.due_date ?? "").trim();
+  if (explicit) return explicit;
+  const joining = String(md.joining_date ?? "").trim();
+  if (!joining) return "";
+  const d = new Date(joining);
+  if (isNaN(d.getTime())) return "";
+  d.setDate(d.getDate() + 45);
+  return d.toLocaleDateString("en-GB", { day: "numeric", month: "long", year: "numeric" });
 }
 
 function render(body: string, vars: Record<string, string>, html = false): string {
