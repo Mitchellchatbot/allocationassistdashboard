@@ -156,6 +156,24 @@ Deno.serve(async (req) => {
         const { data } = await sb.from("automation_flow_runs").select("id, flow_key, current_stage, doctor_id, assigned_to, last_event_at, metadata").order("last_event_at", { ascending: false, nullsFirst: false }).limit(5);
         return new Response(JSON.stringify({ ok: true, runs: data ?? [] }, null, 2), { headers: { "Content-Type": "application/json" } });
       }
+      if ((body as { resend_domains?: boolean } | null)?.resend_domains) {
+        const key = Deno.env.get("RESEND_API_KEY") ?? "";
+        const r = await fetch("https://api.resend.com/domains", { headers: { Authorization: `Bearer ${key}` } });
+        const j = await r.json().catch(() => null);
+        return new Response(JSON.stringify({ ok: r.ok, status: r.status, domains: j }, null, 2), { headers: { "Content-Type": "application/json" } });
+      }
+      if ((body as { recent_inbound?: boolean } | null)?.recent_inbound) {
+        const [replies, notifs] = await Promise.all([
+          sb.from("hospital_replies").select("id, run_id, doctor_name, hospital_name, reply_from, reply_subject, classification, source, created_at").order("created_at", { ascending: false }).limit(8),
+          sb.from("notifications").select("*").order("created_at", { ascending: false }).limit(12),
+        ]);
+        return new Response(JSON.stringify({
+          ok: true,
+          replies: replies.data ?? [], replies_err: replies.error?.message,
+          notifs: (notifs.data ?? []).map((n: Record<string, unknown>) => ({ kind: n.kind, title: n.title, created_at: n.created_at, slack_skip_reason: n.slack_skip_reason, slack_delivered_at: n.slack_delivered_at, related_run_id: n.related_run_id })),
+          notifs_err: notifs.error?.message,
+        }, null, 2), { headers: { "Content-Type": "application/json" } });
+      }
       if ((body as { find_doctor?: string } | null)?.find_doctor) {
         const q = (body as { find_doctor: string }).find_doctor;
         const [wp, staged, forms] = await Promise.all([
