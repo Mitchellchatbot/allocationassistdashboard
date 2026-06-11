@@ -2050,6 +2050,11 @@ function MenuButton({ onClick, children }: { onClick: () => void; children: Reac
 function buildPhotoProxyUrl(rawUrl: string | null, formId: string | null): string | null {
   if (!rawUrl) return null;
   if (!formId) return rawUrl;  // Old staged rows pre-migration; let the browser try.
+  // Typeform file uploads need the Bearer token — route through the proxy.
+  if (/^https?:\/\/api\.typeform\.com\//i.test(rawUrl)) {
+    const supabaseUrl = import.meta.env.VITE_SUPABASE_URL as string;
+    return `${supabaseUrl}/functions/v1/typeform-file-proxy?form_id=${encodeURIComponent(formId)}&url=${encodeURIComponent(rawUrl)}`;
+  }
   // Extract the /widget-uploads/... or /uploads/... path. JotForm URLs
   // look like https://www.jotform.com/widget-uploads/imagepreview/<formId>/<file>.
   try {

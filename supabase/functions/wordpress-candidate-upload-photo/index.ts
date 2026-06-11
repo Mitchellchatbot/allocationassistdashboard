@@ -60,24 +60,31 @@ Deno.serve(async (req: Request) => {
 
     const { data: row } = await supabase
       .from("forms")
-      .select("api_token")
+      .select("api_token, provider")
       .eq("id", body.form_id)
       .single();
     const apiKey = (row as { api_token?: string } | null)?.api_token;
-    if (!apiKey) return json({ ok: false, error: "Form has no JotForm api_token; cannot fetch picture" }, 404);
+    if (!apiKey) return json({ ok: false, error: "Form has no api_token; cannot fetch picture" }, 404);
 
-    // Normalise relative paths.
-    const jfUrl = body.jotform_url.startsWith("http")
-      ? body.jotform_url
-      : `https://www.jotform.com${body.jotform_url.startsWith("/") ? "" : "/"}${body.jotform_url}`;
-
-    const jfRes = await fetch(jfUrl, { headers: { APIKEY: apiKey } });
-    if (!jfRes.ok) return json({ ok: false, error: `JotForm fetch ${jfRes.status}` }, 502);
-    const blob = await jfRes.blob();
-    if (blob.size === 0)                  return json({ ok: false, error: "JotForm returned empty body" }, 502);
+    // Typeform file URLs need a Bearer token; JotForm uses APIKEY (and may
+    // arrive as a relative /uploads/ path that we absolutise).
+    const isTypeform = (row as { provider?: string } | null)?.provider === "typeform"
+                    || /^https?:\/\/api\.typeform\.com\//i.test(body.jotform_url);
+    let picRes: Response;
+    if (isTypeform) {
+      picRes = await fetch(body.jotform_url, { headers: { Authorization: `Bearer ${apiKey}` } });
+    } else {
+      const jfUrl = body.jotform_url.startsWith("http")
+        ? body.jotform_url
+        : `https://www.jotform.com${body.jotform_url.startsWith("/") ? "" : "/"}${body.jotform_url}`;
+      picRes = await fetch(jfUrl, { headers: { APIKEY: apiKey } });
+    }
+    if (!picRes.ok) return json({ ok: false, error: `Picture fetch ${picRes.status}` }, 502);
+    const blob = await picRes.blob();
+    if (blob.size === 0)                  return json({ ok: false, error: "Picture fetch returned empty body" }, 502);
     if (blob.size > 8 * 1024 * 1024)      return json({ ok: false, error: "Picture too large (>8 MB)" }, 413);
 
-    const inferredName = (jfUrl.split("/").pop() || "photo.jpg").split("?")[0];
+    const inferredName = (body.jotform_url.split("/").pop() || "photo.jpg").split("?")[0];
     file = new File([blob], inferredName, { type: blob.type || "image/jpeg" });
   } else {
     const form = await req.formData().catch(() => null);

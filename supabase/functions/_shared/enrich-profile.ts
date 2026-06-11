@@ -103,10 +103,17 @@ function pictureUrlFromFormResponse(
     for (const [label, v] of Object.entries(answers)) {
       if (!v) continue;
       // Cheap pre-filter on the label so we don't try to parse every value as JSON.
-      const looksLikePic = /picture|photo|image|profilepic|headshot/i.test(label);
+      const looksLikePic = /picture|photo|image|profilepic|headshot|studio/i.test(label);
       if (!looksLikePic && !v.includes("widget_metadata")) continue;
       const url = extractWidgetUrl(v);
       if (url) return url;
+      // Typeform photo: a plain file URL (api.typeform.com/.../files/…), not
+      // widget_metadata. Pick it out of the picture-labelled answer.
+      if (looksLikePic) {
+        const tf = /https?:\/\/api\.typeform\.com\/[^\s,;"'\\]+/i.exec(v)?.[0]
+                ?? /https?:\/\/[^\s,;"'\\]+\.(?:jpe?g|png|gif|webp)(?:\?|$)/i.exec(v)?.[0];
+        if (tf) return tf.replace(/\\\//g, "/");
+      }
     }
   }
 

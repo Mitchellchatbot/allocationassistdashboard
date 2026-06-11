@@ -2049,6 +2049,15 @@ function pictureUrlFor(response: FormResponse): string | null {
       }
     } catch { /* skip */ }
   }
+  // Typeform photo: a file-upload answer is a plain URL (api.typeform.com/…/
+  // files/…), not widget_metadata. Find the picture-labelled one + proxy it.
+  for (const [label, v] of Object.entries(flat)) {
+    if (typeof v !== "string" || !v.trim()) continue;
+    if (!/picture|photo|image|profilepic|headshot|studio/i.test(label)) continue;
+    const url = (/https?:\/\/api\.typeform\.com\/[^\s,;"']+/i.exec(v)?.[0])
+             ?? (/https?:\/\/[^\s,;"']+\.(?:jpe?g|png|gif|webp)(?:\?|$)/i.exec(v)?.[0]);
+    if (url) return jotformImageUrl(url, response.form_id);
+  }
   return null;
 }
 
