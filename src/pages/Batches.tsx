@@ -846,11 +846,11 @@ function BatchDialog({ target, onTargetChange, batches, suggestedSpecialty }: {
 
   // Editor-only state.
   const [search, setSearch] = useState("");
-  // specialtyOnly defaults TRUE for specialty_of_day (batch.specialty is
-  // the whole point of the send) and FALSE for daily_duo / tuesday_top_15
-  // — those kinds aren't specialty-bound, so we only score-boost the
-  // rotation match instead of filtering by it.
-  const [specialtyOnly, setSpecialtyOnly] = useState(false);
+  // specialtyOnly defaults ON whenever there's a specialty to scope to —
+  // the batch's own specialty (specialty_of_day) OR today's rotation
+  // specialty for the open-ended kinds (daily_duo / tuesday_top_15). The
+  // team can uncheck it to widen the pool.
+  const [specialtyOnly, setSpecialtyOnly] = useState(true);
   // Website-only pool — default ON. Ammar 2026-06-09: batches should pull
   // from doctors who are actually live on the AA website (have a matching
   // WP candidate), not the whole Zoho roster. Toggle off to widen the pool.
@@ -864,14 +864,16 @@ function BatchDialog({ target, onTargetChange, batches, suggestedSpecialty }: {
     return next;
   });
 
-  // When the dialog swaps to a different batch, default specialtyOnly to
-  // ON for specialty_of_day (batch is explicitly that specialty) and OFF
-  // for the open-ended kinds (rotation hint still ranks doctors but
-  // doesn't hard-filter).
+  // When the dialog swaps to a different batch, default specialtyOnly ON
+  // whenever there's a specialty to scope to — the batch's own specialty,
+  // or today's rotation specialty for the open-ended kinds (daily_duo /
+  // tuesday_top_15). Only OFF when no effective specialty exists at all.
   useEffect(() => {
     if (!editingBatch) return;
-    setSpecialtyOnly(!!editingBatch.specialty);
-  }, [editingBatch?.id, editingBatch?.specialty]);
+    const hasSpecialtyScope = !!(editingBatch.specialty
+      || (editingBatch.kind !== "specialty_of_day" && suggestedSpecialty));
+    setSpecialtyOnly(hasSpecialtyScope);
+  }, [editingBatch?.id, editingBatch?.specialty, editingBatch?.kind, suggestedSpecialty]);
 
   const close = () => {
     onTargetChange(null);
