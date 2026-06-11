@@ -334,15 +334,36 @@ Deno.serve(async (req: Request) => {
   // keep them in lockstep when adding new tokens.
   let profileTokens: Record<string, string> = {};
   if (run.doctor_id) {
-    // Step 1: WP candidate — most recent linked row (a doctor *should*
-    // only have one, but order-by-modified just in case).
-    const { data: wp } = await supabase
-      .from("wordpress_candidates")
-      .select("*")
-      .eq("doctor_id", run.doctor_id)
-      .order("wp_modified", { ascending: false, nullsFirst: false })
-      .limit(1)
-      .maybeSingle();
+    // Step 1: WP candidate. The picker is Zoho-sourced (dob:/lead: ids) and a
+    // candidate's WP record is often NOT linked by doctor_id (email/name
+    // mismatch), or the doctor is website-only (wp:<id>). So resolve the same
+    // way the batch path does: wp:<id> → linked doctor_id → phone → email →
+    // name. Without this a fully-filled WP profile renders as {{tokens}}.
+    const did = String(run.doctor_id);
+    const sel = () => supabase.from("wordpress_candidates").select("*");
+    let wp: Record<string, any> | null = null;  // eslint-disable-line @typescript-eslint/no-explicit-any
+    if (did.startsWith("wp:")) {
+      const numId = Number(did.slice(3));
+      if (Number.isFinite(numId)) wp = (await sel().eq("id", numId).maybeSingle()).data ?? null;
+    }
+    if (!wp) {
+      wp = (await sel().eq("doctor_id", did)
+        .order("wp_modified", { ascending: false, nullsFirst: false }).limit(1).maybeSingle()).data ?? null;
+    }
+    if (!wp && run.doctor_phone) {
+      const k = String(run.doctor_phone).replace(/\D/g, "").slice(-9);
+      if (k.length === 9) wp = (await sel().ilike("phone", `%${k}%`).limit(1).maybeSingle()).data ?? null;
+    }
+    if (!wp && run.doctor_email) {
+      wp = (await sel().ilike("email", String(run.doctor_email).trim()).limit(1).maybeSingle()).data ?? null;
+    }
+    if (!wp && run.doctor_name) {
+      const clean = String(run.doctor_name).replace(/^(dr|doctor|prof|mr|mrs|ms|miss)\.?\s+/i, "").trim();
+      if (clean) {
+        const { data: byName } = await sel().ilike("full_name", `%${clean}%`).limit(2);
+        if (Array.isArray(byName) && byName.length === 1) wp = byName[0];
+      }
+    }
     if (wp) {
       const age = computeAgeFromDob(wp.date_of_birth);
       profileTokens = {

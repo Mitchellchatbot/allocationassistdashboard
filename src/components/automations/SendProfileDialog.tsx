@@ -16,7 +16,7 @@ import { supabase } from "@/lib/supabase";
 import { useHospitals, type Hospital } from "@/hooks/use-hospitals";
 import { useEmailTemplates, renderTemplate } from "@/hooks/use-email-templates";
 import { useDoctorProfile, profileToTokens, calcCompletion } from "@/hooks/use-doctor-profiles";
-import { useWpCandidateByDoctorId, wpCandidateToTokens } from "@/hooks/use-wp-candidates";
+import { useWpCandidateForDoctor, wpCandidateToTokens } from "@/hooks/use-wp-candidates";
 import { useZohoData, type ZohoDoctorOnBoard, type ZohoLead } from "@/hooks/use-zoho-data";
 import { useQueryClient } from "@tanstack/react-query";
 
@@ -476,7 +476,7 @@ function PreviewConfirm({
   // now the source of truth — if the doctor is linked to a WP record
   // we use that; for any field WP doesn't have set, we fall back to
   // the legacy doctor_profiles row so historical data still renders.
-  const { data: wpCandidate } = useWpCandidateByDoctorId(doctor.id);
+  const wpCandidate           = useWpCandidateForDoctor(doctor);
   const { data: profile }     = useDoctorProfile(doctor.id);
   const wpTokens     = wpCandidateToTokens(wpCandidate);
   const legacyTokens = profileToTokens(profile);

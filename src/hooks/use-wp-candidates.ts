@@ -650,6 +650,42 @@ export function useWpCandidateByDoctorId(doctorId: string | null) {
   });
 }
 
+/** Resolve a doctor (from the Zoho-sourced picker) to their WP candidate the
+ *  SAME way the batch path does — `useWpCandidateByDoctorId` only matches the
+ *  `doctor_id` link, which fails when the candidate's WP record isn't linked
+ *  (email/name mismatch) or the doctor is website-only. Match against the
+ *  published pool by: linked doctor_id → wp:<id> → phone (last 9) → email →
+ *  unique name. Returns null when the doctor genuinely isn't on the website. */
+export function useWpCandidateForDoctor(
+  doctor: { id: string; email?: string | null; phone?: string | null; name?: string | null } | null,
+): WpCandidate | null {
+  const { data: pool = [] } = usePublishedWpCandidates();
+  return useMemo<WpCandidate | null>(() => {
+    if (!doctor) return null;
+    const norm = (n: string | null | undefined) =>
+      (n ?? "").toLowerCase().replace(/^(dr|doctor|prof|mr|mrs|ms|miss)\.?\s+/i, "").replace(/\s+/g, " ").trim();
+
+    let hit = pool.find(c => c.doctor_id === doctor.id);
+    if (!hit && doctor.id.startsWith("wp:")) {
+      const n = Number(doctor.id.slice(3));
+      if (Number.isFinite(n)) hit = pool.find(c => c.id === n);
+    }
+    if (!hit && doctor.phone) {
+      const k = normalizePhone(doctor.phone);
+      if (k) hit = pool.find(c => normalizePhone(c.phone) === k);
+    }
+    if (!hit && doctor.email) {
+      const e = doctor.email.toLowerCase().trim();
+      if (e) hit = pool.find(c => (c.email ?? "").toLowerCase().trim() === e);
+    }
+    if (!hit && doctor.name) {
+      const nm = norm(doctor.name);
+      if (nm) { const ms = pool.filter(c => norm(c.full_name) === nm); if (ms.length === 1) hit = ms[0]; }
+    }
+    return hit ?? null;
+  }, [pool, doctor?.id, doctor?.email, doctor?.phone, doctor?.name]);
+}
+
 /** Normalise a phone to its last 9 digits so country-code / spacing /
  *  punctuation variants collapse onto the same key. JotForm hands us
  *  '+44 7900 123 456'; WP often has '07900123456' or '447900123456';
