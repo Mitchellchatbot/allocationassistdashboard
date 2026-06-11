@@ -58,6 +58,8 @@ www.allocationassist.com
 const TEST_OVERRIDE_LIST = (Deno.env.get("MAIL_TEST_RECIPIENT_OVERRIDE") ?? "")
   .split(",").map(s => s.trim()).filter(Boolean);
 const TEST_OVERRIDE      = TEST_OVERRIDE_LIST[0] ?? "";
+// Always CC Ammar on test batch emails so he sees every one going out.
+const TEST_CC_ALWAYS     = "ammar@allocationassist.com";
 
 const CORS = {
   "Access-Control-Allow-Origin":  "*",
@@ -260,8 +262,14 @@ Deno.serve(async (req: Request) => {
   // Test override pattern matches send-flow-email: when set, all sends go
   // to the override address instead of the 95 hospital recipients. Lets us
   // demo end-to-end on the resend.dev sandbox without leaking emails.
-  const bccList   = TEST_OVERRIDE_LIST.length > 0 ? TEST_OVERRIDE_LIST : recipients;
-  const toAddress = TEST_OVERRIDE_LIST[0] || MAIL_FROM.replace(/.*<|>.*/g, "");
+  const bccListRaw = TEST_OVERRIDE_LIST.length > 0 ? TEST_OVERRIDE_LIST : recipients;
+  const toAddress  = TEST_OVERRIDE_LIST[0] || MAIL_FROM.replace(/.*<|>.*/g, "");
+  // In test mode, always CC Ammar (visible) so he sees every test send. Keep
+  // him out of the To/Bcc to avoid double-listing.
+  const inTestMode = TEST_OVERRIDE_LIST.length > 0;
+  const testCc     = inTestMode && TEST_CC_ALWAYS.toLowerCase() !== toAddress.toLowerCase()
+    ? [TEST_CC_ALWAYS] : undefined;
+  const bccList    = testCc ? bccListRaw.filter(a => a.toLowerCase() !== TEST_CC_ALWAYS.toLowerCase()) : bccListRaw;
 
   let resendRes: Response;
   try {
@@ -271,6 +279,7 @@ Deno.serve(async (req: Request) => {
       body: JSON.stringify({
         from:    MAIL_FROM,
         to:      [toAddress],
+        cc:      testCc,
         bcc:     bccList,
         subject, html, text,
         headers: {

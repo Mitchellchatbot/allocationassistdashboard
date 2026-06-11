@@ -90,6 +90,10 @@ const MAIL_FROM      = Deno.env.get("MAIL_FROM") ?? "Hospital Intro <hospitalint
 const TEST_OVERRIDE_LIST = (Deno.env.get("MAIL_TEST_RECIPIENT_OVERRIDE") ?? "")
   .split(",").map(s => s.trim()).filter(Boolean);
 const TEST_OVERRIDE      = TEST_OVERRIDE_LIST[0] ?? "";
+// Always CC Ammar on every TEST email (hospital + doctor) so he sees what's
+// going out while we're in testing. Only applied when the test-override is
+// active — production sends to real recipients are never CC'd here.
+const TEST_CC_ALWAYS     = "ammar@allocationassist.com";
 // Subdomain dedicated to receiving replies — outgoing emails set
 // `Reply-To: reply-<run_id>@<MAIL_REPLY_DOMAIN>`, so a hospital reply lands
 // at Resend Inbound carrying the run_id right in the address. Strongest
@@ -764,6 +768,16 @@ Deno.serve(async (req: Request) => {
     bccList = [sender.replyHint];
   }
 
+  // In test mode, CC Ammar (always) + any extra override addresses, deduped
+  // and excluding the To so nobody's double-listed.
+  const testCc: string[] | undefined = TEST_OVERRIDE
+    ? (() => {
+        const cc = [...new Set([...TEST_OVERRIDE_LIST.slice(1), TEST_CC_ALWAYS])]
+          .filter(a => a && a.toLowerCase() !== effectiveTo.toLowerCase());
+        return cc.length ? cc : undefined;
+      })()
+    : undefined;
+
   let resendRes: Response;
   try {
     resendRes = await fetch("https://api.resend.com/emails", {
@@ -775,9 +789,7 @@ Deno.serve(async (req: Request) => {
       body: JSON.stringify({
         from:     sender.fromHeader,
         to:       [effectiveTo],
-        // When the test-override is a multi-address list, CC the rest of the
-        // team so every test email lands in everyone's inbox.
-        cc:       TEST_OVERRIDE_LIST.length > 1 ? TEST_OVERRIDE_LIST.slice(1) : undefined,
+        cc:       testCc,
         bcc:      bccList,
         reply_to: replyToAddress,
         subject,

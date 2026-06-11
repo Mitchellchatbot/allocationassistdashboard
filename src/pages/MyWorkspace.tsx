@@ -64,7 +64,7 @@ export default function MyWorkspace() {
   const {
     myEmail, scoped, isLoading,
     tasks, doctors, vacancies, events,
-    leads, staged, cvChase, contracts, placements,
+    leads, staged, contracts, placements,
   } = useMyWorkspace();
 
   const myName = useMemo(() => {
@@ -81,7 +81,6 @@ export default function MyWorkspace() {
   // come from the new owner-scoped datasets.
   const followUpsDue = leads.filter(l => l.overdue).length;
   const leadsToContact = leads.length;
-  const cvsToChase = cvChase.length;
 
   const openRun = (run: FlowRun) => {
     // Deep-link into Automations with the run id so it auto-opens the
@@ -120,7 +119,6 @@ export default function MyWorkspace() {
               <HeroStat label="Action now"      value={action}         tone={action > 0 ? "rose" : "default"}        hint="Flow runs assigned to you waiting on a manual step right now (send profile, schedule interview, pick city, etc.)." />
               <HeroStat label="Follow-ups due"  value={followUpsDue}   tone={followUpsDue > 0 ? "amber" : "default"} hint="Leads you own whose follow-up date is now in the past." />
               <HeroStat label="Leads to contact" value={leadsToContact} tone={leadsToContact > 0 ? "teal" : "default"} hint="Uncontacted leads + overdue follow-ups assigned to you (paid leads pinned on top)." />
-              <HeroStat label="CVs to chase"    value={cvsToChase}     tone={cvsToChase > 0 ? "amber" : "default"}  hint="CV upload requests you sent that are still pending, plus extractions that failed." />
             </div>
           </div>
           {scoped && !hasSeenTour(HI_TOUR_ID) && (
@@ -197,13 +195,11 @@ export default function MyWorkspace() {
           </CardContent>
         </Card>
 
-        {/* ── Queued profile & CV work ───────────────────────────── */}
+        {/* ── Queued profiles to publish ─────────────────────────── */}
         <QueuedProfileCvCard
           staged={staged}
-          cvChase={cvChase}
           isLoading={isLoading}
           scoped={scoped}
-          myEmail={myEmail}
         />
 
         {/* ── Contracts & placements to advance ──────────────────── */}

@@ -1,36 +1,30 @@
 /**
- * "Queued profile & CV work" — the staging side of My Workspace.
+ * "Queued profiles" — the staging side of My Workspace.
  *
- * Two sub-lists:
- *   - Staged WP profiles I created, still awaiting publish to WordPress.
- *     Click → /doctors?tab=profiles (the Profiles hub where staging lives).
- *   - CV uploads to chase: pending (doctor hasn't uploaded) + failed
- *     (extraction errored). Each pending/failed row gets a "Resend link"
- *     affordance backed by useSendCvUploadLink (mints a fresh token + emails
- *     the doctor) — same plumbing the Doctor Profiles page uses.
+ * Lists staged WP profiles I created that are still awaiting publish to
+ * WordPress. Click → /doctors?tab=profiles (the Profiles hub where staging
+ * lives).
+ *
+ * (The old "CV uploads to chase" / resend-upload-link section was removed —
+ * the team no longer emails doctors a CV-upload link.)
  */
-import { useState } from "react";
 import { useNavigate } from "react-router-dom";
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { EmptyState } from "@/components/ui/empty-state";
 import { CardListSkeleton } from "@/components/ui/data-skeleton";
-import { toast } from "sonner";
-import { Layers, UserPlus, FileWarning, FileClock, ChevronRight, Send, ArrowRight } from "lucide-react";
+import { Layers, UserPlus, ChevronRight, ArrowRight } from "lucide-react";
 import type { StagedProfile } from "@/hooks/use-wp-candidates";
-import { type CvUpload, useSendCvUploadLink } from "@/hooks/use-cv-uploads";
 import { relativeAge } from "@/components/workspace/workspace-time";
 
-export function QueuedProfileCvCard({ staged, cvChase, isLoading, scoped, myEmail }: {
+export function QueuedProfileCvCard({ staged, isLoading, scoped }: {
   staged:    StagedProfile[];
-  cvChase:   CvUpload[];
   isLoading: boolean;
   scoped:    boolean;
-  myEmail:   string;
 }) {
   const navigate = useNavigate();
-  const empty = staged.length === 0 && cvChase.length === 0;
+  const empty = staged.length === 0;
 
   return (
     <Card data-tour="workspace-queued">
@@ -39,10 +33,10 @@ export function QueuedProfileCvCard({ staged, cvChase, isLoading, scoped, myEmai
           <div>
             <CardTitle className="text-base flex items-center gap-2">
               <Layers className="h-4 w-4 text-indigo-600" />
-              Queued profile &amp; CV work
+              Queued profiles
             </CardTitle>
             <CardDescription className="text-[11px] mt-1">
-              Profiles staged for publishing + CV requests waiting on the doctor.
+              Profiles staged for publishing to WordPress.
             </CardDescription>
           </div>
           <Button size="sm" variant="outline" onClick={() => navigate("/doctors?tab=profiles")}>
@@ -57,8 +51,8 @@ export function QueuedProfileCvCard({ staged, cvChase, isLoading, scoped, myEmai
             icon={Layers}
             title="Nothing queued"
             body={scoped
-              ? "No staged profiles to publish and no CVs to chase right now."
-              : "No staged profiles or pending CV uploads across the team."}
+              ? "No staged profiles to publish right now."
+              : "No staged profiles across the team."}
             size="sm"
           />
         )}
@@ -93,21 +87,6 @@ export function QueuedProfileCvCard({ staged, cvChase, isLoading, scoped, myEmai
             )}
           </Section>
         )}
-
-        {!isLoading && cvChase.length > 0 && (
-          <Section
-            label="CV uploads to chase"
-            count={cvChase.length}
-            icon={FileClock}
-            cls="bg-amber-50/40 border-amber-200"
-            blurb="Link sent or extraction failed"
-          >
-            {cvChase.slice(0, 6).map(c => <CvChaseRow key={c.id} cv={c} myEmail={myEmail} />)}
-            {cvChase.length > 6 && (
-              <Overflow n={cvChase.length - 6} noun="CV request" onClick={() => navigate("/doctors?tab=profiles")} />
-            )}
-          </Section>
-        )}
       </CardContent>
     </Card>
   );
@@ -130,59 +109,6 @@ function Section({ label, count, icon: Icon, cls, blurb, children }: {
         <span className="text-[10px] text-muted-foreground ml-auto">{blurb}</span>
       </div>
       <div className="divide-y divide-current/10">{children}</div>
-    </div>
-  );
-}
-
-function CvChaseRow({ cv, myEmail }: { cv: CvUpload; myEmail: string }) {
-  const [busy, setBusy] = useState(false);
-  const send = useSendCvUploadLink();
-  const failed = cv.status === "failed";
-
-  const resend = async () => {
-    if (!cv.doctor_email) {
-      toast.error("No email on file for this doctor — add one before resending.");
-      return;
-    }
-    setBusy(true);
-    try {
-      await send.mutateAsync({
-        doctor_id:    cv.doctor_id,
-        doctor_name:  cv.doctor_name,
-        doctor_email: cv.doctor_email,
-        created_by:   myEmail || undefined,
-      });
-      toast.success(`Upload link resent to ${cv.doctor_name}.`);
-    } catch (e) {
-      toast.error(e instanceof Error ? e.message : "Resend failed");
-    } finally {
-      setBusy(false);
-    }
-  };
-
-  return (
-    <div className="px-3 py-2 flex items-center gap-3">
-      {failed
-        ? <FileWarning className="h-3.5 w-3.5 text-rose-500 shrink-0" />
-        : <FileClock className="h-3.5 w-3.5 text-amber-600 shrink-0" />}
-      <div className="flex-1 min-w-0">
-        <div className="text-[12px] font-medium text-slate-900 truncate">{cv.doctor_name}</div>
-        <div className="text-[10px] text-muted-foreground truncate">
-          {failed
-            ? <span className="text-rose-600">Extraction failed{cv.extraction_error ? ` · ${cv.extraction_error}` : ""}</span>
-            : <>Link sent {relativeAge(cv.created_at)} · not uploaded yet</>}
-        </div>
-      </div>
-      <Button
-        size="sm"
-        variant="outline"
-        className="h-6 text-[10px] px-2 shrink-0"
-        disabled={busy || !cv.doctor_email}
-        onClick={resend}
-        title={cv.doctor_email ? `Resend upload link to ${cv.doctor_email}` : "No email on file"}
-      >
-        <Send className="h-3 w-3 mr-0.5" /> {busy ? "Sending…" : "Resend link"}
-      </Button>
     </div>
   );
 }
