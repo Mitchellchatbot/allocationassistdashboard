@@ -27,7 +27,7 @@
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
-import { Bell, CheckCircle2, AlertTriangle, AlertCircle, ArrowRight, Slack as SlackIcon, X, Trash2, ChevronRight, ChevronDown, Sparkles, CalendarCheck, UserCheck, FileSignature, MessageSquare, Mail, FileText, Archive, DollarSign, AlertOctagon, RefreshCw, Inbox } from "lucide-react";
+import { Bell, CheckCircle2, AlertTriangle, AlertCircle, ArrowRight, Slack as SlackIcon, X, Trash2, ChevronRight, ChevronDown, Sparkles, CalendarCheck, UserCheck, UserX, FileSignature, MessageSquare, Mail, FileText, Archive, DollarSign, AlertOctagon, RefreshCw, Inbox } from "lucide-react";
 import { useState, useMemo, useEffect, useRef } from "react";
 import { useNavigate } from "react-router-dom";
 import {
@@ -66,6 +66,7 @@ const KIND_META: Record<string, KindMeta> = {
   // — actionable (action tier) —
   shortlist_suggested:  { label: "Shortlist suggestions",  icon: MessageSquare, accent: "text-violet-600" },
   interview_proposed:   { label: "Interview times proposed", icon: CalendarCheck, accent: "text-amber-600" },
+  hospital_declined:    { label: "Hospital declined",       icon: UserX,         accent: "text-rose-600" },
   hospital_reply_overdue: { label: "Hospital reply overdue", icon: Mail,        accent: "text-blue-600" },
   interview_followup:   { label: "Interview follow-ups",   icon: CalendarCheck, accent: "text-amber-600" },
   availability_checkin: { label: "Availability check-ins", icon: UserCheck,     accent: "text-sky-600" },
@@ -89,7 +90,7 @@ const KIND_ORDER = [
   "shortlist_suggested", "interview_proposed", "hospital_reply_overdue", "interview_followup",
   "availability_checkin", "signed_not_joined", "contract_signed",
   "cv_uploaded", "batch_send_failed", "slack_archive_due", "form_digest",
-  "vacancy_match", "new_form_submission", "wp_sync_summary",
+  "hospital_declined", "vacancy_match", "new_form_submission", "wp_sync_summary",
 ];
 
 function kindMeta(kind: string): KindMeta {

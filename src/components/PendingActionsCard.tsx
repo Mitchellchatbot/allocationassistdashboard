@@ -3,7 +3,7 @@ import { useQuery } from "@tanstack/react-query";
 import { useNavigate } from "react-router-dom";
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
-import { Bell, Clock, Mail, FileSignature, MapPin, ChevronRight, ChevronDown, AlertCircle, ClipboardList, Sparkles, X, CheckCheck, Trash2, CalendarCheck, UserCheck, Eye, EyeOff, Inbox, MessageSquare, FileText, Archive, DollarSign, AlertOctagon, RefreshCw } from "lucide-react";
+import { Bell, Clock, Mail, FileSignature, MapPin, ChevronRight, ChevronDown, AlertCircle, ClipboardList, Sparkles, X, CheckCheck, Trash2, CalendarCheck, UserCheck, UserX, Eye, EyeOff, Inbox, MessageSquare, FileText, Archive, DollarSign, AlertOctagon, RefreshCw } from "lucide-react";
 import { EmptyState } from "@/components/ui/empty-state";
 import { supabase } from "@/lib/supabase";
 import { FLOW_DEFINITIONS, type FlowKey } from "@/lib/automation-flows";
@@ -160,6 +160,7 @@ const KIND_META: Record<string, KindMeta> = {
   // — actionable —
   shortlist_suggested:  { label: "Shortlist suggestions",  icon: MessageSquare, accent: "text-violet-600",  bg: "bg-violet-50/60 border-violet-200" },
   interview_proposed:   { label: "Interview times proposed", icon: CalendarCheck, accent: "text-amber-600",  bg: "bg-amber-50/60 border-amber-200" },
+  hospital_declined:    { label: "Hospital declined",       icon: UserX,         accent: "text-rose-600",    bg: "bg-rose-50/60 border-rose-200" },
   hospital_reply_overdue: { label: "Hospital reply overdue", icon: Mail,        accent: "text-blue-600",    bg: "bg-blue-50/60 border-blue-200" },
   interview_followup:   { label: "Interview follow-ups", icon: CalendarCheck, accent: "text-amber-600",  bg: "bg-amber-50/60 border-amber-200" },
   availability_checkin: { label: "Availability check-ins", icon: UserCheck,  accent: "text-sky-600",     bg: "bg-sky-50/60 border-sky-200" },
@@ -183,7 +184,7 @@ const KIND_ORDER = [
   "shortlist_suggested", "interview_proposed", "hospital_reply_overdue", "interview_followup",
   "availability_checkin", "signed_not_joined", "contract_signed",
   "cv_uploaded", "batch_send_failed", "slack_archive_due", "form_digest",
-  "vacancy_match", "new_form_submission", "wp_sync_summary",
+  "hospital_declined", "vacancy_match", "new_form_submission", "wp_sync_summary",
 ];
 
 function NotificationsBucket({ notifications, unreadCount, onDismiss, onDismissAllOfKind, onMarkAllRead, onJump }: {

@@ -263,7 +263,19 @@ Output ONLY the JSON object. No markdown fences, no commentary, no preamble.`;
       run_id, stage_key: "awaiting_response", event_type: "note",
       message: `${run.hospital ?? "Hospital"} declined (confidence ${parsedResult.confidence.toFixed(2)}): ${parsedResult.summary}`,
     });
-    action_taken = "Profile Sent marked completed (declined)";
+    // The team wants to hear about every hospital reply — including a pass —
+    // so the channel gets a heads-up (slack:true on the kind) and the run is
+    // closed; consider re-sourcing the candidate elsewhere.
+    await notify({
+      kind:              "hospital_declined",
+      title:             `${run.hospital ?? "Hospital"} passed on ${run.doctor_name ?? "the doctor"}`,
+      body:              `${parsedResult.summary} (confidence ${parsedResult.confidence.toFixed(2)}). Profile Sent run closed.`,
+      link_path:         `/automations?flow=profile_sent&run=${run_id}`,
+      related_run_id:    run_id,
+      related_doctor_id: run.doctor_id,
+      for_user:          (run as { assigned_to?: string | null }).assigned_to ?? null,
+    });
+    action_taken = "Profile Sent marked completed (declined); team notified";
   } else if (parsedResult.classification === "needs_more_info") {
     await supabase.from("automation_flow_events").insert({
       run_id, stage_key: "awaiting_response", event_type: "note",

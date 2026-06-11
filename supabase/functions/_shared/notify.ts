@@ -89,6 +89,9 @@ const KIND_RULES: Record<string, KindRule> = {
   shortlist_suggested:    { severity: "action",   slack: true,  cta_label: "Review reply",      cta_kind: "open_run" },
   interview_proposed:     { severity: "action",   slack: true,  cta_label: "Pick a time",       cta_kind: "open_run" },
   contract_signed:        { severity: "action",   slack: true,  cta_label: "Log in Reports",    cta_kind: "open_doctor" },
+  // Hospital passed on a candidate — FYI (the run auto-closes), but the team
+  // wants every hospital reply in Slack, so it pings too.
+  hospital_declined:      { severity: "info",     slack: true,  cta_label: "View reply",        cta_kind: "open_run" },
 
   // ── Bell-only (no Slack) ────────────────────────────────────────────────
   //  Reminders / chases — useful in the dashboard, but not Slack pings.
