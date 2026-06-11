@@ -1249,9 +1249,9 @@ function BatchDialog({ target, onTargetChange, batches, suggestedSpecialty }: {
             )}
 
             <DialogFooter>
+              {/* Primary action is PREVIEW — it builds the email and opens
+                  the preview modal, from which the user actually sends. */}
               <Button
-                variant="outline"
-                className="mr-auto"
                 onClick={async () => {
                   if (picked.length === 0) { toast.error("Queue at least one doctor to preview."); return; }
                   try {
@@ -1263,44 +1263,10 @@ function BatchDialog({ target, onTargetChange, batches, suggestedSpecialty }: {
                 }}
                 disabled={previewMut.isPending || picked.length === 0}
               >
-                <Mailbox className="h-3.5 w-3.5 mr-1.5 text-teal-600" /> {previewMut.isPending ? "Building…" : "Preview email"}
+                {previewMut.isPending
+                  ? <><RefreshCw className="h-3.5 w-3.5 mr-1.5 animate-spin" /> Building preview…</>
+                  : <><Mailbox className="h-3.5 w-3.5 mr-1.5" /> {batch.status === "sent" ? "Preview & resend" : "Preview & send"}</>}
               </Button>
-              {batch.status === "draft" && (
-                <Button
-                  onClick={async () => {
-                    if (picked.length === 0) { toast.error("Queue at least one doctor."); return; }
-                    try {
-                      const res = await sendNow.mutateAsync(batch.id);
-                      toast.success(`Sent. ${res.doctor_count} doctors → ${res.bcc_count} hospitals.`);
-                      close();
-                    } catch (e) {
-                      toast.error(e instanceof Error ? e.message : "Send failed");
-                    }
-                  }}
-                  disabled={sendNow.isPending || picked.length === 0}
-                >
-                  <Send className="h-3.5 w-3.5 mr-1.5" /> {sendNow.isPending ? "Sending..." : "Send now"}
-                </Button>
-              )}
-              {batch.status === "sent" && (
-                <Button
-                  variant="outline"
-                  onClick={async () => {
-                    if (!confirm(`Resend this batch? Same ${picked.length} doctor${picked.length === 1 ? "" : "s"} will go out again.`)) return;
-                    try {
-                      const res = await sendNow.mutateAsync({ batchId: batch.id, force: true });
-                      toast.success(`Resent. ${res.doctor_count} doctors → ${res.bcc_count} hospitals.`);
-                      close();
-                    } catch (e) {
-                      toast.error(e instanceof Error ? e.message : "Resend failed");
-                    }
-                  }}
-                  disabled={sendNow.isPending || picked.length === 0}
-                >
-                  <RefreshCw className={`h-3.5 w-3.5 mr-1.5 text-teal-600 ${sendNow.isPending ? "animate-spin" : ""}`} />
-                  {sendNow.isPending ? "Resending..." : "Resend"}
-                </Button>
-              )}
               <Button variant="outline" onClick={close}>Close</Button>
             </DialogFooter>
           </>
@@ -1327,6 +1293,26 @@ function BatchDialog({ target, onTargetChange, batches, suggestedSpecialty }: {
           srcDoc={emailPreview?.html ?? ""}
         />
         <DialogFooter>
+          {/* Send/resend straight from the preview — what you see is what goes out. */}
+          <Button
+            onClick={async () => {
+              if (!batch) return;
+              if (batch.status === "sent"
+                && !confirm(`Resend this batch? Same ${picked.length} doctor${picked.length === 1 ? "" : "s"} will go out again.`)) return;
+              try {
+                const res = await sendNow.mutateAsync(batch.status === "sent" ? { batchId: batch.id, force: true } : batch.id);
+                toast.success(`${batch.status === "sent" ? "Resent" : "Sent"}. ${res.doctor_count} doctors → ${res.bcc_count} hospitals.`);
+                setEmailPreview(null);
+                close();
+              } catch (e) {
+                toast.error(e instanceof Error ? e.message : "Send failed");
+              }
+            }}
+            disabled={sendNow.isPending}
+          >
+            <Send className="h-3.5 w-3.5 mr-1.5" />
+            {sendNow.isPending ? "Sending…" : (batch?.status === "sent" ? "Resend now" : "Send now")}
+          </Button>
           <Button variant="outline" onClick={() => setEmailPreview(null)}>Close preview</Button>
         </DialogFooter>
       </DialogContent>

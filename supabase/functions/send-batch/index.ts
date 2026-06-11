@@ -127,14 +127,28 @@ Deno.serve(async (req: Request) => {
   const profileById = new Map<string, Record<string, unknown>>();
   for (const p of (profiles ?? []) as Array<Record<string, unknown>>) profileById.set(p.doctor_id as string, p);
 
-  // Zoho cache rows 1+2 merged
-  const { data: cache } = await supabase.from("zoho_cache").select("id, data").in("id", [1, 2]);
-  const merged: Record<string, unknown> = {};
-  for (const r of (cache ?? []) as Array<{ id: number; data: Record<string, unknown> }>) {
-    if (r.data) Object.assign(merged, r.data);
+  // Zoho cache is large — row 1 is ~27k leads (17 MB), row 2 is ~3k
+  // doctors-on-board + calls/deals/etc (3 MB). Loading both on every send
+  // was the bulk of the latency. Only load the row(s) this batch's queued
+  // doctors actually reference: a dob-only batch skips the 17 MB leads blob.
+  // Pull ONLY the sub-array we need (data->doctorsOnBoard / data->leads),
+  // not the calls/deals/etc that share row 2 — and only the list(s) this
+  // batch references. A dob-only batch loads ~1.5 MB instead of ~20 MB.
+  const needLeads = doctorIds.some(d => d.startsWith("lead:"));
+  const needDobs  = doctorIds.some(d => d.startsWith("dob:"));
+  type ZRec = { id: string } & Record<string, unknown>;
+  let leadsArr: ZRec[] = [];
+  let dobsArr:  ZRec[] = [];
+  if (needDobs) {
+    const { data } = await supabase.from("zoho_cache").select("dob:data->doctorsOnBoard").eq("id", 2).maybeSingle();
+    const arr = (data as { dob?: unknown } | null)?.dob;
+    if (Array.isArray(arr)) dobsArr = arr as ZRec[];
   }
-  const leadsArr = (merged.leads as Array<{ id: string } & Record<string, unknown>>) ?? [];
-  const dobsArr  = (merged.doctorsOnBoard as Array<{ id: string } & Record<string, unknown>>) ?? [];
+  if (needLeads) {
+    const { data } = await supabase.from("zoho_cache").select("leads:data->leads").eq("id", 1).maybeSingle();
+    const arr = (data as { leads?: unknown } | null)?.leads;
+    if (Array.isArray(arr)) leadsArr = arr as ZRec[];
+  }
   const leadById = new Map<string, Record<string, unknown>>();
   for (const l of leadsArr) leadById.set(`lead:${l.id}`, l);
   const dobById  = new Map<string, Record<string, unknown>>();
@@ -157,36 +171,62 @@ Deno.serve(async (req: Request) => {
   const normName = (n: unknown): string => String(n ?? "").toLowerCase().replace(/\s+/g, " ").trim();
   const WP_COLS = "id, doctor_id, status, full_name, job_title, email, phone, date_of_birth, nationality, specialty, subspecialty, area_of_interest, years_experience, license_status, family_status, expected_salary, notice_period, country_of_training, current_location, languages, english_level, targeted_locations, cv_url, wp_link";
 
-  const wpByDoctorId = new Map<string, Record<string, unknown>>();
-  const wpById       = new Map<string, Record<string, unknown>>();
-  const wpByPhone    = new Map<string, Record<string, unknown>>();
-  const wpByEmail    = new Map<string, Record<string, unknown>>();
-  const wpByName     = new Map<string, Record<string, unknown>>();
+  // Two-phase for speed: scan a LIGHTWEIGHT index (5 small columns) over all
+  // published candidates to find each queued doctor's matching id, then fetch
+  // the FULL row for only the handful of matched ids. Loading every column for
+  // all ~1.3k candidates made the preview take ~7s; this keeps it snappy.
+  const wpForDoctor = new Map<string, Record<string, unknown>>();
   {
-    // Published candidates = the website pool the picker draws from. Page
-    // through them (PostgREST caps at 1000/req) and index by every key the
-    // picker matches on, so the reverse lookup below can find any of them.
+    const idByDoctorId = new Map<string, number>();
+    const idByWpKey    = new Map<string, number>();
+    const idByPhone    = new Map<string, number>();
+    const idByEmail    = new Map<string, number>();
+    const idByName     = new Map<string, number>();
     const PAGE = 1000;
-    for (let from = 0; from < 20000; from += PAGE) {
+    for (let from = 0; from < 50000; from += PAGE) {
       const { data } = await supabase
-        .from("wordpress_candidates").select(WP_COLS).eq("status", "publish")
+        .from("wordpress_candidates")
+        .select("id, doctor_id, phone, email, full_name")
+        .eq("status", "publish")
         .range(from, from + PAGE - 1);
-      const batch = (data ?? []) as Array<Record<string, unknown>>;
+      const batch = (data ?? []) as Array<{ id: number; doctor_id: string | null; phone: string | null; email: string | null; full_name: string | null }>;
       for (const w of batch) {
-        wpById.set(`wp:${w.id}`, w);
-        if (w.doctor_id) wpByDoctorId.set(String(w.doctor_id), w);
-        const ph = phoneKey(w.phone);                          if (ph && !wpByPhone.has(ph)) wpByPhone.set(ph, w);
-        const em = String(w.email ?? "").toLowerCase().trim(); if (em && !wpByEmail.has(em)) wpByEmail.set(em, w);
-        const nm = normName(w.full_name);                      if (nm && !wpByName.has(nm)) wpByName.set(nm, w);
+        idByWpKey.set(`wp:${w.id}`, w.id);
+        if (w.doctor_id) idByDoctorId.set(String(w.doctor_id), w.id);
+        const ph = phoneKey(w.phone);                          if (ph && !idByPhone.has(ph)) idByPhone.set(ph, w.id);
+        const em = String(w.email ?? "").toLowerCase().trim(); if (em && !idByEmail.has(em)) idByEmail.set(em, w.id);
+        const nm = normName(w.full_name);                      if (nm && !idByName.has(nm)) idByName.set(nm, w.id);
       }
       if (batch.length < PAGE) break;
     }
-    // Safety net: a queued doctor explicitly linked to a non-published WP
-    // candidate (rare) — pull those by doctor_id too.
-    const { data: linkRows } = await supabase
-      .from("wordpress_candidates").select(WP_COLS).in("doctor_id", doctorIds);
-    for (const w of (linkRows ?? []) as Array<Record<string, unknown>>) {
-      if (w.doctor_id) wpByDoctorId.set(String(w.doctor_id), w);
+
+    // Resolve each queued doctor → candidate id, same keys/priority as the
+    // picker (linked doctor_id → website id → phone → email → name).
+    const matchedIdByDoctor = new Map<string, number>();
+    for (const did of doctorIds) {
+      const lead = leadById.get(did); const dob = dobById.get(did);
+      const zphone = phoneKey(lead?.Mobile ?? lead?.Phone ?? dob?.Mobile ?? dob?.Phone);
+      const zemail = String((lead?.Email ?? dob?.Email ?? "")).toLowerCase().trim();
+      const zname  = normName((lead?.Full_Name ?? dob?.Full_Name)
+                      || `${lead?.First_Name ?? dob?.First_Name ?? ""} ${lead?.Last_Name ?? dob?.Last_Name ?? ""}`);
+      const id = idByDoctorId.get(did)
+              ?? idByWpKey.get(did)
+              ?? (zphone ? idByPhone.get(zphone) : undefined)
+              ?? (zemail ? idByEmail.get(zemail) : undefined)
+              ?? (zname  ? idByName.get(zname)   : undefined);
+      if (id != null) matchedIdByDoctor.set(did, id);
+    }
+
+    // Fetch full data for just the matched ids.
+    const matchedIds = [...new Set([...matchedIdByDoctor.values()])];
+    if (matchedIds.length) {
+      const { data } = await supabase.from("wordpress_candidates").select(WP_COLS).in("id", matchedIds);
+      const fullById = new Map<number, Record<string, unknown>>();
+      for (const w of (data ?? []) as Array<Record<string, unknown>>) fullById.set(Number(w.id), w);
+      for (const [did, id] of matchedIdByDoctor) {
+        const full = fullById.get(id);
+        if (full) wpForDoctor.set(did, full);
+      }
     }
   }
 
@@ -200,18 +240,7 @@ Deno.serve(async (req: Request) => {
     const p    = profileById.get(did) ?? null;
     const lead = leadById.get(did);
     const dob  = dobById.get(did);
-    // Resolve the doctor's rich WP candidate the same way the picker did:
-    // linked doctor_id, then website id, then phone → email → name.
-    const zphone = phoneKey(lead?.Mobile ?? lead?.Phone ?? dob?.Mobile ?? dob?.Phone);
-    const zemail = String((lead?.Email ?? dob?.Email ?? "")).toLowerCase().trim();
-    const zname  = normName((lead?.Full_Name ?? dob?.Full_Name)
-                    || `${lead?.First_Name ?? dob?.First_Name ?? ""} ${lead?.Last_Name ?? dob?.Last_Name ?? ""}`);
-    const wp = wpByDoctorId.get(did)
-            ?? wpById.get(did)
-            ?? (zphone ? wpByPhone.get(zphone) : undefined)
-            ?? (zemail ? wpByEmail.get(zemail) : undefined)
-            ?? (zname  ? wpByName.get(zname)   : undefined)
-            ?? null;
+    const wp   = wpForDoctor.get(did) ?? null;
     return {
       idx:        idx + 1,
       name:         pick(wp?.full_name, lead?.Full_Name, dob?.Full_Name, p?.doctor_name) || "(unknown)",
