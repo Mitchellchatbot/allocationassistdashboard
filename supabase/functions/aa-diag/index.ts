@@ -156,6 +156,56 @@ Deno.serve(async (req) => {
         const { data } = await sb.from("automation_flow_runs").select("id, flow_key, current_stage, doctor_id, assigned_to, last_event_at, metadata").order("last_event_at", { ascending: false, nullsFirst: false }).limit(5);
         return new Response(JSON.stringify({ ok: true, runs: data ?? [] }, null, 2), { headers: { "Content-Type": "application/json" } });
       }
+      if ((body as { fix_templates?: boolean } | null)?.fix_templates) {
+        // Mirror of migration 20260612000001: strip the dead {{logo_header}}
+        // token and the hardcoded "Dr. " prefix before {{doctor_name}} (the
+        // name token already carries the title). Applied via PostgREST since
+        // direct db push can't reach Postgres from here.
+        const { data: rows } = await sb.from("email_templates").select("key, body_html");
+        const changed: string[] = [];
+        for (const t of (rows ?? []) as Array<{ key: string; body_html: string | null }>) {
+          const orig = String(t.body_html ?? "");
+          const next = orig
+            .replace(/\{\{logo_header\}\}/g, "")
+            .replace(/Dr\. \{\{doctor_name\}\}/g, "{{doctor_name}}")
+            .replace(/^\s+/, "");
+          if (next !== orig) {
+            const { error } = await sb.from("email_templates").update({ body_html: next }).eq("key", t.key);
+            changed.push(error ? `${t.key} (ERR: ${error.message})` : t.key);
+          }
+        }
+        return new Response(JSON.stringify({ ok: true, changed }, null, 2), { headers: { "Content-Type": "application/json" } });
+      }
+      if ((body as { reorg_relocation?: boolean } | null)?.reorg_relocation) {
+        // _default/ is attached to EVERY relocation email, but it's full of
+        // Dubai-specific docs (school lists) + a Dubai/Abu-Dhabi rental sheet,
+        // so an Al Ain/Sharjah doctor wrongly receives Dubai material. Move
+        // the Dubai-only school PDFs into dubai/, copy the Dubai+Abu-Dhabi
+        // rental sheet into both those folders, and leave only the genuinely
+        // UAE-wide "Useful Apps" in _default. (City guides already embed their
+        // own schools.)
+        const B = sb.storage.from("relocation-guides");
+        const log: string[] = [];
+        for (const f of [
+          "British Curriculum Schools Dubai.pdf",
+          "Dubai_Schools_Information.pdf",
+          "IB and European Curriculum Schools Dubai.pdf",
+          "US Curriculum Schools Dubai.pdf",
+        ]) {
+          const { error } = await B.move(`_default/${f}`, `dubai/${f}`);
+          log.push(error ? `MOVE ${f} -> dubai/ ERR: ${error.message}` : `moved _default/${f} -> dubai/`);
+        }
+        const prop = "Property Rental Prices - March2024.pdf";
+        const c1 = await B.copy(`_default/${prop}`, `dubai/${prop}`);
+        log.push(c1.error ? `COPY dubai ERR: ${c1.error.message}` : `copied ${prop} -> dubai/`);
+        const c2 = await B.copy(`_default/${prop}`, `abu-dhabi/${prop}`);
+        log.push(c2.error ? `COPY abu-dhabi ERR: ${c2.error.message}` : `copied ${prop} -> abu-dhabi/`);
+        if (!c1.error && !c2.error) {
+          const rm = await B.remove([`_default/${prop}`]);
+          log.push(rm.error ? `REMOVE _default ERR: ${rm.error.message}` : `removed _default/${prop}`);
+        }
+        return new Response(JSON.stringify({ ok: true, log }, null, 2), { headers: { "Content-Type": "application/json" } });
+      }
       if ((body as { resend_domains?: boolean } | null)?.resend_domains) {
         const key = Deno.env.get("RESEND_API_KEY") ?? "";
         const r = await fetch("https://api.resend.com/domains", { headers: { Authorization: `Bearer ${key}` } });

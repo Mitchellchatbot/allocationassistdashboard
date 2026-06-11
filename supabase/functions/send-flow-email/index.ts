@@ -520,7 +520,12 @@ Deno.serve(async (req: Request) => {
   if (run.current_stage === "send_relocation_email") {
     try {
       const sbUrl    = Deno.env.get("SUPABASE_URL") ?? "";
-      const citySlug = String(hospital?.city ?? "")
+      // Resolve the relocation city the SAME way the {{city}} token does
+      // (line ~596): hospital.city, else the city picked at select_city_guide
+      // (stored in run.metadata.city). Reading only hospital.city meant a
+      // manually-picked city (e.g. "Al Ain") attached only the _default pack,
+      // never the city's own guide folder.
+      const citySlug = String(hospital?.city ?? (run.metadata as Record<string, unknown> | null)?.city ?? "")
         .toLowerCase().trim().replace(/\s+/g, "-");
       const byName = new Map<string, string>();   // filename → public URL
       for (const folder of ["_default", citySlug].filter(Boolean)) {
