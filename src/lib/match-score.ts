@@ -293,7 +293,14 @@ function scoreSpecialtyInner(doctor: string | null, vacancy: string): number {
 
   // Exact / substring (cheapest, catches the well-formed cases first).
   if (a === b) return 50;
-  if (a.includes(b) || b.includes(a)) return 35;
+  // Word-boundary containment only. A raw substring wrongly matched
+  // "Vascular Surgery" ⊂ "Cardio·vascular Surgery" (and "Cardiac" ⊂
+  // "Cardiac Surgery" is fine, but vascular⊂cardiovascular is not). Padding
+  // with spaces forces the needle to align to whole words, so
+  // "Adult Cardiology" ⊃ "Cardiology" still matches while
+  // "Cardiovascular Surgery" no longer swallows "Vascular Surgery".
+  const wordContains = (hay: string, needle: string) => ` ${hay} `.includes(` ${needle} `);
+  if (wordContains(a, b) || wordContains(b, a)) return 35;
 
   // Canonical-group match (Ammar 2026-06-03 spec). Resolves the doctor's
   // free-text specialty and the vacancy's to AA-website canonical buckets,

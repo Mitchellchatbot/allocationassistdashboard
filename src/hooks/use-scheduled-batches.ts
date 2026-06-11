@@ -15,6 +15,26 @@ import { useTableSubscription } from "@/lib/realtime-registry";
 export type BatchKind   = "daily_duo" | "tuesday_top_15" | "specialty_of_day";
 export type BatchStatus = "draft" | "sent" | "cancelled" | "failed";
 
+/** Invoke an edge function but never wait forever. supabase.functions.invoke
+ *  has no built-in timeout, so a cold start or a dropped connection could
+ *  leave the UI spinning indefinitely (the "Building… stuck for 2 minutes"
+ *  case). If it overruns, reject so the caller can surface an error + let the
+ *  user retry. The underlying request is abandoned, not cancelled — harmless. */
+async function invokeWithTimeout<T>(name: string, body: unknown, ms = 60_000): Promise<{ data: T | null; error: unknown }> {
+  let timer: ReturnType<typeof setTimeout> | undefined;
+  const timeout = new Promise<never>((_, reject) => {
+    timer = setTimeout(() => reject(new Error("The email service didn't respond in time. Please try again.")), ms);
+  });
+  try {
+    return await Promise.race([
+      supabase.functions.invoke(name, { body }) as Promise<{ data: T | null; error: unknown }>,
+      timeout,
+    ]);
+  } finally {
+    if (timer) clearTimeout(timer);
+  }
+}
+
 export interface ScheduledBatch {
   id:               string;
   kind:             BatchKind;
@@ -220,7 +240,8 @@ export function useSendBatchNow() {
       // flag (used by the Resend button to re-fire an already-sent batch).
       const batchId = typeof input === "string" ? input : input.batchId;
       const force   = typeof input === "string" ? false  : !!input.force;
-      const { data, error } = await supabase.functions.invoke("send-batch", { body: { batch_id: batchId, force } });
+      const { data, error } = await invokeWithTimeout<{ ok: boolean; bcc_count?: number; doctor_count?: number; message_id?: string; error?: string }>(
+        "send-batch", { batch_id: batchId, force }, 90_000);
       if (error) throw error;
       const res = data as { ok: boolean; bcc_count?: number; doctor_count?: number; message_id?: string; error?: string };
       if (!res.ok) throw new Error(res.error ?? "send-batch failed");
@@ -241,7 +262,8 @@ export function useBatchPreview() {
     mutationFn: async (input: string | { batchId: string; force?: boolean }): Promise<{ subject: string; html: string; text: string; from: string; bcc_count: number }> => {
       const batchId = typeof input === "string" ? input : input.batchId;
       const force   = typeof input === "string" ? false  : !!input.force;
-      const { data, error } = await supabase.functions.invoke("send-batch", { body: { batch_id: batchId, dry_run: true, force } });
+      const { data, error } = await invokeWithTimeout<{ ok: boolean; preview?: { subject: string; html: string; text: string; from: string; bcc_count: number }; error?: string }>(
+        "send-batch", { batch_id: batchId, dry_run: true, force }, 60_000);
       if (error) throw error;
       const res = data as { ok: boolean; preview?: { subject: string; html: string; text: string; from: string; bcc_count: number }; error?: string };
       if (!res.ok || !res.preview) throw new Error(res.error ?? "Preview failed");
