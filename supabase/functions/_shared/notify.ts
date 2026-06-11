@@ -56,6 +56,10 @@ export interface NotifyInput {
   for_user?:           string | null;
   /** Optional explicit override of the kind catalog's severity. */
   severity?:           Severity;
+  /** Optional per-call override of whether this pings Slack. Used by the
+   *  form webhooks to Slack ONLY doctor-intake submissions, not lead /
+   *  consultation forms (same `new_form_submission` kind, different reach). */
+  slack?:              boolean;
   /** Optional CTA shown both in the dashboard card and as a Slack button. */
   cta_label?:          string;
   cta_kind?:           string;
@@ -63,6 +67,11 @@ export interface NotifyInput {
 
 interface KindRule {
   severity:  Severity;
+  /** Whether this kind pings Slack. Slack is now an explicit per-kind
+   *  decision (not "any action/critical") so the channel only carries the
+   *  signals the team asked for: doctor-intake form completions + email
+   *  pipeline stage progress. Everything else stays in the dashboard bell. */
+  slack:     boolean;
   cta_label: string;
   cta_kind:  string;
 }
@@ -72,34 +81,38 @@ interface KindRule {
  *  defaults to info-severity + no CTA, which is the safe failure
  *  mode (in-dashboard, never Slack). */
 const KIND_RULES: Record<string, KindRule> = {
-  // — actionable —
-  shortlist_suggested:    { severity: "action",   cta_label: "Review reply",      cta_kind: "open_run" },
-  interview_proposed:     { severity: "action",   cta_label: "Pick a time",       cta_kind: "open_run" },
-  hospital_reply_overdue: { severity: "action",   cta_label: "Chase hospital",    cta_kind: "open_run" },
-  interview_followup:     { severity: "action",   cta_label: "Log follow-up",     cta_kind: "open_run" },
-  signed_not_joined:      { severity: "action",   cta_label: "Set joining date",  cta_kind: "open_doctor" },
-  availability_checkin:   { severity: "action",   cta_label: "Confirm available", cta_kind: "open_doctor" },
-  // — high-signal events —
-  contract_signed:        { severity: "action",   cta_label: "Log in Reports",    cta_kind: "open_doctor" },
-  cv_uploaded:            { severity: "action",   cta_label: "Review CV",         cta_kind: "open_doctor" },
-  slack_archive_due:      { severity: "action",   cta_label: "Archive channel",   cta_kind: "open_doctor" },
-  batch_send_failed:      { severity: "action",   cta_label: "Open automations",  cta_kind: "navigate" },
-  // — escalations —
-  placement_payment_overdue: { severity: "critical", cta_label: "Send invoice reminder", cta_kind: "open_doctor" },
-  sla_breach:                { severity: "critical", cta_label: "Open connection",       cta_kind: "navigate" },
-  // — for awareness —
-  vacancy_match:          { severity: "info",     cta_label: "View match",        cta_kind: "open_vacancy" },
-  wp_sync_summary:        { severity: "info",     cta_label: "View candidates",   cta_kind: "navigate" },
-  // A new form submission is real but routine. Kept at info so it
-  // sits in the bell's quiet tier WITHOUT Slack-blasting the channel
-  // or amber-highlighting the bell for every intake. The Slack-worthy
-  // signal is the once-daily `form_digest` ("N new submissions") fired
-  // from tick-scheduler — one consolidated nudge, not per-submission spam.
-  new_form_submission:    { severity: "info",     cta_label: "Review profile",    cta_kind: "navigate" },
-  form_digest:            { severity: "action",   cta_label: "Review submissions", cta_kind: "navigate" },
+  // ── Slack-worthy (team's explicit ask, 2026-06-11) ──────────────────────
+  //  Only two things reach Slack: a doctor-intake form completion (fired with
+  //  an explicit `slack:true` override from the form webhooks — see below) and
+  //  email-pipeline STAGE PROGRESS — a hospital shortlisting a doctor, an
+  //  interview being proposed, and a contract being signed.
+  shortlist_suggested:    { severity: "action",   slack: true,  cta_label: "Review reply",      cta_kind: "open_run" },
+  interview_proposed:     { severity: "action",   slack: true,  cta_label: "Pick a time",       cta_kind: "open_run" },
+  contract_signed:        { severity: "action",   slack: true,  cta_label: "Log in Reports",    cta_kind: "open_doctor" },
+
+  // ── Bell-only (no Slack) ────────────────────────────────────────────────
+  //  Reminders / chases — useful in the dashboard, but not Slack pings.
+  hospital_reply_overdue: { severity: "action",   slack: false, cta_label: "Chase hospital",    cta_kind: "open_run" },
+  interview_followup:     { severity: "action",   slack: false, cta_label: "Log follow-up",     cta_kind: "open_run" },
+  signed_not_joined:      { severity: "action",   slack: false, cta_label: "Set joining date",  cta_kind: "open_doctor" },
+  availability_checkin:   { severity: "action",   slack: false, cta_label: "Confirm available", cta_kind: "open_doctor" },
+  cv_uploaded:            { severity: "action",   slack: false, cta_label: "Review CV",         cta_kind: "open_doctor" },
+  slack_archive_due:      { severity: "action",   slack: false, cta_label: "Archive channel",   cta_kind: "open_doctor" },
+  batch_send_failed:      { severity: "action",   slack: false, cta_label: "Open automations",  cta_kind: "navigate" },
+  // Escalations — still surfaced in the bell as critical, but per the team's
+  // "only those two in Slack" call they no longer ping the channel.
+  placement_payment_overdue: { severity: "critical", slack: false, cta_label: "Send invoice reminder", cta_kind: "open_doctor" },
+  sla_breach:                { severity: "critical", slack: false, cta_label: "Open connection",       cta_kind: "navigate" },
+  // Awareness / routine.
+  vacancy_match:          { severity: "info",     slack: false, cta_label: "View match",        cta_kind: "open_vacancy" },
+  wp_sync_summary:        { severity: "info",     slack: false, cta_label: "View candidates",   cta_kind: "navigate" },
+  // Form submissions stay info + no Slack by default; the webhooks pass
+  // slack:true ONLY for doctor-intake forms (not lead / consultation forms).
+  new_form_submission:    { severity: "info",     slack: false, cta_label: "Review profile",    cta_kind: "navigate" },
+  form_digest:            { severity: "action",   slack: false, cta_label: "Review submissions", cta_kind: "navigate" },
 };
 
-const fallbackRule: KindRule = { severity: "info", cta_label: "Open", cta_kind: "navigate" };
+const fallbackRule: KindRule = { severity: "info", slack: false, cta_label: "Open", cta_kind: "navigate" };
 
 function ruleFor(kind: string): KindRule {
   return KIND_RULES[kind] ?? fallbackRule;
@@ -145,11 +158,13 @@ export async function notify(input: NotifyInput): Promise<{ id: string | null; s
 
   const notifId = inserted?.id ?? null;
 
-  // 2. Slack delivery. Only `action` + `critical` go to Slack — info
-  //    stays in-dashboard. If SLACK_WEBHOOK_URL isn't set we record
-  //    why we skipped so it's visible in the row + obvious to debug.
-  if (severity === "info") {
-    return { id: notifId, slack_sent: false, slack_skip_reason: "severity_info" };
+  // 2. Slack delivery. Slack is now an explicit per-kind decision (with an
+  //    optional per-call override), NOT "any action/critical" — so the
+  //    channel only carries doctor-intake form completions + pipeline stage
+  //    progress. Everything else stays in the dashboard bell.
+  const wantSlack = input.slack ?? rule.slack;
+  if (!wantSlack) {
+    return { id: notifId, slack_sent: false, slack_skip_reason: "kind_not_slack" };
   }
   if (!SLACK_WEBHOOK_URL) {
     if (notifId) {

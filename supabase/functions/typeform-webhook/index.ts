@@ -290,6 +290,9 @@ Deno.serve(async (req: Request) => {
     .filter(Boolean).join(" · ") || respondentEmail || "no contact details captured";
   await notify({
     kind:    "new_form_submission",
+    // Slack only for doctor-intake forms; lead / consultation Typeforms
+    // stay bell-only (team's ask 2026-06-11).
+    slack:   isDoctorForm,
     title:   `New form submission${respondentName ? ` · ${respondentName}` : ""}`,
     body:    isDoctorForm
       ? `${summary}. Staged for review — pick Publish or Save as draft from the staging row.`

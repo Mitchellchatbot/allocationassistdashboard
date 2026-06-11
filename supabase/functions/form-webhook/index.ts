@@ -197,6 +197,8 @@ Deno.serve(async (req: Request) => {
 
   await notify({
     kind:    "new_form_submission",
+    // Slack only for doctor-intake forms (team's ask 2026-06-11).
+    slack:   form?.form_type === "doctor_intake",
     title:   `New form submission${respondentName ? ` · ${respondentName}` : ""}`,
     body:    `${respondentEmail ?? "no email captured"} via ${form.provider ?? "form"}. Click to review the submission in the dashboard.`,
     link_path:         respondentEmail

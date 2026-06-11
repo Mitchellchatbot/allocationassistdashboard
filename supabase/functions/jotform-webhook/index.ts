@@ -250,6 +250,8 @@ Deno.serve(async (req: Request) => {
         : `${summary}. Submission saved, staging failed — create the profile manually if needed.`;
   await notify({
     kind:    "new_form_submission",
+    // Slack only for doctor-intake forms (team's ask 2026-06-11).
+    slack:   form?.form_type === "doctor_intake",
     title:   `New form submission${profile.full_name ? ` · ${profile.full_name}` : ""}`,
     body,
     link_path:         reviewLink,
