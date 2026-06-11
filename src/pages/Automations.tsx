@@ -509,6 +509,9 @@ function RunDetailSheet({ run, open, onClose }: { run: FlowRun | null; open: boo
   const [classifyOpen, setClassifyOpen] = useState(false);
   const [pickedCity, setPickedCity] = useState<string>("");
   const [sendingCity, setSendingCity] = useState(false);
+  const [invLink,   setInvLink]   = useState<string>("");
+  const [invNumber, setInvNumber] = useState<string>("");
+  const [savingInv, setSavingInv] = useState(false);
   const addNote = useAddRunNote();
   const qc = useQueryClient();
 
@@ -530,6 +533,8 @@ function RunDetailSheet({ run, open, onClose }: { run: FlowRun | null; open: boo
     if (!run) return;
     const md = (run.metadata ?? {}) as Record<string, unknown>;
     setPickedCity((md.city as string | undefined) ?? "");
+    setInvLink((md.payment_link as string | undefined) ?? "");
+    setInvNumber((md.invoice_number as string | undefined) ?? "");
   }, [run?.id]);
 
   if (!run || !flow) return null;
@@ -551,6 +556,33 @@ function RunDetailSheet({ run, open, onClose }: { run: FlowRun | null; open: boo
   // from the hospital, but if hospital isn't known (e.g. Contract Builder
   // didn't capture it), the team picks here.
   const showCityPicker = run.flow_key === "relocation" && run.current_stage === "select_city_guide" && run.status === "active";
+
+  // Second-payment runs: let the team add the payment link + invoice number to
+  // the run before the invoice fires (the amount is fixed at AED 10,500 and the
+  // due date is auto-computed). Saved straight onto the run metadata.
+  const showInvoiceDetails = run.flow_key === "second_payment" && run.status === "active";
+  const handleSaveInvoiceDetails = async () => {
+    if (savingInv) return;
+    setSavingInv(true);
+    try {
+      const newMetadata = {
+        ...(run.metadata as Record<string, unknown>),
+        payment_link:   invLink.trim(),
+        invoice_number: invNumber.trim(),
+      };
+      const { error } = await supabase
+        .from("automation_flow_runs")
+        .update({ metadata: newMetadata })
+        .eq("id", run.id);
+      if (error) throw error;
+      toast.success("Invoice details saved — they'll show on the invoice email.");
+      qc.invalidateQueries({ queryKey: ["automation-flow-runs"] });
+    } catch (err) {
+      toast.error(err instanceof Error ? err.message : "Failed to save");
+    } finally {
+      setSavingInv(false);
+    }
+  };
 
   const handleSendCityGuide = async () => {
     if (!pickedCity.trim() || sendingCity) return;
@@ -741,6 +773,40 @@ function RunDetailSheet({ run, open, onClose }: { run: FlowRun | null; open: boo
               >
                 <Send className="h-3.5 w-3.5 mr-1.5" />
                 {sendingCity ? "Sending..." : "Send guide"}
+              </Button>
+            </div>
+          </div>
+        )}
+
+        {showInvoiceDetails && (
+          <div className="rounded-md border-2 border-teal-200 bg-teal-50/50 p-4 mt-4">
+            <div className="flex items-start gap-2 mb-3">
+              <span className="text-teal-600 leading-none mt-[2px]">🧾</span>
+              <div className="text-[12px] text-teal-900 leading-relaxed">
+                <strong>Invoice details.</strong> Add the payment link and invoice number — they appear on the invoice + reminder emails when this fires. Amount is fixed at <strong>AED 10,500</strong>; due date is the joining date + 45 days. You can fill these in any time before it sends.
+              </div>
+            </div>
+            <div className="space-y-2">
+              <div>
+                <Label className="text-[11px] uppercase tracking-wider text-muted-foreground">Payment link</Label>
+                <Input
+                  value={invLink}
+                  onChange={e => setInvLink(e.target.value)}
+                  placeholder="https://… where the doctor pays"
+                  className="mt-1 text-[12px]"
+                />
+              </div>
+              <div>
+                <Label className="text-[11px] uppercase tracking-wider text-muted-foreground">Invoice number</Label>
+                <Input
+                  value={invNumber}
+                  onChange={e => setInvNumber(e.target.value)}
+                  placeholder="e.g. AA-2026-0042"
+                  className="mt-1 text-[12px]"
+                />
+              </div>
+              <Button size="sm" onClick={handleSaveInvoiceDetails} disabled={savingInv}>
+                {savingInv ? "Saving…" : "Save invoice details"}
               </Button>
             </div>
           </div>

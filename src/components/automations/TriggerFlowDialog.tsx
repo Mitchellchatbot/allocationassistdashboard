@@ -64,6 +64,8 @@ export function TriggerFlowDialog({ open, flowKey, onClose }: Props) {
   const [interviewFmt,  setInterviewFmt]  = useState<string>("Microsoft Teams");
   const [interviewLink, setInterviewLink] = useState<string>("");
   const [joiningDate,   setJoiningDate]   = useState<string>("");
+  const [paymentLink,   setPaymentLink]   = useState<string>("");
+  const [invoiceNumber, setInvoiceNumber] = useState<string>("");
   const [note,          setNote]          = useState<string>("");
   const [submitting,    setSubmitting]    = useState(false);
 
@@ -244,6 +246,10 @@ export function TriggerFlowDialog({ open, flowKey, onClose }: Props) {
         const fire = new Date(joiningDate);
         fire.setDate(fire.getDate() + 15);
         metadata.invoice_fires_at = fire.toISOString();
+        // Optional invoice details the invoice/reminder emails render. Amount
+        // defaults to AED 10,500 + due date is auto-computed in send-flow-email.
+        if (paymentLink.trim())   metadata.payment_link   = paymentLink.trim();
+        if (invoiceNumber.trim()) metadata.invoice_number = invoiceNumber.trim();
       }
 
       const { data: runRow, error: runErr } = await supabase
@@ -480,6 +486,32 @@ export function TriggerFlowDialog({ open, flowKey, onClose }: Props) {
                   </div>
                 )}
               </div>
+            )}
+
+            {flowConfig.needsJoiningDate && (
+              <>
+                <div>
+                  <Label className="text-[11px] uppercase tracking-wider text-muted-foreground">Payment link (optional)</Label>
+                  <Input
+                    value={paymentLink}
+                    onChange={e => setPaymentLink(e.target.value)}
+                    placeholder="https://… where the doctor pays"
+                    className="mt-1 text-[12px]"
+                  />
+                </div>
+                <div>
+                  <Label className="text-[11px] uppercase tracking-wider text-muted-foreground">Invoice number (optional)</Label>
+                  <Input
+                    value={invoiceNumber}
+                    onChange={e => setInvoiceNumber(e.target.value)}
+                    placeholder="e.g. AA-2026-0042"
+                    className="mt-1 text-[12px]"
+                  />
+                </div>
+                <div className="text-[11px] text-muted-foreground -mt-1">
+                  These appear on the invoice email. Amount is fixed at <strong>AED 10,500</strong>; due date is the joining date + 45 days. Leave blank to add later.
+                </div>
+              </>
             )}
 
             <div>
