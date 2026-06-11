@@ -41,7 +41,6 @@ const Batches         = lazy(() => import("./pages/Batches"));
 const MyWorkspace     = lazy(() => import("./pages/MyWorkspace"));
 const BulkImport      = lazy(() => import("./pages/BulkImport"));
 const Connections     = lazy(() => import("./pages/Connections"));
-const UploadCV        = lazy(() => import("./pages/UploadCV"));
 const SharedProfile   = lazy(() => import("./pages/SharedProfile"));
 const Forms           = lazy(() => import("./pages/Forms"));
 const Doctors         = lazy(() => import("./pages/Doctors"));
@@ -140,7 +139,6 @@ const App = () => (
             <Routes>
               {/* Public */}
               <Route path="/login" element={<Login />} />
-              <Route path="/upload-cv/:token" element={<UploadCV />} />
               <Route path="/shared-profile/:token" element={<SharedProfile />} />
 
               {/* Protected — one shell, many children. The shell renders the

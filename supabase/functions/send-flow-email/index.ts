@@ -556,45 +556,8 @@ Deno.serve(async (req: Request) => {
     }
   }
 
-  // ── Generate CV upload link for the onboarding welcome email ─────────────
-  // The onboarding_welcome template references `{{upload_link}}` — without
-  // a real URL it renders as the literal "{{upload_link}}" in the doctor's
-  // inbox. We auto-generate a cv_uploads token here and build the URL so
-  // every onboarding email ships with a working upload button, no separate
-  // "Send CV upload link" click needed from the team.
-  let bundledUploadLink = "";
-  if (run.current_stage === "send_onboarding_email" && run.doctor_id) {
-    try {
-      // Reuse an existing pending token for this doctor if one exists, so
-      // re-sending the welcome doesn't spawn N orphan tokens.
-      const { data: existingUpload } = await supabase
-        .from("cv_uploads")
-        .select("token, expires_at")
-        .eq("doctor_id", run.doctor_id)
-        .eq("status", "pending_upload")
-        .gt("expires_at", new Date().toISOString())
-        .order("created_at", { ascending: false })
-        .limit(1)
-        .maybeSingle();
-
-      let token = existingUpload?.token ?? "";
-      if (!token) {
-        token = crypto.randomUUID().replace(/-/g, "");
-        await supabase.from("cv_uploads").insert({
-          doctor_id:    run.doctor_id,
-          doctor_name:  run.doctor_name,
-          doctor_email: run.doctor_email,
-          token,
-          status:       "pending_upload",
-          created_by:   "onboarding_auto",
-        });
-      }
-      bundledUploadLink = `${APP_ORIGIN.replace(/\/+$/, "")}/upload-cv/${token}`;
-      console.log("[send-flow-email] bundled CV upload link for onboarding:", bundledUploadLink);
-    } catch (e) {
-      console.warn("[send-flow-email] could not bundle CV upload link (non-fatal):", e);
-    }
-  }
+  // (Removed: the onboarding CV-upload-link bundling — the team no longer
+  // emails doctors a CV-upload link. The upload_link token now renders empty.)
 
   // ── Build token vars ──────────────────────────────────────────────────────
   const md = (run.metadata ?? {}) as Record<string, unknown>;
@@ -612,9 +575,9 @@ Deno.serve(async (req: Request) => {
     // these as literal {{token}} when empty so test recipients can SEE what
     // would need to resolve.
     form_link:          String(md.form_link ?? ""),
-    // Prefer the run-bundled upload link if we generated one above; fall
-    // back to whatever was set in metadata.
-    upload_link:        bundledUploadLink || String(md.upload_link ?? ""),
+    // CV-upload link removed — the team no longer collects CVs via an emailed
+    // link. Kept as an empty token so any legacy template reference is blank.
+    upload_link:        "",
     profile_link:       String(md.profile_link ?? ""),
     // profile_url drives the "View full profile online" CTA. Prefer
     // the per-run minted shared-profile token (B5) over any pre-set
