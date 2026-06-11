@@ -183,76 +183,81 @@ Deno.serve(async (req: Request) => {
     }
   }
 
-  // ── Map answers → profile (SAME mapper JotForm uses — the form's
-  //    questions match, so fuzzy label-matching lands the same fields). ──
-  const profile = mapToProfile(flat);
-  const email    = profile.email     || respondentEmail || null;
-  const fullName = profile.full_name || respondentName  || null;
-  const hasEmail = !!email;
+  // Only DOCTOR-intake Typeforms auto-stage to a WP profile (matching the
+  // JotForm doctor form, form_type="doctor_intake"). Other Typeforms (leads,
+  // consultations) just record the response — never a doctor profile.
+  const isDoctorForm = form.form_type === "doctor_intake";
 
-  // ── STAGE the profile (does NOT touch WordPress). Enrich the form ACF
-  //    with Zoho first, exactly like the JotForm path. The HI team reviews
-  //    + publishes from Doctors → Profiles → Staging. ────────────────────
-  const safeAcfForm: Record<string, unknown> = { ...(profile.acf ?? {}) };
-  delete safeAcfForm.cv_resume;
-  const { mergedAcf: safeAcf, pictureUrl } = await enrichProfile({
-    supabase,
-    email,
-    formAcf: safeAcfForm,
-    responseRow: { raw_payload: payload as unknown as Record<string, unknown>, answers: flat },
-  });
+  let stagedId:        string | null = null;
+  let stagedSpecialty: string | null = null;
+  let stagedCountry:   string | null = null;
 
-  const { data: stagedRow, error: stagedErr } = await supabase
-    .from("staged_doctor_profiles")
-    .insert({
-      source:              "typeform",
-      form_id:             form.id,
-      full_name:           fullName,
-      email:               email,
-      phone:               profile.phone || (safeAcf.phone_number as string | undefined) || null,
-      specialty:           (safeAcf.specialty           as string | undefined) ?? null,
-      subspecialty:        (safeAcf.subspecialty        as string | undefined) ?? null,
-      nationality:         (safeAcf.nationality         as string | undefined) ?? null,
-      job_title:           (safeAcf.job_title           as string | undefined) ?? null,
-      current_location:    (safeAcf.current_location    as string | undefined) ?? null,
-      country_of_training: (safeAcf.country_of_training as string | undefined) ?? null,
-      years_experience:    (safeAcf.years_of_experience_post_specialization as string | undefined) ?? null,
-      acf:                 safeAcf,
-      picture_url:         pictureUrl,
-      created_by:          "typeform-webhook",
-    })
-    .select("id")
-    .single();
-  if (stagedErr) console.error("[typeform-webhook] staged insert failed:", stagedErr.message);
-  const stagedId: string | null = stagedRow?.id ?? null;
+  if (isDoctorForm) {
+    // ── Map answers → profile (SAME mapper JotForm uses), enrich with Zoho,
+    //    and STAGE (does NOT touch WordPress — the team publishes from
+    //    Doctors → Profiles → Staging). ─────────────────────────────────────
+    const profile = mapToProfile(flat);
+    const email    = profile.email     || respondentEmail || null;
+    const fullName = profile.full_name || respondentName  || null;
+    respondentEmail = email;      // prefer the mapped values for the response row
+    respondentName  = fullName;
 
-  // ── CV pipeline: download the file-upload from Typeform (Bearer token),
-  //    store in doctor-cvs, fire cv-extract. Async/fire-and-forget so the
-  //    webhook returns fast; cv-extract writes fields back onto the staged
-  //    row. Needs the form's personal access token (api_token). ───────────
-  if (cvUrl && stagedId && form.api_token) {
-    const cvJob = fireTypeformCvPipeline({
-      supabaseUrl, serviceKey,
-      cvUrl,
-      typeformToken:   form.api_token,
-      stagedProfileId: stagedId,
-      candidateName:   fullName || "Typeform intake",
-      candidateEmail:  email,
-    }).catch(e => console.error("[typeform-webhook] cv pipeline error:", e));
-    // Keep the isolate alive for the background download/extract after we
-    // return 200 to Typeform (Supabase runtime would otherwise tear it down).
-    try { (globalThis as { EdgeRuntime?: { waitUntil: (p: Promise<unknown>) => void } }).EdgeRuntime?.waitUntil(cvJob); }
-    catch { /* not available — best-effort fire-and-forget */ }
+    const safeAcfForm: Record<string, unknown> = { ...(profile.acf ?? {}) };
+    delete safeAcfForm.cv_resume;
+    const { mergedAcf: safeAcf, pictureUrl } = await enrichProfile({
+      supabase, email, formAcf: safeAcfForm,
+      responseRow: { raw_payload: payload as unknown as Record<string, unknown>, answers: flat },
+    });
+    stagedSpecialty = (safeAcf.specialty           as string | undefined) ?? null;
+    stagedCountry   = (safeAcf.country_of_training as string | undefined) ?? null;
+
+    const { data: stagedRow, error: stagedErr } = await supabase
+      .from("staged_doctor_profiles")
+      .insert({
+        source:              "typeform",
+        form_id:             form.id,
+        full_name:           fullName,
+        email:               email,
+        phone:               profile.phone || (safeAcf.phone_number as string | undefined) || null,
+        specialty:           stagedSpecialty,
+        subspecialty:        (safeAcf.subspecialty as string | undefined) ?? null,
+        nationality:         (safeAcf.nationality  as string | undefined) ?? null,
+        job_title:           (safeAcf.job_title    as string | undefined) ?? null,
+        current_location:    (safeAcf.current_location as string | undefined) ?? null,
+        country_of_training: stagedCountry,
+        years_experience:    (safeAcf.years_of_experience_post_specialization as string | undefined) ?? null,
+        acf:                 safeAcf,
+        picture_url:         pictureUrl,
+        created_by:          "typeform-webhook",
+      })
+      .select("id")
+      .single();
+    if (stagedErr) console.error("[typeform-webhook] staged insert failed:", stagedErr.message);
+    stagedId = stagedRow?.id ?? null;
+
+    // CV pipeline — download the Typeform file-upload (Bearer token), store +
+    // fire cv-extract. Kept alive past our 200 with EdgeRuntime.waitUntil.
+    if (cvUrl && stagedId && form.api_token) {
+      const cvJob = fireTypeformCvPipeline({
+        supabaseUrl, serviceKey,
+        cvUrl, typeformToken: form.api_token,
+        stagedProfileId: stagedId,
+        candidateName:   fullName || "Typeform intake",
+        candidateEmail:  email,
+      }).catch(e => console.error("[typeform-webhook] cv pipeline error:", e));
+      try { (globalThis as { EdgeRuntime?: { waitUntil: (p: Promise<unknown>) => void } }).EdgeRuntime?.waitUntil(cvJob); }
+      catch { /* not available — best-effort */ }
+    }
   }
 
   // ── Auto-link doctor_id from the Zoho cache (email match) ────────────
   let doctorId: string | null = null;
-  if (hasEmail) {
-    const { data } = await supabase.rpc("lookup_doctor_id_by_email", { p_email: email });
+  if (respondentEmail) {
+    const { data } = await supabase.rpc("lookup_doctor_id_by_email", { p_email: respondentEmail });
     if (typeof data === "string") doctorId = data;
   }
 
-  // ── Insert form_response so it shows in Responses (idempotent) ───────
+  // ── Insert form_response (both paths; idempotent) ────────────────────
   const { error: insErr } = await supabase
     .from("form_responses")
     .upsert({
@@ -261,36 +266,39 @@ Deno.serve(async (req: Request) => {
       submitted_at:          fr.submitted_at ?? new Date().toISOString(),
       raw_payload:           payload as unknown as Record<string, unknown>,
       answers:               flat,
-      respondent_name:       fullName,
-      respondent_email:      email,
+      respondent_name:       respondentName,
+      respondent_email:      respondentEmail,
       doctor_id:             doctorId,
       outreach_status:       "new",
-      outreach_notes:
-        !hasEmail
-          ? "Staged for review. No email captured yet — open the staging row to add contact details."
-          : stagedId
-            ? "Staged for review. Open Doctors → Profiles → Staging to publish or discard."
-            : "Submission saved. Staging insert failed — create the profile manually if needed.",
+      outreach_notes:        isDoctorForm
+        ? (!respondentEmail
+            ? "Staged for review. No email captured yet — open the staging row to add contact details."
+            : stagedId
+              ? "Staged for review. Open Doctors → Profiles → Staging to publish or discard."
+              : "Submission saved. Staging insert failed — create the profile manually if needed.")
+        : "Submission saved.",
     }, { onConflict: "form_id,provider_response_id", ignoreDuplicates: false });
   if (insErr) {
     console.error("[typeform-webhook] insert failed:", insErr);
     return json({ ok: false, error: "Insert failed", detail: insErr.message }, 500);
   }
 
-  // ── Slack nudge → review the staged row (NOTHING has touched WP). ────
-  const summary = [fullName, safeAcf.specialty, safeAcf.country_of_training]
-    .filter(Boolean).join(" · ") || email || "no contact details extracted yet";
+  // ── Slack nudge ──────────────────────────────────────────────────────
+  const summary = [respondentName, stagedSpecialty, stagedCountry]
+    .filter(Boolean).join(" · ") || respondentEmail || "no contact details captured";
   await notify({
     kind:    "new_form_submission",
-    title:   `New form submission${fullName ? ` · ${fullName}` : ""}`,
-    body:    !hasEmail
-      ? `${summary}. Staged for review — no email captured, add one in the staging row before publishing.`
-      : `${summary}. Staged for review — pick Publish or Save as draft from the staging row.`,
-    link_path:         `/doctors?tab=profiles`,
+    title:   `New form submission${respondentName ? ` · ${respondentName}` : ""}`,
+    body:    isDoctorForm
+      ? `${summary}. Staged for review — pick Publish or Save as draft from the staging row.`
+      : `${respondentEmail ?? "no email captured"} via Typeform. Click to review the submission.`,
+    link_path:         isDoctorForm
+      ? `/doctors?tab=profiles`
+      : (respondentEmail ? `/forms?q=${encodeURIComponent(respondentEmail)}` : `/forms`),
     related_doctor_id: doctorId,
   }).catch(e => console.error("[typeform-webhook] notify failed:", e));
 
-  console.log("[typeform-webhook] processed", fr.token, "email:", email, "staged_id:", stagedId, "cv:", !!cvUrl);
+  console.log("[typeform-webhook] processed", fr.token, "doctorForm:", isDoctorForm, "staged_id:", stagedId, "cv:", !!cvUrl);
   return json({ ok: true, form_id: form.id, response_id: fr.token, staged_id: stagedId }, 200);
 });
 

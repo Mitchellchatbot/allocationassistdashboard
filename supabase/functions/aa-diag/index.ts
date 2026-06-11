@@ -514,6 +514,44 @@ Deno.serve(async (req) => {
           populated_examples: populated,
         }, null, 2), { headers: { "Content-Type": "application/json" } });
       }
+      if ((body as { list_forms?: boolean } | null)?.list_forms) {
+        const { data } = await sb.from("forms").select("id, name, provider, provider_form_id, form_type, active, api_token, webhook_secret, metadata");
+        return new Response(JSON.stringify({
+          ok: true,
+          forms: ((data ?? []) as Array<{ id: string; name: string; provider: string; provider_form_id: string | null; form_type: string | null; active: boolean; api_token: string | null; webhook_secret: string | null; metadata: unknown }>)
+            .map(f => ({ id: f.id, name: f.name, provider: f.provider, provider_form_id: f.provider_form_id, form_type: f.form_type, active: f.active, has_api_token: !!f.api_token, has_webhook_secret: !!f.webhook_secret })),
+        }, null, 2), { headers: { "Content-Type": "application/json" } });
+      }
+      if ((body as { connect_typeform?: { provider_form_id: string; name?: string } } | null)?.connect_typeform) {
+        // Register a new Typeform form, copying the api_token from an existing
+        // Typeform form (so the CV download + historical sync work) and the
+        // form_type from the JotForm doctor form (so it's treated the same).
+        const p = (body as { connect_typeform: { provider_form_id: string; name?: string } }).connect_typeform;
+        const { data: all } = await sb.from("forms").select("id, name, provider, provider_form_id, form_type, api_token, metadata, active");
+        const forms = (all ?? []) as Array<{ id: string; name: string; provider: string; provider_form_id: string | null; form_type: string | null; api_token: string | null; metadata: unknown }>;
+        // Already registered?
+        const existing = forms.find(f => f.provider === "typeform" && f.provider_form_id === p.provider_form_id);
+        if (existing) return new Response(JSON.stringify({ ok: true, already_exists: true, form_id: existing.id }), { headers: { "Content-Type": "application/json" } });
+        const tokenSrc = forms.find(f => f.provider === "typeform" && f.api_token);
+        const jotformDoc = forms.find(f => f.provider === "jotform");
+        const { data: inserted, error } = await sb.from("forms").insert({
+          name:             p.name ?? "Doctor Qualification (Typeform)",
+          provider:         "typeform",
+          provider_form_id: p.provider_form_id,
+          api_token:        tokenSrc?.api_token ?? null,
+          form_type:        jotformDoc?.form_type ?? null,
+          active:           true,
+        }).select("id, name, provider_form_id").single();
+        if (error) return new Response(JSON.stringify({ ok: false, error: error.message }), { headers: { "Content-Type": "application/json" } });
+        return new Response(JSON.stringify({
+          ok: true,
+          created: inserted,
+          token_copied_from: tokenSrc ? tokenSrc.name : null,
+          had_token_source: !!tokenSrc,
+          form_type_from: jotformDoc ? jotformDoc.name : null,
+          webhook_url: `${Deno.env.get("SUPABASE_URL")}/functions/v1/typeform-webhook`,
+        }, null, 2), { headers: { "Content-Type": "application/json" } });
+      }
       if ((body as { recent_batches?: boolean } | null)?.recent_batches) {
         const { data } = await sb.from("scheduled_batch_sends")
           .select("id, kind, specialty, country, status, scheduled_for, doctor_ids")
