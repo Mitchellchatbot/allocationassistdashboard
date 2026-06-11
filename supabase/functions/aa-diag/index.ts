@@ -514,6 +514,16 @@ Deno.serve(async (req) => {
           populated_examples: populated,
         }, null, 2), { headers: { "Content-Type": "application/json" } });
       }
+      if ((body as { recent_batches?: boolean } | null)?.recent_batches) {
+        const { data } = await sb.from("scheduled_batch_sends")
+          .select("id, kind, specialty, country, status, scheduled_for, doctor_ids")
+          .order("scheduled_for", { ascending: false }).limit(12);
+        return new Response(JSON.stringify({
+          ok: true,
+          batches: ((data ?? []) as Array<{ id: string; kind: string; specialty: string | null; country: string | null; status: string; scheduled_for: string; doctor_ids: string[] | null }>)
+            .map(b => ({ id: b.id, kind: b.kind, specialty: b.specialty, country: b.country, status: b.status, scheduled_for: b.scheduled_for, n_doctors: (b.doctor_ids ?? []).length })),
+        }, null, 2), { headers: { "Content-Type": "application/json" } });
+      }
       if ((body as { pool_coverage?: boolean } | null)?.pool_coverage) {
         // How many PUBLISHED website doctors would the batch/vacancy picker
         // miss? The picker's spine is Zoho "Doctors on Board"; a published WP

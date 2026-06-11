@@ -205,6 +205,16 @@ Deno.serve(async (req: Request) => {
       mobile:       pick(wp?.phone, lead?.Mobile, lead?.Phone, dob?.Mobile, dob?.Phone),
       email:        pick(wp?.email, lead?.Email, dob?.Email),
       specialty:    pick(wp?.specialty, lead?.Specialty_New, lead?.Specialty, dob?.Specialty),
+      subspecialty: pick(wp?.subspecialty, p?.subspecialty),
+      current_location: pick(wp?.current_location, p?.current_location),
+      targeted:     Array.isArray(wp?.targeted_locations)
+                      ? (wp!.targeted_locations as string[]).filter(Boolean).join(", ")
+                      : pick(wp?.targeted_locations),
+      languages:    pick(wp?.languages, p?.languages),
+      english:      pick(wp?.english_level),
+      // Public profile link — only published candidates have a live page.
+      website:      (String(wp?.status ?? "") === "publish" && wp?.wp_link) ? String(wp!.wp_link) : "",
+      cv:           pick(wp?.cv_url),
     };
   });
 
@@ -339,6 +349,8 @@ interface RowData {
   years: string; nationality: string; age: string; marital: string;
   family: string; license: string; salary: string; notice: string;
   mobile: string; email: string; specialty: string;
+  subspecialty: string; current_location: string; targeted: string;
+  languages: string; english: string; website: string; cv: string;
 }
 
 /** Render each doctor as a CARD instead of a wide 15-column table. The old
@@ -365,16 +377,24 @@ function renderDoctorsTable(rows: RowData[]): string {
 }
 
 function renderDoctorCard(r: RowData): string {
-  // Build attribute rows, skipping anything blank so cards don't bloat with
-  // a wall of "—". Each row is "Label  Value" with the label dimmed.
+  const titleLine = r.title || r.specialty;
+  // Build attribute rows, skipping blanks so cards stay tight. Dedupe the
+  // Specialty row when it already IS the title line, and the Family row when
+  // it just duplicates Marital (both default to WP's family_status).
   const attrs: Array<[string, string]> = [
-    ["Areas of interest",  r.areas],
+    ["Specialty",           r.specialty && r.specialty !== titleLine ? r.specialty : ""],
+    ["Subspecialty",        r.subspecialty],
+    ["Areas of interest",   r.areas],
     ["Country of training", r.training],
+    ["Current location",    r.current_location],
+    ["Targeted locations",  r.targeted],
     ["Years of experience", r.years],
     ["Nationality",         r.nationality],
+    ["Languages",           r.languages],
+    ["English level",       r.english],
     ["Age",                 r.age],
     ["Marital status",      r.marital],
-    ["Family status",       r.family],
+    ["Family status",       r.family && r.family !== r.marital ? r.family : ""],
     ["License",             r.license],
     ["Salary expectation",  r.salary || "Market Range"],
     ["Notice period",       r.notice],
@@ -387,13 +407,23 @@ function renderDoctorCard(r: RowData): string {
         <td style="padding:4px 0;color:#1a2332;font-size:14px;font-weight:500;vertical-align:top;">${esc(value)}</td>
       </tr>`).join("");
 
-  const titleLine = r.title || r.specialty;
   const contactPieces: string[] = [];
   if (r.email)  contactPieces.push(`<span style="color:#0f766e;">&#9993;</span> <a href="mailto:${esc(r.email)}" style="color:#0f766e;text-decoration:none;font-size:14px;">${esc(r.email)}</a>`);
   if (r.mobile) contactPieces.push(`<span style="color:#0f766e;">&#9742;</span> <span style="color:#1a2332;font-size:14px;">${esc(r.mobile)}</span>`);
   const contactHtml = contactPieces.length === 0 ? "" : `
     <div style="background:#f0fbfa;border-top:1px solid #d1f0ec;padding:12px 18px;display:block;">
       ${contactPieces.join(`<span style="display:inline-block;width:18px;"></span>`)}
+    </div>`;
+
+  // Action buttons — view the candidate's live profile on the website (the
+  // hospital can see the full picture: photo, CV, full education/experience)
+  // and a direct CV link.
+  const buttons: string[] = [];
+  if (r.website) buttons.push(`<a href="${esc(r.website)}" style="display:inline-block;background:#0f766e;color:#ffffff;text-decoration:none;font-size:13px;font-weight:600;padding:10px 18px;border-radius:8px;">View full profile on allocationassist.com &rarr;</a>`);
+  if (r.cv)      buttons.push(`<a href="${esc(r.cv)}" style="display:inline-block;color:#0f766e;text-decoration:none;font-size:13px;font-weight:600;padding:10px 16px;border:1px solid #0f766e;border-radius:8px;">View CV</a>`);
+  const buttonsHtml = buttons.length === 0 ? "" : `
+    <div style="padding:14px 18px 4px;">
+      ${buttons.join(`<span style="display:inline-block;width:10px;"></span>`)}
     </div>`;
 
   return `
@@ -413,6 +443,7 @@ function renderDoctorCard(r: RowData): string {
           </td></tr>
         </tbody>
       </table>` : ""}
+      ${buttonsHtml}
       ${contactHtml}
     </div>`;
 }
