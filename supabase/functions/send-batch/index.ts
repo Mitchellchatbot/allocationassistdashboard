@@ -228,14 +228,14 @@ Deno.serve(async (req: Request) => {
       notice:       pick(wp?.notice_period, p?.notice_period),
       mobile:       pick(wp?.phone, lead?.Mobile, lead?.Phone, dob?.Mobile, dob?.Phone),
       email:        pick(wp?.email, lead?.Email, dob?.Email),
-      specialty:    pick(wp?.specialty, lead?.Specialty_New, lead?.Specialty, dob?.Specialty),
+      specialty:    pick(wp?.specialty, lead?.Specialty_New, lead?.Specialty, dob?.Specialty, p?.specialty),
       subspecialty: pick(wp?.subspecialty, p?.subspecialty),
       current_location: pick(wp?.current_location, p?.current_location),
       targeted:     Array.isArray(wp?.targeted_locations)
                       ? (wp!.targeted_locations as string[]).filter(Boolean).join(", ")
                       : pick(wp?.targeted_locations),
       languages:    pick(wp?.languages, p?.languages),
-      english:      pick(wp?.english_level),
+      english:      pick(wp?.english_level, p?.english_level),
       // Public profile link — only published candidates have a live page.
       website:      (String(wp?.status ?? "") === "publish" && wp?.wp_link) ? String(wp!.wp_link) : "",
       cv:           pick(wp?.cv_url),
