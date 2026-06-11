@@ -142,39 +142,51 @@ Deno.serve(async (req: Request) => {
 
   // ── WP candidate is the RICHEST profile source (specialty, area of
   //    interest, country of training, years, nationality, license, salary…).
-  //    The single-doctor email already reads it; the batch path didn't — so
-  //    cards came out near-empty (just name + "Market Range" + contact). Load
-  //    by the linked doctor_id, and fall back to email for any unlinked row.
+  //    The picker is WP-spine: it pairs each doctor with their WP candidate
+  //    by phone → email → name. The batch only stores the resulting
+  //    doctor_id, so we must reconstruct the SAME pairing here. Matching on
+  //    doctor_id + email alone is NOT enough — a doctor whose Zoho email
+  //    differs from their WP email (and whose name is ambiguous between two
+  //    WP records, e.g. two "Mohamed Ismail"s) would resolve to no WP
+  //    candidate and the card came out near-empty. Phone is what
+  //    disambiguates, so index on it the same way the picker does.
+  const phoneKey = (p: unknown): string => {
+    const d = String(p ?? "").replace(/\D/g, "");
+    return d.length >= 9 ? d.slice(-9) : (d || "");
+  };
+  const normName = (n: unknown): string => String(n ?? "").toLowerCase().replace(/\s+/g, " ").trim();
+  const WP_COLS = "id, doctor_id, status, full_name, job_title, email, phone, date_of_birth, nationality, specialty, subspecialty, area_of_interest, years_experience, license_status, family_status, expected_salary, notice_period, country_of_training, current_location, languages, english_level, targeted_locations, cv_url, wp_link";
+
   const wpByDoctorId = new Map<string, Record<string, unknown>>();
+  const wpById       = new Map<string, Record<string, unknown>>();
+  const wpByPhone    = new Map<string, Record<string, unknown>>();
   const wpByEmail    = new Map<string, Record<string, unknown>>();
+  const wpByName     = new Map<string, Record<string, unknown>>();
   {
-    const docEmails = [...new Set(doctorIds.map(did => {
-      const l = leadById.get(did); const d = dobById.get(did);
-      return String((l?.Email ?? d?.Email ?? "")).toLowerCase().trim();
-    }).filter(Boolean))];
-    const { data: wpById } = await supabase.from("wordpress_candidates").select("*").in("doctor_id", doctorIds);
-    for (const w of (wpById ?? []) as Array<Record<string, unknown>>) {
+    // Published candidates = the website pool the picker draws from. Page
+    // through them (PostgREST caps at 1000/req) and index by every key the
+    // picker matches on, so the reverse lookup below can find any of them.
+    const PAGE = 1000;
+    for (let from = 0; from < 20000; from += PAGE) {
+      const { data } = await supabase
+        .from("wordpress_candidates").select(WP_COLS).eq("status", "publish")
+        .range(from, from + PAGE - 1);
+      const batch = (data ?? []) as Array<Record<string, unknown>>;
+      for (const w of batch) {
+        wpById.set(`wp:${w.id}`, w);
+        if (w.doctor_id) wpByDoctorId.set(String(w.doctor_id), w);
+        const ph = phoneKey(w.phone);                          if (ph && !wpByPhone.has(ph)) wpByPhone.set(ph, w);
+        const em = String(w.email ?? "").toLowerCase().trim(); if (em && !wpByEmail.has(em)) wpByEmail.set(em, w);
+        const nm = normName(w.full_name);                      if (nm && !wpByName.has(nm)) wpByName.set(nm, w);
+      }
+      if (batch.length < PAGE) break;
+    }
+    // Safety net: a queued doctor explicitly linked to a non-published WP
+    // candidate (rare) — pull those by doctor_id too.
+    const { data: linkRows } = await supabase
+      .from("wordpress_candidates").select(WP_COLS).in("doctor_id", doctorIds);
+    for (const w of (linkRows ?? []) as Array<Record<string, unknown>>) {
       if (w.doctor_id) wpByDoctorId.set(String(w.doctor_id), w);
-    }
-    // Website-only doctors (no Zoho link) are queued as `wp:<numericId>` —
-    // resolve them straight from wordpress_candidates by id and key them by
-    // that same `wp:<id>` so the row builder below finds them.
-    const wpNumericIds = doctorIds
-      .filter(did => did.startsWith("wp:"))
-      .map(did => Number(did.slice(3)))
-      .filter(n => Number.isFinite(n));
-    if (wpNumericIds.length) {
-      const { data: wpRows } = await supabase.from("wordpress_candidates").select("*").in("id", wpNumericIds);
-      for (const w of (wpRows ?? []) as Array<Record<string, unknown>>) {
-        wpByDoctorId.set(`wp:${w.id}`, w);
-      }
-    }
-    if (docEmails.length) {
-      const { data: wpByEm } = await supabase.from("wordpress_candidates").select("*").in("email", docEmails);
-      for (const w of (wpByEm ?? []) as Array<Record<string, unknown>>) {
-        const e = String(w.email ?? "").toLowerCase().trim();
-        if (e && !wpByEmail.has(e)) wpByEmail.set(e, w);
-      }
     }
   }
 
@@ -188,8 +200,18 @@ Deno.serve(async (req: Request) => {
     const p    = profileById.get(did) ?? null;
     const lead = leadById.get(did);
     const dob  = dobById.get(did);
-    const email = String((lead?.Email ?? dob?.Email ?? "")).toLowerCase().trim();
-    const wp   = wpByDoctorId.get(did) ?? (email ? wpByEmail.get(email) : undefined) ?? null;
+    // Resolve the doctor's rich WP candidate the same way the picker did:
+    // linked doctor_id, then website id, then phone → email → name.
+    const zphone = phoneKey(lead?.Mobile ?? lead?.Phone ?? dob?.Mobile ?? dob?.Phone);
+    const zemail = String((lead?.Email ?? dob?.Email ?? "")).toLowerCase().trim();
+    const zname  = normName((lead?.Full_Name ?? dob?.Full_Name)
+                    || `${lead?.First_Name ?? dob?.First_Name ?? ""} ${lead?.Last_Name ?? dob?.Last_Name ?? ""}`);
+    const wp = wpByDoctorId.get(did)
+            ?? wpById.get(did)
+            ?? (zphone ? wpByPhone.get(zphone) : undefined)
+            ?? (zemail ? wpByEmail.get(zemail) : undefined)
+            ?? (zname  ? wpByName.get(zname)   : undefined)
+            ?? null;
     return {
       idx:        idx + 1,
       name:         pick(wp?.full_name, lead?.Full_Name, dob?.Full_Name, p?.doctor_name) || "(unknown)",
