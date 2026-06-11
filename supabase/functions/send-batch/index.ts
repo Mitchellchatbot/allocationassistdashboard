@@ -274,12 +274,18 @@ Deno.serve(async (req: Request) => {
   // Area of Interest is sent in FULL (Ammar 2026-06-11 reversed the condense
   // — it cut sub-specialties). The cell wraps within a widened column.
 
-  // Specialty label for the email subject + template token.
-  const specialtyLabel: string = batch.specialty
+  // Specialty label for the email subject + template token. Prefer the
+  // batch's own specialty; otherwise, if every queued doctor shares one
+  // specialty (a rotation-scoped daily_duo does), use that. Rendered as the
+  // plural practitioner noun so the header reads "Available Cardiovascular
+  // Surgeons" rather than "Mixed Specialty Doctors Doctors".
+  const distinctSpecs = [...new Set(
+    rows.map(r => (r.specialty || "").trim()).filter(Boolean).map(s => s.toLowerCase()),
+  )];
+  const sharedSpecialty = batch.specialty
     ? String(batch.specialty)
-    : (batch.kind === "daily_duo" || batch.kind === "tuesday_top_15"
-        ? "Mixed Specialty Doctors"
-        : (rows[0]?.specialty ?? "Doctors"));
+    : (distinctSpecs.length === 1 ? (rows.find(r => (r.specialty || "").trim())?.specialty ?? "").trim() : "");
+  const specialtyLabel: string = sharedSpecialty ? practitionerNoun(sharedSpecialty) : "Mixed Specialty Doctors";
 
   // ── Render the table HTML (mirrors Ammar's "Available Doctor Format") ─
   const doctorsTableHtml = renderDoctorsTable(rows);
@@ -515,6 +521,20 @@ function esc(s: string | undefined | null): string {
 
 function stripHtml(s: string): string {
   return s.replace(/<[^>]+>/g, "").replace(/\s+/g, " ").trim();
+}
+
+/** Turn a specialty name into the plural practitioner noun for the email
+ *  header: "Cardiovascular Surgery" → "Cardiovascular Surgeons",
+ *  "Cardiology" → "Cardiologists". Title-cases first so a lowercase Zoho /
+ *  batch specialty ("cardiology") renders cleanly. Falls back to
+ *  "<Specialty> Doctors" for anything without a clean noun form. */
+function practitionerNoun(specialty: string): string {
+  let s = specialty.trim().replace(/\s+/g, " ");
+  if (!s) return "Doctors";
+  s = s.replace(/\b\w/g, c => c.toUpperCase());
+  if (/surgery$/i.test(s)) return s.replace(/surgery$/i, "Surgeons");
+  if (/ology$/i.test(s))   return s.replace(/ology$/i, "ologists");
+  return `${s} Doctors`;
 }
 
 /** Age in years from a WP date_of_birth ("YYYYMMDD", "YYYY-MM-DD", or a
