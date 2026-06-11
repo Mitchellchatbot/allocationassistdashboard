@@ -69,7 +69,7 @@ function extractTypeformId(url: string): string | null {
   return m ? m[1] : null;
 }
 
-export default function Forms() {
+export default function Forms({ embedded = false }: { embedded?: boolean }) {
   const { data: forms = [], isLoading } = useForms();
   const [activeId, setActiveId] = useState<string | null>(null);
   const [createOpen, setCreateOpen] = useState(false);
@@ -82,9 +82,9 @@ export default function Forms() {
 
   const active = useMemo(() => forms.find(f => f.id === safeActiveId) ?? null, [forms, safeActiveId]);
 
-  return (
-    <DashboardLayout>
+  const content = (
       <div className="space-y-4">
+        {!embedded && (
         <div>
           <h1 className="text-2xl font-semibold tracking-tight flex items-center gap-2">
             <ClipboardList className="h-6 w-6 text-teal-600" />
@@ -94,6 +94,7 @@ export default function Forms() {
             Live form submissions from Typeform + Elementor. Each tab shows analytics + every response for one form. Emails matched to a Zoho lead/DoB get linked automatically.
           </p>
         </div>
+        )}
 
         {isLoading ? (
           <div className="grid gap-3 md:grid-cols-2">
@@ -136,8 +137,9 @@ export default function Forms() {
 
         <ConnectFormDialog open={createOpen} onClose={() => setCreateOpen(false)} />
       </div>
-    </DashboardLayout>
   );
+
+  return embedded ? content : <DashboardLayout>{content}</DashboardLayout>;
 }
 
 function ProviderDot({ provider }: { provider: string }) {
@@ -1247,8 +1249,8 @@ function ResponseRow({
   // same phone we already have on file is still in WP. Only matters
   // for JotForm — Typeform / Elementor flows don't feed WP.
   const wpQuery = useWpCandidateByContact(
-    formProvider === "jotform" ? response.respondent_email : null,
-    formProvider === "jotform" ? phone : null,
+    (formProvider === "jotform" || formProvider === "typeform") ? response.respondent_email : null,
+    (formProvider === "jotform" || formProvider === "typeform") ? phone : null,
   );
   const existingWp = wpQuery.data;
 
@@ -1352,7 +1354,7 @@ function ResponseRow({
             JotForm feeds WP, so other providers stay silent. Match
             considers email OR phone so a doctor who re-submitted with
             a different email isn't flagged as missing. */}
-        {formProvider === "jotform" && !wpQuery.isLoading && (
+        {(formProvider === "jotform" || formProvider === "typeform") && !wpQuery.isLoading && (
           existingWp ? (
             <button
               type="button"
@@ -1442,7 +1444,7 @@ function ResponseRow({
               the only provider currently feeding WP. Shows a link to
               the existing record if there is one, else a button that
               opens the review dialog. */}
-          {formProvider === "jotform" && (
+          {(formProvider === "jotform" || formProvider === "typeform") && (
             <div className="flex items-center gap-2 pt-2 border-t">
               {wpQuery.isLoading ? (
                 <span className="text-[10px] text-muted-foreground inline-flex items-center gap-1">

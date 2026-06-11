@@ -21,25 +21,32 @@ import { lazy, Suspense, useMemo } from "react";
 import { useSearchParams } from "react-router-dom";
 import { DashboardLayout } from "@/components/layout/DashboardLayout";
 import { Input } from "@/components/ui/input";
-import { Search, UserSquare, GitBranch } from "lucide-react";
+import { Search, UserSquare, GitBranch, Inbox } from "lucide-react";
 
 const LeadsPipeline  = lazy(() => import("./LeadsPipeline"));
 const WpCandidates   = lazy(() => import("./WpCandidates"));
+const Forms          = lazy(() => import("./Forms"));
 
-type Tab = "progress" | "profiles";
+type Tab = "responses" | "profiles" | "progress";
 
 const TAB_META: Record<Tab, { label: string; icon: typeof UserSquare; subtitle: string; placeholder: string }> = {
+  responses: {
+    label:       "Responses",
+    icon:        Inbox,
+    subtitle:    "Incoming form submissions (Typeform + JotForm). New ones auto-stage to a draft profile — review + publish from Profiles.",
+    placeholder: "",
+  },
+  profiles: {
+    label:       "Doctor Profiles",
+    icon:        UserSquare,
+    subtitle:    "The canonical doctor profile — mirrors allocationassist.com. Edit any candidate (linked or not). New profiles auto-link to the AA roster.",
+    placeholder: "Search any field — name, specialty, license, country, salary, location…",
+  },
   progress: {
     label:       "Doctor Progress",
     icon:        GitBranch,
     subtitle:    "Where each doctor sits in the placement pipeline — Zoho lead stages + AA's manual signals.",
     placeholder: "Search by name, specialty, recruiter, country, license, destination…",
-  },
-  profiles: {
-    label:       "Profiles",
-    icon:        UserSquare,
-    subtitle:    "The canonical doctor profile — mirrors allocationassist.com. Edit any candidate (linked or not). New profiles auto-link to the AA roster.",
-    placeholder: "Search any field — name, specialty, license, country, salary, location…",
   },
 };
 
@@ -69,7 +76,9 @@ export default function Doctors() {
 
   return (
     <DashboardLayout title="Doctors" subtitle={cue}>
-      {/* Shared search bar */}
+      {/* Shared search bar — hidden on Responses (the Forms view has its
+          own per-form search + filters). */}
+      {tab !== "responses" && (
       <div className="relative mb-3">
         <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" />
         <Input
@@ -88,6 +97,7 @@ export default function Doctors() {
           </button>
         )}
       </div>
+      )}
 
       {/* Tab strip */}
       <div className="border-b border-border/60 mb-4 flex items-center gap-1 overflow-x-auto">
@@ -118,8 +128,9 @@ export default function Doctors() {
           the whole shell. */}
       <Suspense fallback={<TabSkeleton />}>
         <div key={tab}>
-          {tab === "progress" && <LeadsPipeline embedded />}
-          {tab === "profiles" && <WpCandidates  embedded />}
+          {tab === "responses" && <Forms         embedded />}
+          {tab === "profiles"  && <WpCandidates  embedded />}
+          {tab === "progress"  && <LeadsPipeline embedded />}
         </div>
       </Suspense>
     </DashboardLayout>
@@ -127,11 +138,11 @@ export default function Doctors() {
 }
 
 function parseTab(raw: string | null): Tab {
-  if (raw === "progress" || raw === "profiles") return raw;
+  if (raw === "responses" || raw === "progress" || raw === "profiles") return raw;
   // Legacy `?tab=wp` (the old WP Candidates tab name) lands on Profiles.
   if (raw === "wp") return "profiles";
-  // Default landing — Progress is the highest-traffic view for HI staff.
-  return "progress";
+  // Default landing — the first tab (incoming form Responses).
+  return "responses";
 }
 
 function TabSkeleton() {

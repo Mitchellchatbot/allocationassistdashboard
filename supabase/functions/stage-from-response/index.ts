@@ -118,9 +118,13 @@ Deno.serve(async (req: Request) => {
   // CV URL can hide in three places, in priority order: the mapped ACF, the
   // flat answers, or ONLY in raw_payload (widget uploads / answers the
   // flattener didn't surface — e.g. Flor's CV lived solely in raw_payload).
+  // JotForm hides the CV in /uploads/ links; Typeform stores a file_url
+  // (api.typeform.com/.../files/…). Pick the right extractor + download auth.
+  const isTypeform = form?.provider === "typeform";
   const cvUrl = (profile.acf?.cv_resume as string | undefined)
-    ?? extractCvUrlFromAnswers(flat)
-    ?? extractCvUrlFromRaw(response.raw_payload)
+    ?? (isTypeform
+        ? (extractTypeformCvUrl(flat) ?? extractTypeformCvUrl(response.raw_payload))
+        : (extractCvUrlFromAnswers(flat) ?? extractCvUrlFromRaw(response.raw_payload)))
     ?? "";
   const cvFound = !!cvUrl;
   let cvExtracted = false;
@@ -130,9 +134,11 @@ Deno.serve(async (req: Request) => {
       const res = await fireCvPipeline({
         supabaseUrl, serviceKey,
         cvUrl,
-        jotformApiKey:   form.api_token,
+        downloadHeaders: isTypeform
+          ? { Authorization: `Bearer ${form.api_token}` }
+          : { APIKEY: form.api_token },
         stagedProfileId: stagedId,
-        candidateName:   profile.full_name || response.respondent_name || "JotForm intake",
+        candidateName:   profile.full_name || response.respondent_name || "Form intake",
         candidateEmail:  profile.email || response.respondent_email || "",
       });
       cvExtracted = res.extracted;
@@ -159,6 +165,19 @@ Deno.serve(async (req: Request) => {
     cv_error:          cvError,
   }, 200);
 });
+
+/** Typeform CV URL: a file-upload answer is an api.typeform.com/.../files/…
+ *  URL (downloaded with the Bearer token). Scans the flat answers OR the raw
+ *  payload (stringified) for it, with a generic typeform-hosted doc fallback. */
+function extractTypeformCvUrl(src: Record<string, unknown> | string | null | undefined): string | null {
+  if (!src) return null;
+  let s: string;
+  try { s = typeof src === "string" ? src : JSON.stringify(src); } catch { return null; }
+  const m = /(https?:\/\/api\.typeform\.com\/[^\s,;"'\\]+\/files\/[^\s,;"'\\]+)/i.exec(s);
+  if (m) return m[1].replace(/\\\//g, "/");
+  const m2 = /(https?:\/\/[^\s,;"'\\]*typeform[^\s,;"'\\]+\.(?:pdf|doc|docx))/i.exec(s);
+  return m2 ? m2[1].replace(/\\\//g, "/") : null;
+}
 
 /** Belt-and-braces CV URL fallback: even if mapToProfile missed
  *  the cv_resume mapping (label heuristics can fail on weird forms),
@@ -189,16 +208,16 @@ function extractCvUrlFromRaw(raw: unknown): string | null {
  *  from sibling functions in the Supabase Edge runtime). */
 async function fireCvPipeline(args: {
   supabaseUrl: string; serviceKey: string;
-  cvUrl: string; jotformApiKey: string;
+  cvUrl: string; downloadHeaders: Record<string, string>;
   stagedProfileId: string;
   candidateName: string; candidateEmail: string;
 }): Promise<{ extracted: boolean; error: string | null }> {
-  const { supabaseUrl, serviceKey, cvUrl, jotformApiKey, stagedProfileId, candidateName, candidateEmail } = args;
+  const { supabaseUrl, serviceKey, cvUrl, downloadHeaders, stagedProfileId, candidateName, candidateEmail } = args;
 
-  const jfRes = await fetch(cvUrl, { headers: { APIKEY: jotformApiKey } });
-  if (!jfRes.ok) throw new Error(`JotForm CV download ${jfRes.status}`);
+  const jfRes = await fetch(cvUrl, { headers: downloadHeaders });
+  if (!jfRes.ok) throw new Error(`CV download ${jfRes.status}`);
   const blob = await jfRes.blob();
-  if (blob.size === 0) throw new Error("JotForm returned empty CV body");
+  if (blob.size === 0) throw new Error("Form returned empty CV body");
   const filename = (() => {
     try {
       const p = new URL(cvUrl).pathname;
