@@ -230,7 +230,7 @@ Deno.serve(async (req: Request) => {
     return json({ ok: false, error: "RESEND_API_KEY not set on the Edge Function." }, 500);
   }
 
-  let body: { run_id?: string; dry_run?: boolean; force?: boolean };
+  let body: { run_id?: string; dry_run?: boolean; force?: boolean; preview_stage?: string; preview_metadata?: Record<string, unknown> };
   try { body = await req.json(); } catch { return json({ ok: false, error: "Invalid JSON body" }, 400); }
   const runId = body.run_id;
   const dryRun = !!body.dry_run;
@@ -251,7 +251,19 @@ Deno.serve(async (req: Request) => {
   if (runErr || !run) {
     return json({ ok: false, error: "Run not found", detail: runErr?.message }, 404);
   }
-  console.log("[send-flow-email] run", runId, "stage:", run.current_stage, "flow:", run.flow_key);
+  // Preview override: on a dry run, the caller can ask to render the email for
+  // a stage the run hasn't entered yet (e.g. a "Confirm shortlist" button
+  // previewing send_shortlist_email before advancing). Mutating the in-memory
+  // run object — never persisted on a dry run — makes EVERY downstream renderer
+  // (route/template, stage-gated attachment + token blocks, {{city}} etc.)
+  // reflect the previewed step with no other code changes.
+  if (dryRun && body.preview_stage) {
+    run.current_stage = body.preview_stage;
+    if (body.preview_metadata && typeof body.preview_metadata === "object") {
+      run.metadata = { ...((run.metadata as Record<string, unknown>) ?? {}), ...body.preview_metadata };
+    }
+  }
+  console.log("[send-flow-email] run", runId, "stage:", run.current_stage, "flow:", run.flow_key, dryRun ? "(dry-run)" : "");
 
   // Resolve the sender for this run based on assigned_to. Falls back
   // to the generic MAIL_FROM env when the owner isn't in the registry.
@@ -273,7 +285,7 @@ Deno.serve(async (req: Request) => {
   // intentionally allowed to repeat — they self-loop and SHOULD fire on each
   // scheduler tick. We only guard against same-stage duplicates within a
   // short window for non-reminder email stages.
-  if (!force && !run.current_stage.startsWith("reminder_")) {
+  if (!force && !dryRun && !run.current_stage.startsWith("reminder_")) {
     const { data: prior } = await supabase
       .from("automation_flow_events")
       .select("id, occurred_at")

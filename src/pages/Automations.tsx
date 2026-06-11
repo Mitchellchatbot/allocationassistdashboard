@@ -35,6 +35,7 @@ import { ApprovalQueues } from "@/components/automations/ApprovalQueues";
 import { ReassignButton } from "@/components/automations/ReassignButton";
 import { SendProfileDialog } from "@/components/automations/SendProfileDialog";
 import { TriggerFlowDialog } from "@/components/automations/TriggerFlowDialog";
+import { FlowSendPreviewDialog } from "@/components/automations/FlowSendPreviewDialog";
 import { ClassifyReplyDialog } from "@/components/automations/ClassifyReplyDialog";
 import { lazy, Suspense } from "react";
 // Lazy-load the Contract Builder so opening the Sheet doesn't bloat the
@@ -505,10 +506,17 @@ function RunDetailSheet({ run, open, onClose }: { run: FlowRun | null; open: boo
   const flow    = run ? FLOW_DEFINITIONS[run.flow_key] : null;
   const [selectedStage, setSelectedStage] = useState<string | null>(null);
   const [noteText, setNoteText] = useState("");
-  const [sending,  setSending]  = useState(false);
   const [classifyOpen, setClassifyOpen] = useState(false);
   const [pickedCity, setPickedCity] = useState<string>("");
-  const [sendingCity, setSendingCity] = useState(false);
+  // Drives the shared preview-before-send dialog. Each send action sets this
+  // (with the real send as onConfirm) instead of firing directly.
+  const [previewCfg, setPreviewCfg] = useState<{
+    previewStage?:    string;
+    previewMetadata?: Record<string, unknown>;
+    title:            string;
+    confirmLabel:     string;
+    onConfirm:        () => Promise<void>;
+  } | null>(null);
   const [invLink,   setInvLink]   = useState<string>("");
   const [invNumber, setInvNumber] = useState<string>("");
   const [savingInv, setSavingInv] = useState(false);
@@ -584,48 +592,51 @@ function RunDetailSheet({ run, open, onClose }: { run: FlowRun | null; open: boo
     }
   };
 
-  const handleSendCityGuide = async () => {
-    if (!pickedCity.trim() || sendingCity) return;
-    setSendingCity(true);
-    try {
-      // 1. Update metadata + advance the stage
-      const newMetadata = { ...(run.metadata as Record<string, unknown>), city: pickedCity.trim() };
-      const { error: updateErr } = await supabase
-        .from("automation_flow_runs")
-        .update({
-          current_stage: "send_relocation_email",
-          last_event_at: new Date().toISOString(),
-          metadata:      newMetadata,
-        })
-        .eq("id", run.id);
-      if (updateErr) throw updateErr;
+  // Real send: update metadata + advance, then fire. Wrapped by a preview.
+  const doSendCityGuide = async () => {
+    const city = pickedCity.trim();
+    const newMetadata = { ...(run.metadata as Record<string, unknown>), city };
+    const { error: updateErr } = await supabase
+      .from("automation_flow_runs")
+      .update({
+        current_stage: "send_relocation_email",
+        last_event_at: new Date().toISOString(),
+        metadata:      newMetadata,
+      })
+      .eq("id", run.id);
+    if (updateErr) throw updateErr;
 
-      // Add a note event for the audit trail
-      await supabase.from("automation_flow_events").insert({
-        run_id:     run.id,
-        stage_key:  "select_city_guide",
-        event_type: "completed",
-        message:    `City picked: ${pickedCity.trim()}. Advancing to send the relocation guide.`,
-      });
+    await supabase.from("automation_flow_events").insert({
+      run_id:     run.id,
+      stage_key:  "select_city_guide",
+      event_type: "completed",
+      message:    `City picked: ${city}. Advancing to send the relocation guide.`,
+    });
 
-      // 2. Invoke send-flow-email — now reads metadata.city and renders the
-      //    guide with that city. Auto-advances to send_attestation_email after.
-      const { data, error: sendErr } = await supabase.functions.invoke("send-flow-email", {
-        body: { run_id: run.id },
-      });
-      if (sendErr) throw sendErr;
-      const resp = data as { ok: boolean; error?: string };
-      if (!resp.ok) throw new Error(resp.error ?? "Send failed");
+    const { data, error: sendErr } = await supabase.functions.invoke("send-flow-email", {
+      body: { run_id: run.id },
+    });
+    if (sendErr) throw sendErr;
+    const resp = data as { ok: boolean; error?: string };
+    if (!resp.ok) throw new Error(resp.error ?? "Send failed");
 
-      toast.success(`Relocation guide for ${pickedCity.trim()} sent`);
-      qc.invalidateQueries({ queryKey: ["automation-flow-runs"] });
-      qc.invalidateQueries({ queryKey: ["automation-flow-events", run.id] });
-    } catch (err) {
-      const msg = err instanceof Error ? err.message : "Failed to send guide";
-      toast.error(msg);
-    } finally {
-      setSendingCity(false);
-    }
+    toast.success(`Relocation guide for ${city} sent`);
+    qc.invalidateQueries({ queryKey: ["automation-flow-runs"] });
+    qc.invalidateQueries({ queryKey: ["automation-flow-events", run.id] });
+  };
+
+  // Open a preview of the city guide BEFORE sending. preview_stage lets us
+  // render send_relocation_email (with the picked city) without advancing the
+  // run; doSendCityGuide does the real advance + send on confirm.
+  const handleSendCityGuide = () => {
+    if (!pickedCity.trim()) return;
+    setPreviewCfg({
+      previewStage:    "send_relocation_email",
+      previewMetadata: { city: pickedCity.trim() },
+      title:           `Relocation guide — ${pickedCity.trim()}`,
+      confirmLabel:    "Send guide",
+      onConfirm:       doSendCityGuide,
+    });
   };
 
   const handleAddNote = async () => {
@@ -635,41 +646,37 @@ function RunDetailSheet({ run, open, onClose }: { run: FlowRun | null; open: boo
     toast.success("Note added");
   };
 
-  const handleSendNow = async (opts: { force?: boolean } = {}) => {
-    if (!run || sending) return;
-    setSending(true);
-    try {
-      const { data, error } = await supabase.functions.invoke("send-flow-email", {
-        body: { run_id: run.id, force: opts.force ?? false },
-      });
-      if (error) throw error;
-      const resp = data as { ok: boolean; error?: string; to?: string; subject?: string; completed?: boolean; already_sent?: boolean };
-      if (!resp.ok) {
-        if (resp.already_sent) {
-          // The function blocked because email_sent already exists. Show a
-          // confirm with the option to override.
-          if (window.confirm("This stage was already emailed. Send again?")) {
-            await handleSendNow({ force: true });
-            return;
-          }
-          toast.info("No email sent — already delivered for this stage.");
-          return;
-        }
-        throw new Error(resp.error ?? "Send failed");
+  // Real send for the current stage. force re-sends an already-sent stage.
+  const doSendNow = async (force: boolean) => {
+    const { data, error } = await supabase.functions.invoke("send-flow-email", {
+      body: { run_id: run.id, force },
+    });
+    if (error) throw error;
+    const resp = data as { ok: boolean; error?: string; to?: string; subject?: string; completed?: boolean; already_sent?: boolean };
+    if (!resp.ok) {
+      if (resp.already_sent) {
+        if (window.confirm("This stage was already emailed. Send again?")) { await doSendNow(true); return; }
+        toast.info("No email sent — already delivered for this stage.");
+        return;
       }
-      toast.success(
-        resp.completed
-          ? `Sent "${resp.subject}" — flow complete`
-          : `Sent "${resp.subject}" to ${resp.to}`,
-      );
-      qc.invalidateQueries({ queryKey: ["automation-flow-runs"] });
-      qc.invalidateQueries({ queryKey: ["automation-flow-events", run.id] });
-    } catch (e) {
-      const msg = e instanceof Error ? e.message : "Failed to send";
-      toast.error(msg);
-    } finally {
-      setSending(false);
+      throw new Error(resp.error ?? "Send failed");
     }
+    toast.success(
+      resp.completed
+        ? `Sent "${resp.subject}" — flow complete`
+        : `Sent "${resp.subject}" to ${resp.to}`,
+    );
+    qc.invalidateQueries({ queryKey: ["automation-flow-runs"] });
+    qc.invalidateQueries({ queryKey: ["automation-flow-events", run.id] });
+  };
+
+  // Always preview before sending the current-stage email. Resend forces.
+  const handleSendNow = () => {
+    setPreviewCfg({
+      title:        alreadySent ? "Resend email" : "Send email",
+      confirmLabel: alreadySent ? "Resend now" : "Send now",
+      onConfirm:    () => doSendNow(alreadySent),
+    });
   };
 
   return (
@@ -723,12 +730,11 @@ function RunDetailSheet({ run, open, onClose }: { run: FlowRun | null; open: boo
                 <Button
                   size="sm"
                   onClick={() => handleSendNow()}
-                  disabled={sending}
                   variant={alreadySent ? "outline" : "default"}
-                  title={alreadySent ? "An email has already been sent for this stage. Click to send again." : `Send "${currentStageDef?.label}" email now`}
+                  title={alreadySent ? "An email has already been sent for this stage. Click to preview & send again." : `Preview & send "${currentStageDef?.label}" email`}
                 >
                   <Send className="h-3.5 w-3.5 mr-1.5" />
-                  {sending ? "Sending..." : alreadySent ? "Resend email" : "Send now"}
+                  {alreadySent ? "Resend email" : "Send now"}
                 </Button>
               )}
             </div>
@@ -769,10 +775,10 @@ function RunDetailSheet({ run, open, onClose }: { run: FlowRun | null; open: boo
               <Button
                 size="sm"
                 onClick={handleSendCityGuide}
-                disabled={!pickedCity.trim() || sendingCity}
+                disabled={!pickedCity.trim()}
               >
                 <Send className="h-3.5 w-3.5 mr-1.5" />
-                {sendingCity ? "Sending..." : "Send guide"}
+                Send guide
               </Button>
             </div>
           </div>
@@ -841,6 +847,18 @@ function RunDetailSheet({ run, open, onClose }: { run: FlowRun | null; open: boo
             hospitalName={run.hospital}
           />
         )}
+
+        {/* Shared preview-before-send gate for every manual send in this sheet. */}
+        <FlowSendPreviewDialog
+          open={!!previewCfg}
+          onClose={() => setPreviewCfg(null)}
+          runId={run.id}
+          previewStage={previewCfg?.previewStage}
+          previewMetadata={previewCfg?.previewMetadata}
+          title={previewCfg?.title ?? "Email preview"}
+          confirmLabel={previewCfg?.confirmLabel ?? "Send now"}
+          onConfirm={async () => { if (previewCfg) await previewCfg.onConfirm(); }}
+        />
 
         <div className="py-4 space-y-5">
           <div>
@@ -1105,11 +1123,22 @@ function InterviewTimePicker({ run }: { run: FlowRun }) {
   const proposed = (md.proposed_interview_times as ProposedTime[] | undefined) ?? [];
   const [pickedIso, setPickedIso] = useState<string | null>(null);
   const [confirming, setConfirming] = useState(false);
+  const [previewOpen, setPreviewOpen] = useState(false);
+  const [previewSlot, setPreviewSlot] = useState<ProposedTime | null>(null);
   const qc = useQueryClient();
 
   if (proposed.length === 0) return null;
 
-  const handleConfirm = async (slot: ProposedTime) => {
+  // Picking a slot previews the tips/confirmation email first (rendered off
+  // this run as send_interview_email with the slot's time); the interview run
+  // is created + emailed only on confirm.
+  const handleConfirm = (slot: ProposedTime) => {
+    setPickedIso(slot.iso);
+    setPreviewSlot(slot);
+    setPreviewOpen(true);
+  };
+
+  const doConfirm = async (slot: ProposedTime) => {
     setConfirming(true);
     setPickedIso(slot.iso);
     try {
@@ -1230,6 +1259,20 @@ function InterviewTimePicker({ run }: { run: FlowRun }) {
           );
         })}
       </div>
+      <FlowSendPreviewDialog
+        open={previewOpen}
+        onClose={() => { setPreviewOpen(false); setPickedIso(null); }}
+        runId={run.id}
+        previewStage="send_interview_email"
+        previewMetadata={previewSlot ? {
+          interview_datetime: previewSlot.label,
+          interview_iso:      previewSlot.iso,
+          interview_format:   previewSlot.format === "unknown" ? "" : previewSlot.format,
+        } : undefined}
+        title="Interview tips + confirmation — preview"
+        confirmLabel="Confirm time & send"
+        onConfirm={async () => { if (previewSlot) await doConfirm(previewSlot); }}
+      />
     </div>
   );
 }
@@ -1250,11 +1293,16 @@ function ShortlistSuggestion({ run }: { run: FlowRun }) {
   const suggested = md.shortlist_suggested === true;
   const summary   = (md.shortlist_suggestion_text as string | undefined) ?? "";
   const [working, setWorking] = useState(false);
+  const [previewOpen, setPreviewOpen] = useState(false);
   const qc = useQueryClient();
 
   if (!suggested) return null;
 
-  const handleConfirm = async () => {
+  // Confirm = preview the shortlist email first (rendered off THIS profile_sent
+  // run via preview_stage, so no shortlist run is created until you send).
+  const handleConfirm = () => setPreviewOpen(true);
+
+  const doConfirm = async () => {
     setWorking(true);
     try {
       const nowIso = new Date().toISOString();
@@ -1358,6 +1406,15 @@ function ShortlistSuggestion({ run }: { run: FlowRun }) {
           <XIcon className="h-3.5 w-3.5 mr-1" /> Not shortlisted
         </Button>
       </div>
+      <FlowSendPreviewDialog
+        open={previewOpen}
+        onClose={() => setPreviewOpen(false)}
+        runId={run.id}
+        previewStage="send_shortlist_email"
+        title="Shortlist confirmation — preview"
+        confirmLabel="Mark shortlisted & send"
+        onConfirm={doConfirm}
+      />
     </div>
   );
 }
