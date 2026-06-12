@@ -668,6 +668,10 @@ Deno.serve(async (req: Request) => {
   // full-profile buttons). Built from the vars above and injected as a RAW
   // token so it survives plainifyBody (which strips the DB template's styles).
   vars.doctor_card_html = doctorCardHtml(vars);
+  // The full horizontal data row UNDER the card (team's existing hospital-comms
+  // format), minus the Area of Interest column. Styled token so it survives
+  // plainifyBody and keeps its coloured header.
+  vars.doctor_row_table_html = doctorRowTableHtml(vars);
 
   const subject = render(tpl.subject ?? "", vars);
   // HTML gets escaped token values (so a doctor name like "Dr. <Smith>" or
@@ -933,7 +937,7 @@ Deno.serve(async (req: Request) => {
 // Tokens whose values are pre-rendered HTML (signature block, etc) and so
 // must NOT be HTML-escaped during template substitution. Anything not in
 // this set is treated as untrusted text and escaped.
-const RAW_HTML_TOKENS = new Set(["signature", "doctors_table_html", "doctor_card_html", "logo_header"]);
+const RAW_HTML_TOKENS = new Set(["signature", "doctors_table_html", "doctor_card_html", "doctor_row_table_html", "logo_header"]);
 
 /** Age from WP date_of_birth. Accepts "YYYYMMDD", "YYYY-MM-DD", or
  *  human-formatted "4 September 1987". Returns null if unparseable. */
@@ -1055,6 +1059,40 @@ function doctorCardHtml(v: Record<string, string>): string {
   ${buttonsHtml}
   ${contactHtml}
 </table>`;
+}
+
+/** The full single-row data table the team uses in hospital comms, rendered
+ *  UNDER the card. Same columns as the old profile_sent_hospital table MINUS
+ *  the Area of Interest column (team request 2026-06-12). Styled token (teal
+ *  header) so it survives plainifyBody. Horizontally scrollable since it's wide. */
+function doctorRowTableHtml(v: Record<string, string>): string {
+  const cols: Array<[string, string]> = [
+    ["#",                                            "1"],
+    ["Name",                                         v.doctor_name || ""],
+    ["Title and Specialty as per the UAE license",   v.doctor_title || ""],
+    ["Country Of Training",                          v.doctor_country_training || ""],
+    ["Years of Experience",                          v.doctor_years_experience || ""],
+    ["Nationality",                                  v.doctor_nationality || ""],
+    ["Age",                                          v.doctor_age || ""],
+    ["Marital Status",                               v.doctor_marital_status || ""],
+    ["Family Status",                                v.doctor_family_status || ""],
+    ["UAE license type / Status",                    v.doctor_license || ""],
+    ["Salary Expectation",                           v.doctor_salary_expectation || "Market Range"],
+    ["Notice Period",                                v.doctor_notice_period || ""],
+    ["Mobile",                                       v.doctor_phone || ""],
+    ["Email",                                        v.doctor_email || ""],
+  ];
+  const th = cols.map(([h]) =>
+    `<th style="text-align:left;border:1px solid #cbd5e1;padding:8px 11px;background:#0f766e;color:#ffffff;font-size:13px;font-weight:600;white-space:nowrap;">${escapeHtml(h)}</th>`).join("");
+  const td = cols.map(([, val]) =>
+    `<td style="border:1px solid #cbd5e1;padding:8px 11px;font-size:14px;color:#1a2332;vertical-align:top;">${escapeHtml(val)}</td>`).join("");
+  return `
+<div style="overflow-x:auto;margin:18px 0;">
+  <table role="presentation" cellspacing="0" cellpadding="0" border="0" style="border-collapse:collapse;border:1px solid #cbd5e1;">
+    <thead><tr>${th}</tr></thead>
+    <tbody><tr>${td}</tr></tbody>
+  </table>
+</div>`;
 }
 
 /** If a token value looks like a URL but is missing a protocol (very common
