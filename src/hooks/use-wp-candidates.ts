@@ -867,6 +867,18 @@ function computeAge(dob: string | null): number | null {
   return a >= 0 && a < 120 ? a : null;
 }
 
+/** Format date_of_birth as "19 January 1981" (same input formats as
+ *  computeAge). Mirrors formatDobLong() in send-flow-email. */
+function formatDobLong(dob: string | null): string {
+  if (!dob) return "";
+  let d: Date | null = null;
+  if (/^\d{8}$/.test(dob))                 d = new Date(`${dob.slice(0,4)}-${dob.slice(4,6)}-${dob.slice(6,8)}`);
+  else if (/^\d{4}-\d{2}-\d{2}/.test(dob)) d = new Date(dob);
+  else                                     { const p = new Date(dob); if (!isNaN(p.valueOf())) d = p; }
+  if (!d || isNaN(d.valueOf())) return "";
+  return d.toLocaleDateString("en-GB", { day: "numeric", month: "long", year: "numeric", timeZone: "UTC" });
+}
+
 /** Map a WP candidate to the email-template token bag the renderer
  *  expects. Same shape as profileToTokens() from use-doctor-profiles
  *  so existing templates keep working without changes. Both client and
@@ -886,6 +898,7 @@ export function wpCandidateToTokens(c: WpCandidate | null): Record<string, strin
     doctor_years_experience:    c.years_experience != null ? String(c.years_experience) : "",
     doctor_nationality:         c.nationality            ?? "",
     doctor_age:                 age != null ? String(age) : "",
+    doctor_dob:                 formatDobLong(c.date_of_birth),
     doctor_marital_status:      c.family_status          ?? "",  // WP doesn't separate marital vs family
     doctor_family_status:       c.family_status          ?? "",
     doctor_license:             c.license_status         ?? "",

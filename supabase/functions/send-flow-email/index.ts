@@ -399,6 +399,7 @@ Deno.serve(async (req: Request) => {
         doctor_years_experience:   wp.years_experience != null ? String(wp.years_experience) : "",
         doctor_nationality:        String(wp.nationality            ?? ""),
         doctor_age:                age != null ? String(age) : "",
+        doctor_dob:                formatDobLong(wp.date_of_birth),
         doctor_marital_status:     String(wp.family_status          ?? ""),  // WP doesn't separate marital
         doctor_family_status:      String(wp.family_status          ?? ""),
         doctor_license:            String(wp.license_status         ?? ""),
@@ -486,6 +487,7 @@ Deno.serve(async (req: Request) => {
         doctor_years_experience:   sacf.years_of_experience_post_specialization != null ? String(sacf.years_of_experience_post_specialization) : "",
         doctor_nationality:        String(sacf.nationality            ?? ""),
         doctor_age:                age != null ? String(age) : "",
+        doctor_dob:                formatDobLong(sacf.date_of_birth as string | undefined),
         doctor_marital_status:     String(sacf.marital_status         ?? ""),
         doctor_family_status:      String(sacf.family_status          ?? ""),
         doctor_license:            String(sacf.dha__haad__moh_license ?? ""),
@@ -962,6 +964,18 @@ function computeAgeFromDob(dob: string | null | undefined): number | null {
   return a >= 0 && a < 120 ? a : null;
 }
 
+/** Format a WP date_of_birth as "19 January 1981" (same input formats as
+ *  computeAgeFromDob). Returns "" if unparseable/empty. */
+function formatDobLong(dob: string | null | undefined): string {
+  if (!dob) return "";
+  let d: Date | null = null;
+  if (/^\d{8}$/.test(dob))                 d = new Date(`${dob.slice(0,4)}-${dob.slice(4,6)}-${dob.slice(6,8)}`);
+  else if (/^\d{4}-\d{2}-\d{2}/.test(dob)) d = new Date(dob);
+  else                                     { const p = new Date(dob); if (!isNaN(p.valueOf())) d = p; }
+  if (!d || isNaN(d.valueOf())) return "";
+  return d.toLocaleDateString("en-GB", { day: "numeric", month: "long", year: "numeric", timeZone: "UTC" });
+}
+
 /** Second-payment due date: an explicit metadata.due_date wins; otherwise
  *  45 days after the logged joining_date (AA terms). Formats as "23 July 2026".
  *  Returns "" when neither is available. */
@@ -1025,15 +1039,27 @@ function doctorCardHtml(v: Record<string, string>): string {
             ${email ? `<div style="font-size:12px;word-break:break-all;color:#ffffff;"><span style="opacity:0.85;">&#9993;</span> ${escapeHtml(email)}</div>` : ""}
           </div>` : "";
 
-  // Highlight facts beside the bio — a quick-scan summary (the full record is
-  // in the data table below). Two columns, only non-empty values.
+  // Full WordPress-profile field set beside the bio (team: "the card should
+  // have all the data available in the profile on wordpress"). Two columns,
+  // only non-empty values; skip what the sidebar already shows (specialty/age)
+  // and dedupe obvious repeats.
   const facts: Array<[string, string]> = [
-    ["Country of training", v.doctor_country_training],
-    ["Years of experience", v.doctor_years_experience],
-    ["Nationality",         v.doctor_nationality],
-    ["Current location",    v.doctor_current_location],
-    ["UAE license",         v.doctor_license],
-    ["Languages",           v.doctor_languages],
+    ["Subspecialty",         v.doctor_subspecialty],
+    ["Title / rank",         v.doctor_rank && v.doctor_rank !== title ? v.doctor_rank : ""],
+    ["Country of training",  v.doctor_country_training],
+    ["Years of experience",  v.doctor_years_experience],
+    ["Current location",     v.doctor_current_location],
+    ["Targeted locations",   v.doctor_targeted_locations],
+    ["Nationality",          v.doctor_nationality],
+    ["Date of birth",        v.doctor_dob],
+    ["Marital status",       v.doctor_marital_status],
+    ["Family status",        v.doctor_family_status && v.doctor_family_status !== v.doctor_marital_status ? v.doctor_family_status : ""],
+    ["Languages",            v.doctor_languages],
+    ["English level",        v.doctor_english_level],
+    ["UAE license",          v.doctor_license],
+    ["License types",        v.doctor_license_types && v.doctor_license_types !== v.doctor_license ? v.doctor_license_types : ""],
+    ["Salary expectation",   v.doctor_salary_expectation || "Market Range"],
+    ["Notice period",        v.doctor_notice_period],
   ];
   const factCells = facts
     .filter(([, val]) => val && val.trim() && val.trim() !== "—")

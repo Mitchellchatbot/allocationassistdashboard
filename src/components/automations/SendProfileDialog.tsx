@@ -663,12 +663,22 @@ function previewDoctorCardHtml(v: Record<string, string>): string {
           </div>` : "";
 
   const facts: Array<[string, string]> = [
-    ["Country of training", v.doctor_country_training],
-    ["Years of experience", v.doctor_years_experience],
-    ["Nationality",         v.doctor_nationality],
-    ["Current location",    v.doctor_current_location],
-    ["UAE license",         v.doctor_license],
-    ["Languages",           v.doctor_languages],
+    ["Subspecialty",         v.doctor_subspecialty],
+    ["Title / rank",         v.doctor_rank && v.doctor_rank !== title ? v.doctor_rank : ""],
+    ["Country of training",  v.doctor_country_training],
+    ["Years of experience",  v.doctor_years_experience],
+    ["Current location",     v.doctor_current_location],
+    ["Targeted locations",   v.doctor_targeted_locations],
+    ["Nationality",          v.doctor_nationality],
+    ["Date of birth",        v.doctor_dob],
+    ["Marital status",       v.doctor_marital_status],
+    ["Family status",        v.doctor_family_status && v.doctor_family_status !== v.doctor_marital_status ? v.doctor_family_status : ""],
+    ["Languages",            v.doctor_languages],
+    ["English level",        v.doctor_english_level],
+    ["UAE license",          v.doctor_license],
+    ["License types",        v.doctor_license_types && v.doctor_license_types !== v.doctor_license ? v.doctor_license_types : ""],
+    ["Salary expectation",   v.doctor_salary_expectation || "Market Range"],
+    ["Notice period",        v.doctor_notice_period],
   ];
   const factCells = facts
     .filter(([, val]) => val && val.trim() && val.trim() !== "—")
