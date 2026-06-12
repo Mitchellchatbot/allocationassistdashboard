@@ -91,7 +91,7 @@ export function useDeleteEmailTemplate() {
  *  the doctors-batch table, etc.) and must NOT be HTML-escaped during
  *  substitution. Kept in sync with the server-side RAW_HTML_TOKENS in
  *  supabase/functions/send-flow-email/index.ts. */
-const RAW_HTML_TOKENS = new Set<string>(["signature", "doctors_table_html", "logo_header"]);
+const RAW_HTML_TOKENS = new Set<string>(["signature", "doctors_table_html", "doctor_card_html", "doctor_row_table_html", "logo_header"]);
 
 export function renderTemplate(
   body: string,

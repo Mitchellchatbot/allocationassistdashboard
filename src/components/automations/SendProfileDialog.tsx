@@ -527,6 +527,11 @@ function PreviewConfirm({
     signature:          PREVIEW_SIGNATURE_HTML,
     signature_text:     PREVIEW_SIGNATURE_TEXT,
   };
+  // Build the card + data-table tokens the same way send-flow-email does, so
+  // this preview matches the actual send (otherwise they'd show as literal
+  // {{doctor_card_html}} / {{doctor_row_table_html}}).
+  vars.doctor_card_html      = previewDoctorCardHtml(vars);
+  vars.doctor_row_table_html = previewDoctorRowTableHtml(vars);
 
   return (
     <div className="space-y-3">
@@ -601,13 +606,15 @@ function PreviewConfirm({
 // block the recipient will see, rather than a literal `{{signature}}`
 // token. When the server-side signature changes, update both.
 const PREVIEW_LOGO_URL = `${import.meta.env.VITE_SUPABASE_URL}/storage/v1/object/public/email-assets/logo.png`;
-const PREVIEW_SANS    = `-apple-system, BlinkMacSystemFont, 'Segoe UI', Helvetica, Arial, sans-serif`;
+// Mirrors the server's FONT_STACK (Garamond) + bumped sizes so the preview
+// reads exactly like the sent email. Keep in sync with send-flow-email.
+const PREVIEW_FONT    = `Garamond, 'EB Garamond', Georgia, 'Times New Roman', serif`;
 const PREVIEW_SIGNATURE_HTML = `
-<p style="margin:24px 0 0;font-family:${PREVIEW_SANS};font-size:14px;color:#1a2332;line-height:1.5;">&nbsp;</p>
-<p style="color:#14b8a6;font-weight:700;font-size:14px;margin:0 0 2px;line-height:1.45;font-family:${PREVIEW_SANS};">Warmest Regards,</p>
-<p style="color:#14b8a6;font-weight:700;font-size:14px;margin:0 0 2px;line-height:1.45;font-family:${PREVIEW_SANS};">The Allocation Assist team</p>
-<p style="color:#475569;font-size:13px;margin:6px 0 2px;line-height:1.45;font-family:${PREVIEW_SANS};"><span style="color:#14b8a6;">&#x1F4CD;</span> Jumeirah Lakes Towers, Dubai, UAE</p>
-<p style="font-size:13px;margin:2px 0 16px;line-height:1.45;font-family:${PREVIEW_SANS};"><a href="https://www.allocationassist.com" style="color:#1d4ed8;text-decoration:underline;">www.allocationassist.com</a></p>
+<p style="margin:24px 0 0;font-family:${PREVIEW_FONT};font-size:16px;color:#1a2332;line-height:1.5;">&nbsp;</p>
+<p style="color:#14b8a6;font-weight:700;font-size:16px;margin:0 0 2px;line-height:1.45;font-family:${PREVIEW_FONT};">Warmest Regards,</p>
+<p style="color:#14b8a6;font-weight:700;font-size:16px;margin:0 0 2px;line-height:1.45;font-family:${PREVIEW_FONT};">The Allocation Assist team</p>
+<p style="color:#475569;font-size:15px;margin:6px 0 2px;line-height:1.45;font-family:${PREVIEW_FONT};"><span style="color:#14b8a6;">&#x1F4CD;</span> Jumeirah Lakes Towers, Dubai, UAE</p>
+<p style="font-size:15px;margin:2px 0 16px;line-height:1.45;font-family:${PREVIEW_FONT};"><a href="https://www.allocationassist.com" style="color:#1d4ed8;text-decoration:underline;">www.allocationassist.com</a></p>
 <table role="presentation" cellpadding="0" cellspacing="0" style="border-collapse:collapse;margin:8px 0 0;">
   <tr>
     <td style="padding:0;">
@@ -624,6 +631,95 @@ Jumeirah Lakes Towers, Dubai, UAE
 www.allocationassist.com
 
 `;
+
+function escPreview(s: string): string {
+  return s.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;").replace(/"/g, "&quot;").replace(/'/g, "&#39;");
+}
+
+/** Preview-side mirror of send-flow-email's doctorCardHtml(). Builds the same
+ *  teal-header profile card (attribute table + View full profile / View CV
+ *  buttons + contact strip) so the Send Profile preview matches the sent email.
+ *  Keep in sync with the server builder. */
+function previewDoctorCardHtml(v: Record<string, string>): string {
+  const name  = (v.doctor_name  || "Candidate").trim();
+  const title = (v.doctor_title || v.doctor_specialty || "").trim();
+  const attrs: Array<[string, string]> = [
+    ["Specialty",           v.doctor_specialty && v.doctor_specialty !== title ? v.doctor_specialty : ""],
+    ["Subspecialty",        v.doctor_subspecialty],
+    ["Areas of interest",   v.doctor_area_of_interest],
+    ["Country of training", v.doctor_country_training],
+    ["Current location",    v.doctor_current_location],
+    ["Targeted locations",  v.doctor_targeted_locations],
+    ["Years of experience", v.doctor_years_experience],
+    ["Nationality",         v.doctor_nationality],
+    ["Languages",           v.doctor_languages],
+    ["English level",       v.doctor_english_level],
+    ["Age",                 v.doctor_age],
+    ["Marital status",      v.doctor_marital_status],
+    ["Family status",       v.doctor_family_status && v.doctor_family_status !== v.doctor_marital_status ? v.doctor_family_status : ""],
+    ["UAE license",         v.doctor_license],
+    ["Salary expectation",  v.doctor_salary_expectation || "Market Range"],
+    ["Notice period",       v.doctor_notice_period],
+  ];
+  const rows = attrs
+    .filter(([, val]) => val && val.trim() && val.trim() !== "—")
+    .map(([label, val]) => `
+      <tr>
+        <td style="padding:6px 14px 6px 0;color:#64748b;font-size:15px;width:40%;vertical-align:top;">${escPreview(label)}</td>
+        <td style="padding:6px 0;color:#1a2332;font-size:16px;font-weight:500;vertical-align:top;">${escPreview(val.trim())}</td>
+      </tr>`).join("");
+  const buttons: string[] = [];
+  const profileUrl = (v.profile_url || v.profile_link || v.doctor_wp_link || "").trim();
+  if (profileUrl) buttons.push(`<a href="${escPreview(profileUrl)}" style="display:inline-block;background:#0f766e;color:#ffffff;text-decoration:none;font-size:15px;font-weight:600;padding:11px 20px;border-radius:8px;">View full profile &rarr;</a>`);
+  const cvUrl = (v.doctor_cv_url || "").trim();
+  if (cvUrl) buttons.push(`<a href="${escPreview(cvUrl)}" style="display:inline-block;color:#0f766e;text-decoration:none;font-size:15px;font-weight:600;padding:11px 18px;border:1px solid #0f766e;border-radius:8px;">View CV</a>`);
+  const buttonsHtml = buttons.length ? `<tr><td style="padding:6px 22px 18px;">${buttons.join(`<span style="display:inline-block;width:10px;"></span>`)}</td></tr>` : "";
+  const cp: string[] = [];
+  const cEmail = (v.doctor_email || "").trim(); const cPhone = (v.doctor_phone || "").trim();
+  if (cEmail) cp.push(`<span style="color:#0f766e;">&#9993;</span> <a href="mailto:${escPreview(cEmail)}" style="color:#0f766e;text-decoration:none;font-size:15px;">${escPreview(cEmail)}</a>`);
+  if (cPhone) cp.push(`<span style="color:#0f766e;">&#9742;</span> <span style="color:#1a2332;font-size:15px;">${escPreview(cPhone)}</span>`);
+  const contactHtml = cp.length ? `<tr><td style="background:#f0fbfa;border-top:1px solid #d1f0ec;padding:14px 22px;">${cp.join(`<span style="display:inline-block;width:18px;"></span>`)}</td></tr>` : "";
+  return `
+<table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0" style="border-collapse:separate;width:100%;max-width:640px;border:1px solid #d1f0ec;border-radius:14px;overflow:hidden;margin:20px 0;background:#ffffff;">
+  <tr><td style="background:#0f766e;background:linear-gradient(135deg,#0f766e,#14b8a6);padding:20px 22px;">
+    <div style="color:#ffffff;font-size:21px;font-weight:700;line-height:1.3;">${escPreview(name)}</div>
+    ${title ? `<div style="color:#d1f5f0;font-size:15px;margin-top:4px;">${escPreview(title)}</div>` : ""}
+  </td></tr>
+  ${rows ? `<tr><td style="padding:18px 22px 6px;"><table role="presentation" cellpadding="0" cellspacing="0" border="0" style="border-collapse:collapse;width:100%;"><tbody>${rows}</tbody></table></td></tr>` : ""}
+  ${buttonsHtml}
+  ${contactHtml}
+</table>`;
+}
+
+/** Preview-side mirror of send-flow-email's doctorRowTableHtml() — the full
+ *  data row under the card, minus Area of Interest. Keep in sync. */
+function previewDoctorRowTableHtml(v: Record<string, string>): string {
+  const cols: Array<[string, string]> = [
+    ["#", "1"],
+    ["Name", v.doctor_name || ""],
+    ["Title and Specialty as per the UAE license", v.doctor_title || ""],
+    ["Country Of Training", v.doctor_country_training || ""],
+    ["Years of Experience", v.doctor_years_experience || ""],
+    ["Nationality", v.doctor_nationality || ""],
+    ["Age", v.doctor_age || ""],
+    ["Marital Status", v.doctor_marital_status || ""],
+    ["Family Status", v.doctor_family_status || ""],
+    ["UAE license type / Status", v.doctor_license || ""],
+    ["Salary Expectation", v.doctor_salary_expectation || "Market Range"],
+    ["Notice Period", v.doctor_notice_period || ""],
+    ["Mobile", v.doctor_phone || ""],
+    ["Email", v.doctor_email || ""],
+  ];
+  const th = cols.map(([h]) => `<th style="text-align:left;border:1px solid #cbd5e1;padding:8px 11px;background:#0f766e;color:#ffffff;font-size:13px;font-weight:600;white-space:nowrap;">${escPreview(h)}</th>`).join("");
+  const td = cols.map(([, val]) => `<td style="border:1px solid #cbd5e1;padding:8px 11px;font-size:14px;color:#1a2332;vertical-align:top;">${escPreview(val)}</td>`).join("");
+  return `
+<div style="overflow-x:auto;margin:18px 0;">
+  <table role="presentation" cellspacing="0" cellpadding="0" border="0" style="border-collapse:collapse;border:1px solid #cbd5e1;">
+    <thead><tr>${th}</tr></thead>
+    <tbody><tr>${td}</tr></tbody>
+  </table>
+</div>`;
+}
 
 /** True when the string is recognisably HTML (has at least one tag). The
  *  preview block flips into iframe-render mode for these so we don't
@@ -672,7 +768,7 @@ function HtmlPreview({ html }: { html: string }) {
     if (!doc) return;
     const full = `<!doctype html><html><head><meta charset="utf-8"><meta name="viewport" content="width=device-width">
       <style>
-        body { font-family: -apple-system,BlinkMacSystemFont,'Segoe UI',Helvetica,Arial,sans-serif; color:#1a2332; margin:0; padding:16px; font-size:14px; line-height:1.55; background:#ffffff; }
+        body { font-family: Garamond,'EB Garamond',Georgia,'Times New Roman',serif; color:#1a2332; margin:0; padding:16px; font-size:17px; line-height:1.55; background:#ffffff; }
         a { color:#1d4ed8; }
         table { border-collapse: collapse; }
         img { max-width: 100%; height: auto; }
