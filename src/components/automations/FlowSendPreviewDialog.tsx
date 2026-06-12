@@ -100,7 +100,7 @@ export function FlowSendPreviewDialog({
 
   return (
     <Dialog open={open} onOpenChange={(v) => !v && !sending && onClose()}>
-      <DialogContent className="sm:max-w-[780px] max-h-[92vh] overflow-hidden flex flex-col">
+      <DialogContent className="w-[95vw] sm:max-w-[1120px] max-h-[92vh] overflow-hidden flex flex-col">
         <DialogHeader>
           <DialogTitle className="text-base">{title}</DialogTitle>
           <DialogDescription className="text-xs">
