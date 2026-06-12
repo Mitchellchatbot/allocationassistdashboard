@@ -162,10 +162,13 @@ function pickSender(assignedTo: string | null | undefined): { fromHeader: string
  *  blue website link → bottom teal "Allocation Assist" + grey tagline.
  *  No box, no logo image, no card frame — just a plain text-only block
  *  that lands looking identical to Plinky's manual sends. */
-// Sans-serif stack matching the user's reference (clean system font,
-// like Gmail / Apple Mail defaults). Used by signature AND by the
-// body wrapper so the whole email reads as a single typeface.
-const SANS_STACK = "-apple-system, BlinkMacSystemFont, 'Segoe UI', Helvetica, Arial, sans-serif";
+// Garamond serif stack (team preference 2026-06-12 — "all emails Garamond,
+// large"). Garamond ships on most Mac/Windows systems; Georgia + Times are
+// near-identical web-safe serif fallbacks for clients that lack it. Used by
+// the body wrapper AND the signature/card so the whole email reads as one
+// typeface. plainifyBody strips the DB template's own font styling, so this
+// wrapper font is what every paragraph actually inherits.
+const FONT_STACK = "Garamond, 'EB Garamond', Georgia, 'Times New Roman', serif";
 
 // Public URL for the logo image (uploaded to the email-assets bucket,
 // migration 20260608000004). Lives on Supabase Storage so email clients
@@ -174,11 +177,11 @@ const LOGO_URL = `${Deno.env.get("SUPABASE_URL") ?? ""}/storage/v1/object/public
 
 function signatureHtml(first: string, last: string, title: string, phone: string): string {
   const fullName = [first, last].filter(Boolean).join(" ") || "Allocation Assist";
-  const teal     = `color:#14b8a6;font-weight:700;font-size:14px;margin:0 0 2px;line-height:1.45;font-family:${SANS_STACK};`;
-  const grey     = `color:#475569;font-size:13px;margin:6px 0 2px;line-height:1.45;font-family:${SANS_STACK};`;
-  const linkLine = `font-size:13px;margin:2px 0 16px;line-height:1.45;font-family:${SANS_STACK};`;
+  const teal     = `color:#14b8a6;font-weight:700;font-size:16px;margin:0 0 2px;line-height:1.45;font-family:${FONT_STACK};`;
+  const grey     = `color:#475569;font-size:15px;margin:6px 0 2px;line-height:1.45;font-family:${FONT_STACK};`;
+  const linkLine = `font-size:15px;margin:2px 0 16px;line-height:1.45;font-family:${FONT_STACK};`;
   return `
-<p style="margin:24px 0 0;font-family:${SANS_STACK};font-size:14px;color:#1a2332;line-height:1.5;">&nbsp;</p>
+<p style="margin:24px 0 0;font-family:${FONT_STACK};font-size:16px;color:#1a2332;line-height:1.5;">&nbsp;</p>
 <p style="${teal}">Warmest Regards,</p>
 <p style="${teal}">${escapeHtml(fullName)}</p>
 ${title ? `<p style="${teal}">${escapeHtml(title)}</p>` : ""}
@@ -660,6 +663,11 @@ Deno.serve(async (req: Request) => {
     // render server-side tokens.
     logo_header:        "",
   };
+  // Rich profile card for the individual profile_sent_hospital email — the
+  // website's coloured profile look, rendered in-email (table colour + CV /
+  // full-profile buttons). Built from the vars above and injected as a RAW
+  // token so it survives plainifyBody (which strips the DB template's styles).
+  vars.doctor_card_html = doctorCardHtml(vars);
 
   const subject = render(tpl.subject ?? "", vars);
   // HTML gets escaped token values (so a doctor name like "Dr. <Smith>" or
@@ -678,7 +686,7 @@ Deno.serve(async (req: Request) => {
   // inherits the sans-serif look from the user's reference email.
   // Inline styles on individual elements still win (signature keeps
   // its teal-bold weight, link colour, etc.).
-  const html          = `<div style="font-family:${SANS_STACK};font-size:14px;color:#1a2332;line-height:1.55;">${renderedBody}</div>`;
+  const html          = `<div style="font-family:${FONT_STACK};font-size:17px;color:#1a2332;line-height:1.55;">${renderedBody}</div>`;
   const text          = render(tpl.body_text ?? "", vars);
 
   // Refuse to send templates that still carry the PLACEHOLDER stub copy
@@ -925,7 +933,7 @@ Deno.serve(async (req: Request) => {
 // Tokens whose values are pre-rendered HTML (signature block, etc) and so
 // must NOT be HTML-escaped during template substitution. Anything not in
 // this set is treated as untrusted text and escaped.
-const RAW_HTML_TOKENS = new Set(["signature", "doctors_table_html", "logo_header"]);
+const RAW_HTML_TOKENS = new Set(["signature", "doctors_table_html", "doctor_card_html", "logo_header"]);
 
 /** Age from WP date_of_birth. Accepts "YYYYMMDD", "YYYY-MM-DD", or
  *  human-formatted "4 September 1987". Returns null if unparseable. */
@@ -971,6 +979,82 @@ function render(body: string, vars: Record<string, string>, html = false): strin
     if (!html) return v;
     return RAW_HTML_TOKENS.has(key) ? v : escapeHtml(v);
   });
+}
+
+/** Rich doctor card for the individual profile_sent_hospital email — the
+ *  website's coloured profile look rendered in-email: a teal-header card with
+ *  the candidate's name + title, a clean attribute table (the "table colour"
+ *  the team asked for), View full profile / View CV buttons, and a contact
+ *  strip. No photo (WP photos are inconsistent — team chose photo-less). Reads
+ *  straight from the assembled `vars`. Injected via the {{doctor_card_html}}
+ *  RAW token so its inline styling survives plainifyBody. Mirrors the batch
+ *  email's renderDoctorCard so the single-profile and batch sends look alike. */
+function doctorCardHtml(v: Record<string, string>): string {
+  const name  = (v.doctor_name  || "Candidate").trim();
+  const title = (v.doctor_title || v.doctor_specialty || "").trim();
+
+  const attrs: Array<[string, string]> = [
+    ["Specialty",           v.doctor_specialty && v.doctor_specialty !== title ? v.doctor_specialty : ""],
+    ["Subspecialty",        v.doctor_subspecialty],
+    ["Areas of interest",   v.doctor_area_of_interest],
+    ["Country of training", v.doctor_country_training],
+    ["Current location",    v.doctor_current_location],
+    ["Targeted locations",  v.doctor_targeted_locations],
+    ["Years of experience", v.doctor_years_experience],
+    ["Nationality",         v.doctor_nationality],
+    ["Languages",           v.doctor_languages],
+    ["English level",       v.doctor_english_level],
+    ["Age",                 v.doctor_age],
+    ["Marital status",      v.doctor_marital_status],
+    ["Family status",       v.doctor_family_status && v.doctor_family_status !== v.doctor_marital_status ? v.doctor_family_status : ""],
+    ["UAE license",         v.doctor_license],
+    ["Salary expectation",  v.doctor_salary_expectation || "Market Range"],
+    ["Notice period",       v.doctor_notice_period],
+  ];
+  const rows = attrs
+    .filter(([, val]) => val && val.trim() && val.trim() !== "—")
+    .map(([label, val]) => `
+      <tr>
+        <td style="padding:6px 14px 6px 0;color:#64748b;font-size:15px;width:40%;vertical-align:top;">${escapeHtml(label)}</td>
+        <td style="padding:6px 0;color:#1a2332;font-size:16px;font-weight:500;vertical-align:top;">${escapeHtml(val.trim())}</td>
+      </tr>`).join("");
+
+  const buttons: string[] = [];
+  const profileUrl = (v.profile_url || v.doctor_wp_link || "").trim();
+  if (profileUrl && !/allocationassist\.com\/?$/.test(profileUrl)) {
+    buttons.push(`<a href="${escapeHtml(profileUrl)}" style="display:inline-block;background:#0f766e;color:#ffffff;text-decoration:none;font-size:15px;font-weight:600;padding:11px 20px;border-radius:8px;">View full profile &rarr;</a>`);
+  }
+  const cvUrl = (v.doctor_cv_url || "").trim();
+  if (cvUrl) {
+    buttons.push(`<a href="${escapeHtml(cvUrl)}" style="display:inline-block;color:#0f766e;text-decoration:none;font-size:15px;font-weight:600;padding:11px 18px;border:1px solid #0f766e;border-radius:8px;">View CV</a>`);
+  }
+  const buttonsHtml = buttons.length
+    ? `<tr><td style="padding:6px 22px 18px;">${buttons.join(`<span style="display:inline-block;width:10px;"></span>`)}</td></tr>`
+    : "";
+
+  const contactPieces: string[] = [];
+  const cEmail = (v.doctor_email || "").trim();
+  const cPhone = (v.doctor_phone || "").trim();
+  if (cEmail) contactPieces.push(`<span style="color:#0f766e;">&#9993;</span> <a href="mailto:${escapeHtml(cEmail)}" style="color:#0f766e;text-decoration:none;font-size:15px;">${escapeHtml(cEmail)}</a>`);
+  if (cPhone) contactPieces.push(`<span style="color:#0f766e;">&#9742;</span> <span style="color:#1a2332;font-size:15px;">${escapeHtml(cPhone)}</span>`);
+  const contactHtml = contactPieces.length
+    ? `<tr><td style="background:#f0fbfa;border-top:1px solid #d1f0ec;padding:14px 22px;">${contactPieces.join(`<span style="display:inline-block;width:18px;"></span>`)}</td></tr>`
+    : "";
+
+  return `
+<table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0" style="border-collapse:separate;width:100%;max-width:640px;border:1px solid #d1f0ec;border-radius:14px;overflow:hidden;margin:20px 0;background:#ffffff;">
+  <tr>
+    <td style="background:#0f766e;background:linear-gradient(135deg,#0f766e,#14b8a6);padding:20px 22px;">
+      <div style="color:#ffffff;font-size:21px;font-weight:700;line-height:1.3;">${escapeHtml(name)}</div>
+      ${title ? `<div style="color:#d1f5f0;font-size:15px;margin-top:4px;">${escapeHtml(title)}</div>` : ""}
+    </td>
+  </tr>
+  ${rows ? `<tr><td style="padding:18px 22px 6px;">
+    <table role="presentation" cellpadding="0" cellspacing="0" border="0" style="border-collapse:collapse;width:100%;"><tbody>${rows}</tbody></table>
+  </td></tr>` : ""}
+  ${buttonsHtml}
+  ${contactHtml}
+</table>`;
 }
 
 /** If a token value looks like a URL but is missing a protocol (very common

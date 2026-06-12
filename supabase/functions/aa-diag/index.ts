@@ -112,6 +112,21 @@ Deno.serve(async (req) => {
         const { data } = await sb.from("email_templates").select("key, subject, body_html");
         return new Response(JSON.stringify({ ok: true, templates: data ?? [] }, null, 2), { headers: { "Content-Type": "application/json" } });
       }
+      // Set a template's body_html (and optionally subject) by key. db push
+      // fails on this project (IPv6 timeout to :5432), so template edits go
+      // through this service-role path instead of a migration.
+      if ((body as { set_template?: { key: string; body_html?: string; subject?: string } } | null)?.set_template) {
+        const { key, body_html, subject } = (body as { set_template: { key: string; body_html?: string; subject?: string } }).set_template;
+        const patch: Record<string, unknown> = {};
+        if (typeof body_html === "string") patch.body_html = body_html;
+        if (typeof subject   === "string") patch.subject   = subject;
+        if (Object.keys(patch).length === 0) {
+          return new Response(JSON.stringify({ ok: false, error: "nothing to update" }), { headers: { "Content-Type": "application/json" } });
+        }
+        const { data, error } = await sb.from("email_templates").update(patch).eq("key", key).select("key");
+        if (error) return new Response(JSON.stringify({ ok: false, error: error.message }), { headers: { "Content-Type": "application/json" } });
+        return new Response(JSON.stringify({ ok: true, updated: data?.length ?? 0, key }), { headers: { "Content-Type": "application/json" } });
+      }
       if ((body as { inspect_run?: string } | null)?.inspect_run) {
         const id = (body as { inspect_run: string }).inspect_run;
         const { data } = await sb.from("automation_flow_runs").select("*").eq("id", id).single();

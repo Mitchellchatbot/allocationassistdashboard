@@ -31,14 +31,16 @@ const MAIL_FROM                 = Deno.env.get("MAIL_FROM") ?? "Hospital Intro <
 // workforce" lines are baked into the AA logo image (uploaded to
 // email-assets/logo.png), so the signature ends with that image
 // instead of duplicating the text below it.
-const SANS_STACK = "-apple-system, BlinkMacSystemFont, 'Segoe UI', Helvetica, Arial, sans-serif";
+// Garamond serif stack (team preference 2026-06-12 — "all emails Garamond,
+// large"). Matches send-flow-email so batch + individual sends read alike.
+const FONT_STACK = "Garamond, 'EB Garamond', Georgia, 'Times New Roman', serif";
 const LOGO_URL   = `${Deno.env.get("SUPABASE_URL") ?? ""}/storage/v1/object/public/email-assets/logo.png`;
 const SIGNATURE_HTML = `
-<p style="margin:24px 0 0;font-family:${SANS_STACK};font-size:14px;color:#1a2332;line-height:1.5;">&nbsp;</p>
-<p style="color:#14b8a6;font-weight:700;font-size:14px;margin:0 0 2px;line-height:1.45;font-family:${SANS_STACK};">Warmest Regards,</p>
-<p style="color:#14b8a6;font-weight:700;font-size:14px;margin:0 0 2px;line-height:1.45;font-family:${SANS_STACK};">The Allocation Assist team</p>
-<p style="color:#475569;font-size:13px;margin:6px 0 2px;line-height:1.45;font-family:${SANS_STACK};"><span style="color:#14b8a6;">&#x1F4CD;</span> Jumeirah Lakes Towers, Dubai, UAE</p>
-<p style="font-size:13px;margin:2px 0 16px;line-height:1.45;font-family:${SANS_STACK};"><a href="https://www.allocationassist.com" style="color:#1d4ed8;text-decoration:underline;">www.allocationassist.com</a></p>
+<p style="margin:24px 0 0;font-family:${FONT_STACK};font-size:14px;color:#1a2332;line-height:1.5;">&nbsp;</p>
+<p style="color:#14b8a6;font-weight:700;font-size:14px;margin:0 0 2px;line-height:1.45;font-family:${FONT_STACK};">Warmest Regards,</p>
+<p style="color:#14b8a6;font-weight:700;font-size:14px;margin:0 0 2px;line-height:1.45;font-family:${FONT_STACK};">The Allocation Assist team</p>
+<p style="color:#475569;font-size:13px;margin:6px 0 2px;line-height:1.45;font-family:${FONT_STACK};"><span style="color:#14b8a6;">&#x1F4CD;</span> Jumeirah Lakes Towers, Dubai, UAE</p>
+<p style="font-size:13px;margin:2px 0 16px;line-height:1.45;font-family:${FONT_STACK};"><a href="https://www.allocationassist.com" style="color:#1d4ed8;text-decoration:underline;">www.allocationassist.com</a></p>
 <table role="presentation" cellpadding="0" cellspacing="0" style="border-collapse:collapse;margin:8px 0 0;">
   <tr><td style="padding:0;"><img src="${LOGO_URL}" alt="Allocation Assist — The source of workforce" width="180" height="119" style="display:block;border:0;outline:none;max-width:180px;width:180px;height:auto;" /></td></tr>
 </table>`;
@@ -303,7 +305,7 @@ Deno.serve(async (req: Request) => {
   // Match send-flow-email: wrap the rendered body in a sans-serif
   // <div> so every <p>/<table> inherits the AA dashboard's standard
   // typeface unless the element overrides explicitly.
-  const html    = `<div style="font-family:${SANS_STACK};font-size:14px;color:#1a2332;line-height:1.55;">${renderedBody}</div>`;
+  const html    = `<div style="font-family:${FONT_STACK};font-size:17px;color:#1a2332;line-height:1.55;">${renderedBody}</div>`;
   const text    = renderText(String(tpl.body_text ?? ""), { specialty: specialtyLabel, hospital_contact_name: "Team", doctors_table_html: stripHtml(doctorsTableHtml), signature: SIGNATURE_TEXT });
 
   // ── Dry run? ──────────────────────────────────────────────────────────
@@ -469,13 +471,13 @@ function renderDoctorCard(r: RowData): string {
     .filter(([, v]) => v && v.trim() && v.trim() !== "—")
     .map(([label, value]) => `
       <tr>
-        <td style="padding:4px 12px 4px 0;color:#64748b;font-size:13px;width:42%;vertical-align:top;">${esc(label)}</td>
-        <td style="padding:4px 0;color:#1a2332;font-size:14px;font-weight:500;vertical-align:top;">${esc(value)}</td>
+        <td style="padding:5px 12px 5px 0;color:#64748b;font-size:15px;width:42%;vertical-align:top;">${esc(label)}</td>
+        <td style="padding:5px 0;color:#1a2332;font-size:16px;font-weight:500;vertical-align:top;">${esc(value)}</td>
       </tr>`).join("");
 
   const contactPieces: string[] = [];
-  if (r.email)  contactPieces.push(`<span style="color:#0f766e;">&#9993;</span> <a href="mailto:${esc(r.email)}" style="color:#0f766e;text-decoration:none;font-size:14px;">${esc(r.email)}</a>`);
-  if (r.mobile) contactPieces.push(`<span style="color:#0f766e;">&#9742;</span> <span style="color:#1a2332;font-size:14px;">${esc(r.mobile)}</span>`);
+  if (r.email)  contactPieces.push(`<span style="color:#0f766e;">&#9993;</span> <a href="mailto:${esc(r.email)}" style="color:#0f766e;text-decoration:none;font-size:15px;">${esc(r.email)}</a>`);
+  if (r.mobile) contactPieces.push(`<span style="color:#0f766e;">&#9742;</span> <span style="color:#1a2332;font-size:15px;">${esc(r.mobile)}</span>`);
   const contactHtml = contactPieces.length === 0 ? "" : `
     <div style="background:#f0fbfa;border-top:1px solid #d1f0ec;padding:12px 18px;display:block;">
       ${contactPieces.join(`<span style="display:inline-block;width:18px;"></span>`)}
@@ -485,8 +487,8 @@ function renderDoctorCard(r: RowData): string {
   // hospital can see the full picture: photo, CV, full education/experience)
   // and a direct CV link.
   const buttons: string[] = [];
-  if (r.website) buttons.push(`<a href="${esc(r.website)}" style="display:inline-block;background:#0f766e;color:#ffffff;text-decoration:none;font-size:13px;font-weight:600;padding:10px 18px;border-radius:8px;">View full profile on allocationassist.com &rarr;</a>`);
-  if (r.cv)      buttons.push(`<a href="${esc(r.cv)}" style="display:inline-block;color:#0f766e;text-decoration:none;font-size:13px;font-weight:600;padding:10px 16px;border:1px solid #0f766e;border-radius:8px;">View CV</a>`);
+  if (r.website) buttons.push(`<a href="${esc(r.website)}" style="display:inline-block;background:#0f766e;color:#ffffff;text-decoration:none;font-size:15px;font-weight:600;padding:11px 20px;border-radius:8px;">View full profile on allocationassist.com &rarr;</a>`);
+  if (r.cv)      buttons.push(`<a href="${esc(r.cv)}" style="display:inline-block;color:#0f766e;text-decoration:none;font-size:15px;font-weight:600;padding:11px 18px;border:1px solid #0f766e;border-radius:8px;">View CV</a>`);
   const buttonsHtml = buttons.length === 0 ? "" : `
     <div style="padding:14px 18px 4px;">
       ${buttons.join(`<span style="display:inline-block;width:10px;"></span>`)}
@@ -495,9 +497,9 @@ function renderDoctorCard(r: RowData): string {
   return `
     <div style="border:1px solid #e2e8f0;border-radius:10px;overflow:hidden;margin:0 0 16px 0;background:#ffffff;">
       <div style="background:linear-gradient(135deg,#0f766e,#14b8a6);padding:14px 18px;color:#ffffff;">
-        <div style="font-size:11px;letter-spacing:1px;text-transform:uppercase;opacity:0.8;">Profile #${r.idx}</div>
-        <div style="font-size:18px;font-weight:700;line-height:1.3;margin-top:2px;">${esc(r.name)}</div>
-        ${titleLine ? `<div style="font-size:13px;opacity:0.9;margin-top:2px;">${esc(titleLine)}</div>` : ""}
+        <div style="font-size:12px;letter-spacing:1px;text-transform:uppercase;opacity:0.8;">Profile #${r.idx}</div>
+        <div style="font-size:21px;font-weight:700;line-height:1.3;margin-top:2px;">${esc(r.name)}</div>
+        ${titleLine ? `<div style="font-size:15px;opacity:0.9;margin-top:2px;">${esc(titleLine)}</div>` : ""}
       </div>
       ${attrRowsHtml ? `
       <table role="presentation" cellspacing="0" cellpadding="0" border="0" style="border-collapse:collapse;width:100%;padding:0;">
