@@ -644,7 +644,6 @@ function previewDoctorCardHtml(v: Record<string, string>): string {
   const name      = (v.doctor_name  || "Candidate").trim();
   const title     = (v.doctor_title || "").trim();
   const specialty = (v.doctor_specialty || "").trim();
-  const age       = (v.doctor_age || "").trim();
   const phone     = (v.doctor_phone || "").trim();
   const email     = (v.doctor_email || "").trim();
   const photo     = (v.doctor_photo_url || "").trim();
@@ -655,7 +654,6 @@ function previewDoctorCardHtml(v: Record<string, string>): string {
     ? `<img src="${escPreview(photo)}" alt="${escPreview(name)}" width="112" height="112" style="display:block;margin:0 auto 14px;width:112px;height:112px;border-radius:50%;border:3px solid rgba(255,255,255,0.9);object-fit:cover;" />`
     : "";
   const sectorPill = specialty ? `<div style="display:inline-block;margin-top:10px;background:rgba(255,255,255,0.2);border-radius:20px;padding:4px 13px;font-size:12px;color:#ffffff;">${escPreview(specialty)}</div>` : "";
-  const ageLine = age ? `<div style="font-size:13px;margin-top:12px;font-weight:600;color:#ffffff;">Age: ${escPreview(age)} Years Old</div>` : "";
   const contactBlock = (phone || email) ? `
           <div style="border-top:1px solid rgba(255,255,255,0.28);margin-top:16px;padding-top:13px;text-align:left;">
             ${phone ? `<div style="font-size:12px;margin-bottom:7px;color:#ffffff;"><span style="opacity:0.85;">&#9742;</span> ${escPreview(phone)}</div>` : ""}
@@ -670,6 +668,7 @@ function previewDoctorCardHtml(v: Record<string, string>): string {
     ["Current location",     v.doctor_current_location],
     ["Targeted locations",   v.doctor_targeted_locations],
     ["Nationality",          v.doctor_nationality],
+    ["Age",                  v.doctor_age],
     ["Date of birth",        v.doctor_dob],
     ["Marital status",       v.doctor_marital_status],
     ["Family status",        v.doctor_family_status && v.doctor_family_status !== v.doctor_marital_status ? v.doctor_family_status : ""],
@@ -680,15 +679,33 @@ function previewDoctorCardHtml(v: Record<string, string>): string {
     ["Salary expectation",   v.doctor_salary_expectation || "Market Range"],
     ["Notice period",        v.doctor_notice_period],
   ];
-  const factList = facts
+  const ICONS: Record<string, string> = {
+    "Subspecialty": "🩺", "Title / rank": "🏅", "Country of training": "🎓",
+    "Years of experience": "💼", "Current location": "📍", "Targeted locations": "🌐",
+    "Nationality": "🌍", "Age": "🎂", "Date of birth": "📅", "Marital status": "💍",
+    "Family status": "👪", "Languages": "🗣️", "English level": "💬", "UAE license": "📋",
+    "License types": "📋", "Salary expectation": "💰", "Notice period": "⏱️",
+  };
+  const factTiles = facts
     .filter(([, val]) => val && val.trim() && val.trim() !== "—")
     .map(([label, val]) => `
-          <div style="margin-bottom:13px;">
-            <div style="font-size:11px;text-transform:uppercase;letter-spacing:.4px;color:#94a3b8;font-weight:600;">${escPreview(label)}</div>
-            <div style="font-size:14px;color:#1a2332;font-weight:500;margin-top:2px;">${escPreview(val.trim())}</div>
-          </div>`).join("");
-  const factsCol = factList
-    ? `<td width="300" valign="top" style="width:300px;background:#f8fafc;border-left:1px solid #eef2f7;padding:24px 22px;font-family:${PREVIEW_CARD_FONT};">${factList}</td>`
+              <td width="33%" valign="top" style="padding:14px 16px 14px 0;font-family:${PREVIEW_CARD_FONT};">
+                <table role="presentation" cellpadding="0" cellspacing="0" border="0"><tr>
+                  <td width="40" valign="top">
+                    <div style="width:36px;height:36px;border-radius:50%;background:#e6f4f1;text-align:center;font-size:16px;line-height:36px;">${ICONS[label] ?? "•"}</div>
+                  </td>
+                  <td valign="top" style="padding-left:11px;">
+                    <div style="font-size:11px;text-transform:uppercase;letter-spacing:.4px;color:#94a3b8;font-weight:600;">${escPreview(label)}</div>
+                    <div style="font-size:14px;color:#1a2332;font-weight:500;margin-top:2px;">${escPreview(val.trim())}</div>
+                  </td>
+                </tr></table>
+              </td>`);
+  const factTileRows: string[] = [];
+  for (let i = 0; i < factTiles.length; i += 3) factTileRows.push(`<tr>${factTiles[i]}${factTiles[i + 1] ?? '<td width="33%"></td>'}${factTiles[i + 2] ?? '<td width="33%"></td>'}</tr>`);
+  const factsBlock = factTileRows.length
+    ? `<tr><td colspan="2" style="background:#f8fafc;border-top:1px solid #eef2f7;padding:10px 26px 18px;font-family:${PREVIEW_CARD_FONT};">
+        <table role="presentation" cellpadding="0" cellspacing="0" border="0" style="width:100%;border-collapse:collapse;"><tbody>${factTileRows.join("")}</tbody></table>
+      </td></tr>`
     : "";
 
   const bioBlock = bio
@@ -714,14 +731,13 @@ function previewDoctorCardHtml(v: Record<string, string>): string {
           <div style="font-size:19px;font-weight:700;line-height:1.3;color:#ffffff;">${escPreview(name)}</div>
           ${title ? `<div style="font-size:13px;opacity:0.92;margin-top:4px;color:#ffffff;">${escPreview(title)}</div>` : ""}
           ${sectorPill}
-          ${ageLine}
           ${contactBlock}
         </td>
         <td valign="top" style="padding:24px 26px;background:#ffffff;font-family:${PREVIEW_CARD_FONT};">
           ${bioBlock}
         </td>
-        ${factsCol}
       </tr>
+      ${factsBlock}
     </table>
   </td></tr>
 </table>

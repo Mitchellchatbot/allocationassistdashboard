@@ -1019,7 +1019,6 @@ function doctorCardHtml(v: Record<string, string>): string {
   const name      = (v.doctor_name  || "Candidate").trim();
   const title     = (v.doctor_title || "").trim();
   const specialty = (v.doctor_specialty || "").trim();
-  const age       = (v.doctor_age || "").trim();
   const phone     = (v.doctor_phone || "").trim();
   const email     = (v.doctor_email || "").trim();
   const photo     = (v.doctor_photo_url || "").trim();
@@ -1032,7 +1031,6 @@ function doctorCardHtml(v: Record<string, string>): string {
   const sectorPill = specialty
     ? `<div style="display:inline-block;margin-top:10px;background:rgba(255,255,255,0.2);border-radius:20px;padding:4px 13px;font-size:12px;color:#ffffff;">${escapeHtml(specialty)}</div>`
     : "";
-  const ageLine = age ? `<div style="font-size:13px;margin-top:12px;font-weight:600;color:#ffffff;">Age: ${escapeHtml(age)} Years Old</div>` : "";
   const contactBlock = (phone || email) ? `
           <div style="border-top:1px solid rgba(255,255,255,0.28);margin-top:16px;padding-top:13px;text-align:left;">
             ${phone ? `<div style="font-size:12px;margin-bottom:7px;color:#ffffff;"><span style="opacity:0.85;">&#9742;</span> ${escapeHtml(phone)}</div>` : ""}
@@ -1051,6 +1049,7 @@ function doctorCardHtml(v: Record<string, string>): string {
     ["Current location",     v.doctor_current_location],
     ["Targeted locations",   v.doctor_targeted_locations],
     ["Nationality",          v.doctor_nationality],
+    ["Age",                  v.doctor_age],
     ["Date of birth",        v.doctor_dob],
     ["Marital status",       v.doctor_marital_status],
     ["Family status",        v.doctor_family_status && v.doctor_family_status !== v.doctor_marital_status ? v.doctor_family_status : ""],
@@ -1061,18 +1060,39 @@ function doctorCardHtml(v: Record<string, string>): string {
     ["Salary expectation",   v.doctor_salary_expectation || "Market Range"],
     ["Notice period",        v.doctor_notice_period],
   ];
-  // Facts render as their own RIGHT-HAND column (1 fact per line) so the card
-  // spreads wide/landscape (team: "much wider, like 16:9") instead of stacking
-  // the facts under the bio and growing tall.
-  const factList = facts
+  // Facts render as a full-width grid of icon tiles BELOW the photo+bio row —
+  // the WordPress layout: "text above, then stuff with icons below it". A small
+  // emoji in a soft circle stands in for WP's line-icons (email-safe; SVG/icon
+  // fonts don't survive most inboxes). 3 tiles per row.
+  const ICONS: Record<string, string> = {
+    "Subspecialty": "🩺", "Title / rank": "🏅", "Country of training": "🎓",
+    "Years of experience": "💼", "Current location": "📍", "Targeted locations": "🌐",
+    "Nationality": "🌍", "Age": "🎂", "Date of birth": "📅", "Marital status": "💍",
+    "Family status": "👪", "Languages": "🗣️", "English level": "💬", "UAE license": "📋",
+    "License types": "📋", "Salary expectation": "💰", "Notice period": "⏱️",
+  };
+  const factTiles = facts
     .filter(([, val]) => val && val.trim() && val.trim() !== "—")
     .map(([label, val]) => `
-          <div style="margin-bottom:13px;">
-            <div style="font-size:11px;text-transform:uppercase;letter-spacing:.4px;color:#94a3b8;font-weight:600;">${escapeHtml(label)}</div>
-            <div style="font-size:14px;color:#1a2332;font-weight:500;margin-top:2px;">${escapeHtml(val.trim())}</div>
-          </div>`).join("");
-  const factsCol = factList
-    ? `<td width="300" valign="top" style="width:300px;background:#f8fafc;border-left:1px solid #eef2f7;padding:24px 22px;font-family:${CARD_FONT};">${factList}</td>`
+              <td width="33%" valign="top" style="padding:14px 16px 14px 0;font-family:${CARD_FONT};">
+                <table role="presentation" cellpadding="0" cellspacing="0" border="0"><tr>
+                  <td width="40" valign="top">
+                    <div style="width:36px;height:36px;border-radius:50%;background:#e6f4f1;text-align:center;font-size:16px;line-height:36px;">${ICONS[label] ?? "•"}</div>
+                  </td>
+                  <td valign="top" style="padding-left:11px;">
+                    <div style="font-size:11px;text-transform:uppercase;letter-spacing:.4px;color:#94a3b8;font-weight:600;">${escapeHtml(label)}</div>
+                    <div style="font-size:14px;color:#1a2332;font-weight:500;margin-top:2px;">${escapeHtml(val.trim())}</div>
+                  </td>
+                </tr></table>
+              </td>`);
+  const factTileRows: string[] = [];
+  for (let i = 0; i < factTiles.length; i += 3) {
+    factTileRows.push(`<tr>${factTiles[i]}${factTiles[i + 1] ?? '<td width="33%"></td>'}${factTiles[i + 2] ?? '<td width="33%"></td>'}</tr>`);
+  }
+  const factsBlock = factTileRows.length
+    ? `<tr><td colspan="2" style="background:#f8fafc;border-top:1px solid #eef2f7;padding:10px 26px 18px;font-family:${CARD_FONT};">
+        <table role="presentation" cellpadding="0" cellspacing="0" border="0" style="width:100%;border-collapse:collapse;"><tbody>${factTileRows.join("")}</tbody></table>
+      </td></tr>`
     : "";
 
   const bioBlock = bio
@@ -1093,8 +1113,9 @@ function doctorCardHtml(v: Record<string, string>): string {
     ? `<div style="margin:14px 0 6px;font-family:${CARD_FONT};">${buttons.join(`<span style="display:inline-block;width:10px;"></span>`)}</div>`
     : "";
 
-  // Wide 3-column layout: teal photo sidebar | bio | facts. font-family:CARD_FONT
-  // on the wrapper AND every cell (Outlook resets fonts on tables).
+  // Wide WordPress-style layout: row 1 = teal photo sidebar | bio; row 2 = the
+  // icon fact-grid spanning the full width. font-family:CARD_FONT on the wrapper
+  // AND every cell (Outlook resets fonts on tables).
   return `
 <div style="font-family:${CARD_FONT};">
 <table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0" style="border-collapse:separate;width:100%;max-width:1040px;margin:20px 0 0;font-family:${CARD_FONT};">
@@ -1106,14 +1127,13 @@ function doctorCardHtml(v: Record<string, string>): string {
           <div style="font-size:19px;font-weight:700;line-height:1.3;color:#ffffff;">${escapeHtml(name)}</div>
           ${title ? `<div style="font-size:13px;opacity:0.92;margin-top:4px;color:#ffffff;">${escapeHtml(title)}</div>` : ""}
           ${sectorPill}
-          ${ageLine}
           ${contactBlock}
         </td>
         <td valign="top" style="padding:24px 26px;background:#ffffff;font-family:${CARD_FONT};">
           ${bioBlock}
         </td>
-        ${factsCol}
       </tr>
+      ${factsBlock}
     </table>
   </td></tr>
 </table>
