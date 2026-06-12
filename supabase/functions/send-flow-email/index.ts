@@ -1100,7 +1100,7 @@ function doctorCardHtml(v: Record<string, string>): string {
   // in the website's Poppins (Outlook resets fonts on tables, hence per-cell).
   return `
 <div style="font-family:${CARD_FONT};">
-<table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0" style="border-collapse:separate;width:100%;max-width:640px;margin:20px 0 0;font-family:${CARD_FONT};">
+<table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0" style="border-collapse:separate;width:100%;max-width:760px;margin:20px 0 0;font-family:${CARD_FONT};">
   <tr><td style="padding:0;">
     <table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0" style="border-collapse:separate;width:100%;border:1px solid #d1f0ec;border-radius:14px;overflow:hidden;background:#ffffff;">
       <tr>
