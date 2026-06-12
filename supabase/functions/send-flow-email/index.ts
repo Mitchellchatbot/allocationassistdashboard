@@ -162,13 +162,20 @@ function pickSender(assignedTo: string | null | undefined): { fromHeader: string
  *  blue website link → bottom teal "Allocation Assist" + grey tagline.
  *  No box, no logo image, no card frame — just a plain text-only block
  *  that lands looking identical to Plinky's manual sends. */
-// Garamond serif stack (team preference 2026-06-12 — "all emails Garamond,
-// large"). Garamond ships on most Mac/Windows systems; Georgia + Times are
-// near-identical web-safe serif fallbacks for clients that lack it. Used by
-// the body wrapper AND the signature/card so the whole email reads as one
-// typeface. plainifyBody strips the DB template's own font styling, so this
-// wrapper font is what every paragraph actually inherits.
-const FONT_STACK = "Garamond, 'EB Garamond', Georgia, 'Times New Roman', serif";
+// Email body + signature font: Garamond ("all emails Garamond, Large"). This
+// governs every paragraph (plainifyBody strips the DB template's own styling,
+// so the wrapper font is what's inherited).
+const FONT_STACK  = "Garamond, 'EB Garamond', Georgia, 'Times New Roman', serif";
+// CARD font: Poppins — the allocationassist.com website's body font. Scoped to
+// the profile card ONLY (team 2026-06-12: "use the website font just for the
+// website html, not all of it") so the card reads like their website while the
+// rest of the email stays Garamond.
+const CARD_FONT   = "'Poppins', 'Helvetica Neue', Helvetica, Arial, sans-serif";
+// Web-font link prepended to the email HTML so clients that support it (Apple
+// Mail + the dashboard previews) render real Poppins in the card. Stripped
+// harmlessly by clients that don't support <style>/@import (they use the
+// Helvetica/Arial fallback). Gmail/Outlook won't load it — expected.
+const FONT_IMPORT = `<style>@import url('https://fonts.googleapis.com/css2?family=Poppins:wght@400;500;600;700&display=swap');</style>`;
 
 // Public URL for the logo image (uploaded to the email-assets bucket,
 // migration 20260608000004). Lives on Supabase Storage so email clients
@@ -690,7 +697,7 @@ Deno.serve(async (req: Request) => {
   // inherits the sans-serif look from the user's reference email.
   // Inline styles on individual elements still win (signature keeps
   // its teal-bold weight, link colour, etc.).
-  const html          = `<div style="font-family:${FONT_STACK};font-size:17px;color:#1a2332;line-height:1.55;">${renderedBody}</div>`;
+  const html          = `${FONT_IMPORT}<div style="font-family:${FONT_STACK};font-size:17px;color:#1a2332;line-height:1.55;">${renderedBody}</div>`;
   const text          = render(tpl.body_text ?? "", vars);
 
   // Refuse to send templates that still carry the PLACEHOLDER stub copy
@@ -1006,22 +1013,49 @@ function doctorCardHtml(v: Record<string, string>): string {
   const bio       = bioRaw ? escapeHtml(bioRaw).replace(/\r?\n+/g, "<br>") : "";
 
   const photoImg = photo
-    ? `<img src="${escapeHtml(photo)}" alt="${escapeHtml(name)}" width="96" height="96" style="display:block;margin:0 auto 12px;width:96px;height:96px;border-radius:50%;border:3px solid rgba(255,255,255,0.85);object-fit:cover;" />`
+    ? `<img src="${escapeHtml(photo)}" alt="${escapeHtml(name)}" width="112" height="112" style="display:block;margin:0 auto 14px;width:112px;height:112px;border-radius:50%;border:3px solid rgba(255,255,255,0.9);object-fit:cover;" />`
     : "";
   const sectorPill = specialty
-    ? `<div style="display:inline-block;margin-top:10px;background:rgba(255,255,255,0.18);border-radius:20px;padding:3px 12px;font-size:12px;color:#ffffff;">${escapeHtml(specialty)}</div>`
+    ? `<div style="display:inline-block;margin-top:10px;background:rgba(255,255,255,0.2);border-radius:20px;padding:4px 13px;font-size:12px;color:#ffffff;">${escapeHtml(specialty)}</div>`
     : "";
   const ageLine = age ? `<div style="font-size:13px;margin-top:12px;font-weight:600;color:#ffffff;">Age: ${escapeHtml(age)} Years Old</div>` : "";
   const contactBlock = (phone || email) ? `
-          <div style="border-top:1px solid rgba(255,255,255,0.25);margin-top:14px;padding-top:12px;text-align:left;">
-            ${phone ? `<div style="font-size:12px;margin-bottom:6px;color:#ffffff;"><span style="opacity:0.85;">&#9742;</span> ${escapeHtml(phone)}</div>` : ""}
+          <div style="border-top:1px solid rgba(255,255,255,0.28);margin-top:16px;padding-top:13px;text-align:left;">
+            ${phone ? `<div style="font-size:12px;margin-bottom:7px;color:#ffffff;"><span style="opacity:0.85;">&#9742;</span> ${escapeHtml(phone)}</div>` : ""}
             ${email ? `<div style="font-size:12px;word-break:break-all;color:#ffffff;"><span style="opacity:0.85;">&#9993;</span> ${escapeHtml(email)}</div>` : ""}
           </div>` : "";
 
-  const mainPanel = bio
+  // Highlight facts beside the bio — a quick-scan summary (the full record is
+  // in the data table below). Two columns, only non-empty values.
+  const facts: Array<[string, string]> = [
+    ["Country of training", v.doctor_country_training],
+    ["Years of experience", v.doctor_years_experience],
+    ["Nationality",         v.doctor_nationality],
+    ["Current location",    v.doctor_current_location],
+    ["UAE license",         v.doctor_license],
+    ["Languages",           v.doctor_languages],
+  ];
+  const factCells = facts
+    .filter(([, val]) => val && val.trim() && val.trim() !== "—")
+    .map(([label, val]) => `
+            <td width="50%" style="padding:8px 12px 8px 0;vertical-align:top;">
+              <div style="font-size:11px;text-transform:uppercase;letter-spacing:.4px;color:#94a3b8;font-weight:600;">${escapeHtml(label)}</div>
+              <div style="font-size:14px;color:#1a2332;font-weight:500;margin-top:2px;">${escapeHtml(val.trim())}</div>
+            </td>`);
+  // Pair the cells into rows of two.
+  const factRows: string[] = [];
+  for (let i = 0; i < factCells.length; i += 2) {
+    factRows.push(`<tr>${factCells[i]}${factCells[i + 1] ?? '<td width="50%"></td>'}</tr>`);
+  }
+  const factGrid = factRows.length
+    ? `<table role="presentation" cellpadding="0" cellspacing="0" border="0" style="border-collapse:collapse;width:100%;margin-top:14px;border-top:1px solid #eef2f7;padding-top:6px;"><tbody>${factRows.join("")}</tbody></table>`
+    : "";
+
+  const bioBlock = bio
     ? `<div style="font-size:16px;font-weight:700;color:#0f766e;margin-bottom:10px;">Specific areas of interests within the specialization</div>
           <div style="font-size:15px;color:#334155;line-height:1.6;">${bio}</div>`
     : `<div style="font-size:16px;font-weight:700;color:#0f766e;">${escapeHtml(title || specialty || name)}</div>`;
+  const mainPanel = `${bioBlock}${factGrid}`;
 
   const buttons: string[] = [];
   const profileUrl = (v.profile_url || v.doctor_wp_link || "").trim();
@@ -1033,30 +1067,34 @@ function doctorCardHtml(v: Record<string, string>): string {
     buttons.push(`<a href="${escapeHtml(cvUrl)}" style="display:inline-block;color:#0f766e;text-decoration:none;font-size:15px;font-weight:600;padding:11px 18px;border:1px solid #0f766e;border-radius:8px;">View CV</a>`);
   }
   const buttonsHtml = buttons.length
-    ? `<div style="margin:14px 0 6px;">${buttons.join(`<span style="display:inline-block;width:10px;"></span>`)}</div>`
+    ? `<div style="margin:14px 0 6px;font-family:${CARD_FONT};">${buttons.join(`<span style="display:inline-block;width:10px;"></span>`)}</div>`
     : "";
 
+  // font-family:CARD_FONT on the wrapper AND both cells so the whole card reads
+  // in the website's Poppins (Outlook resets fonts on tables, hence per-cell).
   return `
-<table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0" style="border-collapse:separate;width:100%;max-width:640px;margin:20px 0 0;">
+<div style="font-family:${CARD_FONT};">
+<table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0" style="border-collapse:separate;width:100%;max-width:640px;margin:20px 0 0;font-family:${CARD_FONT};">
   <tr><td style="padding:0;">
     <table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0" style="border-collapse:separate;width:100%;border:1px solid #d1f0ec;border-radius:14px;overflow:hidden;background:#ffffff;">
       <tr>
-        <td width="200" valign="top" bgcolor="#0f766e" style="width:200px;background:#0f766e;background:linear-gradient(160deg,#0f766e,#14b8a6);padding:24px 18px;text-align:center;color:#ffffff;">
+        <td width="210" valign="top" bgcolor="#0f766e" style="width:210px;font-family:${CARD_FONT};background:#0f766e;background:linear-gradient(160deg,#0f766e,#14b8a6);padding:26px 20px;text-align:center;color:#ffffff;">
           ${photoImg}
-          <div style="font-size:18px;font-weight:700;line-height:1.3;color:#ffffff;">${escapeHtml(name)}</div>
-          ${title ? `<div style="font-size:13px;opacity:0.92;margin-top:3px;color:#ffffff;">${escapeHtml(title)}</div>` : ""}
+          <div style="font-size:19px;font-weight:700;line-height:1.3;color:#ffffff;">${escapeHtml(name)}</div>
+          ${title ? `<div style="font-size:13px;opacity:0.92;margin-top:4px;color:#ffffff;">${escapeHtml(title)}</div>` : ""}
           ${sectorPill}
           ${ageLine}
           ${contactBlock}
         </td>
-        <td valign="top" style="padding:22px 24px;background:#ffffff;">
+        <td valign="top" style="padding:22px 24px;background:#ffffff;font-family:${CARD_FONT};">
           ${mainPanel}
         </td>
       </tr>
     </table>
   </td></tr>
 </table>
-${buttonsHtml}`;
+${buttonsHtml}
+</div>`;
 }
 
 /** The full single-row data table the team uses in hospital comms, rendered

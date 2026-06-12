@@ -251,7 +251,7 @@ Deno.serve(async (req) => {
       if ((body as { find_doctor?: string } | null)?.find_doctor) {
         const q = (body as { find_doctor: string }).find_doctor;
         const [wp, staged, forms] = await Promise.all([
-          sb.from("wordpress_candidates").select("id, full_name, email, status").or(`full_name.ilike.%${q}%,email.ilike.%${q}%`),
+          sb.from("wordpress_candidates").select("id, full_name, email, status, wp_link, photo_url").or(`full_name.ilike.%${q}%,email.ilike.%${q}%`),
           sb.from("staged_doctor_profiles").select("*").or(`full_name.ilike.%${q}%,email.ilike.%${q}%`),
           sb.from("form_responses").select("id, respondent_name, respondent_email, archived_at, submitted_at").or(`respondent_name.ilike.%${q}%,respondent_email.ilike.%${q}%`),
         ]);

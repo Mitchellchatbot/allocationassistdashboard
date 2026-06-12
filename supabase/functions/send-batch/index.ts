@@ -34,6 +34,10 @@ const MAIL_FROM                 = Deno.env.get("MAIL_FROM") ?? "Hospital Intro <
 // Garamond serif stack (team preference 2026-06-12 — "all emails Garamond,
 // large"). Matches send-flow-email so batch + individual sends read alike.
 const FONT_STACK = "Garamond, 'EB Garamond', Georgia, 'Times New Roman', serif";
+// Poppins (the website's font) scoped to the doctor CARDS only — the rest of
+// the batch email stays Garamond. Matches send-flow-email.
+const CARD_FONT   = "'Poppins', 'Helvetica Neue', Helvetica, Arial, sans-serif";
+const FONT_IMPORT = `<style>@import url('https://fonts.googleapis.com/css2?family=Poppins:wght@400;500;600;700&display=swap');</style>`;
 const LOGO_URL   = `${Deno.env.get("SUPABASE_URL") ?? ""}/storage/v1/object/public/email-assets/logo.png`;
 const SIGNATURE_HTML = `
 <p style="margin:24px 0 0;font-family:${FONT_STACK};font-size:14px;color:#1a2332;line-height:1.5;">&nbsp;</p>
@@ -305,7 +309,7 @@ Deno.serve(async (req: Request) => {
   // Match send-flow-email: wrap the rendered body in a sans-serif
   // <div> so every <p>/<table> inherits the AA dashboard's standard
   // typeface unless the element overrides explicitly.
-  const html    = `<div style="font-family:${FONT_STACK};font-size:17px;color:#1a2332;line-height:1.55;">${renderedBody}</div>`;
+  const html    = `${FONT_IMPORT}<div style="font-family:${FONT_STACK};font-size:17px;color:#1a2332;line-height:1.55;">${renderedBody}</div>`;
   const text    = renderText(String(tpl.body_text ?? ""), { specialty: specialtyLabel, hospital_contact_name: "Team", doctors_table_html: stripHtml(doctorsTableHtml), signature: SIGNATURE_TEXT });
 
   // ── Dry run? ──────────────────────────────────────────────────────────
@@ -495,7 +499,7 @@ function renderDoctorCard(r: RowData): string {
     </div>`;
 
   return `
-    <div style="border:1px solid #e2e8f0;border-radius:10px;overflow:hidden;margin:0 0 16px 0;background:#ffffff;">
+    <div style="font-family:${CARD_FONT};border:1px solid #e2e8f0;border-radius:10px;overflow:hidden;margin:0 0 16px 0;background:#ffffff;">
       <div style="background:linear-gradient(135deg,#0f766e,#14b8a6);padding:14px 18px;color:#ffffff;">
         <div style="font-size:12px;letter-spacing:1px;text-transform:uppercase;opacity:0.8;">Profile #${r.idx}</div>
         <div style="font-size:21px;font-weight:700;line-height:1.3;margin-top:2px;">${esc(r.name)}</div>

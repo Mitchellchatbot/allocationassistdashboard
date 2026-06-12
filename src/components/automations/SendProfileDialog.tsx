@@ -637,8 +637,9 @@ function escPreview(s: string): string {
 }
 
 /** Preview-side mirror of send-flow-email's doctorCardHtml() — the WordPress-
- *  style profile card (teal photo sidebar + bio panel + buttons). Keep in sync
- *  with the server builder. */
+ *  style profile card (teal photo sidebar + bio panel + highlight facts +
+ *  buttons), in the website's Poppins font. Keep in sync with the server. */
+const PREVIEW_CARD_FONT = `'Poppins', 'Helvetica Neue', Helvetica, Arial, sans-serif`;
 function previewDoctorCardHtml(v: Record<string, string>): string {
   const name      = (v.doctor_name  || "Candidate").trim();
   const title     = (v.doctor_title || "").trim();
@@ -651,48 +652,73 @@ function previewDoctorCardHtml(v: Record<string, string>): string {
   const bio       = bioRaw ? escPreview(bioRaw).replace(/\r?\n+/g, "<br>") : "";
 
   const photoImg = photo
-    ? `<img src="${escPreview(photo)}" alt="${escPreview(name)}" width="96" height="96" style="display:block;margin:0 auto 12px;width:96px;height:96px;border-radius:50%;border:3px solid rgba(255,255,255,0.85);object-fit:cover;" />`
+    ? `<img src="${escPreview(photo)}" alt="${escPreview(name)}" width="112" height="112" style="display:block;margin:0 auto 14px;width:112px;height:112px;border-radius:50%;border:3px solid rgba(255,255,255,0.9);object-fit:cover;" />`
     : "";
-  const sectorPill = specialty ? `<div style="display:inline-block;margin-top:10px;background:rgba(255,255,255,0.18);border-radius:20px;padding:3px 12px;font-size:12px;color:#ffffff;">${escPreview(specialty)}</div>` : "";
+  const sectorPill = specialty ? `<div style="display:inline-block;margin-top:10px;background:rgba(255,255,255,0.2);border-radius:20px;padding:4px 13px;font-size:12px;color:#ffffff;">${escPreview(specialty)}</div>` : "";
   const ageLine = age ? `<div style="font-size:13px;margin-top:12px;font-weight:600;color:#ffffff;">Age: ${escPreview(age)} Years Old</div>` : "";
   const contactBlock = (phone || email) ? `
-          <div style="border-top:1px solid rgba(255,255,255,0.25);margin-top:14px;padding-top:12px;text-align:left;">
-            ${phone ? `<div style="font-size:12px;margin-bottom:6px;color:#ffffff;"><span style="opacity:0.85;">&#9742;</span> ${escPreview(phone)}</div>` : ""}
+          <div style="border-top:1px solid rgba(255,255,255,0.28);margin-top:16px;padding-top:13px;text-align:left;">
+            ${phone ? `<div style="font-size:12px;margin-bottom:7px;color:#ffffff;"><span style="opacity:0.85;">&#9742;</span> ${escPreview(phone)}</div>` : ""}
             ${email ? `<div style="font-size:12px;word-break:break-all;color:#ffffff;"><span style="opacity:0.85;">&#9993;</span> ${escPreview(email)}</div>` : ""}
           </div>` : "";
-  const mainPanel = bio
+
+  const facts: Array<[string, string]> = [
+    ["Country of training", v.doctor_country_training],
+    ["Years of experience", v.doctor_years_experience],
+    ["Nationality",         v.doctor_nationality],
+    ["Current location",    v.doctor_current_location],
+    ["UAE license",         v.doctor_license],
+    ["Languages",           v.doctor_languages],
+  ];
+  const factCells = facts
+    .filter(([, val]) => val && val.trim() && val.trim() !== "—")
+    .map(([label, val]) => `
+            <td width="50%" style="padding:8px 12px 8px 0;vertical-align:top;">
+              <div style="font-size:11px;text-transform:uppercase;letter-spacing:.4px;color:#94a3b8;font-weight:600;">${escPreview(label)}</div>
+              <div style="font-size:14px;color:#1a2332;font-weight:500;margin-top:2px;">${escPreview(val.trim())}</div>
+            </td>`);
+  const factRows: string[] = [];
+  for (let i = 0; i < factCells.length; i += 2) factRows.push(`<tr>${factCells[i]}${factCells[i + 1] ?? '<td width="50%"></td>'}</tr>`);
+  const factGrid = factRows.length
+    ? `<table role="presentation" cellpadding="0" cellspacing="0" border="0" style="border-collapse:collapse;width:100%;margin-top:14px;border-top:1px solid #eef2f7;padding-top:6px;"><tbody>${factRows.join("")}</tbody></table>`
+    : "";
+
+  const bioBlock = bio
     ? `<div style="font-size:16px;font-weight:700;color:#0f766e;margin-bottom:10px;">Specific areas of interests within the specialization</div>
           <div style="font-size:15px;color:#334155;line-height:1.6;">${bio}</div>`
     : `<div style="font-size:16px;font-weight:700;color:#0f766e;">${escPreview(title || specialty || name)}</div>`;
+  const mainPanel = `${bioBlock}${factGrid}`;
 
   const buttons: string[] = [];
   const profileUrl = (v.profile_url || v.profile_link || v.doctor_wp_link || "").trim();
   if (profileUrl) buttons.push(`<a href="${escPreview(profileUrl)}" style="display:inline-block;background:#0f766e;color:#ffffff;text-decoration:none;font-size:15px;font-weight:600;padding:11px 20px;border-radius:8px;">View full profile &rarr;</a>`);
   const cvUrl = (v.doctor_cv_url || "").trim();
   if (cvUrl) buttons.push(`<a href="${escPreview(cvUrl)}" style="display:inline-block;color:#0f766e;text-decoration:none;font-size:15px;font-weight:600;padding:11px 18px;border:1px solid #0f766e;border-radius:8px;">View CV</a>`);
-  const buttonsHtml = buttons.length ? `<div style="margin:14px 0 6px;">${buttons.join(`<span style="display:inline-block;width:10px;"></span>`)}</div>` : "";
+  const buttonsHtml = buttons.length ? `<div style="margin:14px 0 6px;font-family:${PREVIEW_CARD_FONT};">${buttons.join(`<span style="display:inline-block;width:10px;"></span>`)}</div>` : "";
 
   return `
-<table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0" style="border-collapse:separate;width:100%;max-width:640px;margin:20px 0 0;">
+<div style="font-family:${PREVIEW_CARD_FONT};">
+<table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0" style="border-collapse:separate;width:100%;max-width:640px;margin:20px 0 0;font-family:${PREVIEW_CARD_FONT};">
   <tr><td style="padding:0;">
     <table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0" style="border-collapse:separate;width:100%;border:1px solid #d1f0ec;border-radius:14px;overflow:hidden;background:#ffffff;">
       <tr>
-        <td width="200" valign="top" bgcolor="#0f766e" style="width:200px;background:#0f766e;background:linear-gradient(160deg,#0f766e,#14b8a6);padding:24px 18px;text-align:center;color:#ffffff;">
+        <td width="210" valign="top" bgcolor="#0f766e" style="width:210px;font-family:${PREVIEW_CARD_FONT};background:#0f766e;background:linear-gradient(160deg,#0f766e,#14b8a6);padding:26px 20px;text-align:center;color:#ffffff;">
           ${photoImg}
-          <div style="font-size:18px;font-weight:700;line-height:1.3;color:#ffffff;">${escPreview(name)}</div>
-          ${title ? `<div style="font-size:13px;opacity:0.92;margin-top:3px;color:#ffffff;">${escPreview(title)}</div>` : ""}
+          <div style="font-size:19px;font-weight:700;line-height:1.3;color:#ffffff;">${escPreview(name)}</div>
+          ${title ? `<div style="font-size:13px;opacity:0.92;margin-top:4px;color:#ffffff;">${escPreview(title)}</div>` : ""}
           ${sectorPill}
           ${ageLine}
           ${contactBlock}
         </td>
-        <td valign="top" style="padding:22px 24px;background:#ffffff;">
+        <td valign="top" style="padding:22px 24px;background:#ffffff;font-family:${PREVIEW_CARD_FONT};">
           ${mainPanel}
         </td>
       </tr>
     </table>
   </td></tr>
 </table>
-${buttonsHtml}`;
+${buttonsHtml}
+</div>`;
 }
 
 /** Preview-side mirror of send-flow-email's doctorRowTableHtml() — the full
@@ -771,6 +797,8 @@ function HtmlPreview({ html }: { html: string }) {
     const doc = iframe.contentDocument;
     if (!doc) return;
     const full = `<!doctype html><html><head><meta charset="utf-8"><meta name="viewport" content="width=device-width">
+      <link rel="preconnect" href="https://fonts.googleapis.com"><link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+      <link href="https://fonts.googleapis.com/css2?family=Poppins:wght@400;500;600;700&display=swap" rel="stylesheet">
       <style>
         body { font-family: Garamond,'EB Garamond',Georgia,'Times New Roman',serif; color:#1a2332; margin:0; padding:16px; font-size:17px; line-height:1.55; background:#ffffff; }
         a { color:#1d4ed8; }
