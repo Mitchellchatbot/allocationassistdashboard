@@ -1023,7 +1023,7 @@ function doctorCardHtml(v: Record<string, string>): string {
   const email     = (v.doctor_email || "").trim();
   const photo     = (v.doctor_photo_url || "").trim();
   const bioRaw    = (v.doctor_bio || v.doctor_area_of_interest || "").trim();
-  const bio       = bioRaw ? escapeHtml(bioRaw).replace(/\r?\n+/g, "<br>") : "";
+  const bio       = bioRaw ? escapeHtml(htmlToText(bioRaw)).replace(/\r?\n+/g, "<br>") : "";
 
   const photoImg = photo
     ? `<img src="${escapeHtml(photo)}" alt="${escapeHtml(name)}" width="112" height="112" style="display:block;margin:0 auto 14px;width:112px;height:112px;border-radius:50%;border:3px solid rgba(255,255,255,0.9);object-fit:cover;" />`
@@ -1194,6 +1194,32 @@ function escapeHtml(s: string): string {
     .replace(/>/g, "&gt;")
     .replace(/"/g, "&quot;")
     .replace(/'/g, "&#39;");
+}
+
+/** Strip HTML markup down to plain text. WP's Area of Interest field often
+ *  holds Google-Docs paste HTML (<p class="cvGsUA">…<span class="a_GcMg">),
+ *  which — once escaped for safe insertion — shows the raw tags as text.
+ *  Convert block ends to newlines, drop all tags, decode the common entities,
+ *  collapse whitespace. The caller still escapeHtml()s the result. */
+function htmlToText(s: string): string {
+  if (!s) return "";
+  let t = s
+    .replace(/<\s*br\s*\/?\s*>/gi, "\n")
+    .replace(/<\/\s*(p|div|li|h[1-6]|tr)\s*>/gi, "\n")
+    .replace(/<[^>]*>/g, "");
+  t = t
+    .replace(/&nbsp;/gi, " ")
+    .replace(/&amp;/gi, "&")
+    .replace(/&lt;/gi, "<")
+    .replace(/&gt;/gi, ">")
+    .replace(/&quot;/gi, '"')
+    .replace(/&#0*39;|&apos;|&rsquo;|&lsquo;/gi, "'")
+    .replace(/&rdquo;|&ldquo;/gi, '"')
+    .replace(/&mdash;/gi, "—")
+    .replace(/&ndash;/gi, "–")
+    .replace(/&hellip;/gi, "…")
+    .replace(/&#(\d+);/g, (_m, n) => { const c = parseInt(n, 10); return c ? String.fromCharCode(c) : ""; });
+  return t.replace(/[ \t]+/g, " ").replace(/ *\n */g, "\n").replace(/\n{3,}/g, "\n\n").trim();
 }
 
 /** Wrap plain-text body in a minimal HTML envelope so non-HTML templates still
