@@ -181,6 +181,19 @@ const FONT_IMPORT = `<style>@import url('https://fonts.googleapis.com/css2?famil
 // migration 20260608000004). Lives on Supabase Storage so email clients
 // hot-link without auth.
 const LOGO_URL = `${Deno.env.get("SUPABASE_URL") ?? ""}/storage/v1/object/public/email-assets/logo.png`;
+// Teal line-icons for the profile-card fact grid — rasterised Lucide PNGs in the
+// email-assets bucket (SVG/icon-fonts don't render in most email clients). Each
+// fact label maps to one icon file. Keep in sync with FACT_ICON in
+// SendProfileDialog.tsx and the uploaded files under email-assets/icons/.
+const ICON_BASE = `${Deno.env.get("SUPABASE_URL") ?? ""}/storage/v1/object/public/email-assets/icons`;
+const FACT_ICON: Record<string, string> = {
+  "Subspecialty": "activity", "Title / rank": "badge", "Country of training": "graduation-cap",
+  "Years of experience": "calendar-days", "Current location": "map-pin", "Targeted locations": "target",
+  "Nationality": "globe", "Age": "id-card", "Date of birth": "calendar", "Marital status": "heart",
+  "Family status": "users", "Languages": "languages", "English level": "book-open",
+  "UAE license": "award", "License types": "badge-check", "Salary expectation": "banknote",
+  "Notice period": "clipboard-check",
+};
 
 function signatureHtml(first: string, last: string, title: string, phone: string): string {
   const fullName = [first, last].filter(Boolean).join(" ") || "Allocation Assist";
@@ -1061,25 +1074,21 @@ function doctorCardHtml(v: Record<string, string>): string {
     ["Notice period",        v.doctor_notice_period],
   ];
   // Facts render as a full-width grid of icon tiles BELOW the photo+bio row —
-  // the WordPress layout: "text above, then stuff with icons below it". A small
-  // emoji in a soft circle stands in for WP's line-icons (email-safe; SVG/icon
-  // fonts don't survive most inboxes). 3 tiles per row.
-  const ICONS: Record<string, string> = {
-    "Subspecialty": "🩺", "Title / rank": "🏅", "Country of training": "🎓",
-    "Years of experience": "💼", "Current location": "📍", "Targeted locations": "🌐",
-    "Nationality": "🌍", "Age": "🎂", "Date of birth": "📅", "Marital status": "💍",
-    "Family status": "👪", "Languages": "🗣️", "English level": "💬", "UAE license": "📋",
-    "License types": "📋", "Salary expectation": "💰", "Notice period": "⏱️",
-  };
+  // the WordPress layout: "text above, then stuff with icons below it". Each
+  // tile shows a hosted teal line-icon (PNG in the email-assets bucket — SVG/
+  // icon-fonts don't survive most inboxes, so they're rasterised) in a soft
+  // grey circle, like the website. 3 tiles per row.
   const factTiles = facts
     .filter(([, val]) => val && val.trim() && val.trim() !== "—")
     .map(([label, val]) => `
               <td width="33%" valign="top" style="padding:14px 16px 14px 0;font-family:${CARD_FONT};">
                 <table role="presentation" cellpadding="0" cellspacing="0" border="0"><tr>
-                  <td width="40" valign="top">
-                    <div style="width:36px;height:36px;border-radius:50%;background:#e6f4f1;text-align:center;font-size:16px;line-height:36px;">${ICONS[label] ?? "•"}</div>
+                  <td width="52" valign="top">
+                    <div style="width:44px;height:44px;border-radius:50%;background:#f1f5f9;text-align:center;line-height:44px;">
+                      <img src="${ICON_BASE}/${FACT_ICON[label] ?? "badge"}.png" width="22" height="22" alt="" style="vertical-align:middle;border:0;" />
+                    </div>
                   </td>
-                  <td valign="top" style="padding-left:11px;">
+                  <td valign="top" style="padding-left:12px;">
                     <div style="font-size:11px;text-transform:uppercase;letter-spacing:.4px;color:#94a3b8;font-weight:600;">${escapeHtml(label)}</div>
                     <div style="font-size:14px;color:#1a2332;font-weight:500;margin-top:2px;">${escapeHtml(val.trim())}</div>
                   </td>

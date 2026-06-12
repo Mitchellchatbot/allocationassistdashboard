@@ -696,22 +696,26 @@ function previewDoctorCardHtml(v: Record<string, string>): string {
     ["Salary expectation",   v.doctor_salary_expectation || "Market Range"],
     ["Notice period",        v.doctor_notice_period],
   ];
-  const ICONS: Record<string, string> = {
-    "Subspecialty": "🩺", "Title / rank": "🏅", "Country of training": "🎓",
-    "Years of experience": "💼", "Current location": "📍", "Targeted locations": "🌐",
-    "Nationality": "🌍", "Age": "🎂", "Date of birth": "📅", "Marital status": "💍",
-    "Family status": "👪", "Languages": "🗣️", "English level": "💬", "UAE license": "📋",
-    "License types": "📋", "Salary expectation": "💰", "Notice period": "⏱️",
+  const ICON_BASE = `${import.meta.env.VITE_SUPABASE_URL}/storage/v1/object/public/email-assets/icons`;
+  const FACT_ICON: Record<string, string> = {
+    "Subspecialty": "activity", "Title / rank": "badge", "Country of training": "graduation-cap",
+    "Years of experience": "calendar-days", "Current location": "map-pin", "Targeted locations": "target",
+    "Nationality": "globe", "Age": "id-card", "Date of birth": "calendar", "Marital status": "heart",
+    "Family status": "users", "Languages": "languages", "English level": "book-open",
+    "UAE license": "award", "License types": "badge-check", "Salary expectation": "banknote",
+    "Notice period": "clipboard-check",
   };
   const factTiles = facts
     .filter(([, val]) => val && val.trim() && val.trim() !== "—")
     .map(([label, val]) => `
               <td width="33%" valign="top" style="padding:14px 16px 14px 0;font-family:${PREVIEW_CARD_FONT};">
                 <table role="presentation" cellpadding="0" cellspacing="0" border="0"><tr>
-                  <td width="40" valign="top">
-                    <div style="width:36px;height:36px;border-radius:50%;background:#e6f4f1;text-align:center;font-size:16px;line-height:36px;">${ICONS[label] ?? "•"}</div>
+                  <td width="52" valign="top">
+                    <div style="width:44px;height:44px;border-radius:50%;background:#f1f5f9;text-align:center;line-height:44px;">
+                      <img src="${ICON_BASE}/${FACT_ICON[label] ?? "badge"}.png" width="22" height="22" alt="" style="vertical-align:middle;border:0;" />
+                    </div>
                   </td>
-                  <td valign="top" style="padding-left:11px;">
+                  <td valign="top" style="padding-left:12px;">
                     <div style="font-size:11px;text-transform:uppercase;letter-spacing:.4px;color:#94a3b8;font-weight:600;">${escPreview(label)}</div>
                     <div style="font-size:14px;color:#1a2332;font-weight:500;margin-top:2px;">${escPreview(val.trim())}</div>
                   </td>
