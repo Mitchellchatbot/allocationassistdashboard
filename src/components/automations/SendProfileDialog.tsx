@@ -680,24 +680,21 @@ function previewDoctorCardHtml(v: Record<string, string>): string {
     ["Salary expectation",   v.doctor_salary_expectation || "Market Range"],
     ["Notice period",        v.doctor_notice_period],
   ];
-  const factCells = facts
+  const factList = facts
     .filter(([, val]) => val && val.trim() && val.trim() !== "—")
     .map(([label, val]) => `
-            <td width="50%" style="padding:8px 12px 8px 0;vertical-align:top;">
-              <div style="font-size:11px;text-transform:uppercase;letter-spacing:.4px;color:#94a3b8;font-weight:600;">${escPreview(label)}</div>
-              <div style="font-size:14px;color:#1a2332;font-weight:500;margin-top:2px;">${escPreview(val.trim())}</div>
-            </td>`);
-  const factRows: string[] = [];
-  for (let i = 0; i < factCells.length; i += 2) factRows.push(`<tr>${factCells[i]}${factCells[i + 1] ?? '<td width="50%"></td>'}</tr>`);
-  const factGrid = factRows.length
-    ? `<table role="presentation" cellpadding="0" cellspacing="0" border="0" style="border-collapse:collapse;width:100%;margin-top:14px;border-top:1px solid #eef2f7;padding-top:6px;"><tbody>${factRows.join("")}</tbody></table>`
+          <div style="margin-bottom:13px;">
+            <div style="font-size:11px;text-transform:uppercase;letter-spacing:.4px;color:#94a3b8;font-weight:600;">${escPreview(label)}</div>
+            <div style="font-size:14px;color:#1a2332;font-weight:500;margin-top:2px;">${escPreview(val.trim())}</div>
+          </div>`).join("");
+  const factsCol = factList
+    ? `<td width="300" valign="top" style="width:300px;background:#f8fafc;border-left:1px solid #eef2f7;padding:24px 22px;font-family:${PREVIEW_CARD_FONT};">${factList}</td>`
     : "";
 
   const bioBlock = bio
     ? `<div style="font-size:16px;font-weight:700;color:#0f766e;margin-bottom:10px;">Specific areas of interests within the specialization</div>
           <div style="font-size:15px;color:#334155;line-height:1.6;">${bio}</div>`
     : `<div style="font-size:16px;font-weight:700;color:#0f766e;">${escPreview(title || specialty || name)}</div>`;
-  const mainPanel = `${bioBlock}${factGrid}`;
 
   const buttons: string[] = [];
   const profileUrl = (v.profile_url || v.profile_link || v.doctor_wp_link || "").trim();
@@ -708,11 +705,11 @@ function previewDoctorCardHtml(v: Record<string, string>): string {
 
   return `
 <div style="font-family:${PREVIEW_CARD_FONT};">
-<table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0" style="border-collapse:separate;width:100%;max-width:760px;margin:20px 0 0;font-family:${PREVIEW_CARD_FONT};">
+<table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0" style="border-collapse:separate;width:100%;max-width:1040px;margin:20px 0 0;font-family:${PREVIEW_CARD_FONT};">
   <tr><td style="padding:0;">
     <table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0" style="border-collapse:separate;width:100%;border:1px solid #d1f0ec;border-radius:14px;overflow:hidden;background:#ffffff;">
       <tr>
-        <td width="210" valign="top" bgcolor="#0f766e" style="width:210px;font-family:${PREVIEW_CARD_FONT};background:#0f766e;background:linear-gradient(160deg,#0f766e,#14b8a6);padding:26px 20px;text-align:center;color:#ffffff;">
+        <td width="240" valign="top" bgcolor="#0f766e" style="width:240px;font-family:${PREVIEW_CARD_FONT};background:#0f766e;background:linear-gradient(160deg,#0f766e,#14b8a6);padding:26px 20px;text-align:center;color:#ffffff;">
           ${photoImg}
           <div style="font-size:19px;font-weight:700;line-height:1.3;color:#ffffff;">${escPreview(name)}</div>
           ${title ? `<div style="font-size:13px;opacity:0.92;margin-top:4px;color:#ffffff;">${escPreview(title)}</div>` : ""}
@@ -720,9 +717,10 @@ function previewDoctorCardHtml(v: Record<string, string>): string {
           ${ageLine}
           ${contactBlock}
         </td>
-        <td valign="top" style="padding:22px 24px;background:#ffffff;font-family:${PREVIEW_CARD_FONT};">
-          ${mainPanel}
+        <td valign="top" style="padding:24px 26px;background:#ffffff;font-family:${PREVIEW_CARD_FONT};">
+          ${bioBlock}
         </td>
+        ${factsCol}
       </tr>
     </table>
   </td></tr>
