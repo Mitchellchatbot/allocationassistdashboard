@@ -636,59 +636,63 @@ function escPreview(s: string): string {
   return s.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;").replace(/"/g, "&quot;").replace(/'/g, "&#39;");
 }
 
-/** Preview-side mirror of send-flow-email's doctorCardHtml(). Builds the same
- *  teal-header profile card (attribute table + View full profile / View CV
- *  buttons + contact strip) so the Send Profile preview matches the sent email.
- *  Keep in sync with the server builder. */
+/** Preview-side mirror of send-flow-email's doctorCardHtml() — the WordPress-
+ *  style profile card (teal photo sidebar + bio panel + buttons). Keep in sync
+ *  with the server builder. */
 function previewDoctorCardHtml(v: Record<string, string>): string {
-  const name  = (v.doctor_name  || "Candidate").trim();
-  const title = (v.doctor_title || v.doctor_specialty || "").trim();
-  const attrs: Array<[string, string]> = [
-    ["Specialty",           v.doctor_specialty && v.doctor_specialty !== title ? v.doctor_specialty : ""],
-    ["Subspecialty",        v.doctor_subspecialty],
-    ["Areas of interest",   v.doctor_area_of_interest],
-    ["Country of training", v.doctor_country_training],
-    ["Current location",    v.doctor_current_location],
-    ["Targeted locations",  v.doctor_targeted_locations],
-    ["Years of experience", v.doctor_years_experience],
-    ["Nationality",         v.doctor_nationality],
-    ["Languages",           v.doctor_languages],
-    ["English level",       v.doctor_english_level],
-    ["Age",                 v.doctor_age],
-    ["Marital status",      v.doctor_marital_status],
-    ["Family status",       v.doctor_family_status && v.doctor_family_status !== v.doctor_marital_status ? v.doctor_family_status : ""],
-    ["UAE license",         v.doctor_license],
-    ["Salary expectation",  v.doctor_salary_expectation || "Market Range"],
-    ["Notice period",       v.doctor_notice_period],
-  ];
-  const rows = attrs
-    .filter(([, val]) => val && val.trim() && val.trim() !== "—")
-    .map(([label, val]) => `
-      <tr>
-        <td style="padding:6px 14px 6px 0;color:#64748b;font-size:15px;width:40%;vertical-align:top;">${escPreview(label)}</td>
-        <td style="padding:6px 0;color:#1a2332;font-size:16px;font-weight:500;vertical-align:top;">${escPreview(val.trim())}</td>
-      </tr>`).join("");
+  const name      = (v.doctor_name  || "Candidate").trim();
+  const title     = (v.doctor_title || "").trim();
+  const specialty = (v.doctor_specialty || "").trim();
+  const age       = (v.doctor_age || "").trim();
+  const phone     = (v.doctor_phone || "").trim();
+  const email     = (v.doctor_email || "").trim();
+  const photo     = (v.doctor_photo_url || "").trim();
+  const bioRaw    = (v.doctor_bio || v.doctor_area_of_interest || "").trim();
+  const bio       = bioRaw ? escPreview(bioRaw).replace(/\r?\n+/g, "<br>") : "";
+
+  const photoImg = photo
+    ? `<img src="${escPreview(photo)}" alt="${escPreview(name)}" width="96" height="96" style="display:block;margin:0 auto 12px;width:96px;height:96px;border-radius:50%;border:3px solid rgba(255,255,255,0.85);object-fit:cover;" />`
+    : "";
+  const sectorPill = specialty ? `<div style="display:inline-block;margin-top:10px;background:rgba(255,255,255,0.18);border-radius:20px;padding:3px 12px;font-size:12px;color:#ffffff;">${escPreview(specialty)}</div>` : "";
+  const ageLine = age ? `<div style="font-size:13px;margin-top:12px;font-weight:600;color:#ffffff;">Age: ${escPreview(age)} Years Old</div>` : "";
+  const contactBlock = (phone || email) ? `
+          <div style="border-top:1px solid rgba(255,255,255,0.25);margin-top:14px;padding-top:12px;text-align:left;">
+            ${phone ? `<div style="font-size:12px;margin-bottom:6px;color:#ffffff;"><span style="opacity:0.85;">&#9742;</span> ${escPreview(phone)}</div>` : ""}
+            ${email ? `<div style="font-size:12px;word-break:break-all;color:#ffffff;"><span style="opacity:0.85;">&#9993;</span> ${escPreview(email)}</div>` : ""}
+          </div>` : "";
+  const mainPanel = bio
+    ? `<div style="font-size:16px;font-weight:700;color:#0f766e;margin-bottom:10px;">Specific areas of interests within the specialization</div>
+          <div style="font-size:15px;color:#334155;line-height:1.6;">${bio}</div>`
+    : `<div style="font-size:16px;font-weight:700;color:#0f766e;">${escPreview(title || specialty || name)}</div>`;
+
   const buttons: string[] = [];
   const profileUrl = (v.profile_url || v.profile_link || v.doctor_wp_link || "").trim();
   if (profileUrl) buttons.push(`<a href="${escPreview(profileUrl)}" style="display:inline-block;background:#0f766e;color:#ffffff;text-decoration:none;font-size:15px;font-weight:600;padding:11px 20px;border-radius:8px;">View full profile &rarr;</a>`);
   const cvUrl = (v.doctor_cv_url || "").trim();
   if (cvUrl) buttons.push(`<a href="${escPreview(cvUrl)}" style="display:inline-block;color:#0f766e;text-decoration:none;font-size:15px;font-weight:600;padding:11px 18px;border:1px solid #0f766e;border-radius:8px;">View CV</a>`);
-  const buttonsHtml = buttons.length ? `<tr><td style="padding:6px 22px 18px;">${buttons.join(`<span style="display:inline-block;width:10px;"></span>`)}</td></tr>` : "";
-  const cp: string[] = [];
-  const cEmail = (v.doctor_email || "").trim(); const cPhone = (v.doctor_phone || "").trim();
-  if (cEmail) cp.push(`<span style="color:#0f766e;">&#9993;</span> <a href="mailto:${escPreview(cEmail)}" style="color:#0f766e;text-decoration:none;font-size:15px;">${escPreview(cEmail)}</a>`);
-  if (cPhone) cp.push(`<span style="color:#0f766e;">&#9742;</span> <span style="color:#1a2332;font-size:15px;">${escPreview(cPhone)}</span>`);
-  const contactHtml = cp.length ? `<tr><td style="background:#f0fbfa;border-top:1px solid #d1f0ec;padding:14px 22px;">${cp.join(`<span style="display:inline-block;width:18px;"></span>`)}</td></tr>` : "";
+  const buttonsHtml = buttons.length ? `<div style="margin:14px 0 6px;">${buttons.join(`<span style="display:inline-block;width:10px;"></span>`)}</div>` : "";
+
   return `
-<table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0" style="border-collapse:separate;width:100%;max-width:640px;border:1px solid #d1f0ec;border-radius:14px;overflow:hidden;margin:20px 0;background:#ffffff;">
-  <tr><td style="background:#0f766e;background:linear-gradient(135deg,#0f766e,#14b8a6);padding:20px 22px;">
-    <div style="color:#ffffff;font-size:21px;font-weight:700;line-height:1.3;">${escPreview(name)}</div>
-    ${title ? `<div style="color:#d1f5f0;font-size:15px;margin-top:4px;">${escPreview(title)}</div>` : ""}
+<table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0" style="border-collapse:separate;width:100%;max-width:640px;margin:20px 0 0;">
+  <tr><td style="padding:0;">
+    <table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0" style="border-collapse:separate;width:100%;border:1px solid #d1f0ec;border-radius:14px;overflow:hidden;background:#ffffff;">
+      <tr>
+        <td width="200" valign="top" bgcolor="#0f766e" style="width:200px;background:#0f766e;background:linear-gradient(160deg,#0f766e,#14b8a6);padding:24px 18px;text-align:center;color:#ffffff;">
+          ${photoImg}
+          <div style="font-size:18px;font-weight:700;line-height:1.3;color:#ffffff;">${escPreview(name)}</div>
+          ${title ? `<div style="font-size:13px;opacity:0.92;margin-top:3px;color:#ffffff;">${escPreview(title)}</div>` : ""}
+          ${sectorPill}
+          ${ageLine}
+          ${contactBlock}
+        </td>
+        <td valign="top" style="padding:22px 24px;background:#ffffff;">
+          ${mainPanel}
+        </td>
+      </tr>
+    </table>
   </td></tr>
-  ${rows ? `<tr><td style="padding:18px 22px 6px;"><table role="presentation" cellpadding="0" cellspacing="0" border="0" style="border-collapse:collapse;width:100%;"><tbody>${rows}</tbody></table></td></tr>` : ""}
-  ${buttonsHtml}
-  ${contactHtml}
-</table>`;
+</table>
+${buttonsHtml}`;
 }
 
 /** Preview-side mirror of send-flow-email's doctorRowTableHtml() — the full
