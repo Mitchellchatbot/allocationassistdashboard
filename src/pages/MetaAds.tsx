@@ -1061,36 +1061,99 @@ const MetaAds = () => {
       if (k) funnelByNameKey.set(k, f);
     }
 
-    // Every creative from Meta API — we no longer filter by isVideo here since
-    // the flag is unreliable. The video badge in the rendered table marks the
-    // ones we can confirm are video.
-    const rows = topAds
-      .map(ad => {
-        // Try ID match first (utm_content is a numeric Meta ad ID), then name slug.
-        const f = funnelById.get(ad.id) ?? funnelByNameKey.get(norm(ad.name));
-        const formLeads = f?.total     ?? 0;
-        const qualified = f?.qualified ?? 0;
-        const placed    = f?.converted ?? 0;
-        return {
-          id:          ad.id,
-          name:        ad.name,
-          thumbnail:   ad.thumbnail,
-          status:      ad.status,
-          isVideo:     ad.isVideo,
-          ad,
-          spend:       ad.spend,
-          impressions: ad.impressions,
-          metaLeads:   ad.leads,
-          formLeads,
-          qualified,
-          placed,
-          cpql:        qualified > 0 ? ad.spend / qualified : 0,
-          cpp:         placed    > 0 ? ad.spend / placed    : 0,
-          qualRate:    formLeads > 0 ? (qualified / formLeads) * 100 : 0,
-        };
-      })
+    // ── Group fetched Meta ads BY CREATIVE NAME ──────────────────────────────
+    // The same creative ("Apr'26 - Static 4") usually runs as several ads across
+    // adsets. This is a *per-creative* view, so it must show that creative ONCE —
+    // otherwise its leads (which we attribute by name) get counted on every
+    // duplicate ad row, inflating the table. Merge spend/impressions/clicks
+    // across same-named ads and keep one representative ad for the preview.
+    type AdT = typeof topAds[number];
+    const groups = new Map<string, {
+      name: string; ads: AdT[]; rep: AdT;
+      spend: number; impressions: number; clicks: number; metaLeads: number;
+      thumbnail: string | undefined; isVideo: boolean; active: boolean;
+    }>();
+    for (const ad of topAds) {
+      const k = norm(ad.name) || ad.id;
+      let g = groups.get(k);
+      if (!g) {
+        g = { name: ad.name, ads: [], rep: ad, spend: 0, impressions: 0, clicks: 0, metaLeads: 0, thumbnail: ad.thumbnail, isVideo: ad.isVideo, active: false };
+        groups.set(k, g);
+      }
+      g.ads.push(ad);
+      g.spend += ad.spend; g.impressions += ad.impressions; g.clicks += ad.clicks; g.metaLeads += ad.leads;
+      if (ad.spend > g.rep.spend) g.rep = ad;
+      if (!g.thumbnail && ad.thumbnail) g.thumbnail = ad.thumbnail;
+      g.isVideo = g.isVideo || ad.isVideo;
+      if (ad.status === "ACTIVE") g.active = true;
+    }
+
+    // Which funnels (lead groups keyed by utm_content) we managed to attach to a
+    // fetched creative — anything left over is an orphan we recover below.
+    const matchedFunnels = new Set<typeof creativeFunnels[number]>();
+    const rows = Array.from(groups.values()).map(g => {
+      // Match by name slug, or by any of the creative's ads' numeric id.
+      let f = funnelByNameKey.get(norm(g.name));
+      if (!f) { for (const ad of g.ads) { const byId = funnelById.get(ad.id); if (byId) { f = byId; break; } } }
+      if (f) matchedFunnels.add(f);
+      const formLeads = f?.total     ?? 0;
+      const qualified = f?.qualified ?? 0;
+      const placed    = f?.converted ?? 0;
+      const ctr       = g.impressions > 0 ? (g.clicks / g.impressions) * 100 : 0;
+      return {
+        id:          g.rep.id,
+        name:        g.name,
+        thumbnail:   g.thumbnail,
+        status:      g.active ? "ACTIVE" : g.rep.status,
+        isVideo:     g.isVideo,
+        ad:          g.rep as AdT | null,
+        leadOnly:    false,
+        spend:       g.spend,
+        impressions: g.impressions,
+        clicks:      g.clicks,
+        ctr,
+        metaLeads:   g.metaLeads,
+        formLeads,
+        qualified,
+        placed,
+        cpql:        qualified > 0 ? g.spend / qualified : 0,
+        cpp:         placed    > 0 ? g.spend / placed    : 0,
+        qualRate:    formLeads > 0 ? (qualified / formLeads) * 100 : 0,
+      };
+    })
       // Drop creatives with no measurable activity at all.
       .filter(r => r.spend > 0 || r.formLeads > 0 || r.metaLeads > 0);
+
+    // ── Recover ORPHANED creatives ───────────────────────────────────────────
+    // Funnels (leads grouped by utm_content) that matched NO fetched ad. This is
+    // where leads were "falling through": archived ads (Meta's API won't return
+    // them for this app) and creatives beyond what we fetched. Surface each as a
+    // lead-only row — no Meta spend/impressions are available for them, but the
+    // leads/qualified ARE real, so the table now reconciles with the true total.
+    for (const f of creativeFunnels) {
+      if (matchedFunnels.has(f)) continue;
+      if ((f.total ?? 0) <= 0) continue;
+      rows.push({
+        id:          `funnel:${f.creative}`,
+        name:        f.creative,
+        thumbnail:   undefined,
+        status:      "ARCHIVED",
+        isVideo:     false,
+        ad:          null,
+        leadOnly:    true,
+        spend:       0,
+        impressions: 0,
+        clicks:      0,
+        ctr:         0,
+        metaLeads:   0,
+        formLeads:   f.total,
+        qualified:   f.qualified,
+        placed:      f.converted,
+        cpql:        0,
+        cpp:         0,
+        qualRate:    f.total > 0 ? (f.qualified / f.total) * 100 : 0,
+      });
+    }
 
     // User-controlled sort takes precedence; otherwise fall back to a
     // sensible default for the active view mode.
@@ -1104,8 +1167,8 @@ const MetaAds = () => {
           case "cpql":        return r.cpql > 0 ? r.cpql : (sortDir === "asc" ? Infinity : -Infinity);
           case "cpp":         return r.cpp  > 0 ? r.cpp  : (sortDir === "asc" ? Infinity : -Infinity);
           case "impressions": return r.impressions;
-          case "clicks":      return r.ad.clicks;
-          case "ctr":         return r.ad.ctr;
+          case "clicks":      return r.clicks;
+          case "ctr":         return r.ctr;
         }
       };
       rows.sort((a, b) => (getter(a) - getter(b)) * sign);
@@ -1611,6 +1674,30 @@ const MetaAds = () => {
                     <p className="text-[11px] text-muted-foreground/80 mt-0.5">
                       Spend from Meta API · qualified/placed from Zoho via utm_content match · click any column to sort
                     </p>
+                    {(() => {
+                      // Reconciliation: show how the period's leads split across
+                      // creatives vs. what can't be tied to one. "Untagged" =
+                      // lead forms submitted with no / a numeric utm_content, so
+                      // they can't be attributed to any creative by name.
+                      const tagged = creativeFunnels.reduce((s, f) => s + f.total, 0);
+                      const totalL = data?.total ?? 0;
+                      const untagged = Math.max(0, totalL - tagged);
+                      return (
+                        <p className="text-[11px] mt-1">
+                          <span className="font-semibold text-foreground tabular-nums">{totalL.toLocaleString()}</span>
+                          <span className="text-muted-foreground"> form-leads this period · </span>
+                          <span className="font-semibold text-foreground tabular-nums">{tagged.toLocaleString()}</span>
+                          <span className="text-muted-foreground"> attributed to the creatives below</span>
+                          {untagged > 0 && (
+                            <>
+                              <span className="text-muted-foreground"> · </span>
+                              <span className="font-semibold text-amber-600 tabular-nums">{untagged.toLocaleString()} untagged</span>
+                              <span className="text-muted-foreground"> (form had no / a numeric utm_content)</span>
+                            </>
+                          )}
+                        </p>
+                      );
+                    })()}
                   </div>
                   {/* View-mode toggle — swaps which columns are shown */}
                   <div className="inline-flex rounded-md border border-border/60 overflow-hidden text-[10px] font-medium shrink-0">
@@ -1742,8 +1829,8 @@ const MetaAds = () => {
                                   e.stopPropagation();
                                   setLeadsModal({
                                     title:    v.name,
-                                    subtitle: `Creative · ${v.ad?.adsetId ? "ad" : "creative"}`,
-                                    leads:    attribution.leadsForAd(v.id),
+                                    subtitle: v.leadOnly ? "Creative · archived (leads only)" : "Creative",
+                                    leads:    attribution.leadsForAd(v.leadOnly ? v.name : v.id),
                                     filter:   "all",
                                   });
                                 }}
@@ -1763,7 +1850,7 @@ const MetaAds = () => {
                                   setLeadsModal({
                                     title:    v.name,
                                     subtitle: `Creative · qualified leads only`,
-                                    leads:    attribution.leadsForAd(v.id),
+                                    leads:    attribution.leadsForAd(v.leadOnly ? v.name : v.id),
                                     filter:   "qualified",
                                   });
                                 }}
@@ -1801,21 +1888,25 @@ const MetaAds = () => {
                             {v.impressions > 0 ? fmtN(v.impressions) : <span className="text-muted-foreground/40">—</span>}
                           </td>
                           <td className="py-3 px-3 text-right text-[12px] tabular-nums text-foreground/80">
-                            {v.ad.clicks > 0 ? fmtN(v.ad.clicks) : <span className="text-muted-foreground/40">—</span>}
+                            {v.clicks > 0 ? fmtN(v.clicks) : <span className="text-muted-foreground/40">—</span>}
                           </td>
                           <td className="py-3 px-3 text-right text-[12px] tabular-nums text-violet-700 font-semibold">
-                            {v.ad.ctr > 0 ? `${v.ad.ctr.toFixed(2)}%` : <span className="text-muted-foreground/40 font-normal">—</span>}
+                            {v.ctr > 0 ? `${v.ctr.toFixed(2)}%` : <span className="text-muted-foreground/40 font-normal">—</span>}
                           </td>
                         </>}
 
                         <td className="py-3 px-3 text-center">
-                          <button
-                            type="button"
-                            onClick={() => setDirectPreviewAd(v.ad)}
-                            className="inline-flex items-center gap-1 rounded-lg bg-primary/10 hover:bg-primary hover:text-white text-primary px-2.5 py-1 text-[10px] font-semibold transition-colors"
-                          >
-                            <Play className="h-2.5 w-2.5" /> Preview
-                          </button>
+                          {v.ad ? (
+                            <button
+                              type="button"
+                              onClick={() => setDirectPreviewAd(v.ad)}
+                              className="inline-flex items-center gap-1 rounded-lg bg-primary/10 hover:bg-primary hover:text-white text-primary px-2.5 py-1 text-[10px] font-semibold transition-colors"
+                            >
+                              <Play className="h-2.5 w-2.5" /> Preview
+                            </button>
+                          ) : (
+                            <span className="text-[9px] text-muted-foreground/50 italic" title="No live Meta ad for this creative — it's archived or beyond the API window, so only its leads are available.">archived</span>
+                          )}
                         </td>
                       </motion.tr>
                     ))}

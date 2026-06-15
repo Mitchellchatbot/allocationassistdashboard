@@ -298,6 +298,34 @@ async function gql(path: string, params: Record<string, string>): Promise<unknow
   return json;
 }
 
+// Fetch EVERY page of an edge. Meta returns one page at a time (≤ the `limit`),
+// so a single call only saw the first slice of an account's ads. That silently
+// capped the per-creative view: any lead attributed to an ad past the first
+// page "fell through" and never appeared. Walks the `after` cursor until the
+// edge is exhausted; `maxPages` is a runaway guard. Per-page errors stop paging
+// gracefully (returns what we have so far) rather than throwing.
+async function gqlPaged(
+  path: string,
+  params: Record<string, string>,
+  maxPages = 12,
+): Promise<Record<string, unknown>[]> {
+  const out: Record<string, unknown>[] = [];
+  let after: string | undefined;
+  for (let i = 0; i < maxPages; i++) {
+    const p = { ...params, ...(after ? { after } : {}) };
+    const resp = (await gql(path, p).catch(() => ({ data: [] }))) as {
+      data?: Record<string, unknown>[];
+      paging?: { cursors?: { after?: string }; next?: string };
+    };
+    const data = resp.data ?? [];
+    out.push(...data);
+    const next = resp.paging?.cursors?.after;
+    if (!next || !resp.paging?.next || data.length === 0) break;
+    after = next;
+  }
+  return out;
+}
+
 // ── Main hook ──────────────────────────────────────────────────────────────────
 
 // Meta's /insights endpoint caps queryable history at ~37 months. If the user
@@ -870,13 +898,13 @@ export function useMetaTopAds(accountIds: string[], since: string, until: string
       const TIME_RANGE = JSON.stringify({ since: sinceClamped, until });
       const SAFE_STATUSES = JSON.stringify(["ACTIVE", "PAUSED"]);
 
-      const perAccount = await Promise.all(accountIds.map(accountId =>
-        gql(`${accountId}/ads`, {
+      const perAccount = await Promise.all(accountIds.map(async accountId => ({
+        data: await gqlPaged(`${accountId}/ads`, {
           fields: `${TOP_AD_FIELDS},insights.time_range(${TIME_RANGE}){spend,impressions,clicks,ctr,actions}`,
           effective_status: SAFE_STATUSES,
           limit: "50",
-        }).catch(() => ({ data: [] }))
-      )) as { data: {
+        }),
+      }))) as { data: {
         id: string; name: string; status: string;
         adset_id?: string; campaign_id?: string;
         creative?: {
@@ -981,13 +1009,13 @@ export function useMetaTopAdsets(accountIds: string[], since: string, until: str
       const SAFE_STATUSES = JSON.stringify(["ACTIVE", "PAUSED"]);
       const FIELDS = `id,name,status,daily_budget,campaign{id,name},insights.time_range(${TIME_RANGE}){spend,impressions,clicks,ctr,actions}`;
 
-      const perAccount = await Promise.all(accountIds.map(accountId =>
-        gql(`${accountId}/adsets`, {
+      const perAccount = await Promise.all(accountIds.map(async accountId => ({
+        data: await gqlPaged(`${accountId}/adsets`, {
           fields: FIELDS,
           effective_status: SAFE_STATUSES,
           limit: "50",
-        }).catch(() => ({ data: [] }))
-      )) as { data: {
+        }),
+      }))) as { data: {
         id: string; name: string; status: string;
         daily_budget?: string;
         campaign?: { id: string; name: string };
