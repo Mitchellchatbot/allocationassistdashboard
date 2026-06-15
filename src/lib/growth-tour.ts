@@ -47,7 +47,7 @@ export const GROWTH_TOUR_STEPS: TourStep[] = [
     target: "metaads-overview",
     title:  "Spend, reach & the cost funnel",
     body:   "KPI cards (spend, impressions, reach, CTR, CPM…) plus a cost funnel: Cost-per-Lead (from forms), Cost-per-Qualified, and Cost-per-Conversion. Read them together to spot where money leaks — cheap leads but expensive qualified usually means the wrong audience is filling in the form.",
-    placement: "bottom",
+    placement: "auto",
   },
   {
     placement: "center",
