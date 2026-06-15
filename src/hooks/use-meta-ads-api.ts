@@ -597,7 +597,7 @@ export function useMetaCampaignAds(campaignId: string | null, since: string, unt
         gql(`${campaignId}/ads`, {
           fields: [
             "id", "name", "status",
-            "creative{id,thumbnail_url,image_url,title,body,call_to_action_type,object_story_spec{link_data{image_hash,link,description,caption,message,call_to_action{type}},video_data{image_url,video_id,title,message,call_to_action{type}}},effective_object_story_id}",
+            "creative{id,thumbnail_url,image_url,title,body,call_to_action_type,object_story_spec{link_data{image_hash,picture,link,description,caption,message,call_to_action{type}},video_data{image_url,video_id,title,message,call_to_action{type}}},effective_object_story_id}",
             `insights.time_range(${TIME_RANGE}){spend,impressions,clicks,ctr,actions,quality_ranking,engagement_rate_ranking}`,
           ].join(","),
           limit: "100",
@@ -632,7 +632,7 @@ export function useMetaCampaignAds(campaignId: string | null, since: string, unt
           thumbnail_url?: string; image_url?: string; title?: string; body?: string;
           call_to_action_type?: string; effective_object_story_id?: string;
           object_story_spec?: {
-            link_data?: { image_hash?: string; link?: string; description?: string; message?: string; caption?: string; call_to_action?: { type?: string } };
+            link_data?: { image_hash?: string; picture?: string; link?: string; description?: string; message?: string; caption?: string; call_to_action?: { type?: string } };
             video_data?: { image_url?: string; video_id?: string; title?: string; message?: string; call_to_action?: { type?: string } };
           };
           asset_feed_spec?: { titles?: { text: string }[]; bodies?: { text: string }[] };
@@ -643,10 +643,13 @@ export function useMetaCampaignAds(campaignId: string | null, since: string, unt
         const cr  = ad.creative ?? {};
         const oss = cr.object_story_spec;
 
-        // Resolve thumbnail: direct > video_data image > link_data fallback
-        const thumb = cr.thumbnail_url
+        // Resolve image: prefer the FULL-resolution poster (video) / picture
+        // (image ad) — Meta's top-level thumbnail_url is a tiny 64×64 crop that
+        // looks blurry at card size. Fall back to the small thumbnail last.
+        const thumb = oss?.video_data?.image_url
+          || oss?.link_data?.picture
           || cr.image_url
-          || oss?.video_data?.image_url
+          || cr.thumbnail_url
           || undefined;
 
         // Resolve title/body from multiple sources
@@ -733,7 +736,7 @@ const CREATIVE_FIELDS =
   "id,name,status," +
   "creative{id,thumbnail_url,image_url,title,body,call_to_action_type," +
     "object_story_spec{" +
-      "link_data{description,caption,message,call_to_action{type}}," +
+      "link_data{picture,description,caption,message,call_to_action{type}}," +
       "video_data{image_url,video_id,title,message,call_to_action{type}}" +
     "}," +
     "effective_object_story_id}";
@@ -744,7 +747,7 @@ function mapAdCreative(ad: {
     thumbnail_url?: string; image_url?: string; title?: string; body?: string;
     call_to_action_type?: string; effective_object_story_id?: string;
     object_story_spec?: {
-      link_data?: { description?: string; message?: string; caption?: string; call_to_action?: { type?: string } };
+      link_data?: { picture?: string; description?: string; message?: string; caption?: string; call_to_action?: { type?: string } };
       video_data?: { image_url?: string; video_id?: string; title?: string; message?: string; call_to_action?: { type?: string } };
     };
     asset_feed_spec?: { titles?: { text: string }[]; bodies?: { text: string }[] };
@@ -752,7 +755,8 @@ function mapAdCreative(ad: {
 }): MetaAdRow {
   const cr  = ad.creative ?? {};
   const oss = cr.object_story_spec;
-  const thumb = cr.thumbnail_url || cr.image_url || oss?.video_data?.image_url;
+  // Prefer full-resolution image over Meta's tiny 64×64 thumbnail_url.
+  const thumb = oss?.video_data?.image_url || oss?.link_data?.picture || cr.image_url || cr.thumbnail_url;
   const title = (cr as { title?: string }).title || oss?.link_data?.caption || oss?.link_data?.description || oss?.video_data?.title || cr.asset_feed_spec?.titles?.[0]?.text;
   const body  = (cr as { body?: string }).body || oss?.link_data?.message || oss?.video_data?.message || cr.asset_feed_spec?.bodies?.[0]?.text;
   const cta   = (cr as { call_to_action_type?: string }).call_to_action_type || oss?.link_data?.call_to_action?.type || oss?.video_data?.call_to_action?.type;
@@ -834,7 +838,7 @@ const TOP_AD_FIELDS =
   "id,name,status,adset_id,campaign_id," +
   "creative{thumbnail_url,image_url,title,body,call_to_action_type," +
     "object_story_spec{" +
-      "link_data{description,caption,message,call_to_action{type}}," +
+      "link_data{picture,description,caption,message,call_to_action{type}}," +
       "video_data{image_url,video_id,title,message,call_to_action{type}}" +
     "}," +
     "effective_object_story_id}";
@@ -879,7 +883,7 @@ export function useMetaTopAds(accountIds: string[], since: string, until: string
           thumbnail_url?: string; image_url?: string; title?: string; body?: string;
           call_to_action_type?: string; effective_object_story_id?: string;
           object_story_spec?: {
-            link_data?: { description?: string; caption?: string; message?: string; call_to_action?: { type?: string } };
+            link_data?: { picture?: string; description?: string; caption?: string; message?: string; call_to_action?: { type?: string } };
             video_data?: { image_url?: string; video_id?: string; title?: string; message?: string; call_to_action?: { type?: string } };
           };
         };
@@ -902,7 +906,8 @@ export function useMetaTopAds(accountIds: string[], since: string, until: string
 
           const cr  = ad.creative ?? {};
           const oss = cr.object_story_spec;
-          const thumb = cr.thumbnail_url || cr.image_url || oss?.video_data?.image_url;
+          // Prefer full-resolution image over Meta's tiny 64×64 thumbnail_url.
+          const thumb = oss?.video_data?.image_url || oss?.link_data?.picture || cr.image_url || cr.thumbnail_url;
           const title = (cr as { title?: string }).title || oss?.link_data?.caption || oss?.link_data?.description || oss?.video_data?.title;
           const body  = (cr as { body?: string }).body || oss?.link_data?.message || oss?.video_data?.message;
           const cta   = (cr as { call_to_action_type?: string }).call_to_action_type || oss?.link_data?.call_to_action?.type || oss?.video_data?.call_to_action?.type;
