@@ -10,41 +10,44 @@
  *
  * The provider handles route navigation; targets that take a moment to
  * mount (lazy-loaded chunks, react-query first-load) are retried for
- * ~2s before the overlay gives up and centres the tooltip.
+ * ~2s before the overlay gives up and centres the tooltip. While a tour
+ * is active the sidebar force-expands every section so the sidebar-<slug>
+ * spotlights always have a target.
  *
- * Bump HI_TOUR_ID whenever you add/remove steps so anyone who already
- * dismissed an earlier version gets the new walkthrough on next visit.
+ * Bump HI_TOUR_ID whenever you add/remove steps or materially rewrite the
+ * copy, so anyone who already dismissed an earlier version gets the new
+ * walkthrough on next visit.
  */
 import type { TourStep } from "@/components/OnboardingTour";
 
-export const HI_TOUR_ID = "hi-onboarding-v5";
+export const HI_TOUR_ID = "hi-onboarding-v6";
 
 export const HI_TOUR_STEPS: TourStep[] = [
   {
     placement: "center",
     title:  "Welcome to the Hospital Introduction module",
-    body:   "Quick guided tour — we'll visit every page you'll use and point at the bits that matter. ~3 minutes. Replay any time from the Tour button up top.",
+    body:   "This is the engine that walks a doctor from a first hospital intro all the way to their second payment. We'll visit every page you'll use and point at the bits that matter — about 3 minutes. You can replay it any time from the Tour button at the top-right, and every page has its own ⓘ help button for the full written guide.",
   },
 
   // ── Dashboard ───────────────────────────────────────────────────────
   {
     target: "sidebar-dashboard",
     title:  "Dashboard — team-wide overview",
-    body:   "The home view. KPIs across the whole HI team plus a cross-cutting to-do list. Useful for managers; HI members usually live in My Workspace instead.",
+    body:   "The home view: KPIs across the WHOLE HI team plus a cross-cutting to-do list. It's the manager's cockpit. If you're an HI member working your own doctors, you'll spend your day in My Workspace instead — but the Dashboard is where leadership sees how the team is tracking.",
     placement: "right",
   },
   {
     route: "/",
     target: "dashboard-pending",
-    title:  "Pending Actions",
-    body:   "The team's actionable inbox, bucketed by urgency. 'Stale' is anything with no activity in 7+ days. 'Action needed' is anything where a flow is waiting on a manual click. Click any row to open the run detail sheet on the right.",
+    title:  "Pending Actions — the team's inbox",
+    body:   "Everything that needs a human, bucketed by urgency. 'Stale' = a run with no activity for 7+ days (it's drifting — chase it). 'Action needed' = a flow paused at a manual step waiting on a click. Click any row to slide open the run detail sheet on the right and act without leaving the page.",
     placement: "auto",
   },
   {
     route: "/",
     target: "dashboard-kpis",
     title:  "KPI snapshot",
-    body:   "Six cards covering channel mix, pipeline value, sign-rate, and revenue. Click a card to expand its full breakdown. The date-range above scopes every number here.",
+    body:   "Six cards covering channel mix, pipeline value, sign-rate and revenue. Click a card to flip it open for the full breakdown behind the headline number. Everything here respects the date range selector at the top of the page — change it and every figure recomputes.",
     placement: "auto",
   },
 
@@ -52,39 +55,35 @@ export const HI_TOUR_STEPS: TourStep[] = [
   {
     target: "sidebar-my-workspace",
     title:  "My Workspace — your home base",
-    body:   "What's on YOUR plate, scoped automatically to runs assigned to you (via the hospital owner, or because you triggered the run). HI members land here by default at login.",
+    body:   "The same idea as the Dashboard, but scoped to just YOU — runs assigned to you because you own the hospital, or because you started the run. HI members land here automatically at login. If you only check one screen each morning, make it this one.",
     placement: "right",
   },
   {
     route: "/my-workspace",
     target: "workspace-tasks",
     title:  "Tasks waiting on you",
-    body:   "Pipeline rows where you're the bottleneck — pick a city for a relocation, confirm a shortlist, chase a contract. Stale ones (7d+) get an amber flag. Clicking a row jumps you straight into Automations with the run detail sheet open.",
+    body:   "Pipeline rows where YOU are the bottleneck — pick a relocation city, confirm a shortlist, send a contract. Anything untouched for 7+ days gets an amber 'stale' flag so nothing rots. Click a row and you jump straight into Automations with that run's detail sheet already open.",
     placement: "auto",
   },
   {
     route: "/my-workspace",
     target: "workspace-grid",
     title:  "Your doctors + your vacancies",
-    body:   "Two columns: doctors with an active flow assigned to you, and the vacancies you opened (or own via a hospital you're responsible for). One click jumps you into either page filtered to that record.",
+    body:   "Two columns: doctors with an active flow assigned to you, and the vacancies you opened (or own via a hospital you're responsible for). One click takes you into either the Doctors or Vacancies page already filtered to that record — no hunting.",
     placement: "auto",
   },
 
   // ── Doctors hub (Progress + Profiles in one page) ───────────────────
-  // Used to be three separate sidebar entries — now one. The deep tour
-  // steps that referenced doctor-profile-card / doctor-lifecycle /
-  // doctor-matches went away with the AA Profiles tab. New deep-dive
-  // happens inside the WP candidate detail dialog (click any row).
   {
     target: "sidebar-doctors",
     title:  "Doctors hub",
-    body:   "One place for every doctor view: Doctor Progress (Zoho pipeline stages) and Profiles (the canonical record we use in hospital emails). Tabs at the top switch between them; a single search bar filters whichever tab you're on.",
+    body:   "Every doctor view in one place. Two tabs at the top: Doctor Progress (where each doctor sits in the Zoho pipeline) and Profiles (the canonical record we put in front of hospitals). One search bar filters whichever tab you're on — name, specialty, location.",
     placement: "right",
   },
   {
     route: "/doctors?tab=profiles",
-    title:  "Click any row to edit inline",
-    body:   "Each profile opens a fully-editable card — hover any field (name, specialty, photo, education…) to change it. Saves directly to WordPress. New profiles auto-link to a Zoho lead when there's an email match.",
+    title:  "Profiles — click any row to edit inline",
+    body:   "A profile opens as a fully-editable card — hover any field (name, specialty, photo, education, bio…) to change it, and it saves straight to WordPress, which is what the public AA website and your hospital emails read from. New profiles auto-link to a Zoho lead whenever the email matches.",
     placement: "auto",
   },
 
@@ -92,51 +91,51 @@ export const HI_TOUR_STEPS: TourStep[] = [
   {
     target: "sidebar-automations",
     title:  "Automations — the heart of HI",
-    body:   "Six email flows that walk a doctor from first hospital intro to first payment. The system sends the templated emails automatically; the team only steps in at the manual-action stages. Let's go look inside.",
+    body:   "Six email flows that carry a doctor from first hospital intro to first payment. The system sends the templated emails on schedule; you only step in at the handful of manual-action stages. Everything else — timing, reminders, reply-watching — runs itself. Let's look inside.",
     placement: "right",
   },
   {
     route: "/automations",
     target: "automations-flows",
     title:  "The 6 flows, one tab each",
-    body:   "Profile Sent (intro to hospital), Shortlist (hospital interested), Interview (scheduling + tips), Contract (track milestones on Placements), Relocation (city-specific guide), Second Payment (45-day clock + reminders). Onboarding was removed — Sales sends the intake form from Zoho when a lead converts.",
+    body:   "Profile Sent (intro to hospital) → Shortlist (hospital's interested) → Interview (scheduling + prep tips) → Contract (milestone tracking on Placements) → Relocation (city-specific guide + attestation) → Second Payment (45-day clock with reminders). Onboarding was retired — Sales now sends the intake form from Zoho the moment a lead converts.",
     placement: "bottom",
   },
   {
     route: "/automations",
     target: "automations-admin",
     title:  "Queues, Hospitals, Templates, Default Editor",
-    body:   "Queues = every active run sitting at a manual-action stage, split by what's needed (profile to send, city to pick, contract to send, etc). Hospitals = recruiter directory. Templates = editable email library. Default Flow Editor = stage delays + subjects per flow.",
+    body:   "Four admin tabs. Queues = every run sitting at a manual stage, grouped by what it needs (profile to send, city to pick, contract to send…). Hospitals = the recruiter directory. Templates = the editable email library. Default Flow Editor = the per-stage delays and subject lines for each flow.",
     placement: "bottom",
   },
   {
     placement: "center",
     title:  "Opening a run",
-    body:   "Clicking any row anywhere (Workspace, Queues, Pending Actions) opens the Run Detail Sheet. Inside: the full timeline, the suggestion cards (e.g. 'Hospital looks interested — Mark shortlisted?'), the manual-action button for the current stage, and Reassign.",
+    body:   "Clicking a row ANYWHERE — Workspace, Queues, Pending Actions — opens the same Run Detail Sheet. Inside you get the full timeline, suggestion cards ('Hospital looks interested — Mark shortlisted?'), the manual-action button for the current stage, and a Reassign control to hand the run to a teammate.",
   },
   {
     placement: "center",
-    title:  "Manual shortlist",
-    body:   "Hospitals rarely write 'shortlisted' explicitly — usually a phone call. When the reply classifier thinks they're interested, a yellow card appears on the run with two buttons: Mark shortlisted / Not shortlisted. The system never advances automatically; you confirm.",
+    title:  "Manual shortlist — you stay in control",
+    body:   "Hospitals almost never write 'shortlisted' — it's usually a phone call. When the reply classifier senses interest, a yellow card appears on the run with two buttons: Mark shortlisted / Not shortlisted. The system NEVER advances the doctor on its own; a human always confirms the real-world outcome.",
   },
   {
     placement: "center",
     title:  "Sending a profile",
-    body:   "Send Profile picks the doctor, multi-selects hospitals (filtered by specialty match), and previews the email. Each hospital recipient gets their own tokenised 'View full profile' link — they can open the AA-website profile without a login, and you see view counts.",
+    body:   "Send Profile picks the doctor, lets you multi-select hospitals (filtered to specialty matches), and previews the exact email. Each hospital gets its own tokenised 'View full profile' link — they open the AA-website profile with no login, and you can see how many times each one viewed it.",
   },
 
   // ── Vacancies ───────────────────────────────────────────────────────
   {
     target: "sidebar-vacancies",
     title:  "Vacancies",
-    body:   "Open hospital roles. New vacancies usually come in by email reply from a hospital — once logged, they become target slots for matching doctors.",
+    body:   "The open roles hospitals are trying to fill. Most arrive as an email reply from a hospital; once logged, each vacancy becomes a target slot you can match doctors against.",
     placement: "right",
   },
   {
     route: "/vacancies",
     target: "vacancies-table",
     title:  "Click any row for ranked matches",
-    body:   "Each vacancy opens a side sheet with TWO tabs: Onboarded doctors (auto-scored from the ~1k AA roster, Strong/Decent/Long-shot tiers) and Leads (filled by Sales as they speak with prospects — empty by default). Specialty fuzzy-matches: a 'Retinal Specialist' doctor matches an 'Ophthalmology' vacancy.",
+    body:   "A vacancy opens a side sheet with two tabs: Onboarded doctors (auto-scored from the ~1,000-strong AA roster into Strong / Decent / Long-shot tiers) and Leads (filled by Sales as they speak to prospects — empty by default). Specialties fuzzy-match, so a 'Retinal Specialist' surfaces for an 'Ophthalmology' vacancy.",
     placement: "auto",
   },
 
@@ -144,14 +143,14 @@ export const HI_TOUR_STEPS: TourStep[] = [
   {
     target: "sidebar-batches",
     title:  "Batch Sends",
-    body:   "Country-scoped broadcasts (UAE / KSA / Qatar / Oman / Kuwait / Bahrain). Daily Duo (Mon-Fri, 2 profiles per country). Tuesday Top 15 (mixed specialties). Specialty of the Day (Wed-Fri). Each batch hits ONLY its country's hospitals — create one per country per day.",
+    body:   "Country-scoped broadcasts — UAE, KSA, Qatar, Oman, Kuwait, Bahrain. Daily Duo (Mon–Fri, 2 profiles per country), Tuesday Top 15 (mixed specialties), and Specialty of the Day (Wed–Fri). Each batch reaches ONLY that country's hospital recruiters, so you create one per country per day.",
     placement: "right",
   },
   {
     route: "/batches",
     target: "batches-rotation",
     title:  "Today's specialty + the queue",
-    body:   "The rotation cursor cycles through the 67 canonical specialties from the AA website (not the old Zoho-bucketed list). Auto-advances after every Specialty-of-day send. The same specialty also biases Daily Duo + Tuesday picks so a day's sends stay on one theme.",
+    body:   "The rotation cursor walks the canonical specialty list pulled from the AA website (not the old Zoho buckets), auto-advancing after each Specialty-of-the-Day send. That same specialty also nudges the Daily Duo and Tuesday picks, so a day's sends stay on one coherent theme.",
     placement: "auto",
   },
 
@@ -159,14 +158,14 @@ export const HI_TOUR_STEPS: TourStep[] = [
   {
     target: "sidebar-reports",
     title:  "Reports",
-    body:   "KPI strip, weekly + monthly recap, Placements tracker (replaces the Hammad sheet — one row per (doctor, hospital) pair, so the same doctor sent to 4 hospitals = 4 rows), per-doctor breakdown, hospital relationship health.",
+    body:   "The HI scoreboard: a KPI strip, weekly + monthly recaps, the Placements tracker (this is what replaced Hammad's spreadsheet), a per-doctor breakdown, and hospital-relationship health.",
     placement: "right",
   },
   {
     route: "/reports",
     target: "reports-filters",
     title:  "Slice by anything",
-    body:   "Filter by hospital, HI team member, specialty, date range. Below this: KPI strip → weekly/monthly recap (deltas vs prior period) → Trend chart → Placements (per doctor×hospital pair, with bulk-import-from-CSV + 'New placement' picker that pulls doctors from Zoho) → Per-doctor table → Hospital relationships.",
+    body:   "Filter by hospital, HI team member, specialty, or date range, and everything below re-scopes. Note the Placements table has one row per (doctor, hospital) PAIR — the same doctor sent to four hospitals shows as four rows — with bulk CSV import and a 'New placement' picker that pulls doctors straight from Zoho.",
     placement: "bottom",
   },
 
@@ -174,31 +173,31 @@ export const HI_TOUR_STEPS: TourStep[] = [
   {
     target: "topbar-search",
     title:  "Universal Search — ⌘K",
-    body:   "Index of doctors, hospitals, flow stages, vacancies, templates. Jumps you anywhere in two keystrokes. Empty-state shows your recent items so the most likely next click is one keypress away.",
+    body:   "One index across doctors, hospitals, flow stages, vacancies and templates — jump anywhere in two keystrokes. Opening it with nothing typed shows your recent items, so the most likely next click is already one keypress away.",
     placement: "bottom",
   },
   {
     target: "topbar-notifications",
     title:  "Notifications",
-    body:   "Replies to your sends, doctor uploads, hospital responses, contract signatures. HI members only see notifications addressed to them; admin sees the team-wide stream. The badge count is unread-only.",
+    body:   "Replies to your sends, doctor uploads, hospital responses, contract signatures. HI members see only what's addressed to them; admins see the whole team stream. The red badge counts unread only — clear it by opening the items.",
     placement: "bottom",
   },
   {
     target: "ai-floating-button",
     title:  "AI Assistant",
-    body:   "Ask anything — 'what's stuck right now', 'how do I link a lead to a vacancy', 'which hospitals are cooling off', 'why didn't Dr X's contract send'. It knows the full system AND your live data and answers with concrete next steps + clickable references.",
+    body:   "Ask it anything in plain English — 'what's stuck right now', 'how do I link a lead to a vacancy', 'which hospitals are cooling off', 'why didn't Dr X's contract send'. It knows both how the system works AND your live data, and answers with concrete next steps plus clickable links.",
     placement: "left",
   },
   {
     target: "topbar-tour-button",
     title:  "Replay this tour any time",
-    body:   "Tap here to run this walkthrough again. Useful when a new flow ships or when you're showing the module to a new HI hire.",
+    body:   "This button re-runs the walkthrough whenever you need it — handy when a new flow ships, or when you're onboarding a new HI hire. Each section of the dashboard (Sales, Growth, Admin) has its own tour here too; the button always launches the one for the page you're on.",
     placement: "bottom",
   },
 
   {
     placement: "center",
     title:  "You're set",
-    body:   "When you're stuck on a specific page, ask the AI — it's the fastest way to learn. Now go close some hospital introductions.",
+    body:   "When you get stuck on a specific page, the fastest help is the AI Assistant or that page's ⓘ button. Now go close some hospital introductions.",
   },
 ];

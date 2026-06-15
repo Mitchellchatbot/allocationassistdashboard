@@ -43,6 +43,7 @@ import {
 } from "@/components/ui/sidebar";
 import { useNotifications } from "@/hooks/use-notifications";
 import { useUniversalSearch } from "@/lib/universal-search-context";
+import { useTour } from "@/components/OnboardingTour";
 
 interface NavItem {
   title:   string;
@@ -161,6 +162,11 @@ export function AppSidebar() {
   const { unreadCount } = useNotifications();
   const badgeCtx: BadgeContext = { unreadNotifications: unreadCount };
   const search = useUniversalSearch();
+  // While a guided tour runs, force every section open so the tour's
+  // sidebar-<slug> spotlights always have a mounted target — otherwise a
+  // collapsed section (Admin is collapsed by default) hides its nav items and
+  // the step falls back to a centred, anchorless tooltip.
+  const { isActive: tourActive } = useTour();
 
   // Filter sections to only the items this user can see. Drop empty sections
   // entirely so we don't render headers without children.
@@ -211,7 +217,7 @@ export function AppSidebar() {
         )}
 
         {visibleSections.map(section => {
-          const isCollapsed = !!collapsedMap[section.label];
+          const isCollapsed = tourActive ? false : !!collapsedMap[section.label];
           return (
             <SidebarGroup key={section.label} className="pb-1">
               {!collapsed && (
@@ -241,11 +247,11 @@ export function AppSidebar() {
               <CollapsibleHeader
                 label={visibleAdmin.label}
                 accent={visibleAdmin.accent}
-                isCollapsed={!!collapsedMap[visibleAdmin.label]}
+                isCollapsed={tourActive ? false : !!collapsedMap[visibleAdmin.label]}
                 onToggle={() => toggle(visibleAdmin.label)}
               />
             )}
-            {(collapsed || !collapsedMap[visibleAdmin.label]) && (
+            {(collapsed || tourActive || !collapsedMap[visibleAdmin.label]) && (
               <SidebarGroupContent>
                 <SidebarMenu>
                   {visibleAdmin.items.map(item => (
