@@ -132,17 +132,39 @@ const UNIVERSAL_STEPS: TourStep[] = [
     title: "Replay anytime", body: "This button re-runs the walkthrough for whatever section you're on. Handy after today, or when something new ships." },
 ];
 
+// Mirror of requiredPageForPath() in App.tsx — a few routes are gated behind a
+// DIFFERENT page than their own path (e.g. /connections and /import-bulk gate on
+// "/"). Replicated here rather than imported to avoid an App <-> tours import
+// cycle; keep in sync if the guard mapping in App.tsx changes.
+function guardPageFor(route: string): string {
+  const path = route.split("?")[0];
+  if (path === "/import" || path === "/contracts" || path === "/import-bulk" || path === "/connections") return "/";
+  if (path === "/leads-pipeline" || path === "/doctor-profiles" || path === "/wp-candidates") return "/doctors";
+  return path;
+}
+
+// Pages this user can BOTH see in their nav (url in allowed_pages) AND actually
+// reach (the route guard, which sometimes gates on a different page, passes).
+// This is the à-la-carte safety net: a step only survives if navigating to it
+// won't bounce off ProtectedRoute.
+function tourablePages(allowedPages: string[]): string[] {
+  return ONBOARDING_PAGE_ORDER.filter(p => {
+    const step = PAGE_INTRO_STEPS[p];
+    if (!step) return false;
+    if (!allowedPages.includes(p)) return false;             // shows in their nav
+    return allowedPages.includes(guardPageFor(step.route ?? p)); // guard will pass
+  });
+}
+
 /** True if a user has at least one page we can actually tour — used to avoid
  *  trapping a user (e.g. an unusual access set) in an empty mandatory tour. */
 export function hasOnboardingContent(allowedPages: string[]): boolean {
-  return ONBOARDING_PAGE_ORDER.some(p => allowedPages.includes(p) && !!PAGE_INTRO_STEPS[p]);
+  return tourablePages(allowedPages).length > 0;
 }
 
 /** Build a personalised onboarding tour from the pages this user can reach. */
 export function buildOnboardingTour(allowedPages: string[]): SectionTour {
-  const pageSteps = ONBOARDING_PAGE_ORDER
-    .filter(p => allowedPages.includes(p) && !!PAGE_INTRO_STEPS[p])
-    .map(p => PAGE_INTRO_STEPS[p]);
+  const pageSteps = tourablePages(allowedPages).map(p => PAGE_INTRO_STEPS[p]);
 
   const steps: TourStep[] = [
     {
