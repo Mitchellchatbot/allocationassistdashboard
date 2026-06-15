@@ -8,10 +8,13 @@ import "./index.css";
 // the server. serve -s falls back to index.html (HTML), the browser
 // strict-MIME-checks the import as JS, and the page silently breaks.
 //
-// Detect the failure and do one hard reload to fetch the fresh
-// index.html. The sessionStorage flag stops an infinite reload loop on
-// genuinely broken builds.
-const RELOADED_KEY = "aa-chunk-reload-attempted";
+// Detect the failure and do one hard reload to fetch the fresh index.html.
+// A TIME-BASED guard (shared with App.tsx's lazy() self-heal via the same
+// sessionStorage key) stops an infinite reload loop: we reload at most once per
+// 30s. The previous version cleared its flag 5s after every load, which turned
+// a persistently-failing chunk into an endless reload loop.
+const RELOAD_AT_KEY = "aa-chunk-reload-at";
+const RELOAD_COOLDOWN_MS = 30_000;
 
 function isChunkLoadError(e: unknown): boolean {
   const msg = e instanceof Error ? e.message : String(e ?? "");
@@ -23,8 +26,9 @@ function isChunkLoadError(e: unknown): boolean {
 
 function maybeReload(e: unknown) {
   if (!isChunkLoadError(e)) return;
-  if (sessionStorage.getItem(RELOADED_KEY)) return;  // already tried; don't loop
-  sessionStorage.setItem(RELOADED_KEY, "1");
+  const last = Number(sessionStorage.getItem(RELOAD_AT_KEY) || 0);
+  if (Date.now() - last < RELOAD_COOLDOWN_MS) return;  // reloaded recently — don't loop
+  sessionStorage.setItem(RELOAD_AT_KEY, String(Date.now()));
   // Tiny delay so the failure surfaces in the console before the reload.
   setTimeout(() => window.location.reload(), 100);
 }
@@ -62,12 +66,6 @@ window.addEventListener("unhandledrejection", (event) => {
   } else {
     console.error("[UnhandledRejection]", r);
   }
-});
-
-// Clear the reload flag on a successful first paint so the next deploy
-// gets its own one-shot recovery attempt.
-window.addEventListener("load", () => {
-  setTimeout(() => sessionStorage.removeItem(RELOADED_KEY), 5000);
 });
 
 createRoot(document.getElementById("root")!).render(<App />);

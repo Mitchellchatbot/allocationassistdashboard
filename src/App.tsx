@@ -34,9 +34,9 @@ function lazy<T extends { default: ComponentType<unknown> }>(factory: () => Prom
       const msg = err instanceof Error ? err.message : String(err);
       const isChunkFetchError = /dynamically imported module|module script failed|importing a module|failed to fetch/i.test(msg);
       if (isChunkFetchError) {
-        const KEY = "aa-chunk-reload-at";
+        const KEY = "aa-chunk-reload-at";  // shared with main.tsx's global handler
         const last = Number(sessionStorage.getItem(KEY) || 0);
-        if (Date.now() - last > 10_000) {
+        if (Date.now() - last > 30_000) {
           sessionStorage.setItem(KEY, String(Date.now()));
           window.location.reload();
           return new Promise<T>(() => {}); // hang on the spinner until the reload lands
