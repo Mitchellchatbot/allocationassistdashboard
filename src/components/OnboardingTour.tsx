@@ -37,8 +37,19 @@ export interface TourStep {
 }
 
 interface TourContextValue {
-  start:    (steps: TourStep[], opts?: { id?: string; label?: string }) => void;
+  start:    (steps: TourStep[], opts?: TourStartOptions) => void;
   isActive: boolean;
+}
+
+interface TourStartOptions {
+  id?:    string;
+  label?: string;
+  /** When true, the tour can't be skipped/dismissed (no Skip, no X, no Esc) —
+   *  the user must complete every step. Used for mandatory onboarding. */
+  mandatory?: boolean;
+  /** Fired once when the tour is genuinely COMPLETED (reaches the finale),
+   *  not when skipped. Used to persist "onboarding done" server-side. */
+  onComplete?: () => void;
 }
 
 const TourContext = createContext<TourContextValue>({ start: () => {}, isActive: false });
@@ -56,6 +67,11 @@ export function OnboardingTourProvider({ children }: { children: ReactNode }) {
   // When the user finishes the LAST step (vs. skipping), we swap the step
   // overlay for a short celebratory finale before fully closing.
   const [finale, setFinale] = useState(false);
+  // Mandatory onboarding: no skip / no Esc / no close button.
+  const [mandatory, setMandatory] = useState(false);
+  // Completion callback (persist onboarding done) — held in a ref so it
+  // survives re-renders without re-triggering effects.
+  const onCompleteRef = useRef<(() => void) | null>(null);
   const navigate = useNavigate();
   const location = useLocation();
 
@@ -76,18 +92,22 @@ export function OnboardingTourProvider({ children }: { children: ReactNode }) {
     }
     setActive(false);
     setFinale(false);
+    setMandatory(false);
+    onCompleteRef.current = null;
     setSteps([]);
     setStepIdx(0);
     setTourId(null);
     setTourLabel(null);
   }, [tourId]);
 
-  // Finishing the last step: mark the tour seen and show the celebratory
-  // finale (the finale's own button / auto-timeout then fully closes).
+  // Finishing the last step: mark the tour seen, fire the completion callback
+  // (e.g. persist onboarding done), and show the celebratory finale (its own
+  // button / auto-timeout then fully closes).
   const finish = useCallback(() => {
     if (tourId) {
       try { localStorage.setItem(`${STORAGE_PREFIX}${tourId}`, "1"); } catch { /* ignore */ }
     }
+    try { onCompleteRef.current?.(); } catch { /* ignore */ }
     setFinale(true);
   }, [tourId]);
 
@@ -96,12 +116,14 @@ export function OnboardingTourProvider({ children }: { children: ReactNode }) {
   // /my-workspace, MyWorkspace's mount-effect calls start again because
   // hasSeenTour is still false mid-tour). Without this guard the tour
   // restarted from step 0 every time it crossed into /my-workspace.
-  const start = useCallback((nextSteps: TourStep[], opts?: { id?: string; label?: string }) => {
+  const start = useCallback((nextSteps: TourStep[], opts?: TourStartOptions) => {
     if (active && tourId && tourId === (opts?.id ?? null)) return;
     setSteps(nextSteps);
     setStepIdx(0);
     setTourId(opts?.id ?? null);
     setTourLabel(opts?.label ?? null);
+    setMandatory(!!opts?.mandatory);
+    onCompleteRef.current = opts?.onComplete ?? null;
     setFinale(false);
     setActive(true);
   }, [active, tourId]);
@@ -110,14 +132,14 @@ export function OnboardingTourProvider({ children }: { children: ReactNode }) {
   useEffect(() => {
     if (!active) return;
     const onKey = (e: KeyboardEvent) => {
-      if (e.key === "Escape") close(false);
-      else if (finale) return;  // finale slide — arrows shouldn't scrub steps
-      else if (e.key === "ArrowRight") setStepIdx(i => Math.min(steps.length - 1, i + 1));
+      if (e.key === "Escape") { if (!mandatory) close(false); return; }  // mandatory: no Esc
+      if (finale) return;  // finale slide — arrows shouldn't scrub steps
+      if (e.key === "ArrowRight") setStepIdx(i => Math.min(steps.length - 1, i + 1));
       else if (e.key === "ArrowLeft")  setStepIdx(i => Math.max(0, i - 1));
     };
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
-  }, [active, steps.length, close, finale]);
+  }, [active, steps.length, close, finale, mandatory]);
 
   return (
     <TourContext.Provider value={{ start, isActive: active }}>
@@ -127,6 +149,7 @@ export function OnboardingTourProvider({ children }: { children: ReactNode }) {
           step={steps[stepIdx]}
           stepIdx={stepIdx}
           total={steps.length}
+          mandatory={mandatory}
           onPrev={() => setStepIdx(i => Math.max(0, i - 1))}
           onNext={() => {
             if (stepIdx === steps.length - 1) finish();
@@ -173,10 +196,11 @@ function getTargetRect(selector: string | undefined, padding: number): Rect | nu
   };
 }
 
-function TourOverlay({ step, stepIdx, total, onPrev, onNext, onSkip }: {
+function TourOverlay({ step, stepIdx, total, mandatory, onPrev, onNext, onSkip }: {
   step:    TourStep;
   stepIdx: number;
   total:   number;
+  mandatory?: boolean;
   onPrev:  () => void;
   onNext:  () => void;
   onSkip:  () => void;
@@ -317,13 +341,15 @@ function TourOverlay({ step, stepIdx, total, onPrev, onNext, onSkip }: {
             </div>
             <h3 className="text-[14px] font-semibold text-slate-900 leading-snug">{step.title}</h3>
           </div>
-          <button
-            onClick={onSkip}
-            className="h-6 w-6 rounded-md text-slate-400 hover:text-slate-700 hover:bg-slate-100 flex items-center justify-center"
-            aria-label="Skip tour"
-          >
-            <X className="h-3.5 w-3.5" />
-          </button>
+          {!mandatory && (
+            <button
+              onClick={onSkip}
+              className="h-6 w-6 rounded-md text-slate-400 hover:text-slate-700 hover:bg-slate-100 flex items-center justify-center"
+              aria-label="Skip tour"
+            >
+              <X className="h-3.5 w-3.5" />
+            </button>
+          )}
         </div>
         <p className="text-[12.5px] text-slate-600 leading-relaxed">{step.body}</p>
 
@@ -351,17 +377,19 @@ function TourOverlay({ step, stepIdx, total, onPrev, onNext, onSkip }: {
           >
             <ChevronLeft className="h-3.5 w-3.5 mr-1" /> Back
           </Button>
+          {!mandatory && (
+            <Button
+              variant="ghost"
+              size="sm"
+              className="h-8 text-[12px] text-muted-foreground ml-auto"
+              onClick={onSkip}
+            >
+              Skip
+            </Button>
+          )}
           <Button
-            variant="ghost"
             size="sm"
-            className="h-8 text-[12px] text-muted-foreground ml-auto"
-            onClick={onSkip}
-          >
-            Skip
-          </Button>
-          <Button
-            size="sm"
-            className="h-8 text-[12px]"
+            className={`h-8 text-[12px] ${mandatory ? "ml-auto" : ""}`}
             onClick={onNext}
           >
             {isLast ? <>Got it <Check className="h-3.5 w-3.5 ml-1" /></> : <>Next <ChevronRight className="h-3.5 w-3.5 ml-1" /></>}

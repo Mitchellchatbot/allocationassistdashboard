@@ -12,6 +12,7 @@ import { AIPanelProvider } from "@/lib/ai-panel-context";
 import { OnboardingTourProvider } from "@/components/OnboardingTour";
 import { CurrencyProvider } from "@/lib/CurrencyProvider";
 import { DashboardLayout, ViewportSpinner } from "@/components/layout/DashboardLayout";
+import { OnboardingGate } from "@/components/OnboardingGate";
 
 // Login stays eagerly loaded — it's the first thing unauthenticated users see
 import Login from "./pages/Login";
@@ -120,6 +121,10 @@ function ProtectedShell() {
   const location = useLocation();
   return (
     <ProtectedRoute requiredPage={requiredPageForPath(location.pathname)}>
+      {/* Mandatory first-login onboarding for non-admins. Sits outside the
+          path-keyed FilterProvider so it persists across navigation (launches
+          once per session, not per page). */}
+      <OnboardingGate />
       <FilterProvider key={location.pathname}>
         <DashboardLayout>
           <Suspense fallback={<ViewportSpinner />}>
