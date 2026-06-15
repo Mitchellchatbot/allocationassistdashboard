@@ -61,11 +61,11 @@ you know the architecture and where data lives.
 - [x] [Contract Builder](sales/contract-builder.md)
 
 **Growth**
-- [ ] Marketing
-- [ ] Meta Ads
-- [ ] Forms
-- [ ] Team Performance
-- [ ] Finance
+- [x] [Marketing](growth/marketing.md)
+- [x] [Meta Ads](growth/meta-ads.md)
+- [x] [Forms](growth/forms.md)
+- [x] [Team Performance](growth/team-performance.md)
+- [x] [Finance](growth/finance.md)
 
 **Admin**
 - [ ] Connections
@@ -95,7 +95,7 @@ Target: **≥750 words of real explanation per feature.**
   Introduction clusters complete.) Also added in-app **ⓘ help buttons** on each
   documented page's header, deep-linking to its doc.
 - **Batch 4:** Sales — Sales Tracker, Follow-ups, Calls, Contract Builder. *Done.*
-- **Batch 5:** Growth — Marketing, Meta Ads, Forms, Team Performance, Finance.
+- **Batch 5:** Growth — Marketing, Meta Ads, Forms, Team Performance, Finance. *Done.*
 - **Batch 6:** Admin — Connections, Bulk Import, Import Data, Settings.
 - **Batch 7:** Systems — Auth & roles, Notifications & Slack, Email engine,
   Edge-functions catalogue, public pages.

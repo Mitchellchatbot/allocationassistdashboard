@@ -116,7 +116,7 @@ const TeamPerformance = () => {
   }));
 
   return (
-    <DashboardLayout title="Team Performance" subtitle="See how each sales consultant is performing and track active campaigns">
+    <DashboardLayout title="Team Performance" subtitle="See how each sales consultant is performing and track active campaigns" docSlug="growth/team-performance">
       <SectionDateRange />
 
       {/* ── Recruiter table ─────────────────────────────────────────── */}

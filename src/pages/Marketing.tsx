@@ -353,7 +353,7 @@ const Marketing = () => {
   }, [uncontactedChannel, zoho?.rawLeads, dateRange]);
 
   return (
-    <DashboardLayout title="Marketing" subtitle="See which channels bring in the most doctors and how well they convert">
+    <DashboardLayout title="Marketing" subtitle="See which channels bring in the most doctors and how well they convert" docSlug="growth/marketing">
       <SectionDateRange />
       {/* Channel winner KPIs — Most Revenue Generated, Best Cost/Conv, Best Lead Quality.
           Computed from the SAME channelRows array the table below uses, so

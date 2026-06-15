@@ -149,7 +149,7 @@ export default function Forms({ embedded = false }: { embedded?: boolean }) {
       </div>
   );
 
-  return embedded ? content : <DashboardLayout>{content}</DashboardLayout>;
+  return embedded ? content : <DashboardLayout docSlug="growth/forms">{content}</DashboardLayout>;
 }
 
 function ProviderDot({ provider }: { provider: string }) {

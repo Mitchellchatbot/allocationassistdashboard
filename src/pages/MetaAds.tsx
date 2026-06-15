@@ -1358,7 +1358,7 @@ const MetaAds = () => {
   );
 
   return (
-    <DashboardLayout title="Meta Ads" subtitle="Live performance from Facebook Marketing API · Lead form data from Supabase">
+    <DashboardLayout title="Meta Ads" subtitle="Live performance from Facebook Marketing API · Lead form data from Supabase" docSlug="growth/meta-ads">
       <SectionDateRange />
 
       {/* ══ Meta API section ══════════════════════════════════════════════════ */}

@@ -704,7 +704,7 @@ const Finance = () => {
   }, [monthlySpendByChannel, zoho, dateRange]);
 
   return (
-    <DashboardLayout title="Finance" subtitle="Revenue, spend, profit, and ROI across all channels">
+    <DashboardLayout title="Finance" subtitle="Revenue, spend, profit, and ROI across all channels" docSlug="growth/finance">
       <SectionDateRange />
       {/* ── Period banner — explicit date range + currency lock ───────────────
           Designed to remove ambiguity: every figure on this tab is for the
