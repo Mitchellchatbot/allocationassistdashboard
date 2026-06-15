@@ -48,8 +48,8 @@ you know the architecture and where data lives.
 
 **Hospital Introduction** — the core product
 - [ ] My Workspace
-- [ ] Doctors (pipeline + profiles)
-- [ ] Automations (the 6 email flows, templates, approval queues)
+- [x] [Doctors](hospital-introduction/doctors.md) (responses, pipeline, profiles)
+- [x] [Automations](hospital-introduction/automations.md) (the email flows, templates, the engine)
 - [ ] Vacancies
 - [ ] Batch Sends
 - [ ] Reports
@@ -88,9 +88,8 @@ features share)
 There is a lot here and we are not cutting depth, so it's produced in batches.
 Target: **≥750 words of real explanation per feature.**
 
-- **Batch 1 (this delivery):** README + Overview & Architecture + Data Sources &
-  Sync. *Done.*
-- **Batch 2:** Hospital Introduction core — Doctors, Automations.
+- **Batch 1:** README + Overview & Architecture + Data Sources & Sync. *Done.*
+- **Batch 2:** Hospital Introduction core — Doctors, Automations. *Done.*
 - **Batch 3:** Hospital Introduction — Vacancies, Batch Sends, Reports, My
   Workspace, Dashboard.
 - **Batch 4:** Sales — Sales Tracker, Follow-ups, Calls, Contract Builder.
