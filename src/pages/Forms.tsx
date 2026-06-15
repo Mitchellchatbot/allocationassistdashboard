@@ -128,7 +128,7 @@ export default function Forms({ embedded = false }: { embedded?: boolean }) {
           </Card>
         ) : (
           <Tabs value={safeActiveId ?? undefined} onValueChange={setActiveId}>
-            <TabsList className="flex w-full overflow-x-auto h-auto py-1 bg-slate-100 justify-start">
+            <TabsList className="flex w-full overflow-x-auto h-auto py-1 bg-slate-100 justify-start" data-tour="forms-tabs">
               {formsToShow.map(f => (
                 <TabsTrigger key={f.id} value={f.id} className="text-[12px] px-3 py-1.5 flex items-center gap-1.5">
                   <ProviderDot provider={f.provider} />

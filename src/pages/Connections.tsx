@@ -138,7 +138,7 @@ export default function Connections() {
         </Card>
 
 
-        <Card>
+        <Card data-tour="connections-list">
           <CardHeader className="pb-3">
             <CardTitle className="text-base">Active connections</CardTitle>
             <CardDescription className="text-[11px]">
