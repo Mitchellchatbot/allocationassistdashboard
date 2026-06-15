@@ -33,6 +33,13 @@ export function getMetaToken(): string {
   );
 }
 
+// The access token can see more than one ad account (e.g. a dev account). We
+// must only ever surface the Allocation Assist account's ads here — otherwise
+// someone else's campaigns show up, and querying a restricted account can make
+// the whole page error/retry. Pinned to the AA account (override via env).
+export const AA_AD_ACCOUNT_ID =
+  (import.meta.env.VITE_META_AD_ACCOUNT_ID as string | undefined) || "act_164775630831034";
+
 // ── Types ──────────────────────────────────────────────────────────────────────
 
 export interface MetaAccount {
@@ -321,7 +328,9 @@ export function useMetaAdsApi(dateRange: { from: Date; to: Date }) {
         limit:  "50",
       }) as { data: { id: string; name: string; account_status: number; currency: string; amount_spent: string }[] };
 
-      const allAccounts = accountsResp.data ?? [];
+      // Scope to ONLY the Allocation Assist ad account — the token may have
+      // access to others (a dev account etc.) which we must not pull from.
+      const allAccounts = (accountsResp.data ?? []).filter(a => a.id === AA_AD_ACCOUNT_ID);
       const currency    = "AED";
 
       // Meta's amount_spent is in the SMALLEST currency unit (cents for USD,
