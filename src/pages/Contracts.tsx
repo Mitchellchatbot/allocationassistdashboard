@@ -738,7 +738,7 @@ const Contracts = ({ embedded = false, initialLead = null, testRecipient }: Cont
 
   if (embedded) return body;
   return (
-    <DashboardLayout title="Contract Builder" subtitle="Search a doctor, edit fees and dates, then print">
+    <DashboardLayout title="Contract Builder" subtitle="Search a doctor, edit fees and dates, then print" docSlug="sales/contract-builder">
       {body}
     </DashboardLayout>
   );

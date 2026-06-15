@@ -166,7 +166,7 @@ const Sales = () => {
   );
 
   return (
-    <DashboardLayout title="Sales Tracker" subtitle="See where doctors are in the process and how recruiters are performing">
+    <DashboardLayout title="Sales Tracker" subtitle="See where doctors are in the process and how recruiters are performing" docSlug="sales/sales-tracker">
 
       {/* ── KPI strip ─────────────────────────────────────────────────────── */}
       <div className="grid grid-cols-2 lg:grid-cols-5 gap-3 mb-5">

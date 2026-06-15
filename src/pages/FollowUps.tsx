@@ -247,7 +247,7 @@ const FollowUps = () => {
   });
 
   return (
-    <DashboardLayout title="Follow-ups" subtitle="All leads needing action — High Priority and Contact in Future in one place">
+    <DashboardLayout title="Follow-ups" subtitle="All leads needing action — High Priority and Contact in Future in one place" docSlug="sales/follow-ups">
 
       {/* ── Tab bar ── */}
       <div className="flex items-center gap-2 mb-4">

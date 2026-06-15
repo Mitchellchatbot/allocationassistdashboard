@@ -149,6 +149,7 @@ export default function Calls() {
     <DashboardLayout
       title="Calls"
       subtitle="Sales team recorded calls (Abraham, Asser, Asim) — transcripts & AI summaries from Fathom"
+      docSlug="sales/calls"
     >
       {/* ── Top bar: search, host filter, live auto-sync indicator ───────── */}
       <div className="flex flex-col sm:flex-row gap-2 sm:items-center justify-between mb-4">

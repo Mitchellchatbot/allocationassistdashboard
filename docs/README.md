@@ -55,10 +55,10 @@ you know the architecture and where data lives.
 - [x] [Reports](hospital-introduction/reports.md)
 
 **Sales**
-- [ ] Sales Tracker
-- [ ] Follow-ups
-- [ ] Calls
-- [ ] Contract Builder
+- [x] [Sales Tracker](sales/sales-tracker.md)
+- [x] [Follow-ups](sales/follow-ups.md)
+- [x] [Calls](sales/calls.md)
+- [x] [Contract Builder](sales/contract-builder.md)
 
 **Growth**
 - [ ] Marketing
@@ -94,7 +94,7 @@ Target: **≥750 words of real explanation per feature.**
 - **Batch 3b:** My Workspace + Dashboard. *Done.* (Overview + Hospital
   Introduction clusters complete.) Also added in-app **ⓘ help buttons** on each
   documented page's header, deep-linking to its doc.
-- **Batch 4:** Sales — Sales Tracker, Follow-ups, Calls, Contract Builder.
+- **Batch 4:** Sales — Sales Tracker, Follow-ups, Calls, Contract Builder. *Done.*
 - **Batch 5:** Growth — Marketing, Meta Ads, Forms, Team Performance, Finance.
 - **Batch 6:** Admin — Connections, Bulk Import, Import Data, Settings.
 - **Batch 7:** Systems — Auth & roles, Notifications & Slack, Email engine,
