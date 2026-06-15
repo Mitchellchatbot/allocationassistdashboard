@@ -1,4 +1,4 @@
-import { Suspense, lazy } from "react";
+import { Suspense, lazy as reactLazy, type ComponentType } from "react";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { BrowserRouter, Route, Routes, Outlet, useLocation, Navigate } from "react-router-dom";
 import { Toaster as Sonner } from "@/components/ui/sonner";
@@ -15,6 +15,29 @@ import { DashboardLayout, ViewportSpinner } from "@/components/layout/DashboardL
 
 // Login stays eagerly loaded — it's the first thing unauthenticated users see
 import Login from "./pages/Login";
+
+// Self-healing lazy loader. When a chunk fails to fetch — almost always because
+// a new deploy rotated the hashed filenames out from under an already-open tab
+// (or a dev HMR restart did) — a plain React.lazy throws to the error boundary,
+// which resets and retries the same dead URL, producing an "error flash →
+// spinner" loop. Instead, on the FIRST such failure we reload once to pull the
+// fresh index.html + new chunks; a time-guard prevents an infinite reload loop.
+function lazy<T extends { default: ComponentType<unknown> }>(factory: () => Promise<T>) {
+  return reactLazy(async () => {
+    try {
+      return await factory();
+    } catch (err) {
+      const KEY = "aa-chunk-reload-at";
+      const last = Number(sessionStorage.getItem(KEY) || 0);
+      if (Date.now() - last > 10_000) {
+        sessionStorage.setItem(KEY, String(Date.now()));
+        window.location.reload();
+        return new Promise<T>(() => {}); // hang on the spinner until the reload lands
+      }
+      throw err; // already reloaded recently — let the error boundary show it
+    }
+  });
+}
 
 // All dashboard pages are lazy-loaded — they're only bundled when first visited.
 // This cuts the initial JS payload by ~60% for users who only use a few pages.
