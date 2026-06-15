@@ -37,8 +37,11 @@ export function getMetaToken(): string {
 // must only ever surface the Allocation Assist account's ads here — otherwise
 // someone else's campaigns show up, and querying a restricted account can make
 // the whole page error/retry. Pinned to the AA account (override via env).
+// AA ad account id confirmed by the team: 1102756268219768
+// (Meta app id 1988855461703578 — used only for OAuth/token generation, not
+//  for these Graph reads, which use the baked-in access token.)
 export const AA_AD_ACCOUNT_ID =
-  (import.meta.env.VITE_META_AD_ACCOUNT_ID as string | undefined) || "act_164775630831034";
+  (import.meta.env.VITE_META_AD_ACCOUNT_ID as string | undefined) || "act_1102756268219768";
 
 // ── Types ──────────────────────────────────────────────────────────────────────
 
