@@ -4,7 +4,8 @@ import { PageTransition } from "./PageTransition";
 import { DocLink } from "@/components/DocLink";
 import { Bell, Download, AlertTriangle, ChevronRight, Home, Sparkles, RefreshCw, Info, CheckCircle2, Send, RotateCcw, X, Search, FileSignature, Copy, GraduationCap, Settings as SettingsIcon } from "lucide-react";
 import { useTour } from "@/components/OnboardingTour";
-import { tourForPath } from "@/lib/tours";
+import { tourForPath, buildOnboardingTour, hasOnboardingContent } from "@/lib/tours";
+import { useAuth } from "@/hooks/use-auth";
 import { ChatChart, parseCharts } from "@/components/ChatChart";
 import { ChatActionBar, parseActions } from "@/components/ChatActions";
 import { Button } from "@/components/ui/button";
@@ -146,11 +147,19 @@ export function DashboardLayout({ children, title: pageTitle, subtitle: pageSubt
   const location = useLocation();
   const currentPath = location.pathname;
   const tour = useTour();
-  // The Tour button launches the training tour for whatever section you're in.
+  const { role, allowedPages } = useAuth();
+  // The Tour button replays a training tour. Admins (full access) get the
+  // richer SECTION tour for the current page. Non-admins get a tour BUILT from
+  // the pages they can actually reach — so the button can never navigate them
+  // to a page the route guard would bounce them off of (à-la-carte access).
   const sectionTour = tourForPath(currentPath);
+  const replayTour = useMemo(() => {
+    if (role === "admin") return sectionTour;
+    return hasOnboardingContent(allowedPages) ? buildOnboardingTour(allowedPages) : null;
+  }, [role, allowedPages, sectionTour]);
   const startSectionTour = useCallback(() => {
-    if (sectionTour) tour.start(sectionTour.steps, { id: sectionTour.id, label: sectionTour.label });
-  }, [tour, sectionTour]);
+    if (replayTour) tour.start(replayTour.steps, { id: replayTour.id, label: replayTour.label });
+  }, [tour, replayTour]);
   const breadcrumbEntry  = lookupRoute(currentPath);
   const breadcrumbLabel  = breadcrumbEntry?.label ?? title;
   const breadcrumbSection = breadcrumbEntry?.section && breadcrumbEntry.section !== "Overview"
@@ -301,21 +310,21 @@ export function DashboardLayout({ children, title: pageTitle, subtitle: pageSubt
                   }
                 </TooltipContent>
               </Tooltip>
-              {sectionTour && (
+              {replayTour && (
                 <Tooltip>
                   <TooltipTrigger asChild>
                     <button
                       onClick={startSectionTour}
                       data-tour="topbar-tour-button"
                       className="hidden md:flex items-center gap-1.5 h-8 px-3 text-[11px] font-medium rounded-full border border-teal-200/70 bg-teal-50 text-teal-800 hover:bg-teal-100 hover:border-teal-300 transition-all duration-150"
-                      aria-label={`Replay the ${sectionTour.label} training tour`}
+                      aria-label={`Replay the ${replayTour.label} training tour`}
                     >
                       <GraduationCap className="h-3 w-3 shrink-0" />
                       Tour
                     </button>
                   </TooltipTrigger>
                   <TooltipContent side="bottom" className="text-[10px]">
-                    Training tour — replay the guided walkthrough of {sectionTour.label}.
+                    Training tour — replay the guided walkthrough of {replayTour.label}.
                   </TooltipContent>
                 </Tooltip>
               )}
