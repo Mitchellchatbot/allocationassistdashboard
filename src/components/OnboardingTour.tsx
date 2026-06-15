@@ -11,10 +11,13 @@
  *   - "Simulate onboarding" button in the DashboardLayout header replays
  *     the tour any time.
  */
-import { useEffect, useLayoutEffect, useState, useCallback, useRef, createContext, useContext, type ReactNode } from "react";
+import { useEffect, useLayoutEffect, useState, useCallback, useRef, useMemo, createContext, useContext, type ReactNode, type CSSProperties } from "react";
 import { useNavigate, useLocation } from "react-router-dom";
-import { Sparkles, X, ChevronLeft, ChevronRight, Check } from "lucide-react";
+import { Sparkles, X, ChevronLeft, ChevronRight, Check, PartyPopper } from "lucide-react";
 import { Button } from "@/components/ui/button";
+
+// Confetti palette for the completion finale — the teal-led brand mix.
+const CONFETTI_COLORS = ["#14b8a6", "#0ea5e9", "#f59e0b", "#ec4899", "#8b5cf6", "#22c55e", "#fbbf24"];
 
 export interface TourStep {
   /** Selector for `document.querySelector` OR the value of `data-tour=…`. */
@@ -34,7 +37,7 @@ export interface TourStep {
 }
 
 interface TourContextValue {
-  start:    (steps: TourStep[], opts?: { id?: string }) => void;
+  start:    (steps: TourStep[], opts?: { id?: string; label?: string }) => void;
   isActive: boolean;
 }
 
@@ -49,6 +52,10 @@ export function OnboardingTourProvider({ children }: { children: ReactNode }) {
   const [stepIdx, setStepIdx] = useState(0);
   const [active, setActive] = useState(false);
   const [tourId, setTourId] = useState<string | null>(null);
+  const [tourLabel, setTourLabel] = useState<string | null>(null);
+  // When the user finishes the LAST step (vs. skipping), we swap the step
+  // overlay for a short celebratory finale before fully closing.
+  const [finale, setFinale] = useState(false);
   const navigate = useNavigate();
   const location = useLocation();
 
@@ -68,9 +75,20 @@ export function OnboardingTourProvider({ children }: { children: ReactNode }) {
       try { localStorage.setItem(`${STORAGE_PREFIX}${tourId}`, "1"); } catch { /* ignore */ }
     }
     setActive(false);
+    setFinale(false);
     setSteps([]);
     setStepIdx(0);
     setTourId(null);
+    setTourLabel(null);
+  }, [tourId]);
+
+  // Finishing the last step: mark the tour seen and show the celebratory
+  // finale (the finale's own button / auto-timeout then fully closes).
+  const finish = useCallback(() => {
+    if (tourId) {
+      try { localStorage.setItem(`${STORAGE_PREFIX}${tourId}`, "1"); } catch { /* ignore */ }
+    }
+    setFinale(true);
   }, [tourId]);
 
   // Guard against re-entry: when a tour step uses `route` to navigate to a
@@ -78,11 +96,13 @@ export function OnboardingTourProvider({ children }: { children: ReactNode }) {
   // /my-workspace, MyWorkspace's mount-effect calls start again because
   // hasSeenTour is still false mid-tour). Without this guard the tour
   // restarted from step 0 every time it crossed into /my-workspace.
-  const start = useCallback((nextSteps: TourStep[], opts?: { id?: string }) => {
+  const start = useCallback((nextSteps: TourStep[], opts?: { id?: string; label?: string }) => {
     if (active && tourId && tourId === (opts?.id ?? null)) return;
     setSteps(nextSteps);
     setStepIdx(0);
     setTourId(opts?.id ?? null);
+    setTourLabel(opts?.label ?? null);
+    setFinale(false);
     setActive(true);
   }, [active, tourId]);
 
@@ -91,28 +111,32 @@ export function OnboardingTourProvider({ children }: { children: ReactNode }) {
     if (!active) return;
     const onKey = (e: KeyboardEvent) => {
       if (e.key === "Escape") close(false);
+      else if (finale) return;  // finale slide — arrows shouldn't scrub steps
       else if (e.key === "ArrowRight") setStepIdx(i => Math.min(steps.length - 1, i + 1));
       else if (e.key === "ArrowLeft")  setStepIdx(i => Math.max(0, i - 1));
     };
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
-  }, [active, steps.length, close]);
+  }, [active, steps.length, close, finale]);
 
   return (
     <TourContext.Provider value={{ start, isActive: active }}>
       {children}
-      {active && steps[stepIdx] && (
+      {active && !finale && steps[stepIdx] && (
         <TourOverlay
           step={steps[stepIdx]}
           stepIdx={stepIdx}
           total={steps.length}
           onPrev={() => setStepIdx(i => Math.max(0, i - 1))}
           onNext={() => {
-            if (stepIdx === steps.length - 1) close(true);
+            if (stepIdx === steps.length - 1) finish();
             else setStepIdx(i => i + 1);
           }}
           onSkip={() => close(true)}
         />
+      )}
+      {active && finale && (
+        <TourFinale label={tourLabel} onDone={() => close(false)} />
       )}
     </TourContext.Provider>
   );
@@ -357,4 +381,93 @@ function Arrow({ direction }: { direction: TourOverlayArrow }) {
   if (direction === "down")  return <div className={`${base} -bottom-[7px] left-1/2 -translate-x-1/2 border-l-0 border-t-0`} />;
   if (direction === "left")  return <div className={`${base} -left-[7px] top-1/2 -translate-y-1/2 border-r-0 border-t-0`} />;
   return <div className={`${base} -right-[7px] top-1/2 -translate-y-1/2 border-l-0 border-b-0`} />;
+}
+
+// ── Completion finale ──────────────────────────────────────────────────
+// A short celebration when someone FINISHES a tour (skipping doesn't trigger
+// it): a confetti burst + a spring-in card that sends them on their way.
+// Pure CSS animations (tailwindcss-animate + one keyframe) so we don't pull a
+// heavy animation lib into the eagerly-loaded provider bundle.
+
+interface ConfettiPiece {
+  id: number; left: number; delay: number; duration: number;
+  color: string; w: number; h: number; drift: string; spin: string; round: boolean;
+}
+
+function TourFinale({ label, onDone }: { label: string | null; onDone: () => void }) {
+  // Auto-dismiss after a few seconds so the celebration never traps anyone.
+  useEffect(() => {
+    const t = setTimeout(onDone, 6500);
+    return () => clearTimeout(t);
+  }, [onDone]);
+
+  const pieces = useMemo<ConfettiPiece[]>(() => Array.from({ length: 80 }, (_, i) => ({
+    id:       i,
+    left:     Math.random() * 100,
+    delay:    Math.random() * 0.6,
+    duration: 2.4 + Math.random() * 1.8,
+    color:    CONFETTI_COLORS[i % CONFETTI_COLORS.length],
+    w:        6 + Math.random() * 7,
+    h:        9 + Math.random() * 8,
+    drift:    `${Math.round((Math.random() - 0.5) * 240)}px`,
+    spin:     `${Math.round(360 + Math.random() * 600)}deg`,
+    round:    Math.random() > 0.7,
+  })), []);
+
+  return (
+    <div className="fixed inset-0 z-[1300] flex items-center justify-center" role="dialog" aria-label="Tour complete">
+      {/* one-off keyframe for the falling confetti */}
+      <style>{`
+        @keyframes aa-confetti-fall {
+          0%   { transform: translate3d(0, -12vh, 0) rotate(0deg); opacity: 1; }
+          80%  { opacity: 1; }
+          100% { transform: translate3d(var(--aa-drift), 112vh, 0) rotate(var(--aa-spin)); opacity: 0; }
+        }
+      `}</style>
+
+      {/* backdrop */}
+      <div
+        className="absolute inset-0 bg-slate-900/50 backdrop-blur-[2px] animate-in fade-in duration-300"
+        onClick={onDone}
+      />
+
+      {/* confetti layer */}
+      <div className="absolute inset-0 overflow-hidden pointer-events-none">
+        {pieces.map(p => (
+          <span
+            key={p.id}
+            className={`absolute top-0 ${p.round ? "rounded-full" : "rounded-[2px]"}`}
+            style={{
+              left:            `${p.left}%`,
+              width:           p.w,
+              height:          p.h,
+              backgroundColor: p.color,
+              animation:       `aa-confetti-fall ${p.duration}s ${p.delay}s ease-in forwards`,
+              "--aa-drift":    p.drift,
+              "--aa-spin":     p.spin,
+            } as CSSProperties}
+          />
+        ))}
+      </div>
+
+      {/* card */}
+      <div className="relative z-10 w-[340px] max-w-[90vw] rounded-2xl border border-slate-200 bg-white shadow-2xl px-6 py-7 text-center animate-in fade-in zoom-in-95 slide-in-from-bottom-3 duration-300">
+        <div className="mx-auto mb-4 h-16 w-16 rounded-full bg-teal-100 flex items-center justify-center animate-in zoom-in-50 duration-500">
+          <Check className="h-8 w-8 text-teal-700 animate-in zoom-in-0 duration-700" strokeWidth={3} />
+        </div>
+        <div className="flex items-center justify-center gap-1.5 text-teal-700/80 mb-1">
+          <PartyPopper className="h-3.5 w-3.5" />
+          <span className="text-[10px] uppercase tracking-[0.14em] font-semibold">Tour complete</span>
+        </div>
+        <h3 className="text-[17px] font-bold text-slate-900">You're all set!</h3>
+        <p className="mt-1.5 text-[13px] text-slate-600 leading-relaxed">
+          {label ? `That's the ${label} tour done. ` : "Nice work. "}
+          Replay it anytime from the Tour button up top, and the AI Assistant is always there if you get stuck.
+        </p>
+        <Button className="mt-5 w-full h-9 text-[13px]" onClick={onDone}>
+          Let's go
+        </Button>
+      </div>
+    </div>
+  );
 }

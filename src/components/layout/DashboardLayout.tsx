@@ -149,7 +149,7 @@ export function DashboardLayout({ children, title: pageTitle, subtitle: pageSubt
   // The Tour button launches the training tour for whatever section you're in.
   const sectionTour = tourForPath(currentPath);
   const startSectionTour = useCallback(() => {
-    if (sectionTour) tour.start(sectionTour.steps, { id: sectionTour.id });
+    if (sectionTour) tour.start(sectionTour.steps, { id: sectionTour.id, label: sectionTour.label });
   }, [tour, sectionTour]);
   const breadcrumbEntry  = lookupRoute(currentPath);
   const breadcrumbLabel  = breadcrumbEntry?.label ?? title;

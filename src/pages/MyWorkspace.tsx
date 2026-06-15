@@ -130,7 +130,7 @@ export default function MyWorkspace() {
               <Button
                 size="sm"
                 className="h-7 text-[11px] ml-auto"
-                onClick={() => tour.start(HI_TOUR_STEPS, { id: HI_TOUR_ID })}
+                onClick={() => tour.start(HI_TOUR_STEPS, { id: HI_TOUR_ID, label: "Hospital Introduction" })}
               >
                 Start tour
               </Button>
