@@ -3,6 +3,7 @@ import { useSearchParams } from "react-router-dom";
 import { DashboardLayout } from "@/components/layout/DashboardLayout";
 import { AnimatedTabsList, AnimatedTabContent, AnimatedTabPanel, type AnimatedTabItem } from "@/components/AnimatedTabs";
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "@/components/ui/card";
+import { DocLink } from "@/components/DocLink";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -174,6 +175,7 @@ export default function Automations() {
             <h1 className="text-2xl font-semibold tracking-tight flex items-center gap-2">
               <Workflow className="h-6 w-6 text-teal-600" />
               Automations
+              <DocLink slug="hospital-introduction/automations" />
             </h1>
             <p className="text-sm text-muted-foreground mt-1">
               Hospital Introduction Department — Phase 1 email flows. Tracks every doctor currently in flight and their current stage.

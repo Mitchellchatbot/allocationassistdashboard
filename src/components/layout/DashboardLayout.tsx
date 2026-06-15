@@ -1,6 +1,7 @@
 import { SidebarProvider, SidebarTrigger, useSidebar } from "@/components/ui/sidebar";
 import { AppSidebar } from "./AppSidebar";
 import { PageTransition } from "./PageTransition";
+import { DocLink } from "@/components/DocLink";
 import { Bell, Download, AlertTriangle, ChevronRight, Home, Sparkles, RefreshCw, Info, CheckCircle2, Send, RotateCcw, X, Search, FileSignature, Copy, GraduationCap, Settings as SettingsIcon } from "lucide-react";
 import { useTour } from "@/components/OnboardingTour";
 import { HI_TOUR_ID, HI_TOUR_STEPS } from "@/lib/hi-onboarding-tour";
@@ -53,6 +54,9 @@ interface DashboardLayoutProps {
   children: React.ReactNode;
   title?: string;
   subtitle?: string;
+  /** Optional docs slug — renders a help (ⓘ) button next to the page title that
+   *  deep-links to /docs?p=<slug>. */
+  docSlug?: string;
 }
 
 /**
@@ -73,6 +77,7 @@ const LayoutContext = createContext<{
   mounted:     boolean;
   setTitle:    (s: string) => void;
   setSubtitle: (s: string | undefined) => void;
+  setDocSlug:  (s: string | undefined) => void;
 } | null>(null);
 
 function ViewportSpinner() {
@@ -107,7 +112,7 @@ function SidebarOpener() {
   return null;
 }
 
-export function DashboardLayout({ children, title: pageTitle, subtitle: pageSubtitle }: DashboardLayoutProps) {
+export function DashboardLayout({ children, title: pageTitle, subtitle: pageSubtitle, docSlug: pageDocSlug }: DashboardLayoutProps) {
 
   // If an outer DashboardLayout has already rendered the chrome, just pass
   // children through and push the page title up to the outer instance via
@@ -118,8 +123,9 @@ export function DashboardLayout({ children, title: pageTitle, subtitle: pageSubt
     if (outerCtx?.mounted) {
       outerCtx.setTitle(pageTitle ?? "");
       outerCtx.setSubtitle(pageSubtitle);
+      outerCtx.setDocSlug(pageDocSlug);
     }
-  }, [outerCtx, pageTitle, pageSubtitle]);
+  }, [outerCtx, pageTitle, pageSubtitle, pageDocSlug]);
   if (outerCtx?.mounted) return <>{children}</>;
 
   // Outer layout owns the title/subtitle state so nested pages can push
@@ -127,6 +133,7 @@ export function DashboardLayout({ children, title: pageTitle, subtitle: pageSubt
   // outer caller passed (App.tsx passes nothing, so falls back to "").
   const [title, setTitleState]       = useState<string>(pageTitle ?? "");
   const [subtitle, setSubtitleState] = useState<string | undefined>(pageSubtitle);
+  const [docSlug, setDocSlugState]   = useState<string | undefined>(pageDocSlug);
 
   const { alerts: rawAlerts, filteredLeads, filteredDeals } = useFilteredData();
   const [readIdxs, setReadIdxs] = useState<number[]>([]);
@@ -238,7 +245,7 @@ export function DashboardLayout({ children, title: pageTitle, subtitle: pageSubt
   });
 
   return (
-    <LayoutContext.Provider value={{ mounted: true, setTitle: setTitleState, setSubtitle: setSubtitleState }}>
+    <LayoutContext.Provider value={{ mounted: true, setTitle: setTitleState, setSubtitle: setSubtitleState, setDocSlug: setDocSlugState }}>
     <UniversalSearchContext.Provider value={{ open: () => setSearchOpen(true) }}>
     <SidebarProvider>
       <style>{`
@@ -365,8 +372,9 @@ export function DashboardLayout({ children, title: pageTitle, subtitle: pageSubt
               background. */}
           <div className="flex-1 flex flex-col min-h-0 rounded-3xl border border-border/40 bg-card shadow-lg overflow-hidden">
             <div className="px-4 lg:px-5 pt-5 pb-3 border-b border-border/40">
-              <h1 className="text-[20px] sm:text-[22px] font-semibold text-foreground leading-tight">
+              <h1 className="text-[20px] sm:text-[22px] font-semibold text-foreground leading-tight flex items-center gap-2">
                 {title || breadcrumbLabel}
+                {docSlug && <DocLink slug={docSlug} />}
               </h1>
               {subtitle && <p className="text-[13px] text-muted-foreground mt-1">{subtitle}</p>}
             </div>

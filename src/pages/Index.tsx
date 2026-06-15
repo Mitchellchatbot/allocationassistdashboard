@@ -416,7 +416,7 @@ const Index = () => {
   ] : [];
 
   return (
-    <DashboardLayout title="Dashboard" subtitle="A quick look at how doctor placements and operations are performing">
+    <DashboardLayout title="Dashboard" subtitle="A quick look at how doctor placements and operations are performing" docSlug="overview/dashboard">
       <DashboardGreeting />
 
       <SectionDateRange />

@@ -1,5 +1,6 @@
 import { useMemo, useState } from "react";
 import { DashboardLayout } from "@/components/layout/DashboardLayout";
+import { DocLink } from "@/components/DocLink";
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -79,6 +80,7 @@ export default function Reports() {
             <h1 className="text-2xl font-semibold tracking-tight flex items-center gap-2">
               <BarChart3 className="h-6 w-6 text-teal-600" />
               Reports
+              <DocLink slug="hospital-introduction/reports" />
             </h1>
             <p className="text-sm text-muted-foreground mt-1">
               Hospital Introduction Department metrics for the last {rangeDays} days. Filter by hospital, team member, or specialty.

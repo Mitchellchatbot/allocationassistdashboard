@@ -75,7 +75,7 @@ export default function Doctors() {
   const cue = useMemo(() => meta.subtitle, [meta]);
 
   return (
-    <DashboardLayout title="Doctors" subtitle={cue}>
+    <DashboardLayout title="Doctors" subtitle={cue} docSlug="hospital-introduction/doctors">
       {/* Shared search bar — hidden on Responses (the Forms view has its
           own per-form search + filters). */}
       {tab !== "responses" && (

@@ -29,9 +29,10 @@ interface DocEntry {
 }
 
 // Folders render in this order; anything else is appended after, alphabetically.
-const GROUP_ORDER = ["_root", "hospital-introduction", "sales", "growth", "admin", "systems", "public"];
+const GROUP_ORDER = ["_root", "overview", "hospital-introduction", "sales", "growth", "admin", "systems", "public"];
 const GROUP_LABEL: Record<string, string> = {
   _root: "Getting started",
+  overview: "Overview",
   "hospital-introduction": "Hospital Introduction",
   sales: "Sales",
   growth: "Growth",

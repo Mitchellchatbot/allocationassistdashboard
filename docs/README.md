@@ -44,10 +44,10 @@ you know the architecture and where data lives.
 > batch.
 
 **Overview**
-- [ ] Dashboard (home)
+- [x] [Dashboard (home)](overview/dashboard.md)
 
 **Hospital Introduction** — the core product
-- [ ] My Workspace
+- [x] [My Workspace](hospital-introduction/my-workspace.md)
 - [x] [Doctors](hospital-introduction/doctors.md) (responses, pipeline, profiles)
 - [x] [Automations](hospital-introduction/automations.md) (the email flows, templates, the engine)
 - [x] [Vacancies](hospital-introduction/vacancies.md)
@@ -91,7 +91,9 @@ Target: **≥750 words of real explanation per feature.**
 - **Batch 1:** README + Overview & Architecture + Data Sources & Sync. *Done.*
 - **Batch 2:** Hospital Introduction core — Doctors, Automations. *Done.*
 - **Batch 3:** Hospital Introduction — Vacancies, Batch Sends, Reports. *Done.*
-- **Batch 3b (next):** My Workspace + Dashboard (finishes the HI/Overview cluster).
+- **Batch 3b:** My Workspace + Dashboard. *Done.* (Overview + Hospital
+  Introduction clusters complete.) Also added in-app **ⓘ help buttons** on each
+  documented page's header, deep-linking to its doc.
 - **Batch 4:** Sales — Sales Tracker, Follow-ups, Calls, Contract Builder.
 - **Batch 5:** Growth — Marketing, Meta Ads, Forms, Team Performance, Finance.
 - **Batch 6:** Admin — Connections, Bulk Import, Import Data, Settings.

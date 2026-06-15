@@ -1,5 +1,6 @@
 import { useEffect, useMemo, useState, useMemo as useMemoReact } from "react";
 import { DashboardLayout } from "@/components/layout/DashboardLayout";
+import { DocLink } from "@/components/DocLink";
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
@@ -60,6 +61,7 @@ export default function Batches() {
             <h1 className="text-2xl font-semibold tracking-tight flex items-center gap-2">
               <Mailbox className="h-6 w-6 text-teal-600" />
               Batch sends
+              <DocLink slug="hospital-introduction/batch-sends" />
             </h1>
             <p className="text-sm text-muted-foreground mt-1">
               The daily, Tuesday, and specialty-of-the-day blasts to all hospital recruiters. Pick doctors, hit send.

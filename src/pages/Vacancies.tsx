@@ -1,5 +1,6 @@
 import { useMemo, useState } from "react";
 import { DashboardLayout } from "@/components/layout/DashboardLayout";
+import { DocLink } from "@/components/DocLink";
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -110,6 +111,7 @@ export default function Vacancies() {
             <h1 className="text-2xl font-semibold tracking-tight flex items-center gap-2">
               <ClipboardList className="h-6 w-6 text-teal-600" />
               Vacancies
+              <DocLink slug="hospital-introduction/vacancies" />
             </h1>
             <p className="text-sm text-muted-foreground mt-1">
               Open hospital roles the team is actively filling. Sales sees these when matching incoming doctors to vacancies.

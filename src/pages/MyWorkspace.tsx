@@ -18,6 +18,7 @@
 import { useMemo } from "react";
 import { useNavigate } from "react-router-dom";
 import { DashboardLayout } from "@/components/layout/DashboardLayout";
+import { DocLink } from "@/components/DocLink";
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -106,8 +107,9 @@ export default function MyWorkspace() {
               <p className="text-[11px] uppercase tracking-[0.12em] text-teal-700/70 font-semibold flex items-center gap-1.5">
                 <Inbox className="h-3 w-3" /> My Workspace
               </p>
-              <h1 className="text-2xl font-semibold tracking-tight mt-1">
+              <h1 className="text-2xl font-semibold tracking-tight mt-1 flex items-center gap-2">
                 {greetingFor()}, {myName ?? "team"}
+                <DocLink slug="hospital-introduction/my-workspace" />
               </h1>
               <p className="text-sm text-muted-foreground mt-1">
                 {scoped
