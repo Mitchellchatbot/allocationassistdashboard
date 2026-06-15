@@ -364,7 +364,7 @@ const Marketing = () => {
           Quality" as "lead source quality" (qualified÷leads) but the metric
           actually measures converted÷qualified, i.e. how well qualified leads
           close. The rename makes the label match what's measured. */}
-      <div className="grid grid-cols-1 md:grid-cols-3 gap-3 mb-4">
+      <div className="grid grid-cols-1 md:grid-cols-3 gap-3 mb-4" data-tour="marketing-kpis">
         <WinnerCard
           accent="emerald"
           label="Most Revenue Generated"

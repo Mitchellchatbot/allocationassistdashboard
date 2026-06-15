@@ -120,7 +120,7 @@ const TeamPerformance = () => {
       <SectionDateRange />
 
       {/* ── Recruiter table ─────────────────────────────────────────── */}
-      <Card className="mb-5 shadow-sm border-border/50">
+      <Card className="mb-5 shadow-sm border-border/50" data-tour="team-leaderboard">
         <CardHeader className="pb-1 pt-4 px-4">
           <CardTitle className="text-[12px] font-medium text-muted-foreground uppercase tracking-wide">
             Top Performing Sales Consultants

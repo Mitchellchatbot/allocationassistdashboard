@@ -47,7 +47,7 @@ export default function BulkImport() {
         </div>
 
         <Tabs defaultValue="hospitals">
-          <TabsList className="grid w-full grid-cols-3 sm:grid-cols-6">
+          <TabsList className="grid w-full grid-cols-3 sm:grid-cols-6" data-tour="bulkimport-tabs">
             <TabsTrigger value="hospitals" className="text-[12px]"><Building2 className="h-3.5 w-3.5 mr-1.5" />Hospitals</TabsTrigger>
             <TabsTrigger value="templates" className="text-[12px]"><Mail className="h-3.5 w-3.5 mr-1.5" />Hospital templates</TabsTrigger>
             <TabsTrigger value="vacancies" className="text-[12px]"><ClipboardList className="h-3.5 w-3.5 mr-1.5" />Vacancies</TabsTrigger>

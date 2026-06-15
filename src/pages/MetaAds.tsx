@@ -1362,7 +1362,7 @@ const MetaAds = () => {
       <SectionDateRange />
 
       {/* ══ Meta API section ══════════════════════════════════════════════════ */}
-      <div className="flex items-center justify-between mb-3 mt-2 gap-3 flex-wrap">
+      <div className="flex items-center justify-between mb-3 mt-2 gap-3 flex-wrap" data-tour="metaads-overview">
         <p className="text-[10px] uppercase tracking-widest font-semibold text-muted-foreground/50">
           Live Ad Performance · Meta Marketing API
           <span className="ml-2 normal-case text-muted-foreground/80 font-normal tracking-normal">

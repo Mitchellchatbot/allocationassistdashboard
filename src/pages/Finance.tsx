@@ -710,7 +710,7 @@ const Finance = () => {
           Designed to remove ambiguity: every figure on this tab is for the
           stated period, in the stated currency. Reduces "is that monthly or
           the whole quarter?" / "is that AED or USD?" confusion. */}
-      <div className="mb-5 rounded-xl border border-blue-100 bg-blue-50/40 px-4 py-3 flex flex-wrap items-center justify-between gap-3">
+      <div className="mb-5 rounded-xl border border-blue-100 bg-blue-50/40 px-4 py-3 flex flex-wrap items-center justify-between gap-3" data-tour="finance-banner">
         <div>
           <p className="text-[10px] uppercase tracking-widest font-semibold text-blue-700/80 mb-0.5">
             Showing finance for

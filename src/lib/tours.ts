@@ -9,6 +9,8 @@
 import type { TourStep } from "@/components/OnboardingTour";
 import { HI_TOUR_ID, HI_TOUR_STEPS } from "./hi-onboarding-tour";
 import { SALES_TOUR_ID, SALES_TOUR_STEPS } from "./sales-tour";
+import { GROWTH_TOUR_ID, GROWTH_TOUR_STEPS } from "./growth-tour";
+import { ADMIN_TOUR_ID, ADMIN_TOUR_STEPS } from "./admin-tour";
 
 export interface SectionTour {
   id:    string;
@@ -27,8 +29,16 @@ const SECTIONS: Section[] = [
     tour:  { id: SALES_TOUR_ID, label: "Sales", steps: SALES_TOUR_STEPS },
   },
   {
+    paths: ["/marketing", "/meta-ads", "/forms", "/team", "/finance"],
+    tour:  { id: GROWTH_TOUR_ID, label: "Growth", steps: GROWTH_TOUR_STEPS },
+  },
+  {
+    paths: ["/connections", "/import-bulk", "/import", "/settings"],
+    tour:  { id: ADMIN_TOUR_ID, label: "Admin", steps: ADMIN_TOUR_STEPS },
+  },
+  {
     // Hospital Introduction — the original tour.
-    paths: ["/", "/my-workspace", "/automations", "/doctors", "/vacancies", "/batches", "/reports", "/forms"],
+    paths: ["/", "/my-workspace", "/automations", "/doctors", "/vacancies", "/batches", "/reports"],
     tour:  { id: HI_TOUR_ID, label: "Hospital Introduction", steps: HI_TOUR_STEPS },
   },
 ];

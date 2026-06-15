@@ -465,7 +465,7 @@ const Settings = () => {
   return (
     <DashboardLayout title="Settings" subtitle="Account and notification preferences" docSlug="admin/settings">
       {/* Tab bar */}
-      <div className="flex gap-1 mb-4 border-b border-border/50">
+      <div className="flex gap-1 mb-4 border-b border-border/50" data-tour="settings-tabs">
         {(["general", "notifications", ...(role === "admin" ? ["users"] : [])] as Tab[]).map(t => (
           <button
             key={t}

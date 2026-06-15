@@ -841,7 +841,7 @@ export default function CallLogImport() {
       <div className="max-w-4xl space-y-6">
 
         <Tabs defaultValue="call-log">
-          <TabsList className="h-9 text-[12px]">
+          <TabsList className="h-9 text-[12px]" data-tour="importdata-tabs">
             <TabsTrigger value="call-log" className="text-[12px] gap-1.5">
               <Phone className="h-3.5 w-3.5" /> Call Log
             </TabsTrigger>
