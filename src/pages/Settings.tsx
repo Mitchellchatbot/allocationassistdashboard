@@ -555,7 +555,7 @@ const Settings = () => {
       )}
 
       {(tab === "notifications" || tab === "users") && (
-        <div className="max-w-2xl">
+        <div className="mx-auto w-full max-w-2xl mt-6 sm:mt-10">
           {tab === "notifications" && (
             <div className="space-y-3">
               <SlackIntegrationCard />
