@@ -7,7 +7,7 @@ import { Label } from "@/components/ui/label";
 import { Switch } from "@/components/ui/switch";
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from "@/components/ui/dialog";
 import { useAuth, ROLE_PRESETS, ALL_PAGES } from "@/hooks/use-auth";
-import { Trash2, Plus, UserCog, Slack as SlackIcon, Send, Loader2, CheckCircle2, AlertCircle, Pencil } from "lucide-react";
+import { Trash2, Plus, UserCog, Slack as SlackIcon, Send, Loader2, CheckCircle2, AlertCircle, Pencil, Building2, Mail } from "lucide-react";
 import { supabase } from "@/lib/supabase";
 import { toast } from "sonner";
 
@@ -458,9 +458,34 @@ function UsersTab({ session }: { session: { access_token: string } | null }) {
 
 type Tab = "general" | "notifications" | "users";
 
+const ORG_SETTINGS_KEY = "aa-org-settings";
+
 const Settings = () => {
   const { role, session } = useAuth();
   const [tab, setTab] = useState<Tab>("general");
+
+  // ── General / Organization details ──────────────────────────────────
+  // Persisted locally (there's no org-settings table yet) so Save is real
+  // and the values survive a reload rather than resetting to defaults.
+  const [companyName, setCompanyName]   = useState("Allocation Assist");
+  const [contactEmail, setContactEmail] = useState("info@allocationassist.com");
+  const [savedFlash, setSavedFlash]     = useState(false);
+  useEffect(() => {
+    try {
+      const raw = localStorage.getItem(ORG_SETTINGS_KEY);
+      if (raw) {
+        const o = JSON.parse(raw);
+        if (o.companyName)  setCompanyName(o.companyName);
+        if (o.contactEmail) setContactEmail(o.contactEmail);
+      }
+    } catch { /* ignore */ }
+  }, []);
+  function saveGeneral() {
+    try { localStorage.setItem(ORG_SETTINGS_KEY, JSON.stringify({ companyName, contactEmail })); } catch { /* ignore */ }
+    setSavedFlash(true);
+    toast.success("Organization details saved");
+    setTimeout(() => setSavedFlash(false), 1600);
+  }
 
   return (
     <DashboardLayout title="Settings" subtitle="Account and notification preferences" docSlug="admin/settings">
@@ -483,46 +508,74 @@ const Settings = () => {
         ))}
       </div>
 
-      <div className="max-w-2xl">
-        {tab === "general" && (
-          <Card className="shadow-sm border-border/50">
-            <CardHeader className="pb-2 pt-4 px-4">
-              <CardTitle className="text-[13px] font-semibold">Organization</CardTitle>
-              <CardDescription className="text-[11px]">Company details</CardDescription>
+      {tab === "general" && (
+        <div className="mx-auto w-full max-w-lg mt-6 sm:mt-10">
+          <Card className="shadow-sm border-border/60">
+            <CardHeader className="pb-3 pt-5 px-6">
+              <div className="flex items-center gap-3">
+                <div className="h-10 w-10 rounded-xl bg-primary/10 flex items-center justify-center shrink-0">
+                  <Building2 className="h-5 w-5 text-primary" />
+                </div>
+                <div>
+                  <CardTitle className="text-[15px] font-semibold">Organization</CardTitle>
+                  <CardDescription className="text-[12px]">Company details used across the dashboard</CardDescription>
+                </div>
+              </div>
             </CardHeader>
-            <CardContent className="px-4 pb-4 space-y-3">
-              <div className="space-y-1">
-                <Label className="text-[11px]">Company Name</Label>
-                <Input defaultValue="Allocation Assist" className="h-8 text-[12px]" />
+            <CardContent className="px-6 pb-6 pt-1 space-y-4">
+              <div className="space-y-1.5">
+                <Label className="text-[12px] font-medium">Company Name</Label>
+                <div className="relative">
+                  <Building2 className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground/50 pointer-events-none" />
+                  <Input
+                    value={companyName}
+                    onChange={e => setCompanyName(e.target.value)}
+                    className="h-10 text-[13px] pl-9"
+                  />
+                </div>
               </div>
-              <div className="space-y-1">
-                <Label className="text-[11px]">Contact Email</Label>
-                <Input defaultValue="info@allocationassist.com" className="h-8 text-[12px]" />
+              <div className="space-y-1.5">
+                <Label className="text-[12px] font-medium">Contact Email</Label>
+                <div className="relative">
+                  <Mail className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground/50 pointer-events-none" />
+                  <Input
+                    type="email"
+                    value={contactEmail}
+                    onChange={e => setContactEmail(e.target.value)}
+                    className="h-10 text-[13px] pl-9"
+                  />
+                </div>
               </div>
-              <Button size="sm" className="h-7 text-[11px]">Save</Button>
+              <Button onClick={saveGeneral} className="w-full h-10 text-[13px] mt-1">
+                {savedFlash ? <><CheckCircle2 className="h-4 w-4 mr-1.5" /> Saved</> : "Save changes"}
+              </Button>
             </CardContent>
           </Card>
-        )}
+        </div>
+      )}
 
-        {tab === "notifications" && (
-          <div className="space-y-3">
-            <SlackIntegrationCard />
-            <MyNotificationPrefsCard session={session} />
-          </div>
-        )}
+      {(tab === "notifications" || tab === "users") && (
+        <div className="max-w-2xl">
+          {tab === "notifications" && (
+            <div className="space-y-3">
+              <SlackIntegrationCard />
+              <MyNotificationPrefsCard session={session} />
+            </div>
+          )}
 
-        {tab === "users" && role === "admin" && (
-          <Card className="shadow-sm border-border/50">
-            <CardHeader className="pb-2 pt-4 px-4">
-              <CardTitle className="text-[13px] font-semibold">User Management</CardTitle>
-              <CardDescription className="text-[11px]">Create accounts and assign page-level access</CardDescription>
-            </CardHeader>
-            <CardContent className="px-4 pb-4">
-              <UsersTab session={session} />
-            </CardContent>
-          </Card>
-        )}
-      </div>
+          {tab === "users" && role === "admin" && (
+            <Card className="shadow-sm border-border/50">
+              <CardHeader className="pb-2 pt-4 px-4">
+                <CardTitle className="text-[13px] font-semibold">User Management</CardTitle>
+                <CardDescription className="text-[11px]">Create accounts and assign page-level access</CardDescription>
+              </CardHeader>
+              <CardContent className="px-4 pb-4">
+                <UsersTab session={session} />
+              </CardContent>
+            </Card>
+          )}
+        </div>
+      )}
     </DashboardLayout>
   );
 };
