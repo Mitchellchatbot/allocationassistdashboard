@@ -250,7 +250,7 @@ const FollowUps = () => {
     <DashboardLayout title="Follow-ups" subtitle="All leads needing action — High Priority and Contact in Future in one place" docSlug="sales/follow-ups">
 
       {/* ── Tab bar ── */}
-      <div className="flex items-center gap-2 mb-4">
+      <div className="flex items-center gap-2 mb-4" data-tour="followups-tabs">
         {(["high", "future"] as Tab[]).map(t => {
           const count   = t === "high" ? highCount : futureCount;
           const active  = tab === t;

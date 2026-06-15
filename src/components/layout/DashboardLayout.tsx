@@ -4,14 +4,7 @@ import { PageTransition } from "./PageTransition";
 import { DocLink } from "@/components/DocLink";
 import { Bell, Download, AlertTriangle, ChevronRight, Home, Sparkles, RefreshCw, Info, CheckCircle2, Send, RotateCcw, X, Search, FileSignature, Copy, GraduationCap, Settings as SettingsIcon } from "lucide-react";
 import { useTour } from "@/components/OnboardingTour";
-import { HI_TOUR_ID, HI_TOUR_STEPS } from "@/lib/hi-onboarding-tour";
-
-// Pages where the HI onboarding tour can fire. `/doctors` covers what
-// used to be /doctor-profiles + /leads-pipeline + /wp-candidates.
-const HI_PAGES = new Set([
-  "/", "/my-workspace", "/automations", "/doctors",
-  "/vacancies", "/batches", "/reports", "/forms",
-]);
+import { tourForPath } from "@/lib/tours";
 import { ChatChart, parseCharts } from "@/components/ChatChart";
 import { ChatActionBar, parseActions } from "@/components/ChatActions";
 import { Button } from "@/components/ui/button";
@@ -153,10 +146,11 @@ export function DashboardLayout({ children, title: pageTitle, subtitle: pageSubt
   const location = useLocation();
   const currentPath = location.pathname;
   const tour = useTour();
-  const showTourButton = HI_PAGES.has(currentPath);
-  const startHiTour = useCallback(() => {
-    tour.start(HI_TOUR_STEPS, { id: HI_TOUR_ID });
-  }, [tour]);
+  // The Tour button launches the training tour for whatever section you're in.
+  const sectionTour = tourForPath(currentPath);
+  const startSectionTour = useCallback(() => {
+    if (sectionTour) tour.start(sectionTour.steps, { id: sectionTour.id });
+  }, [tour, sectionTour]);
   const breadcrumbEntry  = lookupRoute(currentPath);
   const breadcrumbLabel  = breadcrumbEntry?.label ?? title;
   const breadcrumbSection = breadcrumbEntry?.section && breadcrumbEntry.section !== "Overview"
@@ -307,21 +301,21 @@ export function DashboardLayout({ children, title: pageTitle, subtitle: pageSubt
                   }
                 </TooltipContent>
               </Tooltip>
-              {showTourButton && (
+              {sectionTour && (
                 <Tooltip>
                   <TooltipTrigger asChild>
                     <button
-                      onClick={startHiTour}
+                      onClick={startSectionTour}
                       data-tour="topbar-tour-button"
                       className="hidden md:flex items-center gap-1.5 h-8 px-3 text-[11px] font-medium rounded-full border border-teal-200/70 bg-teal-50 text-teal-800 hover:bg-teal-100 hover:border-teal-300 transition-all duration-150"
-                      aria-label="Replay Hospital Introduction onboarding tour"
+                      aria-label={`Replay the ${sectionTour.label} training tour`}
                     >
                       <GraduationCap className="h-3 w-3 shrink-0" />
                       Tour
                     </button>
                   </TooltipTrigger>
                   <TooltipContent side="bottom" className="text-[10px]">
-                    Simulate onboarding — replay the guided walkthrough of the HI module.
+                    Training tour — replay the guided walkthrough of {sectionTour.label}.
                   </TooltipContent>
                 </Tooltip>
               )}
