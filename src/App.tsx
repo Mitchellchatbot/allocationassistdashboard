@@ -44,6 +44,7 @@ const Connections     = lazy(() => import("./pages/Connections"));
 const SharedProfile   = lazy(() => import("./pages/SharedProfile"));
 const Forms           = lazy(() => import("./pages/Forms"));
 const Doctors         = lazy(() => import("./pages/Doctors"));
+const Docs            = lazy(() => import("./pages/Docs"));
 const NotFound        = lazy(() => import("./pages/NotFound"));
 
 // Global react-query defaults tuned for this dashboard:
@@ -171,6 +172,9 @@ const App = () => (
                 <Route path="/import-bulk"    element={<BulkImport />} />
                 <Route path="/connections"    element={<Connections />} />
                 <Route path="/forms"          element={<Forms />} />
+                {/* Documentation — open to every signed-in user (gated as a
+                    special case in ProtectedRoute). */}
+                <Route path="/docs"           element={<Docs />} />
               </Route>
 
               <Route path="*" element={<NotFound />} />

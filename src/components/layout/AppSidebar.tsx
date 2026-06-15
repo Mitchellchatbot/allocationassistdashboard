@@ -20,6 +20,7 @@ import {
   Search,
   ChevronRight,
   Inbox,
+  BookOpen,
   type LucideIcon,
 } from "lucide-react";
 import { useCallback, useEffect, useState } from "react";
@@ -72,7 +73,8 @@ const NAV_SECTIONS: NavSection[] = [
     label: "Overview",
     accent: "#fbbf24",  // vivid amber
     items: [
-      { title: "Dashboard", url: "/", icon: LayoutDashboard, badge: (c) => c.unreadNotifications },
+      { title: "Dashboard",     url: "/",     icon: LayoutDashboard, badge: (c) => c.unreadNotifications },
+      { title: "Documentation", url: "/docs", icon: BookOpen },
     ],
   },
   {
@@ -165,7 +167,7 @@ export function AppSidebar() {
   const visibleSections: NavSection[] = role === "admin"
     ? NAV_SECTIONS
     : NAV_SECTIONS
-        .map(s => ({ ...s, items: s.items.filter(it => allowedPages.includes(it.url)) }))
+        .map(s => ({ ...s, items: s.items.filter(it => it.url === "/docs" || allowedPages.includes(it.url)) }))
         .filter(s => s.items.length > 0);
 
   const visibleAdmin: NavSection | null = role === "admin" ? ADMIN_SECTION : null;

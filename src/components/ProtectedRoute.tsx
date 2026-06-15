@@ -26,6 +26,12 @@ export function ProtectedRoute({ children, requiredPage }: ProtectedRouteProps) 
     return <>{children}</>;
   }
 
+  // Documentation is available to every signed-in user, regardless of which
+  // pages their role can access.
+  if (requiredPage === "/docs") {
+    return <>{children}</>;
+  }
+
   // Non-admins: check if this page is in their allowed list
   if (requiredPage && !allowedPages.includes(requiredPage)) {
     // Redirect to the first page they're allowed on, or /worker as last resort
