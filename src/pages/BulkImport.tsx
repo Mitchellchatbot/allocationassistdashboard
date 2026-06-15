@@ -34,7 +34,7 @@ import { useAuth } from "@/hooks/use-auth";
  */
 export default function BulkImport() {
   return (
-    <DashboardLayout>
+    <DashboardLayout docSlug="admin/bulk-import">
       <div className="space-y-6">
         <div>
           <h1 className="text-2xl font-semibold tracking-tight flex items-center gap-2">

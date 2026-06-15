@@ -56,7 +56,7 @@ export default function Connections() {
   }, [searchParams, setSearchParams]);
 
   return (
-    <DashboardLayout>
+    <DashboardLayout docSlug="admin/connections">
       <div className="space-y-5">
         <div className="flex items-start justify-between gap-4 flex-wrap">
           <div>

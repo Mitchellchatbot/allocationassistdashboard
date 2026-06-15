@@ -68,10 +68,10 @@ you know the architecture and where data lives.
 - [x] [Finance](growth/finance.md)
 
 **Admin**
-- [ ] Connections
-- [ ] Bulk Import
-- [ ] Import Data
-- [ ] Settings (users, roles, page access)
+- [x] [Connections](admin/connections.md)
+- [x] [Bulk Import](admin/bulk-import.md)
+- [x] [Import Data](admin/import-data.md)
+- [x] [Settings (users, roles, page access)](admin/settings.md)
 
 **Systems & cross-cutting** (not single screens, but the machinery several
 features share)
@@ -96,7 +96,8 @@ Target: **≥750 words of real explanation per feature.**
   documented page's header, deep-linking to its doc.
 - **Batch 4:** Sales — Sales Tracker, Follow-ups, Calls, Contract Builder. *Done.*
 - **Batch 5:** Growth — Marketing, Meta Ads, Forms, Team Performance, Finance. *Done.*
-- **Batch 6:** Admin — Connections, Bulk Import, Import Data, Settings.
+- **Batch 6:** Admin — Connections, Bulk Import, Import Data, Settings. *Done.*
+  (Also: docs nav now scrolls independently of the article.)
 - **Batch 7:** Systems — Auth & roles, Notifications & Slack, Email engine,
   Edge-functions catalogue, public pages.
 

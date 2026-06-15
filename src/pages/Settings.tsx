@@ -463,7 +463,7 @@ const Settings = () => {
   const [tab, setTab] = useState<Tab>("general");
 
   return (
-    <DashboardLayout title="Settings" subtitle="Account and notification preferences">
+    <DashboardLayout title="Settings" subtitle="Account and notification preferences" docSlug="admin/settings">
       {/* Tab bar */}
       <div className="flex gap-1 mb-4 border-b border-border/50">
         {(["general", "notifications", ...(role === "admin" ? ["users"] : [])] as Tab[]).map(t => (

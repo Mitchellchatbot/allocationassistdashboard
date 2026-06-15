@@ -121,10 +121,11 @@ export default function Docs() {
         <span className="text-xs text-muted-foreground">· how to use the dashboard &amp; how it works</span>
       </div>
 
-      <div className="grid gap-6 md:grid-cols-[260px_minmax(0,1fr)]">
-        {/* Left nav */}
-        <nav className="md:sticky md:top-4 self-start space-y-4">
-          <div className="relative">
+      <div className="grid gap-6 md:grid-cols-[260px_minmax(0,1fr)] md:items-start">
+        {/* Left nav — pinned, with its own scroll independent of the article.
+            Search stays fixed; the link list scrolls inside the bounded height. */}
+        <nav className="md:sticky md:top-4 self-start flex flex-col gap-3 md:max-h-[calc(100dvh-9rem)]">
+          <div className="relative shrink-0">
             <Search className="absolute left-2.5 top-2.5 h-3.5 w-3.5 text-muted-foreground" />
             <Input
               value={query}
@@ -134,6 +135,7 @@ export default function Docs() {
             />
           </div>
 
+          <div className="space-y-4 overflow-y-auto md:flex-1 md:min-h-0 -mr-2 pr-2">
           {groups.length === 0 && (
             <div className="text-[12px] text-muted-foreground px-1">No matches for “{query}”.</div>
           )}
@@ -163,6 +165,7 @@ export default function Docs() {
               </ul>
             </div>
           ))}
+          </div>
         </nav>
 
         {/* Content */}

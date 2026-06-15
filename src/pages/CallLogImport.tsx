@@ -837,7 +837,7 @@ export default function CallLogImport() {
   );
 
   return (
-    <DashboardLayout title="Import Data" subtitle="Upload CSV files to sync data into the dashboard">
+    <DashboardLayout title="Import Data" subtitle="Upload CSV files to sync data into the dashboard" docSlug="admin/import-data">
       <div className="max-w-4xl space-y-6">
 
         <Tabs defaultValue="call-log">
