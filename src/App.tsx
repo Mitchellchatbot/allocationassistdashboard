@@ -27,14 +27,22 @@ function lazy<T extends { default: ComponentType<unknown> }>(factory: () => Prom
     try {
       return await factory();
     } catch (err) {
-      const KEY = "aa-chunk-reload-at";
-      const last = Number(sessionStorage.getItem(KEY) || 0);
-      if (Date.now() - last > 10_000) {
-        sessionStorage.setItem(KEY, String(Date.now()));
-        window.location.reload();
-        return new Promise<T>(() => {}); // hang on the spinner until the reload lands
+      // ONLY reload for a genuine network chunk-miss (stale hashes after a
+      // deploy). A module that throws at *evaluation* (a real code bug) also
+      // rejects the import — we must NOT reload on that, or we'd loop and hide
+      // the actual error. Detect the network case by message.
+      const msg = err instanceof Error ? err.message : String(err);
+      const isChunkFetchError = /dynamically imported module|module script failed|importing a module|failed to fetch/i.test(msg);
+      if (isChunkFetchError) {
+        const KEY = "aa-chunk-reload-at";
+        const last = Number(sessionStorage.getItem(KEY) || 0);
+        if (Date.now() - last > 10_000) {
+          sessionStorage.setItem(KEY, String(Date.now()));
+          window.location.reload();
+          return new Promise<T>(() => {}); // hang on the spinner until the reload lands
+        }
       }
-      throw err; // already reloaded recently — let the error boundary show it
+      throw err; // real code error (or already reloaded) — let the boundary show it
     }
   });
 }

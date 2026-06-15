@@ -8,7 +8,7 @@
  * `resetKey` prop changes, remounting the boundary).
  */
 import React from "react";
-import { AlertTriangle, RefreshCw, Home } from "lucide-react";
+import { AlertTriangle, RefreshCw, Home, Copy } from "lucide-react";
 import { Button } from "@/components/ui/button";
 
 interface Props {
@@ -19,21 +19,22 @@ interface Props {
 interface State {
   hasError: boolean;
   message:  string;
+  stack:    string;
 }
 
 export class PageErrorBoundary extends React.Component<Props, State> {
   constructor(props: Props) {
     super(props);
-    this.state = { hasError: false, message: "" };
+    this.state = { hasError: false, message: "", stack: "" };
   }
 
   static getDerivedStateFromError(err: Error): State {
-    return { hasError: true, message: err.message || "Unknown error" };
+    return { hasError: true, message: err.message || "Unknown error", stack: err.stack || "" };
   }
 
   componentDidUpdate(prev: Props) {
     if (prev.resetKey !== this.props.resetKey && this.state.hasError) {
-      this.setState({ hasError: false, message: "" });
+      this.setState({ hasError: false, message: "", stack: "" });
     }
   }
 
@@ -42,6 +43,11 @@ export class PageErrorBoundary extends React.Component<Props, State> {
     // the message is what we'll mostly have.
     console.error("[PageErrorBoundary]", err, info);
   }
+
+  copyError = () => {
+    const text = `${this.state.message}\n\n${this.state.stack}`.trim();
+    navigator.clipboard?.writeText(text).catch(() => {/* ignore */});
+  };
 
   render() {
     if (this.state.hasError) {
@@ -56,11 +62,15 @@ export class PageErrorBoundary extends React.Component<Props, State> {
               The error has been logged. Refreshing usually fixes it. If it keeps happening, ask the AI assistant about it — it can see the same data.
             </p>
             {this.state.message && (
-              <p className="text-[10px] text-muted-foreground/80 font-mono bg-white/60 rounded-md px-2 py-1 mb-4 break-words">
-                {this.state.message.slice(0, 200)}
-              </p>
+              <pre className="text-[10px] text-left text-muted-foreground/90 font-mono bg-white/70 rounded-md px-2 py-2 mb-4 max-h-48 overflow-auto whitespace-pre-wrap break-words">
+                {this.state.message}
+                {this.state.stack ? `\n\n${this.state.stack}` : ""}
+              </pre>
             )}
             <div className="flex items-center justify-center gap-2">
+              <Button size="sm" variant="outline" onClick={this.copyError}>
+                <Copy className="h-3 w-3 mr-1.5" /> Copy error
+              </Button>
               <Button size="sm" variant="outline" onClick={() => window.location.reload()}>
                 <RefreshCw className="h-3 w-3 mr-1.5" /> Reload
               </Button>

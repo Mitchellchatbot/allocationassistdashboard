@@ -7,7 +7,6 @@ import { useZohoData, type ZohoLead } from "@/hooks/use-zoho-data";
 import { useHospitals } from "@/hooks/use-hospitals";
 import { supabase } from "@/lib/supabase";
 import { Printer, Search, FileText, Send, Loader2, ExternalLink, Download as DownloadIcon, RefreshCw, Sparkles, UserCheck } from "lucide-react";
-import html2pdf from "html2pdf.js";
 import { useContractActivity, boldsignTrackingUrl, downloadContractPdf, type ContractStatus, type ContractSendRow } from "@/hooks/use-contract-activity";
 import { useAutomationFlowRuns, type FlowRun } from "@/hooks/use-automation-flows";
 import { useAuth } from "@/hooks/use-auth";
@@ -406,6 +405,10 @@ const Contracts = ({ embedded = false, initialLead = null, testRecipient }: Cont
     // field on the LAST page (where "THE CLIENT" line lives), not page 1.
     // html2pdf().toPdf() resolves to a worker with the underlying jsPDF
     // instance, which exposes internal.getNumberOfPages().
+    // Loaded lazily (only when actually generating a PDF) so this heavy lib
+    // never runs at page-load — keeps the Contract Builder page from breaking
+    // if html2pdf's module evaluation hits a snag, and trims the chunk.
+    const html2pdf = (await import("html2pdf.js")).default;
     const worker = html2pdf().from(previewRef.current).set(opts).toPdf();
     const pdf: any = await worker.get("pdf");
     const pageCount: number = pdf.internal.getNumberOfPages();
