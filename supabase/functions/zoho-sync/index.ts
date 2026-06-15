@@ -170,7 +170,7 @@ serve(async (req: Request) => {
       'Full_Name', 'First_Name', 'Last_Name', 'Email', 'Phone', 'Mobile',
       'Lead_Status', 'Lead_Source',
       'Owner', 'Specialty', 'Specialty_New', 'Country_of_Specialty_training',
-      'Created_Time', 'Has_DOH', 'Has_DHA', 'Has_MOH', 'License',
+      'Created_Time', 'Modified_Time', 'Has_DOH', 'Has_DHA', 'Has_MOH', 'License',
       'Recruiter', 'Age', 'Prime_Classification',
     ]);
 

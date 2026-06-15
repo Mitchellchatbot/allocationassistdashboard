@@ -45,6 +45,34 @@ function normalizeName(name: string) {
   return name.replace(/^(dr\.|dr\s+|prof\.|prof\s+)/i, "").trim();
 }
 
+/** Whole days since the lead was last touched in Zoho (Modified_Time, falling
+ *  back to Created_Time until the next sync populates Modified_Time). null if
+ *  unparseable. Honest — no modulo tricks. */
+function daysSinceTouched(lead: { Modified_Time?: string | null; Created_Time?: string | null }): number | null {
+  const iso = lead.Modified_Time || lead.Created_Time;
+  if (!iso) return null;
+  const t = new Date(iso).getTime();
+  if (Number.isNaN(t)) return null;
+  return Math.max(0, Math.floor((Date.now() - t) / 86_400_000));
+}
+function recencyLabel(d: number | null): string {
+  if (d === null) return "—";
+  if (d === 0) return "today";
+  return d === 1 ? "1d ago" : `${d}d ago`;
+}
+/** Colour grade: stale (>14d) red, ageing (>4d) amber, fresh slate. Replaces the
+ *  old "SLA Breached on every row" flood with a graded, scannable signal. */
+function recencyTone(d: number | null): string {
+  if (d === null) return "text-slate-500 bg-slate-50 border-slate-200";
+  if (d > 14) return "text-rose-700 bg-rose-50 border-rose-200";
+  if (d > 4)  return "text-amber-700 bg-amber-50 border-amber-200";
+  return "text-slate-600 bg-slate-100 border-slate-200";
+}
+function initialsOf(name: string): string {
+  const parts = normalizeName(name).split(/\s+/).filter(Boolean);
+  return ((parts[0]?.[0] ?? "") + (parts[1]?.[0] ?? "")).toUpperCase() || "—";
+}
+
 // ── Call log panel (same logic as LeadsPipeline, self-contained) ──────────────
 
 function CallLogPanel({ doctorName }: { doctorName: string }) {
@@ -199,15 +227,11 @@ const FollowUps = () => {
     });
   }, [rawLeads, tab, search, recruiterFilter]);
 
-  // Sort: SLA-breached first for high priority tab
+  // Sort least-recently-touched first — the leads at the top have waited
+  // longest for action. Honest recency (Modified_Time → Created_Time).
   const sorted = useMemo(() => {
-    if (tab !== "high") return leads;
-    return [...leads].sort((a, b) => {
-      const daysA = (() => { const d = Math.max(1, Math.floor((Date.now() - new Date(a.Created_Time).getTime()) / 86_400_000)); return d <= 44 ? d : (d % 44) + 1; })();
-      const daysB = (() => { const d = Math.max(1, Math.floor((Date.now() - new Date(b.Created_Time).getTime()) / 86_400_000)); return d <= 44 ? d : (d % 44) + 1; })();
-      return daysB - daysA;
-    });
-  }, [leads, tab]);
+    return [...leads].sort((a, b) => (daysSinceTouched(b) ?? -1) - (daysSinceTouched(a) ?? -1));
+  }, [leads]);
 
   // Status update mutation (same pattern as LeadsPipeline — updates Zoho + cache)
   const updateStatus = useMutation({
@@ -316,13 +340,13 @@ const FollowUps = () => {
         <div className="mb-3 rounded-md bg-destructive/10 border border-destructive/30 px-3 py-2 text-[12px] text-destructive">{errorMsg}</div>
       )}
 
-      {/* ── SLA notice for high priority ── */}
-      {tab === "high" && (
-        <div className="mb-3 flex items-center gap-2 rounded-md bg-destructive/5 border border-destructive/20 px-3 py-2 text-[11px] text-destructive">
-          <AlertTriangle className="h-3.5 w-3.5 shrink-0" />
-          High Priority leads must be actioned within <strong className="mx-1">2 days</strong> — leads past SLA are shown first.
-        </div>
-      )}
+      {/* ── Sort/recency note ── */}
+      <div className="mb-3 flex items-center gap-2 rounded-md bg-muted/40 border border-border/50 px-3 py-2 text-[11px] text-muted-foreground">
+        <Clock className="h-3.5 w-3.5 shrink-0" />
+        Sorted by least-recently-touched — the leads at the top have waited longest. The
+        <span className="mx-1 inline-flex items-center rounded-full border border-rose-200 bg-rose-50 px-1.5 text-rose-700">red</span>
+        chips are stale (&gt;14 days since their last update in Zoho).
+      </div>
 
       {/* ── Lead cards ── */}
       <Card className="shadow-sm border-border/50">
@@ -341,20 +365,24 @@ const FollowUps = () => {
             <div className="divide-y divide-border/40">
               {sorted.map(lead => {
                 const name    = (lead.Full_Name || `${lead.First_Name ?? ""} ${lead.Last_Name ?? ""}`).trim() || "—";
-                const daysOld = Math.max(1, Math.floor((Date.now() - new Date(lead.Created_Time).getTime()) / 86_400_000));
-                const daysInStage = daysOld <= 44 ? daysOld : (daysOld % 44) + 1;
-                const slaBreached = tab === "high" && daysInStage > 2;
+                const recency = daysSinceTouched(lead);
+                const specialty = lead.Specialty || lead.Specialty_New;
                 const expanded    = expandedId === lead.id;
                 const isPending   = pendingId === lead.id;
                 const isUpdated   = updatedIds.has(lead.id);
 
                 return (
                   <div key={lead.id}>
-                    <div className={`px-4 py-3 flex flex-col sm:flex-row sm:items-center gap-3 transition-colors ${slaBreached ? "bg-destructive/3" : ""}`}>
+                    <div className="px-4 py-3 flex items-center gap-3 transition-colors hover:bg-muted/30">
 
-                      {/* Left: name + badges */}
+                      {/* Avatar */}
+                      <div className="h-9 w-9 rounded-full bg-teal-50 text-teal-700 flex items-center justify-center text-[12px] font-semibold shrink-0">
+                        {initialsOf(name)}
+                      </div>
+
+                      {/* Name + metadata */}
                       <div className="flex-1 min-w-0">
-                        <div className="flex flex-wrap items-center gap-1.5 mb-0.5">
+                        <div className="flex flex-wrap items-center gap-1.5">
                           <button
                             onClick={() => setExpandedId(expanded ? null : lead.id)}
                             className="text-[13px] font-medium text-foreground hover:text-primary transition-colors text-left flex items-center gap-1"
@@ -362,29 +390,29 @@ const FollowUps = () => {
                             {name}
                             {expanded ? <ChevronUp className="h-3 w-3" /> : <ChevronDown className="h-3 w-3" />}
                           </button>
-                          {slaBreached && (
-                            <span className="inline-flex items-center gap-0.5 rounded-full bg-destructive/15 border border-destructive/30 px-1.5 py-0.5 text-[9px] font-semibold text-destructive">
-                              <AlertTriangle className="h-2.5 w-2.5" /> SLA Breached
-                            </span>
-                          )}
                           {isUpdated && (
                             <span className="inline-flex items-center gap-0.5 rounded-full bg-success/15 border border-success/30 px-1.5 py-0.5 text-[9px] font-semibold text-success">
                               <Check className="h-2.5 w-2.5" /> Updated
                             </span>
                           )}
                         </div>
-                        <div className="flex flex-wrap gap-2 text-[11px] text-muted-foreground">
-                          {lead.Owner?.name && <span>👤 {lead.Owner.name}</span>}
-                          {(lead.Specialty || lead.Specialty_New) && <span>🏥 {lead.Specialty || lead.Specialty_New}</span>}
-                          {lead.Country_of_Specialty_training && <span>🌍 {lead.Country_of_Specialty_training}</span>}
-                          <span className={`font-medium ${slaBreached ? "text-destructive" : "text-muted-foreground"}`}>
-                            {daysInStage}d in stage
-                          </span>
+                        <div className="flex flex-wrap items-center gap-x-2 gap-y-0.5 text-[11px] text-muted-foreground mt-0.5">
+                          {lead.Owner?.name && <span className="truncate max-w-[140px]">{lead.Owner.name}</span>}
+                          {specialty && <><span className="text-border">·</span><span className="truncate max-w-[160px]">{specialty}</span></>}
+                          {lead.Country_of_Specialty_training && <><span className="text-border">·</span><span className="truncate max-w-[120px]">{lead.Country_of_Specialty_training}</span></>}
                         </div>
                       </div>
 
-                      {/* Right: status dropdown */}
-                      <div className="shrink-0 flex items-center gap-2">
+                      {/* Recency chip + status dropdown */}
+                      <div className="shrink-0 flex items-center gap-2.5">
+                        {recency !== null && (
+                          <span
+                            className={`hidden sm:inline-flex items-center rounded-full border px-2 py-0.5 text-[10px] font-medium ${recencyTone(recency)}`}
+                            title="Time since this lead was last updated in Zoho"
+                          >
+                            {recencyLabel(recency)}
+                          </span>
+                        )}
                         {isPending && <Loader2 className="h-3.5 w-3.5 animate-spin text-muted-foreground" />}
                         <Select
                           value={lead.Lead_Status}

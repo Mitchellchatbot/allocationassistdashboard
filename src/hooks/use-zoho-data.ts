@@ -36,6 +36,7 @@ export interface ZohoLead {
   Specialty_New: string | null;
   Country_of_Specialty_training: string | null;
   Created_Time: string;
+  Modified_Time: string | null;   // last change in Zoho — drives "last touched" recency
   Has_DOH: string | null;
   Has_DHA: string | null;
   Has_MOH: string | null;
