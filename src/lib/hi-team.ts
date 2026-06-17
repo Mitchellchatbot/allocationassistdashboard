@@ -31,11 +31,12 @@ export const HI_TEAM_MEMBERS: HiTeamMember[] = [
 ];
 
 /** Everyone whose mailbox is wired up as a valid 'From' on outbound
- *  emails (HI specialists + Ammar). Used by the assigned-owner picker
- *  on flow runs so any of them can be set as the sender. */
+ *  emails. Used by the assigned-owner picker on flow runs so any of them
+ *  can be set as the sender. (Ammar left the team — removed so he's no
+ *  longer selectable. The backend send-flow-email SENDERS registry keeps
+ *  his entry as a fallback so any run still assigned to him can deliver.) */
 export const AA_SENDERS: HiTeamMember[] = [
   ...HI_TEAM_MEMBERS,
-  { name: "Ammar", email: "ammar@allocationassist.com" },
 ];
 
 /** Quick lookup by email (case-insensitive). Returns null when an email

@@ -7,6 +7,7 @@ import { useMarketingExpenses, type CategorySpend, type MonthlyPoint, type TopTr
 import { useZohoData } from "@/hooks/use-zoho-data";
 import { useFilters } from "@/lib/filters";
 import { ChannelWinnerCards } from "@/components/ChannelEconomics";
+import { ZohoBooksPanel } from "@/components/finance/ZohoBooksPanel";
 import { useCurrency } from "@/lib/CurrencyProvider";
 import { normalizeChannelKey } from "@/lib/channel-mapping";
 import {
@@ -736,6 +737,9 @@ const Finance = () => {
           </p>
         </div>
       </div>
+
+      {/* Actual revenue/expenses from Zoho Books (dormant until connected). */}
+      <ZohoBooksPanel dateRange={dateRange} />
 
       {!hasData && (
         <div className="mb-5 rounded-xl border border-border/50 bg-muted/30 px-4 py-3">
