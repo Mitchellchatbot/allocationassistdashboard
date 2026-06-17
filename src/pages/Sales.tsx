@@ -3,6 +3,7 @@ import { ExpandableKPICard } from "@/components/ExpandableKPICard";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { InfoIcon } from "@/components/InfoIcon";
 import { useFilteredData } from "@/hooks/use-filtered-data";
+import { SectionDateRange } from "@/components/SectionDateRange";
 import { SalesActivity } from "@/components/sales/SalesActivity";
 import { Phone, Mail, Clock, Users, UserCheck, Activity, ArrowRight, PhoneCall, AlertTriangle } from "lucide-react";
 
@@ -168,6 +169,9 @@ const Sales = () => {
 
   return (
     <DashboardLayout title="Sales Tracker" subtitle="See where doctors are in the process and how recruiters are performing" docSlug="sales/sales-tracker">
+      {/* Date range — every metric on this page (KPIs, trend, sources,
+          conversions, leaderboard) is scoped to the selected period. */}
+      <SectionDateRange />
 
       {/* ── KPI strip ─────────────────────────────────────────────────────── */}
       <div className="grid grid-cols-2 lg:grid-cols-5 gap-3 mb-5" data-tour="sales-kpis">

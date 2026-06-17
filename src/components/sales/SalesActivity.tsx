@@ -12,6 +12,7 @@ import { useFilteredData } from "@/hooks/use-filtered-data";
 import { useZohoData } from "@/hooks/use-zoho-data";
 import { useFilters } from "@/lib/filters";
 import { GranularityToggle } from "@/components/GranularityToggle";
+import { normalizeChannelKey } from "@/lib/channel-mapping";
 import { bucketKey, bucketLabel, parseDate, type Granularity } from "@/lib/time-buckets";
 import { ComposedChart, Bar, Line, XAxis, YAxis, Tooltip, ResponsiveContainer, CartesianGrid, Legend } from "recharts";
 import { TrendingUp, PieChart, UserCheck } from "lucide-react";
@@ -56,11 +57,14 @@ export function SalesActivity() {
       .map(r => ({ ...r, label: bucketLabel(r.key, gran) }));
   }, [filteredLeads, conversions, gran]);
 
-  // Lead sources — leads + qualified per source.
+  // Lead sources — leads + qualified per source. Normalised through the same
+  // channel mapping the Marketing/Finance tabs use, so raw Zoho Lead_Source
+  // values ("facebook", "FB", "Meta Ads", "instagram") collapse to one clean
+  // channel ("Meta") and match the other tabs.
   const sources = useMemo(() => {
     const map = new Map<string, { source: string; leads: number; qualified: number }>();
     for (const l of filteredLeads) {
-      const s = (l.Lead_Source || "Unknown").trim() || "Unknown";
+      const s = normalizeChannelKey(l.Lead_Source);
       const cur = map.get(s) ?? { source: s, leads: 0, qualified: 0 };
       cur.leads++;
       if (QUALIFIED.has(l.Lead_Status)) cur.qualified++;
