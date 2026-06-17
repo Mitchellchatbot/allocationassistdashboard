@@ -93,6 +93,10 @@ export function SalesActivity() {
               </CardTitle>
               <p className="text-[11px] text-muted-foreground/80 mt-0.5">
                 {filteredLeads.length.toLocaleString()} new leads · {conversions.length.toLocaleString()} conversions in this period
+                <span className="text-muted-foreground/60"> · </span>
+                <span style={{ color: "#0ea5e9" }} className="font-medium">leads = left axis</span>
+                <span className="text-muted-foreground/60">, </span>
+                <span style={{ color: "#0d9488" }} className="font-medium">conversions = right axis</span>
               </p>
             </div>
             <GranularityToggle value={gran} onChange={setGran} />
@@ -103,14 +107,18 @@ export function SalesActivity() {
             <p className="text-[12px] text-muted-foreground py-8 text-center">No leads or conversions in this period.</p>
           ) : (
             <ResponsiveContainer width="100%" height={250}>
-              <ComposedChart data={trend} margin={{ top: 8, right: 8, left: -18, bottom: 0 }}>
+              <ComposedChart data={trend} margin={{ top: 8, right: 4, left: 0, bottom: 0 }}>
                 <CartesianGrid strokeDasharray="3 3" stroke="hsl(var(--border))" vertical={false} />
                 <XAxis dataKey="label" tick={{ fontSize: 10 }} tickLine={false} axisLine={false} interval="preserveStartEnd" />
-                <YAxis tick={{ fontSize: 10 }} tickLine={false} axisLine={false} allowDecimals={false} width={32} />
+                {/* Two scales: leads (left, hundreds) and conversions (right, a
+                    handful) — on one axis the conversions line sits flat on the
+                    floor. Axis ticks are coloured to match each series. */}
+                <YAxis yAxisId="left"  tick={{ fontSize: 10, fill: "#0ea5e9" }} tickLine={false} axisLine={false} allowDecimals={false} width={36} />
+                <YAxis yAxisId="right" orientation="right" tick={{ fontSize: 10, fill: "#0d9488" }} tickLine={false} axisLine={false} allowDecimals={false} width={28} />
                 <Tooltip contentStyle={{ fontSize: 11, borderRadius: 8 }} />
                 <Legend wrapperStyle={{ fontSize: 10 }} iconType="circle" />
-                <Bar dataKey="leads" name="New leads" fill="#0ea5e9" radius={[3, 3, 0, 0]} barSize={gran === "day" ? 6 : 16} />
-                <Line dataKey="conversions" name="Conversions" stroke="#14b8a6" strokeWidth={2.5} dot={{ r: 2 }} />
+                <Bar  yAxisId="left"  dataKey="leads"       name="New leads"   fill="#0ea5e9" radius={[3, 3, 0, 0]} barSize={gran === "day" ? 6 : 16} />
+                <Line yAxisId="right" dataKey="conversions" name="Conversions" stroke="#0d9488" strokeWidth={2.5} dot={{ r: 3 }} />
               </ComposedChart>
             </ResponsiveContainer>
           )}
