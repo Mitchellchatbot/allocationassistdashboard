@@ -8,6 +8,7 @@ import { useZohoData } from "@/hooks/use-zoho-data";
 import { useFilters } from "@/lib/filters";
 import { ChannelWinnerCards } from "@/components/ChannelEconomics";
 import { ZohoBooksPanel } from "@/components/finance/ZohoBooksPanel";
+import { FinanceDigest } from "@/components/finance/FinanceDigest";
 import { useCurrency } from "@/lib/CurrencyProvider";
 import { normalizeChannelKey } from "@/lib/channel-mapping";
 import {
@@ -752,6 +753,9 @@ const Finance = () => {
 
       {/* Channel winner KPIs (best volume / lowest CPL / lowest CPQ / highest conversion) */}
       <ChannelWinnerCards />
+
+      {/* Daily / Weekly / Monthly digest of revenue, spend & profit */}
+      <FinanceDigest />
 
       {/* ── Row 1: Spend + Lead Economics ── */}
       {/* Only render lead KPIs when we actually have leads in the period — otherwise just show spend */}

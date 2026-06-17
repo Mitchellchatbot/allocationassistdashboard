@@ -3,6 +3,7 @@ import { ExpandableKPICard } from "@/components/ExpandableKPICard";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { InfoIcon } from "@/components/InfoIcon";
 import { useFilteredData } from "@/hooks/use-filtered-data";
+import { SalesActivity } from "@/components/sales/SalesActivity";
 import { Phone, Mail, Clock, Users, UserCheck, Activity, ArrowRight, PhoneCall, AlertTriangle } from "lucide-react";
 
 const Sales = () => {
@@ -226,6 +227,9 @@ const Sales = () => {
           expandedHeight={280}
         />
       </div>
+
+      {/* ── Activity: pipeline trend, lead sources, recent conversions ──────── */}
+      <SalesActivity />
 
       {/* ── Stage Distribution ────────────────────────────────────────────── */}
       <Card className="mb-5 shadow-sm border-border/50">
