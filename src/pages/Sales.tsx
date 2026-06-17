@@ -19,8 +19,6 @@ const Sales = () => {
   const removeMember = useRemoveSalesBoardMember();
   const [addOpen, setAddOpen] = useState(false);
 
-  const maxLeads = Math.max(...recruiters.map(r => r.doctors), 1);
-
   // Admin-pinned salespeople. Those who already auto-appear from Zoho lead
   // ownership are deduped out; the rest are shown as extra rows.
   const normName = (s: string) => s.toLowerCase().replace(/[^a-z0-9]/g, "");
@@ -370,114 +368,100 @@ const Sales = () => {
             </div>
           </div>
         </CardHeader>
-        <CardContent className="px-5 pb-5">
-          <div className="space-y-2">
-            {/* Header */}
-            <div className="grid grid-cols-[minmax(0,1fr)_60px_100px_92px_96px] gap-x-4 gap-y-3 px-3 pb-1 border-b border-border/40">
-              <span className="text-[10px] font-medium text-muted-foreground uppercase tracking-wide">Sales Consultant</span>
-              <span className="text-[10px] font-medium text-muted-foreground uppercase tracking-wide text-right inline-flex items-center justify-end gap-1">
-                Leads
-                <InfoIcon
-                  meaning="Total leads owned by this consultant in the period."
-                  source="Zoho CRM (Lead Owner)."
-                />
-              </span>
-              <span className="text-[10px] font-medium text-muted-foreground uppercase tracking-wide text-right inline-flex items-center justify-end gap-1">
-                Contacted
-                <InfoIcon
-                  meaning='Unique leads engaged (status past "Not Contacted"). e.g. 84/270 = 84 leads picked up / replied / had a call, NOT 84 calls made — a lead counts once regardless of attempts.'
-                  source="Zoho CRM (Lead_Status)."
-                />
-              </span>
-              <span className="text-[10px] font-medium text-muted-foreground uppercase tracking-wide text-right hidden md:inline-flex items-center justify-end gap-1">
-                Contact %
-                <InfoIcon
-                  meaning="Contacted ÷ Leads. ≥ 70% green · ≥ 40% blue · below amber."
-                  source="Zoho CRM (Lead_Status)."
-                />
-              </span>
-              <span className="text-[10px] font-medium text-muted-foreground uppercase tracking-wide text-right hidden md:inline-flex items-center justify-end gap-1 whitespace-nowrap">
-                Converted
-                <InfoIcon
-                  meaning="Doctors on Board this consultant converted in the period — actual placements, attributed by the Doctor-on-Board record's Owner."
-                  source="Zoho CRM (Doctors on Board · Owner)."
-                />
-              </span>
-            </div>
-
-            {recruiters.map((rep, i) => (
-              <div
-                key={rep.name}
-                className="grid grid-cols-[minmax(0,1fr)_60px_100px_92px_96px] gap-x-4 gap-y-3 items-center px-3 py-2.5 rounded-xl hover:bg-muted/40 transition-colors group"
-              >
-                {/* Avatar + name */}
-                <div className="flex items-center gap-2.5 min-w-0">
-                  <div
-                    className="h-8 w-8 rounded-full flex items-center justify-center text-[10px] font-bold shrink-0 text-white"
-                    style={{ backgroundColor: `hsl(${(i * 47) % 360}, 55%, 50%)` }}
-                  >
-                    {rep.name.split(" ").map((n: string) => n[0]).join("").slice(0, 2).toUpperCase()}
-                  </div>
-                  <div className="min-w-0">
-                    <p className="text-[12px] font-medium text-foreground truncate">{rep.name}</p>
-                    <div className="h-1 rounded-full bg-muted overflow-hidden mt-1 w-20">
+        <CardContent className="px-0 pb-3 overflow-x-auto">
+          <table className="w-full text-left border-collapse">
+            <thead className="bg-muted/40 border-y border-border/60">
+              <tr>
+                <th className="py-3 px-5 text-[10px] font-medium text-muted-foreground uppercase tracking-wide">Sales Consultant</th>
+                <th className="py-3 px-3 text-[10px] font-medium text-muted-foreground uppercase tracking-wide text-right">
+                  <span className="inline-flex items-center justify-end gap-1">Leads
+                    <InfoIcon meaning="Total leads owned by this consultant in the period." source="Zoho CRM (Lead Owner)." />
+                  </span>
+                </th>
+                <th className="py-3 px-3 text-[10px] font-medium text-muted-foreground uppercase tracking-wide text-right">
+                  <span className="inline-flex items-center justify-end gap-1">Contacted
+                    <InfoIcon meaning='Unique leads engaged (status past "Not Contacted") — a lead counts once regardless of attempts.' source="Zoho CRM (Lead_Status)." />
+                  </span>
+                </th>
+                <th className="py-3 px-3 text-[10px] font-medium text-muted-foreground uppercase tracking-wide text-right hidden md:table-cell">
+                  <span className="inline-flex items-center justify-end gap-1">Contact %
+                    <InfoIcon meaning="Contacted ÷ Leads. ≥ 70% green · ≥ 40% blue · below amber." source="Zoho CRM (Lead_Status)." />
+                  </span>
+                </th>
+                <th className="py-3 px-3 text-[10px] font-medium text-muted-foreground uppercase tracking-wide text-right">
+                  <span className="inline-flex items-center justify-end gap-1 whitespace-nowrap">Converted
+                    <InfoIcon meaning="Doctors on Board this consultant converted in the period — actual placements, attributed by the Doctor-on-Board record's Owner." source="Zoho CRM (Doctors on Board · Owner)." />
+                  </span>
+                </th>
+                <th className="py-3 px-2 w-8" />
+              </tr>
+            </thead>
+            <tbody>
+              {recruiters.map((rep, i) => (
+                <tr key={rep.name} className="border-b border-border/30 hover:bg-muted/30 group">
+                  <td className="py-3.5 px-5">
+                    <div className="flex items-center gap-2.5 min-w-0">
                       <div
-                        className="h-full rounded-full bg-primary/50 group-hover:bg-primary transition-colors duration-200"
-                        style={{ width: `${(rep.doctors / maxLeads) * 100}%` }}
-                      />
+                        className="h-8 w-8 rounded-full flex items-center justify-center text-[11px] font-bold shrink-0 text-white"
+                        style={{ backgroundColor: `hsl(${(i * 47) % 360}, 55%, 50%)` }}
+                      >
+                        {rep.name.split(" ").map((n: string) => n[0]).join("").slice(0, 2).toUpperCase()}
+                      </div>
+                      <span className="text-[13px] font-semibold text-foreground truncate">{rep.name}</span>
                     </div>
-                  </div>
-                </div>
+                  </td>
+                  <td className="py-3.5 px-3 text-right tabular-nums text-[13px] text-muted-foreground">{rep.doctors.toLocaleString()}</td>
+                  <td className="py-3.5 px-3 text-right tabular-nums text-[13px] text-foreground">
+                    {(rep as { contacted?: number }).contacted?.toLocaleString() ?? "—"}
+                  </td>
+                  <td className={`py-3.5 px-3 text-right tabular-nums text-[13px] font-semibold hidden md:table-cell ${
+                    ((rep as { contactRate?: number }).contactRate ?? 0) >= 70 ? "text-success" :
+                    ((rep as { contactRate?: number }).contactRate ?? 0) >= 40 ? "text-primary" : "text-warning"
+                  }`}>
+                    {(rep as { contactRate?: number }).contactRate ?? 0}%
+                  </td>
+                  <td className={`py-3.5 px-3 text-right tabular-nums text-[14px] font-bold ${
+                    ((rep as { placements?: number }).placements ?? 0) > 0 ? "text-emerald-600" : "text-muted-foreground/40"
+                  }`}>
+                    {((rep as { placements?: number }).placements ?? 0).toLocaleString()}
+                  </td>
+                  <td className="py-3.5 px-2" />
+                </tr>
+              ))}
 
-                <span className="text-[12px] tabular-nums text-right text-muted-foreground">{rep.doctors.toLocaleString()}</span>
-                <span className="text-[12px] tabular-nums text-right text-foreground">
-                  {(rep as { contacted?: number }).contacted?.toLocaleString() ?? '—'}
-                </span>
-                <span className={`text-[12px] font-semibold tabular-nums text-right hidden md:block ${
-                  ((rep as { contactRate?: number }).contactRate ?? 0) >= 70 ? 'text-success' :
-                  ((rep as { contactRate?: number }).contactRate ?? 0) >= 40 ? 'text-primary' : 'text-warning'
-                }`}>
-                  {(rep as { contactRate?: number }).contactRate ?? 0}%
-                </span>
-                <span className={`text-[12px] font-semibold tabular-nums text-right hidden md:block ${
-                  ((rep as { placements?: number }).placements ?? 0) > 0 ? 'text-emerald-600' : 'text-muted-foreground/40'
-                }`}>
-                  {((rep as { placements?: number }).placements ?? 0).toLocaleString()}
-                </span>
-              </div>
-            ))}
-
-            {/* Admin-pinned salespeople who don't auto-appear from Zoho yet. */}
-            {manualOnly.map(m => (
-              <div
-                key={`manual-${m.id}`}
-                className="relative grid grid-cols-[minmax(0,1fr)_60px_100px_92px_96px] gap-x-4 gap-y-3 items-center px-3 py-2.5 rounded-xl hover:bg-muted/40 transition-colors group"
-              >
-                <div className="flex items-center gap-2.5 min-w-0">
-                  <div className="h-8 w-8 rounded-full flex items-center justify-center text-[10px] font-bold shrink-0 text-white bg-slate-400">
-                    {m.member_name.split(" ").map(n => n[0]).join("").slice(0, 2).toUpperCase()}
-                  </div>
-                  <div className="min-w-0">
-                    <p className="text-[12px] font-medium text-foreground truncate">{m.member_name}</p>
-                    <p className="text-[9px] text-muted-foreground">pinned · no Zoho leads in this period</p>
-                  </div>
-                </div>
-                <span className="text-[12px] text-right text-muted-foreground/40">—</span>
-                <span className="text-[12px] text-right text-muted-foreground/40">—</span>
-                <span className="text-[12px] text-right text-muted-foreground/40 hidden md:block">—</span>
-                <span className="text-[12px] text-right text-muted-foreground/40 hidden md:block">—</span>
-                {isAdmin && (
-                  <button
-                    onClick={() => removeMember.mutate(m.id)}
-                    title="Remove from board"
-                    className="absolute right-1 top-1/2 -translate-y-1/2 h-6 w-6 rounded-md text-muted-foreground/50 hover:text-rose-600 hover:bg-rose-50 opacity-0 group-hover:opacity-100 transition flex items-center justify-center"
-                  >
-                    <X className="h-3.5 w-3.5" />
-                  </button>
-                )}
-              </div>
-            ))}
-          </div>
+              {/* Admin-pinned salespeople who don't auto-appear from Zoho yet. */}
+              {manualOnly.map(m => (
+                <tr key={`manual-${m.id}`} className="border-b border-border/30 hover:bg-muted/30 group">
+                  <td className="py-3.5 px-5">
+                    <div className="flex items-center gap-2.5 min-w-0">
+                      <div className="h-8 w-8 rounded-full flex items-center justify-center text-[11px] font-bold shrink-0 text-white bg-slate-400">
+                        {m.member_name.split(" ").map(n => n[0]).join("").slice(0, 2).toUpperCase()}
+                      </div>
+                      <div className="min-w-0">
+                        <span className="block text-[13px] font-semibold text-foreground truncate">{m.member_name}</span>
+                        <span className="text-[9px] text-muted-foreground">pinned · no Zoho leads in this period</span>
+                      </div>
+                    </div>
+                  </td>
+                  <td className="py-3.5 px-3 text-right text-[13px] text-muted-foreground/40">—</td>
+                  <td className="py-3.5 px-3 text-right text-[13px] text-muted-foreground/40">—</td>
+                  <td className="py-3.5 px-3 text-right text-[13px] text-muted-foreground/40 hidden md:table-cell">—</td>
+                  <td className="py-3.5 px-3 text-right text-[14px] text-muted-foreground/40">—</td>
+                  <td className="py-3.5 px-2 text-right">
+                    {isAdmin && (
+                      <button
+                        onClick={() => removeMember.mutate(m.id)}
+                        title="Remove from board"
+                        className="h-6 w-6 rounded-md text-muted-foreground/40 hover:text-rose-600 hover:bg-rose-50 opacity-0 group-hover:opacity-100 transition inline-flex items-center justify-center"
+                      >
+                        <X className="h-3.5 w-3.5" />
+                      </button>
+                    )}
+                  </td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
         </CardContent>
       </Card>
 
