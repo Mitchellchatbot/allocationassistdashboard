@@ -21,7 +21,7 @@ export interface RankInput {
   specialty:        string | null;
   source:           string | null;
   slaDays:          number;           // SLA for the current tab
-  demandGroups:     Set<string>;      // rollup-specialty groups with an OPEN vacancy
+  demandCounts:     Map<string, number>; // OPEN vacancies per rollup-specialty group
 }
 
 export interface RankFactor { label: string; points: number; }
@@ -37,14 +37,17 @@ export function scoreFollowUp(i: RankInput): RankResult {
   const days    = Math.max(0, i.daysSinceTouched ?? 0);
   const overdue = Math.max(0, days - i.slaDays);
 
-  // 1) Urgency — the longer a callback is overdue, the more urgent (capped at 50
-  //    so it never fully drowns out lead value).
-  const urgency = Math.min(50, 10 + overdue * 1.2);
+  // 1) Urgency — rises continuously with how overdue, with diminishing returns,
+  //    so a pile of very-overdue leads still SEPARATES (177d > 150d > 100d)
+  //    instead of all pinning to a flat cap.
+  const urgency = 45 * (1 - Math.exp(-overdue / 40));
 
-  // 2) Open-vacancy demand — there's a slot for this specialty right now, so
-  //    these are the highest-value people to reach. Biggest single boost.
+  // 2) Open-vacancy demand — graded by HOW MANY open vacancies exist for this
+  //    specialty, so a high-demand specialty outranks a one-slot one (instead of
+  //    every vacancy-match being a flat boost).
   const grp = rollupSpecialty(i.specialty);
-  const vacancyMatch = grp && i.demandGroups.has(grp) ? 30 : 0;
+  const vacCount = grp ? (i.demandCounts.get(grp) ?? 0) : 0;
+  const vacancyDemand = vacCount > 0 ? Math.min(35, 15 + 6 * vacCount) : 0;
 
   // 3) Freshness — newer leads engage better; small decaying boost for <3 weeks.
   const age = i.leadAgeDays ?? 999;
@@ -54,19 +57,19 @@ export function scoreFollowUp(i: RankInput): RankResult {
   const ch = normalizeChannelKey(i.source);
   const source = ch === "Referrals" ? 8 : ch === "Other" ? 0 : 4;
 
-  const score = urgency + vacancyMatch + freshness + source;
+  const score = urgency + vacancyDemand + freshness + source;
 
   // Factor breakdown — what actually drove the score (no day counts here; the
   // recency chip already shows the age, so we don't duplicate / appear off-by-SLA).
   const factors: RankFactor[] = [
     { label: overdue > 0 ? "Overdue" : "Due now", points: Math.round(urgency) },
   ];
-  if (vacancyMatch > 0)   factors.push({ label: "Open vacancy", points: vacancyMatch });
-  if (freshness >= 4)     factors.push({ label: "New lead",     points: Math.round(freshness) });
-  if (ch === "Referrals") factors.push({ label: "Referral",     points: source });
+  if (vacancyDemand > 0)  factors.push({ label: vacCount > 1 ? `Open vacancies ×${vacCount}` : "Open vacancy", points: Math.round(vacancyDemand) });
+  if (freshness >= 4)     factors.push({ label: "New lead", points: Math.round(freshness) });
+  if (ch === "Referrals") factors.push({ label: "Referral", points: source });
 
   const headline =
-    vacancyMatch > 0 ? "Open vacancy"
+    vacancyDemand > 0 ? (vacCount > 1 ? `${vacCount} open vacancies` : "Open vacancy")
     : freshness >= 8 ? "New lead"
     : overdue > 0    ? "Overdue"
     :                  "Due now";

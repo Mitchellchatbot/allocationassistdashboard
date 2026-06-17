@@ -7,16 +7,28 @@ const base = {
   specialty: "Cardiology",
   source: "Website",
   slaDays: FOLLOWUP_SLA_DAYS.high,
-  demandGroups: new Set<string>(),
+  demandCounts: new Map<string, number>(),
 };
 
 describe("scoreFollowUp", () => {
   it("boosts a lead whose specialty matches an open vacancy", () => {
     const noDemand   = scoreFollowUp({ ...base });
-    const withDemand = scoreFollowUp({ ...base, demandGroups: new Set(["Cardiology"]) });
+    const withDemand = scoreFollowUp({ ...base, demandCounts: new Map([["Cardiology", 1]]) });
     expect(withDemand.score).toBeGreaterThan(noDemand.score);
     expect(withDemand.headline.toLowerCase()).toContain("vacancy");
-    expect(withDemand.factors.some(f => f.label === "Open vacancy")).toBe(true);
+    expect(withDemand.factors.some(f => f.label.startsWith("Open vacanc"))).toBe(true);
+  });
+
+  it("ranks a higher-demand specialty above a one-slot one (same recency)", () => {
+    const oneSlot   = scoreFollowUp({ ...base, daysSinceTouched: 60, demandCounts: new Map([["Cardiology", 1]]) });
+    const fiveSlots = scoreFollowUp({ ...base, daysSinceTouched: 60, demandCounts: new Map([["Cardiology", 5]]) });
+    expect(fiveSlots.score).toBeGreaterThan(oneSlot.score);
+  });
+
+  it("separates very-overdue leads instead of pinning them to one score", () => {
+    const a = scoreFollowUp({ ...base, daysSinceTouched: 100, demandCounts: new Map([["Cardiology", 2]]) });
+    const b = scoreFollowUp({ ...base, daysSinceTouched: 177, demandCounts: new Map([["Cardiology", 2]]) });
+    expect(b.score).not.toEqual(a.score);
   });
 
   it("ranks a more-overdue callback higher (up to the cap)", () => {
@@ -31,8 +43,8 @@ describe("scoreFollowUp", () => {
     expect(neu.score).toBeGreaterThan(old.score);
   });
 
-  it("tiers high when overdue AND matching demand", () => {
-    const r = scoreFollowUp({ ...base, daysSinceTouched: 30, demandGroups: new Set(["Cardiology"]) });
+  it("tiers high when very overdue AND high demand", () => {
+    const r = scoreFollowUp({ ...base, daysSinceTouched: 177, demandCounts: new Map([["Cardiology", 3]]) });
     expect(r.tier).toBe("high");
   });
 

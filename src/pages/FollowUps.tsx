@@ -247,15 +247,15 @@ const FollowUps = () => {
   );
   const coldHidden = tabLeads.length - leads.length;
 
-  // Specialty groups with an OPEN vacancy → demand signal for ranking.
-  const demandGroups = useMemo(() => {
-    const s = new Set<string>();
+  // Open vacancies per specialty group → graded demand signal for ranking.
+  const demandCounts = useMemo(() => {
+    const m = new Map<string, number>();
     for (const v of vacancies) {
       if (v.status !== "open") continue;
       const g = rollupSpecialty(v.specialty);
-      if (g) s.add(g);
+      if (g) m.set(g, (m.get(g) ?? 0) + 1);
     }
-    return s;
+    return m;
   }, [vacancies]);
 
   // Rank: "smart" = priority score (urgency + open-vacancy demand + freshness +
@@ -270,7 +270,7 @@ const FollowUps = () => {
         specialty:        lead.Specialty || lead.Specialty_New,
         source:           lead.Lead_Source,
         slaDays:          sla,
-        demandGroups,
+        demandCounts,
       }),
     }));
     if (rankMode === "overdue") {
@@ -280,7 +280,7 @@ const FollowUps = () => {
         || (daysSinceTouched(b.lead) ?? -1) - (daysSinceTouched(a.lead) ?? -1));
     }
     return items;
-  }, [leads, tab, demandGroups, rankMode]);
+  }, [leads, tab, demandCounts, rankMode]);
 
   // Status update mutation (same pattern as LeadsPipeline — updates Zoho + cache)
   const updateStatus = useMutation({
