@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { DashboardLayout } from "@/components/layout/DashboardLayout";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
@@ -10,7 +10,7 @@ import {
   Select, SelectContent, SelectItem, SelectTrigger, SelectValue,
 } from "@/components/ui/select";
 import {
-  useFathomCalls, useFathomCall, useFathomCallStats, useFathomHosts, useFathomAutoSync, useFathomSync,
+  useFathomCalls, useFathomCall, useFathomCallStats, useFathomHosts, useFathomAutoSync, useFathomSync, useSummarizeCall,
   type FathomCall,
 } from "@/hooks/use-fathom-calls";
 import { isSalesRepHost } from "@/lib/sales-team";
@@ -148,7 +148,7 @@ export default function Calls() {
   return (
     <DashboardLayout
       title="Calls"
-      subtitle="Sales team recorded calls (Abraham, Asser, Asim) — transcripts & AI summaries from Fathom"
+      subtitle="Sales team recorded calls (Abraham, Asser, Asim) — transcripts from Fathom, AI summaries auto-generated"
       docSlug="sales/calls"
     >
       {/* ── Top bar: search, host filter, live auto-sync indicator ───────── */}
@@ -398,6 +398,20 @@ function EmptyState({ syncing }: { syncing: boolean }) {
 function CallDetailDrawer({ fathomId, onClose }: { fathomId: string; onClose: () => void }) {
   const { data: call, isLoading } = useFathomCall(fathomId);
   const [searchInTranscript, setSearchInTranscript] = useState("");
+  const summarize = useSummarizeCall();
+  const hasTranscript = !!(call?.transcript_plaintext || call?.transcript_segments?.length);
+
+  // Auto-generate an AI summary the first time a call without one is opened
+  // (only when there's a transcript to work from). Persisted server-side, so
+  // it runs once per call; `triedRef` stops it re-firing within this session.
+  const triedRef = useRef<Set<string>>(new Set());
+  useEffect(() => {
+    if (!call || call.summary || !hasTranscript) return;
+    if (triedRef.current.has(call.fathom_id)) return;
+    triedRef.current.add(call.fathom_id);
+    summarize.mutate(call.fathom_id);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [call?.fathom_id, call?.summary, hasTranscript]);
 
   const filteredSegments = useMemo(() => {
     if (!call?.transcript_segments) return null;
@@ -449,11 +463,30 @@ function CallDetailDrawer({ fathomId, onClose }: { fathomId: string; onClose: ()
                 </a>
               )}
 
-              {call.summary && (
+              {call.summary ? (
                 <Section icon={<FileText className="h-3.5 w-3.5" />} title="AI summary" palette={CANDY.lilac}>
                   <p className="text-[12px] text-foreground leading-relaxed whitespace-pre-wrap">{call.summary}</p>
                 </Section>
-              )}
+              ) : hasTranscript ? (
+                <Section icon={<FileText className="h-3.5 w-3.5" />} title="AI summary" palette={CANDY.lilac}>
+                  {summarize.isError ? (
+                    <div className="text-[12px] text-muted-foreground">
+                      Couldn't generate a summary right now.
+                      <button
+                        onClick={() => summarize.mutate(call.fathom_id)}
+                        className={`ml-1 font-medium ${CANDY.lilac.fg} hover:underline`}
+                      >
+                        Try again
+                      </button>
+                    </div>
+                  ) : (
+                    <div className="flex items-center gap-2 text-[12px] text-muted-foreground">
+                      <Loader2 className="h-3.5 w-3.5 animate-spin" />
+                      Generating an AI summary from the transcript…
+                    </div>
+                  )}
+                </Section>
+              ) : null}
 
               {call.action_items && call.action_items.length > 0 && (
                 <Section icon={<UsersIcon className="h-3.5 w-3.5" />} title={`Action items (${call.action_items.length})`} palette={CANDY.peach}>

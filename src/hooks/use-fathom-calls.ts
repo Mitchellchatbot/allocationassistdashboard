@@ -237,6 +237,44 @@ export function useFathomCall(fathomId: string | null) {
   });
 }
 
+// ─── AI summary generation ──────────────────────────────────────────────────
+
+async function callSummarize(fathomId: string): Promise<{ summary: string; action_items: FathomActionItem[] }> {
+  const session = (await supabase.auth.getSession()).data.session;
+  const token   = session?.access_token ?? SUPABASE_ANON_KEY;
+  const res = await fetch(`${SUPABASE_URL}/functions/v1/summarize-call`, {
+    method: "POST",
+    headers: {
+      "apikey":         SUPABASE_ANON_KEY,
+      "Authorization": `Bearer ${token}`,
+      "content-type":   "application/json",
+    },
+    body: JSON.stringify({ fathom_id: fathomId }),
+  });
+  const j = await res.json().catch(() => ({})) as
+    { ok?: boolean; reason?: string; summary?: string; action_items?: FathomActionItem[] };
+  if (!res.ok || !j.ok) throw new Error(j.reason || `Summary failed (${res.status})`);
+  return { summary: j.summary ?? "", action_items: j.action_items ?? [] };
+}
+
+/** Generate + persist an AI summary and action items for a call from its
+ *  transcript. Patches the call into the react-query cache on success so the
+ *  drawer and the list update immediately without a full refetch. */
+export function useSummarizeCall() {
+  const qc = useQueryClient();
+  return useMutation<{ summary: string; action_items: FathomActionItem[] }, Error, string>({
+    mutationFn: callSummarize,
+    onSuccess: (res, fathomId) => {
+      qc.setQueryData<FathomCall | null>(["fathom-call", fathomId], (prev) =>
+        prev ? { ...prev, summary: res.summary, action_items: res.action_items } : prev);
+      qc.setQueriesData<FathomCall[]>({ queryKey: FATHOM_CALLS_KEY }, (prev) =>
+        Array.isArray(prev)
+          ? prev.map(c => c.fathom_id === fathomId ? { ...c, summary: res.summary, action_items: res.action_items } : c)
+          : prev);
+    },
+  });
+}
+
 // ─── Sync (admin button) ─────────────────────────────────────────────────────
 
 export interface FathomSyncResult {
