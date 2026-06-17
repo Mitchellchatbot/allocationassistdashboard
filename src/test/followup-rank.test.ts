@@ -1,55 +1,55 @@
 import { describe, it, expect } from "vitest";
-import { scoreFollowUp, FOLLOWUP_SLA_DAYS } from "@/lib/followup-rank";
+import { scoreFollowUp } from "@/lib/followup-rank";
 
 const base = {
-  daysSinceTouched: 5,
-  leadAgeDays: 120,
+  daysSinceTouched: 60,                       // 2 months = peak timing
   specialty: "Cardiology",
-  source: "Website",
-  slaDays: FOLLOWUP_SLA_DAYS.high,
   demandCounts: new Map<string, number>(),
+  licenseCount: 0,
 };
 
 describe("scoreFollowUp", () => {
-  it("boosts a lead whose specialty matches an open vacancy", () => {
-    const noDemand   = scoreFollowUp({ ...base });
-    const withDemand = scoreFollowUp({ ...base, demandCounts: new Map([["Cardiology", 1]]) });
-    expect(withDemand.score).toBeGreaterThan(noDemand.score);
-    expect(withDemand.headline.toLowerCase()).toContain("vacancy");
-    expect(withDemand.factors.some(f => f.label.startsWith("Open vacanc"))).toBe(true);
+  it("peaks the time score at ~2 months and decays after", () => {
+    const at0   = scoreFollowUp({ ...base, daysSinceTouched: 0 });
+    const at60  = scoreFollowUp({ ...base, daysSinceTouched: 60 });
+    const at90  = scoreFollowUp({ ...base, daysSinceTouched: 90 });
+    const at150 = scoreFollowUp({ ...base, daysSinceTouched: 150 });
+    expect(at60.score).toBeGreaterThan(at0.score);    // peak > sooner
+    expect(at60.score).toBeGreaterThan(at90.score);   // peak > later
+    expect(at90.score).toBeGreaterThan(at150.score);  // decays after the peak
   });
 
-  it("ranks a higher-demand specialty above a one-slot one (same recency)", () => {
-    const oneSlot   = scoreFollowUp({ ...base, daysSinceTouched: 60, demandCounts: new Map([["Cardiology", 1]]) });
-    const fiveSlots = scoreFollowUp({ ...base, daysSinceTouched: 60, demandCounts: new Map([["Cardiology", 5]]) });
+  it("boosts a lead whose specialty matches an open vacancy (graded by count)", () => {
+    const none      = scoreFollowUp({ ...base });
+    const oneSlot   = scoreFollowUp({ ...base, demandCounts: new Map([["Cardiology", 1]]) });
+    const fiveSlots = scoreFollowUp({ ...base, demandCounts: new Map([["Cardiology", 5]]) });
+    expect(oneSlot.score).toBeGreaterThan(none.score);
     expect(fiveSlots.score).toBeGreaterThan(oneSlot.score);
+    expect(oneSlot.headline.toLowerCase()).toContain("vacanc");
   });
 
-  it("separates very-overdue leads instead of pinning them to one score", () => {
-    const a = scoreFollowUp({ ...base, daysSinceTouched: 100, demandCounts: new Map([["Cardiology", 2]]) });
-    const b = scoreFollowUp({ ...base, daysSinceTouched: 177, demandCounts: new Map([["Cardiology", 2]]) });
-    expect(b.score).not.toEqual(a.score);
+  it("boosts a doctor who already holds Gulf licenses (separate from time/vacancy)", () => {
+    const noLic = scoreFollowUp({ ...base, licenseCount: 0 });
+    const lic   = scoreFollowUp({ ...base, licenseCount: 2 });
+    expect(lic.score).toBeGreaterThan(noLic.score);
+    expect(lic.factors.some(f => f.label.toLowerCase().includes("licensed"))).toBe(true);
   });
 
-  it("ranks a more-overdue callback higher (up to the cap)", () => {
-    const fresh = scoreFollowUp({ ...base, daysSinceTouched: 3 });
-    const stale = scoreFollowUp({ ...base, daysSinceTouched: 25 });
-    expect(stale.score).toBeGreaterThan(fresh.score);
+  it("time, vacancy and license are independent contributions", () => {
+    const t = scoreFollowUp({ ...base, daysSinceTouched: 60 }).score;                                  // timing only
+    const tv = scoreFollowUp({ ...base, daysSinceTouched: 60, demandCounts: new Map([["Cardiology", 2]]) }).score;
+    const tvl = scoreFollowUp({ ...base, daysSinceTouched: 60, demandCounts: new Map([["Cardiology", 2]]), licenseCount: 2 }).score;
+    expect(tv).toBeGreaterThan(t);
+    expect(tvl).toBeGreaterThan(tv);
   });
 
-  it("gives a fresh new lead a freshness boost over an old one", () => {
-    const old = scoreFollowUp({ ...base, leadAgeDays: 200 });
-    const neu = scoreFollowUp({ ...base, leadAgeDays: 2 });
-    expect(neu.score).toBeGreaterThan(old.score);
-  });
-
-  it("tiers high when very overdue AND high demand", () => {
-    const r = scoreFollowUp({ ...base, daysSinceTouched: 177, demandCounts: new Map([["Cardiology", 3]]) });
+  it("tiers high at peak timing + demand + license", () => {
+    const r = scoreFollowUp({ ...base, daysSinceTouched: 60, demandCounts: new Map([["Cardiology", 3]]), licenseCount: 2 });
     expect(r.tier).toBe("high");
   });
 
   it("handles null recency / specialty without throwing", () => {
-    const r = scoreFollowUp({ ...base, daysSinceTouched: null, leadAgeDays: null, specialty: null, source: null });
+    const r = scoreFollowUp({ ...base, daysSinceTouched: null, specialty: null });
     expect(typeof r.score).toBe("number");
     expect(["high", "medium", "normal"]).toContain(r.tier);
   });

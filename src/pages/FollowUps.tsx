@@ -14,7 +14,8 @@ import {
 } from "lucide-react";
 import { useVacancies } from "@/hooks/use-vacancies";
 import { rollupSpecialty } from "@/lib/specialty-groups";
-import { scoreFollowUp, FOLLOWUP_STALE_CAP_DAYS, FOLLOWUP_SLA_DAYS } from "@/lib/followup-rank";
+import { detectLicenses } from "@/lib/license-info";
+import { scoreFollowUp, FOLLOWUP_STALE_CAP_DAYS } from "@/lib/followup-rank";
 
 // ── Types ─────────────────────────────────────────────────────────────────────
 
@@ -55,13 +56,6 @@ function daysSinceTouched(lead: { Modified_Time?: string | null; Created_Time?: 
   const iso = lead.Modified_Time || lead.Created_Time;
   if (!iso) return null;
   const t = new Date(iso).getTime();
-  if (Number.isNaN(t)) return null;
-  return Math.max(0, Math.floor((Date.now() - t) / 86_400_000));
-}
-/** Whole days since the lead was created. */
-function leadAgeDays(lead: { Created_Time?: string | null }): number | null {
-  if (!lead.Created_Time) return null;
-  const t = new Date(lead.Created_Time).getTime();
   if (Number.isNaN(t)) return null;
   return Math.max(0, Math.floor((Date.now() - t) / 86_400_000));
 }
@@ -261,16 +255,19 @@ const FollowUps = () => {
   // Rank: "smart" = priority score (urgency + open-vacancy demand + freshness +
   // source), "overdue" = pure least-recently-touched.
   const ranked = useMemo(() => {
-    const sla = FOLLOWUP_SLA_DAYS[tab] ?? 7;
+    const truthy = (v: string | null) => !!v && !/^(no|false|0|n)$/i.test(v.trim());
     const items = leads.map(lead => ({
       lead,
       rank: scoreFollowUp({
         daysSinceTouched: daysSinceTouched(lead),
-        leadAgeDays:      leadAgeDays(lead),
         specialty:        lead.Specialty || lead.Specialty_New,
-        source:           lead.Lead_Source,
-        slaDays:          sla,
         demandCounts,
+        licenseCount: detectLicenses({
+          has_dha:      truthy(lead.Has_DHA),
+          has_doh:      truthy(lead.Has_DOH),
+          has_moh:      truthy(lead.Has_MOH),
+          license_text: lead.License,
+        }).length,
       }),
     }));
     if (rankMode === "overdue") {
@@ -280,7 +277,7 @@ const FollowUps = () => {
         || (daysSinceTouched(b.lead) ?? -1) - (daysSinceTouched(a.lead) ?? -1));
     }
     return items;
-  }, [leads, tab, demandCounts, rankMode]);
+  }, [leads, demandCounts, rankMode]);
 
   // Status update mutation (same pattern as LeadsPipeline — updates Zoho + cache)
   const updateStatus = useMutation({
@@ -393,7 +390,7 @@ const FollowUps = () => {
       <div className="mb-3 flex flex-wrap items-center justify-between gap-2 rounded-md bg-muted/40 border border-border/50 px-3 py-2 text-[11px] text-muted-foreground">
         <div className="flex items-center gap-1.5 min-w-0">
           {rankMode === "smart"
-            ? <><Flame className="h-3.5 w-3.5 shrink-0 text-amber-500" /> <span className="truncate">Ranked by priority — how overdue the callback is, plus open-vacancy demand, freshness &amp; source.</span></>
+            ? <><Flame className="h-3.5 w-3.5 shrink-0 text-amber-500" /> <span className="truncate">Ranked by priority — timing (peaks at ~2 months), plus open-vacancy demand &amp; Gulf licenses held.</span></>
             : <><Clock className="h-3.5 w-3.5 shrink-0" /> <span className="truncate">Sorted by least-recently-touched — longest-waiting first.</span></>}
           {coldHidden > 0 && (
             <span className="ml-1 shrink-0 text-muted-foreground/70">· {coldHidden} cold hidden (no activity in {Math.round(FOLLOWUP_STALE_CAP_DAYS / 30)} months)</span>

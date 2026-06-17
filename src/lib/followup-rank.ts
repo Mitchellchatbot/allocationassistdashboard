@@ -7,7 +7,6 @@
  * are treated as cold and dropped from the queue (so years-old leads don't show).
  */
 import { rollupSpecialty } from "@/lib/specialty-groups";
-import { normalizeChannelKey } from "@/lib/channel-mapping";
 
 /** Leads with no activity for this many days are cold → hidden from the queue. */
 export const FOLLOWUP_STALE_CAP_DAYS = 180;
@@ -17,12 +16,34 @@ export const FOLLOWUP_SLA_DAYS: Record<string, number> = { high: 2, future: 14 }
 
 export interface RankInput {
   daysSinceTouched: number | null;   // recency (Modified_Time → Created_Time)
-  leadAgeDays:      number | null;    // age since Created_Time
   specialty:        string | null;
-  source:           string | null;
-  slaDays:          number;           // SLA for the current tab
   demandCounts:     Map<string, number>; // OPEN vacancies per rollup-specialty group
+  licenseCount:     number;           // Gulf licenses the doctor already holds (DHA/DOH/…)
 }
+
+/**
+ * Time-since-contact curve (0..1), peaking at the ~2-month sweet spot when a
+ * callback matters most (full score), ~90% sooner, then decaying:
+ *   0d → .90 · 60d(2mo) → 1.0 · 90d(3mo) → .85 · 120d(4mo) → .70 · 150d(5mo) → .50 · 180d → .20.
+ * Piecewise-linear through those anchors. Affects ONLY the time portion.
+ */
+function timeCurve(days: number): number {
+  const pts: [number, number][] = [
+    [0, 0.90], [60, 1.00], [90, 0.85], [120, 0.70], [150, 0.50], [180, 0.20],
+  ];
+  if (days <= pts[0][0]) return pts[0][1];
+  for (let k = 1; k < pts.length; k++) {
+    if (days <= pts[k][0]) {
+      const [x0, y0] = pts[k - 1];
+      const [x1, y1] = pts[k];
+      return y0 + (y1 - y0) * (days - x0) / (x1 - x0);
+    }
+  }
+  return pts[pts.length - 1][1];
+}
+
+const TIME_MAX     = 45;                 // max points from the time curve
+const LICENSE_PTS  = [0, 12, 16, 18];    // points for 0 / 1 / 2 / 3+ Gulf licenses held
 
 export interface RankFactor { label: string; points: number; }
 
@@ -34,46 +55,38 @@ export interface RankResult {
 }
 
 export function scoreFollowUp(i: RankInput): RankResult {
-  const days    = Math.max(0, i.daysSinceTouched ?? 0);
-  const overdue = Math.max(0, days - i.slaDays);
+  const days = Math.max(0, i.daysSinceTouched ?? 0);
 
-  // 1) Urgency — rises continuously with how overdue, with diminishing returns,
-  //    so a pile of very-overdue leads still SEPARATES (177d > 150d > 100d)
-  //    instead of all pinning to a flat cap.
-  const urgency = 45 * (1 - Math.exp(-overdue / 40));
+  // 1) Time — bell-ish curve, peaks at the 2-month sweet spot (full score),
+  //    ~90% sooner, decaying after. ONLY this part is time-shaped.
+  const timing = TIME_MAX * timeCurve(days);
 
   // 2) Open-vacancy demand — graded by HOW MANY open vacancies exist for this
-  //    specialty, so a high-demand specialty outranks a one-slot one (instead of
-  //    every vacancy-match being a flat boost).
+  //    specialty (independent of time).
   const grp = rollupSpecialty(i.specialty);
   const vacCount = grp ? (i.demandCounts.get(grp) ?? 0) : 0;
   const vacancyDemand = vacCount > 0 ? Math.min(35, 15 + 6 * vacCount) : 0;
 
-  // 3) Freshness — newer leads engage better; small decaying boost for <3 weeks.
-  const age = i.leadAgeDays ?? 999;
-  const freshness = age <= 21 ? Math.max(0, 12 - age * 0.55) : 0;
+  // 3) License — already holds Gulf license(s) → far easier to place (independent
+  //    of time). Graded by how many.
+  const lc = Math.max(0, Math.min(3, Math.round(i.licenseCount)));
+  const license = LICENSE_PTS[lc];
 
-  // 4) Source warmth — referrals / word-of-mouth are warmer than cold channels.
-  const ch = normalizeChannelKey(i.source);
-  const source = ch === "Referrals" ? 8 : ch === "Other" ? 0 : 4;
+  const score = timing + vacancyDemand + license;
 
-  const score = urgency + vacancyDemand + freshness + source;
-
-  // Factor breakdown — what actually drove the score (no day counts here; the
-  // recency chip already shows the age, so we don't duplicate / appear off-by-SLA).
+  // Factor breakdown (no day counts — the recency chip already shows the age).
+  const timeLabel = days >= 30 && days <= 90 ? "Prime window" : days < 30 ? "Recent" : "Cooling";
   const factors: RankFactor[] = [
-    { label: overdue > 0 ? "Overdue" : "Due now", points: Math.round(urgency) },
+    { label: timeLabel, points: Math.round(timing) },
   ];
-  if (vacancyDemand > 0)  factors.push({ label: vacCount > 1 ? `Open vacancies ×${vacCount}` : "Open vacancy", points: Math.round(vacancyDemand) });
-  if (freshness >= 4)     factors.push({ label: "New lead", points: Math.round(freshness) });
-  if (ch === "Referrals") factors.push({ label: "Referral", points: source });
+  if (vacancyDemand > 0) factors.push({ label: vacCount > 1 ? `Open vacancies ×${vacCount}` : "Open vacancy", points: Math.round(vacancyDemand) });
+  if (license > 0)       factors.push({ label: i.licenseCount > 1 ? `Gulf-licensed ×${i.licenseCount}` : "Gulf-licensed", points: license });
 
   const headline =
     vacancyDemand > 0 ? (vacCount > 1 ? `${vacCount} open vacancies` : "Open vacancy")
-    : freshness >= 8 ? "New lead"
-    : overdue > 0    ? "Overdue"
-    :                  "Due now";
+    : license > 0     ? "Gulf-licensed"
+    :                   timeLabel;
 
-  const tier: RankResult["tier"] = score >= 65 ? "high" : score >= 40 ? "medium" : "normal";
+  const tier: RankResult["tier"] = score >= 60 ? "high" : score >= 38 ? "medium" : "normal";
   return { score: Math.round(score), tier, headline, factors };
 }
