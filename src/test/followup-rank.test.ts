@@ -15,7 +15,8 @@ describe("scoreFollowUp", () => {
     const noDemand   = scoreFollowUp({ ...base });
     const withDemand = scoreFollowUp({ ...base, demandGroups: new Set(["Cardiology"]) });
     expect(withDemand.score).toBeGreaterThan(noDemand.score);
-    expect(withDemand.reason.toLowerCase()).toContain("vacancy");
+    expect(withDemand.headline.toLowerCase()).toContain("vacancy");
+    expect(withDemand.factors.some(f => f.label === "Open vacancy")).toBe(true);
   });
 
   it("ranks a more-overdue callback higher (up to the cap)", () => {

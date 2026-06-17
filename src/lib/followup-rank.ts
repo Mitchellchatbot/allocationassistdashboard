@@ -24,10 +24,13 @@ export interface RankInput {
   demandGroups:     Set<string>;      // rollup-specialty groups with an OPEN vacancy
 }
 
+export interface RankFactor { label: string; points: number; }
+
 export interface RankResult {
-  score:  number;                     // ~0..100
-  tier:   "high" | "medium" | "normal";
-  reason: string;                     // short label of the dominant factor
+  score:    number;                     // ~0..100
+  tier:     "high" | "medium" | "normal";
+  headline: string;                     // the dominant factor (badge label)
+  factors:  RankFactor[];               // each contributing factor + its points
 }
 
 export function scoreFollowUp(i: RankInput): RankResult {
@@ -53,12 +56,21 @@ export function scoreFollowUp(i: RankInput): RankResult {
 
   const score = urgency + vacancyMatch + freshness + source;
 
-  const reason =
-    vacancyMatch > 0 ? (overdue > 7 ? `Open vacancy · ${overdue}d overdue` : "Open vacancy match")
-    : freshness >= 8 ? "Hot new lead"
-    : overdue > 0    ? `Overdue ${overdue}d`
+  // Factor breakdown — what actually drove the score (no day counts here; the
+  // recency chip already shows the age, so we don't duplicate / appear off-by-SLA).
+  const factors: RankFactor[] = [
+    { label: overdue > 0 ? "Overdue" : "Due now", points: Math.round(urgency) },
+  ];
+  if (vacancyMatch > 0)   factors.push({ label: "Open vacancy", points: vacancyMatch });
+  if (freshness >= 4)     factors.push({ label: "New lead",     points: Math.round(freshness) });
+  if (ch === "Referrals") factors.push({ label: "Referral",     points: source });
+
+  const headline =
+    vacancyMatch > 0 ? "Open vacancy"
+    : freshness >= 8 ? "New lead"
+    : overdue > 0    ? "Overdue"
     :                  "Due now";
 
   const tier: RankResult["tier"] = score >= 65 ? "high" : score >= 40 ? "medium" : "normal";
-  return { score: Math.round(score), tier, reason };
+  return { score: Math.round(score), tier, headline, factors };
 }

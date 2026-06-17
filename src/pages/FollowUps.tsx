@@ -475,15 +475,15 @@ const FollowUps = () => {
                       <div className="shrink-0 flex items-center gap-2.5">
                         {rank.tier !== "normal" && (
                           <span
-                            className={`hidden md:inline-flex items-center gap-1 rounded-full px-2 py-0.5 text-[10px] font-semibold ${
+                            className={`hidden md:inline-flex items-center gap-1 rounded-full px-2 py-0.5 text-[10px] font-medium ${
                               rank.tier === "high"
-                                ? "bg-rose-50 text-rose-700 border border-rose-200"
-                                : "bg-amber-50 text-amber-700 border border-amber-200"
+                                ? "bg-emerald-50 text-emerald-700 border border-emerald-100"
+                                : "bg-sky-50 text-sky-700 border border-sky-100"
                             }`}
-                            title={`Priority score ${rank.score}`}
+                            title={`${rank.factors.map(f => `${f.label} +${f.points}`).join(" · ")}  →  priority ${rank.score}`}
                           >
-                            {rank.tier === "high" && <Flame className="h-2.5 w-2.5" />}
-                            {rank.reason}
+                            {rank.headline}
+                            {rank.factors.length > 1 && <span className="opacity-60">· {rank.score}</span>}
                           </span>
                         )}
                         {recency !== null && (
