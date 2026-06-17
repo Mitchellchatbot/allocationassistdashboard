@@ -113,7 +113,7 @@ GLOSSARY
 - "Hospital health score" — 0–100 number per hospital. Warming = trending up. Cooling = trending down. Triggers relationship-health flags in Reports.
 - "Placements" — Reports section replacing Ammar's "Hammad" Google sheet. Per-(doctor, hospital) attempts (one doctor at 4 hospitals = 4 rows). Stored in placement_attempts table; NOT connected to Zoho. CSV import handles the weekly multi-section format. Click any row to edit milestones; 45-day-clock pill counts down from joined_at.
 - "Shared profile token" — every profile_sent send mints a 90-day token at /shared-profile/<token>. View-count and last-viewed are tracked on shared_profile_tokens so the team sees whether a hospital opened the link. Tokens can be revoked.
-- "Test recipient override" — MAIL_TEST_RECIPIENT_OVERRIDE env var on send-batch + send-flow-email + send-cv-upload-link. Comma-separated; currently routes to shaheerkhosa6@gmail.com + ammar@allocationassist.com (first → To, rest → Cc). Contracts via BoldSign do NOT honor the override — they go to real doctors.
+- "Test recipient override" — MAIL_TEST_RECIPIENT_OVERRIDE env var on send-batch + send-flow-email. Comma-separated; routes test sends to the configured test inbox (first → To, rest → Cc). Ammar is no longer CC'd (he left the team — stripped in code even if still listed in the env var). Contracts via BoldSign do NOT honor the override — they go to real doctors.
 
 NAVIGATION TIPS
 - Cmd/Ctrl+K opens Universal Search across all entities (doctors, vacancies, flows, hospitals, batches, templates, pages).

@@ -64,8 +64,9 @@ www.allocationassist.com
 const TEST_OVERRIDE_LIST = (Deno.env.get("MAIL_TEST_RECIPIENT_OVERRIDE") ?? "")
   .split(",").map(s => s.trim()).filter(Boolean);
 const TEST_OVERRIDE      = TEST_OVERRIDE_LIST[0] ?? "";
-// Always CC Ammar on test batch emails so he sees every one going out.
-const TEST_CC_ALWAYS     = "ammar@allocationassist.com";
+// Ammar left the team — never email him. He's stripped from every test
+// recipient list below even if he's still named in MAIL_TEST_RECIPIENT_OVERRIDE.
+const EXCLUDED_RECIPIENT = "ammar@allocationassist.com";
 
 const CORS = {
   "Access-Control-Allow-Origin":  "*",
@@ -327,12 +328,10 @@ Deno.serve(async (req: Request) => {
   // demo end-to-end on the resend.dev sandbox without leaking emails.
   const bccListRaw = TEST_OVERRIDE_LIST.length > 0 ? TEST_OVERRIDE_LIST : recipients;
   const toAddress  = TEST_OVERRIDE_LIST[0] || MAIL_FROM.replace(/.*<|>.*/g, "");
-  // In test mode, always CC Ammar (visible) so he sees every test send. Keep
-  // him out of the To/Bcc to avoid double-listing.
-  const inTestMode = TEST_OVERRIDE_LIST.length > 0;
-  const testCc     = inTestMode && TEST_CC_ALWAYS.toLowerCase() !== toAddress.toLowerCase()
-    ? [TEST_CC_ALWAYS] : undefined;
-  const bccList    = testCc ? bccListRaw.filter(a => a.toLowerCase() !== TEST_CC_ALWAYS.toLowerCase()) : bccListRaw;
+  // No automatic CC any more. Strip Ammar from the BCC list (he may still be in
+  // the test-override env var) so he never receives a batch send.
+  const testCc: string[] | undefined = undefined;
+  const bccList    = bccListRaw.filter(a => a.toLowerCase() !== EXCLUDED_RECIPIENT);
 
   let resendRes: Response;
   try {

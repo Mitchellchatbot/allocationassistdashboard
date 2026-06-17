@@ -93,10 +93,6 @@ const MAIL_FROM      = Deno.env.get("MAIL_FROM") ?? "Hospital Intro <hospitalint
 const TEST_OVERRIDE_LIST = (Deno.env.get("MAIL_TEST_RECIPIENT_OVERRIDE") ?? "")
   .split(",").map(s => s.trim()).filter(Boolean);
 const TEST_OVERRIDE      = TEST_OVERRIDE_LIST[0] ?? "";
-// Always CC Ammar on every TEST email (hospital + doctor) so he sees what's
-// going out while we're in testing. Only applied when the test-override is
-// active — production sends to real recipients are never CC'd here.
-const TEST_CC_ALWAYS     = "ammar@allocationassist.com";
 // AA's fixed second-payment (placement-fee) amount, used on the invoice +
 // reminder emails when a per-run override isn't set.
 const SECOND_PAYMENT_AMOUNT = "AED 10,500";
@@ -814,12 +810,16 @@ Deno.serve(async (req: Request) => {
     bccList = [sender.replyHint];
   }
 
-  // In test mode, CC Ammar (always) + any extra override addresses, deduped
-  // and excluding the To so nobody's double-listed.
+  // In test mode, CC any EXTRA override addresses (everything after the first,
+  // which is the To), deduped and excluding the To so nobody's double-listed.
+  // Ammar left the team — strip him even if he's still in the override env var.
+  const EXCLUDED_RECIPIENT = "ammar@allocationassist.com";
   const testCc: string[] | undefined = TEST_OVERRIDE
     ? (() => {
-        const cc = [...new Set([...TEST_OVERRIDE_LIST.slice(1), TEST_CC_ALWAYS])]
-          .filter(a => a && a.toLowerCase() !== effectiveTo.toLowerCase());
+        const cc = [...new Set(TEST_OVERRIDE_LIST.slice(1))]
+          .filter(a => a
+            && a.toLowerCase() !== effectiveTo.toLowerCase()
+            && a.toLowerCase() !== EXCLUDED_RECIPIENT);
         return cc.length ? cc : undefined;
       })()
     : undefined;
