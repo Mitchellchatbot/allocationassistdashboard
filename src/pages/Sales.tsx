@@ -1,16 +1,32 @@
+import { useState } from "react";
 import { DashboardLayout } from "@/components/layout/DashboardLayout";
 import { ExpandableKPICard } from "@/components/ExpandableKPICard";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { InfoIcon } from "@/components/InfoIcon";
 import { useFilteredData } from "@/hooks/use-filtered-data";
+import { useAuth } from "@/hooks/use-auth";
+import { useSalesBoardMembers, useRemoveSalesBoardMember } from "@/hooks/use-sales-board";
+import { AddSalespersonDialog } from "@/components/sales/AddSalespersonDialog";
 import { SectionDateRange } from "@/components/SectionDateRange";
 import { SalesActivity } from "@/components/sales/SalesActivity";
-import { Phone, Mail, Clock, Users, UserCheck, Activity, ArrowRight, PhoneCall, AlertTriangle } from "lucide-react";
+import { Phone, Mail, Clock, Users, UserCheck, Activity, ArrowRight, PhoneCall, AlertTriangle, Plus, X } from "lucide-react";
 
 const Sales = () => {
   const { pipeline, sales, recruiters, stageConversion, filteredLeads } = useFilteredData();
+  const { role, user } = useAuth();
+  const isAdmin = role === "admin";
+  const { data: boardMembers = [] } = useSalesBoardMembers();
+  const removeMember = useRemoveSalesBoardMember();
+  const [addOpen, setAddOpen] = useState(false);
 
   const maxLeads = Math.max(...recruiters.map(r => r.doctors), 1);
+
+  // Admin-pinned salespeople. Those who already auto-appear from Zoho lead
+  // ownership are deduped out; the rest are shown as extra rows.
+  const normName = (s: string) => s.toLowerCase().replace(/[^a-z0-9]/g, "");
+  const recruiterNameSet = new Set(recruiters.map(r => normName(r.name)));
+  const manualOnly = boardMembers.filter(m => !recruiterNameSet.has(normName(m.member_name)));
+  const namesOnBoard = new Set([...recruiterNameSet, ...boardMembers.map(m => normName(m.member_name))]);
 
   // Conversion = qualified leads that became Doctors on Board.
   // Numerator  = DoB (placement) count.
@@ -337,9 +353,20 @@ const Sales = () => {
         <CardHeader className="pb-2 pt-4 px-5">
           <div className="flex items-center justify-between">
             <CardTitle className="text-[13px] font-semibold text-foreground">Sales Consultant Performance</CardTitle>
-            <div className="flex items-center gap-1 text-[10px] text-muted-foreground">
-              <Users className="h-3 w-3" />
-              {recruiters.length} active
+            <div className="flex items-center gap-2">
+              <div className="flex items-center gap-1 text-[10px] text-muted-foreground">
+                <Users className="h-3 w-3" />
+                {recruiters.length + manualOnly.length} active
+              </div>
+              {isAdmin && (
+                <button
+                  onClick={() => setAddOpen(true)}
+                  title="Add a salesperson from your dashboard users"
+                  className="inline-flex items-center gap-1 h-6 px-2 rounded-full bg-primary/10 text-primary hover:bg-primary hover:text-white text-[10px] font-semibold transition-colors"
+                >
+                  <Plus className="h-3 w-3" /> Add
+                </button>
+              )}
             </div>
           </div>
         </CardHeader>
@@ -419,9 +446,49 @@ const Sales = () => {
                 </span>
               </div>
             ))}
+
+            {/* Admin-pinned salespeople who don't auto-appear from Zoho yet. */}
+            {manualOnly.map(m => (
+              <div
+                key={`manual-${m.id}`}
+                className="relative grid grid-cols-[minmax(0,1fr)_60px_100px_92px_96px] gap-x-4 gap-y-3 items-center px-3 py-2.5 rounded-xl hover:bg-muted/40 transition-colors group"
+              >
+                <div className="flex items-center gap-2.5 min-w-0">
+                  <div className="h-8 w-8 rounded-full flex items-center justify-center text-[10px] font-bold shrink-0 text-white bg-slate-400">
+                    {m.member_name.split(" ").map(n => n[0]).join("").slice(0, 2).toUpperCase()}
+                  </div>
+                  <div className="min-w-0">
+                    <p className="text-[12px] font-medium text-foreground truncate">{m.member_name}</p>
+                    <p className="text-[9px] text-muted-foreground">pinned · no Zoho leads in this period</p>
+                  </div>
+                </div>
+                <span className="text-[12px] text-right text-muted-foreground/40">—</span>
+                <span className="text-[12px] text-right text-muted-foreground/40">—</span>
+                <span className="text-[12px] text-right text-muted-foreground/40 hidden md:block">—</span>
+                <span className="text-[12px] text-right text-muted-foreground/40 hidden md:block">—</span>
+                {isAdmin && (
+                  <button
+                    onClick={() => removeMember.mutate(m.id)}
+                    title="Remove from board"
+                    className="absolute right-1 top-1/2 -translate-y-1/2 h-6 w-6 rounded-md text-muted-foreground/50 hover:text-rose-600 hover:bg-rose-50 opacity-0 group-hover:opacity-100 transition flex items-center justify-center"
+                  >
+                    <X className="h-3.5 w-3.5" />
+                  </button>
+                )}
+              </div>
+            ))}
           </div>
         </CardContent>
       </Card>
+
+      {isAdmin && (
+        <AddSalespersonDialog
+          open={addOpen}
+          onClose={() => setAddOpen(false)}
+          existingNames={namesOnBoard}
+          addedBy={user?.email ?? null}
+        />
+      )}
     </DashboardLayout>
   );
 };
