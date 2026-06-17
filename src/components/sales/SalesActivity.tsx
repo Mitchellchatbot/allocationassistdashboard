@@ -11,6 +11,7 @@ import { Link } from "react-router-dom";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { useFilteredData } from "@/hooks/use-filtered-data";
 import { useZohoData } from "@/hooks/use-zoho-data";
+import { useWpCandidates } from "@/hooks/use-wp-candidates";
 import { useFilters } from "@/lib/filters";
 import { GranularityToggle } from "@/components/GranularityToggle";
 import { normalizeChannelKey } from "@/lib/channel-mapping";
@@ -30,8 +31,32 @@ function fmtDate(s: string | null | undefined): string {
 export function SalesActivity() {
   const { filteredLeads } = useFilteredData();
   const { data: zoho } = useZohoData();
+  const { data: wpCandidates = [] } = useWpCandidates();
   const { dateRange } = useFilters();
   const [gran, setGran] = useState<Granularity>("week");
+
+  // Resolve a Doctor-on-Board to its WordPress profile id (so we can open the
+  // profile directly via ?open=<id> instead of just searching). Matches on
+  // email → phone → name, the same parity the rest of the portal uses.
+  const wpResolve = useMemo(() => {
+    const byEmail = new Map<string, number>();
+    const byPhone = new Map<string, number>();
+    const byName  = new Map<string, number>();
+    const ne = (s: string | null | undefined) => (s ?? "").trim().toLowerCase();
+    const np = (s: string | null | undefined) => { const d = (s ?? "").replace(/\D/g, ""); return d.length >= 9 ? d.slice(-9) : ""; };
+    const nn = (s: string | null | undefined) => (s ?? "").toLowerCase().replace(/[^a-z0-9]/g, "");
+    for (const c of wpCandidates) {
+      if (c.email)     { const k = ne(c.email);     if (k) byEmail.set(k, c.id); }
+      if (c.phone)     { const k = np(c.phone);     if (k) byPhone.set(k, c.id); }
+      if (c.full_name) { const k = nn(c.full_name); if (k && !byName.has(k)) byName.set(k, c.id); }
+    }
+    return (email: string | null, phone: string | null, mobile: string | null, name: string | null): number | null => {
+      const e = ne(email);  if (e && byEmail.has(e)) return byEmail.get(e)!;
+      const p = np(phone) || np(mobile); if (p && byPhone.has(p)) return byPhone.get(p)!;
+      const n = nn(name);   if (n && byName.has(n)) return byName.get(n)!;
+      return null;
+    };
+  }, [wpCandidates]);
 
   const fromMs = dateRange.from.getTime();
   const toMs   = dateRange.to.getTime() + 86_400_000;
@@ -171,13 +196,18 @@ export function SalesActivity() {
             ) : (
               <ul className="divide-y divide-border/40">
                 {recent.map((c, i) => {
-                  const query = encodeURIComponent(c.Email || c.Full_Name || "");
                   const spec  = c.Specialty_New || c.Speciality || "";
+                  // Open the actual profile when we can match it; otherwise fall
+                  // back to a name search (doctor has no WordPress profile yet).
+                  const wpId = wpResolve(c.Email, c.Phone, c.Mobile, c.Full_Name);
+                  const to = wpId
+                    ? `/doctors?tab=profiles&open=${wpId}`
+                    : `/doctors?tab=profiles&q=${encodeURIComponent(c.Email || c.Full_Name || "")}`;
                   return (
                     <li key={i}>
                       <Link
-                        to={`/doctors?tab=profiles&q=${query}`}
-                        title={`Open ${c.Full_Name || "this doctor"}'s profile`}
+                        to={to}
+                        title={wpId ? `Open ${c.Full_Name || "this doctor"}'s profile` : `Find ${c.Full_Name || "this doctor"} in Profiles`}
                         className="flex items-center justify-between gap-3 py-2 -mx-2 px-2 rounded-md hover:bg-muted/40 transition-colors group"
                       >
                         <div className="min-w-0">
