@@ -346,7 +346,7 @@ const Sales = () => {
         <CardContent className="px-5 pb-5">
           <div className="space-y-2">
             {/* Header */}
-            <div className="grid grid-cols-[minmax(0,1fr)_64px_104px_96px_84px] gap-x-4 gap-y-3 px-3 pb-1 border-b border-border/40">
+            <div className="grid grid-cols-[minmax(0,1fr)_60px_100px_92px_96px] gap-x-4 gap-y-3 px-3 pb-1 border-b border-border/40">
               <span className="text-[10px] font-medium text-muted-foreground uppercase tracking-wide">Sales Consultant</span>
               <span className="text-[10px] font-medium text-muted-foreground uppercase tracking-wide text-right inline-flex items-center justify-end gap-1">
                 Leads
@@ -369,11 +369,11 @@ const Sales = () => {
                   source="Zoho CRM (Lead_Status)."
                 />
               </span>
-              <span className="text-[10px] font-medium text-muted-foreground uppercase tracking-wide text-right hidden md:inline-flex items-center justify-end gap-1">
-                Conv. %
+              <span className="text-[10px] font-medium text-muted-foreground uppercase tracking-wide text-right hidden md:inline-flex items-center justify-end gap-1 whitespace-nowrap">
+                Converted
                 <InfoIcon
-                  meaning='Share of this consultant’s leads that reached Initial Sales Call Completed or High Priority Follow up. "Contact in Future" excluded.'
-                  source="Zoho CRM (Lead_Status)."
+                  meaning="Doctors on Board this consultant converted in the period — actual placements, attributed by the Doctor-on-Board record's Owner."
+                  source="Zoho CRM (Doctors on Board · Owner)."
                 />
               </span>
             </div>
@@ -381,7 +381,7 @@ const Sales = () => {
             {recruiters.map((rep, i) => (
               <div
                 key={rep.name}
-                className="grid grid-cols-[minmax(0,1fr)_64px_104px_96px_84px] gap-x-4 gap-y-3 items-center px-3 py-2.5 rounded-xl hover:bg-muted/40 transition-colors group"
+                className="grid grid-cols-[minmax(0,1fr)_60px_100px_92px_96px] gap-x-4 gap-y-3 items-center px-3 py-2.5 rounded-xl hover:bg-muted/40 transition-colors group"
               >
                 {/* Avatar + name */}
                 <div className="flex items-center gap-2.5 min-w-0">
@@ -413,10 +413,9 @@ const Sales = () => {
                   {(rep as { contactRate?: number }).contactRate ?? 0}%
                 </span>
                 <span className={`text-[12px] font-semibold tabular-nums text-right hidden md:block ${
-                  ((rep as { conversionRate?: number }).conversionRate ?? 0) >= 40 ? 'text-success' :
-                  ((rep as { conversionRate?: number }).conversionRate ?? 0) >= 20 ? 'text-primary' : 'text-warning'
+                  ((rep as { placements?: number }).placements ?? 0) > 0 ? 'text-emerald-600' : 'text-muted-foreground/40'
                 }`}>
-                  {(rep as { conversionRate?: number }).conversionRate ?? 0}%
+                  {((rep as { placements?: number }).placements ?? 0).toLocaleString()}
                 </span>
               </div>
             ))}

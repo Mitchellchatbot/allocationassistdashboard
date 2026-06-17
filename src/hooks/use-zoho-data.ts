@@ -749,6 +749,11 @@ export function aggregateZohoData(
     'Closed Won',
   ]);
 
+  // Real per-recruiter conversions: Doctors on Board owned by each rep in the
+  // period. DoB carries the rep as its Owner; normalise the name to match the
+  // recruiter key (which is the lead Owner name, also normalised).
+  const dobByOwner = countBy(doctorsOnBoard, d => normaliseName(d.Owner?.name ?? 'Unknown'));
+
   const recruiters = Object.entries(leadsByOwner)
     .filter(([name]) => name !== 'Unknown')
     .map(([name, rLeads]) => {
@@ -769,7 +774,7 @@ export function aggregateZohoData(
         converted,
         conversionRate,
         highPriority:   highPri,
-        placements:     0,
+        placements:     dobByOwner[name] ?? 0,   // Doctors on Board owned by this rep (real conversions)
         revenue:        'N/A',
         calls:          callsByRecruiter[name] ?? 0,
         emails:         emailData.bySender[name] ?? 0,
