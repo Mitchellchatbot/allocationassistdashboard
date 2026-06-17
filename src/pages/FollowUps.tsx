@@ -10,8 +10,11 @@ import { supabase } from "@/lib/supabase";
 import {
   AlertTriangle, Clock, CheckCircle, Search,
   Phone, Calendar, ChevronDown, ChevronUp,
-  Loader2, Check,
+  Loader2, Check, Flame,
 } from "lucide-react";
+import { useVacancies } from "@/hooks/use-vacancies";
+import { rollupSpecialty } from "@/lib/specialty-groups";
+import { scoreFollowUp, FOLLOWUP_STALE_CAP_DAYS, FOLLOWUP_SLA_DAYS } from "@/lib/followup-rank";
 
 // ── Types ─────────────────────────────────────────────────────────────────────
 
@@ -52,6 +55,13 @@ function daysSinceTouched(lead: { Modified_Time?: string | null; Created_Time?: 
   const iso = lead.Modified_Time || lead.Created_Time;
   if (!iso) return null;
   const t = new Date(iso).getTime();
+  if (Number.isNaN(t)) return null;
+  return Math.max(0, Math.floor((Date.now() - t) / 86_400_000));
+}
+/** Whole days since the lead was created. */
+function leadAgeDays(lead: { Created_Time?: string | null }): number | null {
+  if (!lead.Created_Time) return null;
+  const t = new Date(lead.Created_Time).getTime();
   if (Number.isNaN(t)) return null;
   return Math.max(0, Math.floor((Date.now() - t) / 86_400_000));
 }
@@ -193,8 +203,10 @@ type Tab = keyof typeof TAB_STATUSES;
 
 const FollowUps = () => {
   const { data: zoho }       = useZohoData();
+  const { data: vacancies = [] } = useVacancies();
   const queryClient          = useQueryClient();
   const [tab, setTab]        = useState<Tab>("high");
+  const [rankMode, setRankMode] = useState<"smart" | "overdue">("smart");
   const [search, setSearch]  = useState("");
   const [expandedId, setExpandedId] = useState<string | null>(null);
   const [updatedIds, setUpdatedIds] = useState<Set<string>>(new Set());
@@ -216,7 +228,7 @@ const FollowUps = () => {
   }, [rawLeads]);
 
   // Filtered leads for current tab
-  const leads = useMemo(() => {
+  const tabLeads = useMemo(() => {
     const targetStatus = TAB_STATUSES[tab];
     return rawLeads.filter(l => {
       if (l.Lead_Status !== targetStatus) return false;
@@ -227,11 +239,48 @@ const FollowUps = () => {
     });
   }, [rawLeads, tab, search, recruiterFilter]);
 
-  // Sort least-recently-touched first — the leads at the top have waited
-  // longest for action. Honest recency (Modified_Time → Created_Time).
-  const sorted = useMemo(() => {
-    return [...leads].sort((a, b) => (daysSinceTouched(b) ?? -1) - (daysSinceTouched(a) ?? -1));
-  }, [leads]);
+  // Hard age cap — drop cold leads with no activity in FOLLOWUP_STALE_CAP_DAYS
+  // (so years-old leads stop surfacing).
+  const leads = useMemo(
+    () => tabLeads.filter(l => (daysSinceTouched(l) ?? 0) <= FOLLOWUP_STALE_CAP_DAYS),
+    [tabLeads],
+  );
+  const coldHidden = tabLeads.length - leads.length;
+
+  // Specialty groups with an OPEN vacancy → demand signal for ranking.
+  const demandGroups = useMemo(() => {
+    const s = new Set<string>();
+    for (const v of vacancies) {
+      if (v.status !== "open") continue;
+      const g = rollupSpecialty(v.specialty);
+      if (g) s.add(g);
+    }
+    return s;
+  }, [vacancies]);
+
+  // Rank: "smart" = priority score (urgency + open-vacancy demand + freshness +
+  // source), "overdue" = pure least-recently-touched.
+  const ranked = useMemo(() => {
+    const sla = FOLLOWUP_SLA_DAYS[tab] ?? 7;
+    const items = leads.map(lead => ({
+      lead,
+      rank: scoreFollowUp({
+        daysSinceTouched: daysSinceTouched(lead),
+        leadAgeDays:      leadAgeDays(lead),
+        specialty:        lead.Specialty || lead.Specialty_New,
+        source:           lead.Lead_Source,
+        slaDays:          sla,
+        demandGroups,
+      }),
+    }));
+    if (rankMode === "overdue") {
+      items.sort((a, b) => (daysSinceTouched(b.lead) ?? -1) - (daysSinceTouched(a.lead) ?? -1));
+    } else {
+      items.sort((a, b) => b.rank.score - a.rank.score
+        || (daysSinceTouched(b.lead) ?? -1) - (daysSinceTouched(a.lead) ?? -1));
+    }
+    return items;
+  }, [leads, tab, demandGroups, rankMode]);
 
   // Status update mutation (same pattern as LeadsPipeline — updates Zoho + cache)
   const updateStatus = useMutation({
@@ -340,30 +389,49 @@ const FollowUps = () => {
         <div className="mb-3 rounded-md bg-destructive/10 border border-destructive/30 px-3 py-2 text-[12px] text-destructive">{errorMsg}</div>
       )}
 
-      {/* ── Sort/recency note ── */}
-      <div className="mb-3 flex items-center gap-2 rounded-md bg-muted/40 border border-border/50 px-3 py-2 text-[11px] text-muted-foreground">
-        <Clock className="h-3.5 w-3.5 shrink-0" />
-        Sorted by least-recently-touched — the leads at the top have waited longest. The
-        <span className="mx-1 inline-flex items-center rounded-full border border-rose-200 bg-rose-50 px-1.5 text-rose-700">red</span>
-        chips are stale (&gt;14 days since their last update in Zoho).
+      {/* ── Ranking controls + note ── */}
+      <div className="mb-3 flex flex-wrap items-center justify-between gap-2 rounded-md bg-muted/40 border border-border/50 px-3 py-2 text-[11px] text-muted-foreground">
+        <div className="flex items-center gap-1.5 min-w-0">
+          {rankMode === "smart"
+            ? <><Flame className="h-3.5 w-3.5 shrink-0 text-amber-500" /> <span className="truncate">Ranked by priority — how overdue the callback is, plus open-vacancy demand, freshness &amp; source.</span></>
+            : <><Clock className="h-3.5 w-3.5 shrink-0" /> <span className="truncate">Sorted by least-recently-touched — longest-waiting first.</span></>}
+          {coldHidden > 0 && (
+            <span className="ml-1 shrink-0 text-muted-foreground/70">· {coldHidden} cold hidden (no activity in {Math.round(FOLLOWUP_STALE_CAP_DAYS / 30)} months)</span>
+          )}
+        </div>
+        <div className="inline-flex rounded-md border border-border/60 overflow-hidden text-[10px] font-medium shrink-0">
+          {([
+            { v: "smart",   label: "Smart priority" },
+            { v: "overdue", label: "Most overdue"   },
+          ] as const).map(opt => (
+            <button
+              key={opt.v}
+              type="button"
+              onClick={() => setRankMode(opt.v)}
+              className={`px-2.5 py-1 transition-colors ${rankMode === opt.v ? "bg-primary text-white" : "bg-card text-muted-foreground hover:bg-muted/40"}`}
+            >
+              {opt.label}
+            </button>
+          ))}
+        </div>
       </div>
 
       {/* ── Lead cards ── */}
       <Card className="shadow-sm border-border/50">
         <CardHeader className="pb-2 pt-4 px-4">
           <CardTitle className="text-[12px] font-medium text-muted-foreground uppercase tracking-wide">
-            {sorted.length} {tab === "high" ? "High Priority" : "Contact in Future"} leads
+            {ranked.length} {tab === "high" ? "High Priority" : "Contact in Future"} leads
           </CardTitle>
         </CardHeader>
         <CardContent className="p-0">
-          {sorted.length === 0 ? (
+          {ranked.length === 0 ? (
             <div className="flex flex-col items-center justify-center py-12 text-muted-foreground gap-2">
               <CheckCircle className="h-8 w-8 text-success/40" />
               <p className="text-[13px]">All clear — no leads here right now.</p>
             </div>
           ) : (
             <div className="divide-y divide-border/40">
-              {sorted.map(lead => {
+              {ranked.map(({ lead, rank }) => {
                 const name    = (lead.Full_Name || `${lead.First_Name ?? ""} ${lead.Last_Name ?? ""}`).trim() || "—";
                 const recency = daysSinceTouched(lead);
                 const specialty = lead.Specialty || lead.Specialty_New;
@@ -403,8 +471,21 @@ const FollowUps = () => {
                         </div>
                       </div>
 
-                      {/* Recency chip + status dropdown */}
+                      {/* Priority badge + recency chip + status dropdown */}
                       <div className="shrink-0 flex items-center gap-2.5">
+                        {rank.tier !== "normal" && (
+                          <span
+                            className={`hidden md:inline-flex items-center gap-1 rounded-full px-2 py-0.5 text-[10px] font-semibold ${
+                              rank.tier === "high"
+                                ? "bg-rose-50 text-rose-700 border border-rose-200"
+                                : "bg-amber-50 text-amber-700 border border-amber-200"
+                            }`}
+                            title={`Priority score ${rank.score}`}
+                          >
+                            {rank.tier === "high" && <Flame className="h-2.5 w-2.5" />}
+                            {rank.reason}
+                          </span>
+                        )}
                         {recency !== null && (
                           <span
                             className={`hidden sm:inline-flex items-center rounded-full border px-2 py-0.5 text-[10px] font-medium ${recencyTone(recency)}`}
