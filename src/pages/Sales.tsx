@@ -207,7 +207,7 @@ const Sales = () => {
           expandedHeight={260}
         />
         <ExpandableKPICard
-          title="Conversion Rate"
+          title="Qualified → Converted"
           value={`${overallConversionRate}%`}
           icon={UserCheck}
           color="text-info"
