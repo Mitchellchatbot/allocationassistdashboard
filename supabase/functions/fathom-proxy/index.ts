@@ -327,25 +327,24 @@ function meetingToRow(m: FathomMeeting) {
   }
 
   // ── Summary ──
-  const summary = pick(
-    asStr(m.default_summary),
-    asStr(m.summary),
-    asStr(m.ai_summary),
-    typeof m.ai_summary === 'object'
-      ? asStr((asObj(m.ai_summary) ?? {}).markdown_formatted) ?? asStr((asObj(m.ai_summary) ?? {}).text)
-      : null,
-  );
+  const summary = summaryText(m);
 
   // ── Action items ──
   const actionItems = (Array.isArray(m.default_action_items) ? m.default_action_items
                      : Array.isArray(m.action_items)         ? m.action_items
                      : null) as unknown[] | null;
 
-  // ── Transcript ──
+  // ── Transcript ── Fathom returns an ARRAY of {speaker:{display_name},text,timestamp}
+  // (inline via include_transcript, or under `transcript` from the recordings
+  // endpoint). Tolerate the legacy string / {plaintext,segments} shapes too.
   let transcriptPlain: string | null = null;
   let transcriptSegs: unknown        = null;
   const t = m.transcript;
-  if (typeof t === 'string') {
+  if (Array.isArray(t)) {
+    const p = transcriptFromArray(t);
+    transcriptPlain = p.plaintext;
+    transcriptSegs  = p.segments;
+  } else if (typeof t === 'string') {
     transcriptPlain = t;
   } else if (t && typeof t === 'object') {
     transcriptPlain = asStr((asObj(t) ?? {}).plaintext);
@@ -374,14 +373,51 @@ function meetingToRow(m: FathomMeeting) {
   };
 }
 
+/** Build plaintext + segments from Fathom's transcript array
+ *  ([{ speaker:{display_name}, text, timestamp }]). */
+function transcriptFromArray(arr: unknown): { plaintext: string | null; segments: unknown[] | null } {
+  if (!Array.isArray(arr) || arr.length === 0) return { plaintext: null, segments: null };
+  const segments = arr.map((s) => {
+    const o  = (s ?? {}) as { speaker?: unknown; text?: unknown; timestamp?: unknown };
+    const sp = o.speaker;
+    const speaker = (sp && typeof sp === 'object')
+      ? asStr((sp as { display_name?: string }).display_name)
+      : asStr(sp);
+    return { ts: asStr(o.timestamp), speaker, text: asStr(o.text) ?? '' };
+  });
+  const plaintext = segments
+    .map(s => `${s.speaker ? s.speaker + ': ' : ''}${s.text}`)
+    .filter(l => l.trim())
+    .join('\n');
+  return { plaintext: plaintext || null, segments };
+}
+
+/** Extract the AI summary text from Fathom's various summary shapes. */
+function summaryText(m: Record<string, unknown>): string | null {
+  for (const c of [m.default_summary, m.summary, m.ai_summary]) {
+    if (typeof c === 'string' && c.trim()) return c;
+    if (c && typeof c === 'object') {
+      const o = asObj(c) ?? {};
+      const s = asStr(o.markdown_formatted) ?? asStr(o.text) ?? asStr(o.summary) ?? asStr(o.content);
+      if (s) return s;
+    }
+  }
+  return null;
+}
+
 async function ensureTranscript(row: ReturnType<typeof meetingToRow>) {
   if (!row || row.transcript_plaintext) return row;
   try {
-    const t = await fathomGet(`/meetings/${row.fathom_id}/transcript`);
-    if (typeof t === 'string') row.transcript_plaintext = t as unknown as string;
-    else if (t && typeof t === 'object') {
-      row.transcript_plaintext = (t as { plaintext?: string }).plaintext ?? null;
-      row.transcript_segments  = (t as { segments?: unknown[] }).segments ?? row.transcript_segments;
+    // Correct endpoint: /recordings/{recording_id}/transcript (fathom_id IS the
+    // recording_id). Returns { transcript: [ {speaker,text,timestamp} ] }.
+    const t = await fathomGet(`/recordings/${row.fathom_id}/transcript`);
+    const arr = (t && typeof t === 'object' && !Array.isArray(t))
+      ? (t as { transcript?: unknown }).transcript
+      : t;
+    const p = transcriptFromArray(arr);
+    if (p.plaintext) {
+      row.transcript_plaintext = p.plaintext;
+      row.transcript_segments  = p.segments ?? row.transcript_segments;
     }
   } catch (e) {
     console.warn('[fathom-proxy] transcript fetch failed', row.fathom_id, e);
@@ -410,7 +446,14 @@ async function syncLoop(since: string | null, timeBudgetMs: number) {
       break;
     }
 
-    const params: Record<string, string> = { limit: '100' };
+    const params: Record<string, string> = {
+      limit: '100',
+      // Pull transcript + summary + action items INLINE — they're excluded by
+      // default. Without these, every synced call has a null transcript/summary.
+      include_transcript:   'true',
+      include_summary:      'true',
+      include_action_items: 'true',
+    };
     if (since)  params.created_after = since;
     if (cursor) params.cursor        = cursor;
 

@@ -164,22 +164,24 @@ function meetingToRow(m: FathomMeeting) {
                          : Array.isArray(meeting.external_domains) ? meeting.external_domains
                          : null) as string[] | null;
 
-  const summary = pick(
-    asStr(m.default_summary), asStr(m.summary), asStr(m.ai_summary),
-    typeof m.ai_summary === 'object'
-      ? asStr((asObj(m.ai_summary) ?? {}).markdown_formatted) ?? asStr((asObj(m.ai_summary) ?? {}).text)
-      : null,
-  );
+  const summary = summaryText(m);
 
   const actionItems = (Array.isArray(m.default_action_items) ? m.default_action_items
                      : Array.isArray(m.action_items)         ? m.action_items
                      : null) as unknown[] | null;
 
+  // Fathom transcript is an ARRAY of {speaker:{display_name},text,timestamp}.
+  // Tolerate legacy string / {plaintext,segments} shapes too.
   let transcriptPlain: string | null = null;
   let transcriptSegs: unknown        = null;
   const t = m.transcript;
-  if (typeof t === 'string')                       transcriptPlain = t;
-  else if (t && typeof t === 'object') {
+  if (Array.isArray(t)) {
+    const p = transcriptFromArray(t);
+    transcriptPlain = p.plaintext;
+    transcriptSegs  = p.segments;
+  } else if (typeof t === 'string') {
+    transcriptPlain = t;
+  } else if (t && typeof t === 'object') {
     transcriptPlain = asStr((asObj(t) ?? {}).plaintext);
     const segs      = (asObj(t) ?? {}).segments;
     transcriptSegs  = Array.isArray(segs) ? segs : null;
@@ -206,15 +208,51 @@ function meetingToRow(m: FathomMeeting) {
   };
 }
 
-/** If the webhook fired before transcript was available, fetch it now. */
-async function fetchTranscript(fathomId: string) {
+/** Build plaintext + segments from Fathom's transcript array
+ *  ([{ speaker:{display_name}, text, timestamp }]). */
+function transcriptFromArray(arr: unknown): { plaintext: string | null; segments: unknown[] | null } {
+  if (!Array.isArray(arr) || arr.length === 0) return { plaintext: null, segments: null };
+  const segments = arr.map((s) => {
+    const o  = (s ?? {}) as { speaker?: unknown; text?: unknown; timestamp?: unknown };
+    const sp = o.speaker;
+    const speaker = (sp && typeof sp === 'object')
+      ? asStr((sp as { display_name?: string }).display_name)
+      : asStr(sp);
+    return { ts: asStr(o.timestamp), speaker, text: asStr(o.text) ?? '' };
+  });
+  const plaintext = segments
+    .map(s => `${s.speaker ? s.speaker + ': ' : ''}${s.text}`)
+    .filter(l => l.trim())
+    .join('\n');
+  return { plaintext: plaintext || null, segments };
+}
+
+/** Extract the AI summary text from Fathom's various summary shapes. */
+function summaryText(m: Record<string, unknown>): string | null {
+  for (const c of [m.default_summary, m.summary, m.ai_summary]) {
+    if (typeof c === 'string' && c.trim()) return c;
+    if (c && typeof c === 'object') {
+      const o = asObj(c) ?? {};
+      const s = asStr(o.markdown_formatted) ?? asStr(o.text) ?? asStr(o.summary) ?? asStr(o.content);
+      if (s) return s;
+    }
+  }
+  return null;
+}
+
+/** If the webhook fired before the transcript was ready, fetch it now from the
+ *  correct endpoint: /recordings/{recording_id}/transcript (fathom_id IS the
+ *  recording_id). Returns parsed { plaintext, segments } or null. */
+async function fetchTranscript(fathomId: string): Promise<{ plaintext: string | null; segments: unknown[] | null } | null> {
   if (!FATHOM_API_KEY) return null;
   try {
-    const r = await fetch(`${FATHOM_BASE}/meetings/${fathomId}/transcript`, {
+    const r = await fetch(`${FATHOM_BASE}/recordings/${fathomId}/transcript`, {
       headers: { 'X-Api-Key': FATHOM_API_KEY, 'Accept': 'application/json' },
     });
     if (!r.ok) return null;
-    return await r.json();
+    const j = await r.json();
+    const arr = (j && typeof j === 'object' && !Array.isArray(j)) ? (j as { transcript?: unknown }).transcript : j;
+    return transcriptFromArray(arr);
   } catch {
     return null;
   }
@@ -265,12 +303,9 @@ serve(async (req: Request) => {
   // Fetch transcript on-demand if missing
   if (!row.transcript_plaintext) {
     const t = await fetchTranscript(row.fathom_id);
-    if (t) {
-      if (typeof t === 'string')                row.transcript_plaintext = t;
-      else if (t && typeof t === 'object') {
-        row.transcript_plaintext = (t as { plaintext?: string }).plaintext ?? null;
-        row.transcript_segments  = (t as { segments?: unknown[] }).segments ?? row.transcript_segments;
-      }
+    if (t?.plaintext) {
+      row.transcript_plaintext = t.plaintext;
+      row.transcript_segments  = t.segments ?? row.transcript_segments;
     }
   }
 
