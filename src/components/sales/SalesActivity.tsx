@@ -7,6 +7,7 @@
  * All from the same windowed Zoho data the KPIs use.
  */
 import { useMemo, useState } from "react";
+import { Link } from "react-router-dom";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { useFilteredData } from "@/hooks/use-filtered-data";
 import { useZohoData } from "@/hooks/use-zoho-data";
@@ -169,17 +170,27 @@ export function SalesActivity() {
               <p className="text-[12px] text-muted-foreground py-4 text-center">No conversions in this period.</p>
             ) : (
               <ul className="divide-y divide-border/40">
-                {recent.map((c, i) => (
-                  <li key={i} className="flex items-center justify-between gap-3 py-2">
-                    <div className="min-w-0">
-                      <p className="text-[12px] font-medium truncate">{c.Full_Name || "Unknown"}</p>
-                      <p className="text-[10px] text-muted-foreground truncate">
-                        {c.Owner?.name || "—"}{c.Specialty ? ` · ${c.Specialty}` : ""}
-                      </p>
-                    </div>
-                    <span className="text-[11px] text-muted-foreground tabular-nums shrink-0">{fmtDate(c.Created_Time)}</span>
-                  </li>
-                ))}
+                {recent.map((c, i) => {
+                  const query = encodeURIComponent(c.Email || c.Full_Name || "");
+                  const spec  = c.Specialty_New || c.Speciality || "";
+                  return (
+                    <li key={i}>
+                      <Link
+                        to={`/doctors?tab=profiles&q=${query}`}
+                        title={`Open ${c.Full_Name || "this doctor"}'s profile`}
+                        className="flex items-center justify-between gap-3 py-2 -mx-2 px-2 rounded-md hover:bg-muted/40 transition-colors group"
+                      >
+                        <div className="min-w-0">
+                          <p className="text-[12px] font-medium truncate group-hover:text-primary transition-colors">{c.Full_Name || "Unknown"}</p>
+                          <p className="text-[10px] text-muted-foreground truncate">
+                            {c.Owner?.name || "—"}{spec ? ` · ${spec}` : ""}
+                          </p>
+                        </div>
+                        <span className="text-[11px] text-muted-foreground tabular-nums shrink-0">{fmtDate(c.Created_Time)}</span>
+                      </Link>
+                    </li>
+                  );
+                })}
               </ul>
             )}
           </CardContent>
