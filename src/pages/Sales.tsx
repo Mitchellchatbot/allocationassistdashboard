@@ -12,11 +12,17 @@ const Sales = () => {
 
   const maxLeads = Math.max(...recruiters.map(r => r.doctors), 1);
 
-  // Overall conversion rate using the same lead-status metric as per-recruiter breakdown.
-  // "Contact in Future" is excluded — it's unqualified (recruiter deferred).
-  const convertedStatuses = new Set(['Initial Sales Call Completed', 'High Priority Follow up']);
-  const overallConversionRate = filteredLeads.length > 0
-    ? parseFloat(((filteredLeads.filter(l => convertedStatuses.has(l.Lead_Status)).length / filteredLeads.length) * 100).toFixed(1))
+  // Conversion = qualified leads that became Doctors on Board.
+  // Numerator  = DoB (placement) count.
+  // Denominator = the qualified UNIVERSE: leads currently at a qualified status
+  //   ("Initial Sales Call Completed" / "High Priority Follow up") PLUS those
+  //   already converted to DoB (whose status has since moved past qualified).
+  // So this reads "of everyone who qualified, the share that got placed".
+  const qualifiedNow      = sales.qualifiedCount ?? 0;
+  const placedCount       = sales.convertedCount ?? 0;
+  const qualifiedUniverse = qualifiedNow + placedCount;
+  const overallConversionRate = qualifiedUniverse > 0
+    ? parseFloat(((placedCount / qualifiedUniverse) * 100).toFixed(1))
     : 0;
 
   // ── Expanded content for KPI cards ──────────────────────────────────────────
@@ -69,28 +75,31 @@ const Sales = () => {
     </div>
   );
 
-  // 3. Conversion Rate → lead conversion rate per recruiter
+  // 3. Conversion = qualified leads that became Doctors on Board (funnel view).
+  const conversionFunnel = [
+    { label: "Total leads",      value: sales.totalLeadsManaged, color: "#94a3b8" },
+    { label: "Qualified",        value: qualifiedUniverse,       color: "#0ea5e9" },
+    { label: "Doctors on Board", value: placedCount,             color: "#10b981" },
+  ];
   const conversionRateContent = (
     <div className="space-y-2">
-      {recruiters.length === 0
-        ? <p className="text-[11px] text-muted-foreground py-2">No sales consultant data</p>
-        : recruiters.slice(0, 5).map(r => {
-          const rate = (r as { conversionRate?: number }).conversionRate ?? 0;
-          const barColor = rate >= 40 ? 'bg-success' : rate >= 20 ? 'bg-primary' : 'bg-warning';
-          const maxRate = Math.max(...recruiters.map(x => (x as { conversionRate?: number }).conversionRate ?? 0), 1);
-          return (
-            <div key={r.name}>
-              <div className="flex items-center justify-between mb-1">
-                <span className="text-[11px] text-muted-foreground truncate max-w-[120px]">{r.name}</span>
-                <span className={`text-[11px] font-semibold tabular-nums ${rate >= 40 ? 'text-success' : rate >= 20 ? 'text-primary' : 'text-warning'}`}>{rate}%</span>
-              </div>
-              <div className="h-1.5 rounded-full bg-muted overflow-hidden">
-                <div className={`h-full rounded-full ${barColor} transition-all`} style={{ width: `${(rate / maxRate) * 100}%` }} />
-              </div>
+      {conversionFunnel.map(row => {
+        const pct = sales.totalLeadsManaged > 0 ? (row.value / sales.totalLeadsManaged) * 100 : 0;
+        return (
+          <div key={row.label}>
+            <div className="flex items-center justify-between mb-1">
+              <span className="text-[11px] text-muted-foreground truncate max-w-[140px]">{row.label}</span>
+              <span className="text-[11px] font-semibold tabular-nums">{row.value.toLocaleString()}</span>
             </div>
-          );
-        })
-      }
+            <div className="h-1.5 rounded-full bg-muted overflow-hidden">
+              <div className="h-full rounded-full transition-all" style={{ width: `${pct}%`, backgroundColor: row.color }} />
+            </div>
+          </div>
+        );
+      })}
+      <p className="text-[10px] text-muted-foreground pt-1 leading-relaxed">
+        {overallConversionRate}% of qualified leads ({qualifiedUniverse.toLocaleString()}) became Doctors on Board ({placedCount.toLocaleString()}).
+      </p>
     </div>
   );
 
@@ -198,13 +207,13 @@ const Sales = () => {
           expandedHeight={260}
         />
         <ExpandableKPICard
-          title="Lead Conversion Rate"
+          title="Conversion Rate"
           value={`${overallConversionRate}%`}
           icon={UserCheck}
           color="text-info"
           bg="bg-info/10"
-          hintMeaning="Share of leads that progressed past initial contact (Initial Sales Call Completed or High Priority Follow up)."
-          hintSource="Zoho CRM (Lead_Status)."
+          hintMeaning="Of qualified leads (Initial Sales Call Completed / High Priority Follow up), the share that became Doctors on Board. Denominator includes those already placed, since their status has moved past qualified."
+          hintSource="Zoho CRM (Lead_Status) + Doctors on Board module."
           expandedContent={conversionRateContent}
           expandedHeight={240}
         />

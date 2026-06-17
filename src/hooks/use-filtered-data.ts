@@ -28,6 +28,7 @@ export function useFilteredData() {
           dealsClosed: 0, conversionRate: 0, avgCycleTime: "—",
           outboundCalls: 0, emailsSent: 0, followUpsPending: 0,
           totalLeadsManaged: 0, activeInPipeline: 0, contactedRate: 0,
+          qualifiedCount: 0, convertedCount: 0,
         },
         recruiters: [], marketing: [], costVsConv: [], finance: [],
         roiData: [], doctors: [], campaigns: [], timeLabel,

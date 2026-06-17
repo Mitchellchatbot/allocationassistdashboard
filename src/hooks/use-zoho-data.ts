@@ -830,6 +830,11 @@ export function aggregateZohoData(
     // Metrics relevant to a recruitment outsourcing company
     totalLeadsManaged: leads.length,
     activeInPipeline:  activeLeads.length,
+    // Qualified = leads at "Initial Sales Call Completed" / "High Priority
+    // Follow up". convertedCount = Doctors on Board rows. Together they drive
+    // the qualified→placement conversion rate on the Sales page.
+    qualifiedCount:    qualifiedLeads.length,
+    convertedCount,
     contactedRate:     activeLeads.length > 0
       ? parseFloat(((contacted / activeLeads.length) * 100).toFixed(1))
       : 0,
