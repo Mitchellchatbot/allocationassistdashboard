@@ -346,7 +346,7 @@ const Sales = () => {
         <CardContent className="px-5 pb-5">
           <div className="space-y-2">
             {/* Header */}
-            <div className="grid grid-cols-[1fr_70px_60px_65px_65px] gap-3 px-3 pb-1 border-b border-border/40">
+            <div className="grid grid-cols-[minmax(0,1fr)_64px_104px_96px_84px] gap-x-4 gap-y-3 px-3 pb-1 border-b border-border/40">
               <span className="text-[10px] font-medium text-muted-foreground uppercase tracking-wide">Sales Consultant</span>
               <span className="text-[10px] font-medium text-muted-foreground uppercase tracking-wide text-right inline-flex items-center justify-end gap-1">
                 Leads
@@ -381,7 +381,7 @@ const Sales = () => {
             {recruiters.map((rep, i) => (
               <div
                 key={rep.name}
-                className="grid grid-cols-[1fr_70px_60px_65px_65px] gap-3 items-center px-3 py-2.5 rounded-xl hover:bg-muted/40 transition-colors group"
+                className="grid grid-cols-[minmax(0,1fr)_64px_104px_96px_84px] gap-x-4 gap-y-3 items-center px-3 py-2.5 rounded-xl hover:bg-muted/40 transition-colors group"
               >
                 {/* Avatar + name */}
                 <div className="flex items-center gap-2.5 min-w-0">
