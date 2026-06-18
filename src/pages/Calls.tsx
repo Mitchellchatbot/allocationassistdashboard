@@ -79,6 +79,55 @@ function totalSecondsIn(rows: FathomCall[]): number {
   return rows.reduce((sum, r) => sum + (r.duration_seconds ?? 0), 0);
 }
 
+// Fathom action items vary in shape: the text may live under
+// text/description/title/action and the assignee is often a user OBJECT
+// ({name,team,email}). Coerce both to strings so we never render a raw object
+// (which crashes React) and so the recap panel + drawer share one parser.
+interface NormAction { text: string; assignee: string | null; }
+function normActions(items: unknown): NormAction[] {
+  if (!Array.isArray(items)) return [];
+  return items
+    .map((a): NormAction => {
+      const item = (typeof a === "object" && a !== null ? a : {}) as Record<string, unknown>;
+      const rawText = typeof a === "string" ? a : (item.text ?? item.description ?? item.title ?? item.action ?? "");
+      const text = typeof rawText === "string" ? rawText : JSON.stringify(rawText);
+      const asg = item.assignee;
+      const assignee = typeof asg === "string" ? asg
+        : (asg && typeof asg === "object"
+            ? ((asg as { name?: string; display_name?: string }).name ?? (asg as { display_name?: string }).display_name ?? null)
+            : null);
+      return { text: text.trim(), assignee };
+    })
+    .filter(a => a.text.length > 0);
+}
+
+// Strip the markdown Fathom emits (links, bold, headings, bullets) to plain
+// text — used for the one-line TL;DR peek.
+function stripMd(s: string): string {
+  return s
+    .replace(/\[([^\]]+)\]\([^)]*\)/g, "$1")  // [text](url) -> text
+    .replace(/\*\*([^*]+)\*\*/g, "$1")         // **bold** -> bold
+    .replace(/[*_`>#]/g, "")                    // stray markdown
+    .replace(/^\s*[-•]\s*/, "")                 // leading bullet
+    .trim();
+}
+
+// First substantial line of a summary — the "Meeting Purpose" sentence in
+// Fathom's format — so we can peek the gist without opening the call.
+function summaryTldr(summary: string | null): string | null {
+  if (!summary) return null;
+  const lines = summary.split("\n");
+  for (const raw of lines) {
+    const line = stripMd(raw);
+    if (line.length >= 20 && !/^(meeting purpose|key takeaways?|topics?|next steps?)$/i.test(line)) return line;
+  }
+  for (const raw of lines) {
+    const line = stripMd(raw);
+    if (line) return line;
+  }
+  return null;
+}
+
 // Tick every second so the "synced 4s ago" pill stays live.
 function useNowTick(intervalMs = 1000): number {
   const [now, setNow] = useState(Date.now());
@@ -146,6 +195,35 @@ export default function Calls() {
       externals: callStats.externals,
     };
   }, [calls, callStats, search]);
+
+  // Recap panels built from the loaded list (newest first) — an at-a-glance
+  // "what to follow up on + what just happened" without opening each call.
+  // Both draw from the most recent calls that actually carry the data, so the
+  // panels never pad themselves with empty rows.
+  const recentActionGroups = useMemo(() => {
+    const groups: Array<{ call: FathomCall; items: NormAction[] }> = [];
+    for (const c of calls ?? []) {
+      const items = normActions(c.action_items);
+      if (items.length) groups.push({ call: c, items });
+      if (groups.length >= 3) break;
+    }
+    return groups;
+  }, [calls]);
+
+  const latestSummaries = useMemo(() => {
+    const out: Array<{ call: FathomCall; tldr: string }> = [];
+    for (const c of calls ?? []) {
+      const tldr = summaryTldr(c.summary);
+      if (tldr) out.push({ call: c, tldr });
+      if (out.length >= 3) break;
+    }
+    return out;
+  }, [calls]);
+
+  const openActionCount = useMemo(
+    () => (calls ?? []).reduce((n, c) => n + normActions(c.action_items).length, 0),
+    [calls],
+  );
 
   return (
     <DashboardLayout
@@ -220,11 +298,92 @@ export default function Calls() {
 
       {/* ── KPI tiles (match dashboard ExpandableKPICard) ─────────────────── */}
       <div className="grid grid-cols-2 sm:grid-cols-4 gap-4 mb-6">
-        <CandyKpi palette={CANDY.sky}    icon={<PhoneCall className="h-3.5 w-3.5" />}  label="Total calls"          value={String(stats.count)}    />
-        <CandyKpi palette={CANDY.mint}   icon={<Clock     className="h-3.5 w-3.5" />}  label="Total talk time"      value={stats.totalHrs}         />
-        <CandyKpi palette={CANDY.peach}  icon={<Mic       className="h-3.5 w-3.5" />}  label="Avg call length"      value={stats.avgMins}          />
-        <CandyKpi palette={CANDY.rose}   icon={<UsersIcon className="h-3.5 w-3.5" />}  label="With external guests" value={String(stats.externals)} />
+        <CandyKpi palette={CANDY.sky}    icon={<PhoneCall    className="h-3.5 w-3.5" />}  label="Total calls"     value={String(stats.count)}    />
+        <CandyKpi palette={CANDY.mint}   icon={<Clock        className="h-3.5 w-3.5" />}  label="Total talk time" value={stats.totalHrs}         />
+        <CandyKpi palette={CANDY.peach}  icon={<Mic          className="h-3.5 w-3.5" />}  label="Avg call length" value={stats.avgMins}          />
+        <CandyKpi palette={CANDY.rose}   icon={<CheckCircle2 className="h-3.5 w-3.5" />}  label="Action items"    value={String(openActionCount)} />
       </div>
+
+      {/* ── Recap: action items + summary peeks from the most recent calls ─── */}
+      {(recentActionGroups.length > 0 || latestSummaries.length > 0) && !search.trim() && (
+        <div className="grid grid-cols-1 lg:grid-cols-2 gap-4 mb-6">
+          {/* Action items from the latest calls */}
+          <Card className="shadow-sm border-border/60">
+            <CardHeader className="py-3 px-4 border-b border-border/40">
+              <CardTitle className="text-[13px] font-semibold flex items-center gap-2">
+                <span className={`flex h-7 w-7 items-center justify-center rounded-md ${CANDY.peach.chip} ${CANDY.peach.fg}`}>
+                  <CheckCircle2 className="h-3.5 w-3.5" />
+                </span>
+                Action items · recent calls
+              </CardTitle>
+            </CardHeader>
+            <CardContent className="p-0 divide-y divide-border/40">
+              {recentActionGroups.length === 0 ? (
+                <p className="text-[12px] text-muted-foreground px-4 py-4">No action items on recent calls yet.</p>
+              ) : recentActionGroups.map(({ call, items }) => (
+                <button
+                  key={call.fathom_id}
+                  onClick={() => setActiveId(call.fathom_id)}
+                  className="block w-full text-left px-4 py-3 hover:bg-muted/40 transition-colors"
+                >
+                  <div className="flex items-center justify-between gap-2 mb-1.5">
+                    <span className="text-[12px] font-medium text-foreground truncate">
+                      {call.title || call.matched_doctor_name || "Untitled call"}
+                    </span>
+                    <span className="text-[10px] text-muted-foreground shrink-0">{fmtDate(call.recording_start)}</span>
+                  </div>
+                  <ul className="space-y-1">
+                    {items.slice(0, 4).map((a, i) => (
+                      <li key={i} className="flex items-start gap-2 text-[11.5px] text-foreground/90">
+                        <span className="mt-1.5 h-1.5 w-1.5 rounded-full bg-amber-500 shrink-0" />
+                        <span className="leading-snug">
+                          {a.text}
+                          {a.assignee && <span className="ml-1.5 text-muted-foreground">— {a.assignee}</span>}
+                        </span>
+                      </li>
+                    ))}
+                    {items.length > 4 && (
+                      <li className="text-[11px] text-muted-foreground pl-3.5">+{items.length - 4} more</li>
+                    )}
+                  </ul>
+                </button>
+              ))}
+            </CardContent>
+          </Card>
+
+          {/* One-line summary peeks from the latest calls */}
+          <Card className="shadow-sm border-border/60">
+            <CardHeader className="py-3 px-4 border-b border-border/40">
+              <CardTitle className="text-[13px] font-semibold flex items-center gap-2">
+                <span className={`flex h-7 w-7 items-center justify-center rounded-md ${CANDY.lilac.chip} ${CANDY.lilac.fg}`}>
+                  <FileText className="h-3.5 w-3.5" />
+                </span>
+                Latest summaries
+              </CardTitle>
+            </CardHeader>
+            <CardContent className="p-0 divide-y divide-border/40">
+              {latestSummaries.length === 0 ? (
+                <p className="text-[12px] text-muted-foreground px-4 py-4">No summaries yet — they fill in as calls sync.</p>
+              ) : latestSummaries.map(({ call, tldr }) => (
+                <button
+                  key={call.fathom_id}
+                  onClick={() => setActiveId(call.fathom_id)}
+                  className="block w-full text-left px-4 py-3 hover:bg-muted/40 transition-colors"
+                >
+                  <div className="flex items-center justify-between gap-2 mb-1">
+                    <span className="text-[12px] font-medium text-foreground truncate">
+                      {call.title || call.matched_doctor_name || "Untitled call"}
+                    </span>
+                    <span className="text-[10px] text-muted-foreground shrink-0">{fmtDate(call.recording_start)}</span>
+                  </div>
+                  <p className="text-[11.5px] text-muted-foreground leading-snug line-clamp-2">{tldr}</p>
+                  {call.host_name && <p className="text-[10px] text-muted-foreground/80 mt-1">{call.host_name}</p>}
+                </button>
+              ))}
+            </CardContent>
+          </Card>
+        </div>
+      )}
 
       {/* ── Calls table (matches LeadsPipeline / Marketing styling) ──────── */}
       <Card className="shadow-sm border-border/60">
@@ -402,6 +561,7 @@ function CallDetailDrawer({ fathomId, onClose }: { fathomId: string; onClose: ()
   const [searchInTranscript, setSearchInTranscript] = useState("");
   const summarize = useSummarizeCall();
   const hasTranscript = !!(call?.transcript_plaintext || call?.transcript_segments?.length);
+  const drawerActions = normActions(call?.action_items);
 
   // Auto-generate an AI summary the first time a call without one is opened
   // (only when there's a transcript to work from). Persisted server-side, so
@@ -521,30 +681,18 @@ function CallDetailDrawer({ fathomId, onClose }: { fathomId: string; onClose: ()
                 </Section>
               ) : null}
 
-              {call.action_items && call.action_items.length > 0 && (
-                <Section icon={<UsersIcon className="h-3.5 w-3.5" />} title={`Action items (${call.action_items.length})`} palette={CANDY.peach}>
+              {drawerActions.length > 0 && (
+                <Section icon={<UsersIcon className="h-3.5 w-3.5" />} title={`Action items (${drawerActions.length})`} palette={CANDY.peach}>
                   <ul className="space-y-1.5">
-                    {call.action_items.map((a, i) => {
-                      // Fathom action items vary in shape; the text can be under
-                      // text/description/title and the assignee is often a user
-                      // OBJECT ({name,team,email}) — coerce both to strings so we
-                      // never render a raw object (which crashes React).
-                      const item = (typeof a === "object" && a !== null ? a : {}) as Record<string, unknown>;
-                      const rawText = typeof a === "string" ? a : (item.text ?? item.description ?? item.title ?? item.action ?? a);
-                      const text = typeof rawText === "string" ? rawText : JSON.stringify(rawText);
-                      const asg = item.assignee;
-                      const assignee = typeof asg === "string" ? asg
-                        : (asg && typeof asg === "object" ? ((asg as { name?: string; display_name?: string }).name ?? (asg as { display_name?: string }).display_name ?? null) : null);
-                      return (
-                        <li key={i} className="flex items-start gap-2 text-[12px] text-foreground">
-                          <span className="mt-1.5 h-1.5 w-1.5 rounded-full bg-amber-500 shrink-0" />
-                          <span>
-                            {text}
-                            {assignee && <span className="ml-2 text-muted-foreground">— {assignee}</span>}
-                          </span>
-                        </li>
-                      );
-                    })}
+                    {drawerActions.map((a, i) => (
+                      <li key={i} className="flex items-start gap-2 text-[12px] text-foreground">
+                        <span className="mt-1.5 h-1.5 w-1.5 rounded-full bg-amber-500 shrink-0" />
+                        <span>
+                          {a.text}
+                          {a.assignee && <span className="ml-2 text-muted-foreground">— {a.assignee}</span>}
+                        </span>
+                      </li>
+                    ))}
                   </ul>
                 </Section>
               )}
