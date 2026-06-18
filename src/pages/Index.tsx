@@ -1,5 +1,6 @@
 import { DashboardLayout } from "@/components/layout/DashboardLayout";
 import { PendingActionsCard } from "@/components/PendingActionsCard";
+import { PortalDigest } from "@/components/PortalDigest";
 import { DashboardGreeting } from "@/components/DashboardGreeting";
 import { SectionDateRange } from "@/components/SectionDateRange";
 import { ExpandableKPICard } from "@/components/ExpandableKPICard";
@@ -418,6 +419,9 @@ const Index = () => {
   return (
     <DashboardLayout title="Dashboard" subtitle="A quick look at how doctor placements and operations are performing" docSlug="overview/dashboard">
       <DashboardGreeting />
+
+      {/* AI digest of the entire portal (on demand) */}
+      <PortalDigest />
 
       <SectionDateRange />
 

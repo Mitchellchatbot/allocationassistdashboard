@@ -530,6 +530,62 @@ function dealRow(d: Deal): string {
 
 // ── Handler ───────────────────────────────────────────────────────────────────
 
+// ── Portal digest ────────────────────────────────────────────────────────────
+// A structured executive summary across the WHOLE portal, built from the same
+// full snapshot the chat assistant uses. On-demand (one Claude call per click).
+const DIGEST_SECTIONS = ['metrics', 'pipeline', 'marketing', 'operations', 'attention'] as const;
+
+async function runPortalDigest(contextBlock: string): Promise<Response> {
+  const jsonResp = (b: unknown, status = 200) =>
+    new Response(JSON.stringify(b), { status, headers: { ...CORS, 'Content-Type': 'application/json' } });
+
+  const prompt = `You are the chief-of-staff for Allocation Assist, a company that places UK/Western-trained doctors into Gulf (UAE, Saudi, Qatar) hospital jobs. Below is a full snapshot of the ENTIRE portal right now — lead pipeline, recruiter performance, deals/revenue, the license pipeline, contracts, the Hospital Introduction workflow, ads, and more.
+
+Write a concise executive DIGEST of what's going on across the whole business — the things a founder should know at a glance. Be specific: cite real numbers, recruiter names, hospitals, deal stages, and amounts from the data. Skip anything generic that would be true of any business.
+
+Respond with ONLY a JSON object (no markdown, no code fences) of exactly this shape:
+{
+  "headline": "2-3 sentence plain-English state of the business right now",
+  "metrics": ["the handful of numbers that matter most this moment — each a short 'Label: value' string"],
+  "pipeline": ["lead + recruitment pipeline: volume, qualified vs converted, who's performing, where leads stall"],
+  "marketing": ["ad spend / lead-source / channel observations — what's working vs not"],
+  "operations": ["hospital introductions, contracts, placements, doctors on board, licensing progress"],
+  "attention": ["what needs attention RIGHT NOW — risks, stalled deals, failures, overdue follow-ups, anything off"]
+}
+Each array: 2-6 short, specific bullet strings (one sentence each). Use an empty array for a section with nothing real to say. Output JSON only.
+
+=== PORTAL SNAPSHOT ===
+${contextBlock}`;
+
+  try {
+    const msg = await anthropic.messages.create({
+      model:      'claude-opus-4-6',
+      max_tokens: 4000,
+      messages:   [{ role: 'user', content: prompt }],
+    });
+    const raw = msg.content.map(c => (c.type === 'text' ? c.text : '')).join('').trim();
+    let cleaned = raw.replace(/^```(?:json)?\s*/i, '').replace(/\s*```$/, '').trim();
+    const first = cleaned.indexOf('{');
+    const last  = cleaned.lastIndexOf('}');
+    if (first >= 0 && last > first) cleaned = cleaned.slice(first, last + 1);
+
+    const parsed = JSON.parse(cleaned) as Record<string, unknown>;
+    const out: Record<string, unknown> = {
+      ok:       true,
+      headline: typeof parsed.headline === 'string' ? parsed.headline.trim() : '',
+    };
+    for (const k of DIGEST_SECTIONS) {
+      out[k] = Array.isArray(parsed[k])
+        ? (parsed[k] as unknown[]).map(x => String(x).trim()).filter(Boolean).slice(0, 8)
+        : [];
+    }
+    return jsonResp(out);
+  } catch (e) {
+    console.error('[ai-insights digest] failed:', (e as Error).message);
+    return jsonResp({ ok: false, reason: `Digest failed: ${(e as Error).message}` }, 502);
+  }
+}
+
 Deno.serve(async (req: Request) => {
   if (req.method === 'OPTIONS') return new Response(null, { headers: CORS });
   if (req.method !== 'POST') return new Response('Method not allowed', { status: 405, headers: CORS });
@@ -538,12 +594,14 @@ Deno.serve(async (req: Request) => {
     messages?:    Array<{ role: string; content: string }>;
     currentPage?: string;
     pageData?:    Record<string, unknown> | null;
+    mode?:        string;
   } = {};
   try { body = await req.json(); } catch { /* use defaults */ }
 
   const incoming    = body.messages    ?? [];
   const currentPage = body.currentPage ?? '/';
   const pageData    = body.pageData    ?? null;
+  const mode        = body.mode        ?? 'chat';
 
   const pageLabel = PAGE_LABELS[currentPage] ?? currentPage;
   const pageFocus = PAGE_FOCUS[currentPage]  ?? 'Answer the user\'s question using the data below.';
@@ -891,6 +949,13 @@ Deno.serve(async (req: Request) => {
     leadsText,
     ...(truncated ? [`\n(${filtered.length - CAP} more leads not shown — use more specific filters to narrow results)`] : []),
   ].join('\n');
+
+  // ── Digest mode ───────────────────────────────────────────────────────────
+  // Same full-portal snapshot, but instead of an interactive chat we return a
+  // single structured "what's going on everywhere" executive summary.
+  if (mode === 'digest') {
+    return await runPortalDigest(contextBlock);
+  }
 
   // ── System prompt ─────────────────────────────────────────────────────────
   const systemText =
