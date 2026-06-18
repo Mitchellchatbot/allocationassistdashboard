@@ -4,7 +4,6 @@ import { useQuery } from "@tanstack/react-query";
 import { Sun, Sunrise, Sunset, Moon, ArrowRight, Sparkles } from "lucide-react";
 import { supabase } from "@/lib/supabase";
 import { useAuth } from "@/hooks/use-auth";
-import { useNotifications } from "@/hooks/use-notifications";
 import { useScheduledBatches } from "@/hooks/use-scheduled-batches";
 import { useVacancies } from "@/hooks/use-vacancies";
 
@@ -22,7 +21,6 @@ import { useVacancies } from "@/hooks/use-vacancies";
  */
 export function DashboardGreeting() {
   const { user, fullName } = useAuth();
-  const { unreadCount }    = useNotifications();
   const { data: batches = [] }   = useScheduledBatches();
   const { data: vacancies = [] } = useVacancies();
 
@@ -58,7 +56,7 @@ export function DashboardGreeting() {
             {greeting.text}, <span className="text-teal-700">{firstName}</span>.
           </h2>
           <p className="text-[12px] text-muted-foreground mt-1">
-            {summarise({ unreadCount, batchesToday, openVacancies })}
+            {summarise({ batchesToday, openVacancies })}
           </p>
         </div>
         {emailsSent > 0 && (
@@ -90,17 +88,15 @@ function firstNameFrom(fullName: string | null, email?: string): string {
   return first.charAt(0).toUpperCase() + first.slice(1);
 }
 
-function summarise({ unreadCount, batchesToday, openVacancies }: {
-  unreadCount: number;
+function summarise({ batchesToday, openVacancies }: {
   batchesToday: number;
   openVacancies: number;
 }): React.ReactNode {
-  const total = unreadCount + batchesToday + openVacancies;
+  const total = batchesToday + openVacancies;
   if (total === 0) {
     return "All caught up. Nothing urgent today.";
   }
   const parts: Array<{ label: string; to: string }> = [];
-  if (unreadCount > 0)   parts.push({ label: `${unreadCount} unread`,                                          to: "/" });
   if (batchesToday > 0)  parts.push({ label: `${batchesToday} batch${batchesToday === 1 ? "" : "es"} today`,   to: "/batches" });
   if (openVacancies > 0) parts.push({ label: `${openVacancies} open vacanc${openVacancies === 1 ? "y" : "ies"}`, to: "/vacancies" });
   return (

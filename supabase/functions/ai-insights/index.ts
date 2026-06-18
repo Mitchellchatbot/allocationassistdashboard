@@ -30,6 +30,11 @@ type Deal = {
   Closing_Date: string; Lead_Source: string; Owner?: { name?: string };
 };
 type Contract = Record<string, unknown>;
+// "Doctors on Board" — the renamed Zoho Contacts module. THIS is the conversion
+// metric (a qualified lead who became a Doctor on Board). NOT Closed Won deals.
+type DoB = Record<string, unknown>;
+
+const normName = (s: string) => s.trim().toLowerCase().replace(/\s+/g, ' ');
 
 // ── Page metadata ─────────────────────────────────────────────────────────────
 
@@ -167,16 +172,20 @@ const PAGE_FOCUS: Record<string, string> = {
 
 // ── Data loaders ──────────────────────────────────────────────────────────────
 
-async function loadZohoCache(): Promise<{ leads: Lead[]; deals: Deal[] }> {
-  const { data, error } = await supabase
-    .from('zoho_cache')
-    .select('data')
-    .eq('id', 1)
-    .single();
-  if (error || !data?.data) return { leads: [], deals: [] };
+async function loadZohoCache(): Promise<{ leads: Lead[]; deals: Deal[]; doctorsOnBoard: DoB[] }> {
+  // The cache is split across two rows to dodge the statement-timeout limit:
+  // id=1 = leads (the big one), id=2 = everything else (deals, doctorsOnBoard…).
+  // Read BOTH — reading only id=1 means deals AND Doctors on Board are missing.
+  const [r1, r2] = await Promise.all([
+    supabase.from('zoho_cache').select('data').eq('id', 1).maybeSingle(),
+    supabase.from('zoho_cache').select('data').eq('id', 2).maybeSingle(),
+  ]);
+  const d1 = (r1.data?.data ?? {}) as Record<string, unknown>;
+  const d2 = (r2.data?.data ?? {}) as Record<string, unknown>;
   return {
-    leads: (data.data.leads ?? []) as Lead[],
-    deals: (data.data.deals ?? []) as Deal[],
+    leads:          (d1.leads ?? []) as Lead[],
+    deals:          (d2.deals ?? []) as Deal[],
+    doctorsOnBoard: (d2.doctorsOnBoard ?? []) as DoB[],
   };
 }
 
@@ -460,16 +469,23 @@ function aggregate(leads: Lead[]) {
   return { total: leads.length, bySource: topN(bySource), byRecruiter: topN(byRecruiter), byStatus: topN(byStatus), bySpecialty: topN(bySpecialty) };
 }
 
-function buildRecruiterStats(leads: Lead[]) {
-  const stats: Record<string, { total: number; contacted: number; highPriority: number; placed: number }> = {};
+function buildRecruiterStats(leads: Lead[], doctorsOnBoard: DoB[]) {
+  // Conversions are attributed by the Doctor-on-Board's Owner (the rep credited
+  // with the conversion), matched to the recruiter by normalised name.
+  const convByOwner: Record<string, number> = {};
+  for (const d of doctorsOnBoard) {
+    const owner = ((d.Owner as Record<string, string>)?.name) ?? 'Unknown';
+    convByOwner[normName(owner)] = (convByOwner[normName(owner)] ?? 0) + 1;
+  }
+
+  const stats: Record<string, { total: number; contacted: number; highPriority: number }> = {};
   for (const l of leads) {
     const rec    = ((l.Owner as Record<string, string>)?.name) ?? 'Unknown';
     const status = (l.Lead_Status as string) ?? '';
-    if (!stats[rec]) stats[rec] = { total: 0, contacted: 0, highPriority: 0, placed: 0 };
+    if (!stats[rec]) stats[rec] = { total: 0, contacted: 0, highPriority: 0 };
     stats[rec].total++;
     if (status && status !== 'New Application' && status !== 'Unqualified Leads') stats[rec].contacted++;
     if (status === 'High Priority') stats[rec].highPriority++;
-    if (status === 'Placed' || status === 'Hired') stats[rec].placed++;
   }
   return Object.entries(stats)
     .sort((a, b) => b[1].total - a[1].total)
@@ -477,7 +493,8 @@ function buildRecruiterStats(leads: Lead[]) {
     .map(([name, s]) => ({
       name, total: s.total, contacted: s.contacted,
       contactRate: s.total > 0 ? Math.round((s.contacted / s.total) * 100) : 0,
-      highPriority: s.highPriority, placed: s.placed,
+      highPriority: s.highPriority,
+      converted: convByOwner[normName(name)] ?? 0,   // Doctors on Board credited to this rep
     }));
 }
 
@@ -617,6 +634,8 @@ async function runPortalDigest(
 
 Write a concise executive DIGEST. Be specific: cite real numbers, recruiter names, hospitals, deal stages, and amounts from the data. Skip anything generic. Only cover these areas: ${sections.join(', ')} (plus the headline, key metrics, and what needs attention) — do not add sections outside this list.
 
+CRITICAL DEFINITION: a "conversion" = a doctor who reached DOCTORS ON BOARD (a qualified lead who signed/joined) — use the CONVERSIONS section for these counts. Closed Won deals are REVENUE, not conversions; never describe Closed Won (or "0 deals") as conversions or placements. Report conversions from the Doctors on Board numbers.
+
 Respond with ONLY a JSON object (no markdown, no code fences) of exactly this shape:
 {
 ${shape}
@@ -690,7 +709,7 @@ Deno.serve(async (req: Request) => {
 
   // ── Load all data in parallel ─────────────────────────────────────────────
   const [
-    { leads: allLeads, deals: allDeals },
+    { leads: allLeads, deals: allDeals, doctorsOnBoard },
     contracts,
     flowRuns,
     vacancies,
@@ -738,7 +757,22 @@ Deno.serve(async (req: Request) => {
 
   // ── Compute stats ─────────────────────────────────────────────────────────
   const stats          = aggregate(filtered);
-  const recruiterStats = buildRecruiterStats(allLeads);
+  const recruiterStats = buildRecruiterStats(allLeads, doctorsOnBoard);
+
+  // Conversions = Doctors on Board (NOT Closed Won deals). Total + by-owner +
+  // by-month so the digest/chat can talk about conversion trends correctly.
+  const dobTotal = doctorsOnBoard.length;
+  const dobByOwner: Record<string, number> = {};
+  const dobByMonth: Record<string, number> = {};
+  for (const d of doctorsOnBoard) {
+    const owner = ((d.Owner as Record<string, string>)?.name) ?? 'Unknown';
+    dobByOwner[owner] = (dobByOwner[owner] ?? 0) + 1;
+    const ct = (d.Created_Time as string | undefined)?.slice(0, 7);
+    if (ct) dobByMonth[ct] = (dobByMonth[ct] ?? 0) + 1;
+  }
+  const dobByOwnerText = Object.entries(dobByOwner)
+    .sort((a, b) => b[1] - a[1]).slice(0, 15)
+    .map(([n, c]) => `${n}: ${c}`).join(', ');
   const dealStats      = buildDealStats(allDeals);
   const licenseStats   = buildLicenseStats(allLeads);
 
@@ -987,12 +1021,18 @@ Deno.serve(async (req: Request) => {
     JSON.stringify(monthlySeries),
     '',
     `=== RECRUITER PERFORMANCE ===`,
-    'name | total | contacted | contactRate% | highPriority | placed',
+    'name | total | contacted | contactRate% | highPriority | converted (Doctors on Board)',
     recruiterStats.map(r =>
-      `${r.name} | ${r.total} | ${r.contacted} | ${r.contactRate}% | ${r.highPriority} HP | ${r.placed} placed`
+      `${r.name} | ${r.total} | ${r.contacted} | ${r.contactRate}% | ${r.highPriority} HP | ${r.converted} converted`
     ).join('\n'),
     '',
-    `=== DEALS (${allDeals.length} total) ===`,
+    `=== CONVERSIONS = DOCTORS ON BOARD (${dobTotal}) ===`,
+    `THIS is the conversion metric: a qualified lead who became a Doctor on Board. Closed Won deals are NOT conversions — see the DEALS/REVENUE section for those.`,
+    `Total converted (Doctors on Board): ${dobTotal}`,
+    `Converted by rep (Owner): ${dobByOwnerText || '(none)'}`,
+    `Converted by month: ${JSON.stringify(dobByMonth)}`,
+    '',
+    `=== DEALS / REVENUE (separate from conversions — Closed Won = money, not a conversion count) ===`,
     `Closed Won: ${dealStats.closedWon} deals, AED ${dealStats.totalRevenueAED.toLocaleString()} revenue`,
     `Open pipeline: ${dealStats.openDeals} deals, AED ${dealStats.pipelineValueAED.toLocaleString()}`,
     `By stage: ${JSON.stringify(dealStats.byStage)}`,
