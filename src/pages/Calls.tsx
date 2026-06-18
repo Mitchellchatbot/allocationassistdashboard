@@ -17,7 +17,7 @@ import { isSalesRepHost } from "@/lib/sales-team";
 import { Button } from "@/components/ui/button";
 import {
   PhoneCall, Loader2, Search, ExternalLink, Sparkles,
-  Users as UsersIcon, X, Mic, FileText, RefreshCw, CheckCircle2, AlertCircle,
+  X, Mic, FileText, RefreshCw, CheckCircle2, AlertCircle,
 } from "lucide-react";
 import ReactMarkdown from "react-markdown";
 import remarkGfm from "remark-gfm";
@@ -481,7 +481,7 @@ export default function Calls() {
         </CardContent>
       </Card>
 
-      {activeId && <CallDetailDrawer fathomId={activeId} onClose={() => setActiveId(null)} />}
+      {activeId && <CallDetailDrawer key={activeId} fathomId={activeId} onClose={() => setActiveId(null)} />}
     </DashboardLayout>
   );
 }
@@ -558,6 +558,7 @@ function EmptyState({ syncing }: { syncing: boolean }) {
 function CallDetailDrawer({ fathomId, onClose }: { fathomId: string; onClose: () => void }) {
   const { data: call, isLoading } = useFathomCall(fathomId);
   const [searchInTranscript, setSearchInTranscript] = useState("");
+  const [tab, setTab] = useState<"summary" | "transcript" | "actions">("summary");
   const summarize = useSummarizeCall();
   const hasTranscript = !!(call?.transcript_plaintext || call?.transcript_segments?.length);
   const drawerActions = normActions(call?.action_items);
@@ -581,157 +582,204 @@ function CallDetailDrawer({ fathomId, onClose }: { fathomId: string; onClose: ()
     return call.transcript_segments.filter(seg => seg.text?.toLowerCase().includes(s));
   }, [call, searchInTranscript]);
 
+  const TABS = [
+    { key: "summary"    as const, label: "Summary",      icon: <Sparkles    className="h-3.5 w-3.5" />, dot: !!call?.summary, dotColor: "bg-violet-500" },
+    { key: "transcript" as const, label: "Transcript",   icon: <Mic         className="h-3.5 w-3.5" />, dot: hasTranscript,   dotColor: "bg-emerald-500" },
+    { key: "actions"    as const, label: "Action items", icon: <CheckCircle2 className="h-3.5 w-3.5" />, count: drawerActions.length },
+  ];
+
   return (
     <div className="fixed inset-0 z-50 flex">
       <div className="flex-1 bg-black/40" onClick={onClose} />
-      <div className="w-full max-w-[640px] bg-background border-l border-border flex flex-col shadow-xl">
-        <div className="flex items-center justify-between px-5 py-3 border-b border-border/50 bg-gradient-to-r from-pink-50 via-purple-50 to-sky-50">
-          <div className="flex items-center gap-2 min-w-0">
-            <span className={`flex h-7 w-7 items-center justify-center rounded-md ${CANDY.lilac.chip} ${CANDY.lilac.fg} shrink-0`}>
-              <PhoneCall className="h-3.5 w-3.5" />
-            </span>
-            <h3 className="text-[14px] font-semibold truncate">
-              {call?.title || (isLoading ? "Loading…" : "Call")}
-            </h3>
+      {/* Floating, rounded panel (matches the sidebar's inset card look) */}
+      <div className="w-full max-w-[640px] p-2 sm:p-3">
+        <div className="h-full bg-background border border-border rounded-2xl shadow-2xl flex flex-col overflow-hidden">
+          {/* Header */}
+          <div className="flex items-center justify-between px-5 py-3 border-b border-border/50 bg-gradient-to-r from-pink-50 via-purple-50 to-sky-50 shrink-0">
+            <div className="flex items-center gap-2 min-w-0">
+              <span className={`flex h-7 w-7 items-center justify-center rounded-md ${CANDY.lilac.chip} ${CANDY.lilac.fg} shrink-0`}>
+                <PhoneCall className="h-3.5 w-3.5" />
+              </span>
+              <h3 className="text-[14px] font-semibold truncate">
+                {call?.title || (isLoading ? "Loading…" : "Call")}
+              </h3>
+            </div>
+            <button onClick={onClose} className="h-7 w-7 flex items-center justify-center rounded-md hover:bg-white/60">
+              <X className="h-4 w-4" />
+            </button>
           </div>
-          <button onClick={onClose} className="h-7 w-7 flex items-center justify-center rounded-md hover:bg-white/60">
-            <X className="h-4 w-4" />
-          </button>
-        </div>
 
-        <div className="flex-1 overflow-y-auto">
           {isLoading || !call ? (
             <div className="flex items-center justify-center py-16 text-[12px] text-muted-foreground">
               <Loader2 className="h-4 w-4 animate-spin mr-2" /> Loading…
             </div>
           ) : (
-            <div className="p-5 space-y-5">
-              <div className="grid grid-cols-2 gap-3 text-[12px]">
-                <Meta label="Date"     value={fmtDate(call.recording_start)} palette={CANDY.sky}   />
-                <Meta label="Duration" value={fmtDuration(call.duration_seconds)} palette={CANDY.peach} />
-                <Meta label="Host"     value={call.host_name ?? call.host_email ?? "—"} palette={CANDY.pink} />
-                <Meta label="Invitees" value={String(call.invitees?.length ?? 0)} palette={CANDY.mint} />
+            <>
+              {/* Meta + Fathom link + tab selector (pinned) */}
+              <div className="px-5 pt-4 pb-3 border-b border-border/50 shrink-0 space-y-4">
+                <div className="grid grid-cols-2 gap-3 text-[12px]">
+                  <Meta label="Date"     value={fmtDate(call.recording_start)} palette={CANDY.sky}   />
+                  <Meta label="Duration" value={fmtDuration(call.duration_seconds)} palette={CANDY.peach} />
+                  <Meta label="Host"     value={call.host_name ?? call.host_email ?? "—"} palette={CANDY.pink} />
+                  <Meta label="Invitees" value={String(call.invitees?.length ?? 0)} palette={CANDY.mint} />
+                </div>
+
+                {call.share_url && (
+                  <a
+                    href={call.share_url}
+                    target="_blank"
+                    rel="noreferrer"
+                    className={`inline-flex items-center gap-1.5 text-[12px] font-medium ${CANDY.sky.fg} hover:underline`}
+                  >
+                    Open in Fathom <ExternalLink className="h-3.5 w-3.5" />
+                  </a>
+                )}
+
+                {/* Highlighted-pill tab selector */}
+                <div className="flex items-center gap-1 rounded-full bg-muted/70 p-1">
+                  {TABS.map(t => (
+                    <button
+                      key={t.key}
+                      onClick={() => setTab(t.key)}
+                      className={`inline-flex flex-1 items-center justify-center gap-1.5 rounded-full px-3 py-1.5 text-[12px] font-medium transition-all ${
+                        tab === t.key
+                          ? "bg-background text-foreground shadow-sm"
+                          : "text-muted-foreground hover:text-foreground"
+                      }`}
+                    >
+                      {t.icon}
+                      <span>{t.label}</span>
+                      {typeof t.count === "number" && t.count > 0 && (
+                        <span className={`ml-0.5 rounded-full px-1.5 text-[10px] leading-4 ${
+                          tab === t.key ? `${CANDY.peach.chip} ${CANDY.peach.fg}` : "bg-foreground/10 text-muted-foreground"
+                        }`}>{t.count}</span>
+                      )}
+                      {t.dot && tab !== t.key && <span className={`h-1.5 w-1.5 rounded-full ${t.dotColor}`} />}
+                    </button>
+                  ))}
+                </div>
               </div>
 
-              {call.share_url && (
-                <a
-                  href={call.share_url}
-                  target="_blank"
-                  rel="noreferrer"
-                  className={`inline-flex items-center gap-1.5 text-[12px] font-medium ${CANDY.sky.fg} hover:underline`}
-                >
-                  Open in Fathom <ExternalLink className="h-3.5 w-3.5" />
-                </a>
-              )}
-
-              {call.summary ? (
-                <Section icon={<FileText className="h-3.5 w-3.5" />} title="AI summary" palette={CANDY.lilac}>
-                  <div
-                    className="prose prose-sm max-w-none text-foreground
-                      prose-headings:font-semibold prose-headings:text-foreground
-                      prose-h1:text-[13px] prose-h1:mt-3 prose-h1:mb-1
-                      prose-h2:text-[13px] prose-h2:mt-3 prose-h2:mb-1
-                      prose-h3:text-[12px] prose-h3:mt-2 prose-h3:mb-0.5 prose-h3:text-muted-foreground
-                      prose-p:text-[12px] prose-p:my-1 prose-p:leading-relaxed
-                      prose-ul:my-1 prose-ul:pl-4 prose-li:my-0.5 prose-li:text-[12px] prose-li:marker:text-muted-foreground
-                      prose-strong:text-foreground prose-strong:font-semibold"
-                  >
-                    <ReactMarkdown
-                      remarkPlugins={[remarkGfm]}
-                      components={{
-                        // Fathom wraps each bullet's text in a link to its own
-                        // timestamp. Render those as normal text (not a wall of
-                        // teal) but keep them clickable — opens the moment in Fathom.
-                        a: ({ href, children, ...rest }) => (
-                          <a
-                            href={href}
-                            target="_blank"
-                            rel="noreferrer"
-                            className="text-inherit no-underline decoration-dotted underline-offset-2 hover:underline"
-                            {...rest}
-                          >
-                            {children}
-                          </a>
-                        ),
-                      }}
+              {/* Active tab content (scrolls) */}
+              <div className="flex-1 overflow-y-auto p-5">
+                {/* ── Summary ── */}
+                {tab === "summary" && (
+                  call.summary ? (
+                    <div
+                      className="prose prose-sm max-w-none text-foreground
+                        prose-headings:font-semibold prose-headings:text-foreground
+                        prose-h1:text-[13px] prose-h1:mt-3 prose-h1:mb-1
+                        prose-h2:text-[13px] prose-h2:mt-3 prose-h2:mb-1
+                        prose-h3:text-[12px] prose-h3:mt-2 prose-h3:mb-0.5 prose-h3:text-muted-foreground
+                        prose-p:text-[12px] prose-p:my-1 prose-p:leading-relaxed
+                        prose-ul:my-1 prose-ul:pl-4 prose-li:my-0.5 prose-li:text-[12px] prose-li:marker:text-muted-foreground
+                        prose-strong:text-foreground prose-strong:font-semibold"
                     >
-                      {call.summary}
-                    </ReactMarkdown>
-                  </div>
-                </Section>
-              ) : hasTranscript ? (
-                <Section icon={<FileText className="h-3.5 w-3.5" />} title="AI summary" palette={CANDY.lilac}>
-                  {summarize.isError ? (
-                    <div className="text-[12px] text-muted-foreground">
-                      Couldn't generate a summary right now.
-                      <button
-                        onClick={() => summarize.mutate(call.fathom_id)}
-                        className={`ml-1 font-medium ${CANDY.lilac.fg} hover:underline`}
+                      <ReactMarkdown
+                        remarkPlugins={[remarkGfm]}
+                        components={{
+                          // Fathom wraps each bullet's text in a link to its own
+                          // timestamp. Render those as normal text (not a wall of
+                          // teal) but keep them clickable — opens the moment in Fathom.
+                          a: ({ href, children, ...rest }) => (
+                            <a
+                              href={href}
+                              target="_blank"
+                              rel="noreferrer"
+                              className="text-inherit no-underline decoration-dotted underline-offset-2 hover:underline"
+                              {...rest}
+                            >
+                              {children}
+                            </a>
+                          ),
+                        }}
                       >
-                        Try again
-                      </button>
+                        {call.summary}
+                      </ReactMarkdown>
                     </div>
-                  ) : (
-                    <div className="flex items-center gap-2 text-[12px] text-muted-foreground">
-                      <Loader2 className="h-3.5 w-3.5 animate-spin" />
-                      Generating an AI summary from the transcript…
-                    </div>
-                  )}
-                </Section>
-              ) : null}
-
-              {drawerActions.length > 0 && (
-                <Section icon={<UsersIcon className="h-3.5 w-3.5" />} title={`Action items (${drawerActions.length})`} palette={CANDY.peach}>
-                  <ul className="space-y-1.5">
-                    {drawerActions.map((a, i) => (
-                      <li key={i} className="flex items-start gap-2 text-[12px] text-foreground">
-                        <span className="mt-1.5 h-1.5 w-1.5 rounded-full bg-amber-500 shrink-0" />
-                        <span>
-                          {a.text}
-                          {a.assignee && <span className="ml-2 text-muted-foreground">— {a.assignee}</span>}
-                        </span>
-                      </li>
-                    ))}
-                  </ul>
-                </Section>
-              )}
-
-              <Section icon={<Mic className="h-3.5 w-3.5" />} title="Transcript" palette={CANDY.mint}>
-                {!call.transcript_plaintext && !call.transcript_segments ? (
-                  <p className="text-[12px] text-muted-foreground italic">No transcript available.</p>
-                ) : (
-                  <>
-                    <div className="relative mb-3">
-                      <Search className="absolute left-2.5 top-1/2 -translate-y-1/2 h-3.5 w-3.5 text-muted-foreground" />
-                      <Input
-                        placeholder="Search within this call…"
-                        value={searchInTranscript}
-                        onChange={(e) => setSearchInTranscript(e.target.value)}
-                        className="pl-8 h-8 text-[12px]"
-                      />
-                    </div>
-
-                    {filteredSegments && filteredSegments.length > 0 ? (
-                      <div className="space-y-2.5 text-[12px] leading-relaxed max-h-[60vh] overflow-y-auto pr-2">
-                        {filteredSegments.map((seg, i) => (
-                          <div key={i} className="border-l-2 border-emerald-300 pl-3 py-0.5">
-                            <div className="flex items-center gap-2 text-[10px] text-muted-foreground mb-0.5">
-                              <span className={`font-semibold ${CANDY.mint.fg}`}>{seg.speaker ?? "Speaker"}</span>
-                              {seg.ts !== undefined && <span>{String(seg.ts)}</span>}
-                            </div>
-                            <p className="text-foreground">{seg.text}</p>
-                          </div>
-                        ))}
+                  ) : hasTranscript ? (
+                    summarize.isError ? (
+                      <div className="text-[12px] text-muted-foreground">
+                        Couldn't generate a summary right now.
+                        <button
+                          onClick={() => summarize.mutate(call.fathom_id)}
+                          className={`ml-1 font-medium ${CANDY.lilac.fg} hover:underline`}
+                        >
+                          Try again
+                        </button>
                       </div>
                     ) : (
-                      <pre className="text-[12px] text-foreground whitespace-pre-wrap leading-relaxed max-h-[60vh] overflow-y-auto font-sans">
-                        {call.transcript_plaintext}
-                      </pre>
-                    )}
-                  </>
+                      <div className="flex items-center gap-2 text-[12px] text-muted-foreground">
+                        <Loader2 className="h-3.5 w-3.5 animate-spin" />
+                        Generating an AI summary from the transcript…
+                      </div>
+                    )
+                  ) : (
+                    <p className="text-[12px] text-muted-foreground italic">
+                      No summary yet — there's no transcript to generate one from.
+                    </p>
+                  )
                 )}
-              </Section>
-            </div>
+
+                {/* ── Transcript ── */}
+                {tab === "transcript" && (
+                  !call.transcript_plaintext && !call.transcript_segments ? (
+                    <p className="text-[12px] text-muted-foreground italic">No transcript available.</p>
+                  ) : (
+                    <>
+                      <div className="sticky top-0 z-10 mb-3 bg-background pb-1">
+                        <div className="relative">
+                          <Search className="absolute left-2.5 top-1/2 -translate-y-1/2 h-3.5 w-3.5 text-muted-foreground" />
+                          <Input
+                            placeholder="Search within this call…"
+                            value={searchInTranscript}
+                            onChange={(e) => setSearchInTranscript(e.target.value)}
+                            className="pl-8 h-8 text-[12px]"
+                          />
+                        </div>
+                      </div>
+
+                      {filteredSegments && filteredSegments.length > 0 ? (
+                        <div className="space-y-2.5 text-[12px] leading-relaxed">
+                          {filteredSegments.map((seg, i) => (
+                            <div key={i} className="border-l-2 border-emerald-300 pl-3 py-0.5">
+                              <div className="flex items-center gap-2 text-[10px] text-muted-foreground mb-0.5">
+                                <span className={`font-semibold ${CANDY.mint.fg}`}>{seg.speaker ?? "Speaker"}</span>
+                                {seg.ts !== undefined && <span>{String(seg.ts)}</span>}
+                              </div>
+                              <p className="text-foreground">{seg.text}</p>
+                            </div>
+                          ))}
+                        </div>
+                      ) : (
+                        <pre className="text-[12px] text-foreground whitespace-pre-wrap leading-relaxed font-sans">
+                          {call.transcript_plaintext}
+                        </pre>
+                      )}
+                    </>
+                  )
+                )}
+
+                {/* ── Action items ── */}
+                {tab === "actions" && (
+                  drawerActions.length > 0 ? (
+                    <ul className="space-y-2">
+                      {drawerActions.map((a, i) => (
+                        <li key={i} className="flex items-start gap-2 text-[12px] text-foreground">
+                          <span className="mt-1.5 h-1.5 w-1.5 rounded-full bg-amber-500 shrink-0" />
+                          <span>
+                            {a.text}
+                            {a.assignee && <span className="ml-2 text-muted-foreground">— {a.assignee}</span>}
+                          </span>
+                        </li>
+                      ))}
+                    </ul>
+                  ) : (
+                    <p className="text-[12px] text-muted-foreground italic">No action items for this call.</p>
+                  )
+                )}
+              </div>
+            </>
           )}
         </div>
       </div>
@@ -750,16 +798,3 @@ function Meta({
   );
 }
 
-function Section({
-  icon, title, children, palette,
-}: { icon: React.ReactNode; title: string; children: React.ReactNode; palette: CandyPalette }) {
-  return (
-    <div>
-      <div className={`flex items-center gap-1.5 mb-2 text-[11px] font-semibold uppercase tracking-wide ${palette.fg}`}>
-        <span className={`flex h-5 w-5 items-center justify-center rounded ${palette.chip}`}>{icon}</span>
-        {title}
-      </div>
-      {children}
-    </div>
-  );
-}
