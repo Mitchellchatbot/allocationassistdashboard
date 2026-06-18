@@ -16,7 +16,7 @@ import {
 import { isSalesRepHost } from "@/lib/sales-team";
 import { Button } from "@/components/ui/button";
 import {
-  PhoneCall, Loader2, Search, ExternalLink, Clock,
+  PhoneCall, Loader2, Search, ExternalLink,
   Users as UsersIcon, X, Mic, FileText, RefreshCw, CheckCircle2, AlertCircle,
 } from "lucide-react";
 import ReactMarkdown from "react-markdown";
@@ -73,10 +73,6 @@ function hostInitials(c: FathomCall): string {
   const src = c.host_name || c.host_email || "";
   const parts = src.split(/[\s@.]+/).filter(Boolean);
   return (parts[0]?.[0] ?? "?").toUpperCase() + (parts[1]?.[0] ?? "").toUpperCase();
-}
-
-function totalSecondsIn(rows: FathomCall[]): number {
-  return rows.reduce((sum, r) => sum + (r.duration_seconds ?? 0), 0);
 }
 
 // Fathom action items vary in shape: the text may live under
@@ -173,29 +169,6 @@ export default function Calls() {
   const manualSync = useFathomSync();
   const now = useNowTick(1000);
 
-  const stats = useMemo(() => {
-    const list = calls ?? [];
-    const searching = !!search.trim();
-    // While searching, the KPIs reflect the matches shown. Otherwise use the
-    // full-table aggregate so the totals aren't pinned at the 500-row list cap.
-    if (searching || !callStats) {
-      const externals = list.filter(c => (c.external_domains?.length ?? 0) > 0).length;
-      const totalSecs = totalSecondsIn(list);
-      return {
-        count:    list.length,
-        totalHrs: fmtDuration(totalSecs),
-        avgMins:  list.length ? fmtDuration(Math.round(totalSecs / list.length)) : "—",
-        externals,
-      };
-    }
-    return {
-      count:    callStats.count,
-      totalHrs: fmtDuration(callStats.totalSecs),
-      avgMins:  callStats.count ? fmtDuration(Math.round(callStats.totalSecs / callStats.count)) : "—",
-      externals: callStats.externals,
-    };
-  }, [calls, callStats, search]);
-
   // Recap panels built from the loaded list (newest first) — an at-a-glance
   // "what to follow up on + what just happened" without opening each call.
   // Both draw from the most recent calls that actually carry the data, so the
@@ -219,11 +192,6 @@ export default function Calls() {
     }
     return out;
   }, [calls]);
-
-  const openActionCount = useMemo(
-    () => (calls ?? []).reduce((n, c) => n + normActions(c.action_items).length, 0),
-    [calls],
-  );
 
   return (
     <DashboardLayout
@@ -295,14 +263,6 @@ export default function Calls() {
           )}
         </div>
       )}
-
-      {/* ── KPI tiles (match dashboard ExpandableKPICard) ─────────────────── */}
-      <div className="grid grid-cols-2 sm:grid-cols-4 gap-4 mb-6">
-        <CandyKpi palette={CANDY.sky}    icon={<PhoneCall    className="h-3.5 w-3.5" />}  label="Total calls"     value={String(stats.count)}    />
-        <CandyKpi palette={CANDY.mint}   icon={<Clock        className="h-3.5 w-3.5" />}  label="Total talk time" value={stats.totalHrs}         />
-        <CandyKpi palette={CANDY.peach}  icon={<Mic          className="h-3.5 w-3.5" />}  label="Avg call length" value={stats.avgMins}          />
-        <CandyKpi palette={CANDY.rose}   icon={<CheckCircle2 className="h-3.5 w-3.5" />}  label="Action items"    value={String(openActionCount)} />
-      </div>
 
       {/* ── Recap: action items + summary peeks from the most recent calls ─── */}
       {(recentActionGroups.length > 0 || latestSummaries.length > 0) && !search.trim() && (
@@ -499,25 +459,6 @@ interface CandyPalette {
   fg: string;     // value + icon
   stripe: string; // top accent
   chip: string;   // misc accent (used elsewhere)
-}
-
-function CandyKpi({
-  palette, icon, label, value,
-}: { palette: CandyPalette; icon: React.ReactNode; label: string; value: string }) {
-  return (
-    <div className={`rounded-xl border border-kpi/60 ${palette.bg} shadow-sm transition-all duration-200 hover:shadow-md hover:scale-[1.01] overflow-hidden flex flex-col`}>
-      <div className={`h-1 shrink-0 ${palette.stripe}`} />
-      <div className="px-4 py-3 flex items-start justify-between flex-1 min-h-[64px]">
-        <div className="min-w-0">
-          <p className="text-[11px] font-medium text-muted-foreground truncate mb-1">{label}</p>
-          <p className={`text-[24px] font-bold tabular-nums leading-none ${palette.fg}`}>{value}</p>
-        </div>
-        <div className="h-7 w-7 rounded-lg bg-card/70 flex items-center justify-center shrink-0 ml-2">
-          <span className={palette.fg}>{icon}</span>
-        </div>
-      </div>
-    </div>
-  );
 }
 
 function AutoSyncPill({
