@@ -531,26 +531,95 @@ function dealRow(d: Deal): string {
 // ── Handler ───────────────────────────────────────────────────────────────────
 
 // ── Portal digest ────────────────────────────────────────────────────────────
-// A structured executive summary across the WHOLE portal, built from the same
-// full snapshot the chat assistant uses. On-demand (one Claude call per click).
-const DIGEST_SECTIONS = ['metrics', 'pipeline', 'marketing', 'operations', 'attention'] as const;
+// A structured executive summary built from the same full snapshot the chat
+// assistant uses. Persisted per (period, period_key, scope_key) so the daily
+// digest is generated once and shared, with weekly/monthly variants — and
+// scoped to the sections a viewer has access to.
+const SECTION_PAGES: Record<string, string[]> = {
+  pipeline:   ['/sales', '/follow-ups', '/doctors', '/team', '/reports', '/finance', '/my-workspace'],
+  marketing:  ['/marketing', '/meta-ads'],
+  operations: ['/vacancies', '/batches', '/automations', '/calls', '/connections', '/forms'],
+};
+const SECTION_SPEC: Record<string, string> = {
+  pipeline:   `"pipeline": ["lead + recruitment pipeline: volume, qualified vs converted, who's performing, where leads stall, plus deals/revenue"]`,
+  marketing:  `"marketing": ["ad spend / lead-source / channel observations — what's working vs not"]`,
+  operations: `"operations": ["hospital introductions, contracts, placements, doctors on board, licensing progress"]`,
+};
+const PERIOD_FRAME: Record<string, string> = {
+  daily:   'This is the DAILY digest — summarise the state of the business as of today, emphasising what needs attention now.',
+  weekly:  'This is the WEEKLY digest — summarise the week, emphasising trends and what moved.',
+  monthly: 'This is the MONTHLY digest — summarise the month and the bigger-picture trajectory (use the 12-month lead series for trend).',
+};
 
-async function runPortalDigest(contextBlock: string): Promise<Response> {
+function sectionsForViewer(role: string, pages: string[]): string[] {
+  if (role === 'admin') return ['pipeline', 'marketing', 'operations'];
+  const set = new Set(pages);
+  return Object.keys(SECTION_PAGES).filter(s => SECTION_PAGES[s].some(p => set.has(p)));
+}
+
+function periodKeyFor(period: string, d: Date): string {
+  const y = d.getUTCFullYear();
+  const m = String(d.getUTCMonth() + 1).padStart(2, '0');
+  if (period === 'monthly') return `${y}-${m}`;
+  if (period === 'weekly') {
+    const t = new Date(Date.UTC(d.getUTCFullYear(), d.getUTCMonth(), d.getUTCDate()));
+    const dayNum = (t.getUTCDay() + 6) % 7;            // Mon=0 … Sun=6
+    t.setUTCDate(t.getUTCDate() - dayNum + 3);          // nearest Thursday
+    const firstThu = new Date(Date.UTC(t.getUTCFullYear(), 0, 4));
+    const week = 1 + Math.round(((t.getTime() - firstThu.getTime()) / 86400000 - 3 + ((firstThu.getUTCDay() + 6) % 7)) / 7);
+    return `${t.getUTCFullYear()}-W${String(week).padStart(2, '0')}`;
+  }
+  return `${y}-${m}-${String(d.getUTCDate()).padStart(2, '0')}`;
+}
+
+async function runPortalDigest(
+  contextBlock: string,
+  opts: { period: string; role: string; allowedPages: string[]; force: boolean },
+): Promise<Response> {
   const jsonResp = (b: unknown, status = 200) =>
     new Response(JSON.stringify(b), { status, headers: { ...CORS, 'Content-Type': 'application/json' } });
 
-  const prompt = `You are the chief-of-staff for Allocation Assist, a company that places UK/Western-trained doctors into Gulf (UAE, Saudi, Qatar) hospital jobs. Below is a full snapshot of the ENTIRE portal right now — lead pipeline, recruiter performance, deals/revenue, the license pipeline, contracts, the Hospital Introduction workflow, ads, and more.
+  const period    = ['daily', 'weekly', 'monthly'].includes(opts.period) ? opts.period : 'daily';
+  const sections  = sectionsForViewer(opts.role, opts.allowedPages);
+  const scopeKey  = opts.role === 'admin' ? 'all' : (sections.slice().sort().join(',') || 'none');
+  const periodKey = periodKeyFor(period, new Date());
 
-Write a concise executive DIGEST of what's going on across the whole business — the things a founder should know at a glance. Be specific: cite real numbers, recruiter names, hospitals, deal stages, and amounts from the data. Skip anything generic that would be true of any business.
+  // Viewer can't see any digestable area → friendly empty result.
+  if (sections.length === 0) {
+    return jsonResp({
+      ok: true, cached: false, period, generated_at: new Date().toISOString(),
+      headline: "You don't have access to any areas that feed the digest yet.",
+      metrics: [], attention: [],
+    });
+  }
+
+  // Serve the stored digest unless a refresh was explicitly requested.
+  if (!opts.force) {
+    const { data } = await supabase
+      .from('portal_digests')
+      .select('payload, created_at')
+      .eq('period', period).eq('period_key', periodKey).eq('scope_key', scopeKey)
+      .maybeSingle();
+    if (data?.payload) {
+      return jsonResp({ ok: true, cached: true, period, generated_at: data.created_at, ...(data.payload as Record<string, unknown>) });
+    }
+  }
+
+  // Build the JSON shape from only the sections this viewer is allowed to see.
+  const shape = [
+    `  "headline": "2-3 sentence plain-English state of the business right now"`,
+    `  "metrics": ["the handful of numbers that matter most — each a short 'Label: value' string"]`,
+    ...sections.map(s => '  ' + SECTION_SPEC[s]),
+    `  "attention": ["what needs attention RIGHT NOW — risks, stalled deals, failures, overdue follow-ups, anything off"]`,
+  ].join(',\n');
+
+  const prompt = `You are the chief-of-staff for Allocation Assist, a company that places UK/Western-trained doctors into Gulf (UAE, Saudi, Qatar) hospital jobs. Below is a snapshot of the portal. ${PERIOD_FRAME[period]}
+
+Write a concise executive DIGEST. Be specific: cite real numbers, recruiter names, hospitals, deal stages, and amounts from the data. Skip anything generic. Only cover these areas: ${sections.join(', ')} (plus the headline, key metrics, and what needs attention) — do not add sections outside this list.
 
 Respond with ONLY a JSON object (no markdown, no code fences) of exactly this shape:
 {
-  "headline": "2-3 sentence plain-English state of the business right now",
-  "metrics": ["the handful of numbers that matter most this moment — each a short 'Label: value' string"],
-  "pipeline": ["lead + recruitment pipeline: volume, qualified vs converted, who's performing, where leads stall"],
-  "marketing": ["ad spend / lead-source / channel observations — what's working vs not"],
-  "operations": ["hospital introductions, contracts, placements, doctors on board, licensing progress"],
-  "attention": ["what needs attention RIGHT NOW — risks, stalled deals, failures, overdue follow-ups, anything off"]
+${shape}
 }
 Each array: 2-6 short, specific bullet strings (one sentence each). Use an empty array for a section with nothing real to say. Output JSON only.
 
@@ -570,16 +639,21 @@ ${contextBlock}`;
     if (first >= 0 && last > first) cleaned = cleaned.slice(first, last + 1);
 
     const parsed = JSON.parse(cleaned) as Record<string, unknown>;
-    const out: Record<string, unknown> = {
-      ok:       true,
+    const payload: Record<string, unknown> = {
       headline: typeof parsed.headline === 'string' ? parsed.headline.trim() : '',
     };
-    for (const k of DIGEST_SECTIONS) {
-      out[k] = Array.isArray(parsed[k])
+    for (const k of ['metrics', ...sections, 'attention']) {
+      payload[k] = Array.isArray(parsed[k])
         ? (parsed[k] as unknown[]).map(x => String(x).trim()).filter(Boolean).slice(0, 8)
         : [];
     }
-    return jsonResp(out);
+
+    await supabase.from('portal_digests').upsert(
+      { period, period_key: periodKey, scope_key: scopeKey, payload },
+      { onConflict: 'period,period_key,scope_key' },
+    );
+
+    return jsonResp({ ok: true, cached: false, period, generated_at: new Date().toISOString(), ...payload });
   } catch (e) {
     console.error('[ai-insights digest] failed:', (e as Error).message);
     return jsonResp({ ok: false, reason: `Digest failed: ${(e as Error).message}` }, 502);
@@ -591,10 +665,14 @@ Deno.serve(async (req: Request) => {
   if (req.method !== 'POST') return new Response('Method not allowed', { status: 405, headers: CORS });
 
   let body: {
-    messages?:    Array<{ role: string; content: string }>;
-    currentPage?: string;
-    pageData?:    Record<string, unknown> | null;
-    mode?:        string;
+    messages?:     Array<{ role: string; content: string }>;
+    currentPage?:  string;
+    pageData?:     Record<string, unknown> | null;
+    mode?:         string;
+    period?:       string;
+    role?:         string;
+    allowedPages?: string[];
+    force?:        boolean;
   } = {};
   try { body = await req.json(); } catch { /* use defaults */ }
 
@@ -954,7 +1032,12 @@ Deno.serve(async (req: Request) => {
   // Same full-portal snapshot, but instead of an interactive chat we return a
   // single structured "what's going on everywhere" executive summary.
   if (mode === 'digest') {
-    return await runPortalDigest(contextBlock);
+    return await runPortalDigest(contextBlock, {
+      period:       body.period ?? 'daily',
+      role:         body.role ?? 'admin',
+      allowedPages: Array.isArray(body.allowedPages) ? body.allowedPages.map(String) : [],
+      force:        body.force === true,
+    });
   }
 
   // ── System prompt ─────────────────────────────────────────────────────────

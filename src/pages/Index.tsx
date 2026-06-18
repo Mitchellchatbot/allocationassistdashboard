@@ -1,5 +1,4 @@
 import { DashboardLayout } from "@/components/layout/DashboardLayout";
-import { PendingActionsCard } from "@/components/PendingActionsCard";
 import { PortalDigest } from "@/components/PortalDigest";
 import { DashboardGreeting } from "@/components/DashboardGreeting";
 import { SectionDateRange } from "@/components/SectionDateRange";
@@ -420,17 +419,12 @@ const Index = () => {
     <DashboardLayout title="Dashboard" subtitle="A quick look at how doctor placements and operations are performing" docSlug="overview/dashboard">
       <DashboardGreeting />
 
-      {/* AI digest of the entire portal (on demand) */}
+      {/* AI digest of the entire portal — daily auto-generated, weekly/monthly
+          on demand, scoped to what the viewer can access. Replaces the old
+          Pending Actions panel (its "Needs attention" section supersedes it). */}
       <PortalDigest />
 
       <SectionDateRange />
-
-      {/* Pending Actions — surfaces flows that need a click before they go
-          stale. Quiet/celebratory when there's nothing to do; surfaces stale
-          and blocking work otherwise. */}
-      <div data-tour="dashboard-pending">
-        <PendingActionsCard />
-      </div>
 
       {/* KPI Grid */}
       <div className="grid grid-cols-2 sm:grid-cols-3 gap-4 mb-6" data-tour="dashboard-kpis">

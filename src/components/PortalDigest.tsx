@@ -1,8 +1,10 @@
+import { useState } from "react";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
-import { usePortalDigest } from "@/hooks/use-portal-digest";
+import { useAuth } from "@/hooks/use-auth";
+import { usePortalDigest, type DigestPeriod } from "@/hooks/use-portal-digest";
 import {
-  Sparkles, Loader2, AlertCircle, AlertTriangle, TrendingUp, Megaphone, Building2,
+  Sparkles, Loader2, AlertCircle, AlertTriangle, TrendingUp, Megaphone, Building2, RefreshCw,
 } from "lucide-react";
 
 const SECTIONS: Array<{
@@ -10,11 +12,13 @@ const SECTIONS: Array<{
   title: string; bg: string; fg: string; chip: string; dot: string; ring: string;
   icon: React.ReactNode; full?: boolean;
 }> = [
-  { key: "attention",  title: "Needs attention", bg: "bg-rose-50",    fg: "text-rose-600",    chip: "bg-rose-100",    dot: "bg-rose-500",    ring: "border-rose-200",   icon: <AlertTriangle className="h-3.5 w-3.5" />, full: true },
-  { key: "pipeline",   title: "Pipeline",        bg: "bg-sky-50",     fg: "text-sky-600",     chip: "bg-sky-100",     dot: "bg-sky-500",     ring: "border-border/50",  icon: <TrendingUp className="h-3.5 w-3.5" /> },
-  { key: "marketing",  title: "Marketing",       bg: "bg-violet-50",  fg: "text-violet-600",  chip: "bg-violet-100",  dot: "bg-violet-500",  ring: "border-border/50",  icon: <Megaphone className="h-3.5 w-3.5" /> },
-  { key: "operations", title: "Operations",      bg: "bg-emerald-50", fg: "text-emerald-600", chip: "bg-emerald-100", dot: "bg-emerald-500", ring: "border-border/50",  icon: <Building2 className="h-3.5 w-3.5" /> },
+  { key: "attention",  title: "Needs attention", bg: "bg-rose-50",    fg: "text-rose-600",    chip: "bg-rose-100",    dot: "bg-rose-500",    ring: "border-rose-200",  icon: <AlertTriangle className="h-3.5 w-3.5" />, full: true },
+  { key: "pipeline",   title: "Pipeline",        bg: "bg-sky-50",     fg: "text-sky-600",     chip: "bg-sky-100",     dot: "bg-sky-500",     ring: "border-border/50", icon: <TrendingUp className="h-3.5 w-3.5" /> },
+  { key: "marketing",  title: "Marketing",       bg: "bg-violet-50",  fg: "text-violet-600",  chip: "bg-violet-100",  dot: "bg-violet-500",  ring: "border-border/50", icon: <Megaphone className="h-3.5 w-3.5" /> },
+  { key: "operations", title: "Operations",      bg: "bg-emerald-50", fg: "text-emerald-600", chip: "bg-emerald-100", dot: "bg-emerald-500", ring: "border-border/50", icon: <Building2 className="h-3.5 w-3.5" /> },
 ];
+
+const PERIODS: DigestPeriod[] = ["daily", "weekly", "monthly"];
 
 function MetricTile({ metric }: { metric: string }) {
   const idx   = metric.indexOf(":");
@@ -28,37 +32,63 @@ function MetricTile({ metric }: { metric: string }) {
   );
 }
 
-/** AI digest of the entire portal — built from the same full snapshot the chat
- *  assistant uses. On-demand (one heavy AI call per click), cached for the
- *  session. */
+function fmtUpdated(iso?: string): string {
+  if (!iso) return "";
+  const d = new Date(iso);
+  if (Number.isNaN(d.getTime())) return "";
+  return d.toLocaleString("en-GB", { day: "numeric", month: "short", hour: "2-digit", minute: "2-digit" });
+}
+
+/** AI digest of the portal, scoped to what the viewer can access. Daily digest
+ *  auto-generates once a day (shared across the team); weekly/monthly on demand
+ *  via the toggle. */
 export function PortalDigest() {
-  const { data, isFetching, error, refetch } = usePortalDigest();
+  const { role, allowedPages } = useAuth();
+  const [period, setPeriod] = useState<DigestPeriod>("daily");
+  const { data, isLoading, isFetching, error, regenerate } = usePortalDigest(period, role, allowedPages);
 
   return (
-    <Card className="shadow-sm border-border/60 mb-6 overflow-hidden">
+    <Card className="shadow-sm border-border/60 mb-6 overflow-hidden" data-tour="dashboard-digest">
       <CardHeader className="py-3 px-4 border-b border-border/40 bg-gradient-to-r from-violet-50 via-sky-50 to-transparent">
-        <div className="flex items-center justify-between gap-2">
+        <div className="flex flex-wrap items-center justify-between gap-2">
           <CardTitle className="text-[13px] font-semibold flex items-center gap-2">
             <span className="flex h-7 w-7 items-center justify-center rounded-md bg-violet-100 text-violet-600">
               <Sparkles className="h-3.5 w-3.5" />
             </span>
             Portal digest
-            <span className="text-[10px] font-normal text-muted-foreground hidden sm:inline">
-              AI summary of everything across the portal
-            </span>
+            {data?.generated_at && (
+              <span className="text-[10px] font-normal text-muted-foreground hidden sm:inline">
+                updated {fmtUpdated(data.generated_at)}
+              </span>
+            )}
           </CardTitle>
-          <Button
-            variant="outline"
-            size="sm"
-            onClick={() => refetch()}
-            disabled={isFetching}
-            className="h-8 text-[12px] shrink-0"
-          >
-            {isFetching
-              ? <Loader2 className="h-3.5 w-3.5 mr-1.5 animate-spin" />
-              : <Sparkles className="h-3.5 w-3.5 mr-1.5" />}
-            {isFetching ? "Reading the portal…" : data ? "Refresh" : "Generate"}
-          </Button>
+
+          <div className="flex items-center gap-2">
+            {/* Period selector — highlighted pill */}
+            <div className="flex items-center gap-0.5 rounded-full bg-muted/70 p-0.5">
+              {PERIODS.map(p => (
+                <button
+                  key={p}
+                  onClick={() => setPeriod(p)}
+                  className={`rounded-full px-2.5 py-1 text-[11px] font-medium capitalize transition-all ${
+                    period === p ? "bg-background text-foreground shadow-sm" : "text-muted-foreground hover:text-foreground"
+                  }`}
+                >
+                  {p}
+                </button>
+              ))}
+            </div>
+            <Button
+              variant="outline"
+              size="sm"
+              onClick={() => regenerate()}
+              disabled={isFetching}
+              className="h-8 text-[12px] shrink-0"
+              title="Generate a fresh digest now"
+            >
+              <RefreshCw className={`h-3.5 w-3.5 ${isFetching ? "animate-spin" : ""}`} />
+            </Button>
+          </div>
         </div>
       </CardHeader>
 
@@ -66,20 +96,14 @@ export function PortalDigest() {
         {error ? (
           <div className="flex items-start gap-2 text-[12px] text-rose-700">
             <AlertCircle className="h-3.5 w-3.5 shrink-0 mt-0.5" />
-            <span>{(error as Error).message}</span>
+            <span>{error.message}</span>
           </div>
-        ) : isFetching && !data ? (
+        ) : isLoading || (isFetching && !data) ? (
           <div className="flex items-center gap-2 text-[12px] text-muted-foreground py-1">
             <Loader2 className="h-3.5 w-3.5 animate-spin" />
-            Reading leads, deals, recruiters, contracts, the HI workflow and more…
+            Reading the portal — leads, deals, recruiters, contracts, the HI workflow and more…
           </div>
-        ) : !data ? (
-          <p className="text-[12px] text-muted-foreground">
-            Get an at-a-glance summary of the whole business — pipeline, marketing, operations, and
-            what needs attention right now. Pulls in everything across the portal. Click{" "}
-            <span className="font-medium text-foreground">Generate</span>.
-          </p>
-        ) : (
+        ) : !data ? null : (
           <div className="space-y-4">
             {data.headline && (
               <p className="text-[12.5px] text-foreground leading-relaxed">{data.headline}</p>
@@ -94,7 +118,7 @@ export function PortalDigest() {
             <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
               {SECTIONS.map(s => {
                 const items = data[s.key];
-                if (!items.length) return null;
+                if (!items?.length) return null;
                 return (
                   <div
                     key={s.key}

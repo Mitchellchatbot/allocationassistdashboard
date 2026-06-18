@@ -38,9 +38,9 @@ export const HI_TOUR_STEPS: TourStep[] = [
   },
   {
     route: "/",
-    target: "dashboard-pending",
-    title:  "Pending Actions — the team's inbox",
-    body:   "Everything that needs a human, bucketed by urgency. 'Stale' = a run with no activity for 7+ days (it's drifting — chase it). 'Action needed' = a flow paused at a manual step waiting on a click. Click any row to slide open the run detail sheet on the right and act without leaving the page.",
+    target: "dashboard-digest",
+    title:  "Portal digest — the AI briefing",
+    body:   "A daily AI summary of everything across the portal: pipeline, operations, and — most importantly — what needs attention now (stale runs, stuck contracts, overdue follow-ups). Switch it to weekly or monthly, and hit refresh for an up-to-the-minute version. It only covers the areas you have access to.",
     placement: "auto",
   },
   {

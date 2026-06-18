@@ -66,8 +66,8 @@ export const ONBOARDING_TOUR_ID = "onboarding-mandatory-v1";
 // Targets reuse the data-tour anchors already on each page; pages without a
 // single clean anchor (Doctors, Contract Builder) use a centred slide.
 const PAGE_INTRO_STEPS: Record<string, TourStep> = {
-  "/":            { route: "/",                  target: "dashboard-pending", placement: "auto",
-    title: "Dashboard", body: "Your team-wide overview: the key numbers and a shared to-do list of everything that needs a human, bucketed by urgency. Click any row to open it." },
+  "/":            { route: "/",                  target: "dashboard-digest", placement: "auto",
+    title: "Dashboard", body: "Your team-wide overview. Up top is the AI Portal digest — a daily plain-English summary of everything across the portal (pipeline, marketing, operations) plus what needs attention now. Switch it to weekly or monthly; it only shows the areas you have access to." },
   "/my-workspace":{ route: "/my-workspace",      target: "workspace-tasks",   placement: "auto",
     title: "My Workspace", body: "Your home base, scoped to just you: the doctors and tasks assigned to you. Start here each day, and click a task to jump straight to it." },
   "/doctors":     { route: "/doctors?tab=profiles",                            placement: "center",
