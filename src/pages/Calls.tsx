@@ -19,6 +19,8 @@ import {
   PhoneCall, Loader2, Search, ExternalLink, Clock,
   Users as UsersIcon, X, Mic, FileText, RefreshCw, CheckCircle2, AlertCircle,
 } from "lucide-react";
+import ReactMarkdown from "react-markdown";
+import remarkGfm from "remark-gfm";
 
 // ─── Candy palette ───────────────────────────────────────────────────────────
 // Mirrors the dashboard's ExpandableKPICard look:
@@ -187,7 +189,7 @@ export default function Calls() {
             <RefreshCw className={`h-3.5 w-3.5 mr-1.5 ${manualSync.isPending ? "animate-spin" : ""}`} />
             {manualSync.isPending ? "Syncing…" : "Sync now"}
           </Button>
-          <AutoSyncPill syncing={syncing || isFetching} lastSyncAt={lastSyncAt} now={now} />
+          <AutoSyncPill syncing={syncing || manualSync.isPending} lastSyncAt={lastSyncAt} now={now} />
         </div>
       </div>
 
@@ -465,7 +467,38 @@ function CallDetailDrawer({ fathomId, onClose }: { fathomId: string; onClose: ()
 
               {call.summary ? (
                 <Section icon={<FileText className="h-3.5 w-3.5" />} title="AI summary" palette={CANDY.lilac}>
-                  <p className="text-[12px] text-foreground leading-relaxed whitespace-pre-wrap">{call.summary}</p>
+                  <div
+                    className="prose prose-sm max-w-none text-foreground
+                      prose-headings:font-semibold prose-headings:text-foreground
+                      prose-h1:text-[13px] prose-h1:mt-3 prose-h1:mb-1
+                      prose-h2:text-[13px] prose-h2:mt-3 prose-h2:mb-1
+                      prose-h3:text-[12px] prose-h3:mt-2 prose-h3:mb-0.5 prose-h3:text-muted-foreground
+                      prose-p:text-[12px] prose-p:my-1 prose-p:leading-relaxed
+                      prose-ul:my-1 prose-ul:pl-4 prose-li:my-0.5 prose-li:text-[12px] prose-li:marker:text-muted-foreground
+                      prose-strong:text-foreground prose-strong:font-semibold"
+                  >
+                    <ReactMarkdown
+                      remarkPlugins={[remarkGfm]}
+                      components={{
+                        // Fathom wraps each bullet's text in a link to its own
+                        // timestamp. Render those as normal text (not a wall of
+                        // teal) but keep them clickable — opens the moment in Fathom.
+                        a: ({ href, children, ...rest }) => (
+                          <a
+                            href={href}
+                            target="_blank"
+                            rel="noreferrer"
+                            className="text-inherit no-underline decoration-dotted underline-offset-2 hover:underline"
+                            {...rest}
+                          >
+                            {children}
+                          </a>
+                        ),
+                      }}
+                    >
+                      {call.summary}
+                    </ReactMarkdown>
+                  </div>
                 </Section>
               ) : hasTranscript ? (
                 <Section icon={<FileText className="h-3.5 w-3.5" />} title="AI summary" palette={CANDY.lilac}>
