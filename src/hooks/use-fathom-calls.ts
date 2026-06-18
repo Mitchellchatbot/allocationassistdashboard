@@ -286,6 +286,8 @@ export interface CallInsights {
   risks:      string[];
   coaching:   string[];
   followups:  string[];
+  /** Maps the citation number in [[Name|N]] to the call it refers to. */
+  calls:      Record<string, { fathom_id: string; label: string }>;
 }
 
 async function callInsights(hostEmails: string[]): Promise<CallInsights> {

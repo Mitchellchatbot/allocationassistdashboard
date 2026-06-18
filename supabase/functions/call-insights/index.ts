@@ -57,14 +57,13 @@ function actionItemsText(items: unknown): string {
 
 function buildPrompt(rows: Array<Record<string, unknown>>): string {
   const blocks = rows.map((r, i) => {
-    const title = (r.title as string) || "Untitled call";
     const date  = (r.recording_start as string)?.slice(0, 10) ?? "";
     const host  = (r.host_name as string) || (r.host_email as string) || "";
     let summary = ((r.summary as string) || "").trim();
     if (summary.length > MAX_SUMMARY_CHARS) summary = summary.slice(0, MAX_SUMMARY_CHARS) + "…";
     const actions = actionItemsText(r.action_items);
     return [
-      `### Call ${i + 1}: ${title} (${date}${host ? ", host " + host : ""})`,
+      `### Call ${i + 1} — with ${callLabel(r)} (${date}${host ? ", rep " + host : ""})`,
       summary || "(no summary)",
       actions ? `  Action items:\n${actions}` : "",
     ].filter(Boolean).join("\n");
@@ -72,7 +71,9 @@ function buildPrompt(rows: Array<Record<string, unknown>>): string {
 
   return `You are a sharp sales coach reviewing recent recruitment sales calls for Allocation Assist, a company that places UK/Western-trained doctors into Gulf (UAE, Saudi, Qatar) hospital jobs. Reps qualify doctors, pitch the relocation package + Allocation Assist's service, and aim to get them signed and onto "Doctors on Board".
 
-Below are summaries of the ${rows.length} most recent calls. Produce CROSS-CALL insights — patterns ACROSS the calls, not a recap of each one. Be concrete: cite specialties, packages, numbers, objections, and rep behaviours when the calls support it. Skip anything generic that would be true of any sales team.
+Below are summaries of the ${rows.length} most recent calls, each numbered and labelled with who it was with. Produce CROSS-CALL insights — patterns ACROSS the calls, not a recap of each one. Be concrete: cite specialties, packages, numbers, objections, and rep behaviours when the calls support it. Skip anything generic that would be true of any sales team.
+
+CITING CALLS — IMPORTANT: when you reference a specific call, NEVER write "call 5" or "call number 5". Refer to the person it was with, and wrap that reference as [[Name|N]] where N is the call's number above and Name is who it was with. Examples: "[[Dr. Khaleel|7]] flagged the fee as atypical", "the call with [[Dr. Patel|4]]", "[[Dr. A|2]] and [[Dr. B|9]] both stalled on timing". Use this [[Name|N]] form for EVERY call reference — it becomes a clickable link to that call.
 
 Respond with ONLY a JSON object (no markdown, no code fences) of exactly this shape:
 {
@@ -84,10 +85,20 @@ Respond with ONLY a JSON object (no markdown, no code fences) of exactly this sh
   "coaching": ["specific, actionable coaching for the reps based on what you saw"],
   "followups": ["concrete suggested next steps across the pipeline"]
 }
-Each array: 2-5 short, specific bullet strings (one sentence each). Use an empty array for a section with nothing real to say. Output JSON only.
+Each array: 2-5 short, specific bullet strings (one sentence each), citing calls as [[Name|N]] wherever you reference one. Use an empty array for a section with nothing real to say. Output JSON only.
 
 CALLS:
 ${blocks}`;
+}
+
+// Fathom titles read "<Doctor> and <Rep>" — the doctor is listed first. Prefer
+// the matched doctor name, else the first half of the title.
+function callLabel(r: Record<string, unknown>): string {
+  const matched = (r.matched_doctor_name as string)?.trim();
+  if (matched) return matched;
+  const title = ((r.title as string) || "").trim();
+  if (!title) return "Untitled call";
+  return title.split(/\s+and\s+/i)[0]?.trim() || title;
 }
 
 function emptyInsights(): Insights {
@@ -172,7 +183,7 @@ serve(async (req) => {
 
   let q = supabase
     .from("fathom_calls")
-    .select("title, recording_start, host_name, host_email, summary, action_items")
+    .select("fathom_id, title, recording_start, host_name, host_email, summary, action_items, matched_doctor_name")
     .not("summary", "is", null)
     .order("recording_start", { ascending: false, nullsFirst: false })
     .limit(limit);
@@ -189,5 +200,12 @@ serve(async (req) => {
   const { insights, error: aiError } = await generate(rows);
   if (!insights) return json({ ok: false, reason: aiError || "AI insights are unavailable right now." }, 502);
 
-  return json({ ok: true, count: rows.length, ...insights });
+  // Map each call number (as cited in [[Name|N]]) back to its real id so the
+  // frontend can turn citations into links that open that call.
+  const calls: Record<string, { fathom_id: string; label: string }> = {};
+  rows.forEach((r, i) => {
+    calls[String(i + 1)] = { fathom_id: String(r.fathom_id ?? ""), label: callLabel(r) };
+  });
+
+  return json({ ok: true, count: rows.length, ...insights, calls });
 });

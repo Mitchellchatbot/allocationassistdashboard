@@ -279,7 +279,7 @@ export default function Calls() {
       )}
 
       {/* ── AI insights: cross-call synthesis (on demand) ─────────────────── */}
-      {!search.trim() && <CallInsightsPanel hostEmails={scopedHosts} />}
+      {!search.trim() && <CallInsightsPanel hostEmails={scopedHosts} onOpenCall={setActiveId} />}
 
       {/* ── Recap: action items + summary peeks from the most recent calls ─── */}
       {(recentActionGroups.length > 0 || latestSummaries.length > 0) && !search.trim() && (
@@ -498,11 +498,46 @@ interface CandyPalette {
   chip: string;   // misc accent (used elsewhere)
 }
 
+// Turns the AI's [[Name|N]] citation tokens into clickable links that open the
+// referenced call. Plain text otherwise.
+function renderCitations(
+  text: string,
+  calls: Record<string, { fathom_id: string; label: string }>,
+  onOpenCall: (fathomId: string) => void,
+): React.ReactNode[] {
+  const re = /\[\[([^\]|]+)\|([^\]]+)\]\]/g;
+  const out: React.ReactNode[] = [];
+  let last = 0, key = 0;
+  let m: RegExpExecArray | null;
+  while ((m = re.exec(text)) !== null) {
+    if (m.index > last) out.push(text.slice(last, m.index));
+    const label = m[1].trim();
+    const entry = calls[m[2].trim()];
+    if (entry?.fathom_id) {
+      out.push(
+        <button
+          key={`c${key++}`}
+          onClick={() => onOpenCall(entry.fathom_id)}
+          className="font-medium text-sky-700 decoration-dotted underline-offset-2 hover:underline"
+        >
+          {label || entry.label}
+        </button>,
+      );
+    } else {
+      out.push(label);
+    }
+    last = re.lastIndex;
+  }
+  if (last < text.length) out.push(text.slice(last));
+  return out;
+}
+
 // Cross-call AI synthesis — patterns across the team's recent calls that no
 // single call shows. Generated on demand (one AI call per click) and cached
 // for the session.
-function CallInsightsPanel({ hostEmails }: { hostEmails: string[] }) {
+function CallInsightsPanel({ hostEmails, onOpenCall }: { hostEmails: string[]; onOpenCall: (fathomId: string) => void }) {
   const { data, isFetching, error, refetch } = useCallInsights(hostEmails);
+  const callMap = data?.calls ?? {};
 
   const SECTIONS: Array<{
     key: "themes" | "objections" | "winning" | "risks" | "coaching" | "followups";
@@ -561,7 +596,9 @@ function CallInsightsPanel({ hostEmails }: { hostEmails: string[] }) {
         ) : (
           <div className="space-y-4">
             {data.overview && (
-              <p className="text-[12.5px] text-foreground leading-relaxed">{data.overview}</p>
+              <p className="text-[12.5px] text-foreground leading-relaxed">
+                {renderCitations(data.overview, callMap, onOpenCall)}
+              </p>
             )}
             <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-3">
               {SECTIONS.map(s => {
@@ -577,7 +614,7 @@ function CallInsightsPanel({ hostEmails }: { hostEmails: string[] }) {
                       {items.map((it, i) => (
                         <li key={i} className="flex items-start gap-1.5 text-[11.5px] text-foreground/90 leading-snug">
                           <span className={`mt-1.5 h-1 w-1 rounded-full ${s.palette.stripe} shrink-0`} />
-                          {it}
+                          <span>{renderCitations(it, callMap, onOpenCall)}</span>
                         </li>
                       ))}
                     </ul>
