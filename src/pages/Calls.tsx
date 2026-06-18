@@ -723,11 +723,14 @@ function CallDetailDrawer({ fathomId, onClose }: { fathomId: string; onClose: ()
   ];
 
   return (
-    <div className="fixed inset-0 z-50 flex">
-      <div className="flex-1 bg-black/40" onClick={onClose} />
-      {/* Floating, rounded panel (matches the sidebar's inset card look) */}
-      <div className="w-full max-w-[640px] p-2 sm:p-3">
-        <div className="h-full bg-background border border-border rounded-2xl shadow-2xl flex flex-col overflow-hidden">
+    <div className="fixed inset-0 z-50">
+      {/* Full-screen dim — covers everything, including the gap around the panel */}
+      <div className="absolute inset-0 bg-black/40" onClick={onClose} />
+      {/* Floating, rounded panel on the right (matches the sidebar's inset card look).
+          pointer-events-none on the wrapper lets clicks in the inset gap fall through
+          to the backdrop (so clicking just outside the panel still closes it). */}
+      <div className="absolute inset-y-0 right-0 w-full max-w-[640px] p-2 sm:p-3 pointer-events-none">
+        <div className="h-full bg-background border border-border rounded-2xl shadow-2xl flex flex-col overflow-hidden pointer-events-auto">
           {/* Header */}
           <div className="flex items-center justify-between px-5 py-3 border-b border-border/50 bg-gradient-to-r from-pink-50 via-purple-50 to-sky-50 shrink-0">
             <div className="flex items-center gap-2 min-w-0">
