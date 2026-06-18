@@ -491,15 +491,27 @@ function CallDetailDrawer({ fathomId, onClose }: { fathomId: string; onClose: ()
               {call.action_items && call.action_items.length > 0 && (
                 <Section icon={<UsersIcon className="h-3.5 w-3.5" />} title={`Action items (${call.action_items.length})`} palette={CANDY.peach}>
                   <ul className="space-y-1.5">
-                    {call.action_items.map((a, i) => (
-                      <li key={i} className="flex items-start gap-2 text-[12px] text-foreground">
-                        <span className="mt-1.5 h-1.5 w-1.5 rounded-full bg-amber-500 shrink-0" />
-                        <span>
-                          {a.text ?? JSON.stringify(a)}
-                          {a.assignee && <span className="ml-2 text-muted-foreground">— {a.assignee}</span>}
-                        </span>
-                      </li>
-                    ))}
+                    {call.action_items.map((a, i) => {
+                      // Fathom action items vary in shape; the text can be under
+                      // text/description/title and the assignee is often a user
+                      // OBJECT ({name,team,email}) — coerce both to strings so we
+                      // never render a raw object (which crashes React).
+                      const item = (typeof a === "object" && a !== null ? a : {}) as Record<string, unknown>;
+                      const rawText = typeof a === "string" ? a : (item.text ?? item.description ?? item.title ?? item.action ?? a);
+                      const text = typeof rawText === "string" ? rawText : JSON.stringify(rawText);
+                      const asg = item.assignee;
+                      const assignee = typeof asg === "string" ? asg
+                        : (asg && typeof asg === "object" ? ((asg as { name?: string; display_name?: string }).name ?? (asg as { display_name?: string }).display_name ?? null) : null);
+                      return (
+                        <li key={i} className="flex items-start gap-2 text-[12px] text-foreground">
+                          <span className="mt-1.5 h-1.5 w-1.5 rounded-full bg-amber-500 shrink-0" />
+                          <span>
+                            {text}
+                            {assignee && <span className="ml-2 text-muted-foreground">— {assignee}</span>}
+                          </span>
+                        </li>
+                      );
+                    })}
                   </ul>
                 </Section>
               )}

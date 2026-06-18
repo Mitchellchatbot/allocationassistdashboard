@@ -625,32 +625,40 @@ async function actionEnrich(opts: { background: boolean; limit: number }) {
   return { enriched: 0, scanned: 0, started: true, background: true };
 }
 
+// NOTE: Fathom has no single-meeting GET (/meetings/{id} 404s) — only the LIST
+// endpoint and /recordings/{id}/transcript. So we fetch the transcript straight
+// onto the already-synced row instead of re-fetching the meeting.
+type StoredRow = ReturnType<typeof meetingToRow> & Record<string, unknown>;
+
 async function actionResync(fathomId: string) {
-  const m   = await fathomGet(`/meetings/${fathomId}`) as FathomMeeting;
-  const row = await ensureTranscript(meetingToRow(m));
-  if (!row) return { ok: false, error: 'no row' };
-  const { error } = await supabase.from('fathom_calls').upsert(row, { onConflict: 'fathom_id' });
+  const { data: existing } = await supabase
+    .from('fathom_calls').select('*').eq('fathom_id', fathomId).maybeSingle();
+  if (!existing) return { ok: false, error: 'not found' };
+  const row = existing as StoredRow;
+  row.transcript_plaintext = null;   // force a re-fetch
+  await ensureTranscript(row);
+  const { error } = await supabase.from('fathom_calls')
+    .update({ transcript_plaintext: row.transcript_plaintext, transcript_segments: row.transcript_segments })
+    .eq('fathom_id', fathomId);
   if (error) throw new Error(error.message);
-  return { ok: true, fathom_id: row.fathom_id };
+  return { ok: true, fathom_id: fathomId, has_transcript: !!row.transcript_plaintext };
 }
 
 async function actionTranscript(fathomId: string) {
-  // Cheap path: if we already have it stored, return it.
   const { data: existing } = await supabase
-    .from('fathom_calls')
-    .select('*')
-    .eq('fathom_id', fathomId)
-    .maybeSingle();
+    .from('fathom_calls').select('*').eq('fathom_id', fathomId).maybeSingle();
+  if (!existing) return null;
+  if (existing.transcript_plaintext) return existing;
 
-  if (existing?.transcript_plaintext) return existing;
-
-  // Otherwise fetch + store.
-  const m   = await fathomGet(`/meetings/${fathomId}`) as FathomMeeting;
-  const row = await ensureTranscript(meetingToRow(m));
-  if (!row) return null;
-  await supabase.from('fathom_calls').upsert(row, { onConflict: 'fathom_id' });
-  const { data } = await supabase.from('fathom_calls').select('*').eq('fathom_id', fathomId).maybeSingle();
-  return data;
+  // Fetch the transcript for the already-synced row (recordings endpoint).
+  const row = existing as StoredRow;
+  await ensureTranscript(row);
+  if (row.transcript_plaintext) {
+    await supabase.from('fathom_calls')
+      .update({ transcript_plaintext: row.transcript_plaintext, transcript_segments: row.transcript_segments })
+      .eq('fathom_id', fathomId);
+  }
+  return row;
 }
 
 // ─── Handler ─────────────────────────────────────────────────────────────────
