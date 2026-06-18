@@ -16,7 +16,7 @@ import {
 import { isSalesRepHost } from "@/lib/sales-team";
 import { Button } from "@/components/ui/button";
 import {
-  PhoneCall, Loader2, Search, ExternalLink,
+  PhoneCall, Loader2, Search, ExternalLink, Sparkles,
   Users as UsersIcon, X, Mic, FileText, RefreshCw, CheckCircle2, AlertCircle,
 } from "lucide-react";
 import ReactMarkdown from "react-markdown";
@@ -192,6 +192,20 @@ export default function Calls() {
     }
     return out;
   }, [calls]);
+
+  // Pre-decorate every table row once per data change — the page re-renders
+  // every second (live sync pill), so we keep the per-row regex/parse work out
+  // of the render path.
+  const decoratedRows = useMemo(
+    () => (calls ?? []).map(c => ({
+      call:          c,
+      tldr:          summaryTldr(c.summary),
+      hasSummary:    !!c.summary,
+      hasTranscript: !!(c.transcript_plaintext || c.transcript_segments?.length),
+      actionCount:   normActions(c.action_items).length,
+    })),
+    [calls],
+  );
 
   return (
     <DashboardLayout
@@ -382,27 +396,36 @@ export default function Calls() {
                 <TableHeader>
                   <TableRow className="hover:bg-transparent">
                     <TableHead className="text-[10px] uppercase tracking-wide h-8">Date</TableHead>
-                    <TableHead className="text-[10px] uppercase tracking-wide h-8">Title</TableHead>
+                    <TableHead className="text-[10px] uppercase tracking-wide h-8">Call</TableHead>
                     <TableHead className="text-[10px] uppercase tracking-wide h-8">Host</TableHead>
-                    <TableHead className="text-[10px] uppercase tracking-wide h-8 hidden md:table-cell text-right">Participants</TableHead>
+                    <TableHead className="text-[10px] uppercase tracking-wide h-8">Insights</TableHead>
                     <TableHead className="text-[10px] uppercase tracking-wide h-8 text-right">Duration</TableHead>
                     <TableHead className="text-[10px] uppercase tracking-wide h-8 text-right"></TableHead>
                   </TableRow>
                 </TableHeader>
                 <TableBody>
-                  {calls.map((c) => (
+                  {decoratedRows.map(({ call: c, tldr, hasSummary, hasTranscript, actionCount }) => (
                     <TableRow
                       key={c.id}
                       className="hover:bg-muted/30 cursor-pointer"
                       onClick={() => setActiveId(c.fathom_id)}
                     >
-                      <TableCell className="text-[11px] text-muted-foreground py-2.5 whitespace-nowrap tabular-nums">
+                      <TableCell className="text-[11px] text-muted-foreground py-3 align-top whitespace-nowrap tabular-nums">
                         {fmtDate(c.recording_start)}
                       </TableCell>
-                      <TableCell className="text-[12px] font-medium text-foreground py-2.5 max-w-[280px] truncate">
-                        {c.title || "Untitled call"}
+                      <TableCell className="py-3 align-top max-w-[420px]">
+                        <p className="text-[12px] font-medium text-foreground truncate">
+                          {c.title || "Untitled call"}
+                        </p>
+                        {tldr ? (
+                          <p className="text-[11px] text-muted-foreground truncate mt-0.5">{tldr}</p>
+                        ) : (
+                          <p className="text-[11px] text-muted-foreground/50 italic mt-0.5">
+                            {hasTranscript ? "Summary generating…" : "No summary yet"}
+                          </p>
+                        )}
                       </TableCell>
-                      <TableCell className="py-2.5">
+                      <TableCell className="py-3 align-top">
                         <div className="flex items-center gap-2">
                           <div className={`h-6 w-6 rounded-full ${CANDY.pink.chip} ${CANDY.pink.fg} flex items-center justify-center text-[10px] font-semibold shrink-0`}>
                             {hostInitials(c)}
@@ -412,10 +435,21 @@ export default function Calls() {
                           </span>
                         </div>
                       </TableCell>
-                      <TableCell className="text-[11px] text-muted-foreground py-2.5 hidden md:table-cell text-right tabular-nums">
-                        {c.invitees?.length ?? 0}
+                      <TableCell className="py-3 align-top">
+                        <div className="flex flex-wrap items-center gap-1.5">
+                          <InsightChip on={hasSummary} pending={hasTranscript} icon={<Sparkles className="h-3 w-3" />} label="Summary" palette={CANDY.lilac} />
+                          <InsightChip on={hasTranscript} icon={<Mic className="h-3 w-3" />} label="Transcript" palette={CANDY.mint} />
+                          {actionCount > 0 && (
+                            <span
+                              title={`${actionCount} action item${actionCount === 1 ? "" : "s"}`}
+                              className={`inline-flex items-center gap-1 rounded-full pl-1 pr-1.5 py-0.5 text-[10px] font-medium ${CANDY.peach.chip} ${CANDY.peach.fg}`}
+                            >
+                              <CheckCircle2 className="h-3 w-3" />{actionCount}
+                            </span>
+                          )}
+                        </div>
                       </TableCell>
-                      <TableCell className="text-[12px] text-foreground py-2.5 whitespace-nowrap text-right tabular-nums">
+                      <TableCell className="text-[12px] text-foreground py-3 align-top whitespace-nowrap text-right tabular-nums">
                         {c.duration_seconds === null && enriching ? (
                           <span className="inline-flex items-center gap-1 text-muted-foreground text-[11px]">
                             <Loader2 className="h-3 w-3 animate-spin" />
@@ -425,7 +459,7 @@ export default function Calls() {
                           fmtDuration(c.duration_seconds)
                         )}
                       </TableCell>
-                      <TableCell className="py-2.5 text-right">
+                      <TableCell className="py-3 align-top text-right">
                         {c.share_url && (
                           <a
                             href={c.share_url}
@@ -459,6 +493,30 @@ interface CandyPalette {
   fg: string;     // value + icon
   stripe: string; // top accent
   chip: string;   // misc accent (used elsewhere)
+}
+
+// Small status chip for the Insights column — solid + colored when the call
+// has the data, faded outline when it doesn't. Gives an at-a-glance read on
+// which calls have a transcript / AI summary ready.
+function InsightChip({
+  on, icon, label, palette, pending,
+}: {
+  on: boolean; icon: React.ReactNode; label: string;
+  palette: { chip: string; fg: string }; pending?: boolean;
+}) {
+  return (
+    <span
+      title={on ? `${label} ready` : pending ? `${label} generating…` : `No ${label.toLowerCase()} yet`}
+      className={`inline-flex items-center gap-1 rounded-full pl-1 pr-1.5 py-0.5 text-[10px] font-medium transition-colors ${
+        on
+          ? `${palette.chip} ${palette.fg}`
+          : "bg-transparent text-muted-foreground/40 ring-1 ring-inset ring-border/60"
+      }`}
+    >
+      {pending && !on ? <Loader2 className="h-3 w-3 animate-spin" /> : icon}
+      {label}
+    </span>
+  );
 }
 
 function AutoSyncPill({
