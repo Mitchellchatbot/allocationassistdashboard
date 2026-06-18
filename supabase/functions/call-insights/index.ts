@@ -106,10 +106,12 @@ function coerceInsights(raw: unknown): Insights {
   return out;
 }
 
-async function generate(rows: Array<Record<string, unknown>>): Promise<Insights | null> {
-  if (!ANTHROPIC_API_KEY) return null;
+async function generate(rows: Array<Record<string, unknown>>): Promise<{ insights?: Insights; error?: string }> {
+  if (!ANTHROPIC_API_KEY) return { error: "ANTHROPIC_API_KEY is not set on the project" };
+
+  let res: Response;
   try {
-    const res = await fetch("https://api.anthropic.com/v1/messages", {
+    res = await fetch("https://api.anthropic.com/v1/messages", {
       method: "POST",
       headers: {
         "x-api-key":         ANTHROPIC_API_KEY,
@@ -118,21 +120,41 @@ async function generate(rows: Array<Record<string, unknown>>): Promise<Insights 
       },
       body: JSON.stringify({
         model: ANTHROPIC_MODEL,
-        max_tokens: 1500,
+        max_tokens: 4000,
         messages: [{ role: "user", content: buildPrompt(rows) }],
       }),
     });
-    if (!res.ok) {
-      console.error("[call-insights] anthropic non-200:", res.status, await res.text());
-      return null;
-    }
-    const j = await res.json() as { content?: { type: string; text?: string }[] };
-    const raw = (j.content ?? []).find(c => c.type === "text")?.text?.trim() ?? "";
-    const cleaned = raw.replace(/^```(?:json)?\s*/i, "").replace(/\s*```$/, "").trim();
-    return coerceInsights(JSON.parse(cleaned));
   } catch (e) {
-    console.error("[call-insights] generate failed:", (e as Error).message);
-    return null;
+    return { error: `Anthropic request failed: ${(e as Error).message}` };
+  }
+
+  if (!res.ok) {
+    const body = await res.text().catch(() => "");
+    console.error("[call-insights] anthropic non-200:", res.status, body);
+    return { error: `Anthropic ${res.status}: ${body.slice(0, 300)}` };
+  }
+
+  let raw = "";
+  try {
+    const j = await res.json() as { content?: { type: string; text?: string }[] };
+    raw = (j.content ?? []).find(c => c.type === "text")?.text?.trim() ?? "";
+  } catch (e) {
+    return { error: `Unreadable Anthropic response: ${(e as Error).message}` };
+  }
+  if (!raw) return { error: "Anthropic returned an empty response" };
+
+  // Robustly isolate the JSON object even if the model wraps it in fences or
+  // adds a sentence before/after it.
+  let cleaned = raw.replace(/^```(?:json)?\s*/i, "").replace(/\s*```$/, "").trim();
+  const first = cleaned.indexOf("{");
+  const last  = cleaned.lastIndexOf("}");
+  if (first >= 0 && last > first) cleaned = cleaned.slice(first, last + 1);
+
+  try {
+    return { insights: coerceInsights(JSON.parse(cleaned)) };
+  } catch (e) {
+    console.error("[call-insights] parse failed. raw:", raw.slice(0, 500));
+    return { error: `Could not parse AI output: ${(e as Error).message}` };
   }
 }
 
@@ -164,8 +186,8 @@ serve(async (req) => {
     return json({ ok: false, reason: "Not enough summarized calls to draw insights yet. Open a few calls (or hit Sync) so summaries generate, then try again." }, 422);
   }
 
-  const insights = await generate(rows);
-  if (!insights) return json({ ok: false, reason: "AI insights are unavailable right now." }, 502);
+  const { insights, error: aiError } = await generate(rows);
+  if (!insights) return json({ ok: false, reason: aiError || "AI insights are unavailable right now." }, 502);
 
   return json({ ok: true, count: rows.length, ...insights });
 });
