@@ -693,6 +693,18 @@ function CallDetailDrawer({ fathomId, onClose }: { fathomId: string; onClose: ()
   const { data: call, isLoading } = useFathomCall(fathomId);
   const [searchInTranscript, setSearchInTranscript] = useState("");
   const [tab, setTab] = useState<"summary" | "transcript" | "actions">("summary");
+
+  // Slide-in/out: mount off-screen, flip to on-screen after first paint; on
+  // close, slide out first, then unmount once the transition finishes.
+  const [show, setShow] = useState(false);
+  useEffect(() => {
+    const r = requestAnimationFrame(() => setShow(true));
+    return () => cancelAnimationFrame(r);
+  }, []);
+  const handleClose = () => {
+    setShow(false);
+    window.setTimeout(onClose, 300);
+  };
   const summarize = useSummarizeCall();
   const hasTranscript = !!(call?.transcript_plaintext || call?.transcript_segments?.length);
   const drawerActions = normActions(call?.action_items);
@@ -724,13 +736,17 @@ function CallDetailDrawer({ fathomId, onClose }: { fathomId: string; onClose: ()
 
   return (
     <div className="fixed inset-0 z-50">
-      {/* Full-screen dim — covers everything, including the gap around the panel */}
-      <div className="absolute inset-0 bg-black/40" onClick={onClose} />
-      {/* Floating, rounded panel on the right (matches the sidebar's inset card look).
-          pointer-events-none on the wrapper lets clicks in the inset gap fall through
-          to the backdrop (so clicking just outside the panel still closes it). */}
+      {/* Full-screen dim — fades with the panel; covers the gap around it too */}
+      <div
+        className={`absolute inset-0 bg-black/40 transition-opacity duration-300 ${show ? "opacity-100" : "opacity-0"}`}
+        onClick={handleClose}
+      />
+      {/* Floating, rounded panel — slides in/out from the right (matches the
+          sidebar's inset card look). pointer-events-none on the wrapper lets
+          clicks in the inset gap fall through to the backdrop (so clicking just
+          outside the panel still closes it). */}
       <div className="absolute inset-y-0 right-0 w-full max-w-[640px] p-2 sm:p-3 pointer-events-none">
-        <div className="h-full bg-background border border-border rounded-2xl shadow-2xl flex flex-col overflow-hidden pointer-events-auto">
+        <div className={`h-full bg-background border border-border rounded-2xl shadow-2xl flex flex-col overflow-hidden pointer-events-auto transition-transform duration-300 ease-out ${show ? "translate-x-0" : "translate-x-[calc(100%+2rem)]"}`}>
           {/* Header */}
           <div className="flex items-center justify-between px-5 py-3 border-b border-border/50 bg-gradient-to-r from-pink-50 via-purple-50 to-sky-50 shrink-0">
             <div className="flex items-center gap-2 min-w-0">
@@ -741,7 +757,7 @@ function CallDetailDrawer({ fathomId, onClose }: { fathomId: string; onClose: ()
                 {call?.title || (isLoading ? "Loading…" : "Call")}
               </h3>
             </div>
-            <button onClick={onClose} className="h-7 w-7 flex items-center justify-center rounded-md hover:bg-white/60">
+            <button onClick={handleClose} className="h-7 w-7 flex items-center justify-center rounded-md hover:bg-white/60">
               <X className="h-4 w-4" />
             </button>
           </div>
