@@ -10,7 +10,7 @@ import {
   Select, SelectContent, SelectItem, SelectTrigger, SelectValue,
 } from "@/components/ui/select";
 import {
-  useFathomCalls, useFathomCall, useFathomCallStats, useFathomHosts, useFathomAutoSync, useFathomSync, useSummarizeCall,
+  useFathomCalls, useFathomCall, useFathomCallStats, useFathomHosts, useFathomAutoSync, useFathomSync, useSummarizeCall, useCallInsights,
   type FathomCall,
 } from "@/hooks/use-fathom-calls";
 import { isSalesRepHost } from "@/lib/sales-team";
@@ -278,6 +278,9 @@ export default function Calls() {
         </div>
       )}
 
+      {/* ── AI insights: cross-call synthesis (on demand) ─────────────────── */}
+      {!search.trim() && <CallInsightsPanel hostEmails={scopedHosts} />}
+
       {/* ── Recap: action items + summary peeks from the most recent calls ─── */}
       {(recentActionGroups.length > 0 || latestSummaries.length > 0) && !search.trim() && (
         <div className="grid grid-cols-1 lg:grid-cols-2 gap-4 mb-6">
@@ -493,6 +496,100 @@ interface CandyPalette {
   fg: string;     // value + icon
   stripe: string; // top accent
   chip: string;   // misc accent (used elsewhere)
+}
+
+// Cross-call AI synthesis — patterns across the team's recent calls that no
+// single call shows. Generated on demand (one AI call per click) and cached
+// for the session.
+function CallInsightsPanel({ hostEmails }: { hostEmails: string[] }) {
+  const { data, isFetching, error, refetch } = useCallInsights(hostEmails);
+
+  const SECTIONS: Array<{
+    key: "themes" | "objections" | "winning" | "risks" | "coaching" | "followups";
+    title: string; palette: CandyPalette; icon: React.ReactNode;
+  }> = [
+    { key: "themes",     title: "Common themes",         palette: CANDY.sky,   icon: <Sparkles className="h-3.5 w-3.5" /> },
+    { key: "objections", title: "Objections & concerns", palette: CANDY.rose,  icon: <AlertCircle className="h-3.5 w-3.5" /> },
+    { key: "winning",    title: "What's landing",        palette: CANDY.mint,  icon: <CheckCircle2 className="h-3.5 w-3.5" /> },
+    { key: "risks",      title: "Deal risks",            palette: CANDY.peach, icon: <AlertCircle className="h-3.5 w-3.5" /> },
+    { key: "coaching",   title: "Coaching tips",         palette: CANDY.lilac, icon: <Sparkles className="h-3.5 w-3.5" /> },
+    { key: "followups",  title: "Suggested follow-ups",  palette: CANDY.pink,  icon: <CheckCircle2 className="h-3.5 w-3.5" /> },
+  ];
+
+  return (
+    <Card className="shadow-sm border-border/60 mb-6 overflow-hidden">
+      <CardHeader className="py-3 px-4 border-b border-border/40 bg-gradient-to-r from-violet-50 via-sky-50 to-transparent">
+        <div className="flex items-center justify-between gap-2">
+          <CardTitle className="text-[13px] font-semibold flex items-center gap-2">
+            <span className={`flex h-7 w-7 items-center justify-center rounded-md ${CANDY.lilac.chip} ${CANDY.lilac.fg}`}>
+              <Sparkles className="h-3.5 w-3.5" />
+            </span>
+            AI insights
+            {data && <span className="text-[10px] font-normal text-muted-foreground">across {data.count} recent calls</span>}
+          </CardTitle>
+          <Button
+            variant="outline"
+            size="sm"
+            onClick={() => refetch()}
+            disabled={isFetching}
+            className="h-8 text-[12px] shrink-0"
+          >
+            {isFetching
+              ? <Loader2 className="h-3.5 w-3.5 mr-1.5 animate-spin" />
+              : <Sparkles className="h-3.5 w-3.5 mr-1.5" />}
+            {isFetching ? "Analyzing…" : data ? "Refresh" : "Generate"}
+          </Button>
+        </div>
+      </CardHeader>
+
+      <CardContent className="p-4">
+        {error ? (
+          <div className="flex items-start gap-2 text-[12px] text-rose-700">
+            <AlertCircle className="h-3.5 w-3.5 shrink-0 mt-0.5" />
+            <span>{(error as Error).message}</span>
+          </div>
+        ) : isFetching && !data ? (
+          <div className="flex items-center gap-2 text-[12px] text-muted-foreground py-1">
+            <Loader2 className="h-3.5 w-3.5 animate-spin" />
+            Reading your recent calls and pulling out the patterns…
+          </div>
+        ) : !data ? (
+          <p className="text-[12px] text-muted-foreground">
+            Synthesize patterns across the team's recent sales calls — recurring objections, what's landing,
+            deals at risk, and coaching. Click <span className="font-medium text-foreground">Generate</span>.
+          </p>
+        ) : (
+          <div className="space-y-4">
+            {data.overview && (
+              <p className="text-[12.5px] text-foreground leading-relaxed">{data.overview}</p>
+            )}
+            <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-3">
+              {SECTIONS.map(s => {
+                const items = (data[s.key] as string[]) ?? [];
+                if (!items.length) return null;
+                return (
+                  <div key={s.key} className={`rounded-lg border border-border/50 ${s.palette.bg} p-3`}>
+                    <div className={`flex items-center gap-1.5 mb-2 text-[11px] font-semibold uppercase tracking-wide ${s.palette.fg}`}>
+                      <span className={`flex h-5 w-5 items-center justify-center rounded ${s.palette.chip}`}>{s.icon}</span>
+                      {s.title}
+                    </div>
+                    <ul className="space-y-1">
+                      {items.map((it, i) => (
+                        <li key={i} className="flex items-start gap-1.5 text-[11.5px] text-foreground/90 leading-snug">
+                          <span className={`mt-1.5 h-1 w-1 rounded-full ${s.palette.stripe} shrink-0`} />
+                          {it}
+                        </li>
+                      ))}
+                    </ul>
+                  </div>
+                );
+              })}
+            </div>
+          </div>
+        )}
+      </CardContent>
+    </Card>
+  );
 }
 
 // Small status chip for the Insights column — solid + colored when the call

@@ -275,6 +275,50 @@ export function useSummarizeCall() {
   });
 }
 
+// ─── Cross-call AI insights ──────────────────────────────────────────────────
+
+export interface CallInsights {
+  count:      number;
+  overview:   string;
+  themes:     string[];
+  objections: string[];
+  winning:    string[];
+  risks:      string[];
+  coaching:   string[];
+  followups:  string[];
+}
+
+async function callInsights(hostEmails: string[]): Promise<CallInsights> {
+  const session = (await supabase.auth.getSession()).data.session;
+  const token   = session?.access_token ?? SUPABASE_ANON_KEY;
+  const res = await fetch(`${SUPABASE_URL}/functions/v1/call-insights`, {
+    method: "POST",
+    headers: {
+      "apikey":         SUPABASE_ANON_KEY,
+      "Authorization": `Bearer ${token}`,
+      "content-type":   "application/json",
+    },
+    body: JSON.stringify({ host_emails: hostEmails, limit: 30 }),
+  });
+  const j = await res.json().catch(() => ({})) as { ok?: boolean; reason?: string } & Partial<CallInsights>;
+  if (!res.ok || !j.ok) throw new Error(j.reason || `Insights failed (${res.status})`);
+  return j as CallInsights;
+}
+
+/** On-demand cross-call insights. Disabled by default (costs an AI call) —
+ *  call `.refetch()` from a button. The generated result stays cached for the
+ *  session so it isn't re-run on every render. */
+export function useCallInsights(hostEmails: string[]) {
+  return useQuery({
+    queryKey: ["call-insights", [...hostEmails].sort().join(",")],
+    queryFn:  () => callInsights(hostEmails),
+    enabled:  false,
+    staleTime: Infinity,
+    gcTime:    30 * 60_000,
+    retry:     false,
+  });
+}
+
 // ─── Sync (admin button) ─────────────────────────────────────────────────────
 
 export interface FathomSyncResult {
