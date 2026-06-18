@@ -212,7 +212,7 @@ interface FlowRun {
 interface Vacancy {
   id: string; hospital_name: string; specialty: string;
   priority: string; status: string; opened_at: string;
-  opened_by: string | null; city: string | null;
+  opened_by: string | null;
 }
 
 interface BatchSend {
@@ -254,7 +254,7 @@ async function loadFlowRuns(): Promise<FlowRun[]> {
 async function loadVacancies(): Promise<Vacancy[]> {
   const { data } = await supabase
     .from('vacancies')
-    .select('id, hospital_name, specialty, priority, status, opened_at, opened_by, city')
+    .select('id, hospital_name, specialty, priority, status, opened_at, opened_by')
     .order('opened_at', { ascending: false })
     .limit(200);
   return (data ?? []) as Vacancy[];
@@ -958,10 +958,10 @@ Deno.serve(async (req: Request) => {
     '',
     '=== VACANCIES ===',
     `Open: ${openVacancies.length} (${vacByPriority.high} high, ${vacByPriority.medium} medium, ${vacByPriority.low} low). Stale 7d+: ${staleVacancies.length}.`,
-    'hospital | specialty | priority | days_open | city',
+    'hospital | specialty | priority | days_open',
     ...openVacancies.slice(0, 25).map(v => {
       const days = Math.floor((now - new Date(v.opened_at).getTime()) / 86_400_000);
-      return `  ${v.hospital_name} | ${v.specialty} | ${v.priority} | ${days}d | ${v.city ?? '—'}`;
+      return `  ${v.hospital_name} | ${v.specialty} | ${v.priority} | ${days}d`;
     }),
     '',
     '=== BATCH SENDS ===',
