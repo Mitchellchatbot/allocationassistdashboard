@@ -574,7 +574,7 @@ function periodKeyFor(period: string, d: Date): string {
 
 async function runPortalDigest(
   contextBlock: string,
-  opts: { period: string; role: string; allowedPages: string[]; force: boolean },
+  opts: { period: string; role: string; allowedPages: string[]; force: boolean; leadCount: number },
 ): Promise<Response> {
   const jsonResp = (b: unknown, status = 200) =>
     new Response(JSON.stringify(b), { status, headers: { ...CORS, 'Content-Type': 'application/json' } });
@@ -589,7 +589,7 @@ async function runPortalDigest(
     return jsonResp({
       ok: true, cached: false, period, generated_at: new Date().toISOString(),
       headline: "You don't have access to any areas that feed the digest yet.",
-      metrics: [], attention: [],
+      attention: [],
     });
   }
 
@@ -607,15 +607,14 @@ async function runPortalDigest(
 
   // Build the JSON shape from only the sections this viewer is allowed to see.
   const shape = [
-    `  "headline": "2-3 sentence plain-English state of the business right now"`,
-    `  "metrics": ["the handful of numbers that matter most — each a short 'Label: value' string"]`,
+    `  "headline": "2-3 sentence plain-English state of the business right now (cite the key numbers inline)"`,
     ...sections.map(s => '  ' + SECTION_SPEC[s]),
     `  "attention": ["what needs attention RIGHT NOW — risks, stalled deals, failures, overdue follow-ups, anything off"]`,
   ].join(',\n');
 
   const prompt = `You are the chief-of-staff for Allocation Assist, a company that places UK/Western-trained doctors into Gulf (UAE, Saudi, Qatar) hospital jobs. Below is a snapshot of the portal. ${PERIOD_FRAME[period]}
 
-Write a concise executive DIGEST. Be specific: cite real numbers, recruiter names, hospitals, deal stages, and amounts from the data. Skip anything generic. Only cover these areas: ${sections.join(', ')} (plus the headline, key metrics, and what needs attention) — do not add sections outside this list.
+Write a concise executive DIGEST. Be specific: cite real numbers, recruiter names, hospitals, deal stages, and amounts from the data. Skip anything generic. Only cover these areas: ${sections.join(', ')} (plus the headline and what needs attention) — do not add sections outside this list. Weave the important numbers into the headline and bullets rather than a separate metrics list.
 
 CRITICAL DEFINITION: a "conversion" = a doctor who reached DOCTORS ON BOARD (a qualified lead who signed/joined) — use the CONVERSIONS section for these counts. Closed Won deals are REVENUE, not conversions; never describe Closed Won (or "0 deals") as conversions or placements. Report conversions from the Doctors on Board numbers.
 
@@ -646,16 +645,22 @@ ${contextBlock}`;
     const payload: Record<string, unknown> = {
       headline: typeof parsed.headline === 'string' ? parsed.headline.trim() : '',
     };
-    for (const k of ['metrics', ...sections, 'attention']) {
+    for (const k of [...sections, 'attention']) {
       payload[k] = Array.isArray(parsed[k])
         ? (parsed[k] as unknown[]).map(x => String(x).trim()).filter(Boolean).slice(0, 8)
         : [];
     }
 
-    await supabase.from('portal_digests').upsert(
-      { period, period_key: periodKey, scope_key: scopeKey, payload },
-      { onConflict: 'period,period_key,scope_key' },
-    );
+    // Don't persist a digest built on a failed/empty data load (0 leads is
+    // always a load failure for this org, never reality) — otherwise a
+    // transient glitch poisons the whole day's cache. Still return it so the
+    // caller sees something; the next load regenerates.
+    if (opts.leadCount > 0) {
+      await supabase.from('portal_digests').upsert(
+        { period, period_key: periodKey, scope_key: scopeKey, payload },
+        { onConflict: 'period,period_key,scope_key' },
+      );
+    }
 
     return jsonResp({ ok: true, cached: false, period, generated_at: new Date().toISOString(), ...payload });
   } catch (e) {
@@ -1052,6 +1057,7 @@ Deno.serve(async (req: Request) => {
       role:         body.role ?? 'admin',
       allowedPages: Array.isArray(body.allowedPages) ? body.allowedPages.map(String) : [],
       force:        body.force === true,
+      leadCount:    allLeads.length,
     });
   }
 

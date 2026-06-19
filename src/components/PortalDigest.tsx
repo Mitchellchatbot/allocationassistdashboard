@@ -20,18 +20,6 @@ const SECTIONS: Array<{
 
 const PERIODS: DigestPeriod[] = ["daily", "weekly", "monthly"];
 
-function MetricTile({ metric }: { metric: string }) {
-  const idx   = metric.indexOf(":");
-  const label = idx >= 0 ? metric.slice(0, idx).trim() : metric;
-  const value = idx >= 0 ? metric.slice(idx + 1).trim() : "";
-  return (
-    <div className="rounded-lg border border-border/50 bg-muted/30 px-3 py-2">
-      <div className="text-[10px] uppercase tracking-wide text-muted-foreground truncate">{label}</div>
-      {value && <div className="text-[13px] font-semibold text-foreground leading-tight mt-0.5">{value}</div>}
-    </div>
-  );
-}
-
 function fmtUpdated(iso?: string): string {
   if (!iso) return "";
   const d = new Date(iso);
@@ -107,12 +95,6 @@ export function PortalDigest() {
           <div className="space-y-4">
             {data.headline && (
               <p className="text-[12.5px] text-foreground leading-relaxed">{data.headline}</p>
-            )}
-
-            {data.metrics.length > 0 && (
-              <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-4 gap-2">
-                {data.metrics.map((m, i) => <MetricTile key={i} metric={m} />)}
-              </div>
             )}
 
             <div className="grid grid-cols-1 md:grid-cols-3 gap-3">

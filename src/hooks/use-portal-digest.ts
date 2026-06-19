@@ -8,7 +8,6 @@ export type DigestPeriod = "daily" | "weekly" | "monthly";
 
 export interface PortalDigest {
   headline:     string;
-  metrics:      string[];
   pipeline?:    string[];
   marketing?:   string[];
   operations?:  string[];
@@ -42,7 +41,6 @@ async function fetchDigest(args: {
   if (!res.ok || !j.ok) throw new Error(j.reason || `Digest failed (${res.status})`);
   return {
     headline:     j.headline   ?? "",
-    metrics:      j.metrics    ?? [],
     pipeline:     j.pipeline,
     marketing:    j.marketing,
     operations:   j.operations,
