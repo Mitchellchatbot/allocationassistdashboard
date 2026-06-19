@@ -66,6 +66,7 @@ const CallLogImport   = lazy(() => import("./pages/CallLogImport"));
 const Contracts       = lazy(() => import("./pages/Contracts"));
 const FollowUps       = lazy(() => import("./pages/FollowUps"));
 const Calls           = lazy(() => import("./pages/Calls"));
+const Chatbot         = lazy(() => import("./pages/Chatbot"));
 const Automations     = lazy(() => import("./pages/Automations"));
 const Vacancies       = lazy(() => import("./pages/Vacancies"));
 const Reports         = lazy(() => import("./pages/Reports"));
@@ -194,6 +195,7 @@ const App = () => (
                 <Route path="/contracts"      element={<Contracts />} />
                 <Route path="/follow-ups"     element={<FollowUps />} />
                 <Route path="/calls"          element={<Calls />} />
+                <Route path="/chatbot"        element={<Chatbot />} />
                 <Route path="/my-workspace"   element={<MyWorkspace />} />
                 <Route path="/automations"    element={<Automations />} />
                 <Route path="/doctors"        element={<Doctors />} />

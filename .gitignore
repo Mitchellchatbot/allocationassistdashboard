@@ -1,6 +1,9 @@
 # Claude Code local settings (per-machine, not committed)
 .claude/
 
+# Doctor chatbot — its own repo (Care Assist), not part of this dashboard
+doctor-chatbot/
+
 # Logs
 logs
 *.log

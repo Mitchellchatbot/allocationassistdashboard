@@ -960,6 +960,75 @@ export function aggregateZohoData(
       status:  zohoStatusMap[c.Status ?? ''] ?? 'active',
     }));
 
+  // ── Chatbot (Care Assist widget) → CRM conversions ───────────────────────
+  // The widget stamps Lead_Source = "Chatbot" on every lead it exports to Zoho.
+  // A chatbot "conversion" = that person became a Doctor on Board. We count it
+  // two robust ways (union, deduped by identity): a DoB whose Lead_Source is
+  // Chatbot, OR a DoB that matches a Chatbot lead by email / phone / name.
+  const isChatbotSrc = (s: string | null | undefined) => /chat\s*bot/i.test(s ?? '');
+  const chatbotLeadRows = leads.filter(l => isChatbotSrc(l.Lead_Source));
+  const cbEmails = new Set(chatbotLeadRows.map(l => _normEmail(l.Email)).filter(Boolean));
+  const cbPhones = new Set(chatbotLeadRows.map(l => _normPhone(l.Phone ?? l.Mobile)).filter(Boolean));
+  const cbNames  = new Set(chatbotLeadRows.map(l => _normName(l.First_Name, l.Last_Name)).filter(Boolean));
+
+  const cbConvDob: ZohoDoctorOnBoard[] = [];
+  const cbConvKeys = new Set<string>();
+  for (const d of doctorsOnBoard) {
+    const e = _normEmail(d.Email), p = _normPhone(d.Phone ?? d.Mobile), n = _normName(d.First_Name, d.Last_Name);
+    const isCb = isChatbotSrc(d.Lead_Source) || (!!e && cbEmails.has(e)) || (!!p && cbPhones.has(p)) || (!!n && cbNames.has(n));
+    if (!isCb) continue;
+    const key = e || p || n || d.id;
+    if (cbConvKeys.has(key)) continue;
+    cbConvKeys.add(key);
+    cbConvDob.push(d);
+  }
+  // Total chatbot-origin people = unique(leads ∪ conversions) so someone who is
+  // both still a Lead and a converted DoB isn't double-counted.
+  const chatbotPeople = new Set<string>(cbConvKeys);
+  chatbotLeadRows.forEach((l, i) => {
+    chatbotPeople.add(_normEmail(l.Email) || _normPhone(l.Phone ?? l.Mobile) || _normName(l.First_Name, l.Last_Name) || `l${i}`);
+  });
+  const chatbotConversions = cbConvDob.length;
+  const chatbotTotalPeople = chatbotPeople.size;
+  const chatbotConversionRate = chatbotTotalPeople > 0 ? +(100 * chatbotConversions / chatbotTotalPeople).toFixed(1) : 0;
+  const chatbotQualified = chatbotLeadRows.filter(l => qualifiedStatusSet.has(l.Lead_Status)).length;
+
+  // Last-12-month trend: chatbot leads exported vs conversions.
+  const cbMonthKeys: string[] = [];
+  {
+    const base = new Date();
+    for (let i = 11; i >= 0; i--) {
+      const d = new Date(base.getFullYear(), base.getMonth() - i, 1);
+      cbMonthKeys.push(`${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}`);
+    }
+  }
+  const cbMonthIdx = new Map(cbMonthKeys.map((k, i) => [k, i]));
+  const chatbotTrend = cbMonthKeys.map(month => ({ month, leads: 0, conversions: 0 }));
+  for (const l of chatbotLeadRows) { const idx = cbMonthIdx.get((l.Created_Time ?? '').slice(0, 7)); if (idx !== undefined) chatbotTrend[idx].leads++; }
+  for (const d of cbConvDob)       { const idx = cbMonthIdx.get((d.Created_Time ?? '').slice(0, 7)); if (idx !== undefined) chatbotTrend[idx].conversions++; }
+
+  const chatbotRecentConversions = [...cbConvDob]
+    .sort((a, b) => new Date(b.Created_Time).getTime() - new Date(a.Created_Time).getTime())
+    .slice(0, 10)
+    .map(d => ({
+      name:      d.Full_Name || `${d.First_Name ?? ''} ${d.Last_Name ?? ''}`.trim() || '—',
+      specialty: d.Specialty_New || d.Speciality || '—',
+      email:     d.Email,
+      phone:     d.Phone ?? d.Mobile,
+      date:      d.Created_Time,
+      owner:     d.Owner?.name ?? null,
+    }));
+
+  const chatbot = {
+    leads:             chatbotLeadRows.length,
+    conversions:       chatbotConversions,
+    totalPeople:       chatbotTotalPeople,
+    conversionRate:    chatbotConversionRate,
+    qualified:         chatbotQualified,
+    trend:             chatbotTrend,
+    recentConversions: chatbotRecentConversions,
+  };
+
   // ── Raw data (passed through for downstream filtering) ───────────────────
   const rawLeads = leads;
   const rawDeals = deals;
@@ -968,6 +1037,7 @@ export function aggregateZohoData(
   const rawCampaigns = campaigns;
 
   return {
+    chatbot,
     kpis,
     leadsOverTime,
     placementFunnel,

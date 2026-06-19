@@ -21,6 +21,7 @@ import {
   ChevronRight,
   Inbox,
   BookOpen,
+  Bot,
   type LucideIcon,
 } from "lucide-react";
 import { useCallback, useEffect, useState } from "react";
@@ -106,6 +107,7 @@ const NAV_SECTIONS: NavSection[] = [
     items: [
       { title: "Marketing",         url: "/marketing",       icon: Megaphone },
       { title: "Meta Ads",          url: "/meta-ads",        icon: Image },
+      { title: "Chatbot",           url: "/chatbot",         icon: Bot },
       { title: "Forms",             url: "/forms",           icon: ClipboardList },
       { title: "Team Performance",  url: "/team",            icon: UsersIcon },
       { title: "Finance",           url: "/finance",         icon: DollarSign },
