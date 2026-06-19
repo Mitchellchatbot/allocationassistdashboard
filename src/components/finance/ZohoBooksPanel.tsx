@@ -106,7 +106,7 @@ export function ZohoBooksPanel({ dateRange }: { dateRange: { from: Date; to: Dat
         <span className="inline-flex items-center gap-1 text-[9px] font-bold uppercase tracking-wide px-2 py-0.5 rounded-full bg-emerald-100 text-emerald-700">
           <span className="h-1.5 w-1.5 rounded-full bg-emerald-500" /> Zoho Books · live
         </span>
-        <span className="text-[10px] text-muted-foreground">Actuals for the selected period</span>
+        <span className="text-[10px] text-muted-foreground">Actuals for the selected period · in {cur} (Zoho Books currency)</span>
       </div>
       <div className="grid grid-cols-2 lg:grid-cols-4 gap-3">
         <Stat icon={TrendingUp} label="Revenue (invoiced)" value={fmt(revenue, cur)} sub={`${data.invoiceCount ?? 0} invoices`} accent="emerald" />

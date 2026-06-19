@@ -1561,7 +1561,8 @@ const MetaAds = () => {
                     sub={cpc > 0 ? `${fmtN(conversions)} converted (Doctors on Board)` : "no conversions in period"}
                     back={
                       <div className="space-y-2 text-[11px]">
-                        <p className="text-muted-foreground">Conversion = a row in the Zoho <strong>Doctors on Board</strong> module whose <code>Lead_Source</code> resolves to Meta (Facebook / Instagram / placement variants). Zoho is the sole source — no form-side cross-references.</p>
+                        <p className="text-muted-foreground">Conversion = a row in the Zoho <strong>Doctors on Board</strong> module whose <code>Lead_Source</code> resolves to Meta (Facebook / Instagram / placement variants) — this matches the Meta conversion count on the Marketing page.</p>
+                        <p className="text-muted-foreground/80">Note: Cost/Lead and Cost/Qualified above are attributed by Meta <em>form</em> submissions (meta_leads), whereas this is attributed by Lead Source — so the funnel mixes two attribution methods.</p>
                         <div className="pt-2 border-t border-border/40 space-y-1">
                           <div className="flex justify-between"><span className="text-muted-foreground">Ad spend</span><span className="font-semibold tabular-nums">{fmtC(toDisplay(adSpend), currency)}</span></div>
                           <div className="flex justify-between"><span className="text-muted-foreground">Conversions</span><span className="font-semibold tabular-nums">{fmtN(conversions)}</span></div>

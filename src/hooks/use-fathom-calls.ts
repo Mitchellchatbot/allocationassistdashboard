@@ -76,11 +76,15 @@ export function useFathomCalls(filters: FathomCallsFilters = {}) {
   return useQuery({
     queryKey: [...FATHOM_CALLS_KEY, filters],
     queryFn: async () => {
+      // Display caps at the latest 500, but when the user is SEARCHING we widen
+      // the window so the text filter covers the full history, not just the most
+      // recent 500 (otherwise older matching calls silently never appear).
+      const limit = filters.search?.trim() ? 5000 : 500;
       let q = supabase
         .from("fathom_calls")
         .select("*")
         .order("recording_start", { ascending: false, nullsFirst: false })
-        .limit(500);
+        .limit(limit);
 
       if (filters.from) q = q.gte("recording_start", filters.from);
       if (filters.to)   q = q.lte("recording_start", filters.to);

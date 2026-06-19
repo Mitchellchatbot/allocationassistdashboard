@@ -37,7 +37,7 @@ export function groupRunsIntoBuckets(items: FlowRun[]): FlowBucket[] {
     }
     if (r.flow_key === "contract_signing" &&
         (r.current_stage === "awaiting_view" || r.current_stage === "awaiting_signature") &&
-        ageDays > 3) {
+        ageDays > 5) {   // align with the scheduler's 5-day awaiting_signature reminder gate
       action.push(r); continue;
     }
     if (ageDays > 7) { stale.push(r); continue; }

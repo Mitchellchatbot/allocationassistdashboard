@@ -170,6 +170,13 @@ export function DashboardLayout({ children, title: pageTitle, subtitle: pageSubt
   useRecentItemsTracker(lookupRoute);
   const { data: zoho } = useZohoData();
   const syncedAt = zoho?.syncedAt;
+  // Re-render once a minute so the "Synced Nm ago" chip keeps counting up on a
+  // long-open tab instead of freezing at its first-render value.
+  const [, setSyncTick] = useState(0);
+  useEffect(() => {
+    const t = setInterval(() => setSyncTick(n => n + 1), 60_000);
+    return () => clearInterval(t);
+  }, []);
   const queryClient = useQueryClient();
 
   // Prefetch weekly sales after a short delay so it doesn't compete with
