@@ -1526,8 +1526,11 @@ const MetaAds = () => {
               const conversions = (zoho?.rawDoctorsOnBoard ?? []).filter(dob => {
                 const t = dob.Created_Time ? new Date(dob.Created_Time).getTime() : NaN;
                 if (isNaN(t) || t < metaFromMs || t >= metaToMs) return false;
+                const ds = displaySource(dob.Lead_Source);
+                if (ds === "Meta") return true;                       // raw FB/IG source
+                if (ds !== "Undefined") return false;                // a real non-Meta channel never counts as Meta
                 const e = normalizeEmail(dob.Email), p = normalizePhone(dob.Phone ?? dob.Mobile);
-                return displaySource(dob.Lead_Source) === "Meta" || (!!e && metaEmails.has(e)) || (!!p && metaPhones.has(p));
+                return (!!e && metaEmails.has(e)) || (!!p && metaPhones.has(p));  // junk source rescued by meta_leads
               }).length;
               const cpl = totalLeads     > 0 ? adSpend / totalLeads     : 0;
               const cpq = qualifiedLeads > 0 ? adSpend / qualifiedLeads : 0;

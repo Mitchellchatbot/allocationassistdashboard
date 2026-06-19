@@ -19,7 +19,63 @@ Deno.serve(async (req) => {
   // deletes any form_responses whose respondent_name matches.
   if (req.method === "POST") {
     try {
-      const body = await req.json().catch(() => null) as { delete_form_response_names?: string[] } | null;
+      const body = await req.json().catch(() => null) as { delete_form_response_names?: string[]; dob_channel_audit?: { from: string; to: string } } | null;
+
+      // One-off: reconcile Doctors-on-Board → marketing channel for a window,
+      // exactly how the dashboard attributes them (displaySource + meta_leads
+      // override). POST { dob_channel_audit: { from:"2026-06-01", to:"2026-06-30" } }
+      if (body?.dob_channel_audit) {
+        const { from, to } = body.dob_channel_audit;
+        const fromMs = new Date(from).getTime();
+        const toMs   = new Date(to).getTime() + 86_400_000;
+        const dsrc = (raw: string | null): string => {
+          if (!raw) return "Undefined";
+          const s = raw.trim().toLowerCase();
+          if (!s || /^x+$/i.test(s) || s === "none" || s === "null" || s === "n/a" || s.length < 2) return "Undefined";
+          if (s.includes("instagram") || s === "ig") return "Meta";
+          if (s.includes("facebook") || s === "fb" || s === "meta") return "Meta";
+          if (s.includes("landing page")) return "Landing Page";
+          if (s.includes("website") || s.includes("seo") || s === "organic" || s.includes("chatgpt") || s.includes("gpt") || s.includes("openai") || s.includes("chatbot")) return "Website / SEO";
+          if (s.includes("google") && s.includes("ad")) return "Google Ads";
+          if (s.includes("linkedin") || s.includes("linked in")) return "LinkedIn";
+          if (s.includes("referral") || s.includes("referrer") || s.startsWith("reference") || s.includes("word of mouth") || s.includes("nhs")) return "Referrals";
+          if (s.includes("go hire") || s.includes("gohire")) return "Go Hire";
+          if (s === "indeed" || s.startsWith("indeed")) return "Indeed";
+          return raw.replace(/_/g, " ").replace(/\b\w/g, c => c.toUpperCase()).trim();
+        };
+        const nE = (x: unknown) => (typeof x === "string" ? x : "").trim().toLowerCase();
+        const nP = (x: unknown) => (typeof x === "string" ? x : "").replace(/\D/g, "");
+        const [{ data: cache2 }, { count: mlCount }] = await Promise.all([
+          sb.from("zoho_cache").select("data").eq("id", 2).maybeSingle(),
+          sb.from("meta_leads").select("id", { head: true, count: "exact" }),
+        ]);
+        // Supabase caps each query at 1000 rows — paginate the full table.
+        const ml: Array<{ email: unknown; phone: unknown }> = [];
+        for (let off = 0; off < (mlCount ?? 0); off += 1000) {
+          const { data: page } = await sb.from("meta_leads").select("email, phone").range(off, off + 999);
+          if (!page || page.length === 0) break;
+          ml.push(...page);
+        }
+        const dob = (((cache2?.data as Record<string, unknown>)?.doctorsOnBoard) ?? []) as Array<Record<string, unknown>>;
+        const mEmails = new Set(ml.map(r => nE(r.email)).filter(Boolean));
+        const mPhones = new Set(ml.map(r => nP(r.phone)).filter(Boolean));
+        const isTest = (r: Record<string, unknown>) => /^test\s+test$/i.test(String(r.Full_Name ?? "").trim()) || /^test(?:[+.\-_]\w*)?@/i.test(String(r.Email ?? "").trim());
+        const inWin = dob.filter(d => { const t = d.Created_Time ? new Date(d.Created_Time as string).getTime() : NaN; return !isNaN(t) && t >= fromMs && t < toMs; });
+        const rows = inWin.map(d => {
+          const e = nE(d.Email), p = nP((d.Phone ?? d.Mobile));
+          const metaMatch = (!!e && mEmails.has(e)) || (!!p && mPhones.has(p));
+          const rawCh = dsrc(d.Lead_Source as string | null);
+          return { name: d.Full_Name, created: d.Created_Time, leadSource: d.Lead_Source ?? null, rawChannel: rawCh, metaMatch, finalChannel: metaMatch ? "Meta" : rawCh, test: isTest(d) };
+        });
+        const tally = (key: "rawChannel" | "finalChannel") => rows.filter(r => !r.test).reduce((m: Record<string, number>, r) => { m[r[key]] = (m[r[key]] ?? 0) + 1; return m; }, {});
+        return new Response(JSON.stringify({
+          window: { from, to }, total: rows.length, testRows: rows.filter(r => r.test).length,
+          metaLeadsCount: mlCount ?? null, metaLeadsRead: (ml ?? []).length,
+          byRawChannel: tally("rawChannel"), byFinalChannel: tally("finalChannel"),
+          rows,
+        }, null, 2), { headers: { "Content-Type": "application/json" } });
+      }
+
       if (body?.delete_form_response_names && Array.isArray(body.delete_form_response_names)) {
         const names = body.delete_form_response_names;
         const { error, count } = await sb.from("form_responses").delete({ count: "exact" }).in("respondent_name", names);

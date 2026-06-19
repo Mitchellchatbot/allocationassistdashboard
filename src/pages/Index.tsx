@@ -72,17 +72,20 @@ const Index = () => {
   const { fmt: fmtAED } = useCurrency();
   const { data: zoho } = useZohoData();
   // Meta cross-reference so channel attribution matches the Marketing page:
-  // a lead/DoB whose email or phone is in meta_leads is attributed to "Meta"
-  // even if its Zoho Lead_Source says otherwise (the "XXXX → Meta" fix).
+  // a lead/DoB with a junk/blank Lead_Source whose email or phone is in
+  // meta_leads is attributed to "Meta" (the narrowed "XXXX → Meta" fix — a
+  // real Lead_Source channel always wins; see Marketing.tsx channelOf).
   const { data: metaStats } = useMetaLeadsStats(dateRange);
   const channelOf = useMemo(() => {
     const metaEmails = metaStats?.metaLeadEmails ?? new Set<string>();
     const metaPhones = metaStats?.metaLeadPhones ?? new Set<string>();
     return (email: string | null | undefined, phone: string | null | undefined, leadSource: string | null | undefined): string => {
+      const ds = displaySource(leadSource);
+      if (ds !== "Undefined") return ds;          // a real channel always wins
       const e = normalizeEmail(email);
       const p = normalizePhone(phone);
       if ((e && metaEmails.has(e)) || (p && metaPhones.has(p))) return "Meta";
-      return displaySource(leadSource);
+      return ds;
     };
   }, [metaStats?.metaLeadEmails, metaStats?.metaLeadPhones]);
   // "Where Qualified Leads Come From" — channel breakdown of qualified leads

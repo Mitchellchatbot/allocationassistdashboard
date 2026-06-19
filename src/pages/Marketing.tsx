@@ -86,26 +86,29 @@ const Marketing = () => {
       'Initial Sales Call Completed', 'High Priority Follow up',
     ]);
 
-    // Meta attribution override (Ammar 2026-06-02). A doctor whose email/phone
-    // appears in meta_leads (form submissions captured directly from Meta
-    // campaigns) gets attributed to Meta regardless of what the recruiter
-    // typed into Lead_Source. This fixes the "XXXX → Meta" miscategorisation
-    // — currently 9 DoB rows get filed under Website/SEO when they actually
-    // came in from Meta forms.
+    // Meta attribution override (Ammar 2026-06-02), NARROWED 2026-06-19.
+    // Original intent: rescue the "XXXX → Meta" miscategorisation — leads with a
+    // junk/blank Lead_Source that actually came in from a Meta form. But
+    // meta_leads now holds 16K+ form submissions, so a blanket "in meta_leads ⇒
+    // Meta" wrongly relabels anyone who ever touched a Meta ad — stealing
+    // chatgpt/Website/LinkedIn-sourced conversions into Meta. So we now ONLY
+    // override when the recruiter gave us no real source (displaySource ===
+    // "Undefined"); a real channel always wins. `channelOf` resolves the final
+    // channel: trust the Lead_Source, fall back to the meta_leads signal only
+    // when the source is junk.
     const metaEmails = metaStats?.metaLeadEmails ?? new Set<string>();
     const metaPhones = metaStats?.metaLeadPhones ?? new Set<string>();
-    const isMetaSourced = (email: string | null | undefined, phone: string | null | undefined): boolean => {
+    const channelOf = (email: string | null | undefined, phone: string | null | undefined, src: string | null | undefined): string => {
+      const ds = displaySource(src);
+      if (ds !== "Undefined") return ds;          // a real channel always wins
       const e = normalizeEmail(email);
-      if (e && metaEmails.has(e)) return true;
       const p = normalizePhone(phone);
-      if (p && metaPhones.has(p)) return true;
-      return false;
+      if ((e && metaEmails.has(e)) || (p && metaPhones.has(p))) return "Meta";
+      return ds;
     };
 
     for (const l of recentLeads) {
-      const ch = isMetaSourced(l.Email, l.Phone ?? l.Mobile)
-        ? "Meta"
-        : displaySource(l.Lead_Source);
+      const ch = channelOf(l.Email, l.Phone ?? l.Mobile, l.Lead_Source);
       leadsByChannel[ch] = (leadsByChannel[ch] ?? 0) + 1;
       if (activeStatuses.has(l.Lead_Status)) {
         activeByChannel[ch] = (activeByChannel[ch] ?? 0) + 1;
@@ -118,14 +121,12 @@ const Marketing = () => {
       }
     }
 
-    // Conversions from Doctors on Board, attributed to channel via
-    // meta_leads cross-reference first, then Lead_Source as fallback.
+    // Conversions from Doctors on Board, attributed by Lead_Source (with the
+    // junk-source-only meta_leads fallback above).
     for (const dob of zoho.rawDoctorsOnBoard ?? []) {
       const t = dob.Created_Time ? new Date(dob.Created_Time).getTime() : NaN;
       if (isNaN(t) || t < fromMs || t >= toMs) continue;
-      const ch = isMetaSourced(dob.Email, dob.Phone ?? dob.Mobile)
-        ? "Meta"
-        : displaySource(dob.Lead_Source);
+      const ch = channelOf(dob.Email, dob.Phone ?? dob.Mobile, dob.Lead_Source);
       convertedByChannel[ch] = (convertedByChannel[ch] ?? 0) + 1;
     }
 
@@ -186,16 +187,22 @@ const Marketing = () => {
   const minLeadsThreshold = Math.min(10, Math.floor(totalLeadsInWindow * 0.05));
   const [showAllChannels, setShowAllChannels] = useState(false);
   const [showUndefined,   setShowUndefined]   = useState(false);
+  // A channel is hidden only if it's BOTH low-volume AND has no outcomes.
+  // A channel that produced conversions (or qualified leads) always shows —
+  // otherwise low-traffic-but-converting channels like LinkedIn silently
+  // vanish and the visible rows no longer sum to the real total.
+  const isLowSignal = (c: (typeof marketing)[number]) =>
+    c.doctors < minLeadsThreshold && (c.converted ?? 0) === 0 && (c.qualified ?? 0) === 0;
   const visibleMarketing = useMemo(() => {
     return marketing.filter(c => {
       if (!showUndefined && c.channel === "Undefined") return false;
-      if (!showAllChannels && c.doctors < minLeadsThreshold) return false;
+      if (!showAllChannels && isLowSignal(c)) return false;
       return true;
     });
   }, [marketing, showAllChannels, showUndefined, minLeadsThreshold]);
   const undefinedRow         = marketing.find(c => c.channel === "Undefined");
   const undefinedLeads       = undefinedRow?.doctors ?? 0;
-  const hiddenLowVolumeCount = marketing.filter(c => c.doctors < minLeadsThreshold && c.channel !== "Undefined").length;
+  const hiddenLowVolumeCount = marketing.filter(c => isLowSignal(c) && c.channel !== "Undefined").length;
 
   // KPI card expand panel
   const [selectedKpiChannel, setSelectedKpiChannel] = useState<string | null>(null);
@@ -327,9 +334,11 @@ const Marketing = () => {
     const metaEmails = metaStats?.metaLeadEmails ?? new Set<string>();
     const metaPhones = metaStats?.metaLeadPhones ?? new Set<string>();
     const chOf = (email: string | null | undefined, phone: string | null | undefined, src: string | null | undefined) => {
+      const ds = displaySource(src ?? null);
+      if (ds !== "Undefined") return ds;          // a real channel always wins
       const e = normalizeEmail(email), p = normalizePhone(phone);
       if ((e && metaEmails.has(e)) || (p && metaPhones.has(p))) return "Meta";
-      return displaySource(src ?? null);
+      return ds;
     };
     return zoho.rawDoctorsOnBoard.filter(d => {
       const t = d.Created_Time ? new Date(d.Created_Time).getTime() : NaN;
