@@ -692,7 +692,7 @@ function EmptyState({ syncing }: { syncing: boolean }) {
       <p className="text-[12px] text-muted-foreground max-w-sm">
         {syncing
           ? "Pulling your meetings from Fathom for the first time… this can take up to a minute."
-          : "Once Fathom records a call it'll appear here automatically. The page auto-syncs every 2 minutes."}
+          : "Once Fathom records a call it'll appear here automatically. The page auto-syncs every 10 minutes (and checks for new rows every 30s)."}
       </p>
       {syncing && (
         <Loader2 className="h-4 w-4 animate-spin text-purple-500" />
