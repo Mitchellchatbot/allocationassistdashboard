@@ -548,7 +548,9 @@ export function aggregateZohoData(
       channel: ch,
       leads: n,
       conversions: dobsByChannel.get(ch) ?? 0,
-      rate: n > 0 ? ((dobsByChannel.get(ch) ?? 0) / n) * 100 : 0,
+      // Clamp ≤100 — DoB are all-time while leads are window-scoped, so a
+      // channel's conversions can exceed its in-window leads.
+      rate: n > 0 ? Math.min(100, ((dobsByChannel.get(ch) ?? 0) / n) * 100) : 0,
     }))
     .sort((a, b) => b.rate - a.rate)[0];
 

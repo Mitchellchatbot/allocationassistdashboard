@@ -114,7 +114,7 @@ export function ContractsPlacementsCard({ contracts, placements, isLoading, scop
                 <div className="flex-1 min-w-0">
                   <div className="text-[12px] font-medium text-slate-900 truncate">{p.doctor_name}</div>
                   <div className="text-[10px] text-muted-foreground truncate">
-                    {placementStage(p)} · {p.hospital_name} · {relativeAge(p.updated_at)}
+                    {placementStage(p)} · {p.hospital_name} · {relativeAge(placementDate(p))}
                   </div>
                 </div>
                 <ChevronRight className="h-3.5 w-3.5 text-slate-400 shrink-0" />
@@ -136,6 +136,13 @@ function placementStage(p: PlacementAttempt): string {
   if (p.offered_at)     return "Offered";
   if (p.interviewed_at) return "Interviewed";
   return "Shortlisted";
+}
+
+/** Date of the furthest milestone — the real "when" of the placement. Use this
+ *  for the relative age, NOT updated_at (which is just the last DB write / seed
+ *  time, so it makes every row read the same "Nd ago"). */
+function placementDate(p: PlacementAttempt): string | null {
+  return p.signed_at ?? p.offered_at ?? p.interviewed_at ?? p.shortlisted_at ?? null;
 }
 
 function Section({ label, count, icon: Icon, cls, blurb, children }: {

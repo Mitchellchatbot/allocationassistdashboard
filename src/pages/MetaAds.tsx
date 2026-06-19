@@ -7,7 +7,7 @@ import { createPortal } from "react-dom";
 import { DashboardLayout } from "@/components/layout/DashboardLayout";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { CampaignWinnerCards } from "@/components/CampaignWinners";
-import { useMetaLeadsStats, type GroupedStat } from "@/hooks/use-meta-leads-stats";
+import { useMetaLeadsStats, normalizeEmail, normalizePhone, type GroupedStat } from "@/hooks/use-meta-leads-stats";
 import { useMetaAdsApi, useMetaCampaignAds, useMetaAdsByName, useMetaTopAds, useMetaTopAdsets, type MetaTopAd, getMetaToken, META_TOKEN_LS_KEY } from "@/hooks/use-meta-ads-api";
 import { useMetaCampaignLeads } from "@/hooks/use-meta-campaign-leads";
 import { useMetaLeadAttribution, type MetaLeadRow } from "@/hooks/use-meta-lead-attribution";
@@ -132,7 +132,14 @@ function MetaKpiCard({
             </div>
             <span className="text-[9px] text-muted-foreground">click to close</span>
           </div>
-          <div className="flex-1 overflow-y-auto px-4 py-3 min-h-0">{back}</div>
+          <div className="flex-1 overflow-y-auto px-4 py-3 min-h-0 space-y-2">
+            {hint && (
+              <p className="text-[10.5px] text-muted-foreground leading-snug border-b border-border/30 pb-2">
+                {hint.meaning}
+              </p>
+            )}
+            {back}
+          </div>
         </div>
       </div>
     </div>
@@ -1509,16 +1516,18 @@ const MetaAds = () => {
               const adSpend          = summary?.spend ?? 0;
               const totalLeads       = data?.total          ?? 0;
               const qualifiedLeads   = data?.qualifiedCount ?? 0;
-              // Conversions: a DoB record counts as a Meta conversion if its
-              // Lead_Source resolves to Meta (Facebook / Instagram / Meta /
-              // their placement variants). Zoho is the sole source of truth —
-              // no meta_leads cross-references.
+              // Conversions: a DoB counts as a Meta conversion if its Lead_Source
+              // resolves to Meta OR its email/phone is in meta_leads — the SAME
+              // attribution the Marketing page uses, so the two reconcile.
               const metaFromMs = metaDateRange.from.getTime();
-              const metaToMs   = metaDateRange.to.getTime();
+              const metaToMs   = metaDateRange.to.getTime() + 86_400_000;  // include the full last day
+              const metaEmails = data?.metaLeadEmails ?? new Set<string>();
+              const metaPhones = data?.metaLeadPhones ?? new Set<string>();
               const conversions = (zoho?.rawDoctorsOnBoard ?? []).filter(dob => {
                 const t = dob.Created_Time ? new Date(dob.Created_Time).getTime() : NaN;
-                if (isNaN(t) || t < metaFromMs || t > metaToMs) return false;
-                return displaySource(dob.Lead_Source) === "Meta";
+                if (isNaN(t) || t < metaFromMs || t >= metaToMs) return false;
+                const e = normalizeEmail(dob.Email), p = normalizePhone(dob.Phone ?? dob.Mobile);
+                return displaySource(dob.Lead_Source) === "Meta" || (!!e && metaEmails.has(e)) || (!!p && metaPhones.has(p));
               }).length;
               const cpl = totalLeads     > 0 ? adSpend / totalLeads     : 0;
               const cpq = qualifiedLeads > 0 ? adSpend / qualifiedLeads : 0;
@@ -1561,8 +1570,7 @@ const MetaAds = () => {
                     sub={cpc > 0 ? `${fmtN(conversions)} converted (Doctors on Board)` : "no conversions in period"}
                     back={
                       <div className="space-y-2 text-[11px]">
-                        <p className="text-muted-foreground">Conversion = a row in the Zoho <strong>Doctors on Board</strong> module whose <code>Lead_Source</code> resolves to Meta (Facebook / Instagram / placement variants) — this matches the Meta conversion count on the Marketing page.</p>
-                        <p className="text-muted-foreground/80">Note: Cost/Lead and Cost/Qualified above are attributed by Meta <em>form</em> submissions (meta_leads), whereas this is attributed by Lead Source — so the funnel mixes two attribution methods.</p>
+                        <p className="text-muted-foreground">Conversion = a row in the Zoho <strong>Doctors on Board</strong> module attributed to Meta — either its <code>Lead_Source</code> resolves to Meta, OR its email/phone matches a Meta lead form (meta_leads). This is the same attribution the Marketing page uses, so the two reconcile.</p>
                         <div className="pt-2 border-t border-border/40 space-y-1">
                           <div className="flex justify-between"><span className="text-muted-foreground">Ad spend</span><span className="font-semibold tabular-nums">{fmtC(toDisplay(adSpend), currency)}</span></div>
                           <div className="flex justify-between"><span className="text-muted-foreground">Conversions</span><span className="font-semibold tabular-nums">{fmtN(conversions)}</span></div>

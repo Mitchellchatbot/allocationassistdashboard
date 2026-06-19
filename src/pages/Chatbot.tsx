@@ -148,8 +148,8 @@ export default function Chatbot() {
             />
             <FlipKpi
               palette={CANDY.lilac} icon={<BadgeCheck className="h-3.5 w-3.5" />}
-              label="Qualified" value={cb.qualified.toLocaleString()} hint={`${cb.leads ? Math.round(100 * cb.qualified / cb.leads) : 0}% of leads`}
-              back={<>The chatbot qualifies leads mid-conversation (specialty, training, intent). <b>{cb.qualified.toLocaleString()}</b> of <b>{cb.leads.toLocaleString()}</b> qualified.</>}
+              label="Qualified in chat" value={cb.qualified.toLocaleString()} hint={`${cb.leads ? Math.round(100 * cb.qualified / cb.leads) : 0}% of leads`}
+              back={<>The chatbot's OWN mid-conversation qualification (specialty, training, intent) — separate from the Zoho lead-status "qualified". <b>{cb.qualified.toLocaleString()}</b> of <b>{cb.leads.toLocaleString()}</b> qualified in chat.</>}
             />
           </div>
 
@@ -170,9 +170,9 @@ export default function Chatbot() {
               </CardHeader>
               <CardContent className="p-4 space-y-3">
                 {[
-                  { label: "Leads captured", value: cb.leads,       palette: CANDY.sky },
-                  { label: "Qualified",      value: cb.qualified,   palette: CANDY.lilac },
-                  { label: "Converted",      value: cb.conversions, palette: CANDY.mint },
+                  { label: "Leads captured",   value: cb.leads,       palette: CANDY.sky },
+                  { label: "Qualified in chat", value: cb.qualified,  palette: CANDY.lilac },
+                  { label: "Converted",        value: cb.conversions, palette: CANDY.mint },
                 ].map(step => {
                   const pct = cb.leads > 0 ? Math.round((step.value / cb.leads) * 100) : 0;
                   return (

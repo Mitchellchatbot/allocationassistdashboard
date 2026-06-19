@@ -94,7 +94,9 @@ function isProfileSendRun(r: FlowRun): boolean {
 function inRange(iso: string | null | undefined, range: DateRange): boolean {
   if (!iso) return false;
   const t = new Date(iso).getTime();
-  return t >= range.from.getTime() && t <= range.to.getTime();
+  // range.to is local midnight of the last selected day → treat as end-of-day
+  // (+1 day, exclusive) so the final day is included (app-wide convention).
+  return t >= range.from.getTime() && t < range.to.getTime() + 86_400_000;
 }
 
 function passesFilters(r: FlowRun, f: ReportingFilters): boolean {
