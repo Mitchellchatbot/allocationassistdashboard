@@ -4,11 +4,11 @@ import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { SectionDateRange } from "@/components/SectionDateRange";
 import { useFilters } from "@/lib/filters";
-import { useChatbotStats, useChatbotInsights } from "@/hooks/use-chatbot-stats";
+import { useChatbotStats, useChatbotInsights, useChatbotLeadDetail } from "@/hooks/use-chatbot-stats";
 import {
   ComposedChart, Bar, Line, XAxis, YAxis, Tooltip, ResponsiveContainer, CartesianGrid, Legend, BarChart,
 } from "recharts";
-import { Bot, UserCheck, TrendingUp, BadgeCheck, Loader2, MessageSquare, AlertCircle, Check, Sparkles, Filter, Stethoscope } from "lucide-react";
+import { Bot, UserCheck, TrendingUp, BadgeCheck, Loader2, MessageSquare, AlertCircle, Check, Sparkles, Filter, Stethoscope, X, MapPin, Globe, Mail, Phone } from "lucide-react";
 
 const CANDY = {
   sky:   { bg: "bg-sky-50",     fg: "text-sky-600",     chip: "bg-sky-100",     stripe: "bg-sky-600" },
@@ -101,6 +101,7 @@ function ChatbotInsightsPanel({ from, to }: { from?: Date; to?: Date }) {
 export default function Chatbot() {
   const { dateRange } = useFilters();
   const { data: cb, isLoading, error } = useChatbotStats(dateRange.from, dateRange.to);
+  const [openLead, setOpenLead] = useState<{ id: string; name: string } | null>(null);
 
   return (
     <DashboardLayout
@@ -262,7 +263,12 @@ export default function Chatbot() {
               {cb.recent.length === 0 ? (
                 <p className="text-[12px] text-muted-foreground px-4 py-6 text-center">No leads in this range.</p>
               ) : cb.recent.map((c, i) => (
-                <div key={i} className="flex items-center justify-between gap-3 px-4 py-3">
+                <button
+                  key={i}
+                  onClick={() => c.visitor_id && setOpenLead({ id: c.visitor_id, name: c.name })}
+                  disabled={!c.visitor_id}
+                  className="flex w-full items-center justify-between gap-3 px-4 py-3 text-left hover:bg-muted/40 transition-colors disabled:cursor-default"
+                >
                   <div className="min-w-0">
                     <p className="text-[12.5px] font-medium text-foreground truncate">{c.name}</p>
                     <p className="text-[11px] text-muted-foreground truncate">{c.specialty}</p>
@@ -279,12 +285,138 @@ export default function Chatbot() {
                     )}
                     <span className="text-[11px] text-muted-foreground tabular-nums w-[88px] text-right">{fmtDate(c.exported_at)}</span>
                   </div>
-                </div>
+                </button>
               ))}
             </CardContent>
           </Card>
         </div>
       )}
+
+      {openLead && (
+        <ChatbotLeadDrawer visitorId={openLead.id} fallbackName={openLead.name} onClose={() => setOpenLead(null)} />
+      )}
     </DashboardLayout>
+  );
+}
+
+function InfoRow({ icon, label, value }: { icon?: React.ReactNode; label: string; value: React.ReactNode }) {
+  return (
+    <div className="flex items-start justify-between gap-3 py-1.5 border-b border-border/30 last:border-0">
+      <span className="text-[11px] text-muted-foreground flex items-center gap-1.5 shrink-0">{icon}{label}</span>
+      <span className="text-[12px] text-foreground text-right min-w-0 break-words">{value}</span>
+    </div>
+  );
+}
+
+function DrawerSection({ title, palette, children }: { title: string; palette: { chip: string; fg: string }; children: React.ReactNode }) {
+  return (
+    <div>
+      <div className={`flex items-center gap-1.5 mb-2 text-[11px] font-semibold uppercase tracking-wide ${palette.fg}`}>
+        <span className={`flex h-5 w-5 items-center justify-center rounded ${palette.chip}`}><Sparkles className="h-3 w-3" /></span>
+        {title}
+      </div>
+      {children}
+    </div>
+  );
+}
+
+function ChatbotLeadDrawer({ visitorId, fallbackName, onClose }: { visitorId: string; fallbackName: string; onClose: () => void }) {
+  const { data, isLoading, error } = useChatbotLeadDetail(visitorId);
+  const v = data?.visitor;
+  const z = data?.zoho;
+  return (
+    <div className="fixed inset-0 z-50">
+      <div className="absolute inset-0 bg-black/40" onClick={onClose} />
+      <div className="absolute inset-y-0 right-0 w-full max-w-[560px] p-2 sm:p-3 pointer-events-none">
+        <div className="h-full bg-background border border-border rounded-2xl shadow-2xl flex flex-col overflow-hidden pointer-events-auto">
+          <div className="flex items-center justify-between px-5 py-3 border-b border-border/50 bg-gradient-to-r from-emerald-50 via-sky-50 to-transparent shrink-0">
+            <div className="flex items-center gap-2 min-w-0">
+              <span className="flex h-7 w-7 items-center justify-center rounded-md bg-emerald-100 text-emerald-600 shrink-0"><Bot className="h-3.5 w-3.5" /></span>
+              <h3 className="text-[14px] font-semibold truncate">{v?.name || fallbackName}</h3>
+            </div>
+            <button onClick={onClose} className="h-7 w-7 flex items-center justify-center rounded-md hover:bg-white/60"><X className="h-4 w-4" /></button>
+          </div>
+
+          <div className="flex-1 overflow-y-auto p-5 space-y-6">
+            {isLoading ? (
+              <div className="flex items-center justify-center gap-2 text-[12px] text-muted-foreground py-12"><Loader2 className="h-4 w-4 animate-spin" /> Loading lead detail…</div>
+            ) : error ? (
+              <div className="flex items-start gap-2 text-[12px] text-rose-700"><AlertCircle className="h-3.5 w-3.5 shrink-0 mt-0.5" /><span>{error.message}</span></div>
+            ) : !data ? null : (
+              <>
+                {/* AI summary first — the quick read */}
+                {data.ai && (data.ai.summary || data.ai.facts.length > 0) && (
+                  <DrawerSection title="AI summary" palette={{ chip: "bg-violet-100", fg: "text-violet-600" }}>
+                    {data.ai.summary && <p className="text-[12.5px] text-foreground leading-relaxed mb-2">{data.ai.summary}</p>}
+                    {data.ai.facts.length > 0 && (
+                      <ul className="space-y-1">
+                        {data.ai.facts.map((f, i) => (
+                          <li key={i} className="flex items-start gap-1.5 text-[11.5px] text-foreground/90 leading-snug">
+                            <span className="mt-1.5 h-1 w-1 rounded-full bg-violet-500 shrink-0" />{f}
+                          </li>
+                        ))}
+                      </ul>
+                    )}
+                  </DrawerSection>
+                )}
+
+                {/* What the chatbot captured */}
+                <DrawerSection title="What the chatbot captured" palette={{ chip: "bg-sky-100", fg: "text-sky-600" }}>
+                  <div className="rounded-lg border border-border/50 bg-muted/20 px-3 py-1">
+                    <InfoRow icon={<Stethoscope className="h-3 w-3" />} label="Specialty" value={v?.specialty || "—"} />
+                    <InfoRow icon={<Globe className="h-3 w-3" />} label="Trained in" value={v?.country || "—"} />
+                    <InfoRow icon={<MapPin className="h-3 w-3" />} label="Location" value={v?.location || "—"} />
+                    <InfoRow label="Qualified in chat" value={v?.qualified ? "Yes" : v?.qualified === false ? "No" : "—"} />
+                    <InfoRow icon={<Mail className="h-3 w-3" />} label="Email" value={v?.email || "—"} />
+                    <InfoRow icon={<Phone className="h-3 w-3" />} label="Phone" value={v?.phone || "—"} />
+                    <InfoRow label="First seen" value={v?.firstSeen ? fmtDate(v.firstSeen) : "—"} />
+                  </div>
+                </DrawerSection>
+
+                {/* CRM status */}
+                <DrawerSection title="In the CRM (Zoho)" palette={{ chip: "bg-emerald-100", fg: "text-emerald-600" }}>
+                  {z?.inZoho ? (
+                    <div className="rounded-lg border border-border/50 bg-muted/20 px-3 py-1">
+                      <InfoRow label="Lead status" value={z.leadStatus || "—"} />
+                      <InfoRow label="Source" value={z.leadSource || "—"} />
+                      <InfoRow label="Owner" value={z.owner || "—"} />
+                      <InfoRow label="Converted" value={
+                        z.converted
+                          ? <span className="inline-flex items-center gap-1 rounded-full bg-emerald-100 text-emerald-700 px-2 py-0.5 text-[10px] font-medium"><Check className="h-3 w-3" /> Doctor on Board</span>
+                          : <span className="text-muted-foreground">Not yet</span>
+                      } />
+                      {z.converted && z.hospital && <InfoRow label="Hospital" value={z.hospital} />}
+                      {z.converted && z.convertedAt && <InfoRow label="Converted on" value={fmtDate(z.convertedAt)} />}
+                    </div>
+                  ) : (
+                    <p className="text-[12px] text-muted-foreground">Not matched to a Zoho record yet.</p>
+                  )}
+                </DrawerSection>
+
+                {/* Transcript */}
+                <DrawerSection title={`Conversation (${data.messages.length})`} palette={{ chip: "bg-amber-100", fg: "text-amber-600" }}>
+                  {data.messages.length === 0 ? (
+                    <p className="text-[12px] text-muted-foreground italic">No transcript available.</p>
+                  ) : (
+                    <div className="space-y-2">
+                      {data.messages.map((m, i) => {
+                        const isVisitor = m.sender_type === "visitor";
+                        return (
+                          <div key={i} className={`flex ${isVisitor ? "justify-end" : "justify-start"}`}>
+                            <div className={`max-w-[82%] rounded-2xl px-3 py-1.5 text-[12px] leading-snug ${isVisitor ? "bg-sky-100 text-sky-900 rounded-br-sm" : "bg-muted text-foreground rounded-bl-sm"}`}>
+                              {m.content}
+                            </div>
+                          </div>
+                        );
+                      })}
+                    </div>
+                  )}
+                </DrawerSection>
+              </>
+            )}
+          </div>
+        </div>
+      </div>
+    </div>
   );
 }

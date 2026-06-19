@@ -36,6 +36,7 @@ const normName  = (f: unknown, l: unknown) =>
   `${(typeof f === "string" ? f : "").trim().toLowerCase()} ${(typeof l === "string" ? l : "").trim().toLowerCase()}`.trim();
 
 interface CbLead {
+  visitor_id?: string | null;
   name: string | null; email: string | null; phone: string | null;
   specialty: string | null; qualified: boolean | null; exported_at: string;
 }
@@ -127,6 +128,7 @@ serve(async (req) => {
     .sort((a, b) => new Date(b.exported_at).getTime() - new Date(a.exported_at).getTime())
     .slice(0, 15)
     .map(l => ({
+      visitor_id:  l.visitor_id ?? null,
       name:        l.name || "—",
       specialty:   l.specialty || "—",
       exported_at: l.exported_at,

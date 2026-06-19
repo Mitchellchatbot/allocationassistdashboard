@@ -11,10 +11,18 @@ export interface ChatbotStats {
   qualified:      number;
   trend:          Array<{ month: string; leads: number; conversions: number }>;
   bySpecialty:    Array<{ specialty: string; leads: number; conversions: number }>;
-  recent:         Array<{ name: string; specialty: string; exported_at: string; qualified: boolean; converted: boolean }>;
+  recent:         Array<{ visitor_id: string | null; name: string; specialty: string; exported_at: string; qualified: boolean; converted: boolean }>;
 }
 
 export interface ChatbotInsights { overview: string; bullets: string[] }
+
+export interface ChatbotLeadDetail {
+  visitor: { name?: string | null; email?: string | null; phone?: string | null; specialty?: string | null; country?: string | null; qualified?: boolean | null; location?: string | null; firstSeen?: string | null };
+  conversationStatus: string | null;
+  messages: Array<{ sender_type: string; content: string; created_at: string }>;
+  zoho: { inZoho: boolean; leadStatus: string | null; leadSource: string | null; owner: string | null; converted: boolean; hospital: string | null; convertedAt: string | null };
+  ai: { summary: string; facts: string[] } | null;
+}
 
 async function callChatbotStats(args: { from?: Date; to?: Date; insights?: boolean }): Promise<Record<string, unknown>> {
   const session = (await supabase.auth.getSession()).data.session;
@@ -50,6 +58,36 @@ export function useChatbotStats(from?: Date, to?: Date) {
       };
     },
     staleTime: 5 * 60_000,
+  });
+}
+
+/** Full detail for one chatbot lead (captured info + transcript + Zoho status +
+ *  AI summary). Fetched when a lead is opened; cached per visitor. */
+export function useChatbotLeadDetail(visitorId: string | null) {
+  return useQuery({
+    queryKey: ["chatbot-lead-detail", visitorId ?? ""],
+    enabled: !!visitorId,
+    staleTime: 10 * 60_000,
+    gcTime: 30 * 60_000,
+    retry: false,
+    queryFn: async (): Promise<ChatbotLeadDetail> => {
+      const session = (await supabase.auth.getSession()).data.session;
+      const token   = session?.access_token ?? SUPABASE_ANON_KEY;
+      const res = await fetch(`${SUPABASE_URL}/functions/v1/chatbot-lead-detail`, {
+        method: "POST",
+        headers: { "apikey": SUPABASE_ANON_KEY, "Authorization": `Bearer ${token}`, "content-type": "application/json" },
+        body: JSON.stringify({ visitor_id: visitorId }),
+      });
+      const j = await res.json().catch(() => ({})) as { ok?: boolean; reason?: string } & Partial<ChatbotLeadDetail>;
+      if (!res.ok || !j.ok) throw new Error(j.reason || `Lead detail failed (${res.status})`);
+      return {
+        visitor:            j.visitor ?? {},
+        conversationStatus: j.conversationStatus ?? null,
+        messages:           j.messages ?? [],
+        zoho:               j.zoho ?? { inZoho: false, leadStatus: null, leadSource: null, owner: null, converted: false, hospital: null, convertedAt: null },
+        ai:                 j.ai ?? null,
+      };
+    },
   });
 }
 
