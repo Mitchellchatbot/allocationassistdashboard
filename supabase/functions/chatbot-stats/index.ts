@@ -87,10 +87,14 @@ serve(async (req) => {
     return (!!e && dobEmail.has(e)) || (!!p && dobPhone.has(p)) || (!!n && dobName.has(n));
   };
 
-  // 3. Window by exported_at + compute.
+  // 3. Window by exported_at + compute. Upper bound is inclusive of the whole
+  // `to` day (the UI passes the day at 00:00), matching the rest of the
+  // dashboard's date-range convention (+1 day, exclusive).
+  const fromMs = from.getTime();
+  const toMs   = to.getTime() + 86_400_000;
   const inRange = cbLeads.filter(l => {
     const t = new Date(l.exported_at).getTime();
-    return t >= from.getTime() && t <= to.getTime();
+    return t >= fromMs && t < toMs;
   });
 
   let conversions = 0, qualified = 0;

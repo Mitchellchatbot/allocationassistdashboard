@@ -7,6 +7,7 @@ import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { useFilteredData } from "@/hooks/use-filtered-data";
 import { useFilters } from "@/lib/filters";
 import { useZohoData, displaySource } from "@/hooks/use-zoho-data";
+import { useMetaLeadsStats, normalizeEmail, normalizePhone } from "@/hooks/use-meta-leads-stats";
 import { useCurrency } from "@/lib/CurrencyProvider";
 import { REVENUE_PER_CONVERSION_AED } from "@/lib/revenue";
 import {
@@ -70,6 +71,20 @@ const Index = () => {
   const { dateRange } = useFilters();
   const { fmt: fmtAED } = useCurrency();
   const { data: zoho } = useZohoData();
+  // Meta cross-reference so channel attribution matches the Marketing page:
+  // a lead/DoB whose email or phone is in meta_leads is attributed to "Meta"
+  // even if its Zoho Lead_Source says otherwise (the "XXXX → Meta" fix).
+  const { data: metaStats } = useMetaLeadsStats(dateRange);
+  const channelOf = useMemo(() => {
+    const metaEmails = metaStats?.metaLeadEmails ?? new Set<string>();
+    const metaPhones = metaStats?.metaLeadPhones ?? new Set<string>();
+    return (email: string | null | undefined, phone: string | null | undefined, leadSource: string | null | undefined): string => {
+      const e = normalizeEmail(email);
+      const p = normalizePhone(phone);
+      if ((e && metaEmails.has(e)) || (p && metaPhones.has(p))) return "Meta";
+      return displaySource(leadSource);
+    };
+  }, [metaStats?.metaLeadEmails, metaStats?.metaLeadPhones]);
   // "Where Qualified Leads Come From" — channel breakdown of qualified leads
   // in the selected period. Uses page-level date range via filteredLeads.
   const QUALIFIED_SET = useMemo(() => new Set([
@@ -81,7 +96,7 @@ const Index = () => {
     const map: Record<string, number> = {};
     for (const l of filteredLeads) {
       if (!QUALIFIED_SET.has(l.Lead_Status)) continue;
-      const ch = displaySource(l.Lead_Source);
+      const ch = channelOf(l.Email, l.Phone ?? l.Mobile, l.Lead_Source);
       map[ch] = (map[ch] ?? 0) + 1;
     }
     // Diagnostic: status breakdown per channel — helps explain why some
@@ -109,13 +124,13 @@ const Index = () => {
       if (!d.Created_Time) continue;
       const t = new Date(d.Created_Time).getTime();
       if (t < fromMs || t >= toMs) continue;
-      const ch = displaySource(d.Lead_Source);
+      const ch = channelOf(d.Email, d.Phone ?? d.Mobile, d.Lead_Source);
       map[ch] = (map[ch] ?? 0) + 1;
     }
     return Object.entries(map)
       .sort((a, b) => b[1] - a[1])
       .map(([channel, count]) => ({ channel, count }));
-  }, [zoho?.rawDoctorsOnBoard, dateRange]);
+  }, [zoho?.rawDoctorsOnBoard, dateRange, channelOf]);
 
 
   // ── Expanded content for each KPI card ──────────────────────────────────────
@@ -132,7 +147,7 @@ const Index = () => {
       if (!d.Created_Time) continue;
       const t = new Date(d.Created_Time).getTime();
       if (t < fromMs || t >= toMs) continue;
-      const ch = displaySource(d.Lead_Source);
+      const ch = channelOf(d.Email, d.Phone ?? d.Mobile, d.Lead_Source);
       if (ch === 'Undefined') continue;
       convByCh.set(ch, (convByCh.get(ch) ?? 0) + 1);
     }
@@ -144,7 +159,7 @@ const Index = () => {
       }))
       .sort((a, b) => b.conversions - a.conversions);
     return { ranked };
-  }, [zoho?.rawDoctorsOnBoard, dateRange]);
+  }, [zoho?.rawDoctorsOnBoard, dateRange, channelOf]);
 
   const winner = bestChannelData.ranked[0];
 

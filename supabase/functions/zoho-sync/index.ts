@@ -95,18 +95,20 @@ async function fetchAllPages<T>(
             await new Promise(r => setTimeout(r, wait));
             continue;
           }
-          if (res.status === 204) return null;
+          if (res.status === 204) return null;             // legit end of data
           if (!res.ok) {
+            // A real error mid-walk would silently truncate the dataset (e.g.
+            // 26k leads → 200) and overwrite the cache with partial data. Throw
+            // so the whole sync aborts and the last COMPLETE cache is kept; the
+            // next run retries.
             const body = await res.text().catch(() => '');
-            console.warn(`[zoho-sync] ${module} page ${p} → HTTP ${res.status}: ${body.slice(0, 300)}`);
-            return null;
+            throw new Error(`[zoho-sync] ${module} page ${p} HTTP ${res.status}: ${body.slice(0, 200)}`);
           }
           const text = await res.text();
           if (!text) return null;
           return JSON.parse(text) as { data?: T[]; info?: { more_records: boolean } };
         }
-        console.warn(`[zoho-sync] ${module} page ${p} — gave up after 3 retries on 429`);
-        return null;
+        throw new Error(`[zoho-sync] ${module} page ${p} rate-limited after 3 retries — aborting to avoid truncated data`);
       }),
     );
 
@@ -245,21 +247,38 @@ serve(async (req: Request) => {
     // ~20 fields each). Row 2 = everything else (deals, calls, accounts,
     // campaigns, doctorsOnBoard). The dashboard reads both rows on load.
     const syncedAt = new Date().toISOString();
-    const r1 = await supabase.from('zoho_cache').upsert({
-      id: 1, data: { leads }, synced_at: syncedAt,
-    });
-    if (r1.error) throw r1.error;
 
-    const r2 = await supabase.from('zoho_cache').upsert({
-      id: 2, data: { deals, calls, accounts, campaigns, doctorsOnBoard, hospitalContacts }, synced_at: syncedAt,
-    });
-    if (r2.error) throw r2.error;
+    // Never overwrite a good cache with EMPTY critical data. Leads + Doctors on
+    // Board are always non-zero for this org, so an empty result means the
+    // fetch failed (the optional .catch(()=>[]) on the DoB fetch can mask a
+    // transient error) — skip that row's upsert and keep the last good copy
+    // rather than zeroing out the dashboard's leads/conversions.
+    const skipped: string[] = [];
+
+    if (leads.length > 0) {
+      const r1 = await supabase.from('zoho_cache').upsert({ id: 1, data: { leads }, synced_at: syncedAt });
+      if (r1.error) throw r1.error;
+    } else {
+      skipped.push('leads');
+      console.warn('[zoho-sync] leads came back empty — preserving last good cache row 1');
+    }
+
+    if (doctorsOnBoard.length > 0) {
+      const r2 = await supabase.from('zoho_cache').upsert({
+        id: 2, data: { deals, calls, accounts, campaigns, doctorsOnBoard, hospitalContacts }, synced_at: syncedAt,
+      });
+      if (r2.error) throw r2.error;
+    } else {
+      skipped.push('doctorsOnBoard');
+      console.warn('[zoho-sync] Doctors on Board came back empty — preserving last good cache row 2 (deals/DoB)');
+    }
 
     return new Response(JSON.stringify({
       ok: true,
       leads: leads.length, deals: deals.length, calls: calls.length,
       accounts: accounts.length, campaigns: campaigns.length,
       doctorsOnBoard: doctorsOnBoard.length,
+      skipped,   // rows NOT overwritten because the fetch returned empty
       synced_at: new Date().toISOString(),
     }), { status: 200, headers: { ...CORS, 'Content-Type': 'application/json' } });
 

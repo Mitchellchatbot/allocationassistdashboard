@@ -117,7 +117,10 @@ const Sales = () => {
     </div>
   );
 
-  // 4. Qualified Contact Rate → contact rate per recruiter (qualified leads only)
+  // 4. Contact Rate → share of ACTIVE leads we've reached at least once. NOTE:
+  // this `activeStatuses` set is the active funnel, NOT the canonical "qualified"
+  // set ({Initial Sales Call Completed, High Priority Follow up}) used for the
+  // Qualified→Converted card — keep them distinct.
   const qualifiedStatuses = new Set(['Not Contacted', 'Attempted to Contact', 'Initial Sales Call Completed', 'High Priority Follow up']);
   const qualifiedLeads = filteredLeads.filter(l => qualifiedStatuses.has(l.Lead_Status));
   const qualifiedContacted = qualifiedLeads.filter(l => l.Lead_Status !== 'Not Contacted');
@@ -145,7 +148,7 @@ const Sales = () => {
           );
         })
       }
-      <p className="text-[10px] text-muted-foreground pt-1 border-t border-border/30">Qualified leads only (excl. unqualified/not interested)</p>
+      <p className="text-[10px] text-muted-foreground pt-1 border-t border-border/30">Across active leads (excl. unqualified/not interested)</p>
     </div>
   );
 
@@ -232,12 +235,12 @@ const Sales = () => {
           expandedHeight={240}
         />
         <ExpandableKPICard
-          title="Qualified Contact Rate"
+          title="Contact Rate"
           value={`${qualifiedContactRate}%`}
           icon={PhoneCall}
           color="text-warning"
           bg="bg-warning/10"
-          hintMeaning='Unique leads engaged (status past "Not Contacted") ÷ total. Counts leads, NOT call attempts.'
+          hintMeaning='Share of ACTIVE leads reached at least once (status past "Not Contacted") ÷ active leads. Counts leads, NOT call attempts. (Not the qualified set — that is "Initial Sales Call Completed" + "High Priority Follow up".)'
           hintSource="Zoho CRM (Lead_Status)."
           expandedContent={contactRateContent}
           expandedHeight={240}
