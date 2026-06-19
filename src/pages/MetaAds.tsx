@@ -1450,16 +1450,32 @@ const MetaAds = () => {
           <span className="text-[11px]">Fetching from Meta ({since} → {until})…</span>
         </div>
       ) : campaigns.length === 0 && (summary?.spend ?? 0) === 0 ? (
-        <div className="mb-5 rounded-xl border border-border/50 bg-muted/30 px-4 py-4">
-          <p className="text-[12px] font-medium mb-1">No ad data found for this period</p>
-          <p className="text-[11px] text-muted-foreground">
-            Range: {since} → {until}
-            {(api?.accounts?.length ?? 0) > 0 && <> · Accounts: {api?.accounts.map(a => a.name).join(", ")}</>}
-          </p>
-          <p className="text-[10px] text-muted-foreground/60 mt-1">Try selecting "All" to see all historical data.</p>
-        </div>
+        api?.degraded ? (
+          <div className="mb-5 rounded-xl border border-amber-300 bg-amber-50 px-4 py-4">
+            <p className="text-[12px] font-semibold mb-1 text-amber-800">Meta metrics couldn't be loaded</p>
+            <p className="text-[11px] text-amber-800/80">
+              Some Meta API calls failed for {since} → {until} — the connection/token may have expired or hit a rate limit, so this isn't a true zero. Try refreshing shortly, or re-check the token below.
+            </p>
+            <div className="mt-3"><TokenConfigPanel onSaved={handleTokenSaved} /></div>
+          </div>
+        ) : (
+          <div className="mb-5 rounded-xl border border-border/50 bg-muted/30 px-4 py-4">
+            <p className="text-[12px] font-medium mb-1">No ad data found for this period</p>
+            <p className="text-[11px] text-muted-foreground">
+              Range: {since} → {until}
+              {(api?.accounts?.length ?? 0) > 0 && <> · Accounts: {api?.accounts.map(a => a.name).join(", ")}</>}
+            </p>
+            <p className="text-[10px] text-muted-foreground/60 mt-1">Try selecting "All" to see all historical data.</p>
+          </div>
+        )
       ) : (
         <>
+          {api?.degraded && (
+            <div className="mb-4 rounded-lg border border-amber-300 bg-amber-50 px-3 py-2 flex items-center gap-2 text-[11.5px] text-amber-800">
+              <AlertCircle className="h-3.5 w-3.5 shrink-0" />
+              Some Meta metrics failed to load — the figures below may be understated. Refresh to retry.
+            </div>
+          )}
           {/* ── 8 Flip KPI cards ── */}
           <div className="grid grid-cols-2 lg:grid-cols-4 gap-3 mb-4" data-tour="metaads-overview">
             <MetaKpiCard icon={DollarSign}   label="Total Spend"    color="text-primary"     bg="bg-primary/10"

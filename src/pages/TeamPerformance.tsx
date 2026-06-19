@@ -226,7 +226,7 @@ const TeamPerformance = () => {
                     <TableCell className="text-right py-2.5 hidden lg:table-cell">
                       <div className="flex items-center justify-end gap-1.5">
                         <div className="w-14 h-1.5 rounded-full bg-muted overflow-hidden">
-                          <div className="h-full rounded-full bg-primary" style={{ width: `${r.score}%` }} />
+                          <div className="h-full rounded-full bg-primary" style={{ width: `${Math.min(100, r.score)}%` }} />
                         </div>
                         <span className="text-[10px] font-medium tabular-nums w-5 text-right">{r.score}</span>
                       </div>

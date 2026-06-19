@@ -152,9 +152,12 @@ const Sales = () => {
     </div>
   );
 
-  // 5. Urgent Follow-ups → list of high priority leads
+  // 5. Urgent Follow-ups → high-priority leads, oldest first (stalest = most
+  // urgent). Leads don't carry a status-change timestamp, so we show real total
+  // lead age (Created_Time) — not a fabricated "days in stage".
   const urgentLeads = filteredLeads
     .filter(l => l.Lead_Status === 'High Priority Follow up')
+    .sort((a, b) => new Date(a.Created_Time).getTime() - new Date(b.Created_Time).getTime())
     .slice(0, 8);
   const urgentContent = (
     <div className="divide-y divide-border/30">
@@ -162,8 +165,7 @@ const Sales = () => {
         ? <p className="text-[11px] text-muted-foreground py-2">No urgent follow-ups</p>
         : urgentLeads.map(l => {
           const daysOld = Math.max(1, Math.floor((Date.now() - new Date(l.Created_Time).getTime()) / 86_400_000));
-          const daysInStage = daysOld <= 44 ? daysOld : (daysOld % 44) + 1;
-          const slaBreached = daysInStage > 2;
+          const slaBreached = daysOld > 7;   // high-priority lead sitting for over a week
           return (
             <div key={l.id} className="flex items-start justify-between py-1.5 gap-2">
               <div className="min-w-0">
@@ -171,16 +173,16 @@ const Sales = () => {
                   <p className="text-[11px] font-medium truncate">{l.Full_Name || `${l.First_Name ?? ''} ${l.Last_Name ?? ''}`.trim() || '—'}</p>
                   {slaBreached && (
                     <span
-                      title="SLA breach — this lead has sat in 'High Priority Follow up' for more than 2 days without movement. Contact today."
+                      title={`High-priority lead, ${daysOld} days old — chase it.`}
                       className="inline-flex items-center gap-0.5 rounded-full bg-destructive/15 border border-destructive/30 px-1 py-0 text-[8px] font-semibold text-destructive shrink-0"
                     >
-                      <AlertTriangle className="h-2 w-2" />SLA
+                      <AlertTriangle className="h-2 w-2" />Stale
                     </span>
                   )}
                 </div>
                 <p className="text-[10px] text-muted-foreground">{l.Owner?.name ?? '—'}</p>
               </div>
-              <span className={`text-[10px] tabular-nums shrink-0 ${slaBreached ? 'text-destructive font-semibold' : 'text-warning'}`}>{daysInStage}d</span>
+              <span className={`text-[10px] tabular-nums shrink-0 ${slaBreached ? 'text-destructive font-semibold' : 'text-warning'}`}>{daysOld}d</span>
             </div>
           );
         })

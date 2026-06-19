@@ -173,6 +173,9 @@ export interface MetaAdsApiData {
   byPlatform: MetaPlatformRow[];
   byPlacement: MetaPlacementRow[];
   actions:    MetaActionRow[];
+  /** True when the account was reachable but one or more insight calls failed,
+   *  so the numbers shown may be understated (vs a clean true-zero period). */
+  degraded?:  boolean;
 }
 
 export interface MetaTopAd {
@@ -353,6 +356,9 @@ export function useMetaAdsApi(dateRange: { from: Date; to: Date }) {
     refetchOnWindowFocus: false,
 
     queryFn: async () => {
+      // Set when the account is reachable but an insight call fails — lets the
+      // page warn "metrics incomplete" instead of showing a clean (wrong) zero.
+      let degraded = false;
       // ── 1. Ad accounts ───────────────────────────────────────────────────────
       const accountsResp = await gql("me/adaccounts", {
         fields: "id,name,account_status,currency,amount_spent",
@@ -375,9 +381,11 @@ export function useMetaAdsApi(dateRange: { from: Date; to: Date }) {
       }));
 
       if (allAccounts.length === 0) {
+        // The token no longer sees the AA ad account — surface as degraded so
+        // the page warns instead of showing a clean (misleading) zero.
         return {
           accounts: accountsMapped, summary: { spend: 0, impressions: 0, clicks: 0, reach: 0, ctr: 0, cpm: 0, frequency: 0, leads: 0, costPerLead: 0, currency },
-          campaigns: [], dailySeries: [], byAge: [], byPlatform: [], byPlacement: [], actions: [],
+          campaigns: [], dailySeries: [], byAge: [], byPlatform: [], byPlacement: [], actions: [], degraded: true,
         };
       }
 
@@ -396,11 +404,12 @@ export function useMetaAdsApi(dateRange: { from: Date; to: Date }) {
         placementResp,
       ] = await Promise.all([
 
-        // 2. Summary insights (all accounts)
+        // 2. Summary insights (all accounts) — failure here understates the
+        //    headline spend/leads, so flag the dashboard as degraded.
         Promise.all(allAccounts.map(acc =>
           gql(`${acc.id}/insights`, {
             fields: INSIGHT_FIELDS, time_range: TIME_RANGE, level: "account",
-          }).catch(() => ({ data: [] }))
+          }).catch(() => { degraded = true; return { data: [] }; })
         )),
 
         // 3. Campaigns (all accounts)
@@ -408,7 +417,7 @@ export function useMetaAdsApi(dateRange: { from: Date; to: Date }) {
           gql(`${acc.id}/campaigns`, {
             fields: `name,status,objective,daily_budget,insights.time_range(${TIME_RANGE}){${CAMP_INS_FIELDS}}`,
             limit: "200",
-          }).catch(() => ({ data: [] }))
+          }).catch(() => { degraded = true; return { data: [] }; })
         )),
 
         // 4. Daily time series (primary account)
@@ -601,6 +610,7 @@ export function useMetaAdsApi(dateRange: { from: Date; to: Date }) {
         byPlatform,
         byPlacement,
         actions,
+        degraded,
       };
     },
   });

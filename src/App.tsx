@@ -84,8 +84,11 @@ const NotFound        = lazy(() => import("./pages/NotFound"));
 //   - 60s staleTime cuts refetch chatter when navigating between tabs that
 //     share queries (Notifications, Hospitals, Lifecycle, Vacancies, etc.)
 //   - refetchOnWindowFocus off — the team often alt-tabs; we don't need a
-//     full refetch every time they come back. Realtime subscriptions handle
-//     "fresh data on change" already.
+//     full refetch every time they come back. Realtime subscriptions keep the
+//     OPERATIONAL tables fresh on change (notifications, vacancies, flow runs,
+//     lifecycle, hospitals). NOTE: the Zoho CRM dataset is NOT realtime — it
+//     refreshes from zoho_cache, which a pg_cron job re-syncs server-side and
+//     use-zoho-data re-reads on its own refetchInterval / stale-read.
 //   - 1 retry instead of the default 3 — failures show up faster.
 const queryClient = new QueryClient({
   defaultOptions: {

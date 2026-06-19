@@ -352,7 +352,10 @@ function KpiStrip({ bundle }: { bundle: ReturnType<typeof useReportingMetrics> }
     const inRange = (iso: string | null | undefined): boolean => {
       if (!iso) return false;
       const t = new Date(iso).getTime();
-      return t >= filters.range.from.getTime() && t <= filters.range.to.getTime();
+      // range.to is local midnight of the last selected day — treat it as
+      // end-of-day (+1 day, exclusive) so the final day is included, matching
+      // the app-wide convention used by Sales/Marketing/Finance.
+      return t >= filters.range.from.getTime() && t < filters.range.to.getTime() + 86_400_000;
     };
     const passesRunFilters = (r: FlowRun): boolean => {
       if (filters.hospital   && r.hospital   !== filters.hospital)   return false;

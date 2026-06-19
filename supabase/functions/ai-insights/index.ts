@@ -36,6 +36,21 @@ type DoB = Record<string, unknown>;
 
 const normName = (s: string) => s.trim().toLowerCase().replace(/\s+/g, ' ');
 
+// Test-data detection — mirrors src/lib/test-data.ts so the digest/chat exclude
+// the same "TEST TEST" rows the on-screen pages exclude (else digest conversion
+// counts diverge from every page).
+const _TEST_NAME = /^test$/i, _TEST_FULL = /^test\s+test$/i, _TEST_EMAIL = /^test(?:[+.\-_]\w*)?@/i;
+function isTestRow(r: Record<string, unknown>): boolean {
+  const first = String(r.First_Name ?? '').trim(), last = String(r.Last_Name ?? '').trim();
+  if (_TEST_NAME.test(first) && _TEST_NAME.test(last)) return true;
+  if (_TEST_FULL.test(String(r.Full_Name ?? '').trim())) return true;
+  const email = String(r.Email ?? '').trim();
+  return !!email && _TEST_EMAIL.test(email);
+}
+function stripTest<T extends Record<string, unknown>>(rows: T[]): T[] {
+  return rows.filter(r => !isTestRow(r));
+}
+
 // ── Page metadata ─────────────────────────────────────────────────────────────
 
 // ── Static system reference ─────────────────────────────────────────────
@@ -182,10 +197,11 @@ async function loadZohoCache(): Promise<{ leads: Lead[]; deals: Deal[]; doctorsO
   ]);
   const d1 = (r1.data?.data ?? {}) as Record<string, unknown>;
   const d2 = (r2.data?.data ?? {}) as Record<string, unknown>;
+  // Strip test rows so digest/chat metrics match the on-screen pages.
   return {
-    leads:          (d1.leads ?? []) as Lead[],
+    leads:          stripTest((d1.leads ?? []) as Lead[]),
     deals:          (d2.deals ?? []) as Deal[],
-    doctorsOnBoard: (d2.doctorsOnBoard ?? []) as DoB[],
+    doctorsOnBoard: stripTest((d2.doctorsOnBoard ?? []) as DoB[]),
   };
 }
 
@@ -467,8 +483,10 @@ function buildRecruiterStats(leads: Lead[], doctorsOnBoard: DoB[]) {
     const status = (l.Lead_Status as string) ?? '';
     if (!stats[rec]) stats[rec] = { total: 0, contacted: 0, highPriority: 0 };
     stats[rec].total++;
-    if (status && status !== 'New Application' && status !== 'Unqualified Leads') stats[rec].contacted++;
-    if (status === 'High Priority') stats[rec].highPriority++;
+    // Compare against the STORED Lead_Status values, not display labels:
+    // contacted = anything past "Not Contacted" (and not junk).
+    if (status && status !== 'Not Contacted' && status !== 'Unqualified Leads') stats[rec].contacted++;
+    if (status === 'High Priority Follow up' || status === 'High Priority Follow-up') stats[rec].highPriority++;
   }
   return Object.entries(stats)
     .sort((a, b) => b[1].total - a[1].total)
@@ -574,7 +592,7 @@ function periodKeyFor(period: string, d: Date): string {
 
 async function runPortalDigest(
   contextBlock: string,
-  opts: { period: string; role: string; allowedPages: string[]; force: boolean; leadCount: number },
+  opts: { period: string; role: string; allowedPages: string[]; force: boolean; leadCount: number; dobCount: number },
 ): Promise<Response> {
   const jsonResp = (b: unknown, status = 200) =>
     new Response(JSON.stringify(b), { status, headers: { ...CORS, 'Content-Type': 'application/json' } });
@@ -651,11 +669,11 @@ ${contextBlock}`;
         : [];
     }
 
-    // Don't persist a digest built on a failed/empty data load (0 leads is
-    // always a load failure for this org, never reality) — otherwise a
-    // transient glitch poisons the whole day's cache. Still return it so the
-    // caller sees something; the next load regenerates.
-    if (opts.leadCount > 0) {
+    // Don't persist a digest built on a failed/empty data load. 0 leads OR 0
+    // Doctors on Board is always a load failure for this org (never reality) —
+    // e.g. a transient id=2 cache-read miss would otherwise cache a misleading
+    // zero-conversion snapshot for the whole day. Still return it; next load regenerates.
+    if (opts.leadCount > 0 && opts.dobCount > 0) {
       await supabase.from('portal_digests').upsert(
         { period, period_key: periodKey, scope_key: scopeKey, payload },
         { onConflict: 'period,period_key,scope_key' },
@@ -1058,6 +1076,7 @@ Deno.serve(async (req: Request) => {
       allowedPages: Array.isArray(body.allowedPages) ? body.allowedPages.map(String) : [],
       force:        body.force === true,
       leadCount:    allLeads.length,
+      dobCount:     doctorsOnBoard.length,
     });
   }
 

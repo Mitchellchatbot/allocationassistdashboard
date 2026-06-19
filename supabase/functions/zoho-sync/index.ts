@@ -264,8 +264,26 @@ serve(async (req: Request) => {
     }
 
     if (doctorsOnBoard.length > 0) {
+      // The secondary modules each fetch with .catch(()=>[]) so a transient
+      // error on Deals/Calls/etc. would otherwise overwrite good cached data
+      // with [] (zeroing revenue/activity). Fall back to the last-good cached
+      // value for any module that came back empty.
+      const { data: prev2 } = await supabase.from('zoho_cache').select('data').eq('id', 2).maybeSingle();
+      const prev = (prev2?.data ?? {}) as Record<string, unknown[]>;
+      const keep = (cur: unknown[], key: string) => (cur.length > 0 ? cur : (Array.isArray(prev[key]) ? prev[key] : cur));
+      if (calls.length === 0 && Array.isArray(prev.calls) && prev.calls.length > 0) skipped.push('calls');
+      if (deals.length === 0 && Array.isArray(prev.deals) && prev.deals.length > 0) skipped.push('deals');
       const r2 = await supabase.from('zoho_cache').upsert({
-        id: 2, data: { deals, calls, accounts, campaigns, doctorsOnBoard, hospitalContacts }, synced_at: syncedAt,
+        id: 2,
+        data: {
+          deals:            keep(deals, 'deals'),
+          calls:            keep(calls, 'calls'),
+          accounts:         keep(accounts, 'accounts'),
+          campaigns:        keep(campaigns, 'campaigns'),
+          doctorsOnBoard,
+          hospitalContacts: keep(hospitalContacts, 'hospitalContacts'),
+        },
+        synced_at: syncedAt,
       });
       if (r2.error) throw r2.error;
     } else {

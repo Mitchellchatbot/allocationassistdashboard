@@ -17,7 +17,7 @@ import { zohoFetchAll, zohoGetEmailCounts, zohoSync } from '@/lib/zoho';
 import { supabase } from '@/lib/supabase';
 import { stripTestRows } from '@/lib/test-data';
 
-const CACHE_MAX_AGE_MS = 60 * 60 * 1000; // 1 hour
+const CACHE_MAX_AGE_MS = 30 * 60 * 1000; // 30 min — past this, a page load fires a background re-sync
 
 // ── Zoho field types ─────────────────────────────────────────────────────────
 
@@ -759,8 +759,13 @@ export function aggregateZohoData(
       // conversion metric, consistent with Sales/Marketing/digest. (dobByOwner
       // is keyed by normalised name, so look it up normalised.)
       const converted      = dobByOwner[normaliseName(name)] ?? 0;
-      const conversionRate = rLeads.length > 0
-        ? parseFloat(((converted / rLeads.length) * 100).toFixed(1))
+      // DoB are all-time while leads are window-scoped, so in-window placements
+      // (often from prior-year leads) can exceed this rep's new leads. Floor the
+      // denominator to `converted` and clamp at 100% so the rate + leaderboard
+      // bar never overflow.
+      const convDenom      = Math.max(rLeads.length, converted);
+      const conversionRate = convDenom > 0
+        ? Math.min(100, parseFloat(((converted / convDenom) * 100).toFixed(1)))
         : 0;
       return {
         name,
@@ -1160,8 +1165,13 @@ export function useZohoData() {
       }
       throw new Error('Initial Zoho sync timed out — try refreshing');
     },
-    staleTime:            55 * 60 * 1000,
+    staleTime:            25 * 60 * 1000,
     gcTime:               4 * 60 * 60 * 1000,
+    // Re-read the cache periodically so a long-open tab picks up the latest
+    // server sync (and the stale-read branch above kicks off a fresh sync when
+    // the cache is older than CACHE_MAX_AGE_MS). Paused while the tab is hidden.
+    refetchInterval:            20 * 60 * 1000,
+    refetchIntervalInBackground: false,
     placeholderData:      (prev: unknown) => prev,
     retry:                2,
     retryDelay:           5_000,

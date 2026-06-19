@@ -86,7 +86,7 @@ Deno.serve(async (req: Request) => {
   // single fetch + filter is simpler than per-stage queries.
   const { data: runs, error } = await supabase
     .from("automation_flow_runs")
-    .select("id, flow_key, doctor_id, doctor_name, current_stage, status, last_event_at, metadata")
+    .select("id, flow_key, doctor_id, doctor_name, hospital, current_stage, status, last_event_at, metadata")
     .eq("status", "active")
     .in("current_stage", [
       "wait_for_form",
@@ -441,7 +441,7 @@ async function runVacancyMatchSweep(
           prefixedId:  `dob:${d.id}`,
           name:        d.Full_Name ?? "",
           createdAt:   d.Created_Time ?? new Date(0).toISOString(),
-          specialty:   d.Specialty ?? null,
+          specialty:   d.Specialty_New ?? d.Speciality ?? null,
           hasDha:      false, hasDoh: false, hasMoh: false, licenseText: null,
         });
       }
@@ -984,7 +984,9 @@ interface ZohoLeadLite {
 }
 interface ZohoDobLite {
   id: string; Full_Name: string | null; Created_Time: string | null;
-  Specialty: string | null;
+  // DoB (Zoho Contacts) store British "Speciality" + the "Specialty_New"
+  // override; there is no American "Specialty" field on this module.
+  Speciality: string | null; Specialty_New: string | null;
 }
 
 function rec(r: FlowRun, result: TickAction["result"], detail: string): TickAction {
