@@ -143,10 +143,15 @@ serve(async (req) => {
     if (isConverted(l)) cur.conversions++;
     specMap.set(key, cur);
   }
-  const bySpecialty = [...specMap.entries()]
-    .map(([specialty, v]) => ({ specialty, leads: v.leads, conversions: v.conversions }))
-    .sort((a, b) => b.leads - a.leads)
-    .slice(0, 8);
+  const allSpec = [...specMap.entries()]
+    .map(([specialty, v]) => ({ specialty, leads: v.leads, conversions: v.conversions }));
+  const topByLeads = [...allSpec].sort((a, b) => b.leads - a.leads).slice(0, 8);
+  const seen = new Set(topByLeads.map(s => s.specialty));
+  // Always include specialties that actually converted (even if low-volume),
+  // otherwise the "converted" bars are invisible when conversions sit outside
+  // the top specialties by lead count.
+  const converting = allSpec.filter(s => s.conversions > 0 && !seen.has(s.specialty));
+  const bySpecialty = [...topByLeads, ...converting].sort((a, b) => b.leads - a.leads);
 
   // Optional: a short AI read on how the chatbot is doing (on demand only).
   let insights: { overview: string; bullets: string[] } | null = null;
