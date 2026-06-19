@@ -5,7 +5,7 @@ import {
   BarChart, Bar, XAxis, YAxis, Tooltip, ResponsiveContainer, CartesianGrid, Cell, LabelList,
 } from "recharts";
 import { InfoIcon } from "@/components/InfoIcon";
-import { User, ArrowLeft, X, UserX } from "lucide-react";
+import { User, ArrowLeft, X, UserX, Check } from "lucide-react";
 import { EmptyState } from "@/components/ui/empty-state";
 import { ChannelIcon } from "@/components/ChannelIcon";
 import { motion, LayoutGroup } from "framer-motion";
@@ -318,6 +318,29 @@ const Marketing = () => {
     }));
   }, [selectedKpiChannel, zoho?.rawLeads, dateRange]);
 
+  // Converted doctors (Doctors on Board) for the drilled channel — same
+  // Meta-aware attribution as the channel table (Lead_Source OR meta_leads).
+  const kpiPanelConversions = useMemo(() => {
+    if (!selectedKpiChannel || !zoho?.rawDoctorsOnBoard) return [];
+    const fromMs = dateRange.from.getTime();
+    const toMs   = dateRange.to.getTime() + 86_400_000;
+    const metaEmails = metaStats?.metaLeadEmails ?? new Set<string>();
+    const metaPhones = metaStats?.metaLeadPhones ?? new Set<string>();
+    const chOf = (email: string | null | undefined, phone: string | null | undefined, src: string | null | undefined) => {
+      const e = normalizeEmail(email), p = normalizePhone(phone);
+      if ((e && metaEmails.has(e)) || (p && metaPhones.has(p))) return "Meta";
+      return displaySource(src ?? null);
+    };
+    return zoho.rawDoctorsOnBoard.filter(d => {
+      const t = d.Created_Time ? new Date(d.Created_Time).getTime() : NaN;
+      return !isNaN(t) && t >= fromMs && t < toMs && chOf(d.Email, d.Phone ?? d.Mobile, d.Lead_Source) === selectedKpiChannel;
+    }).map(d => ({
+      name:      d.Full_Name || `${d.First_Name ?? ''} ${d.Last_Name ?? ''}`.trim() || '—',
+      specialty: d.Specialty_New || d.Speciality || '—',
+      hospital:  (d.Account_Name as { name?: string } | null)?.name ?? null,
+    }));
+  }, [selectedKpiChannel, zoho?.rawDoctorsOnBoard, dateRange, metaStats?.metaLeadEmails, metaStats?.metaLeadPhones]);
+
   // Flip state for chart cards
   const [acquiredChannel, setAcquiredChannel] = useState<string | null>(null);
   const [uncontactedChannel, setUncontactedChannel] = useState<string | null>(null);
@@ -627,6 +650,7 @@ const Marketing = () => {
               <div className="flex items-center gap-3 text-[10px] text-muted-foreground">
                 <span className="flex items-center gap-1"><span className="h-2 w-2 rounded-full bg-primary/70 inline-block" />{kpiPanelDoctors.filter(d => d.contacted).length} contacted</span>
                 <span className="flex items-center gap-1"><span className="h-2 w-2 rounded-full bg-muted-foreground/30 inline-block" />{kpiPanelDoctors.filter(d => !d.contacted).length} to reach</span>
+                <span className="flex items-center gap-1"><span className="h-2 w-2 rounded-full bg-emerald-500 inline-block" />{kpiPanelConversions.length} converted</span>
               </div>
               <div className="ml-auto flex items-center gap-2">
                 <Link
@@ -644,9 +668,30 @@ const Marketing = () => {
               </div>
             </div>
             <div className="overflow-y-auto" style={{ maxHeight: '240px' }}>
-              {kpiPanelDoctors.length === 0 ? (
+              {/* Converted (Doctors on Board) for this channel — surfaced first. */}
+              {kpiPanelConversions.length > 0 && (
+                <div className="mb-3">
+                  <p className="text-[10px] font-semibold uppercase tracking-wide text-emerald-700 mb-1.5">
+                    Converted · Doctors on Board ({kpiPanelConversions.length})
+                  </p>
+                  <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-1.5">
+                    {kpiPanelConversions.map((d, i) => (
+                      <div key={i} className="flex items-center gap-2 py-1.5 px-2 rounded-lg bg-emerald-50/60 border border-emerald-200/60">
+                        <div className="h-6 w-6 rounded-full flex items-center justify-center shrink-0 bg-emerald-100">
+                          <Check className="h-3 w-3 text-emerald-600" />
+                        </div>
+                        <div className="min-w-0">
+                          <p className="text-[12px] font-medium truncate leading-tight">{d.name}</p>
+                          <p className="text-[10px] text-muted-foreground truncate leading-tight">{d.specialty}{d.hospital ? ` · ${d.hospital}` : ""}</p>
+                        </div>
+                      </div>
+                    ))}
+                  </div>
+                </div>
+              )}
+              {kpiPanelDoctors.length === 0 && kpiPanelConversions.length === 0 ? (
                 <EmptyState icon={UserX} title="No doctors in this period" body="Widen the date range or pick a different channel." size="sm" />
-              ) : (
+              ) : kpiPanelDoctors.length === 0 ? null : (
                 <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-1.5">
                   {kpiPanelDoctors.map((d, i) => (
                     <div key={i} className="flex items-center gap-2 py-1.5 px-2 rounded-lg hover:bg-muted/40 transition-colors">
