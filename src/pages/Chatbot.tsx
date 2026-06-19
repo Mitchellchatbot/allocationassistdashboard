@@ -1,13 +1,14 @@
 import { useState } from "react";
 import { DashboardLayout } from "@/components/layout/DashboardLayout";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
+import { Button } from "@/components/ui/button";
 import { SectionDateRange } from "@/components/SectionDateRange";
 import { useFilters } from "@/lib/filters";
-import { useChatbotStats } from "@/hooks/use-chatbot-stats";
+import { useChatbotStats, useChatbotInsights } from "@/hooks/use-chatbot-stats";
 import {
-  ComposedChart, Bar, Line, XAxis, YAxis, Tooltip, ResponsiveContainer, CartesianGrid, Legend,
+  ComposedChart, Bar, Line, XAxis, YAxis, Tooltip, ResponsiveContainer, CartesianGrid, Legend, BarChart,
 } from "recharts";
-import { Bot, UserCheck, TrendingUp, BadgeCheck, Loader2, MessageSquare, AlertCircle, Check } from "lucide-react";
+import { Bot, UserCheck, TrendingUp, BadgeCheck, Loader2, MessageSquare, AlertCircle, Check, Sparkles, Filter, Stethoscope } from "lucide-react";
 
 const CANDY = {
   sky:   { bg: "bg-sky-50",     fg: "text-sky-600",     chip: "bg-sky-100",     stripe: "bg-sky-600" },
@@ -54,6 +55,48 @@ const fmtDate = (iso: string) => {
   const d = new Date(iso);
   return Number.isNaN(d.getTime()) ? "—" : d.toLocaleDateString("en-GB", { day: "numeric", month: "short", year: "numeric" });
 };
+
+// On-demand AI read on how the chatbot is performing for the selected window.
+function ChatbotInsightsPanel({ from, to }: { from?: Date; to?: Date }) {
+  const { data, isFetching, error, generate } = useChatbotInsights(from, to);
+  return (
+    <Card className="shadow-sm border-border/60 overflow-hidden">
+      <CardHeader className="py-3 px-4 border-b border-border/40 bg-gradient-to-r from-violet-50 via-sky-50 to-transparent">
+        <div className="flex items-center justify-between gap-2">
+          <CardTitle className="text-[13px] font-semibold flex items-center gap-2">
+            <span className="flex h-7 w-7 items-center justify-center rounded-md bg-violet-100 text-violet-600"><Sparkles className="h-3.5 w-3.5" /></span>
+            AI insights
+            <span className="text-[10px] font-normal text-muted-foreground hidden sm:inline">how the chatbot is doing</span>
+          </CardTitle>
+          <Button variant="outline" size="sm" onClick={() => generate()} disabled={isFetching} className="h-8 text-[12px] shrink-0">
+            {isFetching ? <Loader2 className="h-3.5 w-3.5 mr-1.5 animate-spin" /> : <Sparkles className="h-3.5 w-3.5 mr-1.5" />}
+            {isFetching ? "Reading…" : data ? "Refresh" : "Generate"}
+          </Button>
+        </div>
+      </CardHeader>
+      <CardContent className="p-4">
+        {error ? (
+          <div className="flex items-start gap-2 text-[12px] text-rose-700"><AlertCircle className="h-3.5 w-3.5 shrink-0 mt-0.5" /><span>{error.message}</span></div>
+        ) : isFetching && !data ? (
+          <div className="flex items-center gap-2 text-[12px] text-muted-foreground py-1"><Loader2 className="h-3.5 w-3.5 animate-spin" /> Reading the chatbot's numbers…</div>
+        ) : !data ? (
+          <p className="text-[12px] text-muted-foreground">A quick AI read on momentum, conversion health, and which specialties the chatbot brings in. Click <span className="font-medium text-foreground">Generate</span>.</p>
+        ) : (
+          <div className="space-y-2.5">
+            {data.overview && <p className="text-[12.5px] text-foreground leading-relaxed">{data.overview}</p>}
+            <ul className="space-y-1.5">
+              {data.bullets.map((b, i) => (
+                <li key={i} className="flex items-start gap-1.5 text-[11.5px] text-foreground/90 leading-snug">
+                  <span className="mt-1.5 h-1 w-1 rounded-full bg-violet-500 shrink-0" />{b}
+                </li>
+              ))}
+            </ul>
+          </div>
+        )}
+      </CardContent>
+    </Card>
+  );
+}
 
 export default function Chatbot() {
   const { dateRange } = useFilters();
@@ -107,6 +150,74 @@ export default function Chatbot() {
               label="Qualified" value={cb.qualified.toLocaleString()} hint={`${cb.leads ? Math.round(100 * cb.qualified / cb.leads) : 0}% of leads`}
               back={<>The chatbot qualifies leads mid-conversation (specialty, training, intent). <b>{cb.qualified.toLocaleString()}</b> of <b>{cb.leads.toLocaleString()}</b> qualified.</>}
             />
+          </div>
+
+          {/* ── AI read on how the chatbot is doing (on demand) ─────────── */}
+          <ChatbotInsightsPanel from={dateRange.from} to={dateRange.to} />
+
+          {/* ── Funnel + top specialties ───────────────────────────────── */}
+          <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
+            {/* Conversion funnel */}
+            <Card className="shadow-sm border-border/60">
+              <CardHeader className="py-3 px-4 border-b border-border/40">
+                <CardTitle className="text-[14px] font-semibold flex items-center gap-2">
+                  <span className={`flex h-7 w-7 items-center justify-center rounded-md ${CANDY.teal.chip} ${CANDY.teal.fg}`}>
+                    <Filter className="h-3.5 w-3.5" />
+                  </span>
+                  Conversion funnel
+                </CardTitle>
+              </CardHeader>
+              <CardContent className="p-4 space-y-3">
+                {[
+                  { label: "Leads captured", value: cb.leads,       palette: CANDY.sky },
+                  { label: "Qualified",      value: cb.qualified,   palette: CANDY.lilac },
+                  { label: "Converted",      value: cb.conversions, palette: CANDY.mint },
+                ].map(step => {
+                  const pct = cb.leads > 0 ? Math.round((step.value / cb.leads) * 100) : 0;
+                  return (
+                    <div key={step.label}>
+                      <div className="flex items-center justify-between text-[11.5px] mb-1">
+                        <span className="text-muted-foreground">{step.label}</span>
+                        <span className="font-semibold tabular-nums text-foreground">{step.value.toLocaleString()} <span className="text-muted-foreground font-normal">· {pct}%</span></span>
+                      </div>
+                      <div className="h-3 rounded-full bg-muted overflow-hidden">
+                        <div className={`h-full rounded-full ${step.palette.stripe} transition-all`} style={{ width: `${Math.max(pct, step.value > 0 ? 2 : 0)}%` }} />
+                      </div>
+                    </div>
+                  );
+                })}
+                <p className="text-[10.5px] text-muted-foreground pt-1">% of all captured leads. Conversions lag capture, so the bottom step fills in over time.</p>
+              </CardContent>
+            </Card>
+
+            {/* Top specialties */}
+            <Card className="shadow-sm border-border/60">
+              <CardHeader className="py-3 px-4 border-b border-border/40">
+                <CardTitle className="text-[14px] font-semibold flex items-center gap-2">
+                  <span className={`flex h-7 w-7 items-center justify-center rounded-md ${CANDY.lilac.chip} ${CANDY.lilac.fg}`}>
+                    <Stethoscope className="h-3.5 w-3.5" />
+                  </span>
+                  Top specialties
+                  <span className="text-[10px] font-normal text-muted-foreground">leads captured</span>
+                </CardTitle>
+              </CardHeader>
+              <CardContent className="p-4">
+                {cb.bySpecialty.length === 0 ? (
+                  <p className="text-[12px] text-muted-foreground py-6 text-center">No specialty data in this range.</p>
+                ) : (
+                  <ResponsiveContainer width="100%" height={Math.max(180, cb.bySpecialty.length * 30)}>
+                    <BarChart data={cb.bySpecialty} layout="vertical" margin={{ top: 4, right: 16, left: 8, bottom: 0 }}>
+                      <CartesianGrid strokeDasharray="3 3" stroke="hsl(var(--border))" horizontal={false} />
+                      <XAxis type="number" tick={{ fontSize: 11 }} stroke="hsl(var(--muted-foreground))" allowDecimals={false} />
+                      <YAxis type="category" dataKey="specialty" width={150} tick={{ fontSize: 10 }} stroke="hsl(var(--muted-foreground))" />
+                      <Tooltip contentStyle={{ fontSize: 12, borderRadius: 8, border: "1px solid hsl(var(--border))" }} />
+                      <Bar dataKey="leads" name="Leads" fill="hsl(199 89% 48%)" radius={[0, 3, 3, 0]} maxBarSize={18} />
+                      <Bar dataKey="conversions" name="Converted" fill="hsl(160 84% 39%)" radius={[0, 3, 3, 0]} maxBarSize={18} />
+                    </BarChart>
+                  </ResponsiveContainer>
+                )}
+              </CardContent>
+            </Card>
           </div>
 
           {/* ── Trend ──────────────────────────────────────────────────── */}

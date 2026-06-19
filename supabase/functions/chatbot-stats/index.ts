@@ -44,7 +44,7 @@ serve(async (req) => {
   if (req.method === "OPTIONS") return new Response("ok", { headers: CORS });
   if (req.method !== "POST")    return json({ ok: false, reason: "POST only" }, 405);
 
-  let body: { from?: string; to?: string } = {};
+  let body: { from?: string; to?: string; insights?: boolean } = {};
   try { body = await req.json(); } catch { /* defaults */ }
 
   // Default window: last 12 months.
@@ -134,6 +134,28 @@ serve(async (req) => {
       converted:   isConverted(l),
     }));
 
+  // Top specialties the chatbot brings in (leads + conversions per specialty).
+  const specMap = new Map<string, { leads: number; conversions: number }>();
+  for (const l of inRange) {
+    const key = (l.specialty || "Unspecified").trim() || "Unspecified";
+    const cur = specMap.get(key) ?? { leads: 0, conversions: 0 };
+    cur.leads++;
+    if (isConverted(l)) cur.conversions++;
+    specMap.set(key, cur);
+  }
+  const bySpecialty = [...specMap.entries()]
+    .map(([specialty, v]) => ({ specialty, leads: v.leads, conversions: v.conversions }))
+    .sort((a, b) => b.leads - a.leads)
+    .slice(0, 8);
+
+  // Optional: a short AI read on how the chatbot is doing (on demand only).
+  let insights: { overview: string; bullets: string[] } | null = null;
+  if (body.insights) {
+    insights = await generateInsights({
+      leadsCount, conversions, conversionRate, qualified, trend, bySpecialty,
+    });
+  }
+
   return json({
     ok: true,
     leads: leadsCount,
@@ -141,6 +163,51 @@ serve(async (req) => {
     conversionRate,
     qualified,
     trend,
+    bySpecialty,
     recent,
+    insights,
   });
 });
+
+// Short AI summary of chatbot performance. Returns null on any failure so the
+// stats still render. Raw-fetch Anthropic (claude-sonnet) like the other fns.
+async function generateInsights(s: {
+  leadsCount: number; conversions: number; conversionRate: number; qualified: number;
+  trend: Array<{ month: string; leads: number; conversions: number }>;
+  bySpecialty: Array<{ specialty: string; leads: number; conversions: number }>;
+}): Promise<{ overview: string; bullets: string[] } | null> {
+  const key = Deno.env.get("ANTHROPIC_API_KEY") ?? "";
+  if (!key) return null;
+  const prompt = `You are a concise growth analyst for Allocation Assist. Below is the website chatbot's (Care Assist) performance for the selected period. "Conversion" = a chatbot lead that became a Doctor on Board.
+
+Stats:
+- Leads exported to CRM: ${s.leadsCount}
+- Qualified (in-chat): ${s.qualified}
+- Conversions (Doctors on Board): ${s.conversions} (${s.conversionRate}%)
+- Monthly trend (leads / conversions): ${s.trend.map(t => `${t.month}:${t.leads}/${t.conversions}`).join(", ")}
+- Top specialties (leads, conversions): ${s.bySpecialty.map(b => `${b.specialty}(${b.leads},${b.conversions})`).join("; ")}
+
+Write a SHORT read on how the chatbot is doing. Respond with ONLY JSON (no fences):
+{"overview":"1 sentence headline on momentum + conversion health","bullets":["3-4 short, specific observations: trend direction, which specialties it brings in / convert, conversion quality, and one thing to watch"]}
+Each bullet one short sentence. Be concrete with the numbers. Output JSON only.`;
+  try {
+    const res = await fetch("https://api.anthropic.com/v1/messages", {
+      method: "POST",
+      headers: { "x-api-key": key, "anthropic-version": "2023-06-01", "content-type": "application/json" },
+      body: JSON.stringify({ model: "claude-sonnet-4-6", max_tokens: 700, messages: [{ role: "user", content: prompt }] }),
+    });
+    if (!res.ok) return null;
+    const j = await res.json() as { content?: { type: string; text?: string }[] };
+    let raw = (j.content ?? []).find(c => c.type === "text")?.text?.trim() ?? "";
+    raw = raw.replace(/^```(?:json)?\s*/i, "").replace(/\s*```$/, "").trim();
+    const a = raw.indexOf("{"), b = raw.lastIndexOf("}");
+    if (a >= 0 && b > a) raw = raw.slice(a, b + 1);
+    const parsed = JSON.parse(raw) as { overview?: string; bullets?: unknown };
+    return {
+      overview: typeof parsed.overview === "string" ? parsed.overview.trim() : "",
+      bullets: Array.isArray(parsed.bullets) ? parsed.bullets.map(x => String(x).trim()).filter(Boolean).slice(0, 6) : [],
+    };
+  } catch {
+    return null;
+  }
+}
