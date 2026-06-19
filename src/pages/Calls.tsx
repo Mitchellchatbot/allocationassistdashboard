@@ -538,6 +538,8 @@ function renderCitations(
 function CallInsightsPanel({ hostEmails, onOpenCall }: { hostEmails: string[]; onOpenCall: (fathomId: string) => void }) {
   const { data, isFetching, error, refetch } = useCallInsights(hostEmails);
   const callMap = data?.calls ?? {};
+  const [expanded, setExpanded] = useState<Record<string, boolean>>({});
+  const PREVIEW = 2;   // bullets shown per section before "+N more"
 
   const SECTIONS: Array<{
     key: "themes" | "objections" | "winning" | "risks" | "coaching" | "followups";
@@ -604,6 +606,8 @@ function CallInsightsPanel({ hostEmails, onOpenCall }: { hostEmails: string[]; o
               {SECTIONS.map(s => {
                 const items = (data[s.key] as string[]) ?? [];
                 if (!items.length) return null;
+                const isOpen = !!expanded[s.key];
+                const shown  = isOpen ? items : items.slice(0, PREVIEW);
                 return (
                   <div key={s.key} className={`rounded-lg border border-border/50 ${s.palette.bg} p-3`}>
                     <div className={`flex items-center gap-1.5 mb-2 text-[11px] font-semibold uppercase tracking-wide ${s.palette.fg}`}>
@@ -611,13 +615,21 @@ function CallInsightsPanel({ hostEmails, onOpenCall }: { hostEmails: string[]; o
                       {s.title}
                     </div>
                     <ul className="space-y-1">
-                      {items.map((it, i) => (
+                      {shown.map((it, i) => (
                         <li key={i} className="flex items-start gap-1.5 text-[11.5px] text-foreground/90 leading-snug">
                           <span className={`mt-1.5 h-1 w-1 rounded-full ${s.palette.stripe} shrink-0`} />
                           <span>{renderCitations(it, callMap, onOpenCall)}</span>
                         </li>
                       ))}
                     </ul>
+                    {items.length > PREVIEW && (
+                      <button
+                        onClick={() => setExpanded(e => ({ ...e, [s.key]: !isOpen }))}
+                        className={`mt-1.5 text-[10.5px] font-medium ${s.palette.fg} hover:underline`}
+                      >
+                        {isOpen ? "Show less" : `+${items.length - PREVIEW} more`}
+                      </button>
+                    )}
                   </div>
                 );
               })}

@@ -222,13 +222,6 @@ interface BatchSend {
   sent_at: string | null; created_by: string | null;
 }
 
-interface NotificationRow {
-  id: string; kind: string; title: string;
-  related_run_id: string | null; related_vacancy_id: string | null;
-  for_user: string | null; read_at: string | null;
-  created_at: string;
-}
-
 interface HospitalRow {
   name: string; city: string | null; country: string | null;
   active: boolean | null; owner_email: string | null;
@@ -267,16 +260,6 @@ async function loadBatchSends(): Promise<BatchSend[]> {
     .order('scheduled_for', { ascending: false })
     .limit(60);
   return (data ?? []) as BatchSend[];
-}
-
-async function loadOpenNotifications(): Promise<NotificationRow[]> {
-  const { data } = await supabase
-    .from('notifications')
-    .select('id, kind, title, related_run_id, related_vacancy_id, for_user, read_at, created_at')
-    .is('dismissed_at', null)
-    .order('created_at', { ascending: false })
-    .limit(200);
-  return (data ?? []) as NotificationRow[];
 }
 
 async function loadHospitalsSummary(): Promise<HospitalRow[]> {
@@ -636,6 +619,8 @@ Write a concise executive DIGEST. Be specific: cite real numbers, recruiter name
 
 CRITICAL DEFINITION: a "conversion" = a doctor who reached DOCTORS ON BOARD (a qualified lead who signed/joined) — use the CONVERSIONS section for these counts. Closed Won deals are REVENUE, not conversions; never describe Closed Won (or "0 deals") as conversions or placements. Report conversions from the Doctors on Board numbers.
 
+DO NOT mention notifications in any way — not "unread notifications", not "the notification queue", not form-submission notification counts, nothing about notifications anywhere in any section.
+
 Respond with ONLY a JSON object (no markdown, no code fences) of exactly this shape:
 {
 ${shape}
@@ -714,7 +699,6 @@ Deno.serve(async (req: Request) => {
     flowRuns,
     vacancies,
     batches,
-    notifications,
     hospitals,
     lifecycles,
     formResponses,
@@ -728,7 +712,6 @@ Deno.serve(async (req: Request) => {
     loadFlowRuns(),
     loadVacancies(),
     loadBatchSends(),
-    loadOpenNotifications(),
     loadHospitalsSummary(),
     loadDoctorLifecycles(),
     loadFormResponses(),
@@ -865,11 +848,6 @@ Deno.serve(async (req: Request) => {
   const sentBatches     = batches.filter(b => b.status === 'sent');
   const draftBatches    = batches.filter(b => b.status === 'draft');
 
-  // Notification stats
-  const unreadNotifs = notifications.filter(n => !n.read_at);
-  const notifByKind: Record<string, number> = {};
-  for (const n of notifications) notifByKind[n.kind] = (notifByKind[n.kind] ?? 0) + 1;
-
   // Hospital stats
   const activeHospitals   = hospitals.filter(h => h.active !== false);
   const pausedHospitals   = hospitals.filter(h => h.active === false);
@@ -969,9 +947,6 @@ Deno.serve(async (req: Request) => {
     'date | kind | status | doctors | hospitals | specialty',
     ...batches.slice(0, 15).map(b =>
       `  ${b.scheduled_for} | ${b.kind} | ${b.status} | ${b.doctor_ids?.length ?? 0} | ${b.hospital_count ?? '—'} | ${b.specialty ?? '—'}`),
-    '',
-    '=== NOTIFICATIONS ===',
-    `Open: ${notifications.length} (${unreadNotifs.length} unread). By kind: ${Object.entries(notifByKind).map(([k, n]) => `${k}=${n}`).join(', ')}.`,
     '',
     '=== HOSPITALS ===',
     `Total tracked: ${hospitals.length}. Active: ${activeHospitals.length}. Paused: ${pausedHospitals.length}. With recruiter email: ${withRecruiter}.`,

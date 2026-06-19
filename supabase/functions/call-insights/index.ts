@@ -85,7 +85,7 @@ Respond with ONLY a JSON object (no markdown, no code fences) of exactly this sh
   "coaching": ["specific, actionable coaching for the reps based on what you saw"],
   "followups": ["concrete suggested next steps across the pipeline"]
 }
-Each array: 2-5 short, specific bullet strings (one sentence each), citing calls as [[Name|N]] wherever you reference one. Use an empty array for a section with nothing real to say. Output JSON only.
+Each array: 2-5 PUNCHY bullets, each ONE short sentence (aim for under ~16 words) — lead with the point, cut filler, still cite specifics. Cite calls as [[Name|N]] wherever you reference one. Use an empty array for a section with nothing real to say. Output JSON only.
 
 CALLS:
 ${blocks}`;

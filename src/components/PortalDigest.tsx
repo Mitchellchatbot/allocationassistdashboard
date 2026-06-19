@@ -4,7 +4,7 @@ import { Button } from "@/components/ui/button";
 import { useAuth } from "@/hooks/use-auth";
 import { usePortalDigest, type DigestPeriod } from "@/hooks/use-portal-digest";
 import {
-  Sparkles, Loader2, AlertCircle, AlertTriangle, TrendingUp, Megaphone, Building2, RefreshCw,
+  Sparkles, Loader2, AlertCircle, Flag, TrendingUp, Megaphone, Building2, RefreshCw,
 } from "lucide-react";
 
 const SECTIONS: Array<{
@@ -12,7 +12,7 @@ const SECTIONS: Array<{
   title: string; bg: string; fg: string; chip: string; dot: string; ring: string;
   icon: React.ReactNode; full?: boolean;
 }> = [
-  { key: "attention",  title: "Needs attention", bg: "bg-rose-50",    fg: "text-rose-600",    chip: "bg-rose-100",    dot: "bg-rose-500",    ring: "border-rose-200",  icon: <AlertTriangle className="h-3.5 w-3.5" />, full: true },
+  { key: "attention",  title: "Worth a look",    bg: "bg-teal-50",    fg: "text-teal-700",    chip: "bg-teal-100",    dot: "bg-teal-500",    ring: "border-teal-200",  icon: <Flag className="h-3.5 w-3.5" />, full: true },
   { key: "pipeline",   title: "Pipeline",        bg: "bg-sky-50",     fg: "text-sky-600",     chip: "bg-sky-100",     dot: "bg-sky-500",     ring: "border-border/50", icon: <TrendingUp className="h-3.5 w-3.5" /> },
   { key: "marketing",  title: "Marketing",       bg: "bg-violet-50",  fg: "text-violet-600",  chip: "bg-violet-100",  dot: "bg-violet-500",  ring: "border-border/50", icon: <Megaphone className="h-3.5 w-3.5" /> },
   { key: "operations", title: "Operations",      bg: "bg-emerald-50", fg: "text-emerald-600", chip: "bg-emerald-100", dot: "bg-emerald-500", ring: "border-border/50", icon: <Building2 className="h-3.5 w-3.5" /> },
