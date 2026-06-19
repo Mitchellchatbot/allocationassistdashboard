@@ -182,10 +182,13 @@ export function displaySource(src: string | null): string {
   if (s.includes('instagram') || s === 'ig')   return 'Meta';
   if (s.includes('facebook') || s === 'fb' || s === 'meta') return 'Meta';
 
-  // Website / SEO / ChatGPT — all rolled into one organic-web channel
+  // Website / SEO / ChatGPT — all rolled into one organic-web channel. The
+  // chatbot is a widget on the website, so its leads (Lead_Source "Chatbot")
+  // roll into Website too — both leads and conversions.
   if (s.includes('landing page'))              return 'Landing Page';
   if (s.includes('website') || s.includes('seo') || s === 'organic'
-      || s.includes('chatgpt') || s.includes('gpt') || s.includes('openai'))
+      || s.includes('chatgpt') || s.includes('gpt') || s.includes('openai')
+      || s.includes('chatbot') || s.includes('care assist') || s.includes('careassist'))
     return 'Website / SEO';
 
   // Paid ads

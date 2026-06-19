@@ -24,8 +24,9 @@ const RULES: { match: RegExp; key: ChannelKey }[] = [
   { match: /snapchat/i,                                    key: "Snapchat" },
   { match: /twitter|^x$|x\.com/i,                          key: "Twitter" },
   { match: /whatsapp/i,                                    key: "WhatsApp" },
-  // Website / SEO = website + SEO + ChatGPT (single organic-web channel)
-  { match: /^seo$|seo\s*\/\s*organic|organic|search\s*engine\s*opt|website|web\s*direct|chatgpt|openai|^gpt$/i, key: "Website / SEO" },
+  // Website / SEO = website + SEO + ChatGPT + the website chatbot widget
+  // (single organic-web channel) — chatbot leads + conversions roll in here.
+  { match: /^seo$|seo\s*\/\s*organic|organic|search\s*engine\s*opt|website|web\s*direct|chatgpt|openai|^gpt$|chatbot|care\s*assist/i, key: "Website / SEO" },
   { match: /landing\s*page/i,                              key: "Landing Page" },
   { match: /referr|word\s*of\s*mouth/i,                    key: "Referrals" },
   { match: /email|newsletter|mailchimp/i,                  key: "Email" },
