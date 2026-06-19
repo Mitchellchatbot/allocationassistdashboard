@@ -19,7 +19,31 @@ Deno.serve(async (req) => {
   // deletes any form_responses whose respondent_name matches.
   if (req.method === "POST") {
     try {
-      const body = await req.json().catch(() => null) as { delete_form_response_names?: string[]; dob_channel_audit?: { from: string; to: string } } | null;
+      const body = await req.json().catch(() => null) as { delete_form_response_names?: string[]; dob_channel_audit?: { from: string; to: string }; lead_source_audit?: boolean } | null;
+
+      // One-off: dump every distinct Lead_Source value across leads + DoB with
+      // counts, so we can see exactly which raw strings exist (and verify the
+      // channel mapping covers all Meta placement variants). POST { lead_source_audit: true }
+      if (body?.lead_source_audit) {
+        const [{ data: c1 }, { data: c2 }] = await Promise.all([
+          sb.from("zoho_cache").select("data").eq("id", 1).maybeSingle(),
+          sb.from("zoho_cache").select("data").eq("id", 2).maybeSingle(),
+        ]);
+        const d1 = (c1?.data ?? {}) as Record<string, unknown>;
+        const d2 = (c2?.data ?? {}) as Record<string, unknown>;
+        const leads = (d1.leads ?? d1.rawLeads ?? d1.data ?? []) as Array<Record<string, unknown>>;
+        const dob   = (d2.doctorsOnBoard ?? d2.data ?? []) as Array<Record<string, unknown>>;
+        const tally = (rows: Array<Record<string, unknown>>) => {
+          const m = new Map<string, number>();
+          for (const r of rows) { const k = (r.Lead_Source == null || r.Lead_Source === "") ? "(blank)" : String(r.Lead_Source); m.set(k, (m.get(k) ?? 0) + 1); }
+          return [...m.entries()].sort((a, b) => b[1] - a[1]).map(([source, count]) => ({ source, count }));
+        };
+        return new Response(JSON.stringify({
+          leadsRowCount: leads.length, dobRowCount: dob.length,
+          leadSources_in_leads: tally(leads),
+          leadSources_in_dob:   tally(dob),
+        }, null, 2), { headers: { "Content-Type": "application/json" } });
+      }
 
       // One-off: reconcile Doctors-on-Board → marketing channel for a window,
       // exactly how the dashboard attributes them (displaySource + meta_leads

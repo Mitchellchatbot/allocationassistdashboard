@@ -178,9 +178,14 @@ export function displaySource(src: string | null): string {
     return 'Undefined';
   }
 
-  // Meta = Facebook + Instagram (single channel; both owned by Meta)
+  // Meta = Facebook + Instagram + Messenger + Audience Network (single channel;
+  // all Meta-owned). Matching on includes() means ANY placement variant —
+  // Facebook_Mobile_Feed, Instagram_Reels, Facebook_Stories, etc. — is caught,
+  // including future ones, without enumerating each.
   if (s.includes('instagram') || s === 'ig')   return 'Meta';
-  if (s.includes('facebook') || s === 'fb' || s === 'meta') return 'Meta';
+  if (s.includes('facebook') || s === 'fb' || s === 'meta'
+      || s.includes('messenger') || s.includes('audience network')
+      || s.includes('audience_network')) return 'Meta';
 
   // Website / SEO / ChatGPT — all rolled into one organic-web channel. The
   // chatbot is a widget on the website, so its leads (Lead_Source "Chatbot")

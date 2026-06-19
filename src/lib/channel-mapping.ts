@@ -15,8 +15,9 @@ export type ChannelKey =
   | "Go Hire"  | "Dave"     | "Other";
 
 const RULES: { match: RegExp; key: ChannelKey }[] = [
-  // Meta = Facebook + Instagram (single channel; both owned by Meta)
-  { match: /facebook|instagram|^fb$|^ig$|meta\s*ads?|^meta$/i, key: "Meta" },
+  // Meta = Facebook + Instagram + Messenger + Audience Network (all Meta-owned).
+  // Substring matches catch any placement variant (Facebook_Mobile_Feed, etc.).
+  { match: /facebook|instagram|messenger|audience[\s_]?network|^fb$|^ig$|meta\s*ads?|^meta$/i, key: "Meta" },
   { match: /linkedin/i,                                    key: "LinkedIn" },
   { match: /google\s*ad|adwords|sem|paid\s*search/i,       key: "Google Ads" },
   { match: /tiktok/i,                                      key: "TikTok" },
