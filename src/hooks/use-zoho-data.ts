@@ -714,8 +714,9 @@ export function aggregateZohoData(
   const channels = Object.entries(sourceGroups)
     .sort((a, b) => b[1] - a[1])
     .map(([channel, doctors]) => {
-      const channelDeals = closedWon.filter(d => displaySource(d.Lead_Source) === channel);
-      return { channel, doctors, placed: channelDeals.length, cost: 0, cpa: 0 };
+      // "placed" = Doctors on Board from this channel (the company-wide
+      // conversion metric), not Closed Won deals — keeps every surface aligned.
+      return { channel, doctors, placed: dobsByChannel.get(channel) ?? 0, cost: 0, cpa: 0 };
     });
 
   // ── Marketing channel metrics ─────────────────────────────────────────────
@@ -739,16 +740,6 @@ export function aggregateZohoData(
     leadsByOwner[name].push(l);
   });
 
-  // Per-recruiter "converted" still uses Lead_Status (DoB has no recruiter
-   // attribution). Mirrors the old convertedStatuses set we removed when DoB
-   // became the company-wide conversion source.
-  const convertedStatuses = new Set([
-    'Contact in Future',
-    'High Priority Follow up',
-    'High Priority Follow-up',
-    'Closed Won',
-  ]);
-
   // Real per-recruiter conversions: Doctors on Board owned by each rep in the
   // period. DoB carries the rep as its Owner; normalise the name to match the
   // recruiter key (which is the lead Owner name, also normalised).
@@ -761,7 +752,10 @@ export function aggregateZohoData(
       const contacted      = rActiveLeads.filter(l => l.Lead_Status !== 'Not Contacted').length;
       const highPri        = rLeads.filter(l => l.Lead_Status === 'High Priority Follow up').length;
       const contactRate    = rActiveLeads.length > 0 ? Math.round((contacted / rActiveLeads.length) * 100) : 0;
-      const converted      = rLeads.filter(l => convertedStatuses.has(l.Lead_Status)).length;
+      // Conversions = Doctors on Board owned by this rep — the company-wide
+      // conversion metric, consistent with Sales/Marketing/digest. (dobByOwner
+      // is keyed by normalised name, so look it up normalised.)
+      const converted      = dobByOwner[normaliseName(name)] ?? 0;
       const conversionRate = rLeads.length > 0
         ? parseFloat(((converted / rLeads.length) * 100).toFixed(1))
         : 0;
@@ -774,7 +768,7 @@ export function aggregateZohoData(
         converted,
         conversionRate,
         highPriority:   highPri,
-        placements:     dobByOwner[name] ?? 0,   // Doctors on Board owned by this rep (real conversions)
+        placements:     converted,   // alias — same Doctors-on-Board count
         revenue:        'N/A',
         calls:          callsByRecruiter[name] ?? 0,
         emails:         emailData.bySender[name] ?? 0,
