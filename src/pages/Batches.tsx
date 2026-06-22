@@ -23,7 +23,7 @@ import { groupSpecialty } from "@/lib/specialty-groups";
 import { scoreCandidate, type MatchScore } from "@/lib/match-score";
 import { useWpCandidates, usePublishedWpCandidates, wpCandidateProfileText, type WpCandidate } from "@/hooks/use-wp-candidates";
 import { MatchScoreChip, MatchReasons } from "@/components/DoctorVacancyMatches";
-import { EditableEmailPreview, EmailEditControls } from "@/components/EditableEmailPreview";
+import { EditableEmailPreview } from "@/components/EditableEmailPreview";
 
 /**
  * Phase 6 — Recurring batch sends. Source: Saif Ullah, May 20 2026.
@@ -833,7 +833,6 @@ function BatchDialog({ target, onTargetChange, batches, suggestedSpecialty }: {
   // Editable-preview state: the team can tweak the subject/body before sending.
   // editSubject/editHtml are the live (possibly edited) values; emailPreview
   // holds the pristine template render so "Reset" + the edited-diff check work.
-  const [editingPreview, setEditingPreview] = useState(false);
   const [editSubject, setEditSubject] = useState("");
   const [editHtml, setEditHtml] = useState("");
   const [previewResetTick, setPreviewResetTick] = useState(0);
@@ -1272,7 +1271,6 @@ function BatchDialog({ target, onTargetChange, batches, suggestedSpecialty }: {
                     setEmailPreview({ subject: p.subject, html: p.html, text: p.text, bcc_count: p.bcc_count });
                     setEditSubject(p.subject);
                     setEditHtml(p.html);
-                    setEditingPreview(false);
                     setPreviewResetTick(t => t + 1);
                   } catch (e) {
                     toast.error(e instanceof Error ? e.message : "Preview failed");
@@ -1301,7 +1299,7 @@ function BatchDialog({ target, onTargetChange, batches, suggestedSpecialty }: {
           <DialogDescription className="text-xs">
             {batchEdited
               ? <span className="font-medium text-teal-700">Edited — your version sends, not the template.</span>
-              : "What you see is what goes out. Click Edit email to tweak it first."}
+              : "What you see is what goes out — edit the subject or body below before sending."}
             {typeof emailPreview?.bcc_count === "number" && (<> · BCC to {emailPreview.bcc_count} hospital{emailPreview.bcc_count === 1 ? "" : "s"}</>)}
           </DialogDescription>
         </DialogHeader>
@@ -1309,26 +1307,21 @@ function BatchDialog({ target, onTargetChange, batches, suggestedSpecialty }: {
           <EditableEmailPreview
             subject={editSubject}
             html={emailPreview.html}
-            editing={editingPreview}
             onSubjectChange={setEditSubject}
             onHtmlChange={setEditHtml}
             resetKey={previewResetTick}
-            from="Hospital Intro <hospitalintro@allocationassist.com>"
-            className="flex-1 min-h-[62vh]"
-          />
-        )}
-        <DialogFooter className="sm:justify-between">
-          <EmailEditControls
-            editing={editingPreview}
             edited={batchEdited}
-            onToggle={() => setEditingPreview(e => !e)}
             onReset={() => {
               if (!emailPreview) return;
               setEditSubject(emailPreview.subject);
               setEditHtml(emailPreview.html);
               setPreviewResetTick(t => t + 1);
             }}
+            from="Hospital Intro <hospitalintro@allocationassist.com>"
+            className="flex-1 min-h-[62vh]"
           />
+        )}
+        <DialogFooter>
           <div className="flex items-center gap-2">
             <Button variant="outline" onClick={() => setEmailPreview(null)}>Close preview</Button>
             {/* Send/resend straight from the preview — what you see is what goes out. */}

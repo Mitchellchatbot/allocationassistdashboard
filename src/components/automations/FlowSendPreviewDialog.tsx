@@ -21,7 +21,7 @@ import { Button } from "@/components/ui/button";
 import { Send, RefreshCw, AlertTriangle } from "lucide-react";
 import { supabase } from "@/lib/supabase";
 import { toast } from "sonner";
-import { EditableEmailPreview, EmailEditControls } from "@/components/EditableEmailPreview";
+import { EditableEmailPreview } from "@/components/EditableEmailPreview";
 
 interface FlowPreview { from: string; to: string; subject: string; html: string; text?: string }
 
@@ -78,7 +78,6 @@ export function FlowSendPreviewDialog({
   const [sending, setSending] = useState(false);
   // Editable-preview state — see EditableEmailPreview. editSubject/editHtml hold
   // the live (possibly edited) values; `preview` keeps the pristine render.
-  const [editing,    setEditing]    = useState(false);
   const [editSubject, setEditSubject] = useState("");
   const [editHtml,    setEditHtml]    = useState("");
   const [resetTick,   setResetTick]   = useState(0);
@@ -89,7 +88,7 @@ export function FlowSendPreviewDialog({
   useEffect(() => {
     if (!open || !runId) { setPreview(null); setErr(null); return; }
     let cancelled = false;
-    setLoading(true); setErr(null); setPreview(null); setEditing(false);
+    setLoading(true); setErr(null); setPreview(null);
     fetchPreview(runId, previewStage, previewMetadata)
       .then(p => {
         if (cancelled) return;
@@ -127,7 +126,7 @@ export function FlowSendPreviewDialog({
             {edited
               ? <span className="font-medium text-teal-700">Edited — your version sends, not the template.</span>
               : preview
-                ? <>Review before sending{preview.to ? <> · To {preview.to}</> : null}. Click Edit email to tweak it.</>
+                ? <>Review before sending{preview.to ? <> · To {preview.to}</> : null} — edit the subject or body below if needed.</>
                 : "What goes out — review before sending."}
           </DialogDescription>
         </DialogHeader>
@@ -146,30 +145,23 @@ export function FlowSendPreviewDialog({
           <EditableEmailPreview
             subject={editSubject}
             html={preview.html}
-            editing={editing}
             onSubjectChange={setEditSubject}
             onHtmlChange={setEditHtml}
             resetKey={resetTick}
+            edited={edited}
+            onReset={() => {
+              if (!preview) return;
+              setEditSubject(preview.subject);
+              setEditHtml(preview.html);
+              setResetTick(t => t + 1);
+            }}
             from={preview.from}
             to={preview.to}
             className="flex-1 min-h-[62vh]"
           />
         )}
 
-        <DialogFooter className="sm:justify-between">
-          {preview && !loading && !err ? (
-            <EmailEditControls
-              editing={editing}
-              edited={edited}
-              onToggle={() => setEditing(e => !e)}
-              onReset={() => {
-                if (!preview) return;
-                setEditSubject(preview.subject);
-                setEditHtml(preview.html);
-                setResetTick(t => t + 1);
-              }}
-            />
-          ) : <span />}
+        <DialogFooter>
           <div className="flex items-center gap-2">
             <Button variant="outline" onClick={onClose} disabled={sending}>Cancel</Button>
             <Button onClick={handleSend} disabled={sending || loading || !preview}>

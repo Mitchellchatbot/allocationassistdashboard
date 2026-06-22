@@ -18,7 +18,7 @@ import { useEmailTemplates, renderTemplate } from "@/hooks/use-email-templates";
 import { useDoctorProfile, useDoctorProfiles, profileToTokens, calcCompletion, type DoctorProfile } from "@/hooks/use-doctor-profiles";
 import { useWpCandidateForDoctor, usePublishedWpCandidates, wpCandidateToTokens, normalizePhone, type WpCandidate } from "@/hooks/use-wp-candidates";
 import { useZohoData, type ZohoDoctorOnBoard, type ZohoLead } from "@/hooks/use-zoho-data";
-import { EditableEmailPreview, EmailEditControls } from "@/components/EditableEmailPreview";
+import { EditableEmailPreview } from "@/components/EditableEmailPreview";
 import { useQueryClient } from "@tanstack/react-query";
 
 interface Props {
@@ -951,10 +951,9 @@ function EditableEmailSection({
   editable:  boolean;
   onChange:  (ov: SendOverrides | null) => void;
 }) {
-  const [editing, setEditing] = useState(false);
-  const [subj,    setSubj]    = useState(subject);
-  const [body,    setBody]    = useState(html);
-  const [tick,    setTick]    = useState(0);
+  const [subj, setSubj] = useState(subject);
+  const [body, setBody] = useState(html);
+  const [tick, setTick] = useState(0);
 
   // Re-seed from the pristine render when it changes (profile data finished
   // loading, hospital changed). Settles before the user interacts, so it won't
@@ -962,7 +961,6 @@ function EditableEmailSection({
   useEffect(() => {
     setSubj(subject);
     setBody(html);
-    setEditing(false);
     setTick(t => t + 1);
     onChange(null);
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -978,25 +976,20 @@ function EditableEmailSection({
 
   return (
     <div className="rounded-md border overflow-hidden">
-      <div className="px-3 py-1.5 border-b bg-slate-50/50 text-[10px] uppercase tracking-wider text-muted-foreground flex items-center justify-between gap-2">
-        <span className="flex items-center gap-1.5 min-w-0"><Eye className="h-3 w-3 shrink-0" /> <span className="truncate">{label}</span></span>
-        <EmailEditControls
-          editing={editing}
-          edited={edited}
-          onToggle={() => setEditing(e => !e)}
-          onReset={() => { setSubj(subject); setBody(html); setTick(t => t + 1); onChange(null); }}
-        />
+      <div className="px-3 py-1.5 border-b bg-slate-50/50 text-[10px] uppercase tracking-wider text-muted-foreground flex items-center gap-1.5">
+        <Eye className="h-3 w-3 shrink-0" /> <span className="truncate">{label}</span>
       </div>
       <EditableEmailPreview
         subject={subj}
         html={html}
-        editing={editing}
         onSubjectChange={(v) => { setSubj(v); report(v, body); }}
         onHtmlChange={(v) => { setBody(v); report(subj, v); }}
         resetKey={tick}
+        edited={edited}
+        onReset={() => { setSubj(subject); setBody(html); setTick(t => t + 1); onChange(null); }}
         from={from}
         to={to}
-        className="border-0 rounded-none max-h-[420px]"
+        className="border-0 rounded-none max-h-[440px]"
       />
     </div>
   );
