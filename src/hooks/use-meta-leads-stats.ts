@@ -53,14 +53,12 @@ const QUALIFIED_STAGES = new Set([
   "high priority follow up",
   "high priority follow-up",
 ]);
-// Converted = Qualified leads that progressed to a placement signal. Used for
-// "cost per placement" and conversion-rate cards. Kept narrower than the old
-// definition for the same reason as above.
-const CONVERTED_STAGES = new Set([
-  "high priority follow up",
-  "high priority follow-up",
-  "closed won",
-]);
+// NOTE: "converted" is NOT a Lead_Status stage. A Meta form lead counts as
+// converted only when it became a Doctor on Board (matched by email/phone to
+// the DoB module) — the SAME conversion definition used everywhere else in the
+// dashboard. See `isConverted` inside the queryFn. (Previously this counted
+// Lead_Status in {high priority follow up, closed won}, which conflated
+// qualified-stage leads with conversions and disagreed with every other view.)
 
 // Normalize utm_source values into clean platform names. Empty / "none" /
 // other null-ish placeholders are treated as Website (direct organic traffic
@@ -147,6 +145,8 @@ export function useMetaLeadsStats(dateRange: DateRangeInput) {
   // we always see the current zoho.rawLeads.
   const zohoLeads = zoho?.rawLeads ?? [];
   const zohoCount = zohoLeads.length;
+  const zohoDob   = (zoho as { rawDoctorsOnBoard?: Array<Record<string, unknown>> } | undefined)?.rawDoctorsOnBoard ?? [];
+  const dobCount  = zohoDob.length;
   // One-shot render-time diagnostic so we can verify zoho really arrives here.
   if (zoho) {
     console.log(`[useMetaLeadsStats] render — zoho keys:${Object.keys(zoho as object).length} rawLeads:${(zoho as { rawLeads?: unknown[] }).rawLeads?.length ?? 'MISSING'} rawDoctorsOnBoard:${(zoho as { rawDoctorsOnBoard?: unknown[] }).rawDoctorsOnBoard?.length ?? 'MISSING'}`);
@@ -155,7 +155,7 @@ export function useMetaLeadsStats(dateRange: DateRangeInput) {
   }
 
   return useQuery<MetaLeadsStats>({
-    queryKey: ["meta-leads-stats", fromKey, toKey, zohoCount],
+    queryKey: ["meta-leads-stats", fromKey, toKey, zohoCount, dobCount],
     queryFn: async () => {
       const zohoStatusByEmail = new Map<string, string>();
       const zohoStatusByPhone = new Map<string, string>();
@@ -172,8 +172,23 @@ export function useMetaLeadsStats(dateRange: DateRangeInput) {
         if (phone) zohoStatusByPhone.set(phone, status);
         if (name)  zohoStatusByName.set(name, status);
       }
+      // Doctor-on-Board identity sets — the canonical conversion source. A Meta
+      // form lead is "converted" iff its email/phone is in the DoB module.
+      const dobEmails = new Set<string>();
+      const dobPhones = new Set<string>();
+      for (const d of zohoDob) {
+        const e = normalizeEmail((d as { Email?: string }).Email);
+        const p = normalizePhone((d as { Phone?: string; Mobile?: string }).Phone ?? (d as { Mobile?: string }).Mobile);
+        if (e) dobEmails.add(e);
+        if (p) dobPhones.add(p);
+      }
+      const isConverted = (r: Record<string, string>): boolean => {
+        const e = normalizeEmail(r.email);
+        const p = normalizePhone(r.phone);
+        return (!!e && dobEmails.has(e)) || (!!p && dobPhones.has(p));
+      };
       const sample = zohoLeads[0];
-      console.log(`[useMetaLeadsStats] zoho lookup maps — leads:${zohoLeads.length} withStatus:${leadsWithStatus} byEmail:${zohoStatusByEmail.size} byPhone:${zohoStatusByPhone.size} byName:${zohoStatusByName.size}`);
+      console.log(`[useMetaLeadsStats] zoho lookup maps — leads:${zohoLeads.length} withStatus:${leadsWithStatus} byEmail:${zohoStatusByEmail.size} byPhone:${zohoStatusByPhone.size} byName:${zohoStatusByName.size} dobEmails:${dobEmails.size} dobPhones:${dobPhones.size}`);
       if (sample) {
         console.log('[useMetaLeadsStats] sample Zoho lead keys:', Object.keys(sample as object));
         console.log('[useMetaLeadsStats] sample Zoho lead values:', {
@@ -288,15 +303,16 @@ export function useMetaLeadsStats(dateRange: DateRangeInput) {
       let placedCount    = 0;
       for (const r of filtered) {
         const stage = resolveStage(r);
+        const conv  = isConverted(r);   // became a Doctor on Board
         if (QUALIFIED_STAGES.has(stage)) qualifiedCount++;
-        if (CONVERTED_STAGES.has(stage)) placedCount++;
+        if (conv) placedCount++;
 
         const camp = (r.utm_campaign ?? "").trim();
         if (camp && camp !== "xxxxx") {
           const cur = campaignMap.get(camp) ?? { campaign: camp, total: 0, qualified: 0, converted: 0 };
           cur.total++;
           if (QUALIFIED_STAGES.has(stage)) cur.qualified++;
-          if (CONVERTED_STAGES.has(stage)) cur.converted++;
+          if (conv) cur.converted++;
           campaignMap.set(camp, cur);
         }
 
@@ -307,7 +323,7 @@ export function useMetaLeadsStats(dateRange: DateRangeInput) {
           const cur = creativeMap.get(creative) ?? { creative, total: 0, qualified: 0, converted: 0 };
           cur.total++;
           if (QUALIFIED_STAGES.has(stage)) cur.qualified++;
-          if (CONVERTED_STAGES.has(stage)) cur.converted++;
+          if (conv) cur.converted++;
           creativeMap.set(creative, cur);
         }
       }

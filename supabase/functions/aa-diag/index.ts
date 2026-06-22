@@ -38,10 +38,17 @@ Deno.serve(async (req) => {
           for (const r of rows) { const k = (r.Lead_Source == null || r.Lead_Source === "") ? "(blank)" : String(r.Lead_Source); m.set(k, (m.get(k) ?? 0) + 1); }
           return [...m.entries()].sort((a, b) => b[1] - a[1]).map(([source, count]) => ({ source, count }));
         };
+        const tallyStatus = (rows: Array<Record<string, unknown>>) => {
+          const m = new Map<string, number>();
+          for (const r of rows) { const k = (r.Lead_Status == null || r.Lead_Status === "") ? "(blank)" : String(r.Lead_Status); m.set(k, (m.get(k) ?? 0) + 1); }
+          return [...m.entries()].sort((a, b) => b[1] - a[1]).map(([status, count]) => ({ status, count }));
+        };
         return new Response(JSON.stringify({
           leadsRowCount: leads.length, dobRowCount: dob.length,
           leadSources_in_leads: tally(leads),
           leadSources_in_dob:   tally(dob),
+          leadStatuses_in_leads: tallyStatus(leads),
+          leadStatuses_in_dob:   tallyStatus(dob),
         }, null, 2), { headers: { "Content-Type": "application/json" } });
       }
 

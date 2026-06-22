@@ -262,7 +262,7 @@ export function ChannelEconomicsTable() {
                   <HeaderHint label="Cost / Lead" meaning="Spend ÷ leads. Includes every lead regardless of quality." source="Marketing-spend imports + Zoho CRM." className="justify-end" />
                 </TableHead>
                 <TableHead className="text-[10px] uppercase tracking-wide h-9 px-3 text-right whitespace-nowrap w-[90px]">
-                  <HeaderHint label="Conv. Rate" meaning="Share of leads converted (High Priority Follow up or Closed Won)." source="Zoho CRM (Lead_Status)." className="justify-end" />
+                  <HeaderHint label="Conv. Rate" meaning="Share of leads that became a Doctor on Board (the conversion metric used everywhere on the dashboard)." source="Zoho CRM (Doctors on Board module)." className="justify-end" />
                 </TableHead>
                 <TableHead className="text-[10px] uppercase tracking-wide h-9 px-3 text-right whitespace-nowrap w-[110px]">
                   <HeaderHint label="Spend" meaning='Marketing spend recorded for this channel. "—" = no spend logged.' source="Marketing-spend imports." className="justify-end" />

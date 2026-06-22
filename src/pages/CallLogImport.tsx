@@ -333,7 +333,7 @@ function normalizeCategory(raw: string): string {
   if (s.includes("google"))                            return "Google";
   if (s.includes("facebook") || s.includes("meta"))    return "Meta";
   if (s.includes("linkedin"))                          return "LinkedIn";
-  if (s.includes("gohire"))                            return "GoHire";
+  if (s.includes("gohire") || s.includes("go hire"))   return "Go Hire";
   if (s.includes("seo") || s.includes("mitchel"))      return "SEO";
   if (s.includes("zappier") || s.includes("zapier"))   return "Zapier";
   if (s.includes("magna"))                             return "Magna";

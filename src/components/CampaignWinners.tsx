@@ -170,7 +170,7 @@ export function CampaignWinnerCards() {
       <div className="space-y-2">
         <p className="text-foreground/80">
           <strong>Cost / Conversion</strong> = Meta ad spend on this campaign ÷ converted lead count.
-          A lead is "converted" if its Zoho status is High Priority Follow up or Closed Won.
+          A lead is "converted" if it became a Doctor on Board (matched by email/phone) — the same conversion metric used everywhere on the dashboard.
         </p>
         <div className="space-y-1 pt-2 border-t border-border/40">
           <div className="flex justify-between"><span className="text-muted-foreground">Ad spend</span><span className="font-semibold tabular-nums">{fmtAED(bestConversionKpi.spend)}</span></div>
@@ -253,7 +253,7 @@ export function CampaignWinnerCards() {
           iconColor="text-violet-600" iconBg="bg-violet-50"
           label={conversionLabel}
           meaning={hasSpendData
-            ? "Cheapest campaign per converted lead (High Priority Follow up or Closed Won)."
+            ? "Cheapest campaign per converted lead (became a Doctor on Board)."
             : "Highest conversion rate (≥ 5 leads). Shown when no Meta spend matched."}
           source={hasSpendData
             ? "Meta API + Supabase meta_leads × Zoho."
