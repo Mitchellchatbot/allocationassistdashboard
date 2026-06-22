@@ -24,7 +24,7 @@ import {
   Users, Megaphone, Globe, Loader2, TrendingUp, DollarSign,
   Eye, MousePointer, AlertCircle, X, ImageOff,
   Repeat2, Hash, Target, Zap, Award, KeyRound, CheckCircle2,
-  ChevronDown, ChevronUp, ChevronsUpDown, Play, ExternalLink, ClipboardList,
+  ChevronDown, ChevronUp, ChevronsUpDown, Play, ExternalLink,
 } from "lucide-react";
 
 // Short {meaning, source} pair shown in the (i) popover on each card.
@@ -36,7 +36,6 @@ const META_KPI_HINTS: Record<string, { meaning: string; source: string }> = {
   "Frequency":               { meaning: "Avg times each person saw your ad (impressions ÷ reach).",                      source: "Meta Marketing API." },
   "CPM":                     { meaning: "Cost per 1,000 impressions.",                                                   source: "Meta Marketing API." },
   "Leads from Ads":          { meaning: "Leads Meta attributes to your ads in the period.",                              source: "Meta Marketing API (lead actions)." },
-  "Leads from Forms":        { meaning: "Form submissions tagged as Meta — independent of Meta's attribution.",          source: "Supabase (meta_leads table)." },
   "Cost Per Lead (forms)":   { meaning: "Meta spend ÷ form-lead submissions. The honest CPL.",                           source: "Meta API + Supabase meta_leads." },
   "Cost Per Qualified":      { meaning: 'Meta spend ÷ qualified form-leads. "Contact in Future" excluded.',              source: "Meta API + meta_leads × Zoho Lead_Status." },
   "Cost per Conversion":     { meaning: "Meta spend ÷ conversions (Doctors on Board attributed to the Meta channel).", source: "Meta API + Zoho Doctors on Board module." },
@@ -1377,42 +1376,6 @@ const MetaAds = () => {
     .map(c => ({ ...c, cpc: c.spend / c.clicks }))
     .sort((a, b) => a.cpc - b.cpc)
     .slice(0, 5);
-  const formLeadsBack = (
-    <div className="space-y-2">
-      {(data?.byCampaign ?? []).length > 0 ? (
-        <>
-          <p className="text-[9px] text-muted-foreground uppercase tracking-wide mb-1">By campaign</p>
-          {(data?.byCampaign ?? []).slice(0, 5).map(c => {
-            const maxC = data!.byCampaign[0]?.count ?? 1;
-            return (
-              <div key={c.label}>
-                <div className="flex items-center justify-between mb-0.5">
-                  <span className="text-[10px] truncate max-w-[140px]">{c.label || "Unknown"}</span>
-                  <span className="text-[10px] font-semibold text-orange-500 tabular-nums">{c.count}</span>
-                </div>
-                <div className="h-1.5 bg-muted rounded-full overflow-hidden">
-                  <div className="h-full bg-orange-400 rounded-full" style={{ width: `${(c.count / maxC) * 100}%` }} />
-                </div>
-              </div>
-            );
-          })}
-        </>
-      ) : (data?.bySpeciality ?? []).length > 0 ? (
-        <>
-          <p className="text-[9px] text-muted-foreground uppercase tracking-wide mb-1">By speciality</p>
-          {(data?.bySpeciality ?? []).slice(0, 5).map(c => (
-            <div key={c.label} className="flex items-center justify-between">
-              <span className="text-[10px] truncate max-w-[150px]">{c.label}</span>
-              <span className="text-[10px] font-semibold text-orange-500 tabular-nums">{c.count}</span>
-            </div>
-          ))}
-        </>
-      ) : (
-        <p className="text-[10px] text-muted-foreground">No form data in Supabase yet</p>
-      )}
-    </div>
-  );
-
   const cplBack = (
     <div className="space-y-2">
       <p className="text-[9px] text-muted-foreground uppercase tracking-wide">Best cost-per-click by campaign</p>
@@ -1503,11 +1466,9 @@ const MetaAds = () => {
               value={fmtN((summary?.leads ?? 0) > 0 ? (summary?.leads ?? 0) : zohoMetaLeads)}
               sub={(summary?.leads ?? 0) > 0 ? "form submissions" : "via Zoho (Meta channel)"}
               back={leadsBack}  backHeight={220} />
-            <MetaKpiCard icon={ClipboardList} label="Leads from Forms" color="text-orange-500" bg="bg-orange-50"
-              value={fmtN(data?.total ?? 0)}
-              sub={leadsLoading ? "loading…" : `${data?.withUtm ?? 0} tracked`}
-              back={formLeadsBack} backHeight={220} />
-            {/* Cost Per Lead lives in the cost-per-funnel section below alongside CPQL and CPP */}
+            {/* "Leads from Forms" KPI removed (raw meta_leads count was a second,
+                conflicting lead number). The form count still powers the
+                campaign/creative funnels + the "Cost Per Lead (forms)" card below. */}
           </div>
 
           {/* Cost-per-funnel KPIs — spend joined with meta_leads stage progression */}
