@@ -191,13 +191,15 @@ export function SendProfileDialog({ open, onClose }: Props) {
   const hospitalTemplate = templates.find(t => t.key === "profile_sent_hospital");
   const doctorTemplate   = templates.find(t => t.key === "profile_sent_doctor");
 
-  const handleConfirm = async (overrides?: SendOverrides) => {
+  const handleConfirm = async (stageOverrides?: Record<string, SendOverrides>) => {
     if (!selectedDoctor || selectedHospitals.length === 0) return;
     // Edits only apply to a single-hospital send — the preview (and so the
     // edited HTML) is rendered for one hospital, and the override would bake
     // that hospital's tokens into every BCC run. The preview UI already
     // disables editing for multi-hospital, but guard here too.
-    const effectiveOverrides = selectedHospitals.length === 1 ? overrides : undefined;
+    const effectiveStageOverrides =
+      selectedHospitals.length === 1 && stageOverrides && Object.keys(stageOverrides).length
+        ? stageOverrides : undefined;
     setSubmitting(true);
     try {
       // One run per hospital — keeps Flow 2 timeline focused per relationship,
@@ -231,6 +233,11 @@ export function SendProfileDialog({ open, onClose }: Props) {
               // and applied verbatim to the outbound. Empty array =
               // BCC no-one.
               bcc_override:       bccList,
+              // Per-stage edits from the preview (email_hospital / email_doctor).
+              // send-flow-email reads stage_overrides[<stage>] when each email
+              // fires — including the doctor heads-up that auto-continues
+              // server-side — and ships that edited version verbatim.
+              ...(effectiveStageOverrides ? { stage_overrides: effectiveStageOverrides } : {}),
             },
           })
           .select("id")
@@ -279,7 +286,10 @@ export function SendProfileDialog({ open, onClose }: Props) {
       for (const r of createdRuns ?? []) {
         try {
           const { data: sendResp, error: sendErr } = await supabase.functions.invoke("send-flow-email", {
-            body: { run_id: r.id, ...(effectiveOverrides ?? {}) },
+            // Edits ride along in the run's metadata.stage_overrides (set above),
+            // so both the hospital email and the auto-continued doctor email
+            // pick up their own edited version.
+            body: { run_id: r.id },
           });
           if (sendErr) throw sendErr;
           const resp = sendResp as { ok: boolean; error?: string };
@@ -537,7 +547,7 @@ function PreviewConfirm({
   doctorSubject: string;
   doctorBody: string;
   onBack: () => void;
-  onConfirm: (overrides?: SendOverrides) => void;
+  onConfirm: (stageOverrides?: Record<string, SendOverrides>) => void;
   submitting: boolean;
   bccList: string[];
   setBccList: (next: string[]) => void;
@@ -546,10 +556,9 @@ function PreviewConfirm({
   // edited HTML) is rendered for one hospital, so reusing it across a BCC
   // batch would bake the wrong hospital's tokens into the others.
   const isSingle = hospitals.length === 1;
-  const [editing,    setEditing]    = useState(false);
-  const [editSubject, setEditSubject] = useState("");
-  const [editHtml,    setEditHtml]    = useState("");
-  const [resetTick,   setResetTick]   = useState(0);
+  // Per-stage overrides captured from the editable previews (null = unedited).
+  const [hospitalOv, setHospitalOv] = useState<SendOverrides | null>(null);
+  const [doctorOv,   setDoctorOv]   = useState<SendOverrides | null>(null);
   // Who'll be on the From line — derived from the current user, which
   // matches what send-flow-email does at send time (looks up
   // assigned_to in its SENDERS registry). Falls back to the generic
@@ -616,26 +625,17 @@ function PreviewConfirm({
   vars.doctor_card_html      = previewDoctorCardHtml(vars);
   vars.doctor_row_table_html = previewDoctorRowTableHtml(vars);
 
-  // The exact hospital email the team sees. The body is wrapped in the same
-  // font shell send-flow-email uses, so when edits are shipped verbatim they
-  // render identically to a normal send.
+  // The exact emails the team sees. Bodies are wrapped in the same font shell
+  // send-flow-email uses, so edits shipped verbatim render like a normal send.
   const renderedHospitalSubject = renderTemplate(hospitalSubject, vars);
   const renderedHospitalBody    = renderTemplate(hospitalBody, vars) + (customMessage ? `\n\n--- Custom note ---\n${customMessage}` : "");
   const hospitalHtml            = wrapBodyForSend(renderedHospitalBody);
   const hospitalRecipient       = isSingle ? (hospitals[0].primary_recruiter_email ?? "(no recruiter email)") : `${hospitals.length} recipients (BCC)`;
 
-  // Seed (and re-seed) the editable copy from the rendered email whenever the
-  // rendered content changes — e.g. profile data finishes loading. Runs only
-  // when the actual string changes, so it won't clobber an in-progress edit.
-  useEffect(() => {
-    setEditSubject(renderedHospitalSubject);
-    setEditHtml(hospitalHtml);
-    setEditing(false);
-    setResetTick(t => t + 1);
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [renderedHospitalSubject, hospitalHtml]);
+  const renderedDoctorSubject   = renderTemplate(doctorSubject, vars);
+  const doctorHtml              = wrapBodyForSend(renderTemplate(doctorBody, vars));
 
-  const edited = isSingle && (editSubject !== renderedHospitalSubject || editHtml !== hospitalHtml);
+  const anyEdited = !!hospitalOv || !!doctorOv;
 
   return (
     <div className="space-y-3">
@@ -674,50 +674,35 @@ function PreviewConfirm({
         </div>
       )}
 
-      {isSingle ? (
-        <div className="rounded-md border overflow-hidden">
-          <div className="px-3 py-1.5 border-b bg-slate-50/50 text-[10px] uppercase tracking-wider text-muted-foreground flex items-center justify-between gap-1.5">
-            <span className="flex items-center gap-1.5"><Eye className="h-3 w-3" /> To hospital · {hospitalRecipient}</span>
-            <EmailEditControls
-              editing={editing}
-              edited={edited}
-              onToggle={() => setEditing(e => !e)}
-              onReset={() => { setEditSubject(renderedHospitalSubject); setEditHtml(hospitalHtml); setResetTick(t => t + 1); }}
-            />
-          </div>
-          <EditableEmailPreview
-            subject={editSubject}
-            html={hospitalHtml}
-            editing={editing}
-            onSubjectChange={setEditSubject}
-            onHtmlChange={setEditHtml}
-            resetKey={resetTick}
-            from={senderLine}
-            to={isSingle ? (hospitals[0].primary_recruiter_email ?? undefined) : undefined}
-            className="border-0 rounded-none max-h-[420px]"
-          />
-        </div>
-      ) : (
-        <PreviewBlock
-          label={`To hospital · ${hospitalRecipient}`}
-          subject={renderedHospitalSubject}
-          body={renderedHospitalBody}
-        />
-      )}
-
-      <PreviewBlock
-        label={`To doctor · ${doctor.email ?? "(no email)"}`}
-        subject={renderTemplate(doctorSubject, vars)}
-        body={renderTemplate(doctorBody, vars)}
+      <EditableEmailSection
+        label={`To hospital · ${hospitalRecipient}`}
+        subject={renderedHospitalSubject}
+        html={hospitalHtml}
+        from={senderLine}
+        to={isSingle ? (hospitals[0].primary_recruiter_email ?? undefined) : undefined}
+        editable={isSingle}
+        onChange={setHospitalOv}
+        plainBody={renderedHospitalBody}
       />
 
-      {isSingle && (
-        <div className="text-[10.5px] text-muted-foreground px-0.5">
-          {edited
-            ? <span className="text-teal-700 font-medium">You've edited the hospital email — your version sends instead of the template.</span>
-            : "Click Edit email above to tweak the hospital email before it sends. The doctor heads-up uses its template."}
-        </div>
-      )}
+      <EditableEmailSection
+        label={`To doctor · ${doctor.email ?? "(no email)"}`}
+        subject={renderedDoctorSubject}
+        html={doctorHtml}
+        from={senderLine}
+        to={doctor.email ?? undefined}
+        editable={isSingle}
+        onChange={setDoctorOv}
+        plainBody={renderTemplate(doctorBody, vars)}
+      />
+
+      <div className="text-[10.5px] text-muted-foreground px-0.5">
+        {!isSingle
+          ? "Editing is available when sending to a single hospital (a shared edit can't be reused across a BCC batch)."
+          : anyEdited
+            ? <span className="text-teal-700 font-medium">You've edited {hospitalOv && doctorOv ? "both emails" : hospitalOv ? "the hospital email" : "the doctor email"} — your version sends instead of the template.</span>
+            : "Click Edit email on either preview to tweak the wording before it sends."}
+      </div>
 
       {hospitals.some(h => !h.primary_recruiter_email) && (
         <div className="rounded-md border border-amber-200 bg-amber-50 p-2 text-[11px] text-amber-900">
@@ -730,7 +715,13 @@ function PreviewConfirm({
           <ChevronLeft className="h-3.5 w-3.5 mr-1" /> Back
         </Button>
         <Button
-          onClick={() => onConfirm(edited ? { subject_override: editSubject, html_override: editHtml } : undefined)}
+          onClick={() => {
+            const stageOverrides: Record<string, SendOverrides> = {
+              ...(hospitalOv ? { email_hospital: hospitalOv } : {}),
+              ...(doctorOv   ? { email_doctor:   doctorOv }   : {}),
+            };
+            onConfirm(Object.keys(stageOverrides).length ? stageOverrides : undefined);
+          }}
           disabled={submitting}
         >
           {submitting ? "Queueing..." : <><Send className="h-3.5 w-3.5 mr-1.5" /> Queue {hospitals.length} send{hospitals.length === 1 ? "" : "s"}</>}
@@ -941,6 +932,74 @@ function previewDoctorRowTableHtml(v: Record<string, string>): string {
  *  show raw `<p>` tags in monospace. */
 function looksLikeHtml(s: string): boolean {
   return /<\/?[a-z][\s\S]*?>/i.test(s);
+}
+
+/** One email in the preview step. When `editable`, shows the WYSIWYG
+ *  EditableEmailPreview + Edit/Reset controls and reports the team's edits up
+ *  via onChange (null = unedited). When not (multi-hospital BCC), falls back to
+ *  the compact read-only PreviewBlock. Used for both the hospital and the
+ *  doctor email so either can be edited before sending. */
+function EditableEmailSection({
+  label, subject, html, plainBody, from, to, editable, onChange,
+}: {
+  label:     string;
+  subject:   string;   // pristine rendered subject
+  html:      string;   // pristine wrapped HTML (what ships if unedited)
+  plainBody: string;   // pristine body for the read-only fallback
+  from?:     string;
+  to?:       string;
+  editable:  boolean;
+  onChange:  (ov: SendOverrides | null) => void;
+}) {
+  const [editing, setEditing] = useState(false);
+  const [subj,    setSubj]    = useState(subject);
+  const [body,    setBody]    = useState(html);
+  const [tick,    setTick]    = useState(0);
+
+  // Re-seed from the pristine render when it changes (profile data finished
+  // loading, hospital changed). Settles before the user interacts, so it won't
+  // clobber a real edit. Runs only when the actual string changes.
+  useEffect(() => {
+    setSubj(subject);
+    setBody(html);
+    setEditing(false);
+    setTick(t => t + 1);
+    onChange(null);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [subject, html]);
+
+  const report = (s: string, b: string) =>
+    onChange((s !== subject || b !== html) ? { subject_override: s, html_override: b } : null);
+  const edited = subj !== subject || body !== html;
+
+  if (!editable) {
+    return <PreviewBlock label={label} subject={subject} body={plainBody} />;
+  }
+
+  return (
+    <div className="rounded-md border overflow-hidden">
+      <div className="px-3 py-1.5 border-b bg-slate-50/50 text-[10px] uppercase tracking-wider text-muted-foreground flex items-center justify-between gap-2">
+        <span className="flex items-center gap-1.5 min-w-0"><Eye className="h-3 w-3 shrink-0" /> <span className="truncate">{label}</span></span>
+        <EmailEditControls
+          editing={editing}
+          edited={edited}
+          onToggle={() => setEditing(e => !e)}
+          onReset={() => { setSubj(subject); setBody(html); setTick(t => t + 1); onChange(null); }}
+        />
+      </div>
+      <EditableEmailPreview
+        subject={subj}
+        html={html}
+        editing={editing}
+        onSubjectChange={(v) => { setSubj(v); report(v, body); }}
+        onHtmlChange={(v) => { setBody(v); report(subj, v); }}
+        resetKey={tick}
+        from={from}
+        to={to}
+        className="border-0 rounded-none max-h-[420px]"
+      />
+    </div>
+  );
 }
 
 function PreviewBlock({ label, subject, body }: { label: string; subject: string; body: string }) {

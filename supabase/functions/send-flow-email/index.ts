@@ -764,14 +764,29 @@ Deno.serve(async (req: Request) => {
   }
 
   // ── Apply editable-preview overrides ──────────────────────────────────────
-  // If the team edited the preview before sending, ship their version verbatim.
+  // Two sources, in precedence order:
+  //   1. Request body (subject_override/html_override) — a one-shot edit for
+  //      the stage being sent right now (used by the single-send preview gates).
+  //   2. run.metadata.stage_overrides[<stage>] — edits stashed on the run,
+  //      keyed by stage. This is how an email that fires LATER (server-side
+  //      auto-continue, e.g. the doctor heads-up after the hospital intro)
+  //      still ships the team's edited version: each stage reads its own entry.
   // Empty/whitespace overrides are ignored so a blank field can't send an empty
   // email. Text fallback is derived from the edited HTML when not supplied.
-  const finalSubject = (body.subject_override ?? "").trim() ? String(body.subject_override) : subject;
-  const finalHtml    = (body.html_override ?? "").trim()    ? String(body.html_override)    : html;
-  const finalText    = (body.text_override ?? "").trim()    ? String(body.text_override)
-                     : (body.html_override ?? "").trim()    ? htmlToText(String(body.html_override))
+  const stageOverrides = (run.metadata as { stage_overrides?: Record<string, { subject_override?: string; html_override?: string }> } | null)?.stage_overrides;
+  const metaOverride   = stageOverrides?.[run.current_stage];
+  const ovSubject = (body.subject_override ?? "").trim() ? String(body.subject_override)
+                  : (metaOverride?.subject_override ?? "").trim() ? String(metaOverride!.subject_override)
+                  : "";
+  const ovHtml    = (body.html_override ?? "").trim() ? String(body.html_override)
+                  : (metaOverride?.html_override ?? "").trim() ? String(metaOverride!.html_override)
+                  : "";
+  const finalSubject = ovSubject || subject;
+  const finalHtml    = ovHtml    || html;
+  const finalText    = (body.text_override ?? "").trim() ? String(body.text_override)
+                     : ovHtml ? htmlToText(ovHtml)
                      : text;
+  const wasEdited = !!ovSubject || !!ovHtml;
 
   // ── Send via Resend ───────────────────────────────────────────────────────
   console.log("[send-flow-email] sending to", effectiveTo, "(original:", actualRecipient + ")", "template:", templateKey);
@@ -909,7 +924,7 @@ Deno.serve(async (req: Request) => {
     payload:    {
       resend_message_id:   messageId,
       template_key:        templateKey,
-      edited:              (body.subject_override ?? "").trim() !== "" || (body.html_override ?? "").trim() !== "",
+      edited:              wasEdited,
       original_recipient:  actualRecipient,
       effective_recipient: effectiveTo,
       from:                sender.fromHeader,

@@ -64,7 +64,7 @@ export function EditableEmailPreview({
 
   return (
     <div className={cn(
-      "rounded-xl border border-slate-200 bg-white overflow-hidden flex flex-col min-h-0",
+      "rounded-xl border border-slate-200 bg-white overflow-hidden flex flex-col min-h-0 w-full min-w-0 max-w-full",
       className,
     )}>
       {/* Subject + recipient header */}
@@ -109,8 +109,11 @@ export function EditableEmailPreview({
         </div>
       )}
 
-      {/* Body — read-only render or contentEditable, both fed by the same HTML. */}
-      <div className="bg-slate-100/60 px-4 py-5 overflow-y-auto flex-1 min-h-0">
+      {/* Body — read-only render or contentEditable, both fed by the same HTML.
+          overflow-auto + min-w-0 keep a wide email (e.g. the ~600px doctor
+          card) scrolling INSIDE this box instead of stretching the dialog and
+          pushing the edit controls off-screen. */}
+      <div className="bg-slate-100/60 px-4 py-5 overflow-auto flex-1 min-h-0 min-w-0 w-full">
         <div
           ref={bodyRef}
           contentEditable={editing}
