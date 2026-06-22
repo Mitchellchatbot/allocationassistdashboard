@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useState } from "react";
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription, DialogFooter } from "@/components/ui/dialog";
 import { Button } from "@/components/ui/button";
-import { FlowSendPreviewDialog } from "./FlowSendPreviewDialog";
+import { FlowSendPreviewDialog, type EmailOverrides } from "./FlowSendPreviewDialog";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Textarea } from "@/components/ui/textarea";
@@ -327,9 +327,9 @@ export function TriggerFlowDialog({ open, flowKey, onClose }: Props) {
   };
 
   // Real send for the just-created run, fired from the preview's "Send".
-  const doSendTriggered = async (runId: string) => {
+  const doSendTriggered = async (runId: string, overrides?: EmailOverrides) => {
     const { data: sendResp, error: sendErr } = await supabase.functions.invoke("send-flow-email", {
-      body: { run_id: runId },
+      body: { run_id: runId, ...overrides },
     });
     if (sendErr) throw sendErr;
     const r = sendResp as { ok: boolean; error?: string; to?: string };
@@ -544,7 +544,7 @@ export function TriggerFlowDialog({ open, flowKey, onClose }: Props) {
       runId={pendingPreview?.runId ?? null}
       title="Preview & send"
       confirmLabel="Send now"
-      onConfirm={async () => { if (pendingPreview) await doSendTriggered(pendingPreview.runId); }}
+      onConfirm={async (overrides) => { if (pendingPreview) await doSendTriggered(pendingPreview.runId, overrides); }}
     />
     </>
   );

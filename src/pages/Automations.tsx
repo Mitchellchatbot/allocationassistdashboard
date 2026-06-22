@@ -36,7 +36,7 @@ import { ApprovalQueues } from "@/components/automations/ApprovalQueues";
 import { ReassignButton } from "@/components/automations/ReassignButton";
 import { SendProfileDialog } from "@/components/automations/SendProfileDialog";
 import { TriggerFlowDialog } from "@/components/automations/TriggerFlowDialog";
-import { FlowSendPreviewDialog } from "@/components/automations/FlowSendPreviewDialog";
+import { FlowSendPreviewDialog, type EmailOverrides } from "@/components/automations/FlowSendPreviewDialog";
 import { ClassifyReplyDialog } from "@/components/automations/ClassifyReplyDialog";
 import { lazy, Suspense } from "react";
 // Lazy-load the Contract Builder so opening the Sheet doesn't bloat the
@@ -517,7 +517,7 @@ function RunDetailSheet({ run, open, onClose }: { run: FlowRun | null; open: boo
     previewMetadata?: Record<string, unknown>;
     title:            string;
     confirmLabel:     string;
-    onConfirm:        () => Promise<void>;
+    onConfirm:        (overrides?: EmailOverrides) => Promise<void>;
   } | null>(null);
   const [invLink,   setInvLink]   = useState<string>("");
   const [invNumber, setInvNumber] = useState<string>("");
@@ -604,7 +604,7 @@ function RunDetailSheet({ run, open, onClose }: { run: FlowRun | null; open: boo
   };
 
   // Real send: update metadata + advance, then fire. Wrapped by a preview.
-  const doSendCityGuide = async () => {
+  const doSendCityGuide = async (overrides?: EmailOverrides) => {
     const city = pickedCity.trim();
     const newMetadata = { ...(run.metadata as Record<string, unknown>), city };
     const { error: updateErr } = await supabase
@@ -625,7 +625,7 @@ function RunDetailSheet({ run, open, onClose }: { run: FlowRun | null; open: boo
     });
 
     const { data, error: sendErr } = await supabase.functions.invoke("send-flow-email", {
-      body: { run_id: run.id },
+      body: { run_id: run.id, ...overrides },
     });
     if (sendErr) throw sendErr;
     const resp = data as { ok: boolean; error?: string };
@@ -652,7 +652,7 @@ function RunDetailSheet({ run, open, onClose }: { run: FlowRun | null; open: boo
 
   // Real send for the attestation email. The guide step leaves the run parked
   // at send_attestation_email; this makes sure we're on that stage, then fires.
-  const doSendAttestation = async () => {
+  const doSendAttestation = async (overrides?: EmailOverrides) => {
     const city = pickedCity.trim();
     const newMetadata = city ? { ...(run.metadata as Record<string, unknown>), city } : run.metadata;
     const { error: updateErr } = await supabase
@@ -666,7 +666,7 @@ function RunDetailSheet({ run, open, onClose }: { run: FlowRun | null; open: boo
     if (updateErr) throw updateErr;
 
     const { data, error: sendErr } = await supabase.functions.invoke("send-flow-email", {
-      body: { run_id: run.id },
+      body: { run_id: run.id, ...overrides },
     });
     if (sendErr) throw sendErr;
     const resp = data as { ok: boolean; error?: string };
@@ -696,15 +696,15 @@ function RunDetailSheet({ run, open, onClose }: { run: FlowRun | null; open: boo
   };
 
   // Real send for the current stage. force re-sends an already-sent stage.
-  const doSendNow = async (force: boolean) => {
+  const doSendNow = async (force: boolean, overrides?: EmailOverrides) => {
     const { data, error } = await supabase.functions.invoke("send-flow-email", {
-      body: { run_id: run.id, force },
+      body: { run_id: run.id, force, ...overrides },
     });
     if (error) throw error;
     const resp = data as { ok: boolean; error?: string; to?: string; subject?: string; completed?: boolean; already_sent?: boolean };
     if (!resp.ok) {
       if (resp.already_sent) {
-        if (window.confirm("This stage was already emailed. Send again?")) { await doSendNow(true); return; }
+        if (window.confirm("This stage was already emailed. Send again?")) { await doSendNow(true, overrides); return; }
         toast.info("No email sent — already delivered for this stage.");
         return;
       }
@@ -724,7 +724,7 @@ function RunDetailSheet({ run, open, onClose }: { run: FlowRun | null; open: boo
     setPreviewCfg({
       title:        alreadySent ? "Resend email" : "Send email",
       confirmLabel: alreadySent ? "Resend now" : "Send now",
-      onConfirm:    () => doSendNow(alreadySent),
+      onConfirm:    (overrides) => doSendNow(alreadySent, overrides),
     });
   };
 
@@ -940,7 +940,7 @@ function RunDetailSheet({ run, open, onClose }: { run: FlowRun | null; open: boo
           previewMetadata={previewCfg?.previewMetadata}
           title={previewCfg?.title ?? "Email preview"}
           confirmLabel={previewCfg?.confirmLabel ?? "Send now"}
-          onConfirm={async () => { if (previewCfg) await previewCfg.onConfirm(); }}
+          onConfirm={async (overrides) => { if (previewCfg) await previewCfg.onConfirm(overrides); }}
         />
 
         <div className="py-4 space-y-5">
@@ -1221,7 +1221,7 @@ function InterviewTimePicker({ run }: { run: FlowRun }) {
     setPreviewOpen(true);
   };
 
-  const doConfirm = async (slot: ProposedTime) => {
+  const doConfirm = async (slot: ProposedTime, overrides?: EmailOverrides) => {
     setConfirming(true);
     setPickedIso(slot.iso);
     try {
@@ -1272,7 +1272,7 @@ function InterviewTimePicker({ run }: { run: FlowRun }) {
 
       // Fire the tips + confirmation email to the doctor.
       const { error: sendErr } = await supabase.functions.invoke("send-flow-email", {
-        body: { run_id: interviewRun.id },
+        body: { run_id: interviewRun.id, ...overrides },
       });
       if (sendErr) throw sendErr;
 
@@ -1354,7 +1354,7 @@ function InterviewTimePicker({ run }: { run: FlowRun }) {
         } : undefined}
         title="Interview tips + confirmation — preview"
         confirmLabel="Confirm time & send"
-        onConfirm={async () => { if (previewSlot) await doConfirm(previewSlot); }}
+        onConfirm={async (overrides) => { if (previewSlot) await doConfirm(previewSlot, overrides); }}
       />
     </div>
   );
@@ -1385,7 +1385,7 @@ function ShortlistSuggestion({ run }: { run: FlowRun }) {
   // run via preview_stage, so no shortlist run is created until you send).
   const handleConfirm = () => setPreviewOpen(true);
 
-  const doConfirm = async () => {
+  const doConfirm = async (overrides?: EmailOverrides) => {
     setWorking(true);
     try {
       const nowIso = new Date().toISOString();
@@ -1429,7 +1429,7 @@ function ShortlistSuggestion({ run }: { run: FlowRun }) {
       ]);
 
       const { error: sendErr } = await supabase.functions.invoke("send-flow-email", {
-        body: { run_id: shortlistRun.id },
+        body: { run_id: shortlistRun.id, ...overrides },
       });
       if (sendErr) throw sendErr;
 

@@ -252,7 +252,17 @@ Deno.serve(async (req: Request) => {
     return json({ ok: false, error: "RESEND_API_KEY not set on the Edge Function." }, 500);
   }
 
-  let body: { run_id?: string; dry_run?: boolean; force?: boolean; preview_stage?: string; preview_metadata?: Record<string, unknown> };
+  let body: {
+    run_id?: string; dry_run?: boolean; force?: boolean;
+    preview_stage?: string; preview_metadata?: Record<string, unknown>;
+    // Per-send overrides from the editable preview — see the matching block in
+    // send-batch. When present, these replace the template-rendered subject/body
+    // on a real send so the team's edits ship verbatim. Ignored on a dry run
+    // (the preview always reflects the freshly-rendered template) and NOT
+    // forwarded to auto-continue sends, so a bundled follow-up (e.g. the doctor
+    // heads-up after the hospital intro) still uses its own template.
+    subject_override?: string; html_override?: string; text_override?: string;
+  };
   try { body = await req.json(); } catch { return json({ ok: false, error: "Invalid JSON body" }, 400); }
   const runId = body.run_id;
   const dryRun = !!body.dry_run;
@@ -753,6 +763,16 @@ Deno.serve(async (req: Request) => {
     }, 200);
   }
 
+  // ── Apply editable-preview overrides ──────────────────────────────────────
+  // If the team edited the preview before sending, ship their version verbatim.
+  // Empty/whitespace overrides are ignored so a blank field can't send an empty
+  // email. Text fallback is derived from the edited HTML when not supplied.
+  const finalSubject = (body.subject_override ?? "").trim() ? String(body.subject_override) : subject;
+  const finalHtml    = (body.html_override ?? "").trim()    ? String(body.html_override)    : html;
+  const finalText    = (body.text_override ?? "").trim()    ? String(body.text_override)
+                     : (body.html_override ?? "").trim()    ? htmlToText(String(body.html_override))
+                     : text;
+
   // ── Send via Resend ───────────────────────────────────────────────────────
   console.log("[send-flow-email] sending to", effectiveTo, "(original:", actualRecipient + ")", "template:", templateKey);
 
@@ -838,9 +858,9 @@ Deno.serve(async (req: Request) => {
         cc:       testCc,
         bcc:      bccList,
         reply_to: replyToAddress,
-        subject,
-        html,
-        text,
+        subject: finalSubject,
+        html:    finalHtml,
+        text:    finalText,
         headers,
         // Resend fetches each `path` URL and attaches it. Only the relocation
         // stage populates this; everything else sends with no attachments.
@@ -885,10 +905,11 @@ Deno.serve(async (req: Request) => {
     run_id:     run.id,
     stage_key:  run.current_stage,
     event_type: "email_sent",
-    message:    `Sent "${subject}" from ${sender.fromHeader} to ${effectiveTo}${personalRouting ? ` · replies land in ${sender.replyHint}` : ""}${TEST_OVERRIDE && actualRecipient !== TEST_OVERRIDE ? ` (test override; would have gone to ${actualRecipient})` : ""}.`,
+    message:    `Sent "${finalSubject}" from ${sender.fromHeader} to ${effectiveTo}${personalRouting ? ` · replies land in ${sender.replyHint}` : ""}${TEST_OVERRIDE && actualRecipient !== TEST_OVERRIDE ? ` (test override; would have gone to ${actualRecipient})` : ""}.`,
     payload:    {
       resend_message_id:   messageId,
       template_key:        templateKey,
+      edited:              (body.subject_override ?? "").trim() !== "" || (body.html_override ?? "").trim() !== "",
       original_recipient:  actualRecipient,
       effective_recipient: effectiveTo,
       from:                sender.fromHeader,

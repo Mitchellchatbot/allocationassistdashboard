@@ -82,7 +82,15 @@ Deno.serve(async (req: Request) => {
 
   if (!RESEND_API_KEY) return json({ ok: false, error: "RESEND_API_KEY not set" }, 500);
 
-  let body: { batch_id?: string; dry_run?: boolean; force?: boolean };
+  let body: {
+    batch_id?: string; dry_run?: boolean; force?: boolean;
+    // Per-send overrides from the editable preview. When present (non-empty),
+    // these replace the template-rendered subject/body so what the team typed
+    // in the preview is exactly what goes out. Only honoured on a real send —
+    // a dry run always returns the freshly-rendered template so "Reset to
+    // template" works by simply re-previewing.
+    subject_override?: string; html_override?: string; text_override?: string;
+  };
   try { body = await req.json(); } catch { return json({ ok: false, error: "Invalid JSON body" }, 400); }
   if (!body.batch_id) return json({ ok: false, error: "batch_id required" }, 400);
   const dryRun = !!body.dry_run;
@@ -322,6 +330,17 @@ Deno.serve(async (req: Request) => {
     }, 200);
   }
 
+  // ── Apply editable-preview overrides ──────────────────────────────────
+  // If the team edited the preview before sending, ship their version verbatim
+  // (subject as typed; the body's edited HTML; a text fallback derived from the
+  // edit if they didn't pass one). Empty/whitespace overrides are ignored so a
+  // blank field can't accidentally send an empty email.
+  const finalSubject = (body.subject_override ?? "").trim() ? String(body.subject_override) : subject;
+  const finalHtml    = (body.html_override ?? "").trim()    ? String(body.html_override)    : html;
+  const finalText    = (body.text_override ?? "").trim()    ? String(body.text_override)
+                     : (body.html_override ?? "").trim()    ? stripHtml(String(body.html_override))
+                     : text;
+
   // ── Send via Resend (BCC) ─────────────────────────────────────────────
   // Test override pattern matches send-flow-email: when set, all sends go
   // to the override address instead of the 95 hospital recipients. Lets us
@@ -343,7 +362,7 @@ Deno.serve(async (req: Request) => {
         to:      [toAddress],
         cc:      testCc,
         bcc:     bccList,
-        subject, html, text,
+        subject: finalSubject, html: finalHtml, text: finalText,
         headers: {
           "X-AA-Batch-Id":  String(batch.id),
           "X-AA-Batch-Kind": String(batch.kind),

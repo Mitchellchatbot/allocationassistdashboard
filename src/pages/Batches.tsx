@@ -23,6 +23,7 @@ import { groupSpecialty } from "@/lib/specialty-groups";
 import { scoreCandidate, type MatchScore } from "@/lib/match-score";
 import { useWpCandidates, usePublishedWpCandidates, wpCandidateProfileText, type WpCandidate } from "@/hooks/use-wp-candidates";
 import { MatchScoreChip, MatchReasons } from "@/components/DoctorVacancyMatches";
+import { EditableEmailPreview, EmailEditControls } from "@/components/EditableEmailPreview";
 
 /**
  * Phase 6 — Recurring batch sends. Source: Saif Ullah, May 20 2026.
@@ -828,7 +829,17 @@ function BatchDialog({ target, onTargetChange, batches, suggestedSpecialty }: {
   const update = useUpdateBatch();
   const sendNow = useSendBatchNow();
   const previewMut = useBatchPreview();
-  const [emailPreview, setEmailPreview] = useState<{ subject: string; html: string; bcc_count: number } | null>(null);
+  const [emailPreview, setEmailPreview] = useState<{ subject: string; html: string; text: string; bcc_count: number } | null>(null);
+  // Editable-preview state: the team can tweak the subject/body before sending.
+  // editSubject/editHtml are the live (possibly edited) values; emailPreview
+  // holds the pristine template render so "Reset" + the edited-diff check work.
+  const [editingPreview, setEditingPreview] = useState(false);
+  const [editSubject, setEditSubject] = useState("");
+  const [editHtml, setEditHtml] = useState("");
+  const [previewResetTick, setPreviewResetTick] = useState(0);
+  // True once the team has actually changed the subject or body away from the
+  // template render — gates the override on send and the "edited" UI hints.
+  const batchEdited = !!emailPreview && (editSubject !== emailPreview.subject || editHtml !== emailPreview.html);
   const { data: zoho } = useZohoData();
   const lifecycleMap = useDoctorLifecycleMap();
   // Pool = WP PUBLISHED candidates only (the website), augmented from Zoho.
@@ -1258,7 +1269,11 @@ function BatchDialog({ target, onTargetChange, batches, suggestedSpecialty }: {
                   if (picked.length === 0) { toast.error("Queue at least one doctor to preview."); return; }
                   try {
                     const p = await previewMut.mutateAsync(batch.status === "sent" ? { batchId: batch.id, force: true } : batch.id);
-                    setEmailPreview({ subject: p.subject, html: p.html, bcc_count: p.bcc_count });
+                    setEmailPreview({ subject: p.subject, html: p.html, text: p.text, bcc_count: p.bcc_count });
+                    setEditSubject(p.subject);
+                    setEditHtml(p.html);
+                    setEditingPreview(false);
+                    setPreviewResetTick(t => t + 1);
                   } catch (e) {
                     toast.error(e instanceof Error ? e.message : "Preview failed");
                   }
@@ -1280,42 +1295,70 @@ function BatchDialog({ target, onTargetChange, batches, suggestedSpecialty }: {
         dry_run), shown in a sandboxed iframe so the email's own styles
         can't leak into the dashboard. */}
     <Dialog open={!!emailPreview} onOpenChange={(v) => !v && setEmailPreview(null)}>
-      <DialogContent className="sm:max-w-[780px] max-h-[92vh] overflow-hidden flex flex-col">
+      <DialogContent className="sm:max-w-[820px] max-h-[92vh] overflow-hidden flex flex-col">
         <DialogHeader>
           <DialogTitle className="text-base">Email preview</DialogTitle>
           <DialogDescription className="text-xs">
-            {emailPreview?.subject && (<><span className="font-medium text-slate-700">Subject:</span> {emailPreview.subject}</>)}
+            {batchEdited
+              ? <span className="font-medium text-teal-700">Edited — your version sends, not the template.</span>
+              : "What you see is what goes out. Click Edit email to tweak it first."}
             {typeof emailPreview?.bcc_count === "number" && (<> · BCC to {emailPreview.bcc_count} hospital{emailPreview.bcc_count === 1 ? "" : "s"}</>)}
           </DialogDescription>
         </DialogHeader>
-        <iframe
-          title="Batch email preview"
-          sandbox=""
-          className="w-full flex-1 min-h-[62vh] rounded-md border border-slate-200 bg-white"
-          srcDoc={emailPreview?.html ?? ""}
-        />
-        <DialogFooter>
-          {/* Send/resend straight from the preview — what you see is what goes out. */}
-          <Button
-            onClick={async () => {
-              if (!batch) return;
-              if (batch.status === "sent"
-                && !confirm(`Resend this batch? Same ${picked.length} doctor${picked.length === 1 ? "" : "s"} will go out again.`)) return;
-              try {
-                const res = await sendNow.mutateAsync(batch.status === "sent" ? { batchId: batch.id, force: true } : batch.id);
-                toast.success(`${batch.status === "sent" ? "Resent" : "Sent"}. ${res.doctor_count} doctors → ${res.bcc_count} hospitals.`);
-                setEmailPreview(null);
-                close();
-              } catch (e) {
-                toast.error(e instanceof Error ? e.message : "Send failed");
-              }
+        {emailPreview && (
+          <EditableEmailPreview
+            subject={editSubject}
+            html={emailPreview.html}
+            editing={editingPreview}
+            onSubjectChange={setEditSubject}
+            onHtmlChange={setEditHtml}
+            resetKey={previewResetTick}
+            from="Hospital Intro <hospitalintro@allocationassist.com>"
+            className="flex-1 min-h-[62vh]"
+          />
+        )}
+        <DialogFooter className="sm:justify-between">
+          <EmailEditControls
+            editing={editingPreview}
+            edited={batchEdited}
+            onToggle={() => setEditingPreview(e => !e)}
+            onReset={() => {
+              if (!emailPreview) return;
+              setEditSubject(emailPreview.subject);
+              setEditHtml(emailPreview.html);
+              setPreviewResetTick(t => t + 1);
             }}
-            disabled={sendNow.isPending}
-          >
-            <Send className="h-3.5 w-3.5 mr-1.5" />
-            {sendNow.isPending ? "Sending…" : (batch?.status === "sent" ? "Resend now" : "Send now")}
-          </Button>
-          <Button variant="outline" onClick={() => setEmailPreview(null)}>Close preview</Button>
+          />
+          <div className="flex items-center gap-2">
+            <Button variant="outline" onClick={() => setEmailPreview(null)}>Close preview</Button>
+            {/* Send/resend straight from the preview — what you see is what goes out. */}
+            <Button
+              onClick={async () => {
+                if (!batch) return;
+                if (batch.status === "sent"
+                  && !confirm(`Resend this batch? Same ${picked.length} doctor${picked.length === 1 ? "" : "s"} will go out again.`)) return;
+                try {
+                  const overrides = batchEdited
+                    ? { subjectOverride: editSubject, htmlOverride: editHtml }
+                    : {};
+                  const res = await sendNow.mutateAsync(
+                    batch.status === "sent"
+                      ? { batchId: batch.id, force: true, ...overrides }
+                      : { batchId: batch.id, ...overrides },
+                  );
+                  toast.success(`${batch.status === "sent" ? "Resent" : "Sent"}. ${res.doctor_count} doctors → ${res.bcc_count} hospitals.`);
+                  setEmailPreview(null);
+                  close();
+                } catch (e) {
+                  toast.error(e instanceof Error ? e.message : "Send failed");
+                }
+              }}
+              disabled={sendNow.isPending}
+            >
+              <Send className="h-3.5 w-3.5 mr-1.5" />
+              {sendNow.isPending ? "Sending…" : (batch?.status === "sent" ? "Resend now" : "Send now")}
+            </Button>
+          </div>
         </DialogFooter>
       </DialogContent>
     </Dialog>

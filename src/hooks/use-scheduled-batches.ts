@@ -235,13 +235,25 @@ export function useCancelBatch() {
 export function useSendBatchNow() {
   const qc = useQueryClient();
   return useMutation({
-    mutationFn: async (input: string | { batchId: string; force?: boolean }): Promise<{ ok: boolean; bcc_count?: number; doctor_count?: number; message_id?: string; error?: string }> => {
+    mutationFn: async (
+      input: string | {
+        batchId: string; force?: boolean;
+        // Edits from the preview, shipped verbatim by send-batch instead of
+        // re-rendering the template. Omit/blank → template version is sent.
+        subjectOverride?: string; htmlOverride?: string; textOverride?: string;
+      },
+    ): Promise<{ ok: boolean; bcc_count?: number; doctor_count?: number; message_id?: string; error?: string }> => {
       // Accept either a bare id (legacy callers) or an object with a force
       // flag (used by the Resend button to re-fire an already-sent batch).
       const batchId = typeof input === "string" ? input : input.batchId;
       const force   = typeof input === "string" ? false  : !!input.force;
+      const overrides = typeof input === "string" ? {} : {
+        ...(input.subjectOverride ? { subject_override: input.subjectOverride } : {}),
+        ...(input.htmlOverride    ? { html_override:    input.htmlOverride }    : {}),
+        ...(input.textOverride    ? { text_override:    input.textOverride }    : {}),
+      };
       const { data, error } = await invokeWithTimeout<{ ok: boolean; bcc_count?: number; doctor_count?: number; message_id?: string; error?: string }>(
-        "send-batch", { batch_id: batchId, force }, 90_000);
+        "send-batch", { batch_id: batchId, force, ...overrides }, 90_000);
       if (error) throw error;
       const res = data as { ok: boolean; bcc_count?: number; doctor_count?: number; message_id?: string; error?: string };
       if (!res.ok) throw new Error(res.error ?? "send-batch failed");

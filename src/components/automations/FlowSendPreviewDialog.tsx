@@ -21,8 +21,14 @@ import { Button } from "@/components/ui/button";
 import { Send, RefreshCw, AlertTriangle } from "lucide-react";
 import { supabase } from "@/lib/supabase";
 import { toast } from "sonner";
+import { EditableEmailPreview, EmailEditControls } from "@/components/EditableEmailPreview";
 
 interface FlowPreview { from: string; to: string; subject: string; html: string; text?: string }
+
+/** Edits captured from the preview, passed to onConfirm so the caller can
+ *  forward them to send-flow-email (which ships them verbatim). Empty when the
+ *  team sent the template version unchanged. */
+export interface EmailOverrides { subject_override?: string; html_override?: string }
 
 /** dry-run preview with a hard timeout — supabase.functions.invoke can hang on
  *  a cold start / dropped connection, leaving the spinner forever. */
@@ -64,20 +70,34 @@ export function FlowSendPreviewDialog({
   previewMetadata?: Record<string, unknown>;
   title?:           string;
   confirmLabel?:    string;
-  onConfirm:        () => Promise<void>;
+  onConfirm:        (overrides?: EmailOverrides) => Promise<void>;
 }) {
   const [loading, setLoading] = useState(false);
   const [preview, setPreview] = useState<FlowPreview | null>(null);
   const [err,     setErr]     = useState<string | null>(null);
   const [sending, setSending] = useState(false);
+  // Editable-preview state — see EditableEmailPreview. editSubject/editHtml hold
+  // the live (possibly edited) values; `preview` keeps the pristine render.
+  const [editing,    setEditing]    = useState(false);
+  const [editSubject, setEditSubject] = useState("");
+  const [editHtml,    setEditHtml]    = useState("");
+  const [resetTick,   setResetTick]   = useState(0);
+
+  const edited = !!preview && (editSubject !== preview.subject || editHtml !== preview.html);
 
   // (Re)build the preview whenever the dialog opens for a run/stage.
   useEffect(() => {
     if (!open || !runId) { setPreview(null); setErr(null); return; }
     let cancelled = false;
-    setLoading(true); setErr(null); setPreview(null);
+    setLoading(true); setErr(null); setPreview(null); setEditing(false);
     fetchPreview(runId, previewStage, previewMetadata)
-      .then(p => { if (!cancelled) setPreview(p); })
+      .then(p => {
+        if (cancelled) return;
+        setPreview(p);
+        setEditSubject(p.subject);
+        setEditHtml(p.html);
+        setResetTick(t => t + 1);
+      })
       .catch(e => { if (!cancelled) setErr(e instanceof Error ? e.message : "Couldn't build the preview."); })
       .finally(() => { if (!cancelled) setLoading(false); });
     return () => { cancelled = true; };
@@ -89,7 +109,7 @@ export function FlowSendPreviewDialog({
   const handleSend = async () => {
     setSending(true);
     try {
-      await onConfirm();
+      await onConfirm(edited ? { subject_override: editSubject, html_override: editHtml } : undefined);
       onClose();
     } catch (e) {
       toast.error(e instanceof Error ? e.message : "Send failed");
@@ -104,9 +124,11 @@ export function FlowSendPreviewDialog({
         <DialogHeader>
           <DialogTitle className="text-base">{title}</DialogTitle>
           <DialogDescription className="text-xs">
-            {preview?.subject
-              ? (<><span className="font-medium text-slate-700">Subject:</span> {preview.subject}{preview.to ? <> · To {preview.to}</> : null}</>)
-              : "What goes out — review before sending."}
+            {edited
+              ? <span className="font-medium text-teal-700">Edited — your version sends, not the template.</span>
+              : preview
+                ? <>Review before sending{preview.to ? <> · To {preview.to}</> : null}. Click Edit email to tweak it.</>
+                : "What goes out — review before sending."}
           </DialogDescription>
         </DialogHeader>
 
@@ -121,20 +143,40 @@ export function FlowSendPreviewDialog({
           </div>
         )}
         {preview && !loading && !err && (
-          <iframe
-            title="Email preview"
-            sandbox=""
-            className="w-full flex-1 min-h-[62vh] rounded-md border border-slate-200 bg-white"
-            srcDoc={preview.html}
+          <EditableEmailPreview
+            subject={editSubject}
+            html={preview.html}
+            editing={editing}
+            onSubjectChange={setEditSubject}
+            onHtmlChange={setEditHtml}
+            resetKey={resetTick}
+            from={preview.from}
+            to={preview.to}
+            className="flex-1 min-h-[62vh]"
           />
         )}
 
-        <DialogFooter>
-          <Button onClick={handleSend} disabled={sending || loading || !preview}>
-            <Send className="h-3.5 w-3.5 mr-1.5" />
-            {sending ? "Sending…" : confirmLabel}
-          </Button>
-          <Button variant="outline" onClick={onClose} disabled={sending}>Cancel</Button>
+        <DialogFooter className="sm:justify-between">
+          {preview && !loading && !err ? (
+            <EmailEditControls
+              editing={editing}
+              edited={edited}
+              onToggle={() => setEditing(e => !e)}
+              onReset={() => {
+                if (!preview) return;
+                setEditSubject(preview.subject);
+                setEditHtml(preview.html);
+                setResetTick(t => t + 1);
+              }}
+            />
+          ) : <span />}
+          <div className="flex items-center gap-2">
+            <Button variant="outline" onClick={onClose} disabled={sending}>Cancel</Button>
+            <Button onClick={handleSend} disabled={sending || loading || !preview}>
+              <Send className="h-3.5 w-3.5 mr-1.5" />
+              {sending ? "Sending…" : confirmLabel}
+            </Button>
+          </div>
         </DialogFooter>
       </DialogContent>
     </Dialog>
