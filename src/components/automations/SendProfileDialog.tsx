@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription, DialogFooter } from "@/components/ui/dialog";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -15,9 +15,10 @@ import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover
 import { supabase } from "@/lib/supabase";
 import { useHospitals, type Hospital } from "@/hooks/use-hospitals";
 import { useEmailTemplates, renderTemplate } from "@/hooks/use-email-templates";
-import { useDoctorProfile, profileToTokens, calcCompletion } from "@/hooks/use-doctor-profiles";
-import { useWpCandidateForDoctor, wpCandidateToTokens } from "@/hooks/use-wp-candidates";
+import { useDoctorProfile, useDoctorProfiles, profileToTokens, calcCompletion, type DoctorProfile } from "@/hooks/use-doctor-profiles";
+import { useWpCandidateForDoctor, usePublishedWpCandidates, wpCandidateToTokens, normalizePhone, type WpCandidate } from "@/hooks/use-wp-candidates";
 import { useZohoData, type ZohoDoctorOnBoard, type ZohoLead } from "@/hooks/use-zoho-data";
+import { EditableEmailPreview, EmailEditControls } from "@/components/EditableEmailPreview";
 import { useQueryClient } from "@tanstack/react-query";
 
 interface Props {
@@ -35,6 +36,37 @@ interface DoctorOption {
   speciality: string | null;
   source:     "dob" | "lead";
 }
+
+// ── Profile completion (shared by the picker filter + the preview warning) ──
+// WP candidate is the source of truth; these are the 9 fields the preview
+// counts. Mirrors the inline ratio that used to live only in PreviewConfirm.
+const WP_COMPLETION_FIELDS: (keyof WpCandidate)[] = [
+  "job_title", "area_of_interest", "country_of_training", "years_experience",
+  "nationality", "family_status", "license_status", "expected_salary", "notice_period",
+];
+function wpCandidateCompletion(c: WpCandidate): number {
+  const filled = WP_COMPLETION_FIELDS.filter(f => { const v = c[f]; return v != null && v !== ""; }).length;
+  return Math.round((filled / WP_COMPLETION_FIELDS.length) * 100);
+}
+/** Normalise a name for matching — drops title prefixes + collapses spaces.
+ *  Mirrors the matcher inside useWpCandidateForDoctor so the picker filter
+ *  resolves the same WP record the preview would. */
+function normName(n: string | null | undefined): string {
+  return (n ?? "").toLowerCase().replace(/^(dr|doctor|prof|mr|mrs|ms|miss)\.?\s+/i, "").replace(/\s+/g, " ").trim();
+}
+
+// ── Send-fidelity wrapper ───────────────────────────────────────────────────
+// When the team edits the hospital preview, we ship their HTML verbatim. To
+// match what send-flow-email produces, wrap the edited body in the SAME font
+// shell the server uses (FONT_IMPORT + Garamond container). Keep in sync with
+// FONT_IMPORT / FONT_STACK in supabase/functions/send-flow-email/index.ts.
+const SEND_FONT_STACK  = "Garamond, 'EB Garamond', Georgia, 'Times New Roman', serif";
+const SEND_FONT_IMPORT = `<style>@import url('https://fonts.googleapis.com/css2?family=Poppins:wght@400;500;600;700&display=swap');</style>`;
+function wrapBodyForSend(bodyHtml: string): string {
+  return `${SEND_FONT_IMPORT}<div style="font-family:${SEND_FONT_STACK};font-size:17px;color:#1a2332;line-height:1.55;">${bodyHtml}</div>`;
+}
+
+interface SendOverrides { subject_override?: string; html_override?: string }
 
 /**
  * Triggers Flow 2 (Profile Sent to Hospital). Three steps:
@@ -83,6 +115,45 @@ export function SendProfileDialog({ open, onClose }: Props) {
   // "Signed status removes from public website (not eligible to be sent in
   // future profile batches)" + unavailable doctors are paused.
   const lifecycleMap = useDoctorLifecycleMap();
+  // Completion sources — used to drop 0%-complete doctors from the picker
+  // (a blank profile would render literal {{token}}s to the hospital).
+  const { data: wpPool = [], isLoading: wpLoading } = usePublishedWpCandidates();
+  const { data: allProfiles = [], isLoading: profilesLoading } = useDoctorProfiles();
+  const completionReady = !wpLoading && !profilesLoading;
+
+  // Index the WP pool + legacy profiles once so per-doctor completion is a
+  // few map lookups, not an O(doctors × candidates) scan on every render.
+  const completionIndex = useMemo(() => {
+    const byDoctorId = new Map<string, WpCandidate>();
+    const byWpId     = new Map<number, WpCandidate>();
+    const byPhone    = new Map<string, WpCandidate>();
+    const byEmail    = new Map<string, WpCandidate>();
+    const byName     = new Map<string, WpCandidate[]>();
+    for (const c of wpPool) {
+      if (c.doctor_id) byDoctorId.set(c.doctor_id, c);
+      byWpId.set(c.id, c);
+      const ph = normalizePhone(c.phone); if (ph && !byPhone.has(ph)) byPhone.set(ph, c);
+      const em = (c.email ?? "").toLowerCase().trim(); if (em && !byEmail.has(em)) byEmail.set(em, c);
+      const nm = normName(c.full_name); if (nm) (byName.get(nm) ?? byName.set(nm, []).get(nm)!).push(c);
+    }
+    const profileById = new Map<string, DoctorProfile>();
+    for (const p of allProfiles) profileById.set(p.doctor_id, p);
+    return { byDoctorId, byWpId, byPhone, byEmail, byName, profileById };
+  }, [wpPool, allProfiles]);
+
+  // Same resolution priority as useWpCandidateForDoctor: id → wp:id → phone
+  // → email → unique name. Returns 0 when nothing's on file.
+  const completionFor = useCallback((o: DoctorOption): number => {
+    const idx = completionIndex;
+    let hit = idx.byDoctorId.get(o.id);
+    if (!hit && o.id.startsWith("wp:")) { const n = Number(o.id.slice(3)); if (Number.isFinite(n)) hit = idx.byWpId.get(n); }
+    if (!hit && o.phone) { const k = normalizePhone(o.phone); if (k) hit = idx.byPhone.get(k); }
+    if (!hit && o.email) { const e = o.email.toLowerCase().trim(); if (e) hit = idx.byEmail.get(e); }
+    if (!hit && o.name) { const nm = normName(o.name); const ms = nm ? idx.byName.get(nm) : undefined; if (ms && ms.length === 1) hit = ms[0]; }
+    if (hit) return wpCandidateCompletion(hit);
+    return calcCompletion(idx.profileById.get(o.id));
+  }, [completionIndex]);
+
   const doctorOptions: DoctorOption[] = useMemo(() => {
     const opts: DoctorOption[] = [];
     const z = zoho as { rawDoctorsOnBoard?: ZohoDoctorOnBoard[]; rawLeads?: ZohoLead[] } | undefined;
@@ -105,8 +176,12 @@ export function SendProfileDialog({ open, onClose }: Props) {
       if (!eligible(id)) continue;
       opts.push({ id, name, email: l.Email, phone: l.Phone ?? l.Mobile, speciality: l.Specialty ?? l.Specialty_New, source: "lead" });
     }
-    return opts;
-  }, [zoho, lifecycleMap]);
+    // Drop doctors with a 0%-complete profile — sending them would leak
+    // literal {{token}}s to the hospital. Only filter once completion data
+    // has loaded, so the list isn't transiently emptied on first paint.
+    if (!completionReady) return opts;
+    return opts.filter(o => completionFor(o) > 0);
+  }, [zoho, lifecycleMap, completionReady, completionFor]);
 
   const selectedHospitals = useMemo(
     () => hospitals.filter(h => selectedIds.includes(h.id)),
@@ -116,8 +191,13 @@ export function SendProfileDialog({ open, onClose }: Props) {
   const hospitalTemplate = templates.find(t => t.key === "profile_sent_hospital");
   const doctorTemplate   = templates.find(t => t.key === "profile_sent_doctor");
 
-  const handleConfirm = async () => {
+  const handleConfirm = async (overrides?: SendOverrides) => {
     if (!selectedDoctor || selectedHospitals.length === 0) return;
+    // Edits only apply to a single-hospital send — the preview (and so the
+    // edited HTML) is rendered for one hospital, and the override would bake
+    // that hospital's tokens into every BCC run. The preview UI already
+    // disables editing for multi-hospital, but guard here too.
+    const effectiveOverrides = selectedHospitals.length === 1 ? overrides : undefined;
     setSubmitting(true);
     try {
       // One run per hospital — keeps Flow 2 timeline focused per relationship,
@@ -199,7 +279,7 @@ export function SendProfileDialog({ open, onClose }: Props) {
       for (const r of createdRuns ?? []) {
         try {
           const { data: sendResp, error: sendErr } = await supabase.functions.invoke("send-flow-email", {
-            body: { run_id: r.id },
+            body: { run_id: r.id, ...(effectiveOverrides ?? {}) },
           });
           if (sendErr) throw sendErr;
           const resp = sendResp as { ok: boolean; error?: string };
@@ -250,7 +330,7 @@ export function SendProfileDialog({ open, onClose }: Props) {
         {step === "pick-doctor" && (
           <DoctorPicker
             options={doctorOptions}
-            isLoading={zohoLoading}
+            isLoading={zohoLoading || !completionReady}
             onPick={(d) => { setSelectedDoctor(d); setStep("pick-hospitals"); }}
           />
         )}
@@ -457,11 +537,19 @@ function PreviewConfirm({
   doctorSubject: string;
   doctorBody: string;
   onBack: () => void;
-  onConfirm: () => void;
+  onConfirm: (overrides?: SendOverrides) => void;
   submitting: boolean;
   bccList: string[];
   setBccList: (next: string[]) => void;
 }) {
+  // Editing is offered for single-hospital sends only — the preview (and the
+  // edited HTML) is rendered for one hospital, so reusing it across a BCC
+  // batch would bake the wrong hospital's tokens into the others.
+  const isSingle = hospitals.length === 1;
+  const [editing,    setEditing]    = useState(false);
+  const [editSubject, setEditSubject] = useState("");
+  const [editHtml,    setEditHtml]    = useState("");
+  const [resetTick,   setResetTick]   = useState(0);
   // Who'll be on the From line — derived from the current user, which
   // matches what send-flow-email does at send time (looks up
   // assigned_to in its SENDERS registry). Falls back to the generic
@@ -486,15 +574,10 @@ function PreviewConfirm({
     else if (!(k in mergedProfileTokens)) mergedProfileTokens[k] = "";
   }
   // Completion %: prefer WP candidate filled-fields ratio; fall back to
-  // the legacy profile's completion if no WP record exists.
+  // the legacy profile's completion if no WP record exists. Same helper the
+  // picker uses to drop 0%-complete doctors, so the two always agree.
   const profileCompletion = wpCandidate
-    ? Math.round(
-        ([
-          wpCandidate.job_title, wpCandidate.area_of_interest, wpCandidate.country_of_training,
-          wpCandidate.years_experience, wpCandidate.nationality, wpCandidate.family_status,
-          wpCandidate.license_status, wpCandidate.expected_salary, wpCandidate.notice_period,
-        ].filter(v => v != null && v !== "").length / 9) * 100
-      )
+    ? wpCandidateCompletion(wpCandidate)
     : profile ? calcCompletion(profile) : 0;
   const sampleHospital = hospitals[0];
 
@@ -533,6 +616,27 @@ function PreviewConfirm({
   vars.doctor_card_html      = previewDoctorCardHtml(vars);
   vars.doctor_row_table_html = previewDoctorRowTableHtml(vars);
 
+  // The exact hospital email the team sees. The body is wrapped in the same
+  // font shell send-flow-email uses, so when edits are shipped verbatim they
+  // render identically to a normal send.
+  const renderedHospitalSubject = renderTemplate(hospitalSubject, vars);
+  const renderedHospitalBody    = renderTemplate(hospitalBody, vars) + (customMessage ? `\n\n--- Custom note ---\n${customMessage}` : "");
+  const hospitalHtml            = wrapBodyForSend(renderedHospitalBody);
+  const hospitalRecipient       = isSingle ? (hospitals[0].primary_recruiter_email ?? "(no recruiter email)") : `${hospitals.length} recipients (BCC)`;
+
+  // Seed (and re-seed) the editable copy from the rendered email whenever the
+  // rendered content changes — e.g. profile data finishes loading. Runs only
+  // when the actual string changes, so it won't clobber an in-progress edit.
+  useEffect(() => {
+    setEditSubject(renderedHospitalSubject);
+    setEditHtml(hospitalHtml);
+    setEditing(false);
+    setResetTick(t => t + 1);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [renderedHospitalSubject, hospitalHtml]);
+
+  const edited = isSingle && (editSubject !== renderedHospitalSubject || editHtml !== hospitalHtml);
+
   return (
     <div className="space-y-3">
       <div className="rounded-md border bg-slate-50/50 p-3 text-[12px] space-y-1">
@@ -570,17 +674,50 @@ function PreviewConfirm({
         </div>
       )}
 
-      <PreviewBlock
-        label={`To hospital · ${hospitals.length === 1 ? hospitals[0].primary_recruiter_email ?? "(no recruiter email)" : `${hospitals.length} recipients (BCC)`}`}
-        subject={renderTemplate(hospitalSubject, vars)}
-        body={renderTemplate(hospitalBody, vars) + (customMessage ? `\n\n--- Custom note ---\n${customMessage}` : "")}
-      />
+      {isSingle ? (
+        <div className="rounded-md border overflow-hidden">
+          <div className="px-3 py-1.5 border-b bg-slate-50/50 text-[10px] uppercase tracking-wider text-muted-foreground flex items-center justify-between gap-1.5">
+            <span className="flex items-center gap-1.5"><Eye className="h-3 w-3" /> To hospital · {hospitalRecipient}</span>
+            <EmailEditControls
+              editing={editing}
+              edited={edited}
+              onToggle={() => setEditing(e => !e)}
+              onReset={() => { setEditSubject(renderedHospitalSubject); setEditHtml(hospitalHtml); setResetTick(t => t + 1); }}
+            />
+          </div>
+          <EditableEmailPreview
+            subject={editSubject}
+            html={hospitalHtml}
+            editing={editing}
+            onSubjectChange={setEditSubject}
+            onHtmlChange={setEditHtml}
+            resetKey={resetTick}
+            from={senderLine}
+            to={isSingle ? (hospitals[0].primary_recruiter_email ?? undefined) : undefined}
+            className="border-0 rounded-none max-h-[420px]"
+          />
+        </div>
+      ) : (
+        <PreviewBlock
+          label={`To hospital · ${hospitalRecipient}`}
+          subject={renderedHospitalSubject}
+          body={renderedHospitalBody}
+        />
+      )}
 
       <PreviewBlock
         label={`To doctor · ${doctor.email ?? "(no email)"}`}
         subject={renderTemplate(doctorSubject, vars)}
         body={renderTemplate(doctorBody, vars)}
       />
+
+      {isSingle && (
+        <div className="text-[10.5px] text-muted-foreground px-0.5">
+          {edited
+            ? <span className="text-teal-700 font-medium">You've edited the hospital email — your version sends instead of the template.</span>
+            : "Click Edit email above to tweak the hospital email before it sends. The doctor heads-up uses its template."}
+        </div>
+      )}
 
       {hospitals.some(h => !h.primary_recruiter_email) && (
         <div className="rounded-md border border-amber-200 bg-amber-50 p-2 text-[11px] text-amber-900">
@@ -592,7 +729,10 @@ function PreviewConfirm({
         <Button variant="outline" onClick={onBack} disabled={submitting}>
           <ChevronLeft className="h-3.5 w-3.5 mr-1" /> Back
         </Button>
-        <Button onClick={onConfirm} disabled={submitting}>
+        <Button
+          onClick={() => onConfirm(edited ? { subject_override: editSubject, html_override: editHtml } : undefined)}
+          disabled={submitting}
+        >
           {submitting ? "Queueing..." : <><Send className="h-3.5 w-3.5 mr-1.5" /> Queue {hospitals.length} send{hospitals.length === 1 ? "" : "s"}</>}
         </Button>
       </DialogFooter>
