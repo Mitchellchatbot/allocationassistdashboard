@@ -358,7 +358,7 @@ function DoctorDetail({
                     {analyze.isPending ? <Loader2 className="h-3.5 w-3.5 mr-1 animate-spin" /> : <ScanLine className="h-3.5 w-3.5 mr-1" />}
                     {analyze.isPending ? "Analyzing…" : "Analyze CV"}
                   </Button>
-                  <LinkChip href={cvUrl} label="Open CV PDF" />
+                  <LinkChip href={cvUrl} label="Open CV file" />
                   <span className="text-[10.5px] text-muted-foreground">Runs Claude on the website CV — on demand, only when you ask.</span>
                 </div>
               ) : (

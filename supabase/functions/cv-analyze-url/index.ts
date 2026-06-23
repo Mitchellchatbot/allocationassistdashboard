@@ -20,6 +20,7 @@
 
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2";
 import { encodeBase64 } from "https://deno.land/std@0.224.0/encoding/base64.ts";
+import { unzipSync } from "https://esm.sh/fflate@0.8.2";
 
 const supabase = createClient(
   Deno.env.get("SUPABASE_URL")!,
@@ -89,16 +90,33 @@ Deno.serve(async (req: Request) => {
     return json({ ok: false, error: `Couldn't fetch the CV: ${String(e)}` }, 502);
   }
 
+  // Detect the real format by magic bytes (more reliable than the URL suffix):
+  //   • PDF  ("%PDF")      → native document block (best fidelity).
+  //   • DOCX ("PK", a zip) → unzip word/document.xml and send the text, since
+  //     Claude can't take a .docx as a document block.
   const isPdf = bytes[0] === 0x25 && bytes[1] === 0x50 && bytes[2] === 0x44 && bytes[3] === 0x46; // %PDF
-  if (!isPdf) {
-    return json({ ok: false, error: "On-demand analysis currently supports PDF CVs, and this file isn't a PDF." }, 422);
-  }
+  const isZip = bytes[0] === 0x50 && bytes[1] === 0x4B;                                           // PK… (docx)
 
-  // ── Claude extraction ──────────────────────────────────────────────────────
-  const content = [
-    { type: "document", source: { type: "base64", media_type: "application/pdf", data: encodeBase64(bytes) } },
-    { type: "text", text: EXTRACTION_PROMPT },
-  ];
+  let content: unknown[];
+  let mime = "application/pdf";
+  if (isPdf) {
+    content = [
+      { type: "document", source: { type: "base64", media_type: "application/pdf", data: encodeBase64(bytes) } },
+      { type: "text", text: EXTRACTION_PROMPT },
+    ];
+  } else if (isZip) {
+    let cvText: string;
+    try { cvText = extractDocxText(bytes); }
+    catch (e) { return json({ ok: false, error: `Couldn't read the .docx CV: ${String(e)}` }, 422); }
+    if (!cvText.trim()) return json({ ok: false, error: "The .docx CV had no extractable text." }, 422);
+    mime = "application/vnd.openxmlformats-officedocument.wordprocessingml.document";
+    content = [
+      { type: "text", text: `The following is the plain text of a doctor's CV (extracted from a Word .docx file):\n\n${cvText}` },
+      { type: "text", text: EXTRACTION_PROMPT },
+    ];
+  } else {
+    return json({ ok: false, error: "Unsupported CV format — on-demand analysis supports PDF and .docx CVs." }, 422);
+  }
 
   let claudeRes: Response;
   try {
@@ -123,7 +141,7 @@ Deno.serve(async (req: Request) => {
   try { extracted = JSON.parse(cleaned); } catch { return json({ ok: false, error: `Couldn't parse extraction JSON: ${cleaned.slice(0, 200)}` }, 502); }
 
   // ── Persist: a cv_uploads row (so the Overview shows it) ───────────────────
-  const fileName = decodeURIComponent(cvUrl.split("/").pop()?.split("?")[0] ?? "cv.pdf");
+  const fileName = decodeURIComponent(cvUrl.split("/").pop()?.split("?")[0] ?? (isPdf ? "cv.pdf" : "cv.docx"));
   const { data: inserted, error: insErr } = await supabase
     .from("cv_uploads")
     .insert({
@@ -131,7 +149,7 @@ Deno.serve(async (req: Request) => {
       doctor_name:    doctorName,
       token:          crypto.randomUUID(),
       file_name:      fileName,
-      file_mime:      "application/pdf",
+      file_mime:      mime,
       status:         "extracted",
       extracted_data: extracted,
       extracted_at:   new Date().toISOString(),
@@ -161,3 +179,21 @@ Deno.serve(async (req: Request) => {
 
   return json({ ok: true, extracted, upload_id: inserted?.id ?? null });
 });
+
+/** Pull readable text out of a .docx (a zip whose body is word/document.xml).
+ *  Claude can't take a .docx as a document block, so we send this text instead.
+ *  Mirrors extractDocxText() in cv-extract. */
+function extractDocxText(bytes: Uint8Array): string {
+  const files = unzipSync(bytes);
+  const xmlBytes = files["word/document.xml"];
+  if (!xmlBytes) throw new Error("no word/document.xml in archive");
+  let xml = new TextDecoder().decode(xmlBytes);
+  xml = xml
+    .replace(/<\/w:p>/g, "\n")        // paragraph end → newline
+    .replace(/<w:tab\/?>/g, "\t")     // tab
+    .replace(/<w:br\/?>/g, "\n")      // line break
+    .replace(/<[^>]+>/g, "")          // drop every remaining tag
+    .replace(/&amp;/g, "&").replace(/&lt;/g, "<").replace(/&gt;/g, ">")
+    .replace(/&quot;/g, '"').replace(/&apos;/g, "'");
+  return xml.replace(/[ \t]+\n/g, "\n").replace(/\n{3,}/g, "\n\n").trim();
+}
