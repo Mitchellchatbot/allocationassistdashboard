@@ -6,7 +6,7 @@
  * receipt file; edit or delete any of them. Amounts display through the
  * dashboard's AED/USD toggle.
  */
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import {
   useLicensingCosts, useUpsertLicensingCost, useDeleteLicensingCost,
   uploadLicensingReceipt, getReceiptUrl, type LicensingCost,
@@ -26,11 +26,17 @@ function fmtDate(iso: string | null): string {
   return isNaN(t.getTime()) ? "" : t.toLocaleDateString(undefined, { day: "numeric", month: "short", year: "numeric" });
 }
 
-export function LicensingSpend({ doctorId, doctorName }: { doctorId: string; doctorName: string | null }) {
+export function LicensingSpend({ doctorId, doctorName, addSignal }: { doctorId: string; doctorName: string | null; addSignal?: number }) {
   const [open, setOpen] = useState(false);
   const [adding, setAdding] = useState(false);
   const [editingId, setEditingId] = useState<string | null>(null);
   const { data: items = [], isLoading } = useLicensingCosts(doctorId);
+
+  // The row-level "Add cost" button bumps addSignal — open this section and jump
+  // straight into the add form. Ignore the initial 0 / undefined.
+  useEffect(() => {
+    if (addSignal && addSignal > 0) { setOpen(true); setAdding(true); }
+  }, [addSignal]);
   const { fmt } = useCurrency();
   const del = useDeleteLicensingCost();
 

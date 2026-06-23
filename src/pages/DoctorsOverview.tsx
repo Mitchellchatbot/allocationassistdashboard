@@ -30,7 +30,7 @@ import { toast } from "sonner";
 import {
   ChevronDown, ChevronRight, Mail, Phone, MapPin, Building2, UserCog,
   FileText, IdCard, Calendar, ExternalLink, Loader2, FileSearch, CircleUser,
-  Pencil, ScanLine, Check, X,
+  Pencil, ScanLine, Check, X, Banknote,
 } from "lucide-react";
 
 type RangeKey = "all" | "7" | "30" | "90" | "365";
@@ -124,6 +124,9 @@ export default function DoctorsOverview() {
 function DoctorRow({ d }: { d: ZohoDoctorOnBoard }) {
   const [open, setOpen] = useState(false);
   const [editing, setEditing] = useState(false);
+  // Bumped when the row's "Add cost" button is clicked — tells LicensingSpend
+  // (once the detail is mounted) to open + jump straight into the add form.
+  const [addCostSignal, setAddCostSignal] = useState(0);
   const doctorId = `dob:${d.id}`;
   const spec = specialtyOf(d);
   const name = d.Full_Name || `${d.First_Name ?? ""} ${d.Last_Name ?? ""}`.trim() || "Unnamed doctor";
@@ -132,7 +135,7 @@ function DoctorRow({ d }: { d: ZohoDoctorOnBoard }) {
     <div className="rounded-lg border border-slate-200 bg-white overflow-hidden">
       {/* FLAT row — Zoho facts only */}
       <div className="flex items-start gap-3 px-4 py-3">
-        <button type="button" onClick={() => setOpen(o => !o)} className="flex items-start gap-3 text-left min-w-0 flex-1 group">
+        <button type="button" onClick={() => { const next = !open; setOpen(next); if (!next) setAddCostSignal(0); }} className="flex items-start gap-3 text-left min-w-0 flex-1 group">
           {open ? <ChevronDown className="h-4 w-4 text-slate-400 mt-0.5 shrink-0" /> : <ChevronRight className="h-4 w-4 text-slate-400 mt-0.5 shrink-0" />}
           <div className="min-w-0 flex-1">
             <div className="flex flex-wrap items-center gap-x-2 gap-y-1">
@@ -149,10 +152,19 @@ function DoctorRow({ d }: { d: ZohoDoctorOnBoard }) {
           </div>
         </button>
         <div className="shrink-0 flex items-center gap-2">
-          <div className="text-right">
+          <div className="text-right hidden sm:block">
             <div className="text-[9px] uppercase tracking-wider text-slate-400">Added</div>
             <div className="text-[11.5px] text-slate-600">{fmtDate(d.Created_Time)}</div>
           </div>
+          <button
+            type="button"
+            onClick={() => { setOpen(true); setAddCostSignal(s => s + 1); }}
+            title="Add a licensing cost for this doctor"
+            className="inline-flex items-center gap-1 rounded-md border border-slate-200 text-slate-600 px-2 py-1.5 text-[11.5px] font-medium hover:border-teal-300 hover:text-teal-700 hover:bg-teal-50 transition-colors"
+          >
+            <Banknote className="h-3.5 w-3.5" />
+            <span className="hidden sm:inline">Add cost</span>
+          </button>
           <button
             type="button"
             onClick={() => { setEditing(e => !e); setOpen(true); }}
@@ -167,7 +179,7 @@ function DoctorRow({ d }: { d: ZohoDoctorOnBoard }) {
       {open && (
         <div className="border-t border-slate-100 bg-slate-50/40 px-4 py-3 space-y-2">
           {editing && <DoctorEditForm d={d} onDone={() => setEditing(false)} />}
-          <DoctorDetail doctorId={doctorId} name={name} email={d.Email} phone={d.Phone || d.Mobile} />
+          <DoctorDetail doctorId={doctorId} name={name} email={d.Email} phone={d.Phone || d.Mobile} addCostSignal={addCostSignal} />
         </div>
       )}
     </div>
@@ -247,9 +259,9 @@ function DoctorEditForm({ d, onDone }: { d: ZohoDoctorOnBoard; onDone: () => voi
 /** Lazily-mounted detail (only when a row is expanded). Pulls the doctor's
  *  profile, forms, and CV and lays them out as collapsible sections. */
 function DoctorDetail({
-  doctorId, name, email, phone,
+  doctorId, name, email, phone, addCostSignal,
 }: {
-  doctorId: string; name: string; email: string | null; phone: string | null;
+  doctorId: string; name: string; email: string | null; phone: string | null; addCostSignal?: number;
 }) {
   const doctorRef = useMemo(() => ({ id: doctorId, name, email, phone }), [doctorId, name, email, phone]);
   const wp = useWpCandidateForDoctor(doctorRef);
@@ -370,7 +382,7 @@ function DoctorDetail({
         </div>
       </Section>
 
-      <LicensingSpend doctorId={doctorId} doctorName={name} />
+      <LicensingSpend doctorId={doctorId} doctorName={name} addSignal={addCostSignal} />
     </div>
   );
 }
