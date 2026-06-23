@@ -21,15 +21,22 @@ import { lazy, Suspense, useMemo } from "react";
 import { useSearchParams } from "react-router-dom";
 import { DashboardLayout } from "@/components/layout/DashboardLayout";
 import { Input } from "@/components/ui/input";
-import { Search, UserSquare, GitBranch, Inbox } from "lucide-react";
+import { Search, UserSquare, GitBranch, Inbox, LayoutGrid } from "lucide-react";
 
+const DoctorsOverview = lazy(() => import("./DoctorsOverview"));
 const LeadsPipeline  = lazy(() => import("./LeadsPipeline"));
 const WpCandidates   = lazy(() => import("./WpCandidates"));
 const Forms          = lazy(() => import("./Forms"));
 
-type Tab = "responses" | "profiles" | "progress";
+type Tab = "overview" | "responses" | "profiles" | "progress";
 
 const TAB_META: Record<Tab, { label: string; icon: typeof UserSquare; subtitle: string; placeholder: string }> = {
+  overview: {
+    label:       "Overview",
+    icon:        LayoutGrid,
+    subtitle:    "Everyone on the board — Zoho facts up front, expand a doctor for their full profile, form submissions and CV.",
+    placeholder: "Search doctors by name, email, specialty, country, recruiter…",
+  },
   responses: {
     label:       "Responses",
     icon:        Inbox,
@@ -128,6 +135,7 @@ export default function Doctors() {
           the whole shell. */}
       <Suspense fallback={<TabSkeleton />}>
         <div key={tab}>
+          {tab === "overview"  && <DoctorsOverview />}
           {tab === "responses" && <Forms         embedded />}
           {tab === "profiles"  && <WpCandidates  embedded />}
           {tab === "progress"  && <LeadsPipeline embedded />}
@@ -138,11 +146,11 @@ export default function Doctors() {
 }
 
 function parseTab(raw: string | null): Tab {
-  if (raw === "responses" || raw === "progress" || raw === "profiles") return raw;
+  if (raw === "overview" || raw === "responses" || raw === "progress" || raw === "profiles") return raw;
   // Legacy `?tab=wp` (the old WP Candidates tab name) lands on Profiles.
   if (raw === "wp") return "profiles";
-  // Default landing — the first tab (incoming form Responses).
-  return "responses";
+  // Default landing — the new Overview tab.
+  return "overview";
 }
 
 function TabSkeleton() {
