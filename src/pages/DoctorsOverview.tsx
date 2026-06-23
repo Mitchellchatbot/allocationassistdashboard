@@ -21,6 +21,7 @@ import { useWpCandidateForDoctor } from "@/hooks/use-wp-candidates";
 import { useForms, type FormResponse } from "@/hooks/use-forms";
 import { useDoctorFormResponses, useDoctorCvUploads, useAnalyzeCv } from "@/hooks/use-doctor-dossier";
 import { useUpdateDoctorOnBoard } from "@/hooks/use-update-doctor";
+import { LicensingSpend } from "@/components/LicensingSpend";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -368,6 +369,8 @@ function DoctorDetail({
           )}
         </div>
       </Section>
+
+      <LicensingSpend doctorId={doctorId} doctorName={name} />
     </div>
   );
 }
