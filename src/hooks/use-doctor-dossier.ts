@@ -5,7 +5,7 @@
  * `enabled` only when a doctorId is passed, so they fire lazily — the Overview
  * mounts a detail component (and thus these hooks) only when a row is expanded.
  */
-import { useQuery } from "@tanstack/react-query";
+import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { supabase } from "@/lib/supabase";
 import type { FormResponse } from "@/hooks/use-forms";
 import type { CvUpload } from "@/hooks/use-cv-uploads";
@@ -48,5 +48,27 @@ export function useDoctorCvUploads(doctorId: string | null) {
       return (data ?? []) as CvUpload[];
     },
     staleTime: 60_000,
+  });
+}
+
+/** On-demand: analyze a doctor's CV PDF (their website cv_url) via Claude. The
+ *  edge function parses it, persists a cv_uploads row + fills empty profile
+ *  fields, and returns the extracted data. We invalidate the CV query so the
+ *  Overview re-renders with the freshly-parsed result. */
+export function useAnalyzeCv() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: async (input: { cvUrl: string; doctorId: string; doctorName?: string }) => {
+      const { data, error } = await supabase.functions.invoke("cv-analyze-url", {
+        body: { cv_url: input.cvUrl, doctor_id: input.doctorId, doctor_name: input.doctorName },
+      });
+      if (error) throw new Error((error as { message?: string })?.message ?? "Analysis failed.");
+      const res = data as { ok?: boolean; error?: string; extracted?: Record<string, unknown> };
+      if (!res?.ok) throw new Error(res?.error ?? "Analysis failed.");
+      return res.extracted ?? {};
+    },
+    onSuccess: (_data, input) => {
+      qc.invalidateQueries({ queryKey: ["doctor-dossier", "cv", input.doctorId] });
+    },
   });
 }

@@ -19,12 +19,17 @@ import { useZohoData, type ZohoDoctorOnBoard } from "@/hooks/use-zoho-data";
 import { useDoctorProfile, calcCompletion } from "@/hooks/use-doctor-profiles";
 import { useWpCandidateForDoctor } from "@/hooks/use-wp-candidates";
 import { useForms, type FormResponse } from "@/hooks/use-forms";
-import { useDoctorFormResponses, useDoctorCvUploads } from "@/hooks/use-doctor-dossier";
+import { useDoctorFormResponses, useDoctorCvUploads, useAnalyzeCv } from "@/hooks/use-doctor-dossier";
+import { useUpdateDoctorOnBoard } from "@/hooks/use-update-doctor";
 import { Badge } from "@/components/ui/badge";
+import { Button } from "@/components/ui/button";
+import { Input } from "@/components/ui/input";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
+import { toast } from "sonner";
 import {
   ChevronDown, ChevronRight, Mail, Phone, MapPin, Building2, UserCog,
   FileText, IdCard, Calendar, ExternalLink, Loader2, FileSearch, CircleUser,
+  Pencil, ScanLine, Check, X,
 } from "lucide-react";
 
 type RangeKey = "all" | "7" | "30" | "90" | "365";
@@ -117,6 +122,7 @@ export default function DoctorsOverview() {
 
 function DoctorRow({ d }: { d: ZohoDoctorOnBoard }) {
   const [open, setOpen] = useState(false);
+  const [editing, setEditing] = useState(false);
   const doctorId = `dob:${d.id}`;
   const spec = specialtyOf(d);
   const name = d.Full_Name || `${d.First_Name ?? ""} ${d.Last_Name ?? ""}`.trim() || "Unnamed doctor";
@@ -124,36 +130,115 @@ function DoctorRow({ d }: { d: ZohoDoctorOnBoard }) {
   return (
     <div className="rounded-lg border border-slate-200 bg-white overflow-hidden">
       {/* FLAT row — Zoho facts only */}
-      <button
-        type="button"
-        onClick={() => setOpen(o => !o)}
-        className="w-full flex items-start gap-3 px-4 py-3 text-left hover:bg-slate-50/70 transition-colors"
-      >
-        {open ? <ChevronDown className="h-4 w-4 text-slate-400 mt-0.5 shrink-0" /> : <ChevronRight className="h-4 w-4 text-slate-400 mt-0.5 shrink-0" />}
-        <div className="min-w-0 flex-1">
-          <div className="flex flex-wrap items-center gap-x-2 gap-y-1">
-            <span className="text-[14px] font-semibold text-slate-900 truncate">{name}</span>
-            {spec && <Badge variant="outline" className="text-[10px] bg-teal-50 text-teal-700 border-teal-200">{spec}</Badge>}
+      <div className="flex items-start gap-3 px-4 py-3">
+        <button type="button" onClick={() => setOpen(o => !o)} className="flex items-start gap-3 text-left min-w-0 flex-1 group">
+          {open ? <ChevronDown className="h-4 w-4 text-slate-400 mt-0.5 shrink-0" /> : <ChevronRight className="h-4 w-4 text-slate-400 mt-0.5 shrink-0" />}
+          <div className="min-w-0 flex-1">
+            <div className="flex flex-wrap items-center gap-x-2 gap-y-1">
+              <span className="text-[14px] font-semibold text-slate-900 truncate group-hover:text-teal-700 transition-colors">{name}</span>
+              {spec && <Badge variant="outline" className="text-[10px] bg-teal-50 text-teal-700 border-teal-200">{spec}</Badge>}
+            </div>
+            <div className="mt-1 flex flex-wrap items-center gap-x-4 gap-y-0.5 text-[11.5px] text-slate-500">
+              {d.Email && <span className="inline-flex items-center gap-1 min-w-0"><Mail className="h-3 w-3 shrink-0" /><span className="truncate">{d.Email}</span></span>}
+              {(d.Phone || d.Mobile) && <span className="inline-flex items-center gap-1"><Phone className="h-3 w-3 shrink-0" />{d.Phone || d.Mobile}</span>}
+              {d.Country_of_Specialty_training && <span className="inline-flex items-center gap-1"><MapPin className="h-3 w-3 shrink-0" />{d.Country_of_Specialty_training}</span>}
+              {d.Account_Name?.name && <span className="inline-flex items-center gap-1"><Building2 className="h-3 w-3 shrink-0" />{d.Account_Name.name}</span>}
+              {d.Owner?.name && <span className="inline-flex items-center gap-1"><UserCog className="h-3 w-3 shrink-0" />{d.Owner.name}</span>}
+            </div>
           </div>
-          <div className="mt-1 flex flex-wrap items-center gap-x-4 gap-y-0.5 text-[11.5px] text-slate-500">
-            {d.Email && <span className="inline-flex items-center gap-1 min-w-0"><Mail className="h-3 w-3 shrink-0" /><span className="truncate">{d.Email}</span></span>}
-            {(d.Phone || d.Mobile) && <span className="inline-flex items-center gap-1"><Phone className="h-3 w-3 shrink-0" />{d.Phone || d.Mobile}</span>}
-            {d.Country_of_Specialty_training && <span className="inline-flex items-center gap-1"><MapPin className="h-3 w-3 shrink-0" />{d.Country_of_Specialty_training}</span>}
-            {d.Account_Name?.name && <span className="inline-flex items-center gap-1"><Building2 className="h-3 w-3 shrink-0" />{d.Account_Name.name}</span>}
-            {d.Owner?.name && <span className="inline-flex items-center gap-1"><UserCog className="h-3 w-3 shrink-0" />{d.Owner.name}</span>}
+        </button>
+        <div className="shrink-0 flex items-center gap-2">
+          <div className="text-right">
+            <div className="text-[9px] uppercase tracking-wider text-slate-400">Added</div>
+            <div className="text-[11.5px] text-slate-600">{fmtDate(d.Created_Time)}</div>
           </div>
+          <button
+            type="button"
+            onClick={() => { setEditing(e => !e); setOpen(true); }}
+            title="Edit Zoho fields"
+            className={`rounded-md border p-1.5 transition-colors ${editing ? "border-teal-300 bg-teal-50 text-teal-700" : "border-slate-200 text-slate-400 hover:text-slate-700 hover:bg-slate-50"}`}
+          >
+            <Pencil className="h-3.5 w-3.5" />
+          </button>
         </div>
-        <div className="shrink-0 text-right">
-          <div className="text-[9px] uppercase tracking-wider text-slate-400">Added</div>
-          <div className="text-[11.5px] text-slate-600">{fmtDate(d.Created_Time)}</div>
-        </div>
-      </button>
+      </div>
 
       {open && (
-        <div className="border-t border-slate-100 bg-slate-50/40 px-4 py-3">
+        <div className="border-t border-slate-100 bg-slate-50/40 px-4 py-3 space-y-2">
+          {editing && <DoctorEditForm d={d} onDone={() => setEditing(false)} />}
           <DoctorDetail doctorId={doctorId} name={name} email={d.Email} phone={d.Phone || d.Mobile} />
         </div>
       )}
+    </div>
+  );
+}
+
+/** Inline editor for the doctor's Zoho (Doctors-on-Board / Contacts) fields.
+ *  Saves straight back to Zoho and optimistically updates the local cache. */
+const EDITABLE_FIELDS: Array<{ key: keyof ZohoDoctorOnBoard; label: string }> = [
+  { key: "First_Name", label: "First name" },
+  { key: "Last_Name", label: "Last name" },
+  { key: "Email", label: "Email" },
+  { key: "Phone", label: "Phone" },
+  { key: "Mobile", label: "Mobile" },
+  { key: "Specialty_New", label: "Specialty" },
+  { key: "Speciality", label: "Specialty (legacy)" },
+  { key: "Country_of_Specialty_training", label: "Country of training" },
+  { key: "Lead_Source", label: "Lead source" },
+];
+
+function DoctorEditForm({ d, onDone }: { d: ZohoDoctorOnBoard; onDone: () => void }) {
+  const update = useUpdateDoctorOnBoard();
+  const [vals, setVals] = useState<Record<string, string>>(() => {
+    const init: Record<string, string> = {};
+    for (const f of EDITABLE_FIELDS) init[f.key as string] = (d[f.key] as string | null) ?? "";
+    return init;
+  });
+
+  const save = async () => {
+    // Only send fields that actually changed.
+    const changed: Record<string, unknown> = {};
+    for (const f of EDITABLE_FIELDS) {
+      const k = f.key as string;
+      const before = (d[f.key] as string | null) ?? "";
+      if (vals[k] !== before) changed[k] = vals[k] === "" ? null : vals[k];
+    }
+    if (Object.keys(changed).length === 0) { onDone(); return; }
+    try {
+      await update.mutateAsync({ id: d.id, fields: changed });
+      toast.success("Saved to Zoho.");
+      onDone();
+    } catch (e) {
+      toast.error(e instanceof Error ? e.message : "Couldn't save to Zoho.");
+    }
+  };
+
+  return (
+    <div className="rounded-md border border-teal-200 bg-teal-50/40 p-3">
+      <div className="flex items-center gap-1.5 mb-2 text-[11px] font-medium text-teal-800">
+        <Pencil className="h-3 w-3" /> Edit Zoho fields — saves straight back to Zoho
+      </div>
+      <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-2.5">
+        {EDITABLE_FIELDS.map(f => (
+          <label key={f.key as string} className="block">
+            <span className="text-[9.5px] uppercase tracking-wider text-slate-500">{f.label}</span>
+            <Input
+              value={vals[f.key as string]}
+              onChange={e => setVals(v => ({ ...v, [f.key as string]: e.target.value }))}
+              className="mt-0.5 h-8 text-[12px] bg-white"
+            />
+          </label>
+        ))}
+      </div>
+      <div className="flex items-center gap-2 mt-3">
+        <Button size="sm" className="h-7 text-[12px]" onClick={save} disabled={update.isPending}>
+          {update.isPending ? <Loader2 className="h-3.5 w-3.5 mr-1 animate-spin" /> : <Check className="h-3.5 w-3.5 mr-1" />}
+          Save to Zoho
+        </Button>
+        <Button size="sm" variant="outline" className="h-7 text-[12px]" onClick={onDone} disabled={update.isPending}>
+          <X className="h-3.5 w-3.5 mr-1" /> Cancel
+        </Button>
+      </div>
     </div>
   );
 }
@@ -171,6 +256,8 @@ function DoctorDetail({
   const { data: responses = [], isLoading: rLoading } = useDoctorFormResponses(doctorId);
   const { data: cvs = [], isLoading: cvLoading } = useDoctorCvUploads(doctorId);
   const { data: forms = [] } = useForms();
+  const analyze = useAnalyzeCv();
+  const cvUrl = wp?.cv_url || profile?.cv_url || null;
   const formName = useMemo(() => {
     const m = new Map<string, string>();
     for (const f of forms) m.set(f.id, f.name);
@@ -240,23 +327,46 @@ function DoctorDetail({
       <Section
         icon={<IdCard className="h-3.5 w-3.5" />}
         title="CV information"
-        meta={cvLoading ? "loading…" : (cvWithData ? "Parsed" : cvs.length ? cvs[0].status : "None")}
+        meta={cvLoading ? "loading…" : (cvWithData ? "Parsed" : cvs.length ? cvs[0].status : (cvUrl ? "Not analyzed" : "No CV"))}
         defaultOpen={false}
-        empty={!cvLoading && cvs.length === 0}
+        empty={!cvLoading && cvs.length === 0 && !cvUrl}
         loading={cvLoading}
       >
-        {cvs.length > 0 && (
-          <div className="space-y-2">
+        <div className="space-y-2">
+          {cvs.length > 0 && (
             <div className="flex flex-wrap items-center gap-2 text-[11.5px] text-slate-600">
               {cvs[0].file_name && <span className="inline-flex items-center gap-1"><FileSearch className="h-3 w-3" />{cvs[0].file_name}</span>}
               <Badge variant="outline" className="text-[10px]">{cvs[0].status}</Badge>
               {cvs[0].uploaded_at && <span>Uploaded {fmtDate(cvs[0].uploaded_at)}</span>}
             </div>
-            {cvWithData
-              ? <KeyValueGrid pairs={Object.entries(cvWithData.extracted_data as Record<string, unknown>).map(([k, v]) => [prettyKey(k), stringifyVal(v)] as [string, string])} />
-              : <p className="text-[11.5px] text-muted-foreground">{cvs[0].extraction_error ? `Extraction failed: ${cvs[0].extraction_error}` : "CV uploaded but not parsed yet."}</p>}
-          </div>
-        )}
+          )}
+          {cvWithData ? (
+            <KeyValueGrid pairs={Object.entries(cvWithData.extracted_data as Record<string, unknown>).map(([k, v]) => [prettyKey(k), stringifyVal(v)] as [string, string])} />
+          ) : (
+            <div className="space-y-2">
+              {cvs[0]?.extraction_error && <p className="text-[11.5px] text-rose-600">Last extraction failed: {cvs[0].extraction_error}</p>}
+              {cvUrl ? (
+                <div className="flex flex-wrap items-center gap-2">
+                  <Button
+                    size="sm" className="h-7 text-[12px]"
+                    disabled={analyze.isPending}
+                    onClick={async () => {
+                      try { await analyze.mutateAsync({ cvUrl, doctorId, doctorName: name }); toast.success("CV analyzed."); }
+                      catch (e) { toast.error(e instanceof Error ? e.message : "Couldn't analyze the CV."); }
+                    }}
+                  >
+                    {analyze.isPending ? <Loader2 className="h-3.5 w-3.5 mr-1 animate-spin" /> : <ScanLine className="h-3.5 w-3.5 mr-1" />}
+                    {analyze.isPending ? "Analyzing…" : "Analyze CV"}
+                  </Button>
+                  <LinkChip href={cvUrl} label="Open CV PDF" />
+                  <span className="text-[10.5px] text-muted-foreground">Runs Claude on the website CV — on demand, only when you ask.</span>
+                </div>
+              ) : (
+                <p className="text-[11.5px] text-muted-foreground">No CV on file for this doctor.</p>
+              )}
+            </div>
+          )}
+        </div>
       </Section>
     </div>
   );
