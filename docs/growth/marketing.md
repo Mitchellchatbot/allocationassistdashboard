@@ -60,9 +60,9 @@ A date-range picker scopes everything.
   form submission (`meta_leads`), it's re-attributed to Meta regardless of what was
   typed in `Lead_Source` — fixing the common "came from a Meta form but logged as
   Website" miscategorisation.
-- **Revenue** uses a shared constant (`REVENUE_PER_CONVERSION_AED` ≈ AED 18,362.50,
-  i.e. USD 5,000 at the AED peg) so Marketing and Finance rank channels with the
-  same fee. It's an *estimate* (conversions × fee), not summed invoices.
+- **Revenue** uses a shared constant (`REVENUE_PER_CONVERSION_AED` = AED 20,000,
+  i.e. ≈ USD 5,446.56 at the AED peg) so Marketing and Finance rank channels with
+  the same fee. It's an *estimate* (conversions × fee), not summed invoices.
 
 ## Reading the channel table (column by column)
 

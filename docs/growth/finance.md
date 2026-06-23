@@ -48,8 +48,8 @@ simple P&L and ROI picture for leadership.
   from the Digital Marketing Google Sheet (one row per expense; totals are computed
   in the dashboard, not stored). Re-imports are idempotent. Categories are
   normalised to canonical channels (Meta, Google Ads, LinkedIn…).
-- **Revenue** = **conversions × `REVENUE_PER_CONVERSION_AED`** (≈ AED 18,362.50 =
-  USD 5,000 at the peg). Conversions are **Zoho Doctors-on-Board** rows in the
+- **Revenue** = **conversions × `REVENUE_PER_CONVERSION_AED`** (AED 20,000 ≈
+  USD 5,446.56 at the peg). Conversions are **Zoho Doctors-on-Board** rows in the
   period — the single source of truth for placements. The fee constant is shared
   with the Marketing page so both rank channels identically.
 - **Qualified** (for cost-per-qualified) = leads at "Initial Sales Call Completed"
@@ -62,7 +62,7 @@ simple P&L and ROI picture for leadership.
 
 ## The numbers, precisely
 
-- **Revenue** = conversions × `REVENUE_PER_CONVERSION_AED` (≈ AED 18,362.50). It's
+- **Revenue** = conversions × `REVENUE_PER_CONVERSION_AED` (AED 20,000). It's
   an estimate, not invoices — and the page labels totals "(period total)" so a
   multi-month figure is never misread as monthly.
 - **Profit (today)** = Revenue − Marketing spend. Payroll and other operating

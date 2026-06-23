@@ -691,7 +691,7 @@ const Finance = () => {
       label: new Date(`${k}-01`).toLocaleDateString("en-GB", { month: "short", year: "2-digit" }),
     }));
 
-    // Revenue = conversions × fee per placement (5,000 AED).
+    // Revenue = conversions × fee per placement (AED 20,000).
     const revenueByMonth: Record<string, number> = {};
     for (const m of months) {
       revenueByMonth[m.key] = (conversionsByMonth[m.key] ?? 0) * REVENUE_PER_CONVERSION_AED;
