@@ -378,6 +378,7 @@ export function SendProfileDialog({ open, onClose }: Props) {
             hospitals={hospitals}
             selectedIds={selectedIds}
             onToggle={(id) => setSelectedIds(prev => prev.includes(id) ? prev.filter(x => x !== id) : [...prev, id])}
+            onSetSelected={setSelectedIds}
             onContinue={() => setStep("preview-confirm")}
             onBack={() => setStep("pick-doctor")}
             customMessage={customMessage}
@@ -485,12 +486,13 @@ function DoctorPicker({ options, isLoading, onPick }: {
 }
 
 function HospitalPicker({
-  doctor, hospitals, selectedIds, onToggle, onContinue, onBack, customMessage, setCustomMessage,
+  doctor, hospitals, selectedIds, onToggle, onSetSelected, onContinue, onBack, customMessage, setCustomMessage,
 }: {
   doctor: DoctorOption;
   hospitals: Hospital[];
   selectedIds: string[];
   onToggle: (id: string) => void;
+  onSetSelected: (ids: string[]) => void;
   onContinue: () => void;
   onBack: () => void;
   customMessage: string;
@@ -507,6 +509,17 @@ function HospitalPicker({
     );
   }, [hospitals, q]);
 
+  // "Select all" acts on whatever's currently filtered (so a search narrows it).
+  const allFilteredSelected = filtered.length > 0 && filtered.every(h => selectedIds.includes(h.id));
+  const toggleAll = () => {
+    if (allFilteredSelected) {
+      const drop = new Set(filtered.map(h => h.id));
+      onSetSelected(selectedIds.filter(id => !drop.has(id)));
+    } else {
+      onSetSelected([...new Set([...selectedIds, ...filtered.map(h => h.id)])]);
+    }
+  };
+
   return (
     <div className="space-y-3">
       <div className="rounded-md border bg-slate-50/50 p-2.5">
@@ -519,7 +532,18 @@ function HospitalPicker({
         <Input value={q} onChange={e => setQ(e.target.value)} placeholder="Filter hospitals..." className="pl-7 text-[12px]" />
       </div>
       <div className="flex items-center justify-between text-[11px]">
-        <span className="text-muted-foreground">{selectedIds.length} selected</span>
+        <div className="flex items-center gap-2">
+          <button
+            type="button"
+            onClick={toggleAll}
+            disabled={filtered.length === 0}
+            className="inline-flex items-center gap-1 rounded-md border border-slate-200 px-2 py-1 text-[11px] font-medium text-slate-600 hover:border-teal-300 hover:text-teal-700 hover:bg-teal-50 transition-colors disabled:opacity-40"
+          >
+            {allFilteredSelected ? "Deselect all" : `Select all${q ? " (filtered)" : ""}`}
+            {!allFilteredSelected && <span className="text-slate-400">· {filtered.length}</span>}
+          </button>
+          <span className="text-muted-foreground">{selectedIds.length} selected</span>
+        </div>
         {selectedIds.length > 1 && <Badge variant="outline" className="text-[10px] bg-amber-50 border-amber-200">BCC mode</Badge>}
       </div>
       <div className="rounded-md border max-h-[280px] overflow-y-auto divide-y">
