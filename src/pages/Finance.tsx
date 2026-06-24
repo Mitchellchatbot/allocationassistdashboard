@@ -588,34 +588,6 @@ const Finance = () => {
     }).length;
   }, [zoho, dateRange]);
 
-  // Monthly P&L series — revenue, spend, and resulting profit per month.
-  // Drives the chart at the bottom of the page so it tells the same story as
-  // the P&L table above (Conversions × per-doctor fee − Marketing spend).
-  const monthlyPnl = useMemo(() => {
-    const map = new Map<string, { month: string; monthKey: string; spend: number; revenue: number; profit: number }>();
-    for (const m of monthly) {
-      map.set(m.monthKey, { month: m.month, monthKey: m.monthKey, spend: m.amount, revenue: 0, profit: 0 });
-    }
-    // Layer revenue from DoB conversions in window
-    const fromMs = dateRange.from.getTime();
-    const toMs   = dateRange.to.getTime() + 86_400_000;
-    for (const dob of zoho?.rawDoctorsOnBoard ?? []) {
-      if (!dob.Created_Time) continue;
-      const t = new Date(dob.Created_Time).getTime();
-      if (isNaN(t) || t < fromMs || t >= toMs) continue;
-      const key = dob.Created_Time.slice(0, 7);
-      if (!key) continue;
-      const label = new Date(key + "-01").toLocaleDateString("en-GB", { month: "short", year: "2-digit" });
-      const cur = map.get(key) ?? { month: label, monthKey: key, spend: 0, revenue: 0, profit: 0 };
-      cur.revenue += REVENUE_PER_CONVERSION_AED;
-      map.set(key, cur);
-    }
-    // Compute profit per month
-    for (const row of map.values()) {
-      row.profit = row.revenue - row.spend;
-    }
-    return Array.from(map.values()).sort((a, b) => a.monthKey.localeCompare(b.monthKey));
-  }, [monthly, zoho?.rawDoctorsOnBoard, dateRange]);
 
   const hasData = transactionCount > 0 || leadStats.totalLeads > 0;
 
@@ -753,30 +725,39 @@ const Finance = () => {
   // estimate. Falls back to the estimate when Books isn't connected.
   const booksPnl = useMemo(() => {
     if (!books?.configured || !books?.ok || !books.byMonth?.length) return null;
+    const convByMonth = profitRows.conversionsByMonth;
     const months = [...books.byMonth]
       .sort((a, b) => a.month.localeCompare(b.month))
-      .map(m => ({
-        key:      m.month,
-        label:    new Date(`${m.month}-01`).toLocaleDateString("en-GB", { month: "short", year: "2-digit" }),
-        revenue:  m.revenue,
-        expenses: m.expenses,
-        profit:   m.revenue - m.expenses,
-      }));
+      .map(m => {
+        let revenue = m.revenue;
+        let estimated = false;
+        // No invoiced revenue booked for this month yet (invoices lag) — fall
+        // back to the conversions × per-doctor estimate, flagged with an *.
+        if (revenue <= 0) {
+          const est = (convByMonth[m.month] ?? 0) * REVENUE_PER_CONVERSION_AED;
+          if (est > 0) { revenue = est; estimated = true; }
+        }
+        return {
+          key:      m.month,
+          label:    new Date(`${m.month}-01`).toLocaleDateString("en-GB", { month: "short", year: "2-digit" }),
+          revenue,
+          expenses: m.expenses,
+          profit:   revenue - m.expenses,
+          estimated,
+        };
+      });
+    const revenueTotal = months.reduce((s, m) => s + m.revenue, 0);
+    const expensesTotal = books.expenses ?? 0;
     return {
       months,
-      revenueTotal:  books.revenue  ?? 0,
-      expensesTotal: books.expenses ?? 0,
-      profitTotal:   books.profit   ?? ((books.revenue ?? 0) - (books.expenses ?? 0)),
-      outstanding:   books.outstanding ?? 0,
+      revenueTotal,
+      expensesTotal,
+      profitTotal: revenueTotal - expensesTotal,
+      outstanding: books.outstanding ?? 0,
+      anyEstimated: months.some(m => m.estimated),
     };
-  }, [books]);
+  }, [books, profitRows.conversionsByMonth]);
   const useBooks = !!booksPnl;
-
-  // Chart series — Books actuals (revenue / expenses-as-spend / profit) when
-  // connected, else the conversions-based estimate.
-  const pnlChart = useBooks
-    ? booksPnl!.months.map(m => ({ month: m.label, monthKey: m.key, revenue: m.revenue, spend: m.expenses, profit: m.profit }))
-    : monthlyPnl;
 
   return (
     <DashboardLayout title="Finance" subtitle="Revenue, spend, profit, and ROI across all channels" docSlug="growth/finance">
@@ -1104,11 +1085,11 @@ const Finance = () => {
                 <tr className="border-b border-border/30 hover:bg-muted/30 transition-colors">
                   <td className="py-3.5 px-5 text-[14px] font-semibold text-foreground">Revenue <span className="text-[11px] font-normal text-muted-foreground">(invoiced)</span></td>
                   {booksPnl!.months.map(m => (
-                    <td key={m.key} className="py-3.5 px-3 text-[14px] text-right tabular-nums text-emerald-700 font-semibold">
-                      {m.revenue > 0 ? fmtAED(m.revenue) : <span className="text-muted-foreground/30">—</span>}
+                    <td key={m.key} className={`py-3.5 px-3 text-[14px] text-right tabular-nums font-semibold ${m.estimated ? "text-emerald-600/70" : "text-emerald-700"}`}>
+                      {m.revenue > 0 ? <>{fmtAED(m.revenue)}{m.estimated && <span className="text-amber-600" title="Estimated — no invoices booked yet">*</span>}</> : <span className="text-muted-foreground/30">—</span>}
                     </td>
                   ))}
-                  <td className="py-3.5 px-5 text-[14px] text-right tabular-nums font-bold text-emerald-700">{fmtAED(booksPnl!.revenueTotal)}</td>
+                  <td className="py-3.5 px-5 text-[14px] text-right tabular-nums font-bold text-emerald-700">{fmtAED(booksPnl!.revenueTotal)}{booksPnl!.anyEstimated && <span className="text-amber-600">*</span>}</td>
                 </tr>
                 <tr className="border-b border-border/30 hover:bg-muted/30 transition-colors">
                   <td className="py-3.5 px-5 text-[14px] font-semibold text-foreground">Expenses</td>
@@ -1123,11 +1104,11 @@ const Finance = () => {
                   <td className="py-4 px-5 text-[14px] text-foreground">Profit</td>
                   {booksPnl!.months.map(m => (
                     <td key={m.key} className={`py-4 px-3 text-[15px] text-right tabular-nums ${m.profit >= 0 ? "text-emerald-700" : "text-rose-700"}`}>
-                      {m.revenue === 0 && m.expenses === 0 ? <span className="text-muted-foreground/30">—</span> : (m.profit < 0 ? `(${fmtAED(Math.abs(m.profit))})` : fmtAED(m.profit))}
+                      {m.revenue === 0 && m.expenses === 0 ? <span className="text-muted-foreground/30">—</span> : <>{m.profit < 0 ? `(${fmtAED(Math.abs(m.profit))})` : fmtAED(m.profit)}{m.estimated && <span className="text-amber-600">*</span>}</>}
                     </td>
                   ))}
                   <td className={`py-4 px-5 text-[16px] text-right tabular-nums ${booksPnl!.profitTotal >= 0 ? "text-emerald-700" : "text-rose-700"}`}>
-                    {booksPnl!.profitTotal < 0 ? `(${fmtAED(Math.abs(booksPnl!.profitTotal))})` : fmtAED(booksPnl!.profitTotal)}
+                    {booksPnl!.profitTotal < 0 ? `(${fmtAED(Math.abs(booksPnl!.profitTotal))})` : fmtAED(booksPnl!.profitTotal)}{booksPnl!.anyEstimated && <span className="text-amber-600">*</span>}
                   </td>
                 </tr>
                 <tr className="border-t border-border/40">
@@ -1138,6 +1119,11 @@ const Finance = () => {
               </tbody>
             </table>
           </CardContent>
+          {booksPnl!.anyEstimated && (
+            <div className="px-5 pb-3 -mt-1 text-[10.5px] text-amber-700/90">
+              <span className="font-semibold">*</span> Estimated — no invoices booked in Zoho Books for that month yet, so revenue falls back to conversions × {fmtAED(REVENUE_PER_CONVERSION_AED)} per doctor. Replaced by actuals once invoices are raised.
+            </div>
+          )}
         </Card>
       )}
 
@@ -1267,44 +1253,8 @@ const Finance = () => {
         </Card>
       )}
 
-      {/* ── Monthly P&L: Revenue / Spend / Profit ── */}
-      {pnlChart.length > 0 && (
-        <Card className="shadow-md border-border/60 mb-5">
-          <CardHeader className="pb-2 pt-4 px-5">
-            <div className="flex items-center justify-between flex-wrap gap-2">
-              <div>
-                <CardTitle className="text-[14px] font-semibold text-foreground">Revenue vs {useBooks ? "Expenses" : "Spend"} vs Profit</CardTitle>
-                <p className="text-[11px] text-muted-foreground/80 mt-0.5">Monthly P&amp;L — {useBooks ? "Zoho Books actuals" : "same numbers as the table above"}, in chart form</p>
-              </div>
-              <div className="flex items-center gap-3 text-[11px] text-muted-foreground">
-                <span className="flex items-center gap-1.5"><span className="h-2.5 w-2.5 rounded-sm bg-emerald-500" />Revenue</span>
-                <span className="flex items-center gap-1.5"><span className="h-2.5 w-2.5 rounded-sm bg-rose-400" />{useBooks ? "Expenses" : "Spend"}</span>
-                <span className="flex items-center gap-1.5"><span className="h-0.5 w-3 bg-violet-500 rounded-full" />Profit</span>
-              </div>
-            </div>
-          </CardHeader>
-          <CardContent className="px-4 pb-4">
-            <ResponsiveContainer width="100%" height={320}>
-              <ComposedChart data={pnlChart} margin={{ top: 8, right: 16, left: -10, bottom: 0 }}>
-                <CartesianGrid strokeDasharray="3 3" stroke="hsl(220,14%,92%)" vertical={false} />
-                <XAxis dataKey="month" fontSize={11} tickLine={false} axisLine={false} stroke="hsl(220,10%,45%)" />
-                <YAxis fontSize={11} tickLine={false} axisLine={false} stroke="hsl(220,10%,45%)"
-                  tickFormatter={v => v >= 1_000_000 ? `${(v / 1_000_000).toFixed(1)}M`
-                                  : v >= 1_000     ? `${(v / 1_000).toFixed(0)}K`
-                                  : `${v}`} />
-                <Tooltip contentStyle={tip}
-                  formatter={(v: number, name: string) => [fmtAED(v), name]} />
-                <Bar  dataKey="revenue" name="Revenue" fill="hsl(160,65%,45%)" radius={[4, 4, 0, 0]} />
-                <Bar  dataKey="spend"   name={useBooks ? "Expenses" : "Spend"} fill="hsl(0,75%,68%)" radius={[4, 4, 0, 0]} />
-                <Line type="monotone" dataKey="profit" name="Profit"
-                  stroke="hsl(265,65%,55%)" strokeWidth={2.5}
-                  dot={{ r: 4, fill: "hsl(265,65%,55%)", strokeWidth: 2, stroke: "#fff" }}
-                  activeDot={{ r: 6 }} />
-              </ComposedChart>
-            </ResponsiveContainer>
-          </CardContent>
-        </Card>
-      )}
+      {/* Revenue vs Expenses vs Profit chart removed — the Digest's monthly
+          chart already covers it. */}
 
       {/* ── Monthly trend ── */}
       {monthly.length > 0 && (
