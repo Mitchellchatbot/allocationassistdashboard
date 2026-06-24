@@ -808,9 +808,6 @@ const Finance = () => {
       {/* Channel winner KPIs (best volume / lowest CPL / lowest CPQ / highest conversion) */}
       <ChannelWinnerCards />
 
-      {/* Daily / Weekly / Monthly digest of revenue, spend & profit */}
-      <FinanceDigest />
-
       {/* ── Row 1: Spend + Lead Economics ── */}
       {/* Only render lead KPIs when we actually have leads in the period — otherwise just show spend */}
       <div className={`grid grid-cols-2 ${leadStats.totalLeads > 0 ? "lg:grid-cols-4" : "lg:grid-cols-2"} gap-3 mb-3`}>
@@ -948,8 +945,10 @@ const Finance = () => {
         </div>
       )}
 
-      {/* ── Row 2: Top channel / Biggest expense / Spend growth / Avg monthly / Txns ── */}
-      <div className="grid grid-cols-2 lg:grid-cols-3 xl:grid-cols-5 gap-3 mb-5">
+      {/* ── Row 2: Top channel / Biggest expense / Spend growth / Txns ──
+          (Avg Monthly dropped — it's already in the Marketing Spend card's
+          subtext, so it was duplicate information.) */}
+      <div className="grid grid-cols-2 lg:grid-cols-2 xl:grid-cols-4 gap-3 mb-5">
         <FlipKpiCard
           icon={Crown} label="Top Channel (period)" accent="amber"
           value={topCategory ? normalizeChannelKey(topCategory.category) : "—"}
@@ -973,18 +972,17 @@ const Finance = () => {
           back={<GrowthBack growthPct={growthPct} total={spend} prevTotal={prevSpend} />}
         />
         <FlipKpiCard
-          icon={CalendarDays} label="Avg Monthly" accent="sky"
-          value={fmtAED(avgMonthly)}
-          sub={`across ${monthly.length} month${monthly.length === 1 ? "" : "s"}`}
-          back={<AvgMonthlyBack monthly={monthly} avg={avgMonthly} />}
-        />
-        <FlipKpiCard
           icon={Receipt} label="Transactions" accent="violet"
           value={fmtN(transactionCount)}
           sub={byCategory.length > 0 ? `across ${byCategory.length} channels` : ""}
           back={<TransactionsBack txns={topTransactions} />}
         />
       </div>
+
+      {/* Daily / Weekly / Monthly digest of revenue, spend & profit — sits
+          below all the headline KPI cards so the numbers read first, then the
+          trend chart. */}
+      <FinanceDigest />
 
       {/* ── CEO View: Monthly Marketing Spend by Channel + Profit P&L ─────
           Built for Emilie. Rows = channels (canonical names — Meta, LinkedIn,
@@ -1256,64 +1254,16 @@ const Finance = () => {
       {/* Revenue vs Expenses vs Profit chart removed — the Digest's monthly
           chart already covers it. */}
 
-      {/* ── Monthly trend ── */}
-      {monthly.length > 0 && (
-        <Card className="shadow-sm border-border/50 mb-5">
-          <CardHeader className="pb-1 pt-4 px-4">
-            <div className="flex items-center justify-between">
-              <CardTitle className="text-[12px] font-medium text-muted-foreground uppercase tracking-wide">Monthly Spend Trend</CardTitle>
-              <span className="text-[10px] text-muted-foreground">{monthly.length} month{monthly.length === 1 ? "" : "s"}</span>
-            </div>
-          </CardHeader>
-          <CardContent className="px-4 pb-4">
-            <ResponsiveContainer width="100%" height={280}>
-              <AreaChart data={monthly} margin={{ top: 4, right: 8, left: -10, bottom: 0 }}>
-                <defs>
-                  <linearGradient id="spendGrad" x1="0" y1="0" x2="0" y2="1">
-                    <stop offset="5%"  stopColor="hsl(170,55%,45%)" stopOpacity={0.7} />
-                    <stop offset="95%" stopColor="hsl(170,55%,45%)" stopOpacity={0.1} />
-                  </linearGradient>
-                </defs>
-                <CartesianGrid strokeDasharray="3 3" stroke="hsl(220,14%,92%)" vertical={false} />
-                <XAxis dataKey="month" fontSize={10} tickLine={false} axisLine={false} stroke="hsl(220,10%,55%)" />
-                <YAxis fontSize={10} tickLine={false} axisLine={false} stroke="hsl(220,10%,55%)"
-                  tickFormatter={v => v >= 1000 ? `${(v / 1000).toFixed(0)}K` : `${v}`} />
-                <Tooltip contentStyle={tip}
-                  formatter={(v: number, _n, p) => [fmtAED(v), `${p.payload.count} txns`]} />
-                <Area type="monotone" dataKey="amount" stroke="hsl(170,55%,45%)" fill="url(#spendGrad)"
-                  strokeWidth={2} dot={{ r: 3 }} activeDot={{ r: 5 }} />
-              </AreaChart>
-            </ResponsiveContainer>
-          </CardContent>
-        </Card>
-      )}
+      {/* Monthly Spend Trend area chart removed — the Digest above already
+          plots spend per month, and the Spend Breakdown table covers the
+          per-channel detail. */}
 
-      {/* ── Two-column: bar + donut ── */}
+      {/* ── Channel Mix donut ── (the old side-by-side Spend-by-Channel bar
+          chart was dropped: the Spend Breakdown table below shows the same
+          numbers with more detail and a per-transaction drill-down.) */}
       {byCategory.length > 0 && (
-        <div className="grid grid-cols-1 lg:grid-cols-5 gap-4 mb-5">
-          <Card className="shadow-sm border-border/50 lg:col-span-3">
-            <CardHeader className="pb-1 pt-4 px-4">
-              <CardTitle className="text-[12px] font-medium text-muted-foreground uppercase tracking-wide">Spend by Channel</CardTitle>
-            </CardHeader>
-            <CardContent className="px-4 pb-4">
-              <ResponsiveContainer width="100%" height={Math.max(320, byCategory.length * 28)}>
-                <BarChart data={byCategory} layout="vertical" barCategoryGap="20%">
-                  <CartesianGrid strokeDasharray="3 3" stroke="hsl(220,14%,92%)" />
-                  <XAxis type="number" fontSize={10} tickLine={false} axisLine={false}
-                    stroke="hsl(220,10%,55%)" tickFormatter={v => v >= 1000 ? `${(v / 1000).toFixed(0)}K` : `${v}`} />
-                  <YAxis dataKey="category" type="category" fontSize={10} tickLine={false} axisLine={false}
-                    width={95} stroke="hsl(220,10%,55%)" />
-                  <Tooltip contentStyle={tip}
-                    formatter={(v: number, _n, p) => [fmtAED(v), `${p.payload.count} txns · ${p.payload.pct.toFixed(1)}%`]} />
-                  <Bar dataKey="amount" radius={[0, 4, 4, 0]}>
-                    {byCategory.map((_, i) => <Cell key={i} fill={CAT_COLORS[i % CAT_COLORS.length]} />)}
-                  </Bar>
-                </BarChart>
-              </ResponsiveContainer>
-            </CardContent>
-          </Card>
-
-          <Card className="shadow-sm border-border/50 lg:col-span-2">
+        <div className="mb-5">
+          <Card className="shadow-sm border-border/50">
             <CardHeader className="pb-1 pt-4 px-4">
               <CardTitle className="text-[12px] font-medium text-muted-foreground uppercase tracking-wide">Channel Mix</CardTitle>
             </CardHeader>
