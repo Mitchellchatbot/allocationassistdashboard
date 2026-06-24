@@ -5,6 +5,7 @@ const SUPABASE_URL      = import.meta.env.VITE_SUPABASE_URL      as string;
 const SUPABASE_ANON_KEY = import.meta.env.VITE_SUPABASE_ANON_KEY as string;
 
 export interface ZohoBooksMonth { month: string; revenue: number; expenses: number }
+export interface ZohoBooksDay { date: string; revenue: number; expenses: number }
 export interface ZohoBooksCategory { name: string; amount: number }
 
 export interface ZohoBooksData {
@@ -21,6 +22,7 @@ export interface ZohoBooksData {
   invoiceCount?: number;
   expenseCount?: number;
   byMonth?:     ZohoBooksMonth[];
+  byDay?:       ZohoBooksDay[];
   byCategory?:  ZohoBooksCategory[];
 }
 

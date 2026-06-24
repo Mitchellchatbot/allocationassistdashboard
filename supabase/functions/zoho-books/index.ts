@@ -100,6 +100,10 @@ serve(async (req) => {
 
     const byMonth: Record<string, { month: string; revenue: number; expenses: number }> = {};
     const bump = (m: string) => (byMonth[m] ??= { month: m, revenue: 0, expenses: 0 });
+    // Per-DAY buckets too, so the dashboard's Daily / Weekly digest can be
+    // sourced from Books (the monthly buckets can't be split back to days).
+    const byDayMap: Record<string, { date: string; revenue: number; expenses: number }> = {};
+    const bumpDay = (d: string) => (byDayMap[d] ??= { date: d, revenue: 0, expenses: 0 });
 
     let revenue = 0, outstanding = 0, currency = "AED";
     for (const inv of invoices) {
@@ -107,7 +111,9 @@ serve(async (req) => {
       revenue     += total;
       outstanding += num(inv.balance);
       currency     = (inv.currency_code as string) || currency;
-      bump(monthKey(String(inv.date ?? ""))).revenue += total;
+      const date   = String(inv.date ?? "");
+      bump(monthKey(date)).revenue += total;
+      if (date) bumpDay(date.slice(0, 10)).revenue += total;
     }
 
     const byCategoryMap: Record<string, number> = {};
@@ -117,8 +123,11 @@ serve(async (req) => {
       expenseTotal += total;
       const cat = (e.account_name as string) || (e.category_name as string) || "Uncategorized";
       byCategoryMap[cat] = (byCategoryMap[cat] ?? 0) + total;
-      bump(monthKey(String(e.date ?? ""))).expenses += total;
+      const date = String(e.date ?? "");
+      bump(monthKey(date)).expenses += total;
+      if (date) bumpDay(date.slice(0, 10)).expenses += total;
     }
+    const byDay = Object.values(byDayMap).sort((a, b) => a.date.localeCompare(b.date));
 
     const byCategory = Object.entries(byCategoryMap)
       .map(([name, amount]) => ({ name, amount: +amount.toFixed(2) }))
@@ -136,6 +145,7 @@ serve(async (req) => {
       invoiceCount: invoices.length,
       expenseCount: expenses.length,
       byMonth:      byMonthArr,
+      byDay,
       byCategory,
     });
   } catch (e) {

@@ -8,6 +8,7 @@ import { useMemo, useState } from "react";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { useMarketingExpenses } from "@/hooks/use-marketing-expenses";
 import { useZohoData } from "@/hooks/use-zoho-data";
+import { useZohoBooks } from "@/hooks/use-zoho-books";
 import { useFilters } from "@/lib/filters";
 import { useCurrency } from "@/lib/CurrencyProvider";
 import { REVENUE_PER_CONVERSION_AED } from "@/lib/revenue";
@@ -21,11 +22,16 @@ export function FinanceDigest() {
   const { rows: expenseRows } = useMarketingExpenses();
   const { data: zoho } = useZohoData();
   const { dateRange } = useFilters();
+  const { data: books } = useZohoBooks(dateRange);
   const { fmt, fromAED } = useCurrency();
   const [gran, setGran] = useState<Granularity>("month");
 
   const fromMs = dateRange.from.getTime();
   const toMs   = dateRange.to.getTime() + 86_400_000;
+
+  // When Zoho Books is connected, revenue + spend are the REAL invoiced
+  // revenue and full expenses (per-day, bucketed). Otherwise the estimate.
+  const useBooks = !!(books?.configured && books?.ok && books?.byDay);
 
   const digest = useMemo<DigestRow[]>(() => {
     const map = new Map<string, DigestRow>();
@@ -34,23 +40,42 @@ export function FinanceDigest() {
       if (!r) { r = { key: k, label: bucketLabel(k, gran), revenue: 0, spend: 0, profit: 0, conversions: 0 }; map.set(k, r); }
       return r;
     };
-    for (const e of expenseRows ?? []) {
-      const d = parseDate(e.expense_date);
-      if (d) get(bucketKey(d, gran)).spend += e.amount ?? 0;
-    }
+    // Conversions (operational placement count) — always from Zoho DoB.
     for (const dob of zoho?.rawDoctorsOnBoard ?? []) {
       const d = parseDate(dob.Created_Time);
       if (!d) continue;
       const t = d.getTime();
       if (t < fromMs || t >= toMs) continue;
-      const r = get(bucketKey(d, gran));
-      r.conversions += 1;
-      r.revenue     += REVENUE_PER_CONVERSION_AED;
+      get(bucketKey(d, gran)).conversions += 1;
+    }
+
+    if (useBooks) {
+      // Real revenue + expenses from Zoho Books, bucketed by day → gran.
+      for (const day of books!.byDay ?? []) {
+        const d = parseDate(day.date);
+        if (!d) continue;
+        const r = get(bucketKey(d, gran));
+        r.revenue += day.revenue;
+        r.spend   += day.expenses;
+      }
+    } else {
+      // Estimate: spend from the marketing sheet, revenue = conversions × fee.
+      for (const e of expenseRows ?? []) {
+        const d = parseDate(e.expense_date);
+        if (d) get(bucketKey(d, gran)).spend += e.amount ?? 0;
+      }
+      for (const dob of zoho?.rawDoctorsOnBoard ?? []) {
+        const d = parseDate(dob.Created_Time);
+        if (!d) continue;
+        const t = d.getTime();
+        if (t < fromMs || t >= toMs) continue;
+        get(bucketKey(d, gran)).revenue += REVENUE_PER_CONVERSION_AED;
+      }
     }
     const out = [...map.values()].sort((a, b) => a.key.localeCompare(b.key));
     for (const r of out) r.profit = r.revenue - r.spend;
     return out;
-  }, [expenseRows, zoho, gran, fromMs, toMs]);
+  }, [expenseRows, zoho, gran, fromMs, toMs, useBooks, books]);
 
   const totals = useMemo(
     () => digest.reduce((a, r) => ({
@@ -76,7 +101,9 @@ export function FinanceDigest() {
           <div>
             <CardTitle className="text-[13px] font-semibold text-foreground">Digest</CardTitle>
             <p className="text-[11px] text-muted-foreground/80 mt-0.5">
-              Revenue, spend &amp; profit per {gran === "day" ? "day" : gran === "week" ? "week" : "month"} · revenue is the estimate until Zoho Books is connected
+              Revenue, spend &amp; profit per {gran === "day" ? "day" : gran === "week" ? "week" : "month"} · {useBooks
+                ? <span className="text-emerald-700 font-medium">actuals from Zoho Books</span>
+                : "estimate until Zoho Books is connected"}
             </p>
           </div>
           <GranularityToggle value={gran} onChange={setGran} />
