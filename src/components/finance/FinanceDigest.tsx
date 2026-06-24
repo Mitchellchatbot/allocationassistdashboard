@@ -15,8 +15,9 @@ import { REVENUE_PER_CONVERSION_AED } from "@/lib/revenue";
 import { GranularityToggle } from "@/components/GranularityToggle";
 import { bucketKey, bucketLabel, parseDate, type Granularity } from "@/lib/time-buckets";
 import { ComposedChart, Bar, Line, XAxis, YAxis, Tooltip, ResponsiveContainer, CartesianGrid, Legend, ReferenceLine } from "recharts";
+import { TrendingUp, TrendingDown } from "lucide-react";
 
-interface DigestRow { key: string; label: string; revenue: number; spend: number; profit: number; conversions: number; }
+interface DigestRow { key: string; label: string; revenue: number; spend: number; profit: number; cumulative: number; conversions: number; }
 
 export function FinanceDigest() {
   const { rows: expenseRows } = useMarketingExpenses();
@@ -37,7 +38,7 @@ export function FinanceDigest() {
     const map = new Map<string, DigestRow>();
     const get = (k: string): DigestRow => {
       let r = map.get(k);
-      if (!r) { r = { key: k, label: bucketLabel(k, gran), revenue: 0, spend: 0, profit: 0, conversions: 0 }; map.set(k, r); }
+      if (!r) { r = { key: k, label: bucketLabel(k, gran), revenue: 0, spend: 0, profit: 0, cumulative: 0, conversions: 0 }; map.set(k, r); }
       return r;
     };
     // Conversions (operational placement count) — always from Zoho DoB.
@@ -73,7 +74,10 @@ export function FinanceDigest() {
       }
     }
     const out = [...map.values()].sort((a, b) => a.key.localeCompare(b.key));
-    for (const r of out) r.profit = r.revenue - r.spend;
+    // Running cumulative profit across the period, so the chart shows the
+    // period's net building up to its end total.
+    let run = 0;
+    for (const r of out) { r.profit = r.revenue - r.spend; run += r.profit; r.cumulative = run; }
     return out;
   }, [expenseRows, zoho, gran, fromMs, toMs, useBooks, books]);
 
@@ -105,6 +109,10 @@ export function FinanceDigest() {
                 ? <span className="text-emerald-700 font-medium">actuals from Zoho Books</span>
                 : "estimate until Zoho Books is connected"}
             </p>
+            <div className={`mt-2 inline-flex items-center gap-1.5 rounded-full px-2.5 py-1 text-[11.5px] font-semibold ${totals.profit >= 0 ? "bg-emerald-50 text-emerald-700" : "bg-rose-50 text-rose-700"}`}>
+              {totals.profit >= 0 ? <TrendingUp className="h-3.5 w-3.5" /> : <TrendingDown className="h-3.5 w-3.5" />}
+              Cumulative profit this period: {fmt(totals.profit)}
+            </div>
           </div>
           <GranularityToggle value={gran} onChange={setGran} />
         </div>
@@ -121,6 +129,7 @@ export function FinanceDigest() {
             <Bar dataKey="revenue" name="Revenue" fill="#10b981" radius={[3, 3, 0, 0]} maxBarSize={gran === "day" ? 8 : 40} />
             <Bar dataKey="spend"   name="Spend"   fill="#f43f5e" radius={[3, 3, 0, 0]} maxBarSize={gran === "day" ? 8 : 40} />
             <Line dataKey="profit" name="Profit"  stroke="#3b82f6" strokeWidth={2.5} dot={{ r: 3, fill: "#3b82f6", strokeWidth: 0 }} activeDot={{ r: 5 }} />
+            <Line dataKey="cumulative" name="Cumulative profit" stroke="#8b5cf6" strokeWidth={2} strokeDasharray="5 3" dot={false} activeDot={{ r: 4 }} />
           </ComposedChart>
         </ResponsiveContainer>
 
@@ -128,7 +137,7 @@ export function FinanceDigest() {
           <table className="w-full text-left border-collapse text-[12px]">
             <thead className="border-y border-border/60 bg-muted/30">
               <tr>
-                {["Period", "Revenue", "Spend", "Profit", "Conv."].map((h, i) => (
+                {["Period", "Revenue", "Spend", "Profit", "Cumulative", "Conv."].map((h, i) => (
                   <th key={h} className={`py-2 px-3 font-semibold text-muted-foreground uppercase text-[10px] tracking-wide ${i === 0 ? "" : "text-right"}`}>{h}</th>
                 ))}
               </tr>
@@ -140,6 +149,7 @@ export function FinanceDigest() {
                   <td className="py-2 px-3 text-right tabular-nums text-emerald-700">{fmt(r.revenue)}</td>
                   <td className="py-2 px-3 text-right tabular-nums text-rose-700">{fmt(r.spend)}</td>
                   <td className={`py-2 px-3 text-right tabular-nums font-semibold ${r.profit >= 0 ? "text-blue-700" : "text-rose-700"}`}>{fmt(r.profit)}</td>
+                  <td className={`py-2 px-3 text-right tabular-nums font-medium ${r.cumulative >= 0 ? "text-violet-700" : "text-rose-700"}`}>{fmt(r.cumulative)}</td>
                   <td className="py-2 px-3 text-right tabular-nums text-muted-foreground">{r.conversions}</td>
                 </tr>
               ))}
@@ -150,6 +160,7 @@ export function FinanceDigest() {
                 <td className="py-2 px-3 text-right tabular-nums text-emerald-700">{fmt(totals.revenue)}</td>
                 <td className="py-2 px-3 text-right tabular-nums text-rose-700">{fmt(totals.spend)}</td>
                 <td className={`py-2 px-3 text-right tabular-nums ${totals.profit >= 0 ? "text-blue-700" : "text-rose-700"}`}>{fmt(totals.profit)}</td>
+                <td className={`py-2 px-3 text-right tabular-nums ${totals.profit >= 0 ? "text-violet-700" : "text-rose-700"}`}>{fmt(totals.profit)}</td>
                 <td className="py-2 px-3 text-right tabular-nums text-muted-foreground">{totals.conversions}</td>
               </tr>
             </tfoot>
