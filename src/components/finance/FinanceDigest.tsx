@@ -15,7 +15,7 @@ import { REVENUE_PER_CONVERSION_AED } from "@/lib/revenue";
 import { GranularityToggle } from "@/components/GranularityToggle";
 import { bucketKey, bucketLabel, parseDate, type Granularity } from "@/lib/time-buckets";
 import { ComposedChart, Bar, Line, XAxis, YAxis, Tooltip, ResponsiveContainer, CartesianGrid, Legend, ReferenceLine } from "recharts";
-import { TrendingUp, TrendingDown } from "lucide-react";
+import { TrendingUp, TrendingDown, Loader2 } from "lucide-react";
 
 interface DigestRow { key: string; label: string; revenue: number; spend: number; profit: number; cumulative: number; conversions: number; }
 
@@ -23,7 +23,7 @@ export function FinanceDigest() {
   const { rows: expenseRows } = useMarketingExpenses();
   const { data: zoho } = useZohoData();
   const { dateRange } = useFilters();
-  const { data: books } = useZohoBooks(dateRange);
+  const { data: books, isLoading: booksLoading } = useZohoBooks(dateRange);
   const { fmt, fromAED } = useCurrency();
   const [gran, setGran] = useState<Granularity>("month");
 
@@ -95,6 +95,24 @@ export function FinanceDigest() {
     if (abs >= 1_000)     return `${Math.round(x / 1_000)}K`;
     return String(Math.round(x));
   };
+
+  // Wait for the Zoho Books query to settle before rendering — otherwise the
+  // chart paints the estimate for a beat, then snaps to Books actuals (the
+  // "graph changes when I load in" flicker).
+  if (booksLoading) {
+    return (
+      <Card className="mb-5 shadow-sm border-border/50">
+        <CardHeader className="pb-2 pt-4 px-5">
+          <CardTitle className="text-[13px] font-semibold text-foreground">Digest</CardTitle>
+        </CardHeader>
+        <CardContent className="px-5 pb-6">
+          <div className="h-[288px] grid place-items-center text-[12px] text-muted-foreground">
+            <span className="inline-flex items-center gap-2"><Loader2 className="h-4 w-4 animate-spin" /> Loading actuals from Zoho Books…</span>
+          </div>
+        </CardContent>
+      </Card>
+    );
+  }
 
   if (digest.length === 0) return null;
 
