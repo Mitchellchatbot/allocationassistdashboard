@@ -849,15 +849,27 @@ Deno.serve(async (req: Request) => {
   // which is the To), deduped and excluding the To so nobody's double-listed.
   // Ammar left the team — strip him even if he's still in the override env var.
   const EXCLUDED_RECIPIENT = "ammar@allocationassist.com";
-  const testCc: string[] | undefined = TEST_OVERRIDE
-    ? (() => {
-        const cc = [...new Set(TEST_OVERRIDE_LIST.slice(1))]
-          .filter(a => a
-            && a.toLowerCase() !== effectiveTo.toLowerCase()
-            && a.toLowerCase() !== EXCLUDED_RECIPIENT);
-        return cc.length ? cc : undefined;
-      })()
-    : undefined;
+  const testCc: string[] = TEST_OVERRIDE
+    ? [...new Set(TEST_OVERRIDE_LIST.slice(1))]
+        .filter(a => a
+          && a.toLowerCase() !== effectiveTo.toLowerCase()
+          && a.toLowerCase() !== EXCLUDED_RECIPIENT)
+    : [];
+
+  // Explicit CC override from the dispatcher (e.g. CC a manager on the send).
+  // Merged with any test CCs, deduped, and never CC the To.
+  const ccOverrideRaw = (md.cc_override as unknown);
+  const ccOverride: string[] = Array.isArray(ccOverrideRaw)
+    ? (ccOverrideRaw as unknown[])
+        .map(v => typeof v === "string" ? v.trim() : "")
+        .filter(v => v.length > 0 && v.includes("@"))
+    : [];
+  const ccSet = new Set<string>();
+  for (const a of [...testCc, ...ccOverride]) {
+    const lc = a.toLowerCase();
+    if (lc && lc !== effectiveTo.toLowerCase() && lc !== EXCLUDED_RECIPIENT) ccSet.add(a);
+  }
+  const ccList: string[] | undefined = ccSet.size ? [...ccSet] : undefined;
 
   let resendRes: Response;
   try {
@@ -870,7 +882,7 @@ Deno.serve(async (req: Request) => {
       body: JSON.stringify({
         from:     sender.fromHeader,
         to:       [effectiveTo],
-        cc:       testCc,
+        cc:       ccList,
         bcc:      bccList,
         reply_to: replyToAddress,
         subject: finalSubject,
@@ -929,6 +941,7 @@ Deno.serve(async (req: Request) => {
       effective_recipient: effectiveTo,
       from:                sender.fromHeader,
       reply_to:            replyToAddress,
+      cc:                  ccList ?? null,
       bcc:                 bccList ?? null,
       personal_routing:    personalRouting,
     },

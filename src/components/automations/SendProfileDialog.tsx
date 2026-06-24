@@ -68,6 +68,32 @@ function wrapBodyForSend(bodyHtml: string): string {
 
 interface SendOverrides { subject_override?: string; html_override?: string }
 
+// Recipient picker options. The AA sender roster is BCC'd ("loop colleagues
+// in"); Amir is offered as a CC (visible to the recipient) per request. The
+// `cc` flag routes a selection to cc_override instead of bcc_override at send.
+const CC_AMIR_EMAIL = "amir@allocationassist.com";
+const RECIPIENT_OPTIONS: Array<{ name: string; email: string; cc?: boolean }> = [
+  ...AA_SENDERS.map(s => ({ name: s.name, email: s.email })),
+  { name: "Amir", email: CC_AMIR_EMAIL, cc: true },
+];
+const CC_OPTION_EMAILS = new Set(RECIPIENT_OPTIONS.filter(o => o.cc).map(o => o.email.toLowerCase()));
+
+/** Split a picked-recipient list into the CC bucket (Amir) and the BCC bucket
+ *  (everyone else). Used both for the live preview hint and the actual send. */
+function splitRecipients(selected: string[]): { cc: string[]; bcc: string[] } {
+  const cc: string[] = [], bcc: string[] = [];
+  for (const e of selected) (CC_OPTION_EMAILS.has(e.toLowerCase()) ? cc : bcc).push(e);
+  return { cc, bcc };
+}
+
+/** "BCC: a, b · CC: amir@…" — the recipient line shown under the picker. */
+function recipientHint(selected: string[]): string {
+  const { cc, bcc } = splitRecipients(selected);
+  const parts = [`BCC${bcc.length ? `: ${bcc.join(", ")}` : ": none"}`];
+  if (cc.length) parts.push(`CC: ${cc.join(", ")}`);
+  return parts.join(" · ");
+}
+
 /**
  * Triggers Flow 2 (Profile Sent to Hospital). Three steps:
  *   1. Pick a doctor (from Doctors on Board or Leads)
@@ -207,6 +233,7 @@ export function SendProfileDialog({ open, onClose }: Props) {
       // For multi-hospital sends we group all runs under a shared batch_id
       // in metadata so the BCC nature is queryable later.
       const batchId = crypto.randomUUID();
+      const recipients = splitRecipients(bccList);
       for (const h of selectedHospitals) {
         const { data: runRow, error: runErr } = await supabase
           .from("automation_flow_runs")
@@ -229,10 +256,10 @@ export function SendProfileDialog({ open, onClose }: Props) {
               custom_message:     customMessage || null,
               doctor_speciality:  selectedDoctor.speciality,
               triggered_via:      "send_profile_dialog",
-              // Dispatcher-picked BCC list — read by send-flow-email
-              // and applied verbatim to the outbound. Empty array =
-              // BCC no-one.
-              bcc_override:       bccList,
+              // Dispatcher-picked recipients. The roster is BCC'd; Amir (if
+              // picked) is CC'd. send-flow-email reads bcc_override / cc_override.
+              bcc_override:       recipients.bcc,
+              ...(recipients.cc.length ? { cc_override: recipients.cc } : {}),
               // Per-stage edits from the preview (email_hospital / email_doctor).
               // send-flow-email reads stage_overrides[<stage>] when each email
               // fires — including the doctor heads-up that auto-continues
@@ -655,11 +682,11 @@ function PreviewConfirm({
 
           {sender ? (
             <div className="text-[10.5px] text-emerald-700">
-              Hospital replies will land in <span className="font-mono">{sender.email}</span>. BCC{bccList.length ? `: ${bccList.join(", ")}` : ": none"}.
+              Hospital replies will land in <span className="font-mono">{sender.email}</span>. {recipientHint(bccList)}.
             </div>
           ) : (
             <div className="text-[10.5px] text-amber-700">
-              Current user isn't in the verified sender roster, so the generic team address is used and replies route through the dashboard parser. BCC{bccList.length ? `: ${bccList.join(", ")}` : ": none"}.
+              Current user isn't in the verified sender roster, so the generic team address is used and replies route through the dashboard parser. {recipientHint(bccList)}.
             </div>
           )}
         </div>
@@ -1085,13 +1112,10 @@ function BccPicker({ selected, onChange }: { selected: string[]; onChange: (next
   };
 
   const summary = (() => {
-    if (selected.length === 0) return "BCC: nobody";
-    if (selected.length === 1) {
-      const m = AA_SENDERS.find(s => s.email.toLowerCase() === selected[0].toLowerCase());
-      return `BCC: ${m?.name ?? selected[0]}`;
-    }
-    const first = AA_SENDERS.find(s => s.email.toLowerCase() === selected[0].toLowerCase());
-    return `BCC: ${first?.name ?? selected[0]} +${selected.length - 1}`;
+    if (selected.length === 0) return "Copy: nobody";
+    const first = RECIPIENT_OPTIONS.find(s => s.email.toLowerCase() === selected[0].toLowerCase());
+    if (selected.length === 1) return `Copy: ${first?.name ?? selected[0]}`;
+    return `Copy: ${first?.name ?? selected[0]} +${selected.length - 1}`;
   })();
 
   return (
@@ -1103,10 +1127,10 @@ function BccPicker({ selected, onChange }: { selected: string[]; onChange: (next
       </PopoverTrigger>
       <PopoverContent className="w-[280px] p-2" align="start">
         <div className="text-[10px] uppercase tracking-wider text-muted-foreground px-1.5 pb-1.5">
-          Loop colleagues in on this send
+          Copy colleagues on this send
         </div>
         <div className="space-y-0.5">
-          {AA_SENDERS.map(s => {
+          {RECIPIENT_OPTIONS.map(s => {
             const checked = selectedSet.has(s.email.toLowerCase());
             return (
               <label
@@ -1119,6 +1143,7 @@ function BccPicker({ selected, onChange }: { selected: string[]; onChange: (next
                   className="h-3.5 w-3.5"
                 />
                 <span className="text-[12px] text-slate-800 flex-1">{s.name}</span>
+                <span className={`text-[9px] font-semibold uppercase tracking-wide rounded px-1 py-px ${s.cc ? "bg-blue-50 text-blue-600" : "bg-slate-100 text-slate-400"}`}>{s.cc ? "CC" : "BCC"}</span>
                 <span className="text-[10px] font-mono text-muted-foreground">{s.email.split("@")[0]}</span>
               </label>
             );
