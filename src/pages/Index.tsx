@@ -10,6 +10,7 @@ import { useZohoData, displaySource } from "@/hooks/use-zoho-data";
 import { useMetaLeadsStats, normalizeEmail, normalizePhone } from "@/hooks/use-meta-leads-stats";
 import { useCurrency } from "@/lib/CurrencyProvider";
 import { REVENUE_PER_CONVERSION_AED } from "@/lib/revenue";
+import { useDoctorRevenue } from "@/hooks/use-doctor-dossier";
 import {
   ComposedChart, Area, XAxis, YAxis, Tooltip, ResponsiveContainer,
   CartesianGrid, Line,
@@ -142,10 +143,12 @@ const Index = () => {
   // (DoB rows) in the period. Headline value = revenue (conversions × per-
   // doctor fee) so the card answers "which channel is making us the most
   // money right now?"
+  const { revenueForDoctor } = useDoctorRevenue();
   const bestChannelData = useMemo(() => {
     const fromMs = dateRange.from.getTime();
     const toMs   = dateRange.to.getTime() + 86_400_000;
     const convByCh = new Map<string, number>();
+    const revByCh  = new Map<string, number>();
     for (const d of zoho?.rawDoctorsOnBoard ?? []) {
       if (!d.Created_Time) continue;
       const t = new Date(d.Created_Time).getTime();
@@ -153,26 +156,30 @@ const Index = () => {
       const ch = channelOf(d.Email, d.Phone ?? d.Mobile, d.Lead_Source);
       if (ch === 'Undefined') continue;
       convByCh.set(ch, (convByCh.get(ch) ?? 0) + 1);
+      const dname = d.Full_Name || `${d.First_Name ?? ""} ${d.Last_Name ?? ""}`.trim();
+      revByCh.set(ch, (revByCh.get(ch) ?? 0) + revenueForDoctor(dname));
     }
+    // Revenue = sum of each converted doctor's ACTUAL Zoho Books invoices
+    // (estimate fallback for not-yet-invoiced), ranked by money produced.
     const ranked = Array.from(convByCh.entries())
       .map(([channel, conversions]) => ({
         channel,
         conversions,
-        revenue: conversions * REVENUE_PER_CONVERSION_AED,
+        revenue: revByCh.get(channel) ?? 0,
       }))
-      .sort((a, b) => b.conversions - a.conversions);
+      .sort((a, b) => b.revenue - a.revenue);
     return { ranked };
-  }, [zoho?.rawDoctorsOnBoard, dateRange, channelOf]);
+  }, [zoho?.rawDoctorsOnBoard, dateRange, channelOf, revenueForDoctor]);
 
   const winner = bestChannelData.ranked[0];
 
   const bestChannelContent = (
     <div className="space-y-3">
       <p className="text-[10px] text-muted-foreground/80 leading-relaxed">
-        Channel with the most converted doctors (Doctors on Board rows) in the selected period. Headline shows the revenue that channel produced (conversions × {fmtAED(REVENUE_PER_CONVERSION_AED)} per doctor).
+        Channel ranked by revenue in the selected period — the sum of each converted doctor's <strong>actual Zoho Books invoices</strong> (a {fmtAED(REVENUE_PER_CONVERSION_AED)} estimate fills in for doctors not invoiced yet).
       </p>
       <div>
-        <p className="text-[10px] uppercase tracking-wide font-semibold text-muted-foreground/70 mb-1">Top 5 channels by conversions</p>
+        <p className="text-[10px] uppercase tracking-wide font-semibold text-muted-foreground/70 mb-1">Top 5 channels by revenue</p>
         <div className="divide-y divide-border/30">
           {bestChannelData.ranked.length === 0
             ? <p className="text-[11px] text-muted-foreground py-2">No conversions in this period</p>

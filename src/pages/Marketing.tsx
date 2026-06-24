@@ -15,6 +15,7 @@ import { REVENUE_PER_CONVERSION_AED } from "@/lib/revenue";
 import { SpendAllocationChart } from "@/components/SpendAllocationChart";
 import { useZohoData, displaySource } from "@/hooks/use-zoho-data";
 import { useChannelEconomics } from "@/hooks/use-channel-economics";
+import { useDoctorRevenue } from "@/hooks/use-doctor-dossier";
 import { useMarketingExpenses } from "@/hooks/use-marketing-expenses";
 import { useMetaAdsApi } from "@/hooks/use-meta-ads-api";
 import { useMetaLeadsStats, normalizeEmail, normalizePhone } from "@/hooks/use-meta-leads-stats";
@@ -41,6 +42,9 @@ const Marketing = () => {
   // Date-windowed spend per normalized channel key — drives cost-per metrics
   // on each channel card. Channels with no spend in the period get "—".
   const channelEconomics = useChannelEconomics();
+  // Actual per-doctor revenue from Zoho Books invoices (falls back to the flat
+  // estimate when a doctor isn't invoiced yet).
+  const { revenueForDoctor } = useDoctorRevenue();
   const spendByChannel = useMemo(() => {
     const m = new Map<string, number>();
     for (const r of channelEconomics) m.set(r.channel, r.spend);
@@ -122,12 +126,17 @@ const Marketing = () => {
     }
 
     // Conversions from Doctors on Board, attributed by Lead_Source (with the
-    // junk-source-only meta_leads fallback above).
+    // junk-source-only meta_leads fallback above). Revenue per channel is the
+    // sum of each converted doctor's ACTUAL invoiced amount (Zoho Books), not
+    // a flat fee — so the headline tracks real money per channel.
+    const revenueByChannel: Record<string, number> = {};
     for (const dob of zoho.rawDoctorsOnBoard ?? []) {
       const t = dob.Created_Time ? new Date(dob.Created_Time).getTime() : NaN;
       if (isNaN(t) || t < fromMs || t >= toMs) continue;
       const ch = channelOf(dob.Email, dob.Phone ?? dob.Mobile, dob.Lead_Source);
       convertedByChannel[ch] = (convertedByChannel[ch] ?? 0) + 1;
+      const dname = dob.Full_Name || `${dob.First_Name ?? ""} ${dob.Last_Name ?? ""}`.trim();
+      revenueByChannel[ch] = (revenueByChannel[ch] ?? 0) + revenueForDoctor(dname);
     }
 
     // Union channel keys from BOTH leads and conversions — otherwise a channel
@@ -163,9 +172,10 @@ const Marketing = () => {
         const contactRate    = doctors > 0 ? Math.round((contacted  / doctors) * 100) : 0;
         const qualifiedRate  = doctors > 0 ? Math.round((qualified  / doctors) * 100) : 0;
         const conversionRate = doctors > 0 ? Math.round((converted  / doctors) * 100) : 0;
-        return { channel, doctors, contacted, uncontacted, qualified, converted, contactRate, qualifiedRate, conversionRate };
+        const revenue        = revenueByChannel[channel] ?? 0;
+        return { channel, doctors, contacted, uncontacted, qualified, converted, contactRate, qualifiedRate, conversionRate, revenue };
       });
-  }, [zoho?.rawLeads, zoho?.rawDoctorsOnBoard, dateRange, metaStats?.metaLeadEmails, metaStats?.metaLeadPhones]);
+  }, [zoho?.rawLeads, zoho?.rawDoctorsOnBoard, dateRange, metaStats?.metaLeadEmails, metaStats?.metaLeadPhones, revenueForDoctor]);
 
   const bestChannel = marketing.length > 0
     ? marketing.reduce((a, b) => (a.doctors > b.doctors ? a : b))
@@ -297,7 +307,7 @@ const Marketing = () => {
     // delivered, not raw lead volume.
     const mostRevenue = [...activeRows]
       .filter(r => r.converted > 0)
-      .sort((a, b) => b.converted - a.converted)[0] ?? null;
+      .sort((a, b) => b.revenue - a.revenue)[0] ?? null;
     // Best Closing Rate — converted ÷ qualified, min 5 qualified to avoid noise
     const QUAL_MIN = 5;
     const bestQuality = [...activeRows]
@@ -400,25 +410,25 @@ const Marketing = () => {
         <WinnerCard
           accent="emerald"
           label="Most Revenue Generated"
-          meaning="Channel that produced the most revenue in the selected period — converted doctors × the per-doctor fee. Ranks channels on actual money delivered, not raw lead volume."
-          source="Zoho Doctors on Board × revenue per conversion."
+          meaning="Channel that produced the most revenue in the selected period — the sum of each converted doctor's ACTUAL invoiced amount (Zoho Books), falling back to the per-doctor estimate for doctors not invoiced yet."
+          source="Zoho Books invoices per converted doctor (estimate fallback)."
           channel={channelWinners?.mostRevenue?.channel ?? null}
-          value={channelWinners?.mostRevenue ? fmtMoney(channelWinners.mostRevenue.converted * REVENUE_PER_CONVERSION_AED) : ""}
-          sub={channelWinners?.mostRevenue ? `${channelWinners.mostRevenue.converted.toLocaleString()} converted · ${fmtMoney(REVENUE_PER_CONVERSION_AED)}/doctor` : undefined}
+          value={channelWinners?.mostRevenue ? fmtMoney(channelWinners.mostRevenue.revenue) : ""}
+          sub={channelWinners?.mostRevenue ? `${channelWinners.mostRevenue.converted.toLocaleString()} converted · actual invoiced` : undefined}
           back={
             <div className="space-y-3">
               <p className="text-muted-foreground">
-                <strong>Formula:</strong> converted doctors × {fmtMoney(REVENUE_PER_CONVERSION_AED)} per placement. Channels need at least one converted doctor to qualify.
+                <strong>Revenue</strong> = sum of each converted doctor's actual Zoho Books invoices, with a {fmtMoney(REVENUE_PER_CONVERSION_AED)} estimate fallback for doctors not yet invoiced. Channels need at least one converted doctor.
               </p>
               <div>
                 <p className="text-[10px] uppercase tracking-wide font-semibold text-muted-foreground/70 mb-1">Top 3 by revenue</p>
                 <div className="divide-y divide-border/30">
                   {[...channelRows]
                     .filter(r => r.converted > 0)
-                    .sort((a, b) => b.converted - a.converted)
+                    .sort((a, b) => b.revenue - a.revenue)
                     .slice(0, 3)
                     .map(r => {
-                      const revenue = r.converted * REVENUE_PER_CONVERSION_AED;
+                      const revenue = r.revenue;
                       return (
                         <div key={r.channel} className="flex items-center justify-between py-1.5">
                           <div className="flex items-center gap-1.5">
