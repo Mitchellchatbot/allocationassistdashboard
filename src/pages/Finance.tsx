@@ -64,6 +64,21 @@ const CAT_COLORS = [
 // rank channels using the same fee.
 import { REVENUE_PER_CONVERSION_AED } from "@/lib/revenue";
 
+// Vendor → channel overrides for Books-billed marketing spend. The vendor name
+// is usually the channel, but some need a manual mapping confirmed by the team:
+//   - Scaled AI LLC  → AA's Website / SEO work (no keyword to match on)
+//   - LinkedIn Ireland → also AA's Website / SEO (NOT a LinkedIn ad channel)
+// Add a line here to map another vendor. Meta is handled by the live Meta API,
+// so Meta-classified rows are dropped to avoid double-counting the Meta bills.
+const VENDOR_CHANNEL_OVERRIDES: { match: RegExp; channel: string }[] = [
+  { match: /scaled\s*ai/i, channel: "Website / SEO" },
+  { match: /linkedin/i,    channel: "Website / SEO" },
+];
+function classifyChannel(text: string): string {
+  for (const o of VENDOR_CHANNEL_OVERRIDES) if (o.match.test(text)) return o.channel;
+  return normalizeChannelKey(text);
+}
+
 // ── Flippable KPI card ────────────────────────────────────────────────────────
 
 function FlipKpiCard({
@@ -641,8 +656,10 @@ const Finance = () => {
     const grid = new Map<string, Map<string, number>>();
     if (usingBooks) {
       for (const t of booksTxns!) {
-        const ch = normalizeChannelKey(t.text);
-        if (ch === "Meta") continue;            // live API covers Meta
+        const ch = classifyChannel(t.text);
+        // Meta → live API; "Other" → unmapped vendors (operational / unknown),
+        // deliberately excluded so the table shows only real, mapped channels.
+        if (ch === "Meta" || ch === "Other") continue;
         const key = (t.date ?? "").slice(0, 7);
         if (!key) continue;
         const row = grid.get(ch) ?? new Map<string, number>();
@@ -1015,7 +1032,7 @@ const Finance = () => {
             <CardTitle className="text-[14px] font-semibold text-foreground">
               Monthly Marketing Spend by Channel
             </CardTitle>
-            <p className="text-[11px] text-muted-foreground/80 mt-0.5">All values in {currency}, per month. <span className="text-emerald-700 font-medium">Meta is pulled live from the Meta Ads API</span>; other channels are classified from Zoho Books transactions (by their account / reference / description). Spend that names no channel lands in <strong>Other</strong>.</p>
+            <p className="text-[11px] text-muted-foreground/80 mt-0.5">All values in {currency}, per month. <span className="text-emerald-700 font-medium">Meta is pulled live from the Meta Ads API</span>; other channels come from Zoho Books vendor bills mapped to a channel (Scaled AI + LinkedIn → Website/SEO, GoHire → Go Hire). Unmapped vendors are excluded.</p>
           </CardHeader>
           <CardContent className="px-0 pb-3 overflow-x-auto">
             <table className="w-full text-left border-collapse">

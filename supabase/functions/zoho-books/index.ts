@@ -93,9 +93,13 @@ serve(async (req) => {
 
   try {
     const dateParams = { date_start: from, date_end: to };
-    const [invoices, expenses] = await Promise.all([
+    const [invoices, expenses, bills] = await Promise.all([
       fetchAll(token, "invoices", "invoices", dateParams),
       fetchAll(token, "expenses", "expenses", dateParams),
+      // Most marketing spend is booked as BILLS to vendors (Scaled AI,
+      // LinkedIn, GoHire, Meta…), not expenses — so the channel attribution
+      // needs them. Vendor name is the channel signal.
+      fetchAll(token, "bills", "bills", dateParams),
     ]);
 
     const byMonth: Record<string, { month: string; revenue: number; expenses: number }> = {};
@@ -136,6 +140,18 @@ serve(async (req) => {
 
       const text = `${e.account_name ?? ""} | ${e.reference_number ?? ""} | ${e.description ?? ""}`.replace(/\s+/g, " ").trim();
       if (CHANNEL_RE.test(text)) marketingTxns.push({ date: date.slice(0, 10), amount: total, text });
+    }
+
+    // Bills → channel candidates. The VENDOR is the channel signal, so include
+    // every bill (the dashboard maps vendor → channel and ignores non-marketing
+    // vendors). Use the base-currency total (bcy_total) so USD vendors like
+    // "Scaled AI LLC" convert to AED.
+    for (const b of bills) {
+      const date = String(b.date ?? "").slice(0, 10);
+      if (!date) continue;
+      const amount = num(b.bcy_total ?? b.total);
+      const text = `${b.vendor_name ?? ""} | ${b.reference_number ?? ""} | ${b.description ?? ""}`.replace(/\s+/g, " ").trim();
+      marketingTxns.push({ date, amount, text });
     }
     const byDay = Object.values(byDayMap).sort((a, b) => a.date.localeCompare(b.date));
 
