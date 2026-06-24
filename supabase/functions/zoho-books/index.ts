@@ -82,14 +82,37 @@ serve(async (req) => {
 
   if (!CONFIGURED) return json({ configured: false, ok: false });
 
-  let body: { from?: string; to?: string };
+  let body: { from?: string; to?: string; action?: string };
   try { body = await req.json(); } catch { body = {}; }
-  const from = ymd(body.from ?? "");
-  const to   = ymd(body.to ?? "");
-  if (!from || !to) return json({ configured: true, ok: false, error: "from/to (YYYY-MM-DD) required" }, 400);
 
   const token = await getAccessToken();
   if (!token) return json({ configured: true, ok: false, error: "Could not authenticate with Zoho Books (check the refresh token / client credentials / data center)." }, 502);
+
+  // ── action=invoices: flat list of ALL invoices (all-time) with customer
+  //    info, so the dashboard can map each doctor (customer) to their billing.
+  if (body.action === "invoices") {
+    try {
+      const invs = await fetchAll(token, "invoices", "invoices", {});
+      return json({
+        configured: true, ok: true,
+        invoices: invs.map(i => ({
+          date:     String(i.date ?? ""),
+          number:   String(i.invoice_number ?? ""),
+          customer: String(i.customer_name ?? ""),
+          customerId: String(i.customer_id ?? ""),
+          total:    num(i.total),
+          balance:  num(i.balance),
+          status:   String(i.status ?? ""),
+        })),
+      });
+    } catch (e) {
+      return json({ configured: true, ok: false, error: (e as Error).message }, 500);
+    }
+  }
+
+  const from = ymd(body.from ?? "");
+  const to   = ymd(body.to ?? "");
+  if (!from || !to) return json({ configured: true, ok: false, error: "from/to (YYYY-MM-DD) required" }, 400);
 
   try {
     const dateParams = { date_start: from, date_end: to };

@@ -51,6 +51,26 @@ export function useDoctorCvUploads(doctorId: string | null) {
   });
 }
 
+export interface BooksInvoice {
+  date: string; number: string; customer: string; customerId: string;
+  total: number; balance: number; status: string;
+}
+
+/** All Zoho Books invoices (customer = the doctor billed). Fetched once and
+ *  matched to each doctor by name in the Overview. */
+export function useBooksInvoices() {
+  return useQuery({
+    queryKey: ["books-invoices"],
+    queryFn: async (): Promise<BooksInvoice[]> => {
+      const { data, error } = await supabase.functions.invoke("zoho-books", { body: { action: "invoices" } });
+      if (error) throw new Error((error as { message?: string })?.message ?? "Couldn't load invoices.");
+      const res = data as { ok?: boolean; invoices?: BooksInvoice[] };
+      return res?.invoices ?? [];
+    },
+    staleTime: 10 * 60_000,
+  });
+}
+
 /** On-demand: analyze a doctor's CV PDF (their website cv_url) via Claude. The
  *  edge function parses it, persists a cv_uploads row + fills empty profile
  *  fields, and returns the extracted data. We invalidate the CV query so the

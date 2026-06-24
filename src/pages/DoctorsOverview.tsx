@@ -19,7 +19,7 @@ import { useZohoData, type ZohoDoctorOnBoard } from "@/hooks/use-zoho-data";
 import { useDoctorProfile, calcCompletion } from "@/hooks/use-doctor-profiles";
 import { useWpCandidateForDoctor } from "@/hooks/use-wp-candidates";
 import { useForms, type FormResponse } from "@/hooks/use-forms";
-import { useDoctorFormResponses, useDoctorCvUploads, useAnalyzeCv } from "@/hooks/use-doctor-dossier";
+import { useDoctorFormResponses, useDoctorCvUploads, useAnalyzeCv, useBooksInvoices } from "@/hooks/use-doctor-dossier";
 import { useUpdateDoctorOnBoard } from "@/hooks/use-update-doctor";
 import { LicensingSpend } from "@/components/LicensingSpend";
 import { Badge } from "@/components/ui/badge";
@@ -30,7 +30,7 @@ import { toast } from "sonner";
 import {
   ChevronDown, ChevronRight, Mail, Phone, MapPin, Building2, UserCog,
   FileText, IdCard, Calendar, ExternalLink, Loader2, FileSearch, CircleUser,
-  Pencil, ScanLine, Check, X, Banknote,
+  Pencil, ScanLine, Check, X, Banknote, Receipt,
 } from "lucide-react";
 
 type RangeKey = "all" | "7" | "30" | "90" | "365";
@@ -50,6 +50,16 @@ function fmtDate(iso: string | null | undefined): string {
 function rangeCutoff(range: RangeKey): number | null {
   if (range === "all") return null;
   return Date.now() - Number(range) * 24 * 60 * 60 * 1000;
+}
+
+const fmtAED = (v: number) => `AED ${Math.round(v).toLocaleString()}`;
+
+/** Normalise a doctor / invoice-customer name for matching — drops a title
+ *  prefix ("Dr", "Dr.", "Prof"…) and collapses spaces. */
+function normDoctorName(n: string | null | undefined): string {
+  return (n ?? "").toLowerCase()
+    .replace(/^\s*(dr|doctor|prof|professor|mr|mrs|ms|miss)\.?\s+/i, "")
+    .replace(/\s+/g, " ").trim();
 }
 
 export default function DoctorsOverview() {
@@ -280,6 +290,18 @@ function DoctorDetail({
   const completion = profile ? calcCompletion(profile) : 0;
   const cvWithData = cvs.find(c => c.status === "extracted" && c.extracted_data);
 
+  // Zoho Books invoices billed to this doctor (matched by name).
+  const { data: allInvoices = [], isLoading: invLoading } = useBooksInvoices();
+  const invoices = useMemo(() => {
+    const target = normDoctorName(name);
+    if (!target) return [];
+    return allInvoices
+      .filter(i => normDoctorName(i.customer) === target)
+      .sort((a, b) => (b.date || "").localeCompare(a.date || ""));
+  }, [allInvoices, name]);
+  const billedTotal  = invoices.reduce((s, i) => s + i.total, 0);
+  const outstanding  = invoices.reduce((s, i) => s + i.balance, 0);
+
   const profileFields: Array<[string, string | null | undefined]> = wp ? [
     ["Job title", wp.job_title], ["Specialty", wp.specialty], ["Subspecialty", wp.subspecialty],
     ["Area of interest", wp.area_of_interest], ["Years experience", wp.years_experience != null ? String(wp.years_experience) : null],
@@ -319,6 +341,36 @@ function DoctorDetail({
               {wp?.wp_link && <LinkChip href={wp.wp_link} label="View on website" />}
               {(wp?.cv_url || profile?.cv_url) && <LinkChip href={(wp?.cv_url || profile?.cv_url)!} label="Open CV file" />}
               {profile && <Badge variant="outline" className="text-[10px]">{completion}% profile complete</Badge>}
+            </div>
+          </div>
+        )}
+      </Section>
+
+      <Section
+        icon={<Receipt className="h-3.5 w-3.5" />}
+        title="Billing (Zoho Books)"
+        meta={invLoading ? "loading…" : invoices.length ? `${fmtAED(billedTotal)} · ${invoices.length}` : "No invoices"}
+        defaultOpen={false}
+        empty={!invLoading && invoices.length === 0}
+        loading={invLoading}
+      >
+        {invoices.length > 0 && (
+          <div className="space-y-2">
+            <div className="flex flex-wrap items-center gap-x-5 gap-y-1 text-[12px]">
+              <span><span className="text-slate-400 text-[10px] uppercase tracking-wider mr-1.5">Billed</span><span className="font-semibold text-emerald-700">{fmtAED(billedTotal)}</span></span>
+              <span><span className="text-slate-400 text-[10px] uppercase tracking-wider mr-1.5">Outstanding</span><span className={`font-semibold ${outstanding > 0 ? "text-amber-700" : "text-slate-500"}`}>{fmtAED(outstanding)}</span></span>
+              <span><span className="text-slate-400 text-[10px] uppercase tracking-wider mr-1.5">Invoices</span><span className="font-semibold text-slate-700">{invoices.length}</span></span>
+            </div>
+            <div className="rounded-md border border-slate-200 overflow-hidden">
+              {invoices.map((i, idx) => (
+                <div key={i.number || idx} className={`flex items-center gap-2 px-2.5 py-1.5 text-[11.5px] ${idx % 2 ? "bg-slate-50/50" : "bg-white"}`}>
+                  <span className="font-mono text-slate-500 w-[78px] shrink-0">{i.number || "—"}</span>
+                  <span className="text-slate-500 w-[88px] shrink-0">{fmtDate(i.date)}</span>
+                  <span className="font-semibold text-slate-800 tabular-nums w-[96px] shrink-0">{fmtAED(i.total)}</span>
+                  <Badge variant="outline" className={`text-[9px] capitalize ${i.status === "paid" ? "bg-emerald-50 text-emerald-700 border-emerald-200" : i.balance > 0 ? "bg-amber-50 text-amber-700 border-amber-200" : ""}`}>{i.status || "—"}</Badge>
+                  {i.balance > 0 && <span className="ml-auto text-[10.5px] text-amber-700">{fmtAED(i.balance)} due</span>}
+                </div>
+              ))}
             </div>
           </div>
         )}
