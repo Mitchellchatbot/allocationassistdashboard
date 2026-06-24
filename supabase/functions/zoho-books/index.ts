@@ -116,6 +116,13 @@ serve(async (req) => {
       if (date) bumpDay(date.slice(0, 10)).revenue += total;
     }
 
+    // Marketing/advertising transactions, returned so the dashboard can
+    // attribute spend to a channel by reading the account / reference /
+    // description text (the only place the channel is recorded — e.g. a bank
+    // line "FACEBK *…FB.ME/ADS" or reference "Facebook - No Invoice").
+    const CHANNEL_RE = /market|advertis|\bads?\b|digital|media|promo|facebook|instagram|fb\.me|facebk|\bmeta\b|google\s*ad|adwords|linkedin|tiktok|snap|youtube|twitter|whatsapp|influencer|\bseo\b/i;
+    const marketingTxns: { date: string; amount: number; text: string }[] = [];
+
     const byCategoryMap: Record<string, number> = {};
     let expenseTotal = 0;
     for (const e of expenses) {
@@ -126,6 +133,9 @@ serve(async (req) => {
       const date = String(e.date ?? "");
       bump(monthKey(date)).expenses += total;
       if (date) bumpDay(date.slice(0, 10)).expenses += total;
+
+      const text = `${e.account_name ?? ""} | ${e.reference_number ?? ""} | ${e.description ?? ""}`.replace(/\s+/g, " ").trim();
+      if (CHANNEL_RE.test(text)) marketingTxns.push({ date: date.slice(0, 10), amount: total, text });
     }
     const byDay = Object.values(byDayMap).sort((a, b) => a.date.localeCompare(b.date));
 
@@ -147,6 +157,7 @@ serve(async (req) => {
       byMonth:      byMonthArr,
       byDay,
       byCategory,
+      marketingTxns,
     });
   } catch (e) {
     console.error("[zoho-books] fetch failed:", (e as Error).message);

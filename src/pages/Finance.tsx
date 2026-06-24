@@ -622,11 +622,9 @@ const Finance = () => {
   // ── Monthly Spend × Channel grid (for the CEO-glanceable section) ─────────
   // Builds rows = channel, cols = months in the selected period. Used by the
   // "Monthly Marketing Spend by Channel" section + the profit P&L beneath it.
-  type ChannelSpendRow = { channel: string; perMonth: Record<string, number>; total: number; source: "sheet" | "meta" };
+  type ChannelSpendRow = { channel: string; perMonth: Record<string, number>; total: number; source: "sheet" | "meta" | "books" };
   const monthlySpendByChannel = useMemo(() => {
-    // Meta's REAL spend comes straight from the Meta Marketing API (live),
-    // bucketed by month — NOT from the sheet (its Meta rows, if any, are
-    // ignored). Everything else comes from the marketing-expenses sheet.
+    // Meta — REAL spend straight from the Meta Marketing API (live), by month.
     const metaByMonth: Record<string, number> = {};
     for (const d of metaAds?.dailySeries ?? []) {
       const k = (d.dateISO ?? "").slice(0, 7);
@@ -634,26 +632,41 @@ const Finance = () => {
     }
     const hasMeta = Object.values(metaByMonth).some(v => v > 0);
 
-    // Sheet spend bucketed channel × month. Meta is excluded ONLY when live
-    // Meta data exists — if the Meta API is unavailable, we keep the sheet's
-    // Meta rows so Meta spend never silently disappears.
+    // Non-Meta channels. Prefer Zoho Books marketing transactions — each is
+    // attributed to a channel by classifying its text (account / reference /
+    // description). Meta-classified txns are dropped (the live API covers Meta).
+    // Falls back to the marketing-expenses sheet when Books isn't connected.
+    const booksTxns = books?.marketingTxns;
+    const usingBooks = !!(booksTxns && booksTxns.length);
     const grid = new Map<string, Map<string, number>>();
-    for (const t of allTransactions) {
-      const ch = normalizeChannelKey(t.category);
-      if (ch === "Meta" && hasMeta) continue;  // live API replaces the sheet's Meta
-      const key = (t.expense_date ?? "").slice(0, 7);
-      if (!key) continue;
-      const row = grid.get(ch) ?? new Map<string, number>();
-      row.set(key, (row.get(key) ?? 0) + (t.amount ?? 0));
-      grid.set(ch, row);
+    if (usingBooks) {
+      for (const t of booksTxns!) {
+        const ch = normalizeChannelKey(t.text);
+        if (ch === "Meta") continue;            // live API covers Meta
+        const key = (t.date ?? "").slice(0, 7);
+        if (!key) continue;
+        const row = grid.get(ch) ?? new Map<string, number>();
+        row.set(key, (row.get(key) ?? 0) + (t.amount ?? 0));
+        grid.set(ch, row);
+      }
+    } else {
+      for (const t of allTransactions) {
+        const ch = normalizeChannelKey(t.category);
+        if (ch === "Meta" && hasMeta) continue;  // live API replaces the sheet's Meta
+        const key = (t.expense_date ?? "").slice(0, 7);
+        if (!key) continue;
+        const row = grid.get(ch) ?? new Map<string, number>();
+        row.set(key, (row.get(key) ?? 0) + (t.amount ?? 0));
+        grid.set(ch, row);
+      }
     }
 
-    // Column set = union of sheet months + Meta (live) months, so a month with
-    // ONLY Meta spend (e.g. the sheet hasn't been imported for it yet) still
-    // shows up — this is why April/May looked empty before.
+    // Column set = union of all months that actually have spend (sheet, Books
+    // channels, and Meta), so no month with data is hidden.
     const monthSet = new Set<string>();
-    for (const m of monthly) monthSet.add(m.monthKey);
+    if (!usingBooks) for (const m of monthly) monthSet.add(m.monthKey);
     for (const k of Object.keys(metaByMonth)) monthSet.add(k);
+    for (const row of grid.values()) for (const k of row.keys()) monthSet.add(k);
     if (monthSet.size === 0) {
       return { months: [] as { key: string; label: string }[], channels: [] as ChannelSpendRow[] };
     }
@@ -666,7 +679,7 @@ const Finance = () => {
       const perMonth: Record<string, number> = {};
       let total = 0;
       for (const m of months) { const v = perMonthMap.get(m.key) ?? 0; perMonth[m.key] = v; total += v; }
-      return { channel, perMonth, total, source: "sheet" };
+      return { channel, perMonth, total, source: usingBooks ? "books" : "sheet" };
     });
 
     if (hasMeta) {
@@ -678,7 +691,7 @@ const Finance = () => {
 
     channels.sort((a, b) => b.total - a.total);
     return { months, channels };
-  }, [allTransactions, monthly, metaAds]);
+  }, [allTransactions, monthly, metaAds, books]);
 
   // ── Profit P&L placeholders ───────────────────────────────────────────────
   // Marketing spend is real; payroll + other expenses + revenue are stubbed
@@ -1002,7 +1015,7 @@ const Finance = () => {
             <CardTitle className="text-[14px] font-semibold text-foreground">
               Monthly Marketing Spend by Channel
             </CardTitle>
-            <p className="text-[11px] text-muted-foreground/80 mt-0.5">All values in {currency}, per month — channels sorted by period total. <span className="text-emerald-700 font-medium">Meta is pulled live from the Meta Ads API</span>; the rest from the marketing-expenses sheet.</p>
+            <p className="text-[11px] text-muted-foreground/80 mt-0.5">All values in {currency}, per month. <span className="text-emerald-700 font-medium">Meta is pulled live from the Meta Ads API</span>; other channels are classified from Zoho Books transactions (by their account / reference / description). Spend that names no channel lands in <strong>Other</strong>.</p>
           </CardHeader>
           <CardContent className="px-0 pb-3 overflow-x-auto">
             <table className="w-full text-left border-collapse">

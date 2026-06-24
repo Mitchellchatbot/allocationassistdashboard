@@ -24,6 +24,9 @@ export interface ZohoBooksData {
   byMonth?:     ZohoBooksMonth[];
   byDay?:       ZohoBooksDay[];
   byCategory?:  ZohoBooksCategory[];
+  /** Marketing/advertising expense transactions — text carries the channel
+   *  (account / reference / description), classified on the dashboard. */
+  marketingTxns?: { date: string; amount: number; text: string }[];
 }
 
 const ymd = (d: Date) =>
