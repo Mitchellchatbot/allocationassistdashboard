@@ -152,7 +152,7 @@ function BatchRow({ batch, onEdit, compact = false }: { batch: ScheduledBatch; o
           <Badge variant="outline" className="text-[9px] bg-slate-50 uppercase tracking-wider">{dayLabel}</Badge>
           {batch.country && (
             <Badge variant="outline" className="text-[9px] bg-sky-50 text-sky-700 border-sky-200 uppercase tracking-wider">
-              {batch.country}
+              {batch.country} · {workWeekLabel(batch.country)}
             </Badge>
           )}
           {batch.specialty && (
@@ -809,6 +809,14 @@ const KIND_LABEL: Record<BatchKind, string> = {
   specialty_of_day: "Specialty of the day",
 };
 
+// Gulf work weeks differ by country: UAE runs Mon–Fri (Sat–Sun weekend) while
+// Saudi + the other GCC desks run Sun–Thu (Fri–Sat weekend). The batch's
+// country picks the work week, so the Saudi team sees their own schedule.
+const SUN_THU_COUNTRIES = new Set(["saudi arabia", "ksa", "saudi", "qatar", "oman", "kuwait", "bahrain"]);
+function workWeekLabel(country: string | null | undefined): string {
+  return SUN_THU_COUNTRIES.has((country ?? "").toLowerCase().trim()) ? "Sun–Thu" : "Mon–Fri";
+}
+
 // ── Unified create / edit dialog ─────────────────────────────────────────
 //
 // Single modal that handles both "create new batch" and "queue doctors into
@@ -1085,6 +1093,11 @@ function BatchDialog({ target, onTargetChange, batches, suggestedSpecialty }: {
                 <p className="text-[10px] text-muted-foreground">
                   This batch only sends to hospitals in the chosen country. Create one batch per country per day (Ammar 2026-06-03 spec).
                 </p>
+                <div className="mt-1 inline-flex items-center gap-1.5 rounded-md bg-sky-50 px-2 py-1 text-[10px] text-sky-700">
+                  <Calendar className="h-3 w-3" />
+                  {country === "UAE" ? "UAE team" : `${country} team`} work week: <strong>{workWeekLabel(country)}</strong>
+                  <span className="text-sky-600/70">({workWeekLabel(country) === "Sun–Thu" ? "Fri–Sat weekend" : "Sat–Sun weekend"})</span>
+                </div>
               </div>
               {kind === "specialty_of_day" && (
                 <div className="space-y-1">
