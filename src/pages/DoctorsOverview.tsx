@@ -62,16 +62,42 @@ function normDoctorName(n: string | null | undefined): string {
     .replace(/\s+/g, " ").trim();
 }
 
+function doctorDisplayName(d: ZohoDoctorOnBoard): string {
+  return d.Full_Name || `${d.First_Name ?? ""} ${d.Last_Name ?? ""}`.trim() || "Unnamed doctor";
+}
+
+interface BillingSummary { billed: number; outstanding: number; count: number }
+type BillFilter = "all" | "invoiced" | "outstanding";
+const BILL_FILTER_LABELS: Record<BillFilter, string> = {
+  all: "All billing", invoiced: "Has invoices", outstanding: "Has outstanding",
+};
+
 export default function DoctorsOverview() {
   const [params] = useSearchParams();
   const q = (params.get("q") ?? "").trim().toLowerCase();
   const [range, setRange] = useState<RangeKey>("all");
 
+  const [billFilter, setBillFilter] = useState<BillFilter>("all");
+
   const { data: zoho, isLoading } = useZohoData();
+  const { data: allInvoices = [] } = useBooksInvoices();
   const dob = useMemo(
     () => ((zoho as { rawDoctorsOnBoard?: ZohoDoctorOnBoard[] } | undefined)?.rawDoctorsOnBoard ?? []),
     [zoho],
   );
+
+  // Books billing per doctor, keyed by normalized name (for the row chip + filter).
+  const billingByName = useMemo(() => {
+    const m = new Map<string, BillingSummary>();
+    for (const i of allInvoices) {
+      const k = normDoctorName(i.customer);
+      if (!k) continue;
+      const cur = m.get(k) ?? { billed: 0, outstanding: 0, count: 0 };
+      cur.billed += i.total; cur.outstanding += i.balance; cur.count += 1;
+      m.set(k, cur);
+    }
+    return m;
+  }, [allInvoices]);
 
   const filtered = useMemo(() => {
     const cutoff = rangeCutoff(range);
@@ -88,10 +114,15 @@ export default function DoctorsOverview() {
           ].filter(Boolean).join(" ").toLowerCase();
           if (!hay.includes(q)) return false;
         }
+        if (billFilter !== "all") {
+          const b = billingByName.get(normDoctorName(doctorDisplayName(d)));
+          if (billFilter === "invoiced"    && (!b || b.count === 0))     return false;
+          if (billFilter === "outstanding" && (!b || b.outstanding <= 0)) return false;
+        }
         return true;
       })
       .sort((a, b) => new Date(b.Created_Time).getTime() - new Date(a.Created_Time).getTime());
-  }, [dob, range, q]);
+  }, [dob, range, q, billFilter, billingByName]);
 
   return (
     <div className="space-y-3">
@@ -105,7 +136,16 @@ export default function DoctorsOverview() {
           )}
         </div>
         <div className="flex items-center gap-1.5">
-          <Calendar className="h-3.5 w-3.5 text-muted-foreground" />
+          <Receipt className="h-3.5 w-3.5 text-muted-foreground" />
+          <Select value={billFilter} onValueChange={(v) => setBillFilter(v as BillFilter)}>
+            <SelectTrigger className="h-8 w-[150px] text-[12px]"><SelectValue /></SelectTrigger>
+            <SelectContent>
+              {(Object.keys(BILL_FILTER_LABELS) as BillFilter[]).map(k => (
+                <SelectItem key={k} value={k} className="text-[12px]">{BILL_FILTER_LABELS[k]}</SelectItem>
+              ))}
+            </SelectContent>
+          </Select>
+          <Calendar className="h-3.5 w-3.5 text-muted-foreground ml-1" />
           <Select value={range} onValueChange={(v) => setRange(v as RangeKey)}>
             <SelectTrigger className="h-8 w-[150px] text-[12px]"><SelectValue /></SelectTrigger>
             <SelectContent>
@@ -125,13 +165,13 @@ export default function DoctorsOverview() {
       )}
 
       <div className="space-y-2">
-        {filtered.map(d => <DoctorRow key={d.id} d={d} />)}
+        {filtered.map(d => <DoctorRow key={d.id} d={d} billing={billingByName.get(normDoctorName(doctorDisplayName(d)))} />)}
       </div>
     </div>
   );
 }
 
-function DoctorRow({ d }: { d: ZohoDoctorOnBoard }) {
+function DoctorRow({ d, billing }: { d: ZohoDoctorOnBoard; billing?: BillingSummary }) {
   const [open, setOpen] = useState(false);
   const [editing, setEditing] = useState(false);
   // Bumped when the row's "Add cost" button is clicked — tells LicensingSpend
@@ -139,7 +179,7 @@ function DoctorRow({ d }: { d: ZohoDoctorOnBoard }) {
   const [addCostSignal, setAddCostSignal] = useState(0);
   const doctorId = `dob:${d.id}`;
   const spec = specialtyOf(d);
-  const name = d.Full_Name || `${d.First_Name ?? ""} ${d.Last_Name ?? ""}`.trim() || "Unnamed doctor";
+  const name = doctorDisplayName(d);
 
   return (
     <div className="rounded-lg border border-slate-200 bg-white overflow-hidden">
@@ -151,6 +191,14 @@ function DoctorRow({ d }: { d: ZohoDoctorOnBoard }) {
             <div className="flex flex-wrap items-center gap-x-2 gap-y-1">
               <span className="text-[14px] font-semibold text-slate-900 truncate group-hover:text-teal-700 transition-colors">{name}</span>
               {spec && <Badge variant="outline" className="text-[10px] bg-teal-50 text-teal-700 border-teal-200">{spec}</Badge>}
+              {billing && billing.billed > 0 && (
+                <span className="inline-flex items-center gap-1 rounded-full bg-emerald-50 px-1.5 py-0.5 text-[9.5px] font-semibold text-emerald-700">
+                  <Receipt className="h-2.5 w-2.5" />{fmtAED(billing.billed)} billed
+                </span>
+              )}
+              {billing && billing.outstanding > 0 && (
+                <span className="rounded-full bg-amber-50 px-1.5 py-0.5 text-[9.5px] font-semibold text-amber-700">{fmtAED(billing.outstanding)} due</span>
+              )}
             </div>
             <div className="mt-1 flex flex-wrap items-center gap-x-4 gap-y-0.5 text-[11.5px] text-slate-500">
               {d.Email && <span className="inline-flex items-center gap-1 min-w-0"><Mail className="h-3 w-3 shrink-0" /><span className="truncate">{d.Email}</span></span>}
