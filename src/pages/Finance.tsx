@@ -8,6 +8,7 @@ import { useZohoData } from "@/hooks/use-zoho-data";
 import { useFilters } from "@/lib/filters";
 import { ChannelWinnerCards } from "@/components/ChannelEconomics";
 import { ZohoBooksPanel } from "@/components/finance/ZohoBooksPanel";
+import { useZohoBooks } from "@/hooks/use-zoho-books";
 import { FinanceDigest } from "@/components/finance/FinanceDigest";
 import { useCurrency } from "@/lib/CurrencyProvider";
 import { normalizeChannelKey } from "@/lib/channel-mapping";
@@ -432,6 +433,7 @@ const Finance = () => {
   const { roiData } = useFilteredData();
   const { preset, setPreset, dateRange } = useFilters();
   const { data: zoho } = useZohoData();
+  const { data: books } = useZohoBooks(dateRange);
   const { fmt: fmtAED, currency } = useCurrency();
   const {
     rows: allTransactions,
@@ -704,6 +706,37 @@ const Finance = () => {
       months,
     };
   }, [monthlySpendByChannel, zoho, dateRange]);
+
+  // ── Zoho Books actuals → P&L (when connected) ─────────────────────────────
+  // When Zoho Books is wired up, the P&L table + chart use REAL invoiced
+  // revenue and full expenses from Books instead of the conversions×fee
+  // estimate. Falls back to the estimate when Books isn't connected.
+  const booksPnl = useMemo(() => {
+    if (!books?.configured || !books?.ok || !books.byMonth?.length) return null;
+    const months = [...books.byMonth]
+      .sort((a, b) => a.month.localeCompare(b.month))
+      .map(m => ({
+        key:      m.month,
+        label:    new Date(`${m.month}-01`).toLocaleDateString("en-GB", { month: "short", year: "2-digit" }),
+        revenue:  m.revenue,
+        expenses: m.expenses,
+        profit:   m.revenue - m.expenses,
+      }));
+    return {
+      months,
+      revenueTotal:  books.revenue  ?? 0,
+      expensesTotal: books.expenses ?? 0,
+      profitTotal:   books.profit   ?? ((books.revenue ?? 0) - (books.expenses ?? 0)),
+      outstanding:   books.outstanding ?? 0,
+    };
+  }, [books]);
+  const useBooks = !!booksPnl;
+
+  // Chart series — Books actuals (revenue / expenses-as-spend / profit) when
+  // connected, else the conversions-based estimate.
+  const pnlChart = useBooks
+    ? booksPnl!.months.map(m => ({ month: m.label, monthKey: m.key, revenue: m.revenue, spend: m.expenses, profit: m.profit }))
+    : monthlyPnl;
 
   return (
     <DashboardLayout title="Finance" subtitle="Revenue, spend, profit, and ROI across all channels" docSlug="growth/finance">
@@ -999,13 +1032,80 @@ const Finance = () => {
       {/* ── Profit P&L (structure shipped, numbers fill in as data arrives) ─
           Render if EITHER spend or conversions exist in the window. Otherwise
           a month with revenue-only data would never be displayed. */}
-      {profitRows.months.length > 0 && (
+      {/* ── Zoho Books actuals P&L (when connected) ── */}
+      {useBooks && booksPnl!.months.length > 0 && (
+        <Card className="shadow-md border-border/60 mb-5">
+          <CardHeader className="pb-2 pt-4 px-5">
+            <div className="flex items-center gap-2 flex-wrap">
+              <CardTitle className="text-[14px] font-semibold text-foreground">
+                Profit &amp; Loss <span className="font-normal text-muted-foreground">(per month)</span>
+              </CardTitle>
+              <span className="inline-flex items-center gap-1 text-[9px] font-bold uppercase tracking-wide px-2 py-0.5 rounded-full bg-emerald-100 text-emerald-700">
+                <span className="h-1.5 w-1.5 rounded-full bg-emerald-500" /> Zoho Books · actuals
+              </span>
+            </div>
+            <p className="text-[11px] text-muted-foreground/80 mt-0.5">Real invoiced revenue and full expenses from Zoho Books for the selected period.</p>
+          </CardHeader>
+          <CardContent className="px-0 pb-3 overflow-x-auto">
+            <table className="w-full text-left border-collapse">
+              <thead className="bg-muted/40 border-y border-border/60">
+                <tr>
+                  <th className="py-3 px-5 text-[12px] font-semibold text-muted-foreground uppercase tracking-wide">Line item</th>
+                  {booksPnl!.months.map(m => (
+                    <th key={m.key} className="py-3 px-3 text-[12px] font-semibold text-muted-foreground uppercase tracking-wide text-right whitespace-nowrap">{m.label}</th>
+                  ))}
+                  <th className="py-3 px-5 text-[12px] font-semibold text-muted-foreground uppercase tracking-wide text-right whitespace-nowrap">Period</th>
+                </tr>
+              </thead>
+              <tbody>
+                <tr className="border-b border-border/30 hover:bg-muted/30 transition-colors">
+                  <td className="py-3.5 px-5 text-[14px] font-semibold text-foreground">Revenue <span className="text-[11px] font-normal text-muted-foreground">(invoiced)</span></td>
+                  {booksPnl!.months.map(m => (
+                    <td key={m.key} className="py-3.5 px-3 text-[14px] text-right tabular-nums text-emerald-700 font-semibold">
+                      {m.revenue > 0 ? fmtAED(m.revenue) : <span className="text-muted-foreground/30">—</span>}
+                    </td>
+                  ))}
+                  <td className="py-3.5 px-5 text-[14px] text-right tabular-nums font-bold text-emerald-700">{fmtAED(booksPnl!.revenueTotal)}</td>
+                </tr>
+                <tr className="border-b border-border/30 hover:bg-muted/30 transition-colors">
+                  <td className="py-3.5 px-5 text-[14px] font-semibold text-foreground">Expenses</td>
+                  {booksPnl!.months.map(m => (
+                    <td key={m.key} className="py-3.5 px-3 text-[14px] text-right tabular-nums text-rose-700/90">
+                      {m.expenses > 0 ? `(${fmtAED(m.expenses)})` : <span className="text-muted-foreground/30">—</span>}
+                    </td>
+                  ))}
+                  <td className="py-3.5 px-5 text-[14px] text-right tabular-nums font-bold text-rose-700">({fmtAED(booksPnl!.expensesTotal)})</td>
+                </tr>
+                <tr className="border-t-2 border-emerald-200 bg-emerald-50/60 font-bold">
+                  <td className="py-4 px-5 text-[14px] text-foreground">Profit</td>
+                  {booksPnl!.months.map(m => (
+                    <td key={m.key} className={`py-4 px-3 text-[15px] text-right tabular-nums ${m.profit >= 0 ? "text-emerald-700" : "text-rose-700"}`}>
+                      {m.revenue === 0 && m.expenses === 0 ? <span className="text-muted-foreground/30">—</span> : (m.profit < 0 ? `(${fmtAED(Math.abs(m.profit))})` : fmtAED(m.profit))}
+                    </td>
+                  ))}
+                  <td className={`py-4 px-5 text-[16px] text-right tabular-nums ${booksPnl!.profitTotal >= 0 ? "text-emerald-700" : "text-rose-700"}`}>
+                    {booksPnl!.profitTotal < 0 ? `(${fmtAED(Math.abs(booksPnl!.profitTotal))})` : fmtAED(booksPnl!.profitTotal)}
+                  </td>
+                </tr>
+                <tr className="border-t border-border/40">
+                  <td className="py-2.5 px-5 text-[11px] text-muted-foreground">Outstanding (unpaid invoices)</td>
+                  {booksPnl!.months.map(m => <td key={m.key} className="py-2.5 px-3" />)}
+                  <td className="py-2.5 px-5 text-[11px] text-right tabular-nums text-amber-700 font-medium">{fmtAED(booksPnl!.outstanding)}</td>
+                </tr>
+              </tbody>
+            </table>
+          </CardContent>
+        </Card>
+      )}
+
+      {/* ── Estimate P&L (fallback when Zoho Books isn't connected) ── */}
+      {!useBooks && profitRows.months.length > 0 && (
         <Card className="shadow-md border-border/60 mb-5">
           <CardHeader className="pb-2 pt-4 px-5">
             <CardTitle className="text-[14px] font-semibold text-foreground">
-              Profit &amp; Loss <span className="font-normal text-muted-foreground">(per month)</span>
+              Profit &amp; Loss <span className="font-normal text-muted-foreground">(per month · estimate)</span>
             </CardTitle>
-            <p className="text-[11px] text-muted-foreground/80 mt-0.5">Conversions × {fmtAED(REVENUE_PER_CONVERSION_AED)} per doctor − marketing spend. Payroll &amp; other operating costs fill in once the accountant delivers them.</p>
+            <p className="text-[11px] text-muted-foreground/80 mt-0.5">Conversions × {fmtAED(REVENUE_PER_CONVERSION_AED)} per doctor − marketing spend. Connect Zoho Books for real revenue + full expenses.</p>
           </CardHeader>
           <CardContent className="px-0 pb-3 overflow-x-auto">
             <table className="w-full text-left border-collapse">
@@ -1125,24 +1225,24 @@ const Finance = () => {
       )}
 
       {/* ── Monthly P&L: Revenue / Spend / Profit ── */}
-      {monthlyPnl.length > 0 && (
+      {pnlChart.length > 0 && (
         <Card className="shadow-md border-border/60 mb-5">
           <CardHeader className="pb-2 pt-4 px-5">
             <div className="flex items-center justify-between flex-wrap gap-2">
               <div>
-                <CardTitle className="text-[14px] font-semibold text-foreground">Revenue vs Spend vs Profit</CardTitle>
-                <p className="text-[11px] text-muted-foreground/80 mt-0.5">Monthly P&amp;L — same numbers as the table above, in chart form</p>
+                <CardTitle className="text-[14px] font-semibold text-foreground">Revenue vs {useBooks ? "Expenses" : "Spend"} vs Profit</CardTitle>
+                <p className="text-[11px] text-muted-foreground/80 mt-0.5">Monthly P&amp;L — {useBooks ? "Zoho Books actuals" : "same numbers as the table above"}, in chart form</p>
               </div>
               <div className="flex items-center gap-3 text-[11px] text-muted-foreground">
                 <span className="flex items-center gap-1.5"><span className="h-2.5 w-2.5 rounded-sm bg-emerald-500" />Revenue</span>
-                <span className="flex items-center gap-1.5"><span className="h-2.5 w-2.5 rounded-sm bg-rose-400" />Spend</span>
+                <span className="flex items-center gap-1.5"><span className="h-2.5 w-2.5 rounded-sm bg-rose-400" />{useBooks ? "Expenses" : "Spend"}</span>
                 <span className="flex items-center gap-1.5"><span className="h-0.5 w-3 bg-violet-500 rounded-full" />Profit</span>
               </div>
             </div>
           </CardHeader>
           <CardContent className="px-4 pb-4">
             <ResponsiveContainer width="100%" height={320}>
-              <ComposedChart data={monthlyPnl} margin={{ top: 8, right: 16, left: -10, bottom: 0 }}>
+              <ComposedChart data={pnlChart} margin={{ top: 8, right: 16, left: -10, bottom: 0 }}>
                 <CartesianGrid strokeDasharray="3 3" stroke="hsl(220,14%,92%)" vertical={false} />
                 <XAxis dataKey="month" fontSize={11} tickLine={false} axisLine={false} stroke="hsl(220,10%,45%)" />
                 <YAxis fontSize={11} tickLine={false} axisLine={false} stroke="hsl(220,10%,45%)"
@@ -1152,7 +1252,7 @@ const Finance = () => {
                 <Tooltip contentStyle={tip}
                   formatter={(v: number, name: string) => [fmtAED(v), name]} />
                 <Bar  dataKey="revenue" name="Revenue" fill="hsl(160,65%,45%)" radius={[4, 4, 0, 0]} />
-                <Bar  dataKey="spend"   name="Spend"   fill="hsl(0,75%,68%)"   radius={[4, 4, 0, 0]} />
+                <Bar  dataKey="spend"   name={useBooks ? "Expenses" : "Spend"} fill="hsl(0,75%,68%)" radius={[4, 4, 0, 0]} />
                 <Line type="monotone" dataKey="profit" name="Profit"
                   stroke="hsl(265,65%,55%)" strokeWidth={2.5}
                   dot={{ r: 4, fill: "hsl(265,65%,55%)", strokeWidth: 2, stroke: "#fff" }}
