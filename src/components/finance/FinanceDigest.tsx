@@ -14,7 +14,7 @@ import { useCurrency } from "@/lib/CurrencyProvider";
 import { REVENUE_PER_CONVERSION_AED } from "@/lib/revenue";
 import { GranularityToggle } from "@/components/GranularityToggle";
 import { bucketKey, bucketLabel, parseDate, type Granularity } from "@/lib/time-buckets";
-import { ComposedChart, Bar, Line, XAxis, YAxis, Tooltip, ResponsiveContainer, CartesianGrid, Legend } from "recharts";
+import { ComposedChart, Bar, Line, XAxis, YAxis, Tooltip, ResponsiveContainer, CartesianGrid, Legend, ReferenceLine } from "recharts";
 
 interface DigestRow { key: string; label: string; revenue: number; spend: number; profit: number; conversions: number; }
 
@@ -110,16 +110,17 @@ export function FinanceDigest() {
         </div>
       </CardHeader>
       <CardContent className="px-5 pb-5">
-        <ResponsiveContainer width="100%" height={240}>
-          <ComposedChart data={digest} margin={{ top: 8, right: 8, left: -6, bottom: 0 }}>
+        <ResponsiveContainer width="100%" height={288}>
+          <ComposedChart data={digest} margin={{ top: 12, right: 12, left: -2, bottom: 4 }} barCategoryGap={gran === "day" ? "12%" : "28%"} barGap={2}>
             <CartesianGrid strokeDasharray="3 3" stroke="hsl(var(--border))" vertical={false} />
-            <XAxis dataKey="label" tick={{ fontSize: 10 }} tickLine={false} axisLine={false} interval="preserveStartEnd" />
-            <YAxis tick={{ fontSize: 10 }} tickLine={false} axisLine={false} tickFormatter={compact} width={44} />
-            <Tooltip formatter={(v: number, n) => [fmt(v), n]} contentStyle={{ fontSize: 11, borderRadius: 8 }} />
-            <Legend wrapperStyle={{ fontSize: 10 }} iconType="circle" />
-            <Bar dataKey="revenue" name="Revenue" fill="#10b981" radius={[3, 3, 0, 0]} barSize={gran === "day" ? 6 : 14} />
-            <Bar dataKey="spend"   name="Spend"   fill="#f43f5e" radius={[3, 3, 0, 0]} barSize={gran === "day" ? 6 : 14} />
-            <Line dataKey="profit" name="Profit"  stroke="#3b82f6" strokeWidth={2} dot={false} />
+            <XAxis dataKey="label" tick={{ fontSize: 11 }} tickLine={false} axisLine={false} interval={gran === "day" ? "preserveStartEnd" : 0} minTickGap={4} />
+            <YAxis tick={{ fontSize: 10 }} tickLine={false} axisLine={false} tickFormatter={compact} width={48} />
+            <Tooltip formatter={(v: number, n) => [fmt(v), n]} contentStyle={{ fontSize: 11, borderRadius: 8 }} cursor={{ fill: "rgba(100,116,139,0.10)" }} />
+            <ReferenceLine y={0} stroke="hsl(var(--border))" strokeWidth={1.5} />
+            <Legend wrapperStyle={{ fontSize: 11 }} iconType="circle" />
+            <Bar dataKey="revenue" name="Revenue" fill="#10b981" radius={[3, 3, 0, 0]} maxBarSize={gran === "day" ? 8 : 40} />
+            <Bar dataKey="spend"   name="Spend"   fill="#f43f5e" radius={[3, 3, 0, 0]} maxBarSize={gran === "day" ? 8 : 40} />
+            <Line dataKey="profit" name="Profit"  stroke="#3b82f6" strokeWidth={2.5} dot={{ r: 3, fill: "#3b82f6", strokeWidth: 0 }} activeDot={{ r: 5 }} />
           </ComposedChart>
         </ResponsiveContainer>
 
