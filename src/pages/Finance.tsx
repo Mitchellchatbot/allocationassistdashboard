@@ -12,7 +12,7 @@ import { useZohoBooks } from "@/hooks/use-zoho-books";
 import { useMetaAdsApi } from "@/hooks/use-meta-ads-api";
 import { FinanceDigest } from "@/components/finance/FinanceDigest";
 import { useCurrency } from "@/lib/CurrencyProvider";
-import { normalizeChannelKey } from "@/lib/channel-mapping";
+import { normalizeChannelKey, classifyChannel } from "@/lib/channel-mapping";
 import {
   BarChart, Bar, XAxis, YAxis, Tooltip, ResponsiveContainer, CartesianGrid, Cell,
   AreaChart, Area, PieChart, Pie, Legend, LineChart, Line, ComposedChart,
@@ -63,21 +63,6 @@ const CAT_COLORS = [
 // Revenue per converted doctor lives in @/lib/revenue so Marketing + Finance
 // rank channels using the same fee.
 import { REVENUE_PER_CONVERSION_AED } from "@/lib/revenue";
-
-// Vendor → channel overrides for Books-billed marketing spend. The vendor name
-// is usually the channel, but some need a manual mapping confirmed by the team:
-//   - Scaled AI LLC  → AA's Website / SEO work (no keyword to match on)
-//   - LinkedIn Ireland → also AA's Website / SEO (NOT a LinkedIn ad channel)
-// Add a line here to map another vendor. Meta is handled by the live Meta API,
-// so Meta-classified rows are dropped to avoid double-counting the Meta bills.
-const VENDOR_CHANNEL_OVERRIDES: { match: RegExp; channel: string }[] = [
-  { match: /scaled\s*ai/i, channel: "Website / SEO" },
-  { match: /linkedin/i,    channel: "Website / SEO" },
-];
-function classifyChannel(text: string): string {
-  for (const o of VENDOR_CHANNEL_OVERRIDES) if (o.match.test(text)) return o.channel;
-  return normalizeChannelKey(text);
-}
 
 // ── Flippable KPI card ────────────────────────────────────────────────────────
 

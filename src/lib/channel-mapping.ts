@@ -51,3 +51,23 @@ export function normalizeChannelKey(raw: string | null | undefined): ChannelKey 
   for (const r of RULES) if (r.match.test(s)) return r.key;
   return "Other";
 }
+
+// Vendor → channel overrides for Books-billed marketing spend. The vendor name
+// is usually the channel, but some need a manual mapping confirmed by the team:
+//   - Scaled AI LLC    → AA's Website / SEO work (no keyword to match on)
+//   - LinkedIn Ireland → also AA's Website / SEO (NOT a LinkedIn ad channel)
+// Add a line to map another vendor. Meta is handled by the live Meta API, so
+// Meta-classified rows are dropped elsewhere to avoid double-counting Meta bills.
+export const VENDOR_CHANNEL_OVERRIDES: { match: RegExp; channel: ChannelKey }[] = [
+  { match: /scaled\s*ai/i, channel: "Website / SEO" },
+  { match: /linkedin/i,    channel: "Website / SEO" },
+];
+
+/** Like normalizeChannelKey but applies the vendor overrides first — use this
+ *  to classify Zoho Books marketing transactions (where the text is the vendor
+ *  name + reference + description). */
+export function classifyChannel(text: string | null | undefined): ChannelKey {
+  if (!text) return "Other";
+  for (const o of VENDOR_CHANNEL_OVERRIDES) if (o.match.test(text)) return o.channel;
+  return normalizeChannelKey(text);
+}

@@ -1,8 +1,10 @@
 import { useMemo } from "react";
 import { useMarketingExpenses } from "@/hooks/use-marketing-expenses";
 import { useZohoData, type ZohoDoctorOnBoard } from "@/hooks/use-zoho-data";
+import { useZohoBooks } from "@/hooks/use-zoho-books";
+import { useMetaAdsApi } from "@/hooks/use-meta-ads-api";
 import { useFilters } from "@/lib/filters";
-import { normalizeChannelKey, type ChannelKey } from "@/lib/channel-mapping";
+import { normalizeChannelKey, classifyChannel, type ChannelKey } from "@/lib/channel-mapping";
 
 export interface ChannelEconomicsRow {
   channel:        ChannelKey;
@@ -54,6 +56,11 @@ export function useChannelEconomics() {
   const { dateRange } = useFilters();
   const { byCategory, allRowsUnfiltered } = useMarketingExpenses();
   const { data: zoho } = useZohoData();
+  // Spend now comes from Zoho Books vendor bills (per channel) + the live Meta
+  // Ads API — the same source the Finance page uses. The marketing-expenses
+  // sheet is only the fallback when Books isn't connected.
+  const { data: books } = useZohoBooks(dateRange);
+  const { data: metaAds } = useMetaAdsApi(dateRange);
 
   return useMemo(() => {
     const map = new Map<ChannelKey, ChannelEconomicsRow>();
@@ -72,9 +79,26 @@ export function useChannelEconomics() {
       return cur;
     };
 
-    // ── Windowed (selected date range) ───────────────────────────────────
-    for (const c of byCategory) {
-      ensure(normalizeChannelKey(c.category)).spend += c.amount;
+    // ── Windowed spend (selected date range) ─────────────────────────────
+    // Prefer Zoho Books vendor bills, classified to a channel; Meta from the
+    // live API. Fall back to the marketing-expenses sheet when Books is off.
+    const booksTxns = books?.marketingTxns;
+    if (booksTxns && booksTxns.length) {
+      for (const t of booksTxns) {
+        const ch = classifyChannel(t.text);
+        if (ch === "Meta" || ch === "Other") continue;  // Meta = live API; Other excluded
+        ensure(ch).spend += t.amount ?? 0;
+      }
+      const metaSpend = metaAds?.summary?.spend ?? 0;
+      if (metaSpend > 0) ensure("Meta").spend += metaSpend;
+    } else {
+      for (const c of byCategory) {
+        const ch = normalizeChannelKey(c.category);
+        if (ch === "Meta" && (metaAds?.summary?.spend ?? 0) > 0) continue;
+        ensure(ch).spend += c.amount;
+      }
+      const metaSpend = metaAds?.summary?.spend ?? 0;
+      if (metaSpend > 0) ensure("Meta").spend += metaSpend;
     }
 
     const fromMs = dateRange.from.getTime();
@@ -146,7 +170,7 @@ export function useChannelEconomics() {
         if (aCpq !== bCpq) return aCpq - bCpq;
         return b.leads - a.leads;
       });
-  }, [byCategory, allRowsUnfiltered, zoho?.rawLeads, dateRange]);
+  }, [byCategory, allRowsUnfiltered, zoho?.rawLeads, dateRange, books, metaAds]);
 }
 
 /** Three "Best" picks for the Channel-winner cards: Volume, Quality, Cost/Conv. */
