@@ -9,6 +9,7 @@ import { useFilters } from "@/lib/filters";
 import { ChannelWinnerCards } from "@/components/ChannelEconomics";
 import { ZohoBooksPanel } from "@/components/finance/ZohoBooksPanel";
 import { useZohoBooks } from "@/hooks/use-zoho-books";
+import { useMetaAdsApi } from "@/hooks/use-meta-ads-api";
 import { FinanceDigest } from "@/components/finance/FinanceDigest";
 import { useCurrency } from "@/lib/CurrencyProvider";
 import { normalizeChannelKey } from "@/lib/channel-mapping";
@@ -434,6 +435,7 @@ const Finance = () => {
   const { preset, setPreset, dateRange } = useFilters();
   const { data: zoho } = useZohoData();
   const { data: books } = useZohoBooks(dateRange);
+  const { data: metaAds } = useMetaAdsApi(dateRange);
   const { fmt: fmtAED, currency } = useCurrency();
   const {
     rows: allTransactions,
@@ -620,18 +622,25 @@ const Finance = () => {
   // ── Monthly Spend × Channel grid (for the CEO-glanceable section) ─────────
   // Builds rows = channel, cols = months in the selected period. Used by the
   // "Monthly Marketing Spend by Channel" section + the profit P&L beneath it.
+  type ChannelSpendRow = { channel: string; perMonth: Record<string, number>; total: number; source: "sheet" | "meta" };
   const monthlySpendByChannel = useMemo(() => {
-    if (allTransactions.length === 0 || monthly.length === 0) {
-      return { months: [] as { key: string; label: string }[], channels: [] as { channel: string; perMonth: Record<string, number>; total: number }[] };
+    // Meta's REAL spend comes straight from the Meta Marketing API (live),
+    // bucketed by month — NOT from the sheet (its Meta rows, if any, are
+    // ignored). Everything else comes from the marketing-expenses sheet.
+    const metaByMonth: Record<string, number> = {};
+    for (const d of metaAds?.dailySeries ?? []) {
+      const k = (d.dateISO ?? "").slice(0, 7);
+      if (k) metaByMonth[k] = (metaByMonth[k] ?? 0) + d.spend;
     }
-    const months = monthly
-      .slice()
-      .sort((a, b) => a.monthKey.localeCompare(b.monthKey))
-      .map(m => ({ key: m.monthKey, label: m.month }));
+    const hasMeta = Object.values(metaByMonth).some(v => v > 0);
 
+    // Sheet spend bucketed channel × month. Meta is excluded ONLY when live
+    // Meta data exists — if the Meta API is unavailable, we keep the sheet's
+    // Meta rows so Meta spend never silently disappears.
     const grid = new Map<string, Map<string, number>>();
     for (const t of allTransactions) {
       const ch = normalizeChannelKey(t.category);
+      if (ch === "Meta" && hasMeta) continue;  // live API replaces the sheet's Meta
       const key = (t.expense_date ?? "").slice(0, 7);
       if (!key) continue;
       const row = grid.get(ch) ?? new Map<string, number>();
@@ -639,21 +648,37 @@ const Finance = () => {
       grid.set(ch, row);
     }
 
-    const channels = Array.from(grid.entries())
-      .map(([channel, perMonthMap]) => {
-        const perMonth: Record<string, number> = {};
-        let total = 0;
-        for (const m of months) {
-          const v = perMonthMap.get(m.key) ?? 0;
-          perMonth[m.key] = v;
-          total += v;
-        }
-        return { channel, perMonth, total };
-      })
-      .sort((a, b) => b.total - a.total);
+    // Column set = union of sheet months + Meta (live) months, so a month with
+    // ONLY Meta spend (e.g. the sheet hasn't been imported for it yet) still
+    // shows up — this is why April/May looked empty before.
+    const monthSet = new Set<string>();
+    for (const m of monthly) monthSet.add(m.monthKey);
+    for (const k of Object.keys(metaByMonth)) monthSet.add(k);
+    if (monthSet.size === 0) {
+      return { months: [] as { key: string; label: string }[], channels: [] as ChannelSpendRow[] };
+    }
+    const months = Array.from(monthSet).sort().map(k => ({
+      key:   k,
+      label: new Date(`${k}-01`).toLocaleDateString("en-GB", { month: "short", year: "2-digit" }),
+    }));
 
+    const channels: ChannelSpendRow[] = Array.from(grid.entries()).map(([channel, perMonthMap]) => {
+      const perMonth: Record<string, number> = {};
+      let total = 0;
+      for (const m of months) { const v = perMonthMap.get(m.key) ?? 0; perMonth[m.key] = v; total += v; }
+      return { channel, perMonth, total, source: "sheet" };
+    });
+
+    if (hasMeta) {
+      const perMonth: Record<string, number> = {};
+      let total = 0;
+      for (const m of months) { const v = metaByMonth[m.key] ?? 0; perMonth[m.key] = v; total += v; }
+      channels.push({ channel: "Meta", perMonth, total, source: "meta" });
+    }
+
+    channels.sort((a, b) => b.total - a.total);
     return { months, channels };
-  }, [allTransactions, monthly]);
+  }, [allTransactions, monthly, metaAds]);
 
   // ── Profit P&L placeholders ───────────────────────────────────────────────
   // Marketing spend is real; payroll + other expenses + revenue are stubbed
@@ -977,7 +1002,7 @@ const Finance = () => {
             <CardTitle className="text-[14px] font-semibold text-foreground">
               Monthly Marketing Spend by Channel
             </CardTitle>
-            <p className="text-[11px] text-muted-foreground/80 mt-0.5">All values in {currency}, per month — channels sorted by period total</p>
+            <p className="text-[11px] text-muted-foreground/80 mt-0.5">All values in {currency}, per month — channels sorted by period total. <span className="text-emerald-700 font-medium">Meta is pulled live from the Meta Ads API</span>; the rest from the marketing-expenses sheet.</p>
           </CardHeader>
           <CardContent className="px-0 pb-3 overflow-x-auto">
             <table className="w-full text-left border-collapse">
@@ -995,7 +1020,10 @@ const Finance = () => {
               <tbody>
                 {monthlySpendByChannel.channels.map(c => (
                   <tr key={c.channel} className="border-b border-border/30 hover:bg-muted/30 transition-colors">
-                    <td className="py-3.5 px-5 text-[14px] font-semibold text-foreground">{c.channel}</td>
+                    <td className="py-3.5 px-5 text-[14px] font-semibold text-foreground">
+                      {c.channel}
+                      {c.source === "meta" && <span className="ml-1.5 inline-flex items-center gap-1 text-[9px] font-bold uppercase tracking-wide px-1.5 py-0.5 rounded-full bg-emerald-100 text-emerald-700 align-middle"><span className="h-1 w-1 rounded-full bg-emerald-500" /> live</span>}
+                    </td>
                     {monthlySpendByChannel.months.map(m => {
                       const v = c.perMonth[m.key];
                       return (
