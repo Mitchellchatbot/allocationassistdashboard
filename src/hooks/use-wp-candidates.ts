@@ -850,10 +850,31 @@ export function useWpCandidateByEmail(email: string | null | undefined) {
   return useWpCandidateByContact(email, null);
 }
 
+/** JotForm date control lands as {"day":"04","month":"04","year":"1973"} JSON.
+ *  Coerce that to YYYY-MM-DD so age/DOB formatting works on legacy records;
+ *  pass anything already-clean through. (New records are normalised at ingest.) */
+function coerceDob(dob: string | null): string | null {
+  if (!dob) return null;
+  const s = dob.trim();
+  if (s.startsWith("{") && s.toLowerCase().includes("year")) {
+    try {
+      const o = JSON.parse(s) as { day?: unknown; month?: unknown; year?: unknown };
+      const y = String(o.year ?? "").trim();
+      if (/^\d{4}$/.test(y)) {
+        const m = /^\d{1,2}$/.test(String(o.month ?? "")) ? String(o.month).padStart(2, "0") : "01";
+        const d = /^\d{1,2}$/.test(String(o.day ?? ""))   ? String(o.day).padStart(2, "0")   : "01";
+        return `${y}-${m}-${d}`;
+      }
+    } catch { /* fall through */ }
+  }
+  return s;
+}
+
 /** Compute age in years from the WP date_of_birth field. WP accepts
  *  several formats ("YYYYMMDD", "YYYY-MM-DD", "4 September 1987"); we
  *  parse all three. Returns null if anything's off. */
-function computeAge(dob: string | null): number | null {
+function computeAge(dobRaw: string | null): number | null {
+  const dob = coerceDob(dobRaw);
   if (!dob) return null;
   let d: Date | null = null;
   if (/^\d{8}$/.test(dob))                 d = new Date(`${dob.slice(0,4)}-${dob.slice(4,6)}-${dob.slice(6,8)}`);
@@ -869,7 +890,8 @@ function computeAge(dob: string | null): number | null {
 
 /** Format date_of_birth as "19 January 1981" (same input formats as
  *  computeAge). Mirrors formatDobLong() in send-flow-email. */
-function formatDobLong(dob: string | null): string {
+function formatDobLong(dobRaw: string | null): string {
+  const dob = coerceDob(dobRaw);
   if (!dob) return "";
   let d: Date | null = null;
   if (/^\d{8}$/.test(dob))                 d = new Date(`${dob.slice(0,4)}-${dob.slice(4,6)}-${dob.slice(6,8)}`);

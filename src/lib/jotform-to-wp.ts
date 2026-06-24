@@ -38,6 +38,24 @@ function normalizePhone(raw: string): string {
   }
 }
 
+/** JotForm's date control is a {day, month, year} object; flattened it lands as
+ *  that object's raw JSON string. Coerce to YYYY-MM-DD so it never reaches
+ *  WordPress / the staging editor as JSON (same idea as normalizePhone). */
+export function normalizeJotformDate(raw: string | null | undefined): string {
+  const s = (raw ?? "").trim();
+  if (!s.startsWith("{") || !s.toLowerCase().includes("year")) return s;
+  try {
+    const o = JSON.parse(s) as { day?: unknown; month?: unknown; year?: unknown };
+    const y = String(o.year ?? "").trim();
+    if (!/^\d{4}$/.test(y)) return s;
+    const m = /^\d{1,2}$/.test(String(o.month ?? "")) ? String(o.month).padStart(2, "0") : "01";
+    const d = /^\d{1,2}$/.test(String(o.day ?? ""))   ? String(o.day).padStart(2, "0")   : "01";
+    return `${y}-${m}-${d}`;
+  } catch {
+    return s;
+  }
+}
+
 /** Walk a stored form_response and map it to the WP-shaped payload.
  *  `flatAnswers` is the {label: value} map we already persist on the
  *  row (`form_responses.answers`); for JotForm it was produced server
@@ -70,7 +88,7 @@ export function mapAnswersToWp(flat: Record<string, string>): MappedProfile {
   if (phone) acf.phone_number = phone;
 
   const dob = pick("dateofbirth", "dob", "birthdate", "birthday");
-  if (dob) acf.date_of_birth = dob;
+  if (dob) acf.date_of_birth = normalizeJotformDate(dob);
 
   const nat = pick("nationality");
   if (nat) acf.nationality = nat;

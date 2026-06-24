@@ -730,10 +730,10 @@ function CandidateDetailDialogInner({ candidate, open, onClose }: { candidate: W
                   value={candidate.nationality}
                   onSave={v => saveAcf({ nationality: v ?? "" })} />
                 <EditableTile icon={<Calendar className="h-4 w-4" />} label="Date of Birth"
-                  value={candidate.date_of_birth}
+                  value={normalizeDob(candidate.date_of_birth)}
                   display={prettyDate(candidate.date_of_birth)}
-                  hint="YYYYMMDD or YYYY-MM-DD"
-                  onSave={v => saveAcf({ date_of_birth: v ?? "" })} />
+                  hint="YYYY-MM-DD"
+                  onSave={v => saveAcf({ date_of_birth: normalizeDob(v) })} />
                 <EditableTile icon={<Stethoscope className="h-4 w-4" />} label="Specialty"
                   value={candidate.specialty}
                   onSave={v => saveAcf({ specialty: v ?? "" })} />
@@ -1183,7 +1183,32 @@ function TabBtn({ active, onClick, disabled, children }: { active: boolean; onCl
 
 // ─── small formatters ─────────────────────────────────────────────────
 
-function ageFromDob(dob: string | null): number | null {
+/** JotForm date answers arrive as {"day":"04","month":"04","year":"1973"}
+ *  (stored as that JSON string). Normalise any DOB value to YYYY-MM-DD when we
+ *  can; pass anything already-clean straight through. Used for display, age,
+ *  and as the value the inline editor shows/saves — so the raw JSON never
+ *  surfaces again. */
+export function normalizeDob(raw: string | null | undefined): string {
+  if (raw == null) return "";
+  const s = String(raw).trim();
+  if (s.startsWith("{") && s.toLowerCase().includes("year")) {
+    try {
+      const o = JSON.parse(s) as { day?: unknown; month?: unknown; year?: unknown };
+      const y = String(o.year ?? "").trim();
+      let m = String(o.month ?? "").trim();
+      let d = String(o.day ?? "").trim();
+      if (/^\d{4}$/.test(y)) {
+        m = /^\d{1,2}$/.test(m) ? m.padStart(2, "0") : "01";
+        d = /^\d{1,2}$/.test(d) ? d.padStart(2, "0") : "01";
+        return `${y}-${m}-${d}`;
+      }
+    } catch { /* fall through to raw */ }
+  }
+  return s;
+}
+
+function ageFromDob(rawDob: string | null): number | null {
+  const dob = normalizeDob(rawDob);
   if (!dob) return null;
   // Accept "19870904", "1987-09-04", "4 September 1987" — try them in order.
   let d: Date | null = null;
@@ -1198,8 +1223,9 @@ function ageFromDob(dob: string | null): number | null {
   return age >= 0 && age < 120 ? age : null;
 }
 
-function prettyDate(raw: string | null): string | null {
-  if (!raw) return null;
+function prettyDate(rawIn: string | null): string | null {
+  if (!rawIn) return null;
+  const raw = normalizeDob(rawIn);
   let d: Date | null = null;
   if (/^\d{8}$/.test(raw))                 d = new Date(`${raw.slice(0, 4)}-${raw.slice(4, 6)}-${raw.slice(6, 8)}`);
   else                                     { const parsed = new Date(raw); if (!isNaN(parsed.valueOf())) d = parsed; }
@@ -1759,10 +1785,10 @@ function StagedProfileDetailDialog({
 
             <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-x-6 gap-y-4">
               <EditableTile icon={<Globe className="h-4 w-4" />}        label="Nationality"            value={get("nationality")}                         onSave={v => saveAcf({ nationality: v ?? "" })} />
-              <EditableTile icon={<Calendar className="h-4 w-4" />}     label="Date of Birth"          value={get("date_of_birth")}
+              <EditableTile icon={<Calendar className="h-4 w-4" />}     label="Date of Birth"          value={normalizeDob(get("date_of_birth"))}
                                                                                                        display={prettyDate(get("date_of_birth"))}
-                                                                                                       hint="YYYY-MM-DD or YYYYMMDD"
-                                                                                                       onSave={v => saveAcf({ date_of_birth: v ?? "" })} />
+                                                                                                       hint="YYYY-MM-DD"
+                                                                                                       onSave={v => saveAcf({ date_of_birth: normalizeDob(v) })} />
               <EditableTile icon={<Stethoscope className="h-4 w-4" />}  label="Specialty"              value={get("specialty")}                           onSave={v => saveAcf({ specialty: v ?? "" })} />
               <EditableTile icon={<Stethoscope className="h-4 w-4" />}  label="Subspecialty"           value={get("subspecialty")}                        onSave={v => saveAcf({ subspecialty: v ?? "" })} />
               <EditableTile icon={<BadgeCheck className="h-4 w-4" />}   label="Specialist / Consultant" value={get("specialist__consultant")}             onSave={v => saveAcf({ specialist__consultant: v ?? "" })} />

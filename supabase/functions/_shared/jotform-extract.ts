@@ -199,8 +199,24 @@ export function mapToProfile(flat: Record<string, string>): {
   const dobRaw = pick("dateofbirth", "dob", "birthdate", "birthday")
               || pickContains("dateofbirth", "birthdate", "birthday");
   if (dobRaw) {
-    const iso = /^(\d{4})-(\d{2})-(\d{2})T/.exec(dobRaw.trim());
-    acf.date_of_birth = iso ? `${iso[1]}-${iso[2]}-${iso[3]}` : dobRaw.trim();
+    const t = dobRaw.trim();
+    const iso = /^(\d{4})-(\d{2})-(\d{2})T/.exec(t);
+    if (iso) {
+      acf.date_of_birth = `${iso[1]}-${iso[2]}-${iso[3]}`;
+    } else if (t.startsWith("{") && t.toLowerCase().includes("year")) {
+      // JotForm date control: {"day":"04","month":"04","year":"1973"} → ISO.
+      try {
+        const o = JSON.parse(t) as { day?: unknown; month?: unknown; year?: unknown };
+        const y = String(o.year ?? "").trim();
+        if (/^\d{4}$/.test(y)) {
+          const mo = /^\d{1,2}$/.test(String(o.month ?? "")) ? String(o.month).padStart(2, "0") : "01";
+          const da = /^\d{1,2}$/.test(String(o.day ?? ""))   ? String(o.day).padStart(2, "0")   : "01";
+          acf.date_of_birth = `${y}-${mo}-${da}`;
+        } else { acf.date_of_birth = t; }
+      } catch { acf.date_of_birth = t; }
+    } else {
+      acf.date_of_birth = t;
+    }
   }
 
   const nat = pick("nationality");

@@ -1028,8 +1028,22 @@ function computeAgeFromDob(dob: string | null | undefined): number | null {
 
 /** Format a WP date_of_birth as "19 January 1981" (same input formats as
  *  computeAgeFromDob). Returns "" if unparseable/empty. */
-function formatDobLong(dob: string | null | undefined): string {
-  if (!dob) return "";
+function formatDobLong(dobIn: string | null | undefined): string {
+  if (!dobIn) return "";
+  let dob = String(dobIn).trim();
+  // JotForm date control: {"day":"04","month":"04","year":"1973"} → ISO, so a
+  // legacy JSON-stored DOB renders a real date instead of blank in the email.
+  if (dob.startsWith("{") && dob.toLowerCase().includes("year")) {
+    try {
+      const o = JSON.parse(dob) as { day?: unknown; month?: unknown; year?: unknown };
+      const y = String(o.year ?? "").trim();
+      if (/^\d{4}$/.test(y)) {
+        const m = /^\d{1,2}$/.test(String(o.month ?? "")) ? String(o.month).padStart(2, "0") : "01";
+        const da = /^\d{1,2}$/.test(String(o.day ?? ""))   ? String(o.day).padStart(2, "0")   : "01";
+        dob = `${y}-${m}-${da}`;
+      }
+    } catch { /* fall through */ }
+  }
   let d: Date | null = null;
   if (/^\d{8}$/.test(dob))                 d = new Date(`${dob.slice(0,4)}-${dob.slice(4,6)}-${dob.slice(6,8)}`);
   else if (/^\d{4}-\d{2}-\d{2}/.test(dob)) d = new Date(dob);
