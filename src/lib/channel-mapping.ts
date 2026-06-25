@@ -54,13 +54,14 @@ export function normalizeChannelKey(raw: string | null | undefined): ChannelKey 
 
 // Vendor → channel overrides for Books-billed marketing spend. The vendor name
 // is usually the channel, but some need a manual mapping confirmed by the team:
-//   - Scaled AI LLC    → AA's Website / SEO work (no keyword to match on)
-//   - LinkedIn Ireland → also AA's Website / SEO (NOT a LinkedIn ad channel)
+//   - Scaled AI LLC → AA's Website / SEO work (no keyword to match on)
+// LinkedIn is NOT overridden — the "Linkedin Ireland Unlimited Company" vendor
+// is the real LinkedIn ad/recruiter spend, so it falls through to
+// normalizeChannelKey and lands on its own "LinkedIn" channel row.
 // Add a line to map another vendor. Meta is handled by the live Meta API, so
 // Meta-classified rows are dropped elsewhere to avoid double-counting Meta bills.
 export const VENDOR_CHANNEL_OVERRIDES: { match: RegExp; channel: ChannelKey }[] = [
   { match: /scaled\s*ai/i, channel: "Website / SEO" },
-  { match: /linkedin/i,    channel: "Website / SEO" },
 ];
 
 /** Like normalizeChannelKey but applies the vendor overrides first — use this
