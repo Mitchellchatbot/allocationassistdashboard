@@ -7,7 +7,6 @@ import { useMarketingExpenses, type CategorySpend, type MonthlyPoint, type TopTr
 import { useZohoData } from "@/hooks/use-zoho-data";
 import { useFilters } from "@/lib/filters";
 import { ChannelWinnerCards } from "@/components/ChannelEconomics";
-import { ZohoBooksPanel } from "@/components/finance/ZohoBooksPanel";
 import { PeriodPnlSummary } from "@/components/finance/PeriodPnlSummary";
 import { useZohoBooks } from "@/hooks/use-zoho-books";
 import { useMetaAdsApi } from "@/hooks/use-meta-ads-api";
@@ -917,8 +916,9 @@ const Finance = () => {
           the previous equal-length period (Zoho Books actuals). */}
       <PeriodPnlSummary dateRange={dateRange} />
 
-      {/* Actual revenue/expenses from Zoho Books (dormant until connected). */}
-      <ZohoBooksPanel dateRange={dateRange} />
+      {/* The old Zoho Books cards (Revenue/Expenses/Profit/Outstanding)
+          duplicated the P&L summary banner above, so they're removed —
+          Outstanding now lives as the banner's 4th tile. */}
 
       {!hasData && (
         <div className="mb-5 rounded-xl border border-border/50 bg-muted/30 px-4 py-3">

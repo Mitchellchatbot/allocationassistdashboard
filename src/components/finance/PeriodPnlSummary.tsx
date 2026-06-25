@@ -123,16 +123,16 @@ export function PeriodPnlSummary({ dateRange }: { dateRange: { from: Date; to: D
         </span>
       </div>
 
-      {/* Three headline tiles — exact numbers, no abbreviation */}
-      <div className="grid grid-cols-1 sm:grid-cols-3 divide-y sm:divide-y-0 sm:divide-x divide-border/40">
+      {/* Headline tiles — exact numbers, no abbreviation */}
+      <div className="grid grid-cols-2 lg:grid-cols-4 divide-x divide-y lg:divide-y-0 divide-border/40">
         <div className="px-5 py-4">
           <p className="text-[10px] uppercase tracking-wide text-muted-foreground font-medium">Revenue</p>
-          <p className="text-[26px] font-bold tabular-nums text-emerald-700 leading-tight mt-1">{money(revenue)}</p>
+          <p className="text-[24px] font-bold tabular-nums text-emerald-700 leading-tight mt-1">{money(revenue)}</p>
           <p className="text-[10px] text-muted-foreground mt-0.5">{cur.invoiceCount ?? 0} invoice{(cur.invoiceCount ?? 0) === 1 ? "" : "s"}</p>
         </div>
         <div className="px-5 py-4">
           <p className="text-[10px] uppercase tracking-wide text-muted-foreground font-medium">Expenses</p>
-          <p className="text-[26px] font-bold tabular-nums text-rose-700 leading-tight mt-1">{money(expenses)}</p>
+          <p className="text-[24px] font-bold tabular-nums text-rose-700 leading-tight mt-1">{money(expenses)}</p>
           <p className="text-[10px] text-muted-foreground mt-0.5">{cur.expenseCount ?? 0} expense{(cur.expenseCount ?? 0) === 1 ? "" : "s"}</p>
         </div>
         <div className={`px-5 py-4 ${isLoss ? "bg-rose-50/50" : "bg-emerald-50/50"}`}>
@@ -140,10 +140,15 @@ export function PeriodPnlSummary({ dateRange }: { dateRange: { from: Date; to: D
             {isLoss ? <TrendingDown className="h-3 w-3" /> : <TrendingUp className="h-3 w-3" />}
             Net {isLoss ? "Loss" : "Profit"}
           </p>
-          <p className={`text-[26px] font-bold tabular-nums leading-tight mt-1 ${isLoss ? "text-rose-700" : "text-emerald-700"}`}>
+          <p className={`text-[24px] font-bold tabular-nums leading-tight mt-1 ${isLoss ? "text-rose-700" : "text-emerald-700"}`}>
             {isLoss ? `(${money(Math.abs(profit))})` : money(profit)}
           </p>
           <p className="text-[10px] text-muted-foreground mt-0.5">{margin.toFixed(1)}% margin</p>
+        </div>
+        <div className="px-5 py-4">
+          <p className="text-[10px] uppercase tracking-wide text-muted-foreground font-medium">Outstanding</p>
+          <p className="text-[24px] font-bold tabular-nums text-amber-700 leading-tight mt-1">{money(cur.outstanding ?? 0)}</p>
+          <p className="text-[10px] text-muted-foreground mt-0.5">unpaid invoices</p>
         </div>
       </div>
 
