@@ -13,7 +13,7 @@ import { useZohoBooks } from "@/hooks/use-zoho-books";
 import { useMetaAdsApi } from "@/hooks/use-meta-ads-api";
 import { FinanceDigest } from "@/components/finance/FinanceDigest";
 import { useCurrency } from "@/lib/CurrencyProvider";
-import { normalizeChannelKey, classifyChannel } from "@/lib/channel-mapping";
+import { normalizeChannelKey, classifyChannel, WEBSITE_SEO_RETAINER_AED, WEBSITE_SEO_START_MONTH, WEBSITE_SEO_ACTUALS } from "@/lib/channel-mapping";
 import {
   BarChart, Bar, XAxis, YAxis, Tooltip, ResponsiveContainer, CartesianGrid, Cell,
   AreaChart, Area, PieChart, Pie, Legend, LineChart, Line, ComposedChart,
@@ -644,6 +644,19 @@ const Finance = () => {
     if (!usingBooks) for (const m of monthly) monthSet.add(m.monthKey);
     for (const k of Object.keys(metaByMonth)) monthSet.add(k);
     for (const row of grid.values()) for (const k of row.keys()) monthSet.add(k);
+    // The Website / SEO retainer shows for every month of the selected range
+    // from its start month on — even months with no booked bill — so make sure
+    // those months are columns.
+    const rangeMonths: string[] = [];
+    {
+      const d   = new Date(dateRange.from.getFullYear(), dateRange.from.getMonth(), 1);
+      const end = new Date(dateRange.to.getFullYear(), dateRange.to.getMonth(), 1);
+      while (d <= end) {
+        rangeMonths.push(`${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}`);
+        d.setMonth(d.getMonth() + 1);
+      }
+    }
+    for (const k of rangeMonths) if (k >= WEBSITE_SEO_START_MONTH) monthSet.add(k);
     if (monthSet.size === 0) {
       return { months: [] as { key: string; label: string }[], channels: [] as ChannelSpendRow[] };
     }
@@ -666,9 +679,25 @@ const Finance = () => {
       channels.push({ channel: "Meta", perMonth, total, source: "meta" });
     }
 
+    // Website / SEO = Scaled AI retainer model (see channel-mapping). Replaces
+    // the unreliable bill-derived row with a fixed monthly retainer + the
+    // confirmed actuals, from the retainer's start month on.
+    {
+      const perMonth: Record<string, number> = {};
+      let total = 0;
+      for (const m of months) {
+        if (m.key < WEBSITE_SEO_START_MONTH) { perMonth[m.key] = 0; continue; }
+        const v = WEBSITE_SEO_ACTUALS[m.key] ?? WEBSITE_SEO_RETAINER_AED;
+        perMonth[m.key] = v; total += v;
+      }
+      const existing = channels.find(c => c.channel === "Website / SEO");
+      if (existing) { existing.perMonth = perMonth; existing.total = total; }
+      else channels.push({ channel: "Website / SEO", perMonth, total, source: "books" });
+    }
+
     channels.sort((a, b) => b.total - a.total);
     return { months, channels };
-  }, [allTransactions, monthly, metaAds, books]);
+  }, [allTransactions, monthly, metaAds, books, dateRange]);
 
   // ── Profit P&L placeholders ───────────────────────────────────────────────
   // Marketing spend is real; payroll + other expenses + revenue are stubbed
@@ -1015,7 +1044,7 @@ const Finance = () => {
             <CardTitle className="text-[14px] font-semibold text-foreground">
               Monthly Marketing Spend by Channel
             </CardTitle>
-            <p className="text-[11px] text-muted-foreground/80 mt-0.5">All values in {currency}, per month. <span className="text-emerald-700 font-medium">Meta is pulled live from the Meta Ads API</span>; other channels come from Zoho Books vendor bills mapped to a channel (Scaled AI + LinkedIn → Website/SEO, GoHire → Go Hire). Unmapped vendors are excluded.</p>
+            <p className="text-[11px] text-muted-foreground/80 mt-0.5">All values in {currency}, per month. <span className="text-emerald-700 font-medium">Meta is pulled live from the Meta Ads API</span>; LinkedIn and Go Hire come from Zoho Books vendor bills. <span className="text-foreground/70">Website / SEO is the Scaled AI retainer (~{fmtAED(WEBSITE_SEO_RETAINER_AED)}/mo), with confirmed actuals for Jan–Mar 2026 — the raw Books bills for this vendor are unreliable, so it's modelled.</span> Unmapped vendors are excluded.</p>
           </CardHeader>
           <CardContent className="px-0 pb-3 overflow-x-auto">
             <table className="w-full text-left border-collapse">
@@ -1061,7 +1090,7 @@ const Finance = () => {
                     );
                   })}
                   <td className="py-3.5 px-5 text-[15px] text-right tabular-nums font-bold text-blue-700">
-                    {fmtAED(profitRows.marketingTotal)}
+                    {fmtAED(monthlySpendByChannel.channels.reduce((s, c) => s + c.total, 0))}
                   </td>
                 </tr>
               </tbody>

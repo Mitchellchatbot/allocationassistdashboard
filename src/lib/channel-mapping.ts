@@ -72,3 +72,19 @@ export function classifyChannel(text: string | null | undefined): ChannelKey {
   for (const o of VENDOR_CHANNEL_OVERRIDES) if (o.match.test(text)) return o.channel;
   return normalizeChannelKey(text);
 }
+
+// ── Website / SEO retainer model ──────────────────────────────────────────────
+// Website / SEO is the Scaled AI retainer. The Zoho Books bills for this vendor
+// are unreliable — some months have the bill entered twice (once as AED, once as
+// a USD record holding the AED-magnitude value), which then inflates wildly when
+// converted to base currency (e.g. April reads ~AED 390k instead of ~45k). So
+// the Finance page IGNORES the raw bills for this channel and models it as a
+// fixed monthly retainer (~AED 45k ≈ $12.5k) from when it started, overlaying
+// the confirmed actuals for the months we know precisely. Edit these to adjust.
+export const WEBSITE_SEO_RETAINER_AED = 45000;     // ≈ $12.5k / month fallback
+export const WEBSITE_SEO_START_MONTH  = "2025-12"; // YYYY-MM — no retainer before this
+export const WEBSITE_SEO_ACTUALS: Record<string, number> = {
+  "2026-01": 59000,
+  "2026-02": 45500,
+  "2026-03": 45500,
+};
