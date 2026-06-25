@@ -18,7 +18,8 @@
  *
  * Endpoint:  POST /functions/v1/zoho-books   body { from: ISO, to: ISO }
  * Returns:   { configured, ok, error?, currency, revenue, expenses, profit,
- *              outstanding, invoiceCount, expenseCount, byMonth[], byCategory[] }
+ *              outstanding, invoiceCount, expenseCount, byMonth[], byCategory[],
+ *              expenseBreakdown[] (per-category, with drill-down txns) }
  */
 import { serve } from "https://deno.land/std@0.168.0/http/server.ts";
 
@@ -151,6 +152,11 @@ serve(async (req) => {
     const marketingTxns: { date: string; amount: number; text: string }[] = [];
 
     const byCategoryMap: Record<string, number> = {};
+    // Per-category expense detail for the Operating Expense Breakdown table —
+    // category (account name, e.g. "Salaries & Wages", "Rent", "Software") →
+    // running total, transaction count, and its individual transactions so the
+    // dashboard can drill into each one.
+    const expenseDetail: Record<string, { amount: number; count: number; txns: { date: string; amount: number; text: string }[] }> = {};
     let expenseTotal = 0;
     for (const e of expenses) {
       const total = num(e.total);
@@ -160,6 +166,15 @@ serve(async (req) => {
       const date = String(e.date ?? "");
       bump(monthKey(date)).expenses += total;
       if (date) bumpDay(date.slice(0, 10)).expenses += total;
+
+      const detail = (expenseDetail[cat] ??= { amount: 0, count: 0, txns: [] });
+      detail.amount += total;
+      detail.count  += 1;
+      detail.txns.push({
+        date: date.slice(0, 10),
+        amount: total,
+        text: String(e.description ?? e.vendor_name ?? e.reference_number ?? "").replace(/\s+/g, " ").trim(),
+      });
 
       const text = `${e.account_name ?? ""} | ${e.reference_number ?? ""} | ${e.description ?? ""}`.replace(/\s+/g, " ").trim();
       if (CHANNEL_RE.test(text)) marketingTxns.push({ date: date.slice(0, 10), amount: total, text });
@@ -181,6 +196,15 @@ serve(async (req) => {
     const byCategory = Object.entries(byCategoryMap)
       .map(([name, amount]) => ({ name, amount: +amount.toFixed(2) }))
       .sort((a, b) => b.amount - a.amount);
+    // Full per-category expense breakdown with drill-down transactions.
+    const expenseBreakdown = Object.entries(expenseDetail)
+      .map(([category, v]) => ({
+        category,
+        amount: +v.amount.toFixed(2),
+        count: v.count,
+        txns: v.txns.sort((a, b) => b.date.localeCompare(a.date)).slice(0, 250),
+      }))
+      .sort((a, b) => b.amount - a.amount);
     const byMonthArr = Object.values(byMonth).sort((a, b) => a.month.localeCompare(b.month));
 
     return json({
@@ -196,6 +220,7 @@ serve(async (req) => {
       byMonth:      byMonthArr,
       byDay,
       byCategory,
+      expenseBreakdown,
       marketingTxns,
     });
   } catch (e) {

@@ -7,6 +7,10 @@ const SUPABASE_ANON_KEY = import.meta.env.VITE_SUPABASE_ANON_KEY as string;
 export interface ZohoBooksMonth { month: string; revenue: number; expenses: number }
 export interface ZohoBooksDay { date: string; revenue: number; expenses: number }
 export interface ZohoBooksCategory { name: string; amount: number }
+export interface ZohoBooksExpenseTxn { date: string; amount: number; text: string }
+export interface ZohoBooksExpenseCategory {
+  category: string; amount: number; count: number; txns: ZohoBooksExpenseTxn[];
+}
 
 export interface ZohoBooksData {
   /** True once the Zoho Books secrets are set on the edge function. */
@@ -24,6 +28,9 @@ export interface ZohoBooksData {
   byMonth?:     ZohoBooksMonth[];
   byDay?:       ZohoBooksDay[];
   byCategory?:  ZohoBooksCategory[];
+  /** Full per-category expense breakdown (payroll, software, rent, …) with
+   *  per-transaction detail for drill-down. Sums to `expenses`. */
+  expenseBreakdown?: ZohoBooksExpenseCategory[];
   /** Marketing/advertising expense transactions — text carries the channel
    *  (account / reference / description), classified on the dashboard. */
   marketingTxns?: { date: string; amount: number; text: string }[];
