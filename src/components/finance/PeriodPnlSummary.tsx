@@ -148,7 +148,7 @@ export function PeriodPnlSummary({ dateRange }: { dateRange: { from: Date; to: D
         <div className="px-5 py-4">
           <p className="text-[10px] uppercase tracking-wide text-muted-foreground font-medium">Outstanding</p>
           <p className="text-[24px] font-bold tabular-nums text-amber-700 leading-tight mt-1">{money(cur.outstanding ?? 0)}</p>
-          <p className="text-[10px] text-muted-foreground mt-0.5">unpaid invoices</p>
+          <p className="text-[10px] text-muted-foreground mt-0.5">total receivables · all-time</p>
         </div>
       </div>
 

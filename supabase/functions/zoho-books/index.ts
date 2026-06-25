@@ -190,7 +190,7 @@ serve(async (req) => {
 
   try {
     const dateParams = { date_start: from, date_end: to };
-    const [invoices, expenses, bills, pnl] = await Promise.all([
+    const [invoices, expenses, bills, pnl, allInvoices] = await Promise.all([
       fetchAll(token, "invoices", "invoices", dateParams),
       fetchAll(token, "expenses", "expenses", dateParams),
       // Most marketing spend is booked as BILLS to vendors (Scaled AI,
@@ -200,6 +200,10 @@ serve(async (req) => {
       // Authoritative income / expenses / per-account totals (incl. bills &
       // journals) — so the headline numbers tie out to Zoho's P&L.
       fetchPnL(token, from, to),
+      // ALL invoices, all-time — for the Outstanding (receivables) snapshot.
+      // Receivables is a point-in-time balance, NOT a period flow, so it must
+      // not be date-scoped; this matches Zoho's "Total Receivables" widget.
+      fetchAll(token, "invoices", "invoices", {}),
     ]);
 
     const byMonth: Record<string, { month: string; revenue: number; expenses: number }> = {};
@@ -212,16 +216,20 @@ serve(async (req) => {
     // Everything is converted to the AED base currency below, so the reported
     // currency is always AED (the org base). Don't read it off individual
     // invoices — a USD/GBP/SAR invoice would otherwise mislabel the whole panel.
-    let revenue = 0, outstanding = 0;
+    let revenue = 0;
     const currency = "AED";
     for (const inv of invoices) {
       const total = baseAmt(inv);
       revenue     += total;
-      outstanding += baseAmt(inv, "balance");
       const date   = String(inv.date ?? "");
       bump(monthKey(date)).revenue += total;
       if (date) bumpDay(date.slice(0, 10)).revenue += total;
     }
+    // Outstanding = receivables snapshot = open balance of EVERY invoice,
+    // all-time (paid invoices carry a 0 balance, so they add nothing). NOT
+    // scoped to the selected period — matches Zoho's "Total Receivables".
+    let outstanding = 0;
+    for (const inv of allInvoices) outstanding += baseAmt(inv, "balance");
 
     // Marketing/advertising transactions, returned so the dashboard can
     // attribute spend to a channel by reading the account / reference /
