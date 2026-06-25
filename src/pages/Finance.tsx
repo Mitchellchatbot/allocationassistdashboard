@@ -1176,6 +1176,10 @@ const Finance = () => {
           channels we can attribute (Meta, Website/SEO, Go Hire, LinkedIn). */}
       <ChannelRoiTable months={channelRoi.months} rows={channelRoi.rows} />
 
+      {/* Company income-statement Sankey: revenue → expense groups → profit.
+          Sits under the ROI table. */}
+      <CompanyFinanceSankey dateRange={dateRange} />
+
       {/* Revenue vs Expenses vs Profit chart removed — the Digest's monthly
           chart already covers it. */}
 
@@ -1183,35 +1187,7 @@ const Finance = () => {
           plots spend per month, and the Spend Breakdown table covers the
           per-channel detail. */}
 
-      {/* ── Channel Mix donut ── (the old side-by-side Spend-by-Channel bar
-          chart was dropped: the Spend Breakdown table below shows the same
-          numbers with more detail and a per-transaction drill-down.) */}
-      {byCategory.length > 0 && (
-        <div className="mb-5">
-          <Card className="shadow-sm border-border/50">
-            <CardHeader className="pb-1 pt-4 px-4">
-              <CardTitle className="text-[12px] font-medium text-muted-foreground uppercase tracking-wide">Channel Mix</CardTitle>
-            </CardHeader>
-            <CardContent className="px-4 pb-4">
-              <ResponsiveContainer width="100%" height={320}>
-                <PieChart>
-                  <Pie
-                    data={byCategory.slice(0, 8)}
-                    cx="50%" cy="50%"
-                    innerRadius={55} outerRadius={95}
-                    paddingAngle={2} dataKey="amount" nameKey="category"
-                  >
-                    {byCategory.slice(0, 8).map((_, i) => <Cell key={i} fill={CAT_COLORS[i % CAT_COLORS.length]} />)}
-                  </Pie>
-                  <Tooltip contentStyle={tip} formatter={(v: number) => fmtAED(v)} />
-                  <Legend wrapperStyle={{ fontSize: 10 }}
-                    formatter={v => <span style={{ color: "hsl(220,10%,35%)" }}>{v}</span>} />
-                </PieChart>
-              </ResponsiveContainer>
-            </CardContent>
-          </Card>
-        </div>
-      )}
+      {/* Channel Mix donut removed per request. */}
 
       {/* ── Spend Breakdown by Channel — click a row to drill into its
           individual transactions inline. Replaces the old standalone
@@ -1304,9 +1280,6 @@ const Finance = () => {
           </CardContent>
         </Card>
       )}
-
-      {/* Company income-statement Sankey: revenue → expense buckets → profit. */}
-      <CompanyFinanceSankey dateRange={dateRange} />
 
       {/* Old single-bar "ROI by channel" chart removed — the Return on
           Investment by Channel table above supersedes it (per-month spend +
