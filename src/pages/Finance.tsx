@@ -8,6 +8,7 @@ import { useZohoData } from "@/hooks/use-zoho-data";
 import { useFilters } from "@/lib/filters";
 import { ChannelWinnerCards } from "@/components/ChannelEconomics";
 import { ZohoBooksPanel } from "@/components/finance/ZohoBooksPanel";
+import { PeriodPnlSummary } from "@/components/finance/PeriodPnlSummary";
 import { useZohoBooks } from "@/hooks/use-zoho-books";
 import { useMetaAdsApi } from "@/hooks/use-meta-ads-api";
 import { FinanceDigest } from "@/components/finance/FinanceDigest";
@@ -792,6 +793,10 @@ const Finance = () => {
           </p>
         </div>
       </div>
+
+      {/* Headline P&L for the selected period — exact numbers + comparison to
+          the previous equal-length period (Zoho Books actuals). */}
+      <PeriodPnlSummary dateRange={dateRange} />
 
       {/* Actual revenue/expenses from Zoho Books (dormant until connected). */}
       <ZohoBooksPanel dateRange={dateRange} />
