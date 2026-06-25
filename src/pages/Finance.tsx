@@ -215,9 +215,10 @@ function MonthlyBack({ monthly }: { monthly: MonthlyPoint[] }) {
   );
 }
 
-function TopCategoryBack({ top }: { top?: CategorySpend }) {
+function TopCategoryBack({ top, conversions, revenue }: { top?: CategorySpend; conversions?: number; revenue?: number }) {
   const { fmt: fmtAED } = useCurrency();
   if (!top) return <p className="text-muted-foreground">No data in this period</p>;
+  const attributed = conversions != null || (revenue != null && revenue > 0);
   return (
     <div className="space-y-2">
       <div>
@@ -225,17 +226,18 @@ function TopCategoryBack({ top }: { top?: CategorySpend }) {
         <p className="text-[14px] font-semibold">{normalizeChannelKey(top.category)}</p>
       </div>
       <div className="grid grid-cols-2 gap-2 pt-1">
-        <div className="rounded-lg bg-muted/30 p-2">
-          <p className="text-[8px] text-muted-foreground uppercase tracking-wide">Transactions</p>
-          <p className="text-[14px] font-bold tabular-nums">{top.count}</p>
+        <div className="rounded-lg bg-emerald-50 p-2">
+          <p className="text-[8px] text-emerald-700/70 uppercase tracking-wide">Conversions</p>
+          <p className="text-[14px] font-bold tabular-nums text-emerald-700">{conversions != null ? conversions : "—"}</p>
         </div>
-        <div className="rounded-lg bg-muted/30 p-2">
-          <p className="text-[8px] text-muted-foreground uppercase tracking-wide">Avg / txn</p>
-          <p className="text-[14px] font-bold tabular-nums">{fmtAED(top.avg)}</p>
+        <div className="rounded-lg bg-blue-50 p-2">
+          <p className="text-[8px] text-blue-700/70 uppercase tracking-wide">Revenue generated</p>
+          <p className="text-[14px] font-bold tabular-nums text-blue-700">{revenue != null && revenue > 0 ? fmtAED(revenue) : "—"}</p>
         </div>
       </div>
       <p className="text-[10px] text-muted-foreground pt-1">
-        {top.pct.toFixed(1)}% of all marketing spend in this period
+        {fmtAED(top.amount)} spent · {top.pct.toFixed(1)}% of marketing spend
+        {attributed ? "" : ". No conversions are attributed to this channel yet (most Doctors-on-Board have no lead source set)."}
       </p>
     </div>
   );
@@ -874,6 +876,25 @@ const Finance = () => {
   }, [books, profitRows.conversionsByMonth]);
   const useBooks = !!booksPnl;
 
+  // Marketing spend from the Monthly Marketing Spend by Channel table (Meta
+  // live + Books vendor bills + the Website/SEO retainer) — the period total
+  // and a per-channel breakdown for the Marketing Spend KPI card.
+  const marketingPeriodTotal = monthlySpendByChannel.channels.reduce((s, c) => s + c.total, 0);
+  const marketingByChannel: CategorySpend[] = monthlySpendByChannel.channels
+    .map(c => ({
+      category: c.channel,
+      amount: c.total,
+      pct: marketingPeriodTotal > 0 ? (c.total / marketingPeriodTotal) * 100 : 0,
+      count: 0,
+      avg: 0,
+    }))
+    .sort((a, b) => b.amount - a.amount);
+
+  // Conversions + revenue attributed to the top channel (for its KPI back).
+  const topChannelRoi = topCategory
+    ? channelRoi.rows.find(r => r.channel === normalizeChannelKey(topCategory.category))
+    : undefined;
+
   return (
     <DashboardLayout title="Finance" subtitle="Revenue, spend, profit, and ROI across all channels" docSlug="growth/finance">
       <SectionDateRange />
@@ -936,15 +957,14 @@ const Finance = () => {
       <div className={`grid grid-cols-2 ${leadStats.totalLeads > 0 ? "lg:grid-cols-4" : "lg:grid-cols-2"} gap-3 mb-3`}>
         <FlipKpiCard
           icon={DollarSign} accent="blue"
-          // Label explicitly says "(period total)" so a multi-month figure
-          // can never be mistaken for a monthly number — Yemima saw 121K
-          // and assumed it was monthly when it was a 3-month aggregate.
+          // From the Monthly Marketing Spend by Channel table (Meta live + Books
+          // vendor bills + Website/SEO retainer) — the period total. Label says
+          // "(period total)" so a multi-month figure can't be mistaken for a
+          // monthly number.
           label={monthly.length > 1 ? "Marketing Spend (period total)" : "Marketing Spend"}
-          value={fmtAED(spend)}
-          sub={monthly.length > 1
-            ? `${monthly.length} months · ${fmtAED(avgMonthly)} / month avg`
-            : `${transactionCount} transactions · ${byCategory.length} channels`}
-          back={<TotalSpendBack byCategory={byCategory} total={spend} />}
+          value={fmtAED(marketingPeriodTotal)}
+          sub={`${marketingByChannel.length} channel${marketingByChannel.length === 1 ? "" : "s"}${monthly.length > 1 ? ` · ${monthly.length} months` : ""}`}
+          back={<TotalSpendBack byCategory={marketingByChannel} total={marketingPeriodTotal} />}
         />
         {leadStats.totalLeads > 0 && (
           <FlipKpiCard
@@ -1076,7 +1096,7 @@ const Finance = () => {
           icon={Crown} label="Top Channel (period)" accent="amber"
           value={topCategory ? normalizeChannelKey(topCategory.category) : "—"}
           sub={topCategory ? `${fmtAED(topCategory.amount)} period total · ${topCategory.pct.toFixed(1)}%` : ""}
-          back={<TopCategoryBack top={topCategory} />}
+          back={<TopCategoryBack top={topCategory} conversions={topChannelRoi?.totalConv} revenue={topChannelRoi?.totalRev} />}
         />
         <FlipKpiCard
           icon={Award} label="Biggest Single Expense" accent="orange"
