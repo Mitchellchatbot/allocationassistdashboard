@@ -51,13 +51,26 @@ export function FinanceDigest() {
     }
 
     if (useBooks) {
-      // Real revenue + expenses from Zoho Books, bucketed by day → gran.
-      for (const day of books!.byDay ?? []) {
-        const d = parseDate(day.date);
-        if (!d) continue;
-        const r = get(bucketKey(d, gran));
-        r.revenue += day.revenue;
-        r.spend   += day.expenses;
+      if (gran === "month") {
+        // Monthly view: exact per-month P&L from Zoho's report (incl. bills +
+        // journals) so it ties out to Zoho.
+        for (const m of books!.byMonth ?? []) {
+          const d = parseDate(`${m.month}-01`);
+          if (!d) continue;
+          const r = get(bucketKey(d, gran));
+          r.revenue += m.revenue;
+          r.spend   += m.expenses;
+        }
+      } else {
+        // Day / week: finer than the P&L report supports, so these come from
+        // dated invoice/expense records (a record-based trend).
+        for (const day of books!.byDay ?? []) {
+          const d = parseDate(day.date);
+          if (!d) continue;
+          const r = get(bucketKey(d, gran));
+          r.revenue += day.revenue;
+          r.spend   += day.expenses;
+        }
       }
     } else {
       // Estimate: spend from the marketing sheet, revenue = conversions × fee.

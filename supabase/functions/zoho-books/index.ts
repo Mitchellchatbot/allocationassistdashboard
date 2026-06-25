@@ -49,6 +49,21 @@ const ymd = (iso: string) => {
 const monthKey = (date: string) => String(date).slice(0, 7); // YYYY-MM
 const num = (v: unknown) => { const n = parseFloat(String(v ?? "0")); return isNaN(n) ? 0 : n; };
 
+/** Calendar months (YYYY-MM + start/end dates) spanned by a from→to range. */
+function monthsBetween(from: string, to: string): { key: string; start: string; end: string }[] {
+  const out: { key: string; start: string; end: string }[] = [];
+  const [fy, fm] = from.split("-").map(Number);
+  const [ty, tm] = to.split("-").map(Number);
+  let y = fy, m = fm;
+  while (y < ty || (y === ty && m <= tm)) {
+    const key  = `${y}-${String(m).padStart(2, "0")}`;
+    const last = new Date(y, m, 0).getDate(); // last day of 1-based month m
+    out.push({ key, start: `${key}-01`, end: `${key}-${String(last).padStart(2, "0")}` });
+    if (++m > 12) { m = 1; y++; }
+  }
+  return out;
+}
+
 // Zoho Books list endpoints return each document in its OWN currency (USD, GBP,
 // SAR…) with an `exchange_rate` to the AED base — and an EMPTY `bcy_total`. So
 // convert to base ourselves: base = amount × exchange_rate. The rate is
@@ -79,6 +94,43 @@ async function getAccessToken(): Promise<string | null> {
   if (j.error || !j.access_token) { console.error("[zoho-books] token error:", j.error); return null; }
   cachedToken = { token: j.access_token, expiresAt: now + (j.expires_in ?? 3600) * 1000 };
   return j.access_token;
+}
+
+// ── Zoho's official Profit & Loss report (accrual) ─────────────────────────
+// The dashboard previously summed invoice/expense RECORDS itself, which missed
+// vendor bills and journal entries — so revenue, expenses and per-account
+// figures (e.g. Salaries) didn't match Zoho's P&L. We now read the report
+// directly so everything ties out to Zoho exactly.
+interface PLNode { name?: string; total?: number; account_transactions?: PLNode[] }
+interface PLAccount { name: string; total: number }
+
+function findPLNode(nodes: PLNode[], name: string): PLNode | null {
+  for (const n of nodes) {
+    if (n.name === name) return n;
+    if (n.account_transactions) { const f = findPLNode(n.account_transactions, name); if (f) return f; }
+  }
+  return null;
+}
+
+async function fetchPnL(token: string, from: string, to: string): Promise<{ revenue: number; expenses: number; expenseAccounts: PLAccount[] } | null> {
+  const url = `${API_BASE}/reports/profitandloss?organization_id=${ORG}&from_date=${from}&to_date=${to}`;
+  const res = await fetch(url, { headers: { Authorization: `Zoho-oauthtoken ${token}` } });
+  if (!res.ok) { console.error("[zoho-books] P&L report failed:", res.status, await res.text()); return null; }
+  const j = await res.json() as { profit_and_loss?: PLNode[] };
+  const pl = j.profit_and_loss ?? [];
+  let revenue = 0;
+  for (const nm of ["Operating Income", "Non Operating Income", "Other Income"]) {
+    const n = findPLNode(pl, nm); if (n) revenue += num(n.total);
+  }
+  let expenses = 0;
+  const expenseAccounts: PLAccount[] = [];
+  for (const nm of ["Cost of Goods Sold", "Operating Expense", "Non Operating Expense", "Other Expense"]) {
+    const n = findPLNode(pl, nm);
+    if (!n) continue;
+    expenses += num(n.total);
+    for (const a of n.account_transactions ?? []) if (a.name) expenseAccounts.push({ name: String(a.name), total: num(a.total) });
+  }
+  return { revenue: +revenue.toFixed(2), expenses: +expenses.toFixed(2), expenseAccounts };
 }
 
 /** Page through a Zoho Books list endpoint and return every row of `listKey`. */
@@ -138,13 +190,16 @@ serve(async (req) => {
 
   try {
     const dateParams = { date_start: from, date_end: to };
-    const [invoices, expenses, bills] = await Promise.all([
+    const [invoices, expenses, bills, pnl] = await Promise.all([
       fetchAll(token, "invoices", "invoices", dateParams),
       fetchAll(token, "expenses", "expenses", dateParams),
       // Most marketing spend is booked as BILLS to vendors (Scaled AI,
       // LinkedIn, GoHire, Meta…), not expenses — so the channel attribution
       // needs them. Vendor name is the channel signal.
       fetchAll(token, "bills", "bills", dateParams),
+      // Authoritative income / expenses / per-account totals (incl. bills &
+      // journals) — so the headline numbers tie out to Zoho's P&L.
+      fetchPnL(token, from, to),
     ]);
 
     const byMonth: Record<string, { month: string; revenue: number; expenses: number }> = {};
@@ -217,11 +272,9 @@ serve(async (req) => {
     }
     const byDay = Object.values(byDayMap).sort((a, b) => a.date.localeCompare(b.date));
 
-    const byCategory = Object.entries(byCategoryMap)
-      .map(([name, amount]) => ({ name, amount: +amount.toFixed(2) }))
-      .sort((a, b) => b.amount - a.amount);
-    // Full per-category expense breakdown with drill-down transactions.
-    const expenseBreakdown = Object.entries(expenseDetail)
+    // Record-based expense breakdown (with per-txn detail) — used only as the
+    // fallback if the P&L report is unavailable.
+    const recordBreakdown = Object.entries(expenseDetail)
       .map(([category, v]) => ({
         category,
         amount: +v.amount.toFixed(2),
@@ -229,15 +282,70 @@ serve(async (req) => {
         txns: v.txns.sort((a, b) => b.date.localeCompare(a.date)).slice(0, 250),
       }))
       .sort((a, b) => b.amount - a.amount);
-    const byMonthArr = Object.values(byMonth).sort((a, b) => a.month.localeCompare(b.month));
+
+    // Headline revenue/expenses/profit + the per-account breakdown come from
+    // Zoho's P&L report (matches Zoho exactly — includes bills + journals).
+    // Per-transaction detail is attached from the expense records where the
+    // account name matches; salary-type accounts booked via journals show
+    // fewer line items than their P&L total.
+    const txnByCat = new Map(Object.entries(expenseDetail).map(([cat, v]) => [cat, v.txns.sort((a, b) => b.date.localeCompare(a.date)).slice(0, 250)]));
+    const rptRevenue  = pnl ? pnl.revenue  : +revenue.toFixed(2);
+    const rptExpenses = pnl ? pnl.expenses : +expenseTotal.toFixed(2);
+    const expenseBreakdown = pnl
+      ? pnl.expenseAccounts
+          .filter(a => a.total > 0)
+          .map(a => { const txns = txnByCat.get(a.name) ?? []; return { category: a.name, amount: +a.total.toFixed(2), count: txns.length, txns }; })
+          .sort((a, b) => b.amount - a.amount)
+      : recordBreakdown;
+    const byCategory = expenseBreakdown.map(c => ({ name: c.category, amount: c.amount }));
+
+    // Accurate per-month P&L (one report call per month) so the Digest trend +
+    // the monthly mini-bars tie out to Zoho. Capped to keep the call count
+    // sane; beyond that we fall back to the record-summed monthly buckets.
+    // Zoho rate-limits concurrent report calls, so run at most a few at a time
+    // and re-fetch any that got throttled (null) sequentially — otherwise some
+    // months silently come back 0.
+    const monthList = monthsBetween(from, to);
+    let byMonthArr: { month: string; revenue: number; expenses: number }[];
+    if (pnl && monthList.length <= 13) {
+      const res: ({ revenue: number; expenses: number } | null)[] = new Array(monthList.length).fill(null);
+      let next = 0;
+      const worker = async () => { while (next < monthList.length) { const i = next++; res[i] = await fetchPnL(token, monthList[i].start, monthList[i].end); } };
+      await Promise.all(Array.from({ length: Math.min(3, monthList.length) }, worker));
+      for (let i = 0; i < monthList.length; i++) if (!res[i]) res[i] = await fetchPnL(token, monthList[i].start, monthList[i].end);
+      byMonthArr = monthList.map((mo, i) => ({ month: mo.key, revenue: res[i]?.revenue ?? 0, expenses: res[i]?.expenses ?? 0 }));
+
+      // Tie the per-DAY records to each month's report total so the daily/weekly
+      // Digest reconciles with the monthly P&L (records miss bills + journals).
+      // Revenue records already match (accrual = invoice date); expenses get
+      // scaled, and a month booked entirely off-record (journals) is spread
+      // evenly across its days.
+      const recMonth: Record<string, { revenue: number; expenses: number }> = {};
+      const daysOf: Record<string, typeof byDay> = {};
+      for (const d of byDay) {
+        const mk = d.date.slice(0, 7);
+        (recMonth[mk] ??= { revenue: 0, expenses: 0 });
+        recMonth[mk].revenue += d.revenue; recMonth[mk].expenses += d.expenses;
+        (daysOf[mk] ??= []).push(d);
+      }
+      for (const m of byMonthArr) {
+        const rec = recMonth[m.month]; const days = daysOf[m.month];
+        if (!days?.length || !rec) continue;
+        if (rec.revenue > 0) { const f = m.revenue / rec.revenue; for (const d of days) d.revenue = +(d.revenue * f).toFixed(2); }
+        if (rec.expenses > 0) { const f = m.expenses / rec.expenses; for (const d of days) d.expenses = +(d.expenses * f).toFixed(2); }
+        else if (m.expenses > 0) { const per = +(m.expenses / days.length).toFixed(2); for (const d of days) d.expenses = per; }
+      }
+    } else {
+      byMonthArr = Object.values(byMonth).sort((a, b) => a.month.localeCompare(b.month));
+    }
 
     return json({
       configured:   true,
       ok:           true,
       currency,
-      revenue:      +revenue.toFixed(2),
-      expenses:     +expenseTotal.toFixed(2),
-      profit:       +(revenue - expenseTotal).toFixed(2),
+      revenue:      rptRevenue,
+      expenses:     rptExpenses,
+      profit:       +(rptRevenue - rptExpenses).toFixed(2),
       outstanding:  +outstanding.toFixed(2),
       invoiceCount: invoices.length,
       expenseCount: expenses.length,
