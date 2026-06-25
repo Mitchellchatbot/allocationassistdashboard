@@ -123,13 +123,13 @@ export function FinanceDigest() {
           <div>
             <CardTitle className="text-[13px] font-semibold text-foreground">Digest</CardTitle>
             <p className="text-[11px] text-muted-foreground/80 mt-0.5">
-              Revenue, spend &amp; profit per {gran === "day" ? "day" : gran === "week" ? "week" : "month"} · {useBooks
+              Revenue, spend &amp; P/L per {gran === "day" ? "day" : gran === "week" ? "week" : "month"} · {useBooks
                 ? <span className="text-emerald-700 font-medium">actuals from Zoho Books</span>
                 : "estimate until Zoho Books is connected"}
             </p>
             <div className={`mt-2 inline-flex items-center gap-1.5 rounded-full px-2.5 py-1 text-[11.5px] font-semibold ${totals.profit >= 0 ? "bg-emerald-50 text-emerald-700" : "bg-rose-50 text-rose-700"}`}>
               {totals.profit >= 0 ? <TrendingUp className="h-3.5 w-3.5" /> : <TrendingDown className="h-3.5 w-3.5" />}
-              Cumulative profit this period: {fmt(totals.profit)}
+              Cumulative P/L this period: {fmt(totals.profit)}
             </div>
           </div>
           <GranularityToggle value={gran} onChange={setGran} />
@@ -146,8 +146,13 @@ export function FinanceDigest() {
             <Legend wrapperStyle={{ fontSize: 11 }} iconType="circle" />
             <Bar dataKey="revenue" name="Revenue" fill="#10b981" radius={[3, 3, 0, 0]} maxBarSize={gran === "day" ? 8 : 40} />
             <Bar dataKey="spend"   name="Spend"   fill="#f43f5e" radius={[3, 3, 0, 0]} maxBarSize={gran === "day" ? 8 : 40} />
-            <Line dataKey="profit" name="Profit"  stroke="#3b82f6" strokeWidth={2.5} dot={{ r: 3, fill: "#3b82f6", strokeWidth: 0 }} activeDot={{ r: 5 }} />
-            <Line dataKey="cumulative" name="Cumulative profit" stroke="#8b5cf6" strokeWidth={2} strokeDasharray="5 3" dot={false} activeDot={{ r: 4 }} />
+            <Line dataKey="profit" name="Net P/L"  stroke="#3b82f6" strokeWidth={2.5} dot={{ r: 3, fill: "#3b82f6", strokeWidth: 0 }} activeDot={{ r: 5 }} />
+            {/* Cumulative P/L only on the monthly view — for day/week the net
+                P/L line is smoother and easier to read (cumulative lives in the
+                KPI chip above). */}
+            {gran === "month" && (
+              <Line dataKey="cumulative" name="Cumulative P/L" stroke="#8b5cf6" strokeWidth={2} strokeDasharray="5 3" dot={false} activeDot={{ r: 4 }} />
+            )}
           </ComposedChart>
         </ResponsiveContainer>
 
@@ -155,7 +160,7 @@ export function FinanceDigest() {
           <table className="w-full text-left border-collapse text-[12px]">
             <thead className="border-y border-border/60 bg-muted/30">
               <tr>
-                {["Period", "Revenue", "Spend", "Profit", "Cumulative", "Conv."].map((h, i) => (
+                {["Period", "Revenue", "Spend", "Net P/L", ...(gran === "month" ? ["Cumulative P/L"] : []), "Conv."].map((h, i) => (
                   <th key={h} className={`py-2 px-3 font-semibold text-muted-foreground uppercase text-[10px] tracking-wide ${i === 0 ? "" : "text-right"}`}>{h}</th>
                 ))}
               </tr>
@@ -167,7 +172,7 @@ export function FinanceDigest() {
                   <td className="py-2 px-3 text-right tabular-nums text-emerald-700">{fmt(r.revenue)}</td>
                   <td className="py-2 px-3 text-right tabular-nums text-rose-700">{fmt(r.spend)}</td>
                   <td className={`py-2 px-3 text-right tabular-nums font-semibold ${r.profit >= 0 ? "text-blue-700" : "text-rose-700"}`}>{fmt(r.profit)}</td>
-                  <td className={`py-2 px-3 text-right tabular-nums font-medium ${r.cumulative >= 0 ? "text-violet-700" : "text-rose-700"}`}>{fmt(r.cumulative)}</td>
+                  {gran === "month" && <td className={`py-2 px-3 text-right tabular-nums font-medium ${r.cumulative >= 0 ? "text-violet-700" : "text-rose-700"}`}>{fmt(r.cumulative)}</td>}
                   <td className="py-2 px-3 text-right tabular-nums text-muted-foreground">{r.conversions}</td>
                 </tr>
               ))}
@@ -178,7 +183,7 @@ export function FinanceDigest() {
                 <td className="py-2 px-3 text-right tabular-nums text-emerald-700">{fmt(totals.revenue)}</td>
                 <td className="py-2 px-3 text-right tabular-nums text-rose-700">{fmt(totals.spend)}</td>
                 <td className={`py-2 px-3 text-right tabular-nums ${totals.profit >= 0 ? "text-blue-700" : "text-rose-700"}`}>{fmt(totals.profit)}</td>
-                <td className={`py-2 px-3 text-right tabular-nums ${totals.profit >= 0 ? "text-violet-700" : "text-rose-700"}`}>{fmt(totals.profit)}</td>
+                {gran === "month" && <td className={`py-2 px-3 text-right tabular-nums ${totals.profit >= 0 ? "text-violet-700" : "text-rose-700"}`}>{fmt(totals.profit)}</td>}
                 <td className="py-2 px-3 text-right tabular-nums text-muted-foreground">{totals.conversions}</td>
               </tr>
             </tfoot>
