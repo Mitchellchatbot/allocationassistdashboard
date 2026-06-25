@@ -715,26 +715,13 @@ const Finance = () => {
   // ── Return on Investment by channel (spend vs revenue, per month) ──────────
   // Only the channels we can attribute. Spend reuses monthlySpendByChannel;
   // revenue = invoiced total of the doctors who CONVERTED from each channel,
-  // bucketed by their conversion month. DoB Lead_Source is often empty, so we
-  // recover it by matching the doctor to their Lead (email → phone → name).
+  // bucketed by their conversion month. Conversions are attributed by the
+  // doctor's raw Lead_Source — the SAME method the Marketing page's channel
+  // economics uses — so the two pages report identical conversion counts.
   const channelRoi = useMemo(() => {
     const TARGET: ChannelKey[] = ["Meta", "Website / SEO", "Go Hire", "LinkedIn"];
     const months = monthlySpendByChannel.months;
     const spendByChannel = new Map(monthlySpendByChannel.channels.map(c => [c.channel, c.perMonth]));
-
-    const nEmail = (s: string | null | undefined) => (s ?? "").trim().toLowerCase();
-    const nPhone = (s: string | null | undefined) => (s ?? "").replace(/\D/g, "");
-    const nName  = (f: string | null | undefined, l: string | null | undefined) =>
-      `${(f ?? "").trim().toLowerCase()} ${(l ?? "").trim().toLowerCase()}`.trim();
-    const leadByEmail = new Map<string, { Lead_Source: string | null }>();
-    const leadByPhone = new Map<string, { Lead_Source: string | null }>();
-    const leadByName  = new Map<string, { Lead_Source: string | null }>();
-    for (const l of zoho?.rawLeads ?? []) {
-      const e = nEmail(l.Email), p = nPhone(l.Phone ?? l.Mobile), n = nName(l.First_Name, l.Last_Name);
-      if (e && !leadByEmail.has(e)) leadByEmail.set(e, l);
-      if (p && !leadByPhone.has(p)) leadByPhone.set(p, l);
-      if (n && !leadByName.has(n))  leadByName.set(n, l);
-    }
 
     const fromMs = dateRange.from.getTime();
     const toMs   = dateRange.to.getTime() + 86_400_000;
@@ -745,14 +732,7 @@ const Finance = () => {
       const d = new Date(dob.Created_Time);
       const t = d.getTime();
       if (isNaN(t) || t < fromMs || t >= toMs) continue;
-      let src = dob.Lead_Source;
-      if (!src) {
-        const lead = leadByEmail.get(nEmail(dob.Email))
-          || leadByPhone.get(nPhone(dob.Phone ?? dob.Mobile))
-          || leadByName.get(nName(dob.First_Name, dob.Last_Name));
-        src = lead?.Lead_Source ?? null;
-      }
-      const ch = normalizeChannelKey(src);
+      const ch = normalizeChannelKey(dob.Lead_Source);
       if (!TARGET.includes(ch)) continue;
       const key = `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}`;
       const name = dob.Full_Name || `${dob.First_Name ?? ""} ${dob.Last_Name ?? ""}`.trim();
