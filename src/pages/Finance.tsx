@@ -16,7 +16,7 @@ import { useCurrency } from "@/lib/CurrencyProvider";
 import { normalizeChannelKey, classifyChannel, WEBSITE_SEO_RETAINER_AED, WEBSITE_SEO_START_MONTH, WEBSITE_SEO_ACTUALS, type ChannelKey } from "@/lib/channel-mapping";
 import { useDoctorRevenue } from "@/hooks/use-doctor-dossier";
 import { ChannelRoiTable } from "@/components/finance/ChannelRoiTable";
-import { ChannelFunnelSankey } from "@/components/finance/ChannelFunnelSankey";
+import { ChannelSpendSankey } from "@/components/finance/ChannelSpendSankey";
 import {
   BarChart, Bar, XAxis, YAxis, Tooltip, ResponsiveContainer, CartesianGrid, Cell,
   AreaChart, Area, PieChart, Pie, Legend, LineChart, Line, ComposedChart,
@@ -1418,8 +1418,8 @@ const Finance = () => {
         </Card>
       )}
 
-      {/* Lead funnel: channels → qualified → converted, with drop-offs. */}
-      <ChannelFunnelSankey />
+      {/* Spend flow: total budget → channels → returned-as-revenue vs unrecovered. */}
+      <ChannelSpendSankey rows={channelRoi.rows} />
 
       {/* Old single-bar "ROI by channel" chart removed — the Return on
           Investment by Channel table above supersedes it (per-month spend +
