@@ -57,14 +57,27 @@ const num = (v: unknown) => { const n = parseFloat(String(v ?? "0")); return isN
 const baseAmt = (row: Record<string, unknown>, field = "total") =>
   num(row[field]) * (num(row.exchange_rate) || 1);
 
+// Cache the access token across invocations on a warm instance. Zoho throttles
+// token GENERATION (refreshing on every request trips it and the whole panel
+// then shows "could not authenticate"), so reuse a token until it's near expiry.
+let cachedToken: { token: string; expiresAt: number } | null = null;
+
 async function getAccessToken(): Promise<string | null> {
+  const now = Date.now();
+  if (cachedToken && cachedToken.expiresAt > now + 60_000) return cachedToken.token;
   const url = `${ACCOUNTS_BASE}/oauth/v2/token?refresh_token=${encodeURIComponent(REFRESH)}`
     + `&client_id=${encodeURIComponent(CID)}&client_secret=${encodeURIComponent(SECRET)}`
     + `&grant_type=refresh_token`;
   const res = await fetch(url, { method: "POST" });
-  if (!res.ok) { console.error("[zoho-books] token refresh failed:", res.status, await res.text()); return null; }
-  const j = await res.json() as { access_token?: string; error?: string };
+  if (!res.ok) {
+    console.error("[zoho-books] token refresh failed:", res.status, await res.text());
+    // If a refresh fails but we still hold a non-expired token, keep using it.
+    if (cachedToken && cachedToken.expiresAt > now) return cachedToken.token;
+    return null;
+  }
+  const j = await res.json() as { access_token?: string; error?: string; expires_in?: number };
   if (j.error || !j.access_token) { console.error("[zoho-books] token error:", j.error); return null; }
+  cachedToken = { token: j.access_token, expiresAt: now + (j.expires_in ?? 3600) * 1000 };
   return j.access_token;
 }
 
