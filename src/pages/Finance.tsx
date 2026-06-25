@@ -472,8 +472,6 @@ const Finance = () => {
   // individual transactions inline. Single-channel expansion at a time keeps
   // the page short.
   const [expandedCategory, setExpandedCategory] = useState<string | null>(null);
-  // Drill-down for the Zoho Books operating-expense breakdown (payroll, etc.).
-  const [expandedExpense, setExpandedExpense] = useState<string | null>(null);
   const txnsByCategory = useMemo(() => {
     const m = new Map<string, typeof allTransactions>();
     for (const t of allTransactions) {
@@ -875,20 +873,6 @@ const Finance = () => {
     };
   }, [books, profitRows.conversionsByMonth]);
   const useBooks = !!booksPnl;
-
-  // Zoho Books operating-expense breakdown (payroll, software, rent, …) — the
-  // full per-category list with amount, count, avg, % of total and drill-down
-  // transactions. Sums to the P&L "Expenses" line.
-  const booksExpenses = useMemo(() => {
-    const list = books?.expenseBreakdown ?? [];
-    const total = list.reduce((s, c) => s + c.amount, 0);
-    const rows = list.map(c => ({
-      ...c,
-      avg: c.count > 0 ? c.amount / c.count : 0,
-      pct: total > 0 ? (c.amount / total) * 100 : 0,
-    }));
-    return { total, rows };
-  }, [books?.expenseBreakdown]);
 
   return (
     <DashboardLayout title="Finance" subtitle="Revenue, spend, profit, and ROI across all channels" docSlug="growth/finance">
@@ -1313,103 +1297,6 @@ const Finance = () => {
                   <td className="py-3.5 px-3 text-[14px] text-right tabular-nums">{byCategory.reduce((s, c) => s + c.count, 0)}</td>
                   <td className="py-3.5 px-3 text-[14px] text-right tabular-nums">—</td>
                   <td className="py-3.5 px-3 text-[15px] text-right tabular-nums text-violet-700">{fmtAED(spend)}</td>
-                  <td className="py-3.5 px-5 text-[14px] text-right tabular-nums">100%</td>
-                </tr>
-              </tbody>
-            </table>
-          </CardContent>
-        </Card>
-      )}
-
-      {/* ── Operating Expense Breakdown (Zoho Books) — payroll, software,
-          rent, etc. Click a category to drill into its transactions. Sums to
-          the P&L "Expenses" line; marketing vendor bills are tracked in the
-          channel table above to avoid double-counting. ── */}
-      {useBooks && booksExpenses.rows.length > 0 && (
-        <Card className="shadow-md border-border/60 mb-5">
-          <CardHeader className="pb-2 pt-4 px-5">
-            <div className="flex items-center gap-2 flex-wrap">
-              <CardTitle className="text-[14px] font-semibold text-foreground">Operating Expense Breakdown</CardTitle>
-              <span className="inline-flex items-center gap-1 text-[9px] font-bold uppercase tracking-wide px-2 py-0.5 rounded-full bg-emerald-100 text-emerald-700">
-                <span className="h-1.5 w-1.5 rounded-full bg-emerald-500" /> Zoho Books · actuals
-              </span>
-            </div>
-            <p className="text-[11px] text-muted-foreground/80 mt-0.5">Every expense booked in Zoho Books — payroll, software, rent, and the rest. Click any category to see its transactions. Totals to the Expenses line in the P&amp;L above.</p>
-          </CardHeader>
-          <CardContent className="px-0 pb-3 overflow-x-auto">
-            <table className="w-full text-left border-collapse">
-              <thead className="bg-muted/40 border-y border-border/60">
-                <tr>
-                  <th className="py-3 px-2 w-8"></th>
-                  <th className="py-3 px-3 text-[12px] font-semibold text-muted-foreground uppercase tracking-wide">Category</th>
-                  <th className="py-3 px-3 text-[12px] font-semibold text-muted-foreground uppercase tracking-wide text-right">Txns</th>
-                  <th className="py-3 px-3 text-[12px] font-semibold text-muted-foreground uppercase tracking-wide text-right">Avg / Txn</th>
-                  <th className="py-3 px-3 text-[12px] font-semibold text-muted-foreground uppercase tracking-wide text-right">Total</th>
-                  <th className="py-3 px-5 text-[12px] font-semibold text-muted-foreground uppercase tracking-wide text-right">% of Total</th>
-                </tr>
-              </thead>
-              <tbody>
-                {booksExpenses.rows.map((c, i) => {
-                  const isOpen = expandedExpense === c.category;
-                  return (
-                    <Fragment key={c.category}>
-                      <tr
-                        className={`border-b border-border/30 cursor-pointer transition-colors ${isOpen ? "bg-emerald-50/60" : "hover:bg-muted/30"}`}
-                        onClick={() => setExpandedExpense(isOpen ? null : c.category)}
-                      >
-                        <td className="py-3.5 px-2 text-center">
-                          <ChevronRight className={`h-3.5 w-3.5 text-muted-foreground transition-transform inline-block ${isOpen ? "rotate-90 text-emerald-700" : ""}`} />
-                        </td>
-                        <td className="py-3.5 px-3 text-[14px] font-semibold">
-                          <div className="flex items-center gap-2.5">
-                            <span className="h-3 w-3 rounded-full shrink-0" style={{ backgroundColor: CAT_COLORS[i % CAT_COLORS.length] }} />
-                            <span className="text-foreground">{c.category}</span>
-                          </div>
-                        </td>
-                        <td className="py-3.5 px-3 text-[14px] text-right tabular-nums text-muted-foreground">{c.count}</td>
-                        <td className="py-3.5 px-3 text-[14px] text-right tabular-nums text-muted-foreground">{fmtAED(c.avg)}</td>
-                        <td className="py-3.5 px-3 text-[14px] text-right tabular-nums font-bold text-emerald-700">{fmtAED(c.amount)}</td>
-                        <td className="py-3.5 px-5 text-[14px] text-right tabular-nums text-muted-foreground">{c.pct.toFixed(1)}%</td>
-                      </tr>
-                      {isOpen && (
-                        <tr className="bg-emerald-50/30 border-b border-border/30">
-                          <td colSpan={6} className="py-3 px-5">
-                            <div className="overflow-x-auto" style={{ maxHeight: 320 }}>
-                              <table className="w-full text-left border-collapse">
-                                <thead>
-                                  <tr className="border-b border-border/40">
-                                    <th className="py-2 text-[10px] uppercase tracking-wide text-muted-foreground/70 font-semibold">Date</th>
-                                    <th className="py-2 text-[10px] uppercase tracking-wide text-muted-foreground/70 font-semibold">Description</th>
-                                    <th className="py-2 text-[10px] uppercase tracking-wide text-muted-foreground/70 font-semibold text-right">Amount</th>
-                                  </tr>
-                                </thead>
-                                <tbody>
-                                  {c.txns.length === 0 ? (
-                                    <tr><td colSpan={3} className="py-3 text-center text-[12px] text-muted-foreground">No transactions in this period</td></tr>
-                                  ) : c.txns.map((t, ti) => (
-                                    <tr key={`${t.date}-${ti}`} className="border-b border-border/20 last:border-0">
-                                      <td className="py-2 text-[12px] font-mono text-muted-foreground whitespace-nowrap pr-3">{t.date || "—"}</td>
-                                      <td className="py-2 text-[12px] text-foreground/80 max-w-[480px] truncate" title={t.text}>
-                                        {t.text || <span className="text-muted-foreground/40">—</span>}
-                                      </td>
-                                      <td className="py-2 text-[12px] text-right tabular-nums font-semibold">{fmtAED(t.amount)}</td>
-                                    </tr>
-                                  ))}
-                                </tbody>
-                              </table>
-                            </div>
-                          </td>
-                        </tr>
-                      )}
-                    </Fragment>
-                  );
-                })}
-                <tr className="border-t-2 border-emerald-200 bg-emerald-50/60 font-bold">
-                  <td></td>
-                  <td className="py-3.5 px-3 text-[14px] text-foreground">Total</td>
-                  <td className="py-3.5 px-3 text-[14px] text-right tabular-nums">{booksExpenses.rows.reduce((s, c) => s + c.count, 0)}</td>
-                  <td className="py-3.5 px-3 text-[14px] text-right tabular-nums">—</td>
-                  <td className="py-3.5 px-3 text-[15px] text-right tabular-nums text-emerald-700">{fmtAED(booksExpenses.total)}</td>
                   <td className="py-3.5 px-5 text-[14px] text-right tabular-nums">100%</td>
                 </tr>
               </tbody>
