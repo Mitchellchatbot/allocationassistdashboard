@@ -12,7 +12,7 @@
  */
 import { useMemo, useState, useRef, useEffect } from "react";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
-import { ChevronLeft, X } from "lucide-react";
+import { ChevronLeft } from "lucide-react";
 import gsap from "gsap";
 import { useZohoBooks } from "@/hooks/use-zoho-books";
 import { useCurrency } from "@/lib/CurrencyProvider";
@@ -277,10 +277,11 @@ export function CompanyFinanceSankey({ dateRange }: { dateRange: { from: Date; t
             <span className="h-1.5 w-1.5 rounded-full bg-emerald-500" /> Zoho Books · actuals
           </span>
         </div>
-        {focus ? (
+        {(focus || selectedCat) ? (
           <button type="button" onClick={() => { setFocus(null); setSelectedCat(null); }} className="mt-1 inline-flex items-center gap-1 text-[11px] font-medium text-blue-700 hover:text-blue-800 transition-colors">
             <ChevronLeft className="h-3.5 w-3.5" /> All expenses
-            <span className="text-muted-foreground font-normal">/ {focus}</span>
+            {focus && <span className="text-muted-foreground font-normal">/ {focus}</span>}
+            {selectedCat && <span className="text-muted-foreground font-normal">/ {selectedCat}</span>}
           </button>
         ) : (
           <p className="text-[11px] text-muted-foreground/80 mt-0.5">
@@ -333,34 +334,38 @@ export function CompanyFinanceSankey({ dateRange }: { dateRange: { from: Date; t
             </svg>
           </div>
 
-          {/* Transaction table — cross-fades in over the graph viewport */}
+          {/* Transaction table — cross-fades in over the graph viewport.
+              No close button: the "‹ All expenses" breadcrumb is the way out. */}
           <div ref={tableRef} className="absolute inset-0" style={{ pointerEvents: selectedCat ? "auto" : "none" }}>
             {tableSel && tableCat && (
-              <div className="h-full flex flex-col rounded-lg border border-border/60 bg-card shadow-sm overflow-hidden">
-                <div className="flex items-center justify-between px-4 py-2 border-b border-border/40 bg-muted/40 shrink-0">
-                  <p className="text-[12px] font-semibold text-foreground">
-                    {tableCat}
-                    <span className="ml-2 font-normal text-muted-foreground">{fmt(tableSel.amount)} · {tableSel.count} txn{tableSel.count === 1 ? "" : "s"} · {pct(tableSel.amount)}</span>
-                  </p>
-                  <button type="button" onClick={() => setSelectedCat(null)} className="text-muted-foreground hover:text-foreground transition-colors"><X className="h-3.5 w-3.5" /></button>
+              <div className="h-full flex flex-col rounded-xl border border-border/60 bg-card shadow-sm overflow-hidden">
+                <div className="flex items-center justify-between gap-3 px-5 py-3 border-b border-border/50 bg-gradient-to-b from-muted/40 to-muted/10 shrink-0">
+                  <div className="min-w-0">
+                    <h4 className="text-[13px] font-semibold text-foreground truncate">{tableCat}</h4>
+                    <p className="text-[11px] text-muted-foreground mt-0.5">{tableSel.count} transaction{tableSel.count === 1 ? "" : "s"} · {pct(tableSel.amount)}</p>
+                  </div>
+                  <div className="text-right shrink-0">
+                    <p className="text-[16px] font-bold tabular-nums text-foreground leading-none">{fmt(tableSel.amount)}</p>
+                    <p className="text-[10px] uppercase tracking-wide text-muted-foreground mt-0.5">Total</p>
+                  </div>
                 </div>
                 <div className="flex-1 overflow-y-auto">
                   <table className="w-full text-left border-collapse">
-                    <thead className="sticky top-0 bg-muted/40">
-                      <tr className="border-b border-border/40">
-                        <th className="py-2 px-4 text-[10px] uppercase tracking-wide text-muted-foreground/70 font-semibold">Date</th>
-                        <th className="py-2 px-4 text-[10px] uppercase tracking-wide text-muted-foreground/70 font-semibold">Description</th>
-                        <th className="py-2 px-4 text-[10px] uppercase tracking-wide text-muted-foreground/70 font-semibold text-right">Amount</th>
+                    <thead className="sticky top-0 z-10 bg-card/95 backdrop-blur-sm shadow-[0_1px_0_rgba(0,0,0,0.06)]">
+                      <tr>
+                        <th className="py-2.5 px-5 text-[10px] uppercase tracking-wide text-muted-foreground font-semibold">Date</th>
+                        <th className="py-2.5 px-3 text-[10px] uppercase tracking-wide text-muted-foreground font-semibold">Description</th>
+                        <th className="py-2.5 px-5 text-[10px] uppercase tracking-wide text-muted-foreground font-semibold text-right">Amount</th>
                       </tr>
                     </thead>
                     <tbody>
                       {tableSel.txns.length === 0 ? (
-                        <tr><td colSpan={3} className="py-3 text-center text-[12px] text-muted-foreground">No transaction detail for this category</td></tr>
+                        <tr><td colSpan={3} className="py-6 text-center text-[12px] text-muted-foreground">No transaction detail for this category</td></tr>
                       ) : tableSel.txns.map((t, i) => (
-                        <tr key={`${t.date}-${i}`} className="border-b border-border/20 last:border-0 hover:bg-muted/30 transition-colors">
-                          <td className="py-2 px-4 text-[12px] font-mono text-muted-foreground whitespace-nowrap">{t.date || "—"}</td>
-                          <td className="py-2 px-4 text-[12px] text-foreground/80 max-w-[520px] truncate" title={t.text}>{t.text || <span className="text-muted-foreground/40">—</span>}</td>
-                          <td className="py-2 px-4 text-[12px] text-right tabular-nums font-semibold">{fmt(t.amount)}</td>
+                        <tr key={`${t.date}-${i}`} className="border-b border-border/25 last:border-0 odd:bg-muted/15 hover:bg-blue-50/50 transition-colors">
+                          <td className="py-2.5 px-5 text-[12px] font-mono text-muted-foreground whitespace-nowrap">{t.date || "—"}</td>
+                          <td className="py-2.5 px-3 text-[12.5px] text-foreground/85 max-w-[520px] truncate" title={t.text}>{t.text || <span className="text-muted-foreground/40">—</span>}</td>
+                          <td className="py-2.5 px-5 text-[12.5px] text-right tabular-nums font-semibold text-foreground">{fmt(t.amount)}</td>
                         </tr>
                       ))}
                     </tbody>
