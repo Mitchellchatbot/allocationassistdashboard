@@ -147,17 +147,20 @@ export function CompanyFinanceSankey({ dateRange }: { dateRange: { from: Date; t
 
     // Links. belong = which group the element survives a drill into ("__rev"
     // for Revenue/Profit + their links, which always fade on drill).
-    const links: { key: string; belong: string; d: string; color: string }[] = [];
+    // `group` = the group this link zooms into when clicked (undefined for the
+    // Revenue→Profit ribbon, which isn't a drill target).
+    const links: { key: string; belong: string; d: string; color: string; group?: string }[] = [];
     const revTargets = [...(profit ? [profit] : []), ...groups].sort((a, b) => a.y - b.y);
     let sy = revenue.y;
     for (const t of revTargets) {
-      links.push({ key: `rev-${t.name}`, belong: "__rev", color: t.color, d: ribbon(revenue.x + NODE_W, sy, sy + t.h, t.x, t.y, t.y + t.h) });
+      const isProfit = !!profit && t.name === profit.name;
+      links.push({ key: `rev-${t.name}`, belong: "__rev", color: t.color, group: isProfit ? undefined : t.name, d: ribbon(revenue.x + NODE_W, sy, sy + t.h, t.x, t.y, t.y + t.h) });
       sy += t.h;
     }
     for (const g of groups) {
       const myCats = cats.filter(c => c.group === g.name).sort((a, b) => a.y - b.y);
       let gy = g.y;
-      for (const c of myCats) { links.push({ key: `${g.name}-${c.name}`, belong: g.name, color: g.color, d: ribbon(g.x + NODE_W, gy, gy + c.h, c.x, c.y, c.y + c.h) }); gy += c.h; }
+      for (const c of myCats) { links.push({ key: `${g.name}-${c.name}`, belong: g.name, color: g.color, group: g.name, d: ribbon(g.x + NODE_W, gy, gy + c.h, c.x, c.y, c.y + c.h) }); gy += c.h; }
     }
     return { revenue, profit, groups, cats, links, VH, rollupInfo };
   }, [base]);
@@ -201,7 +204,13 @@ export function CompanyFinanceSankey({ dateRange }: { dateRange: { from: Date; t
     const onClick = kind === "group" ? () => { setFocus(focus === n.name ? null : n.name); setSelectedCat(null); }
       : kind === "cat" ? () => setSelectedCat(n.name) : undefined;
     return (
-      <g data-belong={belong} className={clickable ? "cursor-pointer" : undefined} onClick={onClick}>
+      <g
+        data-belong={belong}
+        className={clickable ? "cursor-pointer" : undefined}
+        onClick={onClick}
+        onMouseEnter={clickable ? e => gsap.to(e.currentTarget, { y: -5, duration: 0.2, ease: "power2.out" }) : undefined}
+        onMouseLeave={clickable ? e => gsap.to(e.currentTarget, { y: 0, duration: 0.2, ease: "power2.out" }) : undefined}
+      >
         <title>{`${n.name} · ${fmt(n.total)}${kind === "rev" ? "" : kind === "profit" ? ` · ${base.revenue > 0 ? ((n.total / base.revenue) * 100).toFixed(1) : 0}% of revenue` : ` · ${pct(n.total)}`}`}</title>
         <rect x={n.x} y={n.y} width={NODE_W} height={Math.max(n.h, 1.5)} rx={3} fill={n.color} fillOpacity={0.95} />
         <text
@@ -245,7 +254,18 @@ export function CompanyFinanceSankey({ dateRange }: { dateRange: { from: Date; t
         <svg ref={svgRef} viewBox={`0 0 ${VW} ${layout.VH}`} width="100%" style={{ display: "block", height: "auto", aspectRatio: `${VW} / ${layout.VH}` }}>
           <g ref={wrapRef}>
             {layout.links.map(l => (
-              <path key={l.key} data-belong={l.belong} d={l.d} fill={l.color} fillOpacity={0.18} stroke="none" />
+              <path
+                key={l.key}
+                data-belong={l.belong}
+                d={l.d}
+                fill={l.color}
+                fillOpacity={0.18}
+                stroke="none"
+                className={l.group ? "cursor-pointer" : undefined}
+                onClick={l.group ? () => { setFocus(l.group!); setSelectedCat(null); } : undefined}
+                onMouseEnter={l.group ? e => gsap.to(e.currentTarget, { fillOpacity: 0.36, duration: 0.2 }) : undefined}
+                onMouseLeave={l.group ? e => gsap.to(e.currentTarget, { fillOpacity: 0.18, duration: 0.2 }) : undefined}
+              />
             ))}
             <NodeRect n={layout.revenue} belong="__rev" side="left" kind="rev" />
             {layout.profit && <NodeRect n={layout.profit} belong="__rev" side="right" kind="profit" />}
