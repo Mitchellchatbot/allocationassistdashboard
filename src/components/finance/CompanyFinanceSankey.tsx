@@ -1,24 +1,33 @@
 /**
- * CompanyFinanceSankey — an interactive 3-section income-statement Sankey.
+ * CompanyFinanceSankey — a custom, GSAP-animated income-statement Sankey.
  *
- * Overview: Revenue → Profit + big expense GROUPS → individual categories
- * (top few per group, the tail rolled into "other"). Centred layout.
- *  - Click a GROUP (the middle column) to zoom into it — that group becomes
- *    the root and the chart fades/zooms to just its categories.
- *  - Click a CATEGORY to open its transactions in a panel below.
- *  - Hover for amount + % of expenses (+ txn count on categories).
+ * Three sections: Revenue → (Profit + expense GROUPS) → categories. Profit is
+ * pinned to the very top with a curved link; groups are centred on their
+ * categories. Hand-rolled SVG layout (the graph is a strict tree) so we control
+ * positions and can drive a real zoom.
  *
- * Backed by Zoho Books actuals; renders nothing until connected.
+ * Click a GROUP → GSAP zooms into just that group's categories and fades the
+ * rest out in one motion; the breadcrumb zooms back. Click a CATEGORY → its
+ * transactions open in a panel below. Backed by Zoho Books actuals.
  */
-import { useMemo, useState } from "react";
+import { useMemo, useState, useRef, useEffect } from "react";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
-import { Sankey, Tooltip, ResponsiveContainer, Layer, Rectangle } from "recharts";
 import { ChevronLeft, X } from "lucide-react";
+import gsap from "gsap";
 import { useZohoBooks } from "@/hooks/use-zoho-books";
 import { useCurrency } from "@/lib/CurrencyProvider";
 import type { ZohoBooksExpenseTxn } from "@/hooks/use-zoho-books";
 
-const CATS_PER_GROUP = 4; // overview only; no cap once drilled into a group
+// ── viewBox layout constants (the SVG scales to its container) ──
+const VW = 1120;
+const NODE_W = 18;
+const COL = { rev: 120, grp: 500, cat: 862 };
+const CAT_LABEL_W = 234;
+const PAD = 9;
+const OUTER = 22;
+const TARGET_REV_H = 520;
+const MIN_H = 5;
+const CATS_PER_GROUP = 6; // beyond this, a group's tail rolls into one "Other …" bucket
 
 const REVENUE_COLOR = "#2563eb";
 const PROFIT_COLOR  = "#10b981";
@@ -31,39 +40,42 @@ const GROUPS: { name: string; color: string; match: RegExp }[] = [
   { name: "Office & Admin",           color: "#14b8a6", match: /rent|utilit|electric|water|telephone|internet|kitchen|hygiene|subscription|software|insurance|travel|accommod|bank|charge|deprecia|leasehold|meals|office|stationer|telr/i },
 ];
 const OTHER_GROUP = { name: "Other", color: "#94a3b8" };
-
-function groupFor(category: string): { name: string; color: string } {
+function groupFor(category: string) {
   for (const g of GROUPS) if (g.match.test(category)) return g;
   return OTHER_GROUP;
 }
 
-interface SankeyNodeProps {
-  x: number; y: number; width: number; height: number;
-  payload: { name: string; color?: string; value: number };
-  containerWidth: number;
-}
 interface CatInfo { amount: number; count: number; txns: ZohoBooksExpenseTxn[]; color: string }
 interface GroupBucket { color: string; total: number; cats: { name: string; amount: number }[] }
+interface RNode { name: string; color: string; total: number; x: number; y: number; h: number; group?: string }
+
+/** Filled horizontal-ribbon path between a source slice and a target slice. */
+function ribbon(sx: number, sy0: number, sy1: number, tx: number, ty0: number, ty1: number) {
+  const xc = (sx + tx) / 2;
+  return `M${sx},${sy0} C${xc},${sy0} ${xc},${ty0} ${tx},${ty0} L${tx},${ty1} C${xc},${ty1} ${xc},${sy1} ${sx},${sy1} Z`;
+}
 
 export function CompanyFinanceSankey({ dateRange }: { dateRange: { from: Date; to: Date } }) {
   const { data } = useZohoBooks(dateRange);
   const { fmt } = useCurrency();
-  const [root, setRoot] = useState<string | null>(null);
+  const [focus, setFocus] = useState<string | null>(null);
   const [selectedCat, setSelectedCat] = useState<string | null>(null);
+
+  const wrapRef = useRef<SVGGElement | null>(null);
+  const svgRef  = useRef<SVGSVGElement | null>(null);
+  const tween   = useRef({ s: 1, tx: 0, ty: 0 });
 
   const base = useMemo(() => {
     if (!data?.configured || !data.ok) return null;
     const revenue = data.revenue ?? 0;
     const breakdown = (data.expenseBreakdown ?? []).filter(c => c.amount > 0);
     if (revenue <= 0 || breakdown.length === 0) return null;
-
     const groups = new Map<string, GroupBucket>();
     const catInfo = new Map<string, CatInfo>();
     for (const c of breakdown) {
       const g = groupFor(c.category);
       const e = groups.get(g.name) ?? { color: g.color, total: 0, cats: [] };
-      e.total += c.amount;
-      e.cats.push({ name: c.category, amount: c.amount });
+      e.total += c.amount; e.cats.push({ name: c.category, amount: c.amount });
       groups.set(g.name, e);
       catInfo.set(c.category, { amount: c.amount, count: c.count, txns: c.txns ?? [], color: g.color });
     }
@@ -71,96 +83,142 @@ export function CompanyFinanceSankey({ dateRange }: { dateRange: { from: Date; t
     return { revenue, totalExpenses, profit: revenue - totalExpenses, groups, catInfo };
   }, [data]);
 
-  const model = useMemo(() => {
+  const layout = useMemo(() => {
     if (!base) return null;
-    const nodes: { name: string; color: string }[] = [];
-    const links: { source: number; target: number; value: number }[] = [];
-    const add = (name: string, color: string) => nodes.push({ name, color }) - 1;
+    const ky = TARGET_REV_H / base.revenue;
+    const hh = (v: number) => Math.max(v * ky, MIN_H);
+    const groupList = [...base.groups.entries()].sort((a, b) => b[1].total - a[1].total)
+      .map(([name, g]) => ({ name, color: g.color, total: g.total, cats: [...g.cats].sort((a, b) => b.amount - a.amount) }));
 
-    // Drill: one group → ALL its categories.
-    if (root && base.groups.has(root)) {
-      const g = base.groups.get(root)!;
-      const gIdx = add(root, g.color);
-      [...g.cats].sort((a, b) => b.amount - a.amount).forEach(c => {
-        links.push({ source: gIdx, target: add(c.name, g.color), value: c.amount });
-      });
-      return { nodes, links, rightCount: g.cats.length, groupNames: new Set<string>() };
-    }
-
-    // Overview: Revenue → Profit + groups → categories (top few + "other").
-    const revIdx = add("Revenue", REVENUE_COLOR);
-    if (base.profit > 0) links.push({ source: revIdx, target: add("Profit (retained)", PROFIT_COLOR), value: base.profit });
-    const groupNames = new Set<string>();
-    let leafCount = base.profit > 0 ? 1 : 0;
-    [...base.groups.entries()].sort((a, b) => b[1].total - a[1].total).forEach(([gName, g]) => {
-      groupNames.add(gName);
-      const gIdx = add(gName, g.color);
-      links.push({ source: revIdx, target: gIdx, value: g.total });
-      const cats = [...g.cats].sort((a, b) => b.amount - a.amount);
-      cats.slice(0, CATS_PER_GROUP).forEach(c => { links.push({ source: gIdx, target: add(c.name, g.color), value: c.amount }); leafCount++; });
-      const tailTotal = cats.slice(CATS_PER_GROUP).reduce((s, c) => s + c.amount, 0);
-      if (tailTotal > 0) {
-        const label = gName === OTHER_GROUP.name ? "Misc" : `Other ${gName.split(" ")[0].toLowerCase()}`;
-        links.push({ source: gIdx, target: add(label, g.color), value: tailTotal });
-        leafCount++;
+    // Categories (col 3), stacked by group. A group's long tail (e.g. Office &
+    // Admin) rolls into one clickable "Other <group>" bucket to keep it clean.
+    const cats: RNode[] = [];
+    const blocks: Record<string, { top: number; bottom: number }> = {};
+    const rollupInfo = new Map<string, { amount: number; count: number; txns: ZohoBooksExpenseTxn[] }>();
+    let y = 0;
+    for (const g of groupList) {
+      const top = y;
+      const tail = g.cats.slice(CATS_PER_GROUP);
+      const shown = tail.length >= 2 ? g.cats.slice(0, CATS_PER_GROUP) : g.cats;
+      for (const c of shown) { const ch = hh(c.amount); cats.push({ name: c.name, color: g.color, total: c.amount, x: COL.cat, y, h: ch, group: g.name }); y += ch + PAD; }
+      if (tail.length >= 2) {
+        const amount = tail.reduce((s, c) => s + c.amount, 0);
+        const ch = hh(amount);
+        const rollName = `Other ${g.name.split(" ")[0].toLowerCase()}`;
+        cats.push({ name: rollName, color: g.color, total: amount, x: COL.cat, y, h: ch, group: g.name });
+        rollupInfo.set(rollName, {
+          amount,
+          count: tail.reduce((s, c) => s + (base.catInfo.get(c.name)?.count ?? 0), 0),
+          txns: tail.flatMap(c => base.catInfo.get(c.name)?.txns ?? []),
+        });
+        y += ch + PAD;
       }
+      blocks[g.name] = { top, bottom: y - PAD };
+    }
+    const col2H = y - PAD;
+
+    // Groups (col 2) centred on their (possibly-rolled-up) category block.
+    const groups: RNode[] = groupList.map(g => {
+      const myCats = cats.filter(c => c.group === g.name);
+      const gh = myCats.reduce((s, c) => s + c.h, 0);
+      const blk = blocks[g.name];
+      return { name: g.name, color: g.color, total: g.total, x: COL.grp, y: (blk.top + blk.bottom) / 2 - gh / 2, h: gh };
     });
-    return { nodes, links, rightCount: leafCount, groupNames };
-  }, [base, root]);
 
-  if (!base || !model) return null;
+    // Profit pinned above the topmost group.
+    const profitH = base.profit > 0 ? hh(base.profit) : 0;
+    const minGY = Math.min(...groups.map(g => g.y));
+    const profit: RNode | null = base.profit > 0
+      ? { name: "Profit (retained)", color: PROFIT_COLOR, total: base.profit, x: COL.grp, y: minGY - PAD - profitH, h: profitH }
+      : null;
 
-  const onNodeClick = (name: string) => {
-    if (!root && model.groupNames.has(name)) { setRoot(name); setSelectedCat(null); }
-    else if (base.catInfo.has(name)) setSelectedCat(name);
-  };
+    // Revenue (col 1) centred on the whole expense side.
+    const revH = profitH + groups.reduce((s, g) => s + g.h, 0);
+    const spanTop = Math.min(0, profit ? profit.y : 0, ...groups.map(g => g.y));
+    const spanBot = Math.max(col2H, ...groups.map(g => g.y + g.h), profit ? profit.y + profit.h : 0);
+    const revenue: RNode = { name: "Revenue", color: REVENUE_COLOR, total: base.revenue, x: COL.rev, y: spanTop + (spanBot - spanTop - revH) / 2, h: revH };
 
-  const Node = ({ x, y, width, height, payload, containerWidth }: SankeyNodeProps) => {
-    const leftHalf = x < containerWidth / 2;
-    const isGroup = !root && model.groupNames.has(payload.name);
-    const isCat = base.catInfo.has(payload.name);
-    const clickable = isGroup || isCat;
+    // Normalise: shift so the topmost node sits at OUTER.
+    const allNodes = [revenue, ...(profit ? [profit] : []), ...groups, ...cats];
+    const minY = Math.min(...allNodes.map(n => n.y));
+    const maxY = Math.max(...allNodes.map(n => n.y + n.h));
+    for (const n of allNodes) n.y += OUTER - minY;
+    const VH = (maxY - minY) + 2 * OUTER;
+
+    // Links. belong = which group the element survives a drill into ("__rev"
+    // for Revenue/Profit + their links, which always fade on drill).
+    const links: { key: string; belong: string; d: string; color: string }[] = [];
+    const revTargets = [...(profit ? [profit] : []), ...groups].sort((a, b) => a.y - b.y);
+    let sy = revenue.y;
+    for (const t of revTargets) {
+      links.push({ key: `rev-${t.name}`, belong: "__rev", color: t.color, d: ribbon(revenue.x + NODE_W, sy, sy + t.h, t.x, t.y, t.y + t.h) });
+      sy += t.h;
+    }
+    for (const g of groups) {
+      const myCats = cats.filter(c => c.group === g.name).sort((a, b) => a.y - b.y);
+      let gy = g.y;
+      for (const c of myCats) { links.push({ key: `${g.name}-${c.name}`, belong: g.name, color: g.color, d: ribbon(g.x + NODE_W, gy, gy + c.h, c.x, c.y, c.y + c.h) }); gy += c.h; }
+    }
+    return { revenue, profit, groups, cats, links, VH, rollupInfo };
+  }, [base]);
+
+  // GSAP: zoom into the focused group + fade the rest, or zoom back out.
+  useEffect(() => {
+    const wrap = wrapRef.current, svg = svgRef.current;
+    if (!wrap || !svg || !layout) return;
+    let target = { s: 1, tx: 0, ty: 0 };
+    if (focus) {
+      const g = layout.groups.find(n => n.name === focus);
+      const cs = layout.cats.filter(c => c.group === focus);
+      if (g) {
+        const x0 = g.x - 12, x1 = COL.cat + NODE_W + CAT_LABEL_W;
+        const y0 = Math.min(g.y, ...cs.map(c => c.y)) - 16;
+        const y1 = Math.max(g.y + g.h, ...cs.map(c => c.y + c.h)) + 16;
+        const bw = x1 - x0, bh = y1 - y0;
+        const s = Math.min(Math.max(Math.min(VW / bw, layout.VH / bh), 1), 3.4);
+        target = { s, tx: (VW - bw * s) / 2 - x0 * s, ty: (layout.VH - bh * s) / 2 - y0 * s };
+      }
+    }
+    const st = tween.current;
+    gsap.to(st, {
+      ...target, duration: 0.85, ease: "power3.inOut",
+      onUpdate: () => wrap.setAttribute("transform", `translate(${st.tx},${st.ty}) scale(${st.s})`),
+    });
+    svg.querySelectorAll<SVGElement>("[data-belong]").forEach(el => {
+      const keep = !focus || el.getAttribute("data-belong") === focus;
+      el.style.pointerEvents = keep ? "auto" : "none";
+      gsap.to(el, { opacity: keep ? 1 : 0, duration: 0.55, ease: "power1.out" });
+    });
+  }, [focus, layout]);
+
+  if (!base || !layout) return null;
+
+  const pct = (v: number) => base.totalExpenses > 0 ? `${((v / base.totalExpenses) * 100).toFixed(1)}% of expenses` : "";
+  const selected = selectedCat ? (base.catInfo.get(selectedCat) ?? layout.rollupInfo.get(selectedCat)) : null;
+
+  const NodeRect = ({ n, belong, side, kind }: { n: RNode; belong: string; side: "left" | "right"; kind: "rev" | "profit" | "group" | "cat" }) => {
+    const clickable = kind === "group" || kind === "cat";
+    const onClick = kind === "group" ? () => { setFocus(focus === n.name ? null : n.name); setSelectedCat(null); }
+      : kind === "cat" ? () => setSelectedCat(n.name) : undefined;
     return (
-      <Layer style={{ cursor: clickable ? "pointer" : "default" }} onClick={clickable ? () => onNodeClick(payload.name) : undefined}>
-        <Rectangle x={x} y={y} width={width} height={height} fill={payload.color ?? "#6366f1"} fillOpacity={0.92} radius={[3, 3, 3, 3]} />
+      <g data-belong={belong} className={clickable ? "cursor-pointer" : undefined} onClick={onClick}>
+        <title>{`${n.name} · ${fmt(n.total)}${kind === "rev" ? "" : kind === "profit" ? ` · ${base.revenue > 0 ? ((n.total / base.revenue) * 100).toFixed(1) : 0}% of revenue` : ` · ${pct(n.total)}`}`}</title>
+        <rect x={n.x} y={n.y} width={NODE_W} height={Math.max(n.h, 1.5)} rx={3} fill={n.color} fillOpacity={0.95} />
         <text
-          x={leftHalf ? x - 8 : x + width + 8}
-          y={y + height / 2}
-          textAnchor={leftHalf ? "end" : "start"}
+          x={side === "left" ? n.x - 10 : n.x + NODE_W + 10}
+          y={n.y + n.h / 2}
+          textAnchor={side === "left" ? "end" : "start"}
           dominantBaseline="middle"
-          fontSize={11}
-          fontWeight={600}
-          fill="hsl(220,15%,30%)"
+          fontSize={kind === "cat" ? 10.5 : 12}
+          fontWeight={kind === "cat" ? 500 : 600}
+          fill="hsl(220,15%,28%)"
         >
-          {payload.name}{isGroup ? " ›" : ""}
-          <tspan fontWeight={400} fill="hsl(220,10%,55%)"> · {fmt(payload.value)}</tspan>
+          {n.name}{kind === "group" ? " ›" : ""}
+          <tspan fontWeight={400} fill="hsl(220,10%,55%)"> · {fmt(n.total)}</tspan>
         </text>
-      </Layer>
+      </g>
     );
   };
-
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  const renderTooltip = ({ active, payload }: any) => {
-    if (!active || !payload?.length) return null;
-    const p = payload[0]?.payload ?? {};
-    const name: string | undefined = typeof p.name === "string" ? p.name : undefined;
-    const value: number = p.value ?? payload[0]?.value ?? 0;
-    const cat = name ? base.catInfo.get(name) : undefined;
-    return (
-      <div className="rounded-lg border border-border/60 bg-white px-3 py-2 shadow-md text-[11px]">
-        <p className="font-semibold text-foreground">{name ?? "Flow"}</p>
-        <p className="tabular-nums">{fmt(value)}</p>
-        {name === "Revenue" ? null
-          : name === "Profit (retained)"
-            ? <p className="text-muted-foreground">{base.revenue > 0 ? ((value / base.revenue) * 100).toFixed(1) : 0}% of revenue</p>
-            : <p className="text-muted-foreground">{base.totalExpenses > 0 ? ((value / base.totalExpenses) * 100).toFixed(1) : 0}% of expenses</p>}
-        {cat && <p className="text-muted-foreground mt-0.5">{cat.count} transaction{cat.count === 1 ? "" : "s"} · <span className="text-blue-700">click to view</span></p>}
-      </div>
-    );
-  };
-
-  const selected = selectedCat ? base.catInfo.get(selectedCat) : null;
-  const chartHeight = Math.max(380, model.rightCount * 40);
 
   return (
     <Card className="shadow-md border-border/60 mb-5">
@@ -171,10 +229,10 @@ export function CompanyFinanceSankey({ dateRange }: { dateRange: { from: Date; t
             <span className="h-1.5 w-1.5 rounded-full bg-emerald-500" /> Zoho Books · actuals
           </span>
         </div>
-        {root ? (
-          <button type="button" onClick={() => { setRoot(null); setSelectedCat(null); }} className="mt-1 inline-flex items-center gap-1 text-[11px] font-medium text-blue-700 hover:text-blue-800 transition-colors">
+        {focus ? (
+          <button type="button" onClick={() => { setFocus(null); setSelectedCat(null); }} className="mt-1 inline-flex items-center gap-1 text-[11px] font-medium text-blue-700 hover:text-blue-800 transition-colors">
             <ChevronLeft className="h-3.5 w-3.5" /> All expenses
-            <span className="text-muted-foreground font-normal">/ {root}</span>
+            <span className="text-muted-foreground font-normal">/ {focus}</span>
           </button>
         ) : (
           <p className="text-[11px] text-muted-foreground/80 mt-0.5">
@@ -184,34 +242,24 @@ export function CompanyFinanceSankey({ dateRange }: { dateRange: { from: Date; t
         )}
       </CardHeader>
       <CardContent className="px-5 pb-5 overflow-hidden">
-        {/* keyed so each drill/zoom re-mounts and animates in */}
-        <div
-          key={root ?? "top"}
-          className={root
-            ? "animate-in fade-in zoom-in-95 slide-in-from-right-4 duration-500"
-            : "animate-in fade-in duration-300"}
-        >
-          <ResponsiveContainer width="100%" height={chartHeight}>
-            <Sankey
-              data={{ nodes: model.nodes, links: model.links }}
-              nodePadding={22}
-              nodeWidth={14}
-              // eslint-disable-next-line @typescript-eslint/no-explicit-any
-              node={(props: any) => <Node {...props} />}
-              link={{ stroke: "#cbd5e1", strokeOpacity: 0.4 }}
-              margin={{ top: 12, right: 200, bottom: 12, left: 90 }}
-            >
-              <Tooltip content={renderTooltip} />
-            </Sankey>
-          </ResponsiveContainer>
-        </div>
+        <svg ref={svgRef} viewBox={`0 0 ${VW} ${layout.VH}`} width="100%" style={{ display: "block", height: "auto", aspectRatio: `${VW} / ${layout.VH}` }}>
+          <g ref={wrapRef}>
+            {layout.links.map(l => (
+              <path key={l.key} data-belong={l.belong} d={l.d} fill={l.color} fillOpacity={0.18} stroke="none" />
+            ))}
+            <NodeRect n={layout.revenue} belong="__rev" side="left" kind="rev" />
+            {layout.profit && <NodeRect n={layout.profit} belong="__rev" side="right" kind="profit" />}
+            {layout.groups.map(g => <NodeRect key={g.name} n={g} belong={g.name} side="right" kind="group" />)}
+            {layout.cats.map(c => <NodeRect key={c.name} n={c} belong={c.group!} side="right" kind="cat" />)}
+          </g>
+        </svg>
 
         {selected && selectedCat && (
           <div className="mt-3 rounded-lg border border-border/60 bg-muted/20 overflow-hidden animate-in slide-in-from-top-2 fade-in duration-300">
             <div className="flex items-center justify-between px-4 py-2 border-b border-border/40 bg-muted/40">
               <p className="text-[12px] font-semibold text-foreground">
                 {selectedCat}
-                <span className="ml-2 font-normal text-muted-foreground">{fmt(selected.amount)} · {selected.count} txn{selected.count === 1 ? "" : "s"} · {base.totalExpenses > 0 ? ((selected.amount / base.totalExpenses) * 100).toFixed(1) : 0}% of expenses</span>
+                <span className="ml-2 font-normal text-muted-foreground">{fmt(selected.amount)} · {selected.count} txn{selected.count === 1 ? "" : "s"} · {pct(selected.amount)}</span>
               </p>
               <button type="button" onClick={() => setSelectedCat(null)} className="text-muted-foreground hover:text-foreground transition-colors"><X className="h-3.5 w-3.5" /></button>
             </div>
