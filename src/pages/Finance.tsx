@@ -13,7 +13,9 @@ import { useZohoBooks } from "@/hooks/use-zoho-books";
 import { useMetaAdsApi } from "@/hooks/use-meta-ads-api";
 import { FinanceDigest } from "@/components/finance/FinanceDigest";
 import { useCurrency } from "@/lib/CurrencyProvider";
-import { normalizeChannelKey, classifyChannel, WEBSITE_SEO_RETAINER_AED, WEBSITE_SEO_START_MONTH, WEBSITE_SEO_ACTUALS } from "@/lib/channel-mapping";
+import { normalizeChannelKey, classifyChannel, WEBSITE_SEO_RETAINER_AED, WEBSITE_SEO_START_MONTH, WEBSITE_SEO_ACTUALS, type ChannelKey } from "@/lib/channel-mapping";
+import { useDoctorRevenue } from "@/hooks/use-doctor-dossier";
+import { ChannelRoiTable } from "@/components/finance/ChannelRoiTable";
 import {
   BarChart, Bar, XAxis, YAxis, Tooltip, ResponsiveContainer, CartesianGrid, Cell,
   AreaChart, Area, PieChart, Pie, Legend, LineChart, Line, ComposedChart,
@@ -437,6 +439,7 @@ const Finance = () => {
   const { data: zoho } = useZohoData();
   const { data: books } = useZohoBooks(dateRange);
   const { data: metaAds } = useMetaAdsApi(dateRange);
+  const { revenueForDoctor } = useDoctorRevenue();
   const { fmt: fmtAED, currency } = useCurrency();
   const {
     rows: allTransactions,
@@ -707,6 +710,78 @@ const Finance = () => {
     channels.sort((a, b) => b.total - a.total);
     return { months, channels };
   }, [allTransactions, monthly, metaAds, books, dateRange]);
+
+  // ── Return on Investment by channel (spend vs revenue, per month) ──────────
+  // Only the channels we can attribute. Spend reuses monthlySpendByChannel;
+  // revenue = invoiced total of the doctors who CONVERTED from each channel,
+  // bucketed by their conversion month. DoB Lead_Source is often empty, so we
+  // recover it by matching the doctor to their Lead (email → phone → name).
+  const channelRoi = useMemo(() => {
+    const TARGET: ChannelKey[] = ["Meta", "Website / SEO", "Go Hire", "LinkedIn"];
+    const months = monthlySpendByChannel.months;
+    const spendByChannel = new Map(monthlySpendByChannel.channels.map(c => [c.channel, c.perMonth]));
+
+    const nEmail = (s: string | null | undefined) => (s ?? "").trim().toLowerCase();
+    const nPhone = (s: string | null | undefined) => (s ?? "").replace(/\D/g, "");
+    const nName  = (f: string | null | undefined, l: string | null | undefined) =>
+      `${(f ?? "").trim().toLowerCase()} ${(l ?? "").trim().toLowerCase()}`.trim();
+    const leadByEmail = new Map<string, { Lead_Source: string | null }>();
+    const leadByPhone = new Map<string, { Lead_Source: string | null }>();
+    const leadByName  = new Map<string, { Lead_Source: string | null }>();
+    for (const l of zoho?.rawLeads ?? []) {
+      const e = nEmail(l.Email), p = nPhone(l.Phone ?? l.Mobile), n = nName(l.First_Name, l.Last_Name);
+      if (e && !leadByEmail.has(e)) leadByEmail.set(e, l);
+      if (p && !leadByPhone.has(p)) leadByPhone.set(p, l);
+      if (n && !leadByName.has(n))  leadByName.set(n, l);
+    }
+
+    const fromMs = dateRange.from.getTime();
+    const toMs   = dateRange.to.getTime() + 86_400_000;
+    const rev  = new Map<string, Map<string, number>>();
+    const conv = new Map<string, Map<string, number>>();
+    for (const dob of zoho?.rawDoctorsOnBoard ?? []) {
+      if (!dob.Created_Time) continue;
+      const d = new Date(dob.Created_Time);
+      const t = d.getTime();
+      if (isNaN(t) || t < fromMs || t >= toMs) continue;
+      let src = dob.Lead_Source;
+      if (!src) {
+        const lead = leadByEmail.get(nEmail(dob.Email))
+          || leadByPhone.get(nPhone(dob.Phone ?? dob.Mobile))
+          || leadByName.get(nName(dob.First_Name, dob.Last_Name));
+        src = lead?.Lead_Source ?? null;
+      }
+      const ch = normalizeChannelKey(src);
+      if (!TARGET.includes(ch)) continue;
+      const key = `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}`;
+      const name = dob.Full_Name || `${dob.First_Name ?? ""} ${dob.Last_Name ?? ""}`.trim();
+      if (!rev.has(ch))  rev.set(ch, new Map());
+      if (!conv.has(ch)) conv.set(ch, new Map());
+      rev.get(ch)!.set(key,  (rev.get(ch)!.get(key)  ?? 0) + revenueForDoctor(name));
+      conv.get(ch)!.set(key, (conv.get(ch)!.get(key) ?? 0) + 1);
+    }
+
+    const rows = TARGET.map(ch => {
+      const spend = spendByChannel.get(ch) ?? {};
+      const rMap = rev.get(ch)  ?? new Map<string, number>();
+      const cMap = conv.get(ch) ?? new Map<string, number>();
+      const perMonth = months.map(m => ({
+        key: m.key,
+        spend:       spend[m.key] ?? 0,
+        revenue:     rMap.get(m.key) ?? 0,
+        conversions: cMap.get(m.key) ?? 0,
+      }));
+      return {
+        channel:    ch,
+        perMonth,
+        totalSpend: perMonth.reduce((s, x) => s + x.spend, 0),
+        totalRev:   perMonth.reduce((s, x) => s + x.revenue, 0),
+        totalConv:  perMonth.reduce((s, x) => s + x.conversions, 0),
+      };
+    }).filter(r => r.totalSpend > 0 || r.totalRev > 0);
+
+    return { months, rows };
+  }, [monthlySpendByChannel, zoho, dateRange, revenueForDoctor]);
 
   // ── Profit P&L placeholders ───────────────────────────────────────────────
   // Marketing spend is real; payroll + other expenses + revenue are stubbed
@@ -1108,6 +1183,10 @@ const Finance = () => {
         </Card>
       )}
 
+      {/* Return on Investment by channel — spend vs revenue per month, for the
+          channels we can attribute (Meta, Website/SEO, Go Hire, LinkedIn). */}
+      <ChannelRoiTable months={channelRoi.months} rows={channelRoi.rows} />
+
       {/* Revenue vs Expenses vs Profit chart removed — the Digest's monthly
           chart already covers it. */}
 
@@ -1334,34 +1413,9 @@ const Finance = () => {
         </Card>
       )}
 
-      {/* ── Zoho ROI chart (kept) ── */}
-      {roiData?.length > 0 && (
-        <Card className="shadow-sm border-border/50">
-          <CardHeader className="pb-1 pt-4 px-4">
-            <div className="flex items-center gap-1.5">
-              <ArrowUpRight className="h-3.5 w-3.5 text-primary" />
-              <CardTitle className="text-[12px] font-medium text-muted-foreground uppercase tracking-wide">Return on Investment by Channel</CardTitle>
-            </div>
-          </CardHeader>
-          <CardContent className="px-4 pb-4">
-            <ResponsiveContainer width="100%" height={280}>
-              <BarChart data={roiData} layout="vertical" barCategoryGap="25%">
-                <CartesianGrid strokeDasharray="3 3" stroke="hsl(220,14%,92%)" />
-                <XAxis type="number" fontSize={10} tickLine={false} axisLine={false} stroke="hsl(220,10%,55%)" tickFormatter={v => `${v}x`} />
-                <YAxis dataKey="channel" type="category" fontSize={10} tickLine={false} axisLine={false} width={95} stroke="hsl(220,10%,55%)" />
-                <Tooltip contentStyle={tip} formatter={(v: number) => [`${v}x return`, "For every $1 spent"]} />
-                <Bar dataKey="roi" radius={[0, 4, 4, 0]}>
-                  {roiData.map((_, i) => (
-                    <Cell key={i} fill={i === 0 ? "hsl(170,55%,45%)" : "hsl(210,75%,52%)"} />
-                  ))}
-                </Bar>
-              </BarChart>
-            </ResponsiveContainer>
-          </CardContent>
-        </Card>
-      )}
-
-      {/* Channel-economics table lives on Marketing — no duplicate here. */}
+      {/* Old single-bar "ROI by channel" chart removed — the Return on
+          Investment by Channel table above supersedes it (per-month spend +
+          revenue + ROI). Channel-economics detail lives on Marketing. */}
     </DashboardLayout>
   );
 };
