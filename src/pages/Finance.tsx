@@ -444,6 +444,15 @@ const Finance = () => {
     topTransactions, biggest, topCategory, transactionCount,
   } = useMarketingExpenses();
 
+  // Calendar months the SELECTED RANGE spans (e.g. 1 Jan → 25 Jun = 6), for the
+  // period banner. Not monthly.length — that only counts months that actually
+  // have marketing-sheet rows, so it undercounts the range (showed "3 months"
+  // for a Jan–Jun range).
+  const rangeMonthCount = useMemo(() => {
+    const { from, to } = dateRange;
+    return (to.getFullYear() - from.getFullYear()) * 12 + (to.getMonth() - from.getMonth()) + 1;
+  }, [dateRange]);
+
   // Auto-switch to "This Year" the first time Finance page mounts,
   // since the imported data is mostly historical (2025 + early 2026).
   const didAutoSetRef = useRef(false);
@@ -822,7 +831,7 @@ const Finance = () => {
             {" → "}
             {dateRange.to.toLocaleDateString("en-GB", { day: "numeric", month: "short", year: "numeric" })}
             <span className="text-[12px] font-normal text-muted-foreground ml-2">
-              ({monthly.length} {monthly.length === 1 ? "month" : "months"})
+              ({rangeMonthCount} {rangeMonthCount === 1 ? "month" : "months"})
             </span>
           </p>
         </div>
