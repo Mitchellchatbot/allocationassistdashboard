@@ -49,6 +49,14 @@ const ymd = (iso: string) => {
 const monthKey = (date: string) => String(date).slice(0, 7); // YYYY-MM
 const num = (v: unknown) => { const n = parseFloat(String(v ?? "0")); return isNaN(n) ? 0 : n; };
 
+// Zoho Books list endpoints return each document in its OWN currency (USD, GBP,
+// SAR…) with an `exchange_rate` to the AED base — and an EMPTY `bcy_total`. So
+// convert to base ourselves: base = amount × exchange_rate. The rate is
+// AED-per-foreign-unit (USD→3.6725, GBP→4.94, SAR→0.98); AED docs have rate 1,
+// and a missing/zero rate falls back to 1 so AED amounts pass through unchanged.
+const baseAmt = (row: Record<string, unknown>, field = "total") =>
+  num(row[field]) * (num(row.exchange_rate) || 1);
+
 async function getAccessToken(): Promise<string | null> {
   const url = `${ACCOUNTS_BASE}/oauth/v2/token?refresh_token=${encodeURIComponent(REFRESH)}`
     + `&client_id=${encodeURIComponent(CID)}&client_secret=${encodeURIComponent(SECRET)}`
@@ -133,12 +141,15 @@ serve(async (req) => {
     const byDayMap: Record<string, { date: string; revenue: number; expenses: number }> = {};
     const bumpDay = (d: string) => (byDayMap[d] ??= { date: d, revenue: 0, expenses: 0 });
 
-    let revenue = 0, outstanding = 0, currency = "AED";
+    // Everything is converted to the AED base currency below, so the reported
+    // currency is always AED (the org base). Don't read it off individual
+    // invoices — a USD/GBP/SAR invoice would otherwise mislabel the whole panel.
+    let revenue = 0, outstanding = 0;
+    const currency = "AED";
     for (const inv of invoices) {
-      const total = num(inv.total);
+      const total = baseAmt(inv);
       revenue     += total;
-      outstanding += num(inv.balance);
-      currency     = (inv.currency_code as string) || currency;
+      outstanding += baseAmt(inv, "balance");
       const date   = String(inv.date ?? "");
       bump(monthKey(date)).revenue += total;
       if (date) bumpDay(date.slice(0, 10)).revenue += total;
@@ -159,7 +170,7 @@ serve(async (req) => {
     const expenseDetail: Record<string, { amount: number; count: number; txns: { date: string; amount: number; text: string }[] }> = {};
     let expenseTotal = 0;
     for (const e of expenses) {
-      const total = num(e.total);
+      const total = baseAmt(e);
       expenseTotal += total;
       const cat = (e.account_name as string) || (e.category_name as string) || "Uncategorized";
       byCategoryMap[cat] = (byCategoryMap[cat] ?? 0) + total;
@@ -187,7 +198,7 @@ serve(async (req) => {
     for (const b of bills) {
       const date = String(b.date ?? "").slice(0, 10);
       if (!date) continue;
-      const amount = num(b.bcy_total ?? b.total);
+      const amount = baseAmt(b);
       const text = `${b.vendor_name ?? ""} | ${b.reference_number ?? ""} | ${b.description ?? ""}`.replace(/\s+/g, " ").trim();
       marketingTxns.push({ date, amount, text });
     }
