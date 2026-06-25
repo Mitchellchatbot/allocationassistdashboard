@@ -27,6 +27,17 @@ function rangeLabel(r: { from: Date; to: Date }) {
   return `${f} → ${t}`;
 }
 
+/** Compact range for the comparison column headers, e.g. "1 Jan – 30 Jun 26".
+ *  The start year is dropped when both ends share it. */
+function rangeShort(r: { from: Date; to: Date }) {
+  const sameYear = r.from.getFullYear() === r.to.getFullYear();
+  const f = r.from.toLocaleDateString("en-GB", sameYear
+    ? { day: "numeric", month: "short" }
+    : { day: "numeric", month: "short", year: "2-digit" });
+  const t = r.to.toLocaleDateString("en-GB", { day: "numeric", month: "short", year: "2-digit" });
+  return `${f} – ${t}`;
+}
+
 /** Previous period of equal length, ending the day before `from`. */
 function priorRange(r: { from: Date; to: Date }) {
   const lenMs   = r.to.getTime() - r.from.getTime();
@@ -138,11 +149,11 @@ export function PeriodPnlSummary({ dateRange }: { dateRange: { from: Date; to: D
       <div className="px-5 py-3 border-t border-border/40 bg-muted/20">
         {prevOk ? (
           <>
-            <div className="grid grid-cols-[1fr_auto_auto_auto] gap-x-3 text-[9px] uppercase tracking-wide text-muted-foreground/70 font-semibold pb-1">
-              <span>vs prior period · {rangeLabel(prior)}</span>
-              <span className="text-right w-[120px]">This</span>
-              <span className="text-right w-[120px] hidden sm:inline">Prior</span>
-              <span className="text-right w-[78px]">Change</span>
+            <div className="grid grid-cols-[1fr_auto_auto_auto] items-end gap-x-3 text-[9px] text-muted-foreground/70 font-semibold pb-1">
+              <span className="uppercase tracking-wide">Period comparison</span>
+              <span className="text-right w-[120px] whitespace-nowrap text-foreground/70">{rangeShort(dateRange)}</span>
+              <span className="text-right w-[120px] whitespace-nowrap hidden sm:inline">{rangeShort(prior)}</span>
+              <span className="text-right w-[78px] uppercase tracking-wide">Change</span>
             </div>
             <div className="divide-y divide-border/30">
               <CompareRow label="Revenue"     curr={revenue}  prev={prevRevenue} currency={currency} />
