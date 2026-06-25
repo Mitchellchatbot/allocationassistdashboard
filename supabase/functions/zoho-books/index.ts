@@ -225,11 +225,16 @@ serve(async (req) => {
       bump(monthKey(date)).revenue += total;
       if (date) bumpDay(date.slice(0, 10)).revenue += total;
     }
-    // Outstanding = receivables snapshot = open balance of EVERY invoice,
-    // all-time (paid invoices carry a 0 balance, so they add nothing). NOT
-    // scoped to the selected period — matches Zoho's "Total Receivables".
+    // Outstanding = receivables snapshot = open balance of every SENT invoice,
+    // all-time (paid ones carry a 0 balance). NOT period-scoped, and DRAFT/VOID
+    // invoices are excluded (they're not real receivables) — so this matches
+    // Zoho's "Total Receivables" widget.
     let outstanding = 0;
-    for (const inv of allInvoices) outstanding += baseAmt(inv, "balance");
+    for (const inv of allInvoices) {
+      const st = String(inv.status ?? "").toLowerCase();
+      if (st === "draft" || st === "void") continue;
+      outstanding += baseAmt(inv, "balance");
+    }
 
     // Marketing/advertising transactions, returned so the dashboard can
     // attribute spend to a channel by reading the account / reference /
