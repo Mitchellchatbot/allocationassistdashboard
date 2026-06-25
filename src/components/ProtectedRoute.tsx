@@ -1,5 +1,6 @@
 import { Navigate } from "react-router-dom";
 import { useAuth } from "@/hooks/use-auth";
+import { canSeeFinance } from "@/lib/finance-access";
 
 interface ProtectedRouteProps {
   children: React.ReactNode;
@@ -7,7 +8,7 @@ interface ProtectedRouteProps {
 }
 
 export function ProtectedRoute({ children, requiredPage }: ProtectedRouteProps) {
-  const { session, loading, role, allowedPages } = useAuth();
+  const { session, loading, role, allowedPages, user } = useAuth();
 
   if (loading) {
     return (
@@ -19,6 +20,13 @@ export function ProtectedRoute({ children, requiredPage }: ProtectedRouteProps) 
 
   if (!session) {
     return <Navigate to="/login" replace />;
+  }
+
+  // Finance is gated by a hard email allowlist — even admins must be on it.
+  // Checked BEFORE the admin pass-through so admins can't bypass it.
+  if (requiredPage === "/finance" && !canSeeFinance(user?.email)) {
+    const fallback = role === "admin" ? "/" : (allowedPages[0] ?? "/worker");
+    return <Navigate to={fallback} replace />;
   }
 
   // Admins always pass through

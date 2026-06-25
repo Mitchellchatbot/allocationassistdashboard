@@ -28,6 +28,7 @@ import { useCallback, useEffect, useState } from "react";
 import logo from "@/assets/logo.png";
 import { NavLink } from "@/components/NavLink";
 import { useAuth } from "@/hooks/use-auth";
+import { canSeeFinance } from "@/lib/finance-access";
 import { useNavigate, Link } from "react-router-dom";
 import {
   Sidebar,
@@ -172,11 +173,14 @@ export function AppSidebar() {
 
   // Filter sections to only the items this user can see. Drop empty sections
   // entirely so we don't render headers without children.
-  const visibleSections: NavSection[] = role === "admin"
+  const visibleSections: NavSection[] = (role === "admin"
     ? NAV_SECTIONS
     : NAV_SECTIONS
-        .map(s => ({ ...s, items: s.items.filter(it => it.url === "/docs" || allowedPages.includes(it.url)) }))
-        .filter(s => s.items.length > 0);
+        .map(s => ({ ...s, items: s.items.filter(it => it.url === "/docs" || allowedPages.includes(it.url)) })))
+    // Finance is allowlist-only — strip it for anyone not on the list, even
+    // admins (mirrors the hard gate in ProtectedRoute).
+    .map(s => ({ ...s, items: s.items.filter(it => it.url !== "/finance" || canSeeFinance(user?.email)) }))
+    .filter(s => s.items.length > 0);
 
   const visibleAdmin: NavSection | null = role === "admin" ? ADMIN_SECTION : null;
 
