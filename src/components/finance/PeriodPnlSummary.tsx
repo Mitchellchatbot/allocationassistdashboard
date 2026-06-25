@@ -8,6 +8,7 @@
  * estimate sections in that case.
  */
 import { useZohoBooks } from "@/hooks/use-zoho-books";
+import { isMarketingCategory } from "@/lib/finance-groups";
 import { useCurrency } from "@/lib/CurrencyProvider";
 import { TrendingUp, TrendingDown, Minus, ArrowUpRight, ArrowDownRight, Loader2 } from "lucide-react";
 
@@ -67,7 +68,12 @@ function CompareRow({ label, curr, prev, money, higherIsBetter = true }: {
   );
 }
 
-export function PeriodPnlSummary({ dateRange }: { dateRange: { from: Date; to: Date } }) {
+export function PeriodPnlSummary({ dateRange, marketingOverride }: {
+  dateRange: { from: Date; to: Date };
+  // Corrected marketing (retainer + live Meta) — when supplied, the corrupted
+  // raw-Books marketing is swapped out so Expenses/Profit match the graph + KPI.
+  marketingOverride?: { total: number; cats: { name: string; amount: number }[] };
+}) {
   const prior = priorRange(dateRange);
   const { data: cur, isLoading } = useZohoBooks(dateRange);
   const { data: prev }           = useZohoBooks(prior);
@@ -96,8 +102,13 @@ export function PeriodPnlSummary({ dateRange }: { dateRange: { from: Date; to: D
   if (!cur?.configured || !cur.ok) return null;
 
   const revenue     = cur.revenue ?? 0;
-  const expenses    = cur.expenses ?? 0;
-  const profit      = cur.profit ?? 0;
+  // Swap the corrupted raw-Books marketing for the corrected total (retainer +
+  // live Meta) so Expenses/Profit tie to the graph + Marketing KPI card.
+  const rawMk       = marketingOverride
+    ? (cur.expenseBreakdown ?? []).filter(c => isMarketingCategory(c.category)).reduce((s, c) => s + c.amount, 0)
+    : 0;
+  const expenses    = marketingOverride ? (cur.expenses ?? 0) - rawMk + marketingOverride.total : (cur.expenses ?? 0);
+  const profit      = marketingOverride ? revenue - expenses : (cur.profit ?? 0);
   const margin      = revenue > 0 ? (profit / revenue) * 100 : 0;
   const isLoss      = profit < 0;
 

@@ -16,6 +16,7 @@ import { ChevronLeft } from "lucide-react";
 import gsap from "gsap";
 import { useZohoBooks } from "@/hooks/use-zoho-books";
 import { useCurrency } from "@/lib/CurrencyProvider";
+import { groupFor, isMarketingCategory, MARKETING_GROUP } from "@/lib/finance-groups";
 import type { ZohoBooksExpenseTxn } from "@/hooks/use-zoho-books";
 
 // ── viewBox layout constants (the SVG scales to its container) ──
@@ -32,18 +33,8 @@ const CATS_PER_GROUP = 6; // beyond this, a group's tail rolls into one "Other �
 const REVENUE_COLOR = "#2563eb";
 const PROFIT_COLOR  = "#10b981";
 
-const GROUPS: { name: string; color: string; match: RegExp }[] = [
-  { name: "Payroll & Directors",      color: "#f43f5e", match: /salar|remunerat|payroll|wage|bonus|commission|\bhr\b|staff|employee/i },
-  { name: "Licensing & Verification", color: "#f59e0b", match: /licens|dataflow|verificat|visa|permit|complian|regulator|gratuit|\bwps\b/i },
-  { name: "Marketing",                color: "#8b5cf6", match: /market|advertis|website|video|\bmedia\b|\bseo\b|\bads?\b|content/i },
-  { name: "Tax & Professional",       color: "#0ea5e9", match: /\bvat\b|\btax\b|account|audit|legal|consult|contractor|professional|advisor/i },
-  { name: "Office & Admin",           color: "#14b8a6", match: /rent|utilit|electric|water|telephone|internet|kitchen|hygiene|subscription|software|insurance|travel|accommod|bank|charge|deprecia|leasehold|meals|office|stationer|telr/i },
-];
-const OTHER_GROUP = { name: "Other", color: "#94a3b8" };
-function groupFor(category: string) {
-  for (const g of GROUPS) if (g.match.test(category)) return g;
-  return OTHER_GROUP;
-}
+// Expense grouping (groupFor) is shared with the P&L banner + Marketing KPI
+// card so all three bucket categories identically — see src/lib/finance-groups.ts.
 
 interface CatInfo { amount: number; count: number; txns: ZohoBooksExpenseTxn[]; color: string }
 interface GroupBucket { color: string; total: number; cats: { name: string; amount: number }[] }
@@ -55,7 +46,13 @@ function ribbon(sx: number, sy0: number, sy1: number, tx: number, ty0: number, t
   return `M${sx},${sy0} C${xc},${sy0} ${xc},${ty0} ${tx},${ty0} L${tx},${ty1} C${xc},${ty1} ${xc},${sy1} ${sx},${sy1} Z`;
 }
 
-export function CompanyFinanceSankey({ dateRange }: { dateRange: { from: Date; to: Date } }) {
+export function CompanyFinanceSankey({ dateRange, marketingOverride }: {
+  dateRange: { from: Date; to: Date };
+  // When provided, the raw-Books Marketing lines are stripped and replaced by
+  // this corrected marketing (retainer + live Meta) so the graph's Marketing +
+  // Profit match the KPI card and ignore the corrupted Scaled-AI vendor bills.
+  marketingOverride?: { total: number; cats: { name: string; amount: number }[] };
+}) {
   const { data } = useZohoBooks(dateRange);
   const { fmt } = useCurrency();
   const [focus, setFocus] = useState<string | null>(null);
@@ -72,8 +69,14 @@ export function CompanyFinanceSankey({ dateRange }: { dateRange: { from: Date; t
   const base = useMemo(() => {
     if (!data?.configured || !data.ok) return null;
     const revenue = data.revenue ?? 0;
-    const breakdown = (data.expenseBreakdown ?? []).filter(c => c.amount > 0);
-    if (revenue <= 0 || breakdown.length === 0) return null;
+    // When a corrected marketing total is supplied, drop the raw-Books Marketing
+    // categories (corrupted by duplicate Scaled-AI vendor bills) — the corrected
+    // Marketing group is injected below.
+    const rawBreakdown = (data.expenseBreakdown ?? []).filter(c => c.amount > 0);
+    const breakdown = marketingOverride
+      ? rawBreakdown.filter(c => !isMarketingCategory(c.category))
+      : rawBreakdown;
+    if (revenue <= 0 || (breakdown.length === 0 && !marketingOverride)) return null;
     const groups = new Map<string, GroupBucket>();
     const catInfo = new Map<string, CatInfo>();
     for (const c of breakdown) {
@@ -83,9 +86,17 @@ export function CompanyFinanceSankey({ dateRange }: { dateRange: { from: Date; t
       groups.set(g.name, e);
       catInfo.set(c.category, { amount: c.amount, count: c.count, txns: c.txns ?? [], color: g.color });
     }
-    const totalExpenses = breakdown.reduce((s, c) => s + c.amount, 0);
+    // Inject the corrected Marketing group — its categories are the marketing
+    // CHANNELS (Website/SEO at the 45k/mo retainer, Meta live, LinkedIn, …),
+    // the same numbers the Marketing Spend KPI card shows.
+    if (marketingOverride && marketingOverride.total > 0) {
+      const cats = marketingOverride.cats.filter(c => c.amount > 0).sort((a, b) => b.amount - a.amount);
+      groups.set("Marketing", { color: MARKETING_GROUP.color, total: marketingOverride.total, cats });
+      for (const c of cats) catInfo.set(c.name, { amount: c.amount, count: 0, txns: [], color: MARKETING_GROUP.color });
+    }
+    const totalExpenses = [...groups.values()].reduce((s, g) => s + g.total, 0);
     return { revenue, totalExpenses, profit: revenue - totalExpenses, groups, catInfo };
-  }, [data]);
+  }, [data, marketingOverride]);
 
   const layout = useMemo(() => {
     if (!base) return null;
