@@ -2,10 +2,11 @@
  * ChannelRoiTable — per-channel Return on Investment, month by month.
  *
  * For each channel we can attribute (Meta, Website/SEO, Go Hire, LinkedIn) it
- * shows three rows — Spend, Revenue and ROI — across every month of the
+ * shows three rows — Spend, Profit and ROI — across every month of the
  * selected period plus a period total. Spend comes from the Monthly Marketing
- * Spend by Channel table; revenue is the invoiced total of the doctors who
- * converted from that channel in the month. ROI = revenue ÷ spend.
+ * Spend by Channel table; profit = revenue − spend, where revenue is the
+ * invoiced total of the doctors who converted from that channel in the month.
+ * ROI = profit ÷ spend (a percentage).
  */
 import { Fragment } from "react";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
@@ -27,10 +28,15 @@ export function ChannelRoiTable({ months, rows }: {
   const { fmt } = useCurrency();
   if (rows.length === 0 || months.length === 0) return null;
 
-  const roiText = (rev: number, spend: number) => (spend > 0 ? `${(rev / spend).toFixed(2)}×` : "—");
+  // ROI = profit ÷ spend, as a percentage (profit = revenue − spend).
+  const roiText = (rev: number, spend: number) => {
+    if (spend <= 0) return "—";
+    const pct = ((rev - spend) / spend) * 100;
+    return `${pct >= 0 ? "+" : ""}${pct.toFixed(0)}%`;
+  };
   const roiClass = (rev: number, spend: number) => {
     if (spend <= 0) return "text-muted-foreground/40";
-    return rev / spend >= 1 ? "text-emerald-700" : "text-rose-700";
+    return rev - spend >= 0 ? "text-emerald-700" : "text-rose-700";
   };
   const byKey = (r: ChannelRoiRow, key: string) => r.perMonth.find(p => p.key === key);
 
@@ -39,9 +45,10 @@ export function ChannelRoiTable({ months, rows }: {
       <CardHeader className="pb-2 pt-4 px-5">
         <CardTitle className="text-[14px] font-semibold text-foreground">Return on Investment by Channel</CardTitle>
         <p className="text-[11px] text-muted-foreground/80 mt-0.5">
-          Spend vs. revenue per month, per channel. <span className="text-rose-700/90">Spend</span> is from the table above;
-          {" "}<span className="text-emerald-700">revenue</span> is the invoiced total of the doctors who converted from that
-          channel that month (the per-conversion estimate is used where they aren't invoiced yet). ROI = revenue ÷ spend.
+          Spend vs. profit per month, per channel. <span className="text-rose-700/90">Spend</span> is from the table above;
+          {" "}<span className="text-emerald-700">profit</span> = revenue − spend, where revenue is the invoiced total of the
+          doctors who converted from that channel that month (the per-conversion estimate is used where they aren't invoiced
+          yet). ROI = profit ÷ spend.
         </p>
       </CardHeader>
       <CardContent className="px-0 pb-3 overflow-x-auto">
@@ -63,7 +70,7 @@ export function ChannelRoiTable({ months, rows }: {
                 <tr className="border-t-2 border-border/50 hover:bg-muted/20">
                   <td rowSpan={3} className="align-top py-3 px-5 text-[14px] font-semibold text-foreground border-r border-border/30">
                     <div>{r.channel}</div>
-                    <div className={`mt-1.5 inline-flex items-center gap-1 text-[10px] font-bold px-1.5 py-0.5 rounded-full ${r.totalSpend > 0 && r.totalRev / r.totalSpend >= 1 ? "bg-emerald-100 text-emerald-700" : "bg-rose-100 text-rose-700"}`}>
+                    <div className={`mt-1.5 inline-flex items-center gap-1 text-[10px] font-bold px-1.5 py-0.5 rounded-full ${r.totalSpend > 0 && r.totalRev - r.totalSpend >= 0 ? "bg-emerald-100 text-emerald-700" : "bg-rose-100 text-rose-700"}`}>
                       ROI {roiText(r.totalRev, r.totalSpend)}
                     </div>
                     <div className="mt-1 text-[10px] font-normal text-muted-foreground">{r.totalConv} conv.</div>
@@ -75,14 +82,20 @@ export function ChannelRoiTable({ months, rows }: {
                   })}
                   <td className="py-2 px-5 text-[13px] text-right tabular-nums font-bold text-rose-700">({fmt(r.totalSpend)})</td>
                 </tr>
-                {/* Revenue */}
+                {/* Profit = revenue − spend */}
                 <tr className="hover:bg-muted/20">
-                  <td className="py-2 px-3 text-[11px] text-muted-foreground">Revenue</td>
+                  <td className="py-2 px-3 text-[11px] text-muted-foreground">Profit</td>
                   {months.map(m => {
-                    const v = byKey(r, m.key)?.revenue ?? 0;
-                    return <td key={m.key} className="py-2 px-3 text-[13px] text-right tabular-nums text-emerald-700">{v > 0 ? fmt(v) : <span className="text-muted-foreground/30">—</span>}</td>;
+                    const pm = byKey(r, m.key);
+                    const rev = pm?.revenue ?? 0, spend = pm?.spend ?? 0;
+                    if (rev === 0 && spend === 0) return <td key={m.key} className="py-2 px-3 text-[13px] text-right tabular-nums text-muted-foreground/30">—</td>;
+                    const profit = rev - spend;
+                    return <td key={m.key} className={`py-2 px-3 text-[13px] text-right tabular-nums ${profit >= 0 ? "text-emerald-700" : "text-rose-700"}`}>{profit < 0 ? `(${fmt(Math.abs(profit))})` : fmt(profit)}</td>;
                   })}
-                  <td className="py-2 px-5 text-[13px] text-right tabular-nums font-bold text-emerald-700">{fmt(r.totalRev)}</td>
+                  {(() => {
+                    const profit = r.totalRev - r.totalSpend;
+                    return <td className={`py-2 px-5 text-[13px] text-right tabular-nums font-bold ${profit >= 0 ? "text-emerald-700" : "text-rose-700"}`}>{profit < 0 ? `(${fmt(Math.abs(profit))})` : fmt(profit)}</td>;
+                  })()}
                 </tr>
                 {/* ROI */}
                 <tr className="border-b border-border/40 hover:bg-muted/20">
