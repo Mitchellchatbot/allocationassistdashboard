@@ -61,9 +61,13 @@ export function CompanyFinanceSankey({ dateRange }: { dateRange: { from: Date; t
   const [focus, setFocus] = useState<string | null>(null);
   const [selectedCat, setSelectedCat] = useState<string | null>(null);
 
-  const wrapRef = useRef<SVGGElement | null>(null);
-  const svgRef  = useRef<SVGSVGElement | null>(null);
-  const tween   = useRef({ s: 1, tx: 0, ty: 0 });
+  const wrapRef  = useRef<SVGGElement | null>(null);
+  const svgRef   = useRef<SVGSVGElement | null>(null);
+  const graphRef = useRef<HTMLDivElement | null>(null);
+  const tableRef = useRef<HTMLDivElement | null>(null);
+  const tween    = useRef({ s: 1, tx: 0, ty: 0 });
+  const [tableCat, setTableCat] = useState<string | null>(null); // category the table shows (persists through fade-out)
+  const openTxns = (cat: string) => { setTableCat(cat); setSelectedCat(cat); };
 
   const base = useMemo(() => {
     if (!data?.configured || !data.ok) return null;
@@ -200,30 +204,46 @@ export function CompanyFinanceSankey({ dateRange }: { dateRange: { from: Date; t
     svg.querySelectorAll<SVGGElement>("[data-section]").forEach(s => (s.style.filter = ""));
   }, [focus, layout]);
 
-  // Lift a whole subsection (its bars + ribbons) on hover, with a drop shadow.
-  // Bars rise a touch more than the connecting ribbons for a little depth.
+  // Overview only: lift a whole subsection (bars + ribbons) on hover, with a
+  // drop shadow; bars rise a touch more than the ribbons for depth. When zoomed
+  // in, the subsection lift is off — individual ribbons highlight instead.
   const onSectionEnter = (e: React.MouseEvent<SVGGElement>) => {
+    if (focus) return;
     const sec = e.currentTarget;
     gsap.to(sec.querySelectorAll(".snk-bar"),  { y: -9, duration: 0.22, ease: "power2.out" });
     gsap.to(sec.querySelectorAll(".snk-link"), { y: -4, fillOpacity: 0.3, duration: 0.22, ease: "power2.out" });
     sec.style.filter = "drop-shadow(0 7px 7px rgba(15,23,42,0.20))";
   };
   const onSectionLeave = (e: React.MouseEvent<SVGGElement>) => {
+    if (focus) return;
     const sec = e.currentTarget;
     gsap.to(sec.querySelectorAll(".snk-bar"),  { y: 0, duration: 0.22, ease: "power2.out" });
     gsap.to(sec.querySelectorAll(".snk-link"), { y: 0, fillOpacity: 0.18, duration: 0.22, ease: "power2.out" });
     sec.style.filter = "";
   };
 
+  // Cross-fade the graph ↔ the transaction table in the same viewport.
+  useEffect(() => {
+    const g = graphRef.current, t = tableRef.current;
+    if (!g || !t) return;
+    if (selectedCat) {
+      gsap.to(g, { opacity: 0, duration: 0.3, ease: "power1.out" });
+      gsap.to(t, { opacity: 1, duration: 0.4, delay: 0.12, ease: "power1.out" });
+    } else {
+      gsap.to(t, { opacity: 0, duration: 0.28, ease: "power1.out", onComplete: () => setTableCat(null) });
+      gsap.to(g, { opacity: 1, duration: 0.4, delay: 0.1, ease: "power1.out" });
+    }
+  }, [selectedCat]);
+
   if (!base || !layout) return null;
 
   const pct = (v: number) => base.totalExpenses > 0 ? `${((v / base.totalExpenses) * 100).toFixed(1)}% of expenses` : "";
-  const selected = selectedCat ? (base.catInfo.get(selectedCat) ?? layout.rollupInfo.get(selectedCat)) : null;
+  const tableSel = tableCat ? (base.catInfo.get(tableCat) ?? layout.rollupInfo.get(tableCat)) : null;
 
   const NodeRect = ({ n, belong, side, kind }: { n: RNode; belong: string; side: "left" | "right"; kind: "rev" | "profit" | "group" | "cat" }) => {
     const clickable = kind === "group" || kind === "cat";
     const onClick = kind === "group" ? () => { setFocus(focus === n.name ? null : n.name); setSelectedCat(null); }
-      : kind === "cat" ? () => setSelectedCat(n.name) : undefined;
+      : kind === "cat" ? () => openTxns(n.name) : undefined;
     return (
       <g
         data-belong={belong}
@@ -270,7 +290,9 @@ export function CompanyFinanceSankey({ dateRange }: { dateRange: { from: Date; t
         )}
       </CardHeader>
       <CardContent className="px-5 pb-5 overflow-hidden">
-        <svg ref={svgRef} viewBox={`0 0 ${VW} ${layout.VH}`} width="100%" style={{ display: "block", height: "auto", aspectRatio: `${VW} / ${layout.VH}` }}>
+        <div className="relative">
+          <div ref={graphRef} style={{ pointerEvents: selectedCat ? "none" : "auto" }}>
+            <svg ref={svgRef} viewBox={`0 0 ${VW} ${layout.VH}`} width="100%" style={{ display: "block", height: "auto", aspectRatio: `${VW} / ${layout.VH}` }}>
           <g ref={wrapRef}>
             {/* Revenue→Profit ribbon — not part of any drillable subsection */}
             {layout.links.filter(l => !l.group).map(l => (
@@ -291,9 +313,11 @@ export function CompanyFinanceSankey({ dateRange }: { dateRange: { from: Date; t
                     onClick={() => {
                       // Zoomed into this group: a ribbon opens its category's
                       // transactions. Otherwise: zoom into the group.
-                      if (focus === g.name && l.cat) setSelectedCat(l.cat);
+                      if (focus === g.name && l.cat) openTxns(l.cat);
                       else { setFocus(g.name); setSelectedCat(null); }
                     }}
+                    onMouseEnter={e => { if (focus === g.name) gsap.to(e.currentTarget, { fillOpacity: 0.42, duration: 0.18 }); }}
+                    onMouseLeave={e => { if (focus === g.name) gsap.to(e.currentTarget, { fillOpacity: 0.18, duration: 0.18 }); }}
                   />
                 ))}
                 <NodeRect n={g} belong={g.name} side="right" kind="group" />
@@ -306,41 +330,46 @@ export function CompanyFinanceSankey({ dateRange }: { dateRange: { from: Date; t
             <NodeRect n={layout.revenue} belong="__rev" side="left" kind="rev" />
             {layout.profit && <NodeRect n={layout.profit} belong="__rev" side="right" kind="profit" />}
           </g>
-        </svg>
-
-        {selected && selectedCat && (
-          <div className="mt-3 rounded-lg border border-border/60 bg-muted/20 overflow-hidden animate-in slide-in-from-top-2 fade-in duration-300">
-            <div className="flex items-center justify-between px-4 py-2 border-b border-border/40 bg-muted/40">
-              <p className="text-[12px] font-semibold text-foreground">
-                {selectedCat}
-                <span className="ml-2 font-normal text-muted-foreground">{fmt(selected.amount)} · {selected.count} txn{selected.count === 1 ? "" : "s"} · {pct(selected.amount)}</span>
-              </p>
-              <button type="button" onClick={() => setSelectedCat(null)} className="text-muted-foreground hover:text-foreground transition-colors"><X className="h-3.5 w-3.5" /></button>
-            </div>
-            <div className="overflow-x-auto" style={{ maxHeight: 280 }}>
-              <table className="w-full text-left border-collapse">
-                <thead className="sticky top-0 bg-muted/40">
-                  <tr className="border-b border-border/40">
-                    <th className="py-2 px-4 text-[10px] uppercase tracking-wide text-muted-foreground/70 font-semibold">Date</th>
-                    <th className="py-2 px-4 text-[10px] uppercase tracking-wide text-muted-foreground/70 font-semibold">Description</th>
-                    <th className="py-2 px-4 text-[10px] uppercase tracking-wide text-muted-foreground/70 font-semibold text-right">Amount</th>
-                  </tr>
-                </thead>
-                <tbody>
-                  {selected.txns.length === 0 ? (
-                    <tr><td colSpan={3} className="py-3 text-center text-[12px] text-muted-foreground">No transaction detail for this category</td></tr>
-                  ) : selected.txns.map((t, i) => (
-                    <tr key={`${t.date}-${i}`} className="border-b border-border/20 last:border-0 hover:bg-muted/30 transition-colors">
-                      <td className="py-2 px-4 text-[12px] font-mono text-muted-foreground whitespace-nowrap">{t.date || "—"}</td>
-                      <td className="py-2 px-4 text-[12px] text-foreground/80 max-w-[520px] truncate" title={t.text}>{t.text || <span className="text-muted-foreground/40">—</span>}</td>
-                      <td className="py-2 px-4 text-[12px] text-right tabular-nums font-semibold">{fmt(t.amount)}</td>
-                    </tr>
-                  ))}
-                </tbody>
-              </table>
-            </div>
+            </svg>
           </div>
-        )}
+
+          {/* Transaction table — cross-fades in over the graph viewport */}
+          <div ref={tableRef} className="absolute inset-0" style={{ pointerEvents: selectedCat ? "auto" : "none" }}>
+            {tableSel && tableCat && (
+              <div className="h-full flex flex-col rounded-lg border border-border/60 bg-card shadow-sm overflow-hidden">
+                <div className="flex items-center justify-between px-4 py-2 border-b border-border/40 bg-muted/40 shrink-0">
+                  <p className="text-[12px] font-semibold text-foreground">
+                    {tableCat}
+                    <span className="ml-2 font-normal text-muted-foreground">{fmt(tableSel.amount)} · {tableSel.count} txn{tableSel.count === 1 ? "" : "s"} · {pct(tableSel.amount)}</span>
+                  </p>
+                  <button type="button" onClick={() => setSelectedCat(null)} className="text-muted-foreground hover:text-foreground transition-colors"><X className="h-3.5 w-3.5" /></button>
+                </div>
+                <div className="flex-1 overflow-y-auto">
+                  <table className="w-full text-left border-collapse">
+                    <thead className="sticky top-0 bg-muted/40">
+                      <tr className="border-b border-border/40">
+                        <th className="py-2 px-4 text-[10px] uppercase tracking-wide text-muted-foreground/70 font-semibold">Date</th>
+                        <th className="py-2 px-4 text-[10px] uppercase tracking-wide text-muted-foreground/70 font-semibold">Description</th>
+                        <th className="py-2 px-4 text-[10px] uppercase tracking-wide text-muted-foreground/70 font-semibold text-right">Amount</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {tableSel.txns.length === 0 ? (
+                        <tr><td colSpan={3} className="py-3 text-center text-[12px] text-muted-foreground">No transaction detail for this category</td></tr>
+                      ) : tableSel.txns.map((t, i) => (
+                        <tr key={`${t.date}-${i}`} className="border-b border-border/20 last:border-0 hover:bg-muted/30 transition-colors">
+                          <td className="py-2 px-4 text-[12px] font-mono text-muted-foreground whitespace-nowrap">{t.date || "—"}</td>
+                          <td className="py-2 px-4 text-[12px] text-foreground/80 max-w-[520px] truncate" title={t.text}>{t.text || <span className="text-muted-foreground/40">—</span>}</td>
+                          <td className="py-2 px-4 text-[12px] text-right tabular-nums font-semibold">{fmt(t.amount)}</td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
+              </div>
+            )}
+          </div>
+        </div>
       </CardContent>
     </Card>
   );
