@@ -21,7 +21,7 @@ import type { ZohoBooksExpenseTxn } from "@/hooks/use-zoho-books";
 // ── viewBox layout constants (the SVG scales to its container) ──
 const VW = 1120;
 const NODE_W = 18;
-const COL = { rev: 120, grp: 500, cat: 862 };
+const COL = { rev: 190, grp: 520, cat: 868 };
 const CAT_LABEL_W = 234;
 const PAD = 9;
 const OUTER = 22;
@@ -149,7 +149,9 @@ export function CompanyFinanceSankey({ dateRange }: { dateRange: { from: Date; t
     // for Revenue/Profit + their links, which always fade on drill).
     // `group` = the group this link zooms into when clicked (undefined for the
     // Revenue→Profit ribbon, which isn't a drill target).
-    const links: { key: string; belong: string; d: string; color: string; group?: string }[] = [];
+    // `cat` = the category a group→cat ribbon points at (so that, when zoomed
+    // in, clicking the ribbon opens that category's transactions).
+    const links: { key: string; belong: string; d: string; color: string; group?: string; cat?: string }[] = [];
     const revTargets = [...(profit ? [profit] : []), ...groups].sort((a, b) => a.y - b.y);
     let sy = revenue.y;
     for (const t of revTargets) {
@@ -160,7 +162,7 @@ export function CompanyFinanceSankey({ dateRange }: { dateRange: { from: Date; t
     for (const g of groups) {
       const myCats = cats.filter(c => c.group === g.name).sort((a, b) => a.y - b.y);
       let gy = g.y;
-      for (const c of myCats) { links.push({ key: `${g.name}-${c.name}`, belong: g.name, color: g.color, group: g.name, d: ribbon(g.x + NODE_W, gy, gy + c.h, c.x, c.y, c.y + c.h) }); gy += c.h; }
+      for (const c of myCats) { links.push({ key: `${g.name}-${c.name}`, belong: g.name, color: g.color, group: g.name, cat: c.name, d: ribbon(g.x + NODE_W, gy, gy + c.h, c.x, c.y, c.y + c.h) }); gy += c.h; }
     }
     return { revenue, profit, groups, cats, links, VH, rollupInfo };
   }, [base]);
@@ -192,7 +194,26 @@ export function CompanyFinanceSankey({ dateRange }: { dateRange: { from: Date; t
       el.style.pointerEvents = keep ? "auto" : "none";
       gsap.to(el, { opacity: keep ? 1 : 0, duration: 0.55, ease: "power1.out" });
     });
+    // Clear any leftover hover-lift / shadow when the view changes.
+    gsap.set(svg.querySelectorAll(".snk-bar"), { y: 0 });
+    gsap.set(svg.querySelectorAll(".snk-link"), { y: 0, fillOpacity: 0.18 });
+    svg.querySelectorAll<SVGGElement>("[data-section]").forEach(s => (s.style.filter = ""));
   }, [focus, layout]);
+
+  // Lift a whole subsection (its bars + ribbons) on hover, with a drop shadow.
+  // Bars rise a touch more than the connecting ribbons for a little depth.
+  const onSectionEnter = (e: React.MouseEvent<SVGGElement>) => {
+    const sec = e.currentTarget;
+    gsap.to(sec.querySelectorAll(".snk-bar"),  { y: -9, duration: 0.22, ease: "power2.out" });
+    gsap.to(sec.querySelectorAll(".snk-link"), { y: -4, fillOpacity: 0.3, duration: 0.22, ease: "power2.out" });
+    sec.style.filter = "drop-shadow(0 7px 7px rgba(15,23,42,0.20))";
+  };
+  const onSectionLeave = (e: React.MouseEvent<SVGGElement>) => {
+    const sec = e.currentTarget;
+    gsap.to(sec.querySelectorAll(".snk-bar"),  { y: 0, duration: 0.22, ease: "power2.out" });
+    gsap.to(sec.querySelectorAll(".snk-link"), { y: 0, fillOpacity: 0.18, duration: 0.22, ease: "power2.out" });
+    sec.style.filter = "";
+  };
 
   if (!base || !layout) return null;
 
@@ -206,10 +227,8 @@ export function CompanyFinanceSankey({ dateRange }: { dateRange: { from: Date; t
     return (
       <g
         data-belong={belong}
-        className={clickable ? "cursor-pointer" : undefined}
+        className={`snk-bar ${clickable ? "cursor-pointer" : ""}`}
         onClick={onClick}
-        onMouseEnter={clickable ? e => gsap.to(e.currentTarget, { y: -5, duration: 0.2, ease: "power2.out" }) : undefined}
-        onMouseLeave={clickable ? e => gsap.to(e.currentTarget, { y: 0, duration: 0.2, ease: "power2.out" }) : undefined}
       >
         <title>{`${n.name} · ${fmt(n.total)}${kind === "rev" ? "" : kind === "profit" ? ` · ${base.revenue > 0 ? ((n.total / base.revenue) * 100).toFixed(1) : 0}% of revenue` : ` · ${pct(n.total)}`}`}</title>
         <rect x={n.x} y={n.y} width={NODE_W} height={Math.max(n.h, 1.5)} rx={3} fill={n.color} fillOpacity={0.95} />
@@ -253,24 +272,39 @@ export function CompanyFinanceSankey({ dateRange }: { dateRange: { from: Date; t
       <CardContent className="px-5 pb-5 overflow-hidden">
         <svg ref={svgRef} viewBox={`0 0 ${VW} ${layout.VH}`} width="100%" style={{ display: "block", height: "auto", aspectRatio: `${VW} / ${layout.VH}` }}>
           <g ref={wrapRef}>
-            {layout.links.map(l => (
-              <path
-                key={l.key}
-                data-belong={l.belong}
-                d={l.d}
-                fill={l.color}
-                fillOpacity={0.18}
-                stroke="none"
-                className={l.group ? "cursor-pointer" : undefined}
-                onClick={l.group ? () => { setFocus(l.group!); setSelectedCat(null); } : undefined}
-                onMouseEnter={l.group ? e => gsap.to(e.currentTarget, { fillOpacity: 0.36, duration: 0.2 }) : undefined}
-                onMouseLeave={l.group ? e => gsap.to(e.currentTarget, { fillOpacity: 0.18, duration: 0.2 }) : undefined}
-              />
+            {/* Revenue→Profit ribbon — not part of any drillable subsection */}
+            {layout.links.filter(l => !l.group).map(l => (
+              <path key={l.key} className="snk-link" data-belong={l.belong} d={l.d} fill={l.color} fillOpacity={0.18} stroke="none" />
             ))}
+            {/* One liftable subsection per group: its ribbons + its bars */}
+            {layout.groups.map(g => (
+              <g key={g.name} data-section={g.name} style={{ transition: "filter 0.22s ease" }} onMouseEnter={onSectionEnter} onMouseLeave={onSectionLeave}>
+                {layout.links.filter(l => l.group === g.name).map(l => (
+                  <path
+                    key={l.key}
+                    className="snk-link cursor-pointer"
+                    data-belong={l.belong}
+                    d={l.d}
+                    fill={l.color}
+                    fillOpacity={0.18}
+                    stroke="none"
+                    onClick={() => {
+                      // Zoomed into this group: a ribbon opens its category's
+                      // transactions. Otherwise: zoom into the group.
+                      if (focus === g.name && l.cat) setSelectedCat(l.cat);
+                      else { setFocus(g.name); setSelectedCat(null); }
+                    }}
+                  />
+                ))}
+                <NodeRect n={g} belong={g.name} side="right" kind="group" />
+                {layout.cats.filter(c => c.group === g.name).map(c => (
+                  <NodeRect key={c.name} n={c} belong={c.group!} side="right" kind="cat" />
+                ))}
+              </g>
+            ))}
+            {/* Revenue + Profit bars on top */}
             <NodeRect n={layout.revenue} belong="__rev" side="left" kind="rev" />
             {layout.profit && <NodeRect n={layout.profit} belong="__rev" side="right" kind="profit" />}
-            {layout.groups.map(g => <NodeRect key={g.name} n={g} belong={g.name} side="right" kind="group" />)}
-            {layout.cats.map(c => <NodeRect key={c.name} n={c} belong={c.group!} side="right" kind="cat" />)}
           </g>
         </svg>
 
