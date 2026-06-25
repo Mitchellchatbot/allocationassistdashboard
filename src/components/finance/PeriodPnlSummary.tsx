@@ -8,18 +8,10 @@
  * estimate sections in that case.
  */
 import { useZohoBooks } from "@/hooks/use-zoho-books";
+import { useCurrency } from "@/lib/CurrencyProvider";
 import { TrendingUp, TrendingDown, Minus, ArrowUpRight, ArrowDownRight, Loader2 } from "lucide-react";
 
 const DAY_MS = 86_400_000;
-
-/** Exact currency, full digits — no K/M abbreviation. */
-function money(n: number, currency: string) {
-  try {
-    return new Intl.NumberFormat("en-US", { style: "currency", currency, maximumFractionDigits: 0 }).format(n);
-  } catch {
-    return `${currency} ${Math.round(n).toLocaleString()}`;
-  }
-}
 
 function rangeLabel(r: { from: Date; to: Date }) {
   const f = r.from.toLocaleDateString("en-GB", { day: "numeric", month: "short", year: "numeric" });
@@ -53,8 +45,8 @@ function pctDelta(curr: number, prev: number): number | null {
 }
 
 /** A "this vs prior" comparison row with a coloured ↑/↓ delta. */
-function CompareRow({ label, curr, prev, currency, higherIsBetter = true }: {
-  label: string; curr: number; prev: number; currency: string; higherIsBetter?: boolean;
+function CompareRow({ label, curr, prev, money, higherIsBetter = true }: {
+  label: string; curr: number; prev: number; money: (n: number) => string; higherIsBetter?: boolean;
 }) {
   const delta = pctDelta(curr, prev);
   const up    = curr >= prev;
@@ -65,8 +57,8 @@ function CompareRow({ label, curr, prev, currency, higherIsBetter = true }: {
   return (
     <div className="grid grid-cols-[1fr_auto_auto_auto] items-center gap-x-3 py-1.5 text-[12px]">
       <span className="text-muted-foreground">{label}</span>
-      <span className="tabular-nums font-semibold text-foreground text-right w-[120px]">{money(curr, currency)}</span>
-      <span className="tabular-nums text-muted-foreground text-right w-[120px] hidden sm:inline">{money(prev, currency)}</span>
+      <span className="tabular-nums font-semibold text-foreground text-right w-[120px]">{money(curr)}</span>
+      <span className="tabular-nums text-muted-foreground text-right w-[120px] hidden sm:inline">{money(prev)}</span>
       <span className={`tabular-nums font-semibold inline-flex items-center justify-end gap-0.5 w-[78px] ${color}`}>
         <Arrow className="h-3.5 w-3.5" />
         {delta === null ? "n/a" : `${delta >= 0 ? "+" : ""}${delta.toFixed(1)}%`}
@@ -79,6 +71,17 @@ export function PeriodPnlSummary({ dateRange }: { dateRange: { from: Date; to: D
   const prior = priorRange(dateRange);
   const { data: cur, isLoading } = useZohoBooks(dateRange);
   const { data: prev }           = useZohoBooks(prior);
+  const { fromAED, currency }    = useCurrency();
+
+  // Exact, currency-aware formatter — converts AED→display currency (respecting
+  // the header toggle) but keeps full digits, no K/M abbreviation.
+  const money = (n: number) => {
+    try {
+      return new Intl.NumberFormat("en-US", { style: "currency", currency, maximumFractionDigits: 0 }).format(fromAED(n));
+    } catch {
+      return `${currency} ${Math.round(fromAED(n)).toLocaleString()}`;
+    }
+  };
 
   // Slim skeleton while the current-period actuals load.
   if (isLoading) {
@@ -92,7 +95,6 @@ export function PeriodPnlSummary({ dateRange }: { dateRange: { from: Date; to: D
   // No actuals to show — stay quiet, the page's estimate sections cover it.
   if (!cur?.configured || !cur.ok) return null;
 
-  const currency    = cur.currency ?? "AED";
   const revenue     = cur.revenue ?? 0;
   const expenses    = cur.expenses ?? 0;
   const profit      = cur.profit ?? 0;
@@ -125,12 +127,12 @@ export function PeriodPnlSummary({ dateRange }: { dateRange: { from: Date; to: D
       <div className="grid grid-cols-1 sm:grid-cols-3 divide-y sm:divide-y-0 sm:divide-x divide-border/40">
         <div className="px-5 py-4">
           <p className="text-[10px] uppercase tracking-wide text-muted-foreground font-medium">Revenue</p>
-          <p className="text-[26px] font-bold tabular-nums text-emerald-700 leading-tight mt-1">{money(revenue, currency)}</p>
+          <p className="text-[26px] font-bold tabular-nums text-emerald-700 leading-tight mt-1">{money(revenue)}</p>
           <p className="text-[10px] text-muted-foreground mt-0.5">{cur.invoiceCount ?? 0} invoice{(cur.invoiceCount ?? 0) === 1 ? "" : "s"}</p>
         </div>
         <div className="px-5 py-4">
           <p className="text-[10px] uppercase tracking-wide text-muted-foreground font-medium">Expenses</p>
-          <p className="text-[26px] font-bold tabular-nums text-rose-700 leading-tight mt-1">{money(expenses, currency)}</p>
+          <p className="text-[26px] font-bold tabular-nums text-rose-700 leading-tight mt-1">{money(expenses)}</p>
           <p className="text-[10px] text-muted-foreground mt-0.5">{cur.expenseCount ?? 0} expense{(cur.expenseCount ?? 0) === 1 ? "" : "s"}</p>
         </div>
         <div className={`px-5 py-4 ${isLoss ? "bg-rose-50/50" : "bg-emerald-50/50"}`}>
@@ -139,7 +141,7 @@ export function PeriodPnlSummary({ dateRange }: { dateRange: { from: Date; to: D
             Net {isLoss ? "Loss" : "Profit"}
           </p>
           <p className={`text-[26px] font-bold tabular-nums leading-tight mt-1 ${isLoss ? "text-rose-700" : "text-emerald-700"}`}>
-            {isLoss ? `(${money(Math.abs(profit), currency)})` : money(profit, currency)}
+            {isLoss ? `(${money(Math.abs(profit))})` : money(profit)}
           </p>
           <p className="text-[10px] text-muted-foreground mt-0.5">{margin.toFixed(1)}% margin</p>
         </div>
@@ -156,9 +158,9 @@ export function PeriodPnlSummary({ dateRange }: { dateRange: { from: Date; to: D
               <span className="text-right w-[78px] uppercase tracking-wide">Change</span>
             </div>
             <div className="divide-y divide-border/30">
-              <CompareRow label="Revenue"     curr={revenue}  prev={prevRevenue} currency={currency} />
-              <CompareRow label="Expenses"    curr={expenses} prev={prevExpense} currency={currency} higherIsBetter={false} />
-              <CompareRow label="Net profit"  curr={profit}   prev={prevProfit}  currency={currency} />
+              <CompareRow label="Revenue"     curr={revenue}  prev={prevRevenue} money={money} />
+              <CompareRow label="Expenses"    curr={expenses} prev={prevExpense} money={money} higherIsBetter={false} />
+              <CompareRow label="Net profit"  curr={profit}   prev={prevProfit}  money={money} />
             </div>
             <p className="text-[10px] text-muted-foreground mt-2">
               {lossMonths === 0

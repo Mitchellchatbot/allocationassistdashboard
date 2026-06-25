@@ -11,13 +11,15 @@
  */
 import { useState, type ReactNode } from "react";
 import { useZohoBooks } from "@/hooks/use-zoho-books";
+import { useCurrency } from "@/lib/CurrencyProvider";
 import { TrendingUp, Receipt, Wallet, Clock, Loader2, PlugZap, AlertCircle, RotateCw, type LucideIcon } from "lucide-react";
 
-function fmt(n: number, currency: string) {
+/** Format a value (already in display currency) with the given code. */
+function fmtMoney(n: number, code: string) {
   try {
-    return new Intl.NumberFormat("en-US", { style: "currency", currency, maximumFractionDigits: 0 }).format(n);
+    return new Intl.NumberFormat("en-US", { style: "currency", currency: code, maximumFractionDigits: 0 }).format(n);
   } catch {
-    return `${currency} ${Math.round(n).toLocaleString()}`;
+    return `${code} ${Math.round(n).toLocaleString()}`;
   }
 }
 
@@ -108,8 +110,8 @@ function KV({ label, value }: { label: string; value: string }) {
 }
 
 /** Horizontal mini-bars for a small ranked/timeline list. */
-function MiniBars({ rows, cur, color, signed }: {
-  rows: { label: string; value: number }[]; cur: string; color: string; signed?: boolean;
+function MiniBars({ rows, money, color, signed }: {
+  rows: { label: string; value: number }[]; money: (n: number) => string; color: string; signed?: boolean;
 }) {
   const max = Math.max(...rows.map(r => Math.abs(r.value)), 1);
   return (
@@ -120,7 +122,7 @@ function MiniBars({ rows, cur, color, signed }: {
           <div key={`${r.label}-${i}`}>
             <div className="flex items-center justify-between mb-0.5">
               <span className="text-muted-foreground truncate max-w-[120px]">{r.label}</span>
-              <span className={`font-semibold tabular-nums ${neg ? "text-rose-700" : ""}`}>{fmt(r.value, cur)}</span>
+              <span className={`font-semibold tabular-nums ${neg ? "text-rose-700" : ""}`}>{money(r.value)}</span>
             </div>
             <div className="h-1.5 bg-muted rounded-full overflow-hidden">
               <div className="h-full rounded-full" style={{
@@ -137,6 +139,9 @@ function MiniBars({ rows, cur, color, signed }: {
 
 export function ZohoBooksPanel({ dateRange }: { dateRange: { from: Date; to: Date } }) {
   const { data, isLoading } = useZohoBooks(dateRange);
+  const { fromAED, currency } = useCurrency();
+  // Books amounts are in AED; convert to the header's display currency.
+  const money = (n: number) => fmtMoney(fromAED(n), currency);
 
   if (isLoading) {
     return (
@@ -188,7 +193,6 @@ export function ZohoBooksPanel({ dateRange }: { dateRange: { from: Date; to: Dat
   }
 
   // Connected + live data.
-  const cur          = data.currency ?? "AED";
   const revenue      = data.revenue ?? 0;
   const expenses     = data.expenses ?? 0;
   const profit       = data.profit ?? 0;
@@ -221,55 +225,55 @@ export function ZohoBooksPanel({ dateRange }: { dateRange: { from: Date; to: Dat
         <span className="inline-flex items-center gap-1 text-[9px] font-bold uppercase tracking-wide px-2 py-0.5 rounded-full bg-emerald-100 text-emerald-700">
           <span className="h-1.5 w-1.5 rounded-full bg-emerald-500" /> Zoho Books · live
         </span>
-        <span className="text-[10px] text-muted-foreground">Actuals for the selected period · in {cur} (Zoho Books currency) · tap a card for insights</span>
+        <span className="text-[10px] text-muted-foreground">Actuals for the selected period · shown in {currency} · tap a card for insights</span>
       </div>
       <div className="grid grid-cols-2 lg:grid-cols-4 gap-3 items-start">
         {/* ── Revenue ── */}
         <FlipStat
-          icon={TrendingUp} label="Revenue (invoiced)" value={fmt(revenue, cur)}
+          icon={TrendingUp} label="Revenue (invoiced)" value={money(revenue)}
           sub={`${invoiceCount} invoice${invoiceCount === 1 ? "" : "s"}`} accent="emerald"
           back={
             <div className="space-y-2.5">
               <div className="grid grid-cols-2 gap-2">
                 <KV label="Invoices" value={String(invoiceCount)} />
-                <KV label="Avg / invoice" value={fmt(avgInvoice, cur)} />
+                <KV label="Avg / invoice" value={money(avgInvoice)} />
               </div>
               {bestRevMonth && months.length > 1 && (
                 <p className="text-[10px] text-muted-foreground">
-                  Best month: <span className="font-semibold text-foreground">{bestRevMonth.label}</span> · {fmt(bestRevMonth.revenue, cur)}
+                  Best month: <span className="font-semibold text-foreground">{bestRevMonth.label}</span> · {money(bestRevMonth.revenue)}
                 </p>
               )}
               {lastMonths.length > 1 && (
                 <div>
                   <p className="text-[9px] uppercase tracking-wide text-muted-foreground mb-1.5">Revenue by month</p>
-                  <MiniBars rows={lastMonths.map(m => ({ label: m.label, value: m.revenue }))} cur={cur} color={ACCENTS.emerald.bar} />
+                  <MiniBars rows={lastMonths.map(m => ({ label: m.label, value: m.revenue }))} money={money} color={ACCENTS.emerald.bar} />
                 </div>
               )}
               <p className="text-[10px] text-muted-foreground pt-1.5 border-t border-border/30">
-                {fmt(collected, cur)} collected · <span className="text-amber-700 font-medium">{fmt(outstanding, cur)} outstanding</span>
+                {money(collected)} collected · <span className="text-amber-700 font-medium">{money(outstanding)} outstanding</span>
               </p>
             </div>
           }
         />
         {/* ── Expenses ── */}
         <FlipStat
-          icon={Receipt} label="Expenses" value={fmt(expenses, cur)}
+          icon={Receipt} label="Expenses" value={money(expenses)}
           sub={`${expenseCount} expense${expenseCount === 1 ? "" : "s"}`} accent="rose"
           back={
             <div className="space-y-2.5">
               <div className="grid grid-cols-2 gap-2">
                 <KV label="Transactions" value={String(expenseCount)} />
-                <KV label="Avg / expense" value={fmt(avgExpense, cur)} />
+                <KV label="Avg / expense" value={money(avgExpense)} />
               </div>
               {topCats.length > 0 ? (
                 <div>
                   <p className="text-[9px] uppercase tracking-wide text-muted-foreground mb-1.5">Top categories</p>
-                  <MiniBars rows={topCats.map(c => ({ label: c.name, value: c.amount }))} cur={cur} color={ACCENTS.rose.bar} />
+                  <MiniBars rows={topCats.map(c => ({ label: c.name, value: c.amount }))} money={money} color={ACCENTS.rose.bar} />
                 </div>
               ) : lastMonths.length > 1 ? (
                 <div>
                   <p className="text-[9px] uppercase tracking-wide text-muted-foreground mb-1.5">Expenses by month</p>
-                  <MiniBars rows={lastMonths.map(m => ({ label: m.label, value: m.expenses }))} cur={cur} color={ACCENTS.rose.bar} />
+                  <MiniBars rows={lastMonths.map(m => ({ label: m.label, value: m.expenses }))} money={money} color={ACCENTS.rose.bar} />
                 </div>
               ) : (
                 <p className="text-[10px] text-muted-foreground">No category breakdown available for this period.</p>
@@ -279,14 +283,14 @@ export function ZohoBooksPanel({ dateRange }: { dateRange: { from: Date; to: Dat
         />
         {/* ── Profit ── */}
         <FlipStat
-          icon={Wallet} label="Profit" value={fmt(profit, cur)}
+          icon={Wallet} label="Profit" value={money(profit)}
           sub={`${margin.toFixed(0)}% margin`} accent={profit >= 0 ? "blue" : "rose"}
           back={
             <div className="space-y-2.5">
               <div className="rounded-lg bg-muted/40 px-2.5 py-2 space-y-1 text-[11px]">
-                <div className="flex justify-between"><span className="text-muted-foreground">Revenue</span><span className="tabular-nums font-semibold text-emerald-700">{fmt(revenue, cur)}</span></div>
-                <div className="flex justify-between"><span className="text-muted-foreground">− Expenses</span><span className="tabular-nums font-semibold text-rose-700">{fmt(expenses, cur)}</span></div>
-                <div className="flex justify-between pt-1 border-t border-border/40"><span className="font-semibold">= Profit</span><span className={`tabular-nums font-bold ${profit >= 0 ? "text-blue-700" : "text-rose-700"}`}>{fmt(profit, cur)}</span></div>
+                <div className="flex justify-between"><span className="text-muted-foreground">Revenue</span><span className="tabular-nums font-semibold text-emerald-700">{money(revenue)}</span></div>
+                <div className="flex justify-between"><span className="text-muted-foreground">− Expenses</span><span className="tabular-nums font-semibold text-rose-700">{money(expenses)}</span></div>
+                <div className="flex justify-between pt-1 border-t border-border/40"><span className="font-semibold">= Profit</span><span className={`tabular-nums font-bold ${profit >= 0 ? "text-blue-700" : "text-rose-700"}`}>{money(profit)}</span></div>
               </div>
               <div className="flex items-center justify-between text-[10px]">
                 <span className="text-muted-foreground">Margin</span>
@@ -295,9 +299,9 @@ export function ZohoBooksPanel({ dateRange }: { dateRange: { from: Date; to: Dat
               {months.length > 1 && (
                 <div>
                   <p className="text-[9px] uppercase tracking-wide text-muted-foreground mb-1.5">Profit by month</p>
-                  <MiniBars rows={lastMonths.map(m => ({ label: m.label, value: m.profit }))} cur={cur} color={ACCENTS.blue.bar} signed />
+                  <MiniBars rows={lastMonths.map(m => ({ label: m.label, value: m.profit }))} money={money} color={ACCENTS.blue.bar} signed />
                   <p className="text-[10px] text-muted-foreground mt-1.5">
-                    Best: <span className="font-semibold text-foreground">{bestProfitMonth?.label}</span> · Avg/mo {fmt(avgMonthlyProfit, cur)}
+                    Best: <span className="font-semibold text-foreground">{bestProfitMonth?.label}</span> · Avg/mo {money(avgMonthlyProfit)}
                   </p>
                 </div>
               )}
@@ -306,7 +310,7 @@ export function ZohoBooksPanel({ dateRange }: { dateRange: { from: Date; to: Dat
         />
         {/* ── Outstanding ── */}
         <FlipStat
-          icon={Clock} label="Outstanding" value={fmt(outstanding, cur)}
+          icon={Clock} label="Outstanding" value={money(outstanding)}
           sub="unpaid invoices" accent="amber"
           back={
             <div className="space-y-2.5">
@@ -320,12 +324,12 @@ export function ZohoBooksPanel({ dateRange }: { dateRange: { from: Date; to: Dat
                   <div className="h-full bg-amber-400" style={{ width: `${100 - collectRate}%` }} />
                 </div>
                 <div className="flex items-center justify-between mt-1 text-[9px] text-muted-foreground">
-                  <span>{fmt(collected, cur)} in</span>
-                  <span>{fmt(outstanding, cur)} due</span>
+                  <span>{money(collected)} in</span>
+                  <span>{money(outstanding)} due</span>
                 </div>
               </div>
               <div className="grid grid-cols-2 gap-2">
-                <KV label="Invoiced" value={fmt(revenue, cur)} />
+                <KV label="Invoiced" value={money(revenue)} />
                 <KV label="% Outstanding" value={`${outstandingPct.toFixed(0)}%`} />
               </div>
               <p className="text-[10px] text-muted-foreground pt-1.5 border-t border-border/30">
@@ -339,7 +343,7 @@ export function ZohoBooksPanel({ dateRange }: { dateRange: { from: Date; to: Dat
         <div className="mt-2 flex flex-wrap gap-1.5">
           {topCats.map(c => (
             <span key={c.name} className="text-[10px] px-2 py-0.5 rounded-full bg-muted/60 text-muted-foreground">
-              {c.name}: <span className="font-semibold text-foreground">{fmt(c.amount, cur)}</span>
+              {c.name}: <span className="font-semibold text-foreground">{money(c.amount)}</span>
             </span>
           ))}
         </div>

@@ -440,7 +440,7 @@ const Finance = () => {
   const { data: books } = useZohoBooks(dateRange);
   const { data: metaAds } = useMetaAdsApi(dateRange);
   const { revenueForDoctor } = useDoctorRevenue();
-  const { fmt: fmtAED, currency } = useCurrency();
+  const { fmt: fmtAED, currency, rate, rateSource } = useCurrency();
   const {
     rows: allTransactions,
     total: spend, prevTotal: prevSpend, growthPct, avgMonthly, byCategory, monthly,
@@ -919,6 +919,10 @@ const Finance = () => {
             <span className="text-[11px] font-normal text-muted-foreground ml-1">
               · toggle in header
             </span>
+          </p>
+          <p className="text-[10px] text-muted-foreground/80 mt-0.5">
+            1 USD = {rate.toFixed(4)} AED
+            <span className="ml-1">{rateSource === "live" ? "· live rate" : "· pegged"}</span>
           </p>
         </div>
       </div>
