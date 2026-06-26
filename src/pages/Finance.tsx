@@ -868,13 +868,6 @@ const Finance = () => {
       avg: 0,
     }))
     .sort((a, b) => b.amount - a.amount);
-  // Corrected marketing (retainer + live Meta) handed to the Sankey graph AND
-  // the P&L banner so BOTH replace the corrupted raw-Books marketing (duplicate
-  // Scaled-AI vendor bills) — the graph, the P&L profit, and this card all tie.
-  const marketingOverride = useMemo(() => ({
-    total: marketingPeriodTotal,
-    cats: monthlySpendByChannel.channels.map(c => ({ name: c.channel, amount: c.total })),
-  }), [marketingPeriodTotal, monthlySpendByChannel]);
 
   // Conversions + revenue attributed to the top channel (for its KPI back).
   const topChannelRoi = topCategory
@@ -921,7 +914,7 @@ const Finance = () => {
 
       {/* Headline P&L for the selected period — exact numbers + comparison to
           the previous equal-length period (Zoho Books actuals). */}
-      <PeriodPnlSummary dateRange={dateRange} marketingOverride={marketingOverride} />
+      <PeriodPnlSummary dateRange={dateRange} />
 
       {/* The old Zoho Books cards (Revenue/Expenses/Profit/Outstanding)
           duplicated the P&L summary banner above, so they're removed —
@@ -1185,7 +1178,7 @@ const Finance = () => {
 
       {/* Company income-statement Sankey: revenue → expense groups → profit.
           Sits under the ROI table. */}
-      <CompanyFinanceSankey dateRange={dateRange} marketingOverride={marketingOverride} />
+      <CompanyFinanceSankey dateRange={dateRange} />
 
       {/* Revenue vs Expenses vs Profit chart removed — the Digest's monthly
           chart already covers it. */}

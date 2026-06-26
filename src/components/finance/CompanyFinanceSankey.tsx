@@ -16,7 +16,7 @@ import { ChevronLeft } from "lucide-react";
 import gsap from "gsap";
 import { useZohoBooks } from "@/hooks/use-zoho-books";
 import { useCurrency } from "@/lib/CurrencyProvider";
-import { groupFor, isMarketingCategory, MARKETING_GROUP } from "@/lib/finance-groups";
+import { groupFor } from "@/lib/finance-groups";
 import type { ZohoBooksExpenseTxn } from "@/hooks/use-zoho-books";
 
 // ── viewBox layout constants (the SVG scales to its container) ──
@@ -46,12 +46,8 @@ function ribbon(sx: number, sy0: number, sy1: number, tx: number, ty0: number, t
   return `M${sx},${sy0} C${xc},${sy0} ${xc},${ty0} ${tx},${ty0} L${tx},${ty1} C${xc},${ty1} ${xc},${sy1} ${sx},${sy1} Z`;
 }
 
-export function CompanyFinanceSankey({ dateRange, marketingOverride }: {
+export function CompanyFinanceSankey({ dateRange }: {
   dateRange: { from: Date; to: Date };
-  // When provided, the raw-Books Marketing lines are stripped and replaced by
-  // this corrected marketing (retainer + live Meta) so the graph's Marketing +
-  // Profit match the KPI card and ignore the corrupted Scaled-AI vendor bills.
-  marketingOverride?: { total: number; cats: { name: string; amount: number }[] };
 }) {
   const { data } = useZohoBooks(dateRange);
   const { fmt } = useCurrency();
@@ -69,14 +65,11 @@ export function CompanyFinanceSankey({ dateRange, marketingOverride }: {
   const base = useMemo(() => {
     if (!data?.configured || !data.ok) return null;
     const revenue = data.revenue ?? 0;
-    // When a corrected marketing total is supplied, drop the raw-Books Marketing
-    // categories (corrupted by duplicate Scaled-AI vendor bills) — the corrected
-    // Marketing group is injected below.
-    const rawBreakdown = (data.expenseBreakdown ?? []).filter(c => c.amount > 0);
-    const breakdown = marketingOverride
-      ? rawBreakdown.filter(c => !isMarketingCategory(c.category))
-      : rawBreakdown;
-    if (revenue <= 0 || (breakdown.length === 0 && !marketingOverride)) return null;
+    // Straight from Zoho's P&L report — every expense account (incl. the
+    // marketing accounts, where Scaled AI is already booked correctly) flows in
+    // as-is, so the graph's totals tie out to Zoho Books exactly.
+    const breakdown = (data.expenseBreakdown ?? []).filter(c => c.amount > 0);
+    if (revenue <= 0 || breakdown.length === 0) return null;
     const groups = new Map<string, GroupBucket>();
     const catInfo = new Map<string, CatInfo>();
     for (const c of breakdown) {
@@ -86,17 +79,9 @@ export function CompanyFinanceSankey({ dateRange, marketingOverride }: {
       groups.set(g.name, e);
       catInfo.set(c.category, { amount: c.amount, count: c.count, txns: c.txns ?? [], color: g.color });
     }
-    // Inject the corrected Marketing group — its categories are the marketing
-    // CHANNELS (Website/SEO at the 45k/mo retainer, Meta live, LinkedIn, …),
-    // the same numbers the Marketing Spend KPI card shows.
-    if (marketingOverride && marketingOverride.total > 0) {
-      const cats = marketingOverride.cats.filter(c => c.amount > 0).sort((a, b) => b.amount - a.amount);
-      groups.set("Marketing", { color: MARKETING_GROUP.color, total: marketingOverride.total, cats });
-      for (const c of cats) catInfo.set(c.name, { amount: c.amount, count: 0, txns: [], color: MARKETING_GROUP.color });
-    }
     const totalExpenses = [...groups.values()].reduce((s, g) => s + g.total, 0);
     return { revenue, totalExpenses, profit: revenue - totalExpenses, groups, catInfo };
-  }, [data, marketingOverride]);
+  }, [data]);
 
   const layout = useMemo(() => {
     if (!base) return null;
