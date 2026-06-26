@@ -184,6 +184,32 @@ serve(async (req) => {
     }
   }
 
+  // ── action=bills: read-only dump of vendor bills in a date range, for
+  //    auditing (e.g. checking Scaled AI bills for duplicates). TEMP/debug.
+  if (body.action === "bills") {
+    try {
+      const f = ymd(body.from ?? ""); const t = ymd(body.to ?? "");
+      const params = f && t ? { date_start: f, date_end: t } : {};
+      const bs = await fetchAll(token, "bills", "bills", params);
+      return json({
+        configured: true, ok: true,
+        bills: bs.map(b => ({
+          date:      String(b.date ?? ""),
+          number:    String(b.bill_number ?? ""),
+          reference: String(b.reference_number ?? ""),
+          vendor:    String(b.vendor_name ?? ""),
+          status:    String(b.status ?? ""),
+          currency:  String(b.currency_code ?? ""),
+          total:     num(b.total),
+          rate:      num(b.exchange_rate) || 1,
+          base:      baseAmt(b),
+        })),
+      });
+    } catch (e) {
+      return json({ configured: true, ok: false, error: (e as Error).message }, 500);
+    }
+  }
+
   const from = ymd(body.from ?? "");
   const to   = ymd(body.to ?? "");
   if (!from || !to) return json({ configured: true, ok: false, error: "from/to (YYYY-MM-DD) required" }, 400);
@@ -283,6 +309,40 @@ serve(async (req) => {
       const text = `${b.vendor_name ?? ""} | ${b.reference_number ?? ""} | ${b.description ?? ""}`.replace(/\s+/g, " ").trim();
       marketingTxns.push({ date, amount, text });
     }
+
+    // ── Scaled AI correction (standing rule) ──────────────────────────────
+    // Zoho's Bills list double-enters Scaled AI bills (the same bill once in
+    // AED, once tagged "USD" ×3.6725), and some months carry EXTRA Scaled-AI
+    // bills beyond the single monthly retainer. Zoho's P&L already drops the
+    // inflated USD twins, but per the finance owner ONLY the one monthly
+    // retainer is a real cost — any additional same-month Scaled-AI bill is
+    // treated as suspect (duplicate / mis-entry) and removed. Rule: dedupe by
+    // bill number (keeping the AED copy, which is what the P&L counted), then
+    // keep the largest Scaled-AI bill per month (the retainer) and subtract the
+    // rest from expenses.
+    const SCALED_RE = /scaled\s*ai/i;
+    const scaledExcessByMonth: Record<string, number> = {};
+    {
+      const deduped = new Map<string, { month: string; base: number; rate: number }>();
+      for (const b of bills) {
+        if (!SCALED_RE.test(String(b.vendor_name ?? ""))) continue;
+        const date = String(b.date ?? "").slice(0, 10);
+        if (!date) continue;
+        const no   = String(b.bill_number ?? b.reference_number ?? date);
+        const rate = num(b.exchange_rate) || 1;
+        const prev = deduped.get(no);
+        if (!prev || rate < prev.rate) deduped.set(no, { month: monthKey(date), base: baseAmt(b), rate });
+      }
+      const perMonth: Record<string, number[]> = {};
+      for (const d of deduped.values()) (perMonth[d.month] ??= []).push(d.base);
+      for (const [mk, arr] of Object.entries(perMonth)) {
+        arr.sort((a, b) => b - a);
+        const excess = arr.slice(1).reduce((s, v) => s + v, 0); // everything except the retainer
+        if (excess > 0.005) scaledExcessByMonth[mk] = +excess.toFixed(2);
+      }
+    }
+    const scaledExcessTotal = +Object.values(scaledExcessByMonth).reduce((s, v) => s + v, 0).toFixed(2);
+
     const byDay = Object.values(byDayMap).sort((a, b) => a.date.localeCompare(b.date));
 
     // Record-based expense breakdown (with per-txn detail) — used only as the
@@ -303,11 +363,22 @@ serve(async (req) => {
     // fewer line items than their P&L total.
     const txnByCat = new Map(Object.entries(expenseDetail).map(([cat, v]) => [cat, v.txns.sort((a, b) => b.date.localeCompare(a.date)).slice(0, 250)]));
     const rptRevenue  = pnl ? pnl.revenue  : +revenue.toFixed(2);
-    const rptExpenses = pnl ? pnl.expenses : +expenseTotal.toFixed(2);
+    // The suspect Scaled-AI excess only exists in the P&L (bills), so the cut is
+    // applied against the P&L figures, not the expense-record fallback.
+    const scaledCut   = pnl ? scaledExcessTotal : 0;
+    const rptExpenses = +((pnl ? pnl.expenses : expenseTotal) - scaledCut).toFixed(2);
+    const SCALED_ACCOUNT = "Website design & maintenance"; // GL account Scaled AI is booked to
     const expenseBreakdown = pnl
       ? pnl.expenseAccounts
           .filter(a => a.total > 0)
-          .map(a => { const txns = txnByCat.get(a.name) ?? []; return { category: a.name, amount: +a.total.toFixed(2), count: txns.length, txns }; })
+          .map(a => {
+            const txns = txnByCat.get(a.name) ?? [];
+            // Strip the suspect Scaled-AI excess from its account so the graph
+            // + breakdown reconcile with the corrected expense total.
+            const amount = a.name === SCALED_ACCOUNT ? +(a.total - scaledCut).toFixed(2) : +a.total.toFixed(2);
+            return { category: a.name, amount, count: txns.length, txns };
+          })
+          .filter(a => a.amount > 0)
           .sort((a, b) => b.amount - a.amount)
       : recordBreakdown;
     const byCategory = expenseBreakdown.map(c => ({ name: c.category, amount: c.amount }));
@@ -327,6 +398,9 @@ serve(async (req) => {
       await Promise.all(Array.from({ length: Math.min(3, monthList.length) }, worker));
       for (let i = 0; i < monthList.length; i++) if (!res[i]) res[i] = await fetchPnL(token, monthList[i].start, monthList[i].end);
       byMonthArr = monthList.map((mo, i) => ({ month: mo.key, revenue: res[i]?.revenue ?? 0, expenses: res[i]?.expenses ?? 0 }));
+      // Strip the suspect Scaled-AI excess from each month too, so the Digest
+      // trend + the per-day scaling below match the corrected period total.
+      for (const m of byMonthArr) { const cut = scaledExcessByMonth[m.month]; if (cut) m.expenses = +(m.expenses - cut).toFixed(2); }
 
       // Tie the per-DAY records to each month's report total so the daily/weekly
       // Digest reconciles with the monthly P&L (records miss bills + journals).
@@ -367,6 +441,7 @@ serve(async (req) => {
       byCategory,
       expenseBreakdown,
       marketingTxns,
+      scaledAiCorrection: scaledCut, // suspect Scaled-AI excess removed from expenses
     });
   } catch (e) {
     console.error("[zoho-books] fetch failed:", (e as Error).message);

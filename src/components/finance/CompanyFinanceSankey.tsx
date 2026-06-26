@@ -338,7 +338,11 @@ export function CompanyFinanceSankey({ dateRange }: {
                 <div className="flex items-center justify-between gap-3 px-5 py-3 border-b border-border/50 bg-gradient-to-b from-muted/40 to-muted/10 shrink-0">
                   <div className="min-w-0">
                     <h4 className="text-[13px] font-semibold text-foreground truncate">{tableCat}</h4>
-                    <p className="text-[11px] text-muted-foreground mt-0.5">{tableSel.count} transaction{tableSel.count === 1 ? "" : "s"} · {pct(tableSel.amount)}</p>
+                    <p className="text-[11px] text-muted-foreground mt-0.5">
+                      {tableSel.txns.length > 0
+                        ? `${tableSel.count} transaction${tableSel.count === 1 ? "" : "s"} · ${pct(tableSel.amount)}`
+                        : `${pct(tableSel.amount)} of expenses · vendor bills / journals`}
+                    </p>
                   </div>
                   <div className="text-right shrink-0">
                     <p className="text-[16px] font-bold tabular-nums text-foreground leading-none">{fmt(tableSel.amount)}</p>
@@ -356,7 +360,12 @@ export function CompanyFinanceSankey({ dateRange }: {
                     </thead>
                     <tbody>
                       {tableSel.txns.length === 0 ? (
-                        <tr><td colSpan={3} className="py-6 text-center text-[12px] text-muted-foreground">No transaction detail for this category</td></tr>
+                        <tr><td colSpan={3} className="py-10 px-6 text-center">
+                          <p className="text-[12.5px] text-foreground/70 font-medium">No line-item detail for this account</p>
+                          <p className="text-[11.5px] text-muted-foreground mt-1.5 max-w-[420px] mx-auto leading-relaxed">
+                            These costs are booked in Zoho as vendor bills or journal entries (payroll, hardware, licensing fees…), which aren't itemised in this view. The total above is exact and ties to Zoho's P&amp;L.
+                          </p>
+                        </td></tr>
                       ) : tableSel.txns.map((t, i) => (
                         <tr key={`${t.date}-${i}`} className="border-b border-border/25 last:border-0 odd:bg-muted/15 hover:bg-blue-50/50 transition-colors">
                           <td className="py-2.5 px-5 text-[12px] font-mono text-muted-foreground whitespace-nowrap">{t.date || "—"}</td>
