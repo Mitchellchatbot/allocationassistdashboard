@@ -913,6 +913,10 @@ const Finance = () => {
         </div>
       </div>
 
+      {/* Universal expense search — sits at the top so any spend is one query
+          away (smart aliases: "facebook" → Meta, "payroll" → Salaries…). */}
+      <ExpenseSearch dateRange={dateRange} />
+
       {/* Headline P&L for the selected period — exact numbers + comparison to
           the previous equal-length period (Zoho Books actuals). */}
       <PeriodPnlSummary dateRange={dateRange} />
@@ -1180,9 +1184,6 @@ const Finance = () => {
       {/* Company income-statement Sankey: revenue → expense groups → profit.
           Sits under the ROI table. */}
       <CompanyFinanceSankey dateRange={dateRange} />
-
-      {/* Universal search over every expense in Zoho Books for the period. */}
-      <ExpenseSearch dateRange={dateRange} />
 
       {/* Revenue vs Expenses vs Profit chart removed — the Digest's monthly
           chart already covers it. */}
