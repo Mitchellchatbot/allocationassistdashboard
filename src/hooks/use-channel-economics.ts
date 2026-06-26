@@ -4,7 +4,7 @@ import { useZohoData, type ZohoDoctorOnBoard } from "@/hooks/use-zoho-data";
 import { useZohoBooks } from "@/hooks/use-zoho-books";
 import { useMetaAdsApi } from "@/hooks/use-meta-ads-api";
 import { useFilters } from "@/lib/filters";
-import { normalizeChannelKey, classifyChannel, type ChannelKey } from "@/lib/channel-mapping";
+import { normalizeChannelKey, classifyChannel, websiteSeoSpendForRange, WEBSITE_SEO_START_MONTH, type ChannelKey } from "@/lib/channel-mapping";
 
 export interface ChannelEconomicsRow {
   channel:        ChannelKey;
@@ -86,7 +86,9 @@ export function useChannelEconomics() {
     if (booksTxns && booksTxns.length) {
       for (const t of booksTxns) {
         const ch = classifyChannel(t.text);
-        if (ch === "Meta" || ch === "Other") continue;  // Meta = live API; Other excluded
+        // Meta = live API; Other excluded; Website / SEO = retainer model below
+        // (its raw Scaled AI bills are unreliable / duplicated, so we drop them).
+        if (ch === "Meta" || ch === "Other" || ch === "Website / SEO") continue;
         ensure(ch).spend += t.amount ?? 0;
       }
       const metaSpend = metaAds?.summary?.spend ?? 0;
@@ -95,11 +97,17 @@ export function useChannelEconomics() {
       for (const c of byCategory) {
         const ch = normalizeChannelKey(c.category);
         if (ch === "Meta" && (metaAds?.summary?.spend ?? 0) > 0) continue;
+        if (ch === "Website / SEO") continue;  // retainer model below
         ensure(ch).spend += c.amount;
       }
       const metaSpend = metaAds?.summary?.spend ?? 0;
       if (metaSpend > 0) ensure("Meta").spend += metaSpend;
     }
+    // Website / SEO (Scaled AI) = fixed ~AED 45k/month retainer + confirmed
+    // actuals, summed over the selected range — the same model the Finance tab
+    // uses, so the two tabs agree and the duplicated bills never inflate it.
+    const seoSpend = websiteSeoSpendForRange(dateRange.from, dateRange.to);
+    if (seoSpend > 0) ensure("Website / SEO").spend += seoSpend;
 
     const fromMs = dateRange.from.getTime();
     const toMs   = dateRange.to.getTime() + 86_400_000;
@@ -124,8 +132,13 @@ export function useChannelEconomics() {
     // Used for the "Cost / Conv. (lifetime)" column — surfaces channels
     // that are losing money over their full history, not just this window.
     for (const r of allRowsUnfiltered ?? []) {
-      ensure(normalizeChannelKey(r.category)).lifetimeSpend += r.amount ?? 0;
+      const ch = normalizeChannelKey(r.category);
+      if (ch === "Website / SEO") continue;  // retainer model below
+      ensure(ch).lifetimeSpend += r.amount ?? 0;
     }
+    // Website / SEO lifetime = the retainer from its start month through today.
+    const seoLifetime = websiteSeoSpendForRange(new Date(`${WEBSITE_SEO_START_MONTH}-01`), new Date());
+    if (seoLifetime > 0) ensure("Website / SEO").lifetimeSpend += seoLifetime;
     for (const dob of doctorsOnBoard) {
       ensure(normalizeChannelKey(dob.Lead_Source)).lifetimeConverted++;
     }

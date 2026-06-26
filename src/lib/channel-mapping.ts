@@ -88,3 +88,28 @@ export const WEBSITE_SEO_ACTUALS: Record<string, number> = {
   "2026-02": 45500,
   "2026-03": 45500,
 };
+
+/** Calendar months (YYYY-MM) overlapping a date range, inclusive of both ends. */
+export function monthsInRange(from: Date, to: Date): string[] {
+  const out: string[] = [];
+  const d   = new Date(from.getFullYear(), from.getMonth(), 1);
+  const end = new Date(to.getFullYear(), to.getMonth(), 1);
+  while (d <= end) {
+    out.push(`${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}`);
+    d.setMonth(d.getMonth() + 1);
+  }
+  return out;
+}
+
+/** Website / SEO (Scaled AI) retainer spend for one month — 0 before it started,
+ *  the confirmed actual if known, else the flat retainer. This is the model both
+ *  the Finance and Marketing tabs use instead of the unreliable raw bills. */
+export function websiteSeoSpendForMonth(monthKey: string): number {
+  if (monthKey < WEBSITE_SEO_START_MONTH) return 0;
+  return WEBSITE_SEO_ACTUALS[monthKey] ?? WEBSITE_SEO_RETAINER_AED;
+}
+
+/** Total Website / SEO retainer spend across a date range. */
+export function websiteSeoSpendForRange(from: Date, to: Date): number {
+  return monthsInRange(from, to).reduce((s, m) => s + websiteSeoSpendForMonth(m), 0);
+}
