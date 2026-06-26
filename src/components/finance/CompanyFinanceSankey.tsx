@@ -12,9 +12,9 @@
  */
 import { useMemo, useState, useRef, useEffect } from "react";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
-import { ChevronLeft } from "lucide-react";
+import { ChevronLeft, Loader2 } from "lucide-react";
 import gsap from "gsap";
-import { useZohoBooks } from "@/hooks/use-zoho-books";
+import { useZohoBooks, useZohoAccountTxns } from "@/hooks/use-zoho-books";
 import { useCurrency } from "@/lib/CurrencyProvider";
 import { groupFor } from "@/lib/finance-groups";
 import type { ZohoBooksExpenseTxn } from "@/hooks/use-zoho-books";
@@ -60,7 +60,11 @@ export function CompanyFinanceSankey({ dateRange }: {
   const tableRef = useRef<HTMLDivElement | null>(null);
   const tween    = useRef({ s: 1, tx: 0, ty: 0 });
   const [tableCat, setTableCat] = useState<string | null>(null); // category the table shows (persists through fade-out)
-  const openTxns = (cat: string) => { setTableCat(cat); setSelectedCat(cat); };
+  // Lazy general-ledger detail for bill/journal-funded accounts. Only fetched
+  // once the user opens their first drill-down (it pages the whole GL).
+  const [ledgerEnabled, setLedgerEnabled] = useState(false);
+  const { data: ledger, isLoading: ledgerLoading } = useZohoAccountTxns(dateRange, ledgerEnabled);
+  const openTxns = (cat: string) => { setLedgerEnabled(true); setTableCat(cat); setSelectedCat(cat); };
 
   const base = useMemo(() => {
     if (!data?.configured || !data.ok) return null;
@@ -94,7 +98,7 @@ export function CompanyFinanceSankey({ dateRange }: {
     // Admin) rolls into one clickable "Other <group>" bucket to keep it clean.
     const cats: RNode[] = [];
     const blocks: Record<string, { top: number; bottom: number }> = {};
-    const rollupInfo = new Map<string, { amount: number; count: number; txns: ZohoBooksExpenseTxn[] }>();
+    const rollupInfo = new Map<string, { amount: number; count: number; txns: ZohoBooksExpenseTxn[]; cats: string[] }>();
     let y = 0;
     for (const g of groupList) {
       const top = y;
@@ -110,6 +114,7 @@ export function CompanyFinanceSankey({ dateRange }: {
           amount,
           count: tail.reduce((s, c) => s + (base.catInfo.get(c.name)?.count ?? 0), 0),
           txns: tail.flatMap(c => base.catInfo.get(c.name)?.txns ?? []),
+          cats: tail.map(c => c.name),
         });
         y += ch + PAD;
       }
@@ -236,6 +241,23 @@ export function CompanyFinanceSankey({ dateRange }: {
   const pct = (v: number) => base.totalExpenses > 0 ? `${((v / base.totalExpenses) * 100).toFixed(1)}% of expenses` : "";
   const tableSel = tableCat ? (base.catInfo.get(tableCat) ?? layout.rollupInfo.get(tableCat)) : null;
 
+  // Drill-down rows. The general ledger is complete and ties to each account's
+  // P&L total, so prefer it whenever it's loaded; the (often partial) Expense-
+  // module records are just an instant fallback while the ledger fetches.
+  const rollup       = tableCat ? layout.rollupInfo.get(tableCat) : null;
+  const recordTxns   = tableSel?.txns ?? [];
+  const ledgerTxns   = (ledger?.accounts && tableCat)
+    ? (rollup ? rollup.cats : [tableCat]).flatMap(n => ledger.accounts![n] ?? []).sort((a, b) => b.date.localeCompare(a.date))
+    : [];
+  const usingLedger  = ledgerTxns.length > 0;
+  const ledgerSum    = ledgerTxns.reduce((s, t) => s + t.amount, 0);
+  const rows: { date: string; amount: number; text: string; type?: string }[] =
+    usingLedger ? ledgerTxns : recordTxns;
+  const ledgerPending = rows.length === 0 && (ledgerLoading || (ledgerEnabled && !ledger));
+  // Website design is the only account that diverges: we strip suspect Scaled-AI
+  // dupes from the headline, but the raw ledger still lists them — note the gap.
+  const ledgerGap = usingLedger && tableSel ? Math.round(ledgerSum - tableSel.amount) : 0;
+
   const NodeRect = ({ n, belong, side, kind }: { n: RNode; belong: string; side: "left" | "right"; kind: "rev" | "profit" | "group" | "cat" }) => {
     const clickable = kind === "group" || kind === "cat";
     const onClick = kind === "group" ? () => { setFocus(focus === n.name ? null : n.name); setSelectedCat(null); }
@@ -339,9 +361,11 @@ export function CompanyFinanceSankey({ dateRange }: {
                   <div className="min-w-0">
                     <h4 className="text-[13px] font-semibold text-foreground truncate">{tableCat}</h4>
                     <p className="text-[11px] text-muted-foreground mt-0.5">
-                      {tableSel.txns.length > 0
-                        ? `${tableSel.count} transaction${tableSel.count === 1 ? "" : "s"} · ${pct(tableSel.amount)}`
-                        : `${pct(tableSel.amount)} of expenses · vendor bills / journals`}
+                      {usingLedger
+                        ? `${rows.length} ledger ${rows.length === 1 ? "entry" : "entries"} · ${pct(tableSel.amount)}`
+                        : recordTxns.length > 0
+                          ? `${tableSel.count} transaction${tableSel.count === 1 ? "" : "s"} · ${pct(tableSel.amount)}`
+                          : `${pct(tableSel.amount)} · vendor bills / journals`}
                     </p>
                   </div>
                   <div className="text-right shrink-0">
@@ -349,6 +373,11 @@ export function CompanyFinanceSankey({ dateRange }: {
                     <p className="text-[10px] uppercase tracking-wide text-muted-foreground mt-0.5">Total</p>
                   </div>
                 </div>
+                {ledgerGap !== 0 && (
+                  <div className="px-5 py-1.5 text-[10.5px] text-amber-700/90 bg-amber-50/70 border-b border-amber-200/50 shrink-0 leading-snug">
+                    Ledger lists {fmt(ledgerSum)} across {rows.length} entries; the total above excludes {fmt(Math.abs(ledgerGap))} of flagged duplicate Scaled AI bills.
+                  </div>
+                )}
                 <div className="flex-1 overflow-y-auto">
                   <table className="w-full text-left border-collapse">
                     <thead className="sticky top-0 z-10 bg-card/95 backdrop-blur-sm shadow-[0_1px_0_rgba(0,0,0,0.06)]">
@@ -359,20 +388,29 @@ export function CompanyFinanceSankey({ dateRange }: {
                       </tr>
                     </thead>
                     <tbody>
-                      {tableSel.txns.length === 0 ? (
+                      {rows.length > 0 ? rows.map((t, i) => (
+                        <tr key={`${t.date}-${i}`} className="border-b border-border/25 last:border-0 odd:bg-muted/15 hover:bg-blue-50/50 transition-colors">
+                          <td className="py-2.5 px-5 text-[12px] font-mono text-muted-foreground whitespace-nowrap align-top">{t.date || "—"}</td>
+                          <td className="py-2.5 px-3 max-w-[520px]">
+                            <div className="flex items-center gap-2 min-w-0">
+                              {t.type ? <span className="shrink-0 text-[9px] uppercase tracking-wide text-muted-foreground/70 bg-muted/70 rounded px-1.5 py-0.5">{t.type}</span> : null}
+                              <span className="text-[12.5px] text-foreground/85 truncate" title={t.text}>{t.text || <span className="text-muted-foreground/40">—</span>}</span>
+                            </div>
+                          </td>
+                          <td className={`py-2.5 px-5 text-[12.5px] text-right tabular-nums font-semibold align-top ${t.amount < 0 ? "text-emerald-700" : "text-foreground"}`}>{fmt(t.amount)}</td>
+                        </tr>
+                      )) : ledgerPending ? (
+                        <tr><td colSpan={3} className="py-12 text-center text-[12px] text-muted-foreground">
+                          <span className="inline-flex items-center gap-2"><Loader2 className="h-4 w-4 animate-spin" /> Loading transactions from Zoho…</span>
+                        </td></tr>
+                      ) : (
                         <tr><td colSpan={3} className="py-10 px-6 text-center">
                           <p className="text-[12.5px] text-foreground/70 font-medium">No line-item detail for this account</p>
                           <p className="text-[11.5px] text-muted-foreground mt-1.5 max-w-[420px] mx-auto leading-relaxed">
-                            These costs are booked in Zoho as vendor bills or journal entries (payroll, hardware, licensing fees…), which aren't itemised in this view. The total above is exact and ties to Zoho's P&amp;L.
+                            These costs are booked in Zoho as vendor bills or journal entries which aren't itemised here. The total above is exact and ties to Zoho's P&amp;L.
                           </p>
                         </td></tr>
-                      ) : tableSel.txns.map((t, i) => (
-                        <tr key={`${t.date}-${i}`} className="border-b border-border/25 last:border-0 odd:bg-muted/15 hover:bg-blue-50/50 transition-colors">
-                          <td className="py-2.5 px-5 text-[12px] font-mono text-muted-foreground whitespace-nowrap">{t.date || "—"}</td>
-                          <td className="py-2.5 px-3 text-[12.5px] text-foreground/85 max-w-[520px] truncate" title={t.text}>{t.text || <span className="text-muted-foreground/40">—</span>}</td>
-                          <td className="py-2.5 px-5 text-[12.5px] text-right tabular-nums font-semibold text-foreground">{fmt(t.amount)}</td>
-                        </tr>
-                      ))}
+                      )}
                     </tbody>
                   </table>
                 </div>

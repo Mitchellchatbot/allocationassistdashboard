@@ -184,6 +184,61 @@ serve(async (req) => {
     }
   }
 
+  // ── action=accounttxns: per-account transaction detail for the drill-downs.
+  //    Accounts funded by vendor bills / journal entries have no Expense-module
+  //    records, so we read Zoho's Account-Transactions report (the general
+  //    ledger): every bill/expense/journal leg, with the vendor in
+  //    `transaction_details`. The report ignores an account_id filter, so we
+  //    page the whole GL for the range, keep only the EXPENSE-account legs, and
+  //    return them grouped by account. The dashboard fetches this once (lazily)
+  //    and serves every category drill-down from the cached map.
+  if (body.action === "accounttxns") {
+    try {
+      const f = ymd(body.from ?? ""), t = ymd(body.to ?? "");
+      if (!f || !t) return json({ configured: true, ok: false, error: "from/to (YYYY-MM-DD) required" }, 400);
+      // Which accounts are expenses (so we drop AP / VAT / bank / AR offset legs).
+      const coa = await fetchAll(token, "chartofaccounts", "chartofaccounts", {});
+      const expenseAccts = new Set(coa
+        .filter(a => /expense|cost_of_goods/i.test(String(a.account_type ?? "")))
+        .map(a => String(a.account_name)));
+      // Page through the general ledger (Account Transactions report).
+      const legs: Record<string, unknown>[] = [];
+      const walk = (nodes: unknown): void => {
+        if (Array.isArray(nodes)) { for (const n of nodes) walk(n); return; }
+        if (nodes && typeof nodes === "object") {
+          const o = nodes as Record<string, unknown>;
+          if ("transaction_type" in o || "net_amount" in o) legs.push(o);
+          if (Array.isArray(o.account_transactions)) walk(o.account_transactions);
+        }
+      };
+      for (let page = 1; page <= 15; page++) {
+        const url = `${API_BASE}/reports/accounttransaction?organization_id=${ORG}&from_date=${f}&to_date=${t}&per_page=2000&page=${page}`;
+        const res = await fetch(url, { headers: { Authorization: `Zoho-oauthtoken ${token}` } });
+        if (!res.ok) { console.error("[zoho-books] accounttransaction failed:", res.status, await res.text()); break; }
+        const j = await res.json() as Record<string, unknown>;
+        walk(j.account_transactions);
+        const pc = j.page_context as Record<string, unknown> | undefined;
+        if (!pc || !pc.has_more_page) break;
+      }
+      // Keep expense-account legs, net debit−credit (so refunds reduce), group.
+      const byAcct: Record<string, { date: string; type: string; text: string; amount: number }[]> = {};
+      for (const lg of legs) {
+        const acct = String(lg.account_name ?? "");
+        if (!expenseAccts.has(acct)) continue;
+        const amount = +(num(lg.debit) - num(lg.credit)).toFixed(2);
+        if (amount === 0) continue;
+        const text = [lg.transaction_details, lg.entity_number, lg.reference_number]
+          .map(x => String(x ?? "").trim()).filter(Boolean).join(" · ");
+        const type = String(lg.transaction_type ?? "").replace(/_/g, " ");
+        (byAcct[acct] ??= []).push({ date: String(lg.date ?? "").slice(0, 10), type, text, amount });
+      }
+      for (const k of Object.keys(byAcct)) byAcct[k].sort((a, b) => b.date.localeCompare(a.date));
+      return json({ configured: true, ok: true, accounts: byAcct });
+    } catch (e) {
+      return json({ configured: true, ok: false, error: (e as Error).message }, 500);
+    }
+  }
+
   // ── action=bills: read-only dump of vendor bills in a date range, for
   //    auditing (e.g. checking Scaled AI bills for duplicates). TEMP/debug.
   if (body.action === "bills") {

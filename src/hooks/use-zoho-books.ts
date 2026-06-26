@@ -34,6 +34,18 @@ export interface ZohoBooksData {
   /** Marketing/advertising expense transactions — text carries the channel
    *  (account / reference / description), classified on the dashboard. */
   marketingTxns?: { date: string; amount: number; text: string }[];
+  /** Suspect non-retainer Scaled AI billing removed from `expenses`. */
+  scaledAiCorrection?: number;
+}
+
+/** A single general-ledger leg posted to an expense account. */
+export interface ZohoAccountTxn { date: string; type: string; text: string; amount: number }
+export interface ZohoAccountTxnsData {
+  configured: boolean;
+  ok: boolean;
+  error?: string;
+  /** account name → its ledger transactions (bills, expenses, journals). */
+  accounts?: Record<string, ZohoAccountTxn[]>;
 }
 
 const ymd = (d: Date) =>
@@ -69,6 +81,43 @@ export function useZohoBooks(dateRange: { from: Date; to: Date }) {
         return { configured: false, ok: false, error: (e as Error).message };
       }
     },
+    staleTime: 10 * 60_000,
+    refetchOnWindowFocus: false,
+    retry: 0,
+  });
+}
+
+/**
+ * Per-account general-ledger transactions for the period — the line items
+ * behind accounts funded by vendor bills / journal entries (payroll, hardware,
+ * licensing…), which have no Expense-module records. Heavy (pages the whole
+ * GL), so it's lazy: pass `enabled` true only once a drill-down is opened. One
+ * fetch is cached and serves every account's drill-down.
+ */
+export function useZohoAccountTxns(dateRange: { from: Date; to: Date }, enabled: boolean) {
+  const from = ymd(dateRange.from);
+  const to   = ymd(dateRange.to);
+  return useQuery<ZohoAccountTxnsData>({
+    queryKey: ["zoho-accounttxns", from, to],
+    queryFn: async () => {
+      const session = (await supabase.auth.getSession()).data.session;
+      const token   = session?.access_token ?? SUPABASE_ANON_KEY;
+      try {
+        const res = await fetch(`${SUPABASE_URL}/functions/v1/zoho-books`, {
+          method: "POST",
+          headers: {
+            apikey:         SUPABASE_ANON_KEY,
+            Authorization:  `Bearer ${token}`,
+            "content-type": "application/json",
+          },
+          body: JSON.stringify({ action: "accounttxns", from, to }),
+        });
+        return await res.json() as ZohoAccountTxnsData;
+      } catch (e) {
+        return { configured: false, ok: false, error: (e as Error).message };
+      }
+    },
+    enabled,
     staleTime: 10 * 60_000,
     refetchOnWindowFocus: false,
     retry: 0,
