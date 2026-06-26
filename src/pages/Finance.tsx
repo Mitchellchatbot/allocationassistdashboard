@@ -16,6 +16,7 @@ import { normalizeChannelKey, classifyChannel, WEBSITE_SEO_RETAINER_AED, WEBSITE
 import { useDoctorRevenue } from "@/hooks/use-doctor-dossier";
 import { ChannelRoiTable } from "@/components/finance/ChannelRoiTable";
 import { CompanyFinanceSankey } from "@/components/finance/CompanyFinanceSankey";
+import { ExpenseSearch } from "@/components/finance/ExpenseSearch";
 import {
   BarChart, Bar, XAxis, YAxis, Tooltip, ResponsiveContainer, CartesianGrid, Cell,
   AreaChart, Area, PieChart, Pie, Legend, LineChart, Line, ComposedChart,
@@ -1179,6 +1180,9 @@ const Finance = () => {
       {/* Company income-statement Sankey: revenue → expense groups → profit.
           Sits under the ROI table. */}
       <CompanyFinanceSankey dateRange={dateRange} />
+
+      {/* Universal search over every expense in Zoho Books for the period. */}
+      <ExpenseSearch dateRange={dateRange} />
 
       {/* Revenue vs Expenses vs Profit chart removed — the Digest's monthly
           chart already covers it. */}
