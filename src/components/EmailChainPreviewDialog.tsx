@@ -4,6 +4,7 @@ import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { Loader2, ChevronDown, ChevronRight, Mail, ArrowRight } from "lucide-react";
 import { EmailPreview } from "@/components/EmailPreview";
+import { FullScreenEmailPreview } from "@/components/FullScreenEmailPreview";
 import { useEmailTemplates, renderTemplate, type EmailTemplate } from "@/hooks/use-email-templates";
 import type { StagedProfile } from "@/hooks/use-wp-candidates";
 
@@ -298,6 +299,7 @@ function ChainStep({
   vars:  Record<string, string>;
 }) {
   const tpl = byKey.get(step.templateKey);
+  const [fs, setFs] = useState(false);
 
   if (!tpl) {
     return (
@@ -332,7 +334,9 @@ function ChainStep({
         text={text}
         templateKey={step.templateKey}
         attachments={step.attachments}
+        onExpand={() => setFs(true)}
       />
+      <FullScreenEmailPreview open={fs} onClose={() => setFs(false)} subject={subject} html={html} text={text} attachments={step.attachments} />
     </div>
   );
 }

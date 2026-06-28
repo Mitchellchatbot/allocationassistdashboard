@@ -380,6 +380,47 @@ export function useCreateStagedProfile() {
   });
 }
 
+/** Drop a CV PDF/DOCX → create a staged profile straight from the CV, no
+ *  intake form (Amir 2026-06-26). Base64-encodes the file and posts it to the
+ *  cv-to-profile edge function, which stores it, creates the staging row, and
+ *  triggers Claude extraction. Returns the new staged id so the caller can
+ *  auto-open the editor. extraction_ok=false means the row exists but Claude
+ *  parsing failed — the team can retry from the staging dialog. */
+export function useCreateProfileFromCv() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: async (file: File): Promise<{ staged_id: string; extraction_ok: boolean; extraction_error?: string }> => {
+      const file_base64 = await fileToBase64(file);
+      const { data: sess } = await supabase.auth.getSession();
+      const { data, error } = await supabase.functions.invoke("cv-to-profile", {
+        body: {
+          file_base64,
+          file_name:  file.name,
+          file_mime:  file.type || undefined,
+          created_by: sess.session?.user.email ?? null,
+        },
+      });
+      if (error) throw error;
+      const res = data as { ok: boolean; staged_id?: string; extraction_ok?: boolean; extraction_error?: string; error?: string };
+      if (!res.ok || !res.staged_id) throw new Error(res.error ?? "CV upload failed");
+      return { staged_id: res.staged_id, extraction_ok: !!res.extraction_ok, extraction_error: res.extraction_error };
+    },
+    onSuccess: () => qc.invalidateQueries({ queryKey: STAGED_KEY }),
+  });
+}
+
+/** Encode a File to base64 in 32KB chunks (btoa chokes on large buffers in
+ *  one shot). ~2MB CV → ~2.7MB base64, well within the function's body cap. */
+async function fileToBase64(file: File): Promise<string> {
+  const buf = new Uint8Array(await file.arrayBuffer());
+  let s = "";
+  const CHUNK = 0x8000;
+  for (let i = 0; i < buf.length; i += CHUNK) {
+    s += String.fromCharCode.apply(null, Array.from(buf.subarray(i, i + CHUNK)) as number[]);
+  }
+  return btoa(s);
+}
+
 /** Edit a staged profile's flat fields or its acf payload in-place. */
 export function useUpdateStagedProfile() {
   const qc = useQueryClient();

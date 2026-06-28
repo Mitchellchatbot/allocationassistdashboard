@@ -1,0 +1,87 @@
+/**
+ * Lightweight React Query cache persistence — no extra dependency.
+ *
+ * Why: every hard refresh otherwise throws away the in-memory cache and every
+ * page refetches from scratch (the 25-min staleTime is memory-only). Persisting
+ * the cache to localStorage lets a reload paint instantly from the last
+ * snapshot, then revalidate in the background. Biggest wins: first load after a
+ * refresh, switching between data-heavy pages, and the ~19s Zoho Books call on
+ * Finance (which now shows last-known actuals immediately while it refetches).
+ *
+ * Built on react-query's own dehydrate()/hydrate() (already in the bundle) so
+ * there's no new package. Every storage touch is wrapped in try/catch — if
+ * localStorage is full, disabled, or the snapshot is corrupt, we silently fall
+ * back to the cold-start behaviour the app had before.
+ */
+import { dehydrate, hydrate, type QueryClient, type Query } from "@tanstack/react-query";
+
+// Bump the version suffix to invalidate every persisted cache after a release
+// that changes a query's data SHAPE (so we never hydrate a stale structure).
+const STORAGE_KEY = "aa-rq-cache-v1";
+// localStorage is ~5MB of UTF-16; stay well under so a write can't throw quota.
+const MAX_CHARS = 2_000_000;
+// Don't hydrate anything older than this — avoids showing day-old numbers.
+const MAX_AGE_MS = 24 * 60 * 60 * 1000;
+const WRITE_THROTTLE_MS = 1500;
+
+// Queries we deliberately DON'T persist:
+//   - zoho-data: the whole Zoho cache (multi-MB) — would blow the size budget.
+//     It's a single fast zoho_cache row read on reload, not a bottleneck.
+const EXCLUDE_FIRST_KEY = new Set<string>(["zoho-data"]);
+
+function shouldPersist(q: Query): boolean {
+  return q.state.status === "success" && !EXCLUDE_FIRST_KEY.has(String(q.queryKey[0]));
+}
+
+/** Restore the last snapshot into the cache. Call ONCE, synchronously, before
+ *  the first render so components read warm data on mount. */
+export function restoreQueryCache(qc: QueryClient): void {
+  try {
+    if (typeof localStorage === "undefined") return;
+    const raw = localStorage.getItem(STORAGE_KEY);
+    if (!raw) return;
+    const parsed = JSON.parse(raw) as { t?: number; state?: unknown };
+    if (!parsed || typeof parsed.t !== "number" || Date.now() - parsed.t > MAX_AGE_MS) {
+      localStorage.removeItem(STORAGE_KEY);
+      return;
+    }
+    hydrate(qc, parsed.state);
+  } catch {
+    // Corrupt / unreadable snapshot — start cold and clear it.
+    try { localStorage.removeItem(STORAGE_KEY); } catch { /* ignore */ }
+  }
+}
+
+/** Subscribe to cache changes and persist a throttled snapshot. Returns an
+ *  unsubscribe fn (unused at the app root, but handy for tests). */
+export function startQueryPersist(qc: QueryClient): () => void {
+  let timer: ReturnType<typeof setTimeout> | undefined;
+
+  const write = () => {
+    try {
+      if (typeof localStorage === "undefined") return;
+      const state = dehydrate(qc, { shouldDehydrateQuery: shouldPersist });
+      const payload = JSON.stringify({ t: Date.now(), state });
+      // All-or-nothing size guard — if the snapshot is too big, skip this write
+      // rather than risk a QuotaExceededError mid-set.
+      if (payload.length > MAX_CHARS) return;
+      localStorage.setItem(STORAGE_KEY, payload);
+    } catch {
+      // Quota or serialisation error — drop the snapshot and carry on.
+      try { localStorage.removeItem(STORAGE_KEY); } catch { /* ignore */ }
+    }
+  };
+
+  const schedule = () => {
+    if (timer) return;
+    timer = setTimeout(() => { timer = undefined; write(); }, WRITE_THROTTLE_MS);
+  };
+
+  return qc.getQueryCache().subscribe(schedule);
+}
+
+/** Wipe the persisted snapshot — call on sign-out so a shared machine doesn't
+ *  hand the next user the previous one's cached data. */
+export function clearQueryCachePersist(): void {
+  try { localStorage.removeItem(STORAGE_KEY); } catch { /* ignore */ }
+}

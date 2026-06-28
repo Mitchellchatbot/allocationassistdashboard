@@ -24,6 +24,11 @@ import { scoreCandidate, type MatchScore } from "@/lib/match-score";
 import { useWpCandidates, usePublishedWpCandidates, wpCandidateProfileText, type WpCandidate } from "@/hooks/use-wp-candidates";
 import { MatchScoreChip, MatchReasons } from "@/components/DoctorVacancyMatches";
 import { EditableEmailPreview } from "@/components/EditableEmailPreview";
+import { AttachmentsPicker } from "@/components/automations/AttachmentsPicker";
+import type { EmailAttachment } from "@/lib/email-attachments";
+import { GulfClock, composeGulfDateTime } from "@/components/GulfClock";
+import { useScheduledProfileSends, useCancelScheduledProfileSend } from "@/hooks/use-scheduled-profile-sends";
+import { UserSquare2 } from "lucide-react";
 
 /**
  * Phase 6 — Recurring batch sends. Source: Saif Ullah, May 20 2026.
@@ -105,6 +110,8 @@ export default function Batches() {
           </CardContent>
         </Card>
 
+        <ScheduledProfileSendsCard />
+
         <SpecialtyRotationCard rotation={rotation} />
 
         <Card>
@@ -150,6 +157,14 @@ function BatchRow({ batch, onEdit, compact = false }: { batch: ScheduledBatch; o
         <div className="flex items-center gap-2 flex-wrap">
           <span className="text-[12px] font-medium">{kindLabel}</span>
           <Badge variant="outline" className="text-[9px] bg-slate-50 uppercase tracking-wider">{dayLabel}</Badge>
+          {batch.scheduled_at_time && (
+            <Badge variant="outline" className="text-[9px] bg-teal-50 text-teal-700 border-teal-200 tracking-wider">
+              {batch.scheduled_at_time.slice(0, 5)} GST
+            </Badge>
+          )}
+          {batch.recurrence?.freq === "weekly" && (
+            <Badge variant="outline" className="text-[9px] bg-amber-50 text-amber-700 border-amber-200 uppercase tracking-wider">Weekly</Badge>
+          )}
           {batch.country && (
             <Badge variant="outline" className="text-[9px] bg-sky-50 text-sky-700 border-sky-200 uppercase tracking-wider">
               {batch.country} · {workWeekLabel(batch.country)}
@@ -162,11 +177,14 @@ function BatchRow({ batch, onEdit, compact = false }: { batch: ScheduledBatch; o
           )}
           <StatusBadge status={batch.status} />
         </div>
-        <div className="text-[10px] text-muted-foreground mt-0.5">
-          {batch.doctor_ids.length} doctor{batch.doctor_ids.length === 1 ? "" : "s"} queued
-          {batch.hospital_count != null && <> · {batch.hospital_count} hospital recipients</>}
-          {batch.sent_at && <> · sent {formatDate(batch.sent_at)}</>}
-          {batch.error && <span className="text-rose-600"> · {batch.error}</span>}
+        <div className="text-[10px] text-muted-foreground mt-0.5 flex items-center gap-1.5 flex-wrap">
+          <span>{batch.doctor_ids.length} doctor{batch.doctor_ids.length === 1 ? "" : "s"} queued</span>
+          {batch.hospital_count != null && <span>· {batch.hospital_count} hospital recipients</span>}
+          {batch.status === "draft" && batch.scheduled_at_time && (
+            <><span>·</span><GulfClock when={composeGulfDateTime(batch.scheduled_for, batch.scheduled_at_time.slice(0, 5))} /></>
+          )}
+          {batch.sent_at && <span>· sent {formatDate(batch.sent_at)}</span>}
+          {batch.error && <span className="text-rose-600">· {batch.error}</span>}
         </div>
       </button>
       {batch.status === "sent" && (
@@ -784,6 +802,56 @@ function SpecialtyRotationCard({ rotation }: { rotation: ReturnType<typeof useSp
   );
 }
 
+// Scheduled Send-Profile campaigns (Amir #5) — future hospital+doctor sends
+// queued from the Send Profile dialog. Cron firing is deploy-gated; the queue
+// is fully visible + cancellable in the UI now.
+function ScheduledProfileSendsCard() {
+  const { data: scheduled = [], isLoading } = useScheduledProfileSends();
+  const cancel = useCancelScheduledProfileSend();
+  if (isLoading || scheduled.length === 0) return null;
+  return (
+    <Card>
+      <CardHeader className="pb-3">
+        <CardTitle className="text-base flex items-center gap-2">
+          <UserSquare2 className="h-4 w-4 text-teal-600" /> Scheduled profile sends
+          <Badge variant="outline" className="text-[9px] bg-amber-50 text-amber-700 border-amber-200">{scheduled.length}</Badge>
+        </CardTitle>
+        <CardDescription className="text-[11px]">
+          Future hospital + doctor sends queued from Send Profile. The scheduler fires these server-side once edge functions are deployed.
+        </CardDescription>
+      </CardHeader>
+      <CardContent className="p-0">
+        <div className="divide-y">
+          {scheduled.map(s => (
+            <div key={s.id} className="px-4 py-3 flex items-center gap-3">
+              <UserSquare2 className="h-4 w-4 text-slate-400 shrink-0" />
+              <div className="flex-1 min-w-0">
+                <div className="flex items-center gap-2 flex-wrap">
+                  <span className="text-[12px] font-medium truncate">{s.doctor_name}</span>
+                  <Badge variant="outline" className="text-[9px] bg-slate-50 uppercase tracking-wider">{s.hospital_ids.length} hospital{s.hospital_ids.length === 1 ? "" : "s"}</Badge>
+                  {s.template_overrides && <Badge variant="outline" className="text-[9px] bg-pink-50 text-pink-700 border-pink-200">custom template</Badge>}
+                  {(s.attachments?.length ?? 0) > 0 && <Badge variant="outline" className="text-[9px] bg-teal-50 text-teal-700 border-teal-200">{s.attachments.length} attachment{s.attachments.length === 1 ? "" : "s"}</Badge>}
+                </div>
+                <div className="text-[10px] text-muted-foreground mt-0.5 flex items-center gap-1.5 flex-wrap">
+                  <span>{s.doctor_speciality ?? "—"}</span>
+                  <span>·</span>
+                  <GulfClock when={composeGulfDateTime(s.scheduled_for, (s.scheduled_at_time ?? "09:00").slice(0, 5))} />
+                </div>
+              </div>
+              <Button
+                size="sm" variant="ghost" className="h-7 text-[10px] text-rose-600 hover:bg-rose-50"
+                onClick={async () => { if (confirm(`Cancel the scheduled send for ${s.doctor_name}?`)) { try { await cancel.mutateAsync(s.id); toast.success("Cancelled."); } catch (e) { toast.error(e instanceof Error ? e.message : "Cancel failed"); } } }}
+              >
+                Cancel
+              </Button>
+            </div>
+          ))}
+        </div>
+      </CardContent>
+    </Card>
+  );
+}
+
 function StatusBadge({ status }: { status: ScheduledBatch["status"] }) {
   const cls =
     status === "sent"      ? "bg-emerald-100 text-emerald-800 border-emerald-200" :
@@ -815,6 +883,13 @@ const KIND_LABEL: Record<BatchKind, string> = {
 const SUN_THU_COUNTRIES = new Set(["saudi arabia", "ksa", "saudi", "qatar", "oman", "kuwait", "bahrain"]);
 function workWeekLabel(country: string | null | undefined): string {
   return SUN_THU_COUNTRIES.has((country ?? "").toLowerCase().trim()) ? "Sun–Thu" : "Mon–Fri";
+}
+/** Weekday numbers (0=Sun…6=Sat) for the country's work week — used for the
+ *  "every weekday" recurrence so a Saudi schedule recurs Sun–Thu. */
+function workWeekdays(country: string | null | undefined): number[] {
+  return SUN_THU_COUNTRIES.has((country ?? "").toLowerCase().trim())
+    ? [0, 1, 2, 3, 4]   // Sun–Thu
+    : [1, 2, 3, 4, 5];  // Mon–Fri
 }
 
 // ── Unified create / edit dialog ─────────────────────────────────────────
@@ -857,6 +932,10 @@ function BatchDialog({ target, onTargetChange, batches, suggestedSpecialty }: {
   // Create-form local state — only used while target === "new".
   const [kind, setKind] = useState<BatchKind>("daily_duo");
   const [scheduledFor, setScheduledFor] = useState<string>(todayISO());
+  // Time-of-day + recurrence (Amir #5) — Gulf time. Two daily batches at
+  // different times become two rows on the same date+country.
+  const [scheduledTime, setScheduledTime] = useState<string>("09:00");
+  const [recurrenceFreq, setRecurrenceFreq] = useState<"none" | "weekly">("none");
   const [specialty, setSpecialty]       = useState<string>("");
   // Country defaults to UAE — that's the highest-volume target and matches
   // Ammar's spec (one batch per country, sent to all hospitals in that
@@ -898,6 +977,7 @@ function BatchDialog({ target, onTargetChange, batches, suggestedSpecialty }: {
   const close = () => {
     onTargetChange(null);
     setKind("daily_duo"); setScheduledFor(todayISO()); setSpecialty(""); setCountry("UAE"); setSearch("");
+    setScheduledTime("09:00"); setRecurrenceFreq("none");
   };
 
   const handleCreate = async () => {
@@ -914,21 +994,29 @@ function BatchDialog({ target, onTargetChange, batches, suggestedSpecialty }: {
       // the DB has a unique index that would reject a duplicate. Detect it
       // client-side so we can switch the dialog to editing the existing row
       // instead of bouncing the user with a constraint-violation toast.
+      // Duplicate detection now includes the TIME (Amir #5) so two same-day
+      // same-country batches at different times are NOT collapsed into one.
       const existing = batches.find(b =>
         b.kind === kind &&
         b.scheduled_for === scheduledFor &&
         (b.specialty ?? "") === (finalSpecialty ?? "") &&
         (b.country   ?? "") === (country.trim() || "") &&
+        ((b.scheduled_at_time ?? "").slice(0, 5) || "") === scheduledTime &&
         b.status !== "cancelled",
       );
       if (existing) {
-        toast.info("A batch for this date + country already exists — opening it.");
+        toast.info("A batch for this date + country + time already exists — opening it.");
         onTargetChange(existing.id);
         setCreating(false); return;
       }
       const created = await upsert.mutateAsync({
         kind,
         scheduled_for: scheduledFor,
+        scheduled_at_time: scheduledTime,
+        timezone: "Asia/Dubai",
+        recurrence: recurrenceFreq === "weekly"
+          ? { freq: "weekly", weekdays: workWeekdays(country) }
+          : { freq: "none" },
         specialty:     finalSpecialty,
         country:       country.trim() || null,
       });
@@ -986,14 +1074,21 @@ function BatchDialog({ target, onTargetChange, batches, suggestedSpecialty }: {
         })
       : base;
 
-    // Keyword search scans the doctor's WHOLE profile blob (headline
-    // specialty + sub-specialty + area of interest + bio + WP education /
-    // experience / job-title text) — so "electrophysiology" surfaces
-    // website cardiologists whose profile names it anywhere, even when the
-    // headline specialty is just "Cardiology" (Ammar 2026-06-09).
-    const filtered = !q ? specialtyFiltered : specialtyFiltered.filter(d =>
-      d.profileText.includes(q) || (d.email ?? "").toLowerCase().includes(q)
-    );
+    // Search bypasses EVERY filter (Amir 2026-06-26: "not even eligible —
+    // just every person with a profile on WordPress"). The website / specialty
+    // toggles and the eligibility gate shape the DEFAULT ranked suggestions,
+    // but typing a name/keyword is the user explicitly asking for a specific
+    // person, so we scan the whole pool. allDoctors is built spine-first from
+    // the published WP candidates, so this IS "everyone with a WordPress
+    // profile" — only the already-queued ones are removed. Keyword search hits
+    // the doctor's WHOLE profile blob (headline specialty + sub-specialty +
+    // area of interest + bio + WP education / experience / job-title text).
+    const filtered = !q
+      ? specialtyFiltered
+      : allDoctors.filter(d =>
+          !batch.doctor_ids.includes(d.id) &&
+          (d.profileText.includes(q) || (d.email ?? "").toLowerCase().includes(q)),
+        );
     const scored = filtered.map(d => ({ ...d, _score: scoreDoctor(d, batch, effectiveSpecialty) }));
     // When the user is searching, rank by WHERE the keyword hit first
     // (sub-specialty > area of interest > headline specialty > anywhere in
@@ -1004,13 +1099,20 @@ function BatchDialog({ target, onTargetChange, batches, suggestedSpecialty }: {
       (q ? keywordRelevance(b, q) - keywordRelevance(a, q) : 0) ||
       b._score.score - a._score.score,
     );
-    return scored.slice(0, 30);
+    // Show more when searching — an explicit lookup shouldn't get truncated
+    // at the same shortlist length as the ranked default view.
+    return scored.slice(0, q ? 100 : 30);
   })();
 
   const setDoctors = async (next: string[]) => {
     if (!batch) return;
     try { await update.mutateAsync({ id: batch.id, patch: { doctor_ids: next } }); }
     catch (e) { toast.error(e instanceof Error ? e.message : "Update failed"); }
+  };
+  const setAttachments = async (next: EmailAttachment[]) => {
+    if (!batch) return;
+    try { await update.mutateAsync({ id: batch.id, patch: { attachments: next } }); }
+    catch (e) { toast.error(e instanceof Error ? e.message : "Attachment update failed"); }
   };
   // Dedupe guard: doctor_ids comes from the query cache, so a fast double-
   // click before the refetch lands could otherwise queue the same doctor
@@ -1073,9 +1175,28 @@ function BatchDialog({ target, onTargetChange, batches, suggestedSpecialty }: {
                   </SelectContent>
                 </Select>
               </div>
+              <div className="grid grid-cols-2 gap-2">
+                <div className="space-y-1">
+                  <Label className="text-[11px]">Date</Label>
+                  <Input type="date" value={scheduledFor} onChange={e => setScheduledFor(e.target.value)} className="h-9 text-[12px]" />
+                </div>
+                <div className="space-y-1">
+                  <Label className="text-[11px] flex items-center gap-1">Time <span className="text-slate-400 normal-case">(GST)</span></Label>
+                  <Input type="time" value={scheduledTime} onChange={e => setScheduledTime(e.target.value)} className="h-9 text-[12px]" />
+                </div>
+              </div>
               <div className="space-y-1">
-                <Label className="text-[11px]">Date</Label>
-                <Input type="date" value={scheduledFor} onChange={e => setScheduledFor(e.target.value)} className="h-9 text-[12px]" />
+                <Label className="text-[11px]">Repeat</Label>
+                <Select value={recurrenceFreq} onValueChange={(v) => setRecurrenceFreq(v as "none" | "weekly")}>
+                  <SelectTrigger className="h-9 text-[12px]"><SelectValue /></SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="none">One-time</SelectItem>
+                    <SelectItem value="weekly">Every working day ({workWeekLabel(country)})</SelectItem>
+                  </SelectContent>
+                </Select>
+                <p className="text-[10px] text-muted-foreground">
+                  Tip: schedule one <strong>duo at 09:00</strong> and a second <strong>at 14:00</strong> for the same day — both are kept as separate sends.
+                </p>
               </div>
               <div className="space-y-1">
                 <Label className="text-[11px]">Country</Label>
@@ -1182,6 +1303,15 @@ function BatchDialog({ target, onTargetChange, batches, suggestedSpecialty }: {
               })}
             </section>
 
+            <section className="pt-3 border-t">
+              <AttachmentsPicker
+                attachments={batch.attachments ?? []}
+                onChange={setAttachments}
+                disabled={batch.status !== "draft" || update.isPending}
+                hint="CV, logbook, etc. — attached to every hospital in this batch"
+              />
+            </section>
+
             {batch.status === "draft" && (
               <section className="space-y-2 pt-3 border-t">
                 <div className="flex items-center justify-between gap-2 flex-wrap">
@@ -1216,9 +1346,14 @@ function BatchDialog({ target, onTargetChange, batches, suggestedSpecialty }: {
                 <Input
                   value={search}
                   onChange={e => setSearch(e.target.value)}
-                  placeholder="Filter by name, specialty, sub-specialty, area of interest, or email..."
+                  placeholder="Search ANY WordPress profile by name, specialty, area of interest, or email"
                   className="h-9 text-[12px]"
                 />
+                {q && (
+                  <div className="text-[10px] text-muted-foreground px-0.5">
+                    Searching every doctor with a WordPress profile — the filters above and the eligibility gate don't apply while you search, so you can queue anyone.
+                  </div>
+                )}
                 {candidatePool.length > 0 && (
                   <div className="rounded-md border max-h-[300px] overflow-y-auto divide-y">
                     {candidatePool.map(d => {
@@ -1268,7 +1403,7 @@ function BatchDialog({ target, onTargetChange, batches, suggestedSpecialty }: {
                   </div>
                 )}
                 {q && candidatePool.length === 0 && (
-                  <div className="text-[11px] text-muted-foreground italic">No matches.</div>
+                  <div className="text-[11px] text-muted-foreground italic">No WordPress profile matches “{search.trim()}”.</div>
                 )}
               </section>
             )}
@@ -1314,6 +1449,9 @@ function BatchDialog({ target, onTargetChange, batches, suggestedSpecialty }: {
               ? <span className="font-medium text-teal-700">Edited — your version sends, not the template.</span>
               : "What you see is what goes out — edit the subject or body below before sending."}
             {typeof emailPreview?.bcc_count === "number" && (<> · BCC to {emailPreview.bcc_count} hospital{emailPreview.bcc_count === 1 ? "" : "s"}</>)}
+            {batch && (batch.attachments?.length ?? 0) > 0 && (
+              <> · {batch.attachments.length} attachment{batch.attachments.length === 1 ? "" : "s"}</>
+            )}
           </DialogDescription>
         </DialogHeader>
         {emailPreview && (

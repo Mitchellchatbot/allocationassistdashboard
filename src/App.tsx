@@ -1,5 +1,6 @@
 import { Suspense, lazy as reactLazy, type ComponentType } from "react";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
+import { restoreQueryCache, startQueryPersist } from "@/lib/query-persist";
 import { BrowserRouter, Route, Routes, Outlet, useLocation, Navigate } from "react-router-dom";
 import { Toaster as Sonner } from "@/components/ui/sonner";
 import { Toaster } from "@/components/ui/toaster";
@@ -71,6 +72,8 @@ const Automations     = lazy(() => import("./pages/Automations"));
 const Vacancies       = lazy(() => import("./pages/Vacancies"));
 const Reports         = lazy(() => import("./pages/Reports"));
 const Batches         = lazy(() => import("./pages/Batches"));
+const PastSent        = lazy(() => import("./pages/PastSent"));
+const FeatureLab      = lazy(() => import("./pages/FeatureLab"));
 const MyWorkspace     = lazy(() => import("./pages/MyWorkspace"));
 const BulkImport      = lazy(() => import("./pages/BulkImport"));
 const Connections     = lazy(() => import("./pages/Connections"));
@@ -96,9 +99,20 @@ const queryClient = new QueryClient({
       staleTime: 60_000,
       refetchOnWindowFocus: false,
       retry: 1,
+      // Keep inactive query data in memory for a day so a persisted snapshot
+      // (restored below) isn't garbage-collected before its consumer mounts.
+      // Per-hook gcTime overrides still win (e.g. zoho-data sets its own).
+      gcTime: 24 * 60 * 60 * 1000,
     },
   },
 });
+
+// Warm-start: hydrate the last cache snapshot from localStorage BEFORE the
+// first render so a reload paints instantly, then revalidates in the
+// background. Then keep persisting on every cache change. Both calls are
+// fully guarded — if storage is unavailable the app just starts cold.
+restoreQueryCache(queryClient);
+startQueryPersist(queryClient);
 
 // Minimal full-page skeleton — only shown for the very first chunk load (Login).
 // In-app navigation uses ViewportSpinner from DashboardLayout, which preserves
@@ -210,6 +224,8 @@ const App = () => (
                 <Route path="/vacancies"      element={<Vacancies />} />
                 <Route path="/reports"        element={<Reports />} />
                 <Route path="/batches"        element={<Batches />} />
+                <Route path="/past-sent"      element={<PastSent />} />
+                <Route path="/feature-lab"    element={<FeatureLab />} />
                 <Route path="/import-bulk"    element={<BulkImport />} />
                 <Route path="/connections"    element={<Connections />} />
                 <Route path="/forms"          element={<Forms />} />

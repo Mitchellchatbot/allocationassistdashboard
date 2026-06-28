@@ -1,5 +1,6 @@
 import { useEffect, useRef, useState } from "react";
 import { supabase } from "@/lib/supabase";
+import { clearQueryCachePersist } from "@/lib/query-persist";
 import type { Session, User } from "@supabase/supabase-js";
 import { isHiTeamMember, findHiMemberByEmail } from "@/lib/hi-team";
 
@@ -157,7 +158,9 @@ export function useAuth() {
     return supabase.auth.signInWithPassword({ email, password });
   };
 
-  const signOut = () => supabase.auth.signOut();
+  // Drop the persisted query snapshot on sign-out so the next user on a shared
+  // machine doesn't get handed the previous one's cached data.
+  const signOut = () => { clearQueryCachePersist(); return supabase.auth.signOut(); };
 
   // Use cached profile if current profile is null (prevents nav flashing empty during re-fetches)
   const effectiveProfile = profile ?? profileCache.current;

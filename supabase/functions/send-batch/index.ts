@@ -352,6 +352,16 @@ Deno.serve(async (req: Request) => {
   const testCc: string[] | undefined = undefined;
   const bccList    = bccListRaw.filter(a => a.toLowerCase() !== EXCLUDED_RECIPIENT);
 
+  // ── Attachments (CVs / logbooks) ──────────────────────────────────────
+  // Stored on the batch row by the Batches dialog as { filename, path, … };
+  // Resend wants { filename, path } and fetches each public URL server-side.
+  const attachRaw = (batch.attachments as unknown);
+  const attachments: Array<{ filename: string; path: string }> = Array.isArray(attachRaw)
+    ? (attachRaw as Array<Record<string, unknown>>)
+        .map(a => ({ filename: String(a?.filename ?? "attachment"), path: String(a?.path ?? "") }))
+        .filter(a => a.path.startsWith("http"))
+    : [];
+
   let resendRes: Response;
   try {
     resendRes = await fetch("https://api.resend.com/emails", {
@@ -367,6 +377,7 @@ Deno.serve(async (req: Request) => {
           "X-AA-Batch-Id":  String(batch.id),
           "X-AA-Batch-Kind": String(batch.kind),
         },
+        attachments: attachments.length > 0 ? attachments : undefined,
       }),
     });
   } catch (e) {

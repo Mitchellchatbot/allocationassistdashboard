@@ -19,7 +19,27 @@ import { useDoctorProfile, useDoctorProfiles, profileToTokens, calcCompletion, t
 import { useWpCandidateForDoctor, usePublishedWpCandidates, wpCandidateToTokens, normalizePhone, type WpCandidate } from "@/hooks/use-wp-candidates";
 import { useZohoData, type ZohoDoctorOnBoard, type ZohoLead } from "@/hooks/use-zoho-data";
 import { EditableEmailPreview } from "@/components/EditableEmailPreview";
+import { type EmailAttachment } from "@/lib/email-attachments";
+import { AttachmentsPicker } from "@/components/automations/AttachmentsPicker";
+import { TemplatePicker } from "@/components/automations/TemplatePicker";
+import { useScheduleProfileSend } from "@/hooks/use-scheduled-profile-sends";
+import { GulfClock, composeGulfDateTime } from "@/components/GulfClock";
+import { Clock } from "lucide-react";
 import { useQueryClient } from "@tanstack/react-query";
+
+// Persisted per-recruiter template preference (Amir #3 "save as my default").
+const HOSPITAL_DEFAULT_KEY = "profile_sent_hospital";
+const DOCTOR_DEFAULT_KEY   = "profile_sent_doctor";
+function loadDefaultTemplate(which: "hospital" | "doctor"): string {
+  try {
+    const v = localStorage.getItem(`aa.profileSend.default.${which}`);
+    if (v) return v;
+  } catch { /* ignore */ }
+  return which === "hospital" ? HOSPITAL_DEFAULT_KEY : DOCTOR_DEFAULT_KEY;
+}
+function saveDefaultTemplate(which: "hospital" | "doctor", key: string): void {
+  try { localStorage.setItem(`aa.profileSend.default.${which}`, key); } catch { /* ignore */ }
+}
 
 interface Props {
   open:    boolean;
@@ -115,12 +135,16 @@ export function SendProfileDialog({ open, onClose }: Props) {
   // routing). Defaulted from the current user so their own outbound
   // copy lands in their inbox unless they actively change it.
   const [bccList,         setBccList]         = useState<string[]>([]);
+  // Per-send template keys (Amir #3). Persisted preference re-loads on open.
+  const [hospitalTemplateKey, setHospitalTemplateKey] = useState<string>(() => loadDefaultTemplate("hospital"));
+  const [doctorTemplateKey,   setDoctorTemplateKey]   = useState<string>(() => loadDefaultTemplate("doctor"));
 
   const qc = useQueryClient();
   const { data: zoho, isLoading: zohoLoading } = useZohoData();
   const { data: hospitals = [] } = useHospitals();
   const { data: templates = [] } = useEmailTemplates();
   const { user } = useAuth();
+  const scheduleProfileSend = useScheduleProfileSend();
 
   // Reset whenever the dialog re-opens.
   useEffect(() => {
@@ -134,6 +158,8 @@ export function SendProfileDialog({ open, onClose }: Props) {
       // outbound". The Preview step exposes the dropdown for changes.
       const me = findSenderByEmail(user?.email ?? null);
       setBccList(me ? [me.email] : []);
+      setHospitalTemplateKey(loadDefaultTemplate("hospital"));
+      setDoctorTemplateKey(loadDefaultTemplate("doctor"));
     }
   }, [open, user?.email]);
 
@@ -214,10 +240,20 @@ export function SendProfileDialog({ open, onClose }: Props) {
     [hospitals, selectedIds],
   );
 
-  const hospitalTemplate = templates.find(t => t.key === "profile_sent_hospital");
-  const doctorTemplate   = templates.find(t => t.key === "profile_sent_doctor");
+  // Per-send template selection (Amir #3). Defaults to the flow's two
+  // hardcoded templates; the team can pick ANY template per send. The picked
+  // doctor "working opportunity" template is the headline ask.
+  const hospitalTemplate = templates.find(t => t.key === hospitalTemplateKey)
+    ?? templates.find(t => t.key === "profile_sent_hospital");
+  const doctorTemplate   = templates.find(t => t.key === doctorTemplateKey)
+    ?? templates.find(t => t.key === "profile_sent_doctor");
 
-  const handleConfirm = async (stageOverrides?: Record<string, SendOverrides>) => {
+  const handleConfirm = async (
+    stageOverrides?: Record<string, SendOverrides>,
+    attachments?: EmailAttachment[],
+    templateKeys?: { hospital: string; doctor: string },
+    schedule?: { date: string; time: string },
+  ) => {
     if (!selectedDoctor || selectedHospitals.length === 0) return;
     // Edits only apply to a single-hospital send — the preview (and so the
     // edited HTML) is rendered for one hospital, and the override would bake
@@ -226,6 +262,48 @@ export function SendProfileDialog({ open, onClose }: Props) {
     const effectiveStageOverrides =
       selectedHospitals.length === 1 && stageOverrides && Object.keys(stageOverrides).length
         ? stageOverrides : undefined;
+    const recipientsSplit = splitRecipients(bccList);
+    const templateOverridesPayload = templateKeys && (templateKeys.hospital !== HOSPITAL_DEFAULT_KEY || templateKeys.doctor !== DOCTOR_DEFAULT_KEY)
+      ? {
+          ...(templateKeys.hospital !== HOSPITAL_DEFAULT_KEY ? { email_hospital: templateKeys.hospital } : {}),
+          ...(templateKeys.doctor   !== DOCTOR_DEFAULT_KEY   ? { email_doctor:   templateKeys.doctor }   : {}),
+        }
+      : null;
+
+    // ── Schedule-for-later branch (Amir #5) ─────────────────────────────────
+    // Instead of creating runs + sending now, stash everything the send needs
+    // in a scheduled_profile_sends row. A deployed scheduler expands it later;
+    // the Scheduled queue lets the team Send now / Reschedule / Cancel.
+    if (schedule?.date) {
+      setSubmitting(true);
+      try {
+        await scheduleProfileSend.mutateAsync({
+          doctor_id:         selectedDoctor.id,
+          doctor_name:       selectedDoctor.name,
+          doctor_email:      selectedDoctor.email,
+          doctor_phone:      selectedDoctor.phone,
+          doctor_speciality: selectedDoctor.speciality,
+          hospital_ids:      selectedHospitals.map(h => h.id),
+          custom_message:    customMessage || null,
+          bcc_override:      recipientsSplit.bcc,
+          cc_override:       recipientsSplit.cc.length ? recipientsSplit.cc : null,
+          stage_overrides:   effectiveStageOverrides ?? null,
+          template_overrides: templateOverridesPayload,
+          attachments:       attachments?.map(a => ({ filename: a.filename, path: a.path })) ?? [],
+          scheduled_for:     schedule.date,
+          scheduled_at_time: schedule.time || "09:00",
+          timezone:          "Asia/Dubai",
+        });
+        toast.success(`Scheduled for ${schedule.date} ${schedule.time || "09:00"} GST — ${selectedDoctor.name} → ${selectedHospitals.length} hospital${selectedHospitals.length === 1 ? "" : "s"}`);
+        onClose();
+      } catch (err) {
+        toast.error(err instanceof Error ? err.message : "Could not schedule");
+      } finally {
+        setSubmitting(false);
+      }
+      return;
+    }
+
     setSubmitting(true);
     try {
       // One run per hospital — keeps Flow 2 timeline focused per relationship,
@@ -265,6 +343,24 @@ export function SendProfileDialog({ open, onClose }: Props) {
               // fires — including the doctor heads-up that auto-continues
               // server-side — and ships that edited version verbatim.
               ...(effectiveStageOverrides ? { stage_overrides: effectiveStageOverrides } : {}),
+              // CVs / logbooks attached in the preview. Same files for every
+              // hospital in a BCC batch; send-flow-email attaches them on the
+              // hospital email only. Store the minimal Resend shape.
+              ...(attachments?.length
+                ? { attachments: attachments.map(a => ({ filename: a.filename, path: a.path })) }
+                : {}),
+              // Per-send template pick (Amir #3). send-flow-email reads
+              // template_overrides[<stage>] and renders that template server-side
+              // with each hospital's own tokens — so a picked template works even
+              // for a multi-hospital BCC batch. For single-hospital sends the
+              // editable-preview override (stage_overrides above) also carries it,
+              // so it works pre-deploy too.
+              ...((templateKeys && (templateKeys.hospital !== HOSPITAL_DEFAULT_KEY || templateKeys.doctor !== DOCTOR_DEFAULT_KEY))
+                ? { template_overrides: {
+                    ...(templateKeys.hospital !== HOSPITAL_DEFAULT_KEY ? { email_hospital: templateKeys.hospital } : {}),
+                    ...(templateKeys.doctor   !== DOCTOR_DEFAULT_KEY   ? { email_doctor:   templateKeys.doctor }   : {}),
+                  } }
+                : {}),
             },
           })
           .select("id")
@@ -400,6 +496,12 @@ export function SendProfileDialog({ open, onClose }: Props) {
             submitting={submitting}
             bccList={bccList}
             setBccList={setBccList}
+            templates={templates}
+            hospitalTemplateKey={hospitalTemplateKey}
+            setHospitalTemplateKey={setHospitalTemplateKey}
+            doctorTemplateKey={doctorTemplateKey}
+            setDoctorTemplateKey={setDoctorTemplateKey}
+            onSaveDefault={saveDefaultTemplate}
           />
         )}
       </DialogContent>
@@ -589,6 +691,7 @@ function HospitalPicker({
 function PreviewConfirm({
   doctor, hospitals, customMessage, hospitalSubject, hospitalBody, doctorSubject, doctorBody,
   onBack, onConfirm, submitting, bccList, setBccList,
+  templates, hospitalTemplateKey, setHospitalTemplateKey, doctorTemplateKey, setDoctorTemplateKey, onSaveDefault,
 }: {
   doctor: DoctorOption;
   hospitals: Hospital[];
@@ -598,10 +701,16 @@ function PreviewConfirm({
   doctorSubject: string;
   doctorBody: string;
   onBack: () => void;
-  onConfirm: (stageOverrides?: Record<string, SendOverrides>) => void;
+  onConfirm: (stageOverrides?: Record<string, SendOverrides>, attachments?: EmailAttachment[], templateKeys?: { hospital: string; doctor: string }, schedule?: { date: string; time: string }) => void;
   submitting: boolean;
   bccList: string[];
   setBccList: (next: string[]) => void;
+  templates: import("@/hooks/use-email-templates").EmailTemplate[];
+  hospitalTemplateKey: string;
+  setHospitalTemplateKey: (k: string) => void;
+  doctorTemplateKey: string;
+  setDoctorTemplateKey: (k: string) => void;
+  onSaveDefault: (which: "hospital" | "doctor", key: string) => void;
 }) {
   // Editing is offered for single-hospital sends only — the preview (and the
   // edited HTML) is rendered for one hospital, so reusing it across a BCC
@@ -610,6 +719,13 @@ function PreviewConfirm({
   // Per-stage overrides captured from the editable previews (null = unedited).
   const [hospitalOv, setHospitalOv] = useState<SendOverrides | null>(null);
   const [doctorOv,   setDoctorOv]   = useState<SendOverrides | null>(null);
+  // CVs / logbooks to attach to the hospital email. Uploaded to the public
+  // email-attachments bucket on pick; the URLs ride along in run metadata.
+  const [attachments, setAttachments] = useState<EmailAttachment[]>([]);
+  // Send now vs schedule for later (Amir #5).
+  const [sendMode, setSendMode] = useState<"now" | "later">("now");
+  const [schedDate, setSchedDate] = useState<string>(() => new Date(Date.now() + 86_400_000).toISOString().slice(0, 10));
+  const [schedTime, setSchedTime] = useState<string>("09:00");
   // Who'll be on the From line — derived from the current user, which
   // matches what send-flow-email does at send time (looks up
   // assigned_to in its SENDERS registry). Falls back to the generic
@@ -725,27 +841,50 @@ function PreviewConfirm({
         </div>
       )}
 
-      <EditableEmailSection
-        label={`To hospital · ${hospitalRecipient}`}
-        subject={renderedHospitalSubject}
-        html={hospitalHtml}
-        from={senderLine}
-        to={isSingle ? (hospitals[0].primary_recruiter_email ?? undefined) : undefined}
-        editable={isSingle}
-        onChange={setHospitalOv}
-        plainBody={renderedHospitalBody}
-      />
+      <div className="space-y-1.5 rounded-md border bg-white p-2">
+        <div className="flex items-start justify-between gap-2">
+          <div className="flex-1 min-w-0">
+            <TemplatePicker templates={templates} value={hospitalTemplateKey} onChange={setHospitalTemplateKey} defaultKey="profile_sent_hospital" renderVars={vars} label="Hospital email template" />
+          </div>
+          {hospitalTemplateKey !== "profile_sent_hospital" && (
+            <button type="button" onClick={() => onSaveDefault("hospital", hospitalTemplateKey)} className="text-[10px] text-slate-500 hover:underline whitespace-nowrap mt-4">Save as my default</button>
+          )}
+        </div>
+        {hospitalTemplateKey !== "profile_sent_hospital" && !isSingle && (
+          <p className="text-[10px] text-teal-700 px-0.5">Rendered per-hospital at send time — works across a BCC batch.</p>
+        )}
+        <EditableEmailSection
+          label={`To hospital · ${hospitalRecipient}`}
+          subject={renderedHospitalSubject}
+          html={hospitalHtml}
+          from={senderLine}
+          to={isSingle ? (hospitals[0].primary_recruiter_email ?? undefined) : undefined}
+          editable={isSingle}
+          onChange={setHospitalOv}
+          plainBody={renderedHospitalBody}
+        />
+      </div>
 
-      <EditableEmailSection
-        label={`To doctor · ${doctor.email ?? "(no email)"}`}
-        subject={renderedDoctorSubject}
-        html={doctorHtml}
-        from={senderLine}
-        to={doctor.email ?? undefined}
-        editable={isSingle}
-        onChange={setDoctorOv}
-        plainBody={renderTemplate(doctorBody, vars)}
-      />
+      <div className="space-y-1.5 rounded-md border bg-white p-2">
+        <div className="flex items-start justify-between gap-2">
+          <div className="flex-1 min-w-0">
+            <TemplatePicker templates={templates} value={doctorTemplateKey} onChange={setDoctorTemplateKey} defaultKey="profile_sent_doctor" renderVars={vars} label="Doctor 'working opportunity' email template" />
+          </div>
+          {doctorTemplateKey !== "profile_sent_doctor" && (
+            <button type="button" onClick={() => onSaveDefault("doctor", doctorTemplateKey)} className="text-[10px] text-slate-500 hover:underline whitespace-nowrap mt-4">Save as my default</button>
+          )}
+        </div>
+        <EditableEmailSection
+          label={`To doctor · ${doctor.email ?? "(no email)"}`}
+          subject={renderedDoctorSubject}
+          html={doctorHtml}
+          from={senderLine}
+          to={doctor.email ?? undefined}
+          editable={isSingle}
+          onChange={setDoctorOv}
+          plainBody={renderTemplate(doctorBody, vars)}
+        />
+      </div>
 
       <div className="text-[10.5px] text-muted-foreground px-0.5">
         {!isSingle
@@ -753,6 +892,30 @@ function PreviewConfirm({
           : anyEdited
             ? <span className="text-teal-700 font-medium">You've edited {hospitalOv && doctorOv ? "both emails" : hospitalOv ? "the hospital email" : "the doctor email"} — your version sends instead of the template.</span>
             : "Click Edit email on either preview to tweak the wording before it sends."}
+      </div>
+
+      <AttachmentsPicker attachments={attachments} onChange={setAttachments} disabled={submitting} />
+
+      {/* Send now vs schedule for later (Amir #5). */}
+      <div className="rounded-md border bg-slate-50/40 p-2.5 space-y-2">
+        <div className="flex items-center gap-1 rounded-lg bg-slate-100 p-0.5 text-[12px] w-fit">
+          <button type="button" onClick={() => setSendMode("now")} className={`inline-flex items-center gap-1.5 rounded-md px-3 py-1 font-medium transition-colors ${sendMode === "now" ? "bg-white shadow-sm text-teal-700" : "text-slate-500"}`}>
+            <Send className="h-3.5 w-3.5" /> Send now
+          </button>
+          <button type="button" onClick={() => setSendMode("later")} className={`inline-flex items-center gap-1.5 rounded-md px-3 py-1 font-medium transition-colors ${sendMode === "later" ? "bg-white shadow-sm text-teal-700" : "text-slate-500"}`}>
+            <Clock className="h-3.5 w-3.5" /> Schedule for later
+          </button>
+        </div>
+        {sendMode === "later" && (
+          <div className="flex items-end gap-2 flex-wrap">
+            <div className="space-y-1"><span className="text-[10px] uppercase tracking-wider text-muted-foreground">Date</span><Input type="date" value={schedDate} onChange={e => setSchedDate(e.target.value)} className="h-8 text-[12px] w-[150px]" /></div>
+            <div className="space-y-1"><span className="text-[10px] uppercase tracking-wider text-muted-foreground">Time (GST)</span><Input type="time" value={schedTime} onChange={e => setSchedTime(e.target.value)} className="h-8 text-[12px] w-[120px]" /></div>
+            <div className="pb-1.5"><GulfClock when={composeGulfDateTime(schedDate, schedTime)} /></div>
+          </div>
+        )}
+        {sendMode === "later" && (
+          <p className="text-[10px] text-amber-700">Saved to the scheduled queue. The server-side scheduler fires it once the edge functions are deployed; until then use “Send now”.</p>
+        )}
       </div>
 
       {hospitals.some(h => !h.primary_recruiter_email) && (
@@ -767,15 +930,35 @@ function PreviewConfirm({
         </Button>
         <Button
           onClick={() => {
+            // A non-default template pick ships as a stage override too (the
+            // rendered template), so single-hospital sends honour the pick with
+            // no deploy. Manual edits (hospitalOv/doctorOv) take precedence.
+            // Multi-hospital relies on metadata.template_overrides (per-hospital
+            // server render), which the parent writes from templateKeys below.
+            const hospitalOverride = hospitalOv
+              ?? (isSingle && hospitalTemplateKey !== "profile_sent_hospital"
+                    ? { subject_override: renderedHospitalSubject, html_override: hospitalHtml } : null);
+            const doctorOverride = doctorOv
+              ?? (isSingle && doctorTemplateKey !== "profile_sent_doctor"
+                    ? { subject_override: renderedDoctorSubject, html_override: doctorHtml } : null);
             const stageOverrides: Record<string, SendOverrides> = {
-              ...(hospitalOv ? { email_hospital: hospitalOv } : {}),
-              ...(doctorOv   ? { email_doctor:   doctorOv }   : {}),
+              ...(hospitalOverride ? { email_hospital: hospitalOverride } : {}),
+              ...(doctorOverride   ? { email_doctor:   doctorOverride }   : {}),
             };
-            onConfirm(Object.keys(stageOverrides).length ? stageOverrides : undefined);
+            onConfirm(
+              Object.keys(stageOverrides).length ? stageOverrides : undefined,
+              attachments.length ? attachments : undefined,
+              { hospital: hospitalTemplateKey, doctor: doctorTemplateKey },
+              sendMode === "later" ? { date: schedDate, time: schedTime } : undefined,
+            );
           }}
           disabled={submitting}
         >
-          {submitting ? "Queueing..." : <><Send className="h-3.5 w-3.5 mr-1.5" /> Queue {hospitals.length} send{hospitals.length === 1 ? "" : "s"}</>}
+          {submitting
+            ? (sendMode === "later" ? "Scheduling..." : "Queueing...")
+            : sendMode === "later"
+              ? <><Clock className="h-3.5 w-3.5 mr-1.5" /> Schedule {hospitals.length} send{hospitals.length === 1 ? "" : "s"}</>
+              : <><Send className="h-3.5 w-3.5 mr-1.5" /> Queue {hospitals.length} send{hospitals.length === 1 ? "" : "s"}</>}
         </Button>
       </DialogFooter>
     </div>
@@ -1040,6 +1223,7 @@ function EditableEmailSection({
         onReset={() => { setSubj(subject); setBody(html); setTick(t => t + 1); onChange(null); }}
         from={from}
         to={to}
+        text={plainBody}
         className="border-0 rounded-none max-h-[440px]"
       />
     </div>

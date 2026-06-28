@@ -191,8 +191,12 @@ export async function enrichProfile(input: EnrichmentInput): Promise<EnrichmentR
 
   // Phone — use a clean concatenation. If formAcf already has a phone
   // we leave it alone (the JotForm flattener has already produced
-  // "+area phone"); otherwise pull from Zoho.
-  set("phone_number", pickFirst(dob.Mobile, dob.Phone, lead.Mobile, lead.Phone));
+  // "+area phone"); otherwise pull from Zoho, then the CV (no-form path).
+  set("phone_number", pickFirst(dob.Mobile, dob.Phone, lead.Mobile, lead.Phone, cv.phone));
+
+  // Email — only the CV carries it on the no-form path (the form/Zoho
+  // flows already have it as the staging row's email column).
+  set("email", cv.email);
 
   // Specialty — Zoho's Speciality (British spelling on DoB) or
   // Specialty_New override. CV-derived specialty is the fallback when
@@ -235,11 +239,13 @@ export async function enrichProfile(input: EnrichmentInput): Promise<EnrichmentR
     }
   }
 
-  // Name — fall back to Zoho's typed-in name when the form didn't carry one.
+  // Name — fall back to Zoho's typed-in name when the form didn't carry
+  // one, then to the CV-extracted name (the no-form path's only source).
   set("full_name", pickFirst(
     dob.Full_Name, lead.Full_Name,
     joinName(dob.First_Name, dob.Last_Name),
     joinName(lead.First_Name, lead.Last_Name),
+    cv.full_name,
   ));
 
   // Age — typed into Zoho or stated on CV.

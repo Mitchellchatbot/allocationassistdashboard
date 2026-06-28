@@ -9,9 +9,12 @@ import {
   LayoutDashboard, Receipt, BarChart3,
   UserSquare, Workflow, ClipboardList, Building2, Mailbox, Mail,
   Tag, Bell, FileText, Clock, SearchX, CornerDownLeft, Briefcase,
+  Send, Star, History, X as XIcon,
 } from "lucide-react";
 import { useSearchIndex, type SearchKind, type SearchEntity } from "@/hooks/use-search-index";
 import { useRecentItems } from "@/hooks/use-recent-items";
+import { useSavedSearches } from "@/hooks/use-saved-searches";
+import { SearchFilterChips, chipMatches, type SentChip } from "@/components/search/SearchFilterChips";
 
 // Visual identity per kind: icon, group heading, sort order in results, and
 // the colored pill we render on the right of each row so the searcher can see
@@ -27,6 +30,7 @@ const KIND_META: Record<SearchKind, { icon: React.ElementType; heading: string; 
   Vacancy:      { icon: ClipboardList,   heading: "Vacancies",                 order: 6,  badge: "bg-amber-100 text-amber-700 border-amber-200" },
   Hospital:     { icon: Building2,       heading: "Hospitals",                 order: 7,  badge: "bg-cyan-100 text-cyan-700 border-cyan-200" },
   Batch:        { icon: Mailbox,         heading: "Batch sends",               order: 8,  badge: "bg-purple-100 text-purple-700 border-purple-200" },
+  Sent:         { icon: Send,            heading: "Sent history",              order: 8.5, badge: "bg-teal-100 text-teal-700 border-teal-200" },
   Template:     { icon: Mail,            heading: "Email templates",           order: 9,  badge: "bg-pink-100 text-pink-700 border-pink-200" },
   Specialty:    { icon: Tag,             heading: "Specialties",               order: 10, badge: "bg-violet-50 text-violet-700 border-violet-200" },
   Notification: { icon: Bell,            heading: "Notifications",             order: 11, badge: "bg-rose-100 text-rose-700 border-rose-200" },
@@ -70,10 +74,26 @@ function SearchContents({ open, onClose }: { open: boolean; onClose: () => void 
   const index   = useSearchIndex();
   const recent  = useRecentItems();
   const navigate = useNavigate();
+  const { saved, recent: recentQueries, save, remove, pushRecent } = useSavedSearches();
   const [query, setQuery] = useState("");
+  // Sent-history filter chip (Amir #6).
+  const [chip, setChip] = useState<SentChip>("all");
 
-  // Reset query when the dialog closes (parent flips `open`).
-  useEffect(() => { if (!open) setQuery(""); }, [open]);
+  // Reset query + chip when the dialog closes (parent flips `open`).
+  useEffect(() => { if (!open) { setQuery(""); setChip("all"); } }, [open]);
+
+  // Per-chip counts over the Sent entities, for the chip labels.
+  const chipCounts = useMemo(() => {
+    const c: Record<string, number> = { all: 0, "1st": 0, "2nd": 0, top15: 0, specialty: 0, individual: 0 };
+    for (const e of index) {
+      if (e.kind !== "Sent") continue;
+      c.all++;
+      (["1st", "2nd", "top15", "specialty", "individual"] as SentChip[]).forEach(k => {
+        if (chipMatches(k, e.meta?.sentKind, e.meta?.slot)) c[k]++;
+      });
+    }
+    return c;
+  }, [index]);
 
   // Group entities by kind. When there's no query yet we cap each group hard
   // so the dialog opens instantly even with thousands of entities indexed.
@@ -82,13 +102,18 @@ function SearchContents({ open, onClose }: { open: boolean; onClose: () => void 
   const grouped = useMemo(() => {
     const groups = new Map<SearchKind, SearchEntity[]>();
     for (const e of index) {
+      // When a sent-history chip is active, show ONLY matching Sent records.
+      if (chip !== "all") {
+        if (e.kind !== "Sent") continue;
+        if (!chipMatches(chip, e.meta?.sentKind, e.meta?.slot)) continue;
+      }
       const arr = groups.get(e.kind) ?? [];
       arr.push(e);
       groups.set(e.kind, arr);
     }
     return Array.from(groups.entries())
       .sort((a, b) => KIND_META[a[0]].order - KIND_META[b[0]].order);
-  }, [index]);
+  }, [index, chip]);
 
   // Initial render cap per kind when no query — keeps the dialog snappy at
   // ~200 DOM nodes total instead of ~1,500+.
@@ -96,6 +121,7 @@ function SearchContents({ open, onClose }: { open: boolean; onClose: () => void 
   const PER_KIND_CAP_QUERY    = 60;
 
   const handleSelect = (route: string) => {
+    if (query.trim()) pushRecent(query);
     onClose();
     navigate(route);
   };
@@ -105,11 +131,23 @@ function SearchContents({ open, onClose }: { open: boolean; onClose: () => void 
   return (
     <>
       <CommandInput
-        placeholder={`Search doctors, vacancies, flows, hospitals, templates, pages...`}
+        placeholder={`Search doctors, specialties, hospitals, sent history (1st/2nd profile, top 15, daily specialty)...`}
         value={query}
         onValueChange={setQuery}
         autoFocus
       />
+      {/* Sent-history filter chips (Amir #6) + save-search star. */}
+      <div className="flex items-center gap-2 px-3 py-1.5 border-b overflow-x-auto">
+        <SearchFilterChips active={chip} onChange={setChip} counts={chipCounts} />
+        <button
+          type="button"
+          title="Save this search"
+          onClick={() => save(query, chip, query || (chip !== "all" ? chip : "All sent"))}
+          className="ml-auto inline-flex items-center gap-1 rounded-md border border-slate-200 px-1.5 py-0.5 text-[10px] text-slate-500 hover:text-teal-700 hover:border-teal-300 shrink-0"
+        >
+          <Star className="h-3 w-3" /> Save
+        </button>
+      </div>
       {!query && (
         <div className="px-3 py-2 text-[10px] text-muted-foreground border-b flex items-center justify-between gap-3">
           <span>Searching <strong>{total.toLocaleString()}</strong> entities. Start typing to narrow.</span>
@@ -130,6 +168,41 @@ function SearchContents({ open, onClose }: { open: boolean; onClose: () => void 
             <p className="text-[11px] text-muted-foreground mt-1">Try a doctor name, hospital, specialty, or flow stage.</p>
           </div>
         </CommandEmpty>
+
+        {/* Saved searches (Amir #6) — star a query+chip to pin it here. */}
+        {!query && saved.length > 0 && (
+          <CommandGroup heading="Saved searches">
+            {saved.map(s => (
+              <CommandItem
+                key={`saved:${s.id}`}
+                value={`saved ${s.label} ${s.query} ${s.chip}`}
+                onSelect={() => { setQuery(s.query); setChip(s.chip as SentChip); }}
+                className="gap-2"
+              >
+                <Star className="h-3.5 w-3.5 text-amber-400 shrink-0" />
+                <div className="min-w-0 flex-1">
+                  <p className="text-[12px] font-medium truncate">{s.label}</p>
+                  <p className="text-[10px] text-muted-foreground truncate">{s.chip !== "all" ? `chip: ${s.chip}` : "all"}{s.query ? ` · "${s.query}"` : ""}</p>
+                </div>
+                <button type="button" onClick={(e) => { e.stopPropagation(); remove(s.id); }} className="opacity-50 hover:opacity-100 shrink-0" title="Remove">
+                  <XIcon className="h-3 w-3" />
+                </button>
+              </CommandItem>
+            ))}
+          </CommandGroup>
+        )}
+
+        {/* Recent searches — last queries typed. */}
+        {!query && recentQueries.length > 0 && (
+          <CommandGroup heading="Recent searches">
+            {recentQueries.map(q => (
+              <CommandItem key={`recentq:${q}`} value={`recentq ${q}`} onSelect={() => setQuery(q)} className="gap-2">
+                <History className="h-3.5 w-3.5 text-muted-foreground/70 shrink-0" />
+                <p className="text-[12px] truncate flex-1">{q}</p>
+              </CommandItem>
+            ))}
+          </CommandGroup>
+        )}
 
         {/* Recent items — shown when no query so the dialog feels useful
             even with empty input. Caps at 6 to stay scannable. */}

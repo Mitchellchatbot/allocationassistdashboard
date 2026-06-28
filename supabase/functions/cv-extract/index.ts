@@ -41,6 +41,9 @@ General rule: prefer extracting what the CV actually says over leaving fields nu
 Return a JSON object with these exact keys:
 
 {
+  "full_name":          string | null,   // The candidate's full name as printed on the CV. Keep their own spelling/accents (e.g. "Mónica Costeira", "Rayan Al Jurdi"). Drop a leading "Dr."/"Dr"/"Prof." honorific.
+  "email":              string | null,   // Their email address if printed anywhere on the CV (header, contact block, footer). Lowercase it. Null if absent.
+  "phone":              string | null,   // Their phone number if printed on the CV, keeping the country code when shown (e.g. "+351 912 759 750", "+1 7139624666").
   "title":              string | null,   // Their stated professional title. Medical CV: UAE-style like "Consultant Pediatrician", "Specialist Urologist". Non-medical: whatever title they hold, e.g. "SEO & Email Marketing Specialist".
   "bio":                string | null,   // 3-5 sentence prose paragraph summarising their professional background. STRICTLY UNDER 150 WORDS. Third person, professional tone. Use ONLY facts in the CV.
   "specialty":          string | null,   // Broad medical specialty inferred from title/training (e.g. "Rheumatology", "Internal Medicine", "Cardiology", "General Surgery"). One canonical specialty name — not a list. Non-medical: their primary domain (e.g. "Marketing", "Software Engineering").
@@ -284,7 +287,10 @@ Deno.serve(async (req: Request) => {
     const flatPatch: Record<string, unknown> = {
       extracted_cv_data:   extracted,
       acf:                 mergedAcf,
-      full_name:           (mergedAcf.full_name as string | undefined)                                                     ?? (staged?.acf as Record<string, unknown> | undefined)?.full_name ?? null,
+      full_name:           (mergedAcf.full_name as string | undefined)                                                     ?? (extracted.full_name as string | undefined) ?? (staged?.acf as Record<string, unknown> | undefined)?.full_name ?? null,
+      // Email only gets set when the staging row doesn't already have one
+      // (the no-form / drop-a-PDF path). A form/Zoho-sourced email always wins.
+      email:               (staged?.email as string | undefined)                                                          ?? (mergedAcf.email as string | undefined) ?? (extracted.email as string | undefined) ?? null,
       specialty:           (mergedAcf.specialty as string | undefined)                                                     ?? null,
       subspecialty:        (mergedAcf.subspecialty as string | undefined)                                                  ?? null,
       nationality:         (mergedAcf.nationality as string | undefined)                                                   ?? null,
@@ -292,7 +298,7 @@ Deno.serve(async (req: Request) => {
       country_of_training: (mergedAcf.country_of_training as string | undefined)                                           ?? null,
       current_location:    (mergedAcf.current_location as string | undefined)                                              ?? null,
       years_experience:    String((mergedAcf.years_of_experience_post_specialization as string | number | undefined) ?? ""),
-      phone:               (mergedAcf.phone_number as string | undefined)                                                  ?? null,
+      phone:               (mergedAcf.phone_number as string | undefined)                                                  ?? (extracted.phone as string | undefined) ?? null,
     };
     // Strip empties so we don't blank out fields with "" / null.
     for (const k of Object.keys(flatPatch)) {

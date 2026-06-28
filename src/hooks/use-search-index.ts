@@ -11,6 +11,7 @@ import { useDoctorSpecialties } from "@/hooks/use-doctor-specialties";
 import { useNotifications } from "@/hooks/use-notifications";
 import { useDoctorProfiles } from "@/hooks/use-doctor-profiles";
 import { useAutomationFlowRuns } from "@/hooks/use-automation-flows";
+import { useSentHistory, SENT_KIND_LABEL } from "@/hooks/use-sent-history";
 import { FLOW_DEFINITIONS } from "@/lib/automation-flows";
 
 /**
@@ -35,6 +36,7 @@ export type SearchKind =
   | "Hospital"
   | "Flow"
   | "Batch"
+  | "Sent"
   | "Template"
   | "Specialty"
   | "Notification"
@@ -44,6 +46,19 @@ export type SearchKind =
   | "Transaction"
   | "Page";
 
+/** Structured fields used by the search filter chips + operators (Amir #6).
+ *  Only the new "Sent" producers populate this; kept optional so nothing else
+ *  breaks. */
+export interface SearchEntityMeta {
+  sentKind?:   string;   // daily_duo | tuesday_top_15 | specialty_of_day | individual
+  slot?:       string;   // "1st profile" | "2nd profile" | "top 15 · #3" | "daily specialty"
+  specialty?:  string;
+  hospital?:   string;
+  country?:    string;
+  sentAt?:     string;   // ISO
+  doctorName?: string;
+}
+
 export interface SearchEntity {
   id:        string;
   kind:      SearchKind;
@@ -51,6 +66,7 @@ export interface SearchEntity {
   sublabel?: string;
   keywords:  string;
   route:     string;
+  meta?:     SearchEntityMeta;
 }
 
 // ── Pages ──────────────────────────────────────────────────────────────────
@@ -64,6 +80,8 @@ const PAGES: SearchEntity[] = [
   { id: "page:automations",     kind: "Page", label: "Automations",      sublabel: "Phase 1 email flows + run timeline", route: "/automations", keywords: "automations flows emails onboarding shortlist interview contract relocation payment" },
   { id: "page:vacancies",       kind: "Page", label: "Vacancies",        sublabel: "Open hospital roles + auto-match", route: "/vacancies", keywords: "vacancies open roles hospitals match" },
   { id: "page:batches",         kind: "Page", label: "Batch Sends",      sublabel: "Daily duo, Tuesday top 15, specialty rotation", route: "/batches", keywords: "batches send recurring daily tuesday rotation" },
+  { id: "page:past-sent",       kind: "Page", label: "Past Sent",        sublabel: "Searchable history of every batch + profile sent", route: "/past-sent", keywords: "past sent history batch profile 1st 2nd first second top 15 daily specialty log audit who was sent" },
+  { id: "page:feature-lab",     kind: "Page", label: "Feature Lab",      sublabel: "Try every new email feature with sample data", route: "/feature-lab", keywords: "feature lab demo sandbox test try new template table attachments full screen schedule whats new" },
   { id: "page:reports",         kind: "Page", label: "Reports",          sublabel: "KPIs, team breakdown, hospital health", route: "/reports", keywords: "reports analytics kpi metrics hospital health team" },
 
   // Sales
@@ -150,6 +168,7 @@ export function useSearchIndex(): SearchEntity[] {
   const { data: runs      = [] }   = useAutomationFlowRuns();
   const specialties                 = useDoctorSpecialties();
   const { notifications }           = useNotifications();
+  const { records: sentRecords }    = useSentHistory();
 
   // Email templates aren't behind a hook yet — read directly via react-query
   // here so we don't need to wire a new file just for the search index.
@@ -322,6 +341,29 @@ export function useSearchIndex(): SearchEntity[] {
       });
     }
 
+    // ── Sent history (Amir #6) — who went out in which batch/profile slot ──
+    for (const rec of sentRecords) {
+      const kindLabel = SENT_KIND_LABEL[rec.sentKind];
+      const dateStr = rec.sentAt ? new Date(rec.sentAt).toLocaleDateString(undefined, { month: "short", day: "numeric" }) : "";
+      out.push({
+        id:       rec.id,
+        kind:     "Sent",
+        label:    rec.doctorName,
+        sublabel: [rec.slot, rec.specialty, rec.hospital, dateStr].filter(Boolean).join(" · ") || kindLabel,
+        keywords: `sent history ${kindLabel} ${rec.slot} ${rec.specialty ?? ""} ${rec.hospital ?? ""} ${rec.country ?? ""} ${rec.doctorName} ${dateStr} 1st 2nd first second profile top 15 daily specialty`,
+        route:    rec.route,
+        meta: {
+          sentKind:   rec.sentKind,
+          slot:       rec.slot,
+          specialty:  rec.specialty ?? undefined,
+          hospital:   rec.hospital ?? undefined,
+          country:    rec.country ?? undefined,
+          sentAt:     rec.sentAt ?? undefined,
+          doctorName: rec.doctorName,
+        },
+      });
+    }
+
     // ── Email templates ───────────────────────────────────────────────────
     for (const t of templates) {
       out.push({
@@ -420,7 +462,7 @@ export function useSearchIndex(): SearchEntity[] {
   }, [
     zoho?.rawLeads, zoho?.rawDeals, zoho?.rawDoctorsOnBoard,
     channelEcon, byCategory,
-    hospitals, vacancies, batches, templates, profiles, placements, runs, specialties, notifications,
+    hospitals, vacancies, batches, templates, profiles, placements, runs, specialties, notifications, sentRecords,
   ]);
 }
 

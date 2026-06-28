@@ -28,7 +28,7 @@ import {
 import {
   useWpCandidates, useSyncWpCandidates, useLinkWpCandidate,
   useUpsertWpCandidate, useUploadWpPhoto, useUploadWpCv, useDeleteWpCandidate,
-  useStagedProfiles, useCreateStagedProfile, useDeleteStagedProfile, usePublishStagedProfile, useUpdateStagedProfile,
+  useStagedProfiles, useCreateStagedProfile, useCreateProfileFromCv, useDeleteStagedProfile, usePublishStagedProfile, useUpdateStagedProfile,
   useWpCandidateById,
   type WpCandidate, type StagedProfile, type StagedProfileInput,
 } from "@/hooks/use-wp-candidates";
@@ -45,6 +45,8 @@ export default function WpCandidates({ embedded }: WpCandidatesProps = {}) {
   const sync = useSyncWpCandidates();
   const upsert = useUpsertWpCandidate();
   const createStaged = useCreateStagedProfile();
+  const createFromCv = useCreateProfileFromCv();
+  const cvInputRef = useRef<HTMLInputElement | null>(null);
   const [openDetailId, setOpenDetailId] = useState<number | null>(null);
   // Newly-created staged profile to auto-open in the staging editor.
   const [autoOpenStagedId, setAutoOpenStagedId] = useState<string | null>(null);
@@ -87,6 +89,32 @@ export default function WpCandidates({ embedded }: WpCandidatesProps = {}) {
       clearInterval(creep);
       setStagingProgress(null);
       toast.error(e instanceof Error ? e.message : "Failed to create");
+    }
+  };
+
+  // Drop a CV PDF/DOCX → Claude parses it into a staged profile, no form.
+  // The same staging progress bar runs while the file uploads + extracts.
+  const handleCvFile = async (file: File | null | undefined) => {
+    if (!file) return;
+    setStagingProgress({ pct: 8, label: `Parsing ${file.name}…` });
+    const creep = setInterval(() => {
+      setStagingProgress(p => (p && p.pct < 90 ? { ...p, pct: p.pct + Math.max(1, (90 - p.pct) * 0.06) } : p));
+    }, 300);
+    try {
+      const r = await createFromCv.mutateAsync(file);
+      clearInterval(creep);
+      setStagingProgress({ pct: 100, label: "Parsed" });
+      setAutoOpenStagedId(r.staged_id);
+      if (r.extraction_ok) {
+        toast.success("CV parsed into a staging profile — review the fields, then Publish.");
+      } else {
+        toast.warning(`Profile staged, but CV parsing failed: ${r.extraction_error ?? "unknown"}. Open it to retry or fill in manually.`);
+      }
+      setTimeout(() => setStagingProgress(null), 400);
+    } catch (e) {
+      clearInterval(creep);
+      setStagingProgress(null);
+      toast.error(e instanceof Error ? e.message : "CV upload failed");
     }
   };
 
@@ -207,10 +235,27 @@ export default function WpCandidates({ embedded }: WpCandidatesProps = {}) {
           </div>
         </div>
       ) : (
-        <Button size="sm" onClick={handleNewProfile} disabled={createStaged.isPending}>
-          {createStaged.isPending ? <Loader2 className="h-3.5 w-3.5 mr-1 animate-spin" /> : <Plus className="h-3.5 w-3.5 mr-1" />}
-          New profile
-        </Button>
+        <>
+          <Button size="sm" onClick={handleNewProfile} disabled={createStaged.isPending}>
+            {createStaged.isPending ? <Loader2 className="h-3.5 w-3.5 mr-1 animate-spin" /> : <Plus className="h-3.5 w-3.5 mr-1" />}
+            New profile
+          </Button>
+          {/* Drop a CV → Claude builds the staging profile (no form). */}
+          <Button
+            size="sm" variant="outline"
+            onClick={() => cvInputRef.current?.click()}
+            disabled={createFromCv.isPending}
+            title="Upload a CV PDF/DOCX and build a profile straight from it"
+          >
+            {createFromCv.isPending ? <Loader2 className="h-3.5 w-3.5 mr-1 animate-spin" /> : <Upload className="h-3.5 w-3.5 mr-1" />}
+            Profile from CV
+          </Button>
+          <input
+            ref={cvInputRef} type="file" hidden
+            accept=".pdf,.doc,.docx"
+            onChange={(e) => { handleCvFile(e.target.files?.[0]); if (e.target) e.target.value = ""; }}
+          />
+        </>
       )}
       <Button size="sm" variant="outline" onClick={handleSync} disabled={sync.isPending}>
         {sync.isPending ? <RefreshCw className="h-3.5 w-3.5 mr-1 animate-spin" /> : <History className="h-3.5 w-3.5 mr-1" />}

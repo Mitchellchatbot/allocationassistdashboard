@@ -1,6 +1,8 @@
-import { useEffect, useRef } from "react";
-import { Pencil, RotateCcw } from "lucide-react";
+import { useEffect, useRef, useState } from "react";
+import { Pencil, RotateCcw, Bold, Italic, Underline, List, ListOrdered, Link2, Table2, Maximize2 } from "lucide-react";
 import { cn } from "@/lib/utils";
+import { TableInsertDialog } from "@/components/TableInsertDialog";
+import { FullScreenEmailPreview } from "@/components/FullScreenEmailPreview";
 
 /**
  * EditableEmailPreview — the rendered email, editable in place. The subject is
@@ -40,6 +42,10 @@ interface EditableEmailPreviewProps {
   from?:           string;
   to?:             string;
   className?:      string;
+  /** Show the formatting toolbar (table insert, rich text, full-screen). Default on. */
+  tools?:          boolean;
+  /** Plain-text body, forwarded to the full-screen preview. */
+  text?:           string;
 }
 
 const BODY_CLASS =
@@ -50,8 +56,12 @@ const BODY_CLASS =
 
 export function EditableEmailPreview({
   subject, html, onSubjectChange, onHtmlChange, resetKey, edited, onReset, from, to, className,
+  tools = true, text,
 }: EditableEmailPreviewProps) {
   const bodyRef = useRef<HTMLDivElement>(null);
+  const savedRange = useRef<Range | null>(null);
+  const [tableOpen, setTableOpen] = useState(false);
+  const [fullOpen, setFullOpen]   = useState(false);
 
   // Seed / re-seed the contentEditable body from the upstream HTML. Runs on the
   // first render, whenever a new preview arrives (`html`), and on an explicit
@@ -60,8 +70,61 @@ export function EditableEmailPreview({
     if (bodyRef.current && bodyRef.current.innerHTML !== html) {
       bodyRef.current.innerHTML = html;
     }
-    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [html, resetKey]);
+
+  // Remember where the caret is inside the body so an insert (which happens
+  // after a toolbar click / dialog steals focus) lands where they were typing.
+  const saveSelection = () => {
+    const sel = window.getSelection();
+    if (sel && sel.rangeCount > 0 && bodyRef.current?.contains(sel.anchorNode)) {
+      savedRange.current = sel.getRangeAt(0).cloneRange();
+    }
+  };
+
+  const flush = () => { if (bodyRef.current) onHtmlChange(bodyRef.current.innerHTML); };
+
+  // Rich-text command via the contentEditable's built-in editing. execCommand
+  // is deprecated but still the only cross-browser way to format a selection in
+  // a contentEditable; the failure mode is a no-op, never a crash.
+  const exec = (command: string, value?: string) => {
+    const body = bodyRef.current; if (!body) return;
+    body.focus();
+    if (savedRange.current && body.contains(savedRange.current.commonAncestorContainer)) {
+      const sel = window.getSelection();
+      sel?.removeAllRanges(); sel?.addRange(savedRange.current);
+    }
+    try { document.execCommand(command, false, value); } catch { /* unsupported — no-op */ }
+    flush();
+  };
+
+  const makeLink = () => {
+    const url = window.prompt("Link URL", "https://");
+    if (url) exec("createLink", url);
+  };
+
+  // Insert arbitrary HTML (a built table) at the saved caret, or append to the
+  // end if the caret was never placed inside the body.
+  const insertHtml = (snippet: string) => {
+    const body = bodyRef.current; if (!body) return;
+    body.focus();
+    const sel = window.getSelection();
+    let range = savedRange.current;
+    if (!range || !body.contains(range.commonAncestorContainer)) {
+      range = document.createRange();
+      range.selectNodeContents(body);
+      range.collapse(false);
+    }
+    sel?.removeAllRanges(); sel?.addRange(range);
+    const holder = document.createElement("div");
+    holder.innerHTML = snippet;
+    const frag = document.createDocumentFragment();
+    while (holder.firstChild) frag.appendChild(holder.firstChild);
+    const r = sel?.getRangeAt(0);
+    if (r) { r.deleteContents(); r.insertNode(frag); r.collapse(false); }
+    else body.insertAdjacentHTML("beforeend", snippet);
+    savedRange.current = null;
+    flush();
+  };
 
   return (
     <div className={cn(
@@ -116,6 +179,26 @@ export function EditableEmailPreview({
         )}
       </div>
 
+      {/* Formatting toolbar — table insert, rich text, full-screen review. */}
+      {tools && (
+        <div className="px-3 py-1.5 bg-white border-b border-slate-100 flex items-center gap-1 flex-wrap">
+          <ToolBtn onClick={() => setTableOpen(true)} title="Insert table (Top 15 / specialty lists)" primary>
+            <Table2 className="h-3.5 w-3.5" /> <span className="text-[11px] font-medium">Table</span>
+          </ToolBtn>
+          <Divider />
+          <ToolBtn onClick={() => exec("bold")}          title="Bold"><Bold className="h-3.5 w-3.5" /></ToolBtn>
+          <ToolBtn onClick={() => exec("italic")}        title="Italic"><Italic className="h-3.5 w-3.5" /></ToolBtn>
+          <ToolBtn onClick={() => exec("underline")}     title="Underline"><Underline className="h-3.5 w-3.5" /></ToolBtn>
+          <ToolBtn onClick={() => exec("insertUnorderedList")} title="Bulleted list"><List className="h-3.5 w-3.5" /></ToolBtn>
+          <ToolBtn onClick={() => exec("insertOrderedList")}   title="Numbered list"><ListOrdered className="h-3.5 w-3.5" /></ToolBtn>
+          <ToolBtn onClick={makeLink}                    title="Insert link"><Link2 className="h-3.5 w-3.5" /></ToolBtn>
+          <Divider />
+          <ToolBtn onClick={() => setFullOpen(true)} title="Full-screen preview" className="ml-auto">
+            <Maximize2 className="h-3.5 w-3.5" /> <span className="text-[11px] font-medium">Full screen</span>
+          </ToolBtn>
+        </div>
+      )}
+
       {/* Body — always contentEditable. overflow-auto + min-w-0 keep a wide
           email (e.g. the ~600px doctor card) scrolling INSIDE this box instead
           of stretching the dialog. Text still wraps; only over-wide tables
@@ -126,12 +209,48 @@ export function EditableEmailPreview({
           contentEditable
           suppressContentEditableWarning
           onInput={(e) => onHtmlChange((e.target as HTMLDivElement).innerHTML)}
+          onKeyUp={saveSelection}
+          onMouseUp={saveSelection}
+          onBlur={saveSelection}
           className={cn(
             BODY_CLASS,
             "p-4 shadow-sm outline-none ring-1 ring-slate-200/70 focus:ring-2 focus:ring-teal-400 cursor-text",
           )}
         />
       </div>
+
+      <TableInsertDialog open={tableOpen} onOpenChange={setTableOpen} onInsert={insertHtml} />
+      <FullScreenEmailPreview
+        open={fullOpen}
+        onClose={() => setFullOpen(false)}
+        subject={subject}
+        html={bodyRef.current?.innerHTML ?? html}
+        text={text}
+        from={from}
+        to={to}
+      />
     </div>
   );
+}
+
+function ToolBtn({ children, onClick, title, primary, className }: { children: React.ReactNode; onClick: () => void; title: string; primary?: boolean; className?: string }) {
+  return (
+    <button
+      type="button"
+      title={title}
+      onMouseDown={(e) => e.preventDefault()}  // keep the editor selection while clicking
+      onClick={onClick}
+      className={cn(
+        "inline-flex items-center gap-1 rounded-md px-2 py-1 transition-colors",
+        primary ? "text-teal-700 hover:bg-teal-50 border border-teal-200" : "text-slate-600 hover:bg-slate-100",
+        className,
+      )}
+    >
+      {children}
+    </button>
+  );
+}
+
+function Divider() {
+  return <span className="mx-0.5 h-4 w-px bg-slate-200" />;
 }

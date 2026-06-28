@@ -1,5 +1,5 @@
 import { useState, type ReactNode } from "react";
-import { ChevronDown, ChevronRight, Mail, Paperclip } from "lucide-react";
+import { ChevronDown, ChevronRight, Mail, Paperclip, Maximize2 } from "lucide-react";
 import { cn } from "@/lib/utils";
 
 interface EmailPreviewProps {
@@ -20,6 +20,8 @@ interface EmailPreviewProps {
   /** Filenames to show as attachment chips (e.g. the relocation-guide PDFs). */
   attachments?: string[];
   className?: string;
+  /** When set, shows an "expand" button that opens a full-screen review. */
+  onExpand?: () => void;
 }
 
 /**
@@ -34,7 +36,7 @@ interface EmailPreviewProps {
  *   2. Token values inserted via renderTemplate({ html: true }) are escaped
  */
 export function EmailPreview({
-  subject, html, text, from, to, templateKey, banner, attachments, className,
+  subject, html, text, from, to, templateKey, banner, attachments, className, onExpand,
 }: EmailPreviewProps) {
   const [showPlainText, setShowPlainText] = useState(false);
 
@@ -56,6 +58,16 @@ export function EmailPreview({
           Email preview
           {templateKey && <code className="bg-slate-200/60 text-slate-600 px-1 py-0.5 rounded text-[9px] font-mono">{templateKey}</code>}
         </div>
+        {onExpand && (
+          <button
+            type="button"
+            onClick={onExpand}
+            title="Full-screen preview"
+            className="ml-auto inline-flex items-center gap-1 rounded-md border border-slate-200 bg-white px-2 py-0.5 text-[10px] text-slate-600 hover:text-teal-700 hover:border-teal-300 transition-colors"
+          >
+            <Maximize2 className="h-3 w-3" /> Full screen
+          </button>
+        )}
       </div>
 
       {/* Recipient header */}

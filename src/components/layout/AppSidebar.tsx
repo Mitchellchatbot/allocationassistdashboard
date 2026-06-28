@@ -22,6 +22,8 @@ import {
   Inbox,
   BookOpen,
   Bot,
+  History,
+  FlaskConical,
   type LucideIcon,
 } from "lucide-react";
 import { useCallback, useEffect, useState } from "react";
@@ -89,6 +91,8 @@ const NAV_SECTIONS: NavSection[] = [
       { title: "Automations",     url: "/automations",     icon: Workflow },
       { title: "Vacancies",       url: "/vacancies",       icon: ClipboardList },
       { title: "Batch Sends",     url: "/batches",         icon: Mailbox },
+      { title: "Past Sent",       url: "/past-sent",       icon: History },
+      { title: "Feature Lab",     url: "/feature-lab",     icon: FlaskConical },
       { title: "Reports",         url: "/reports",         icon: BarChart3 },
     ],
   },

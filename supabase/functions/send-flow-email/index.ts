@@ -355,6 +355,19 @@ Deno.serve(async (req: Request) => {
     }
   }
 
+  // Per-send template pick (Amir #3). The Send Profile dialog can choose which
+  // template each stage uses; it stores the keys in metadata.template_overrides
+  // keyed by stage. This wins over the route default AND the hospital default,
+  // and renders server-side with this run's own tokens — so a picked template
+  // works for a multi-hospital BCC batch (each run renders its own). Single-
+  // hospital sends also carry the pick via stage_overrides (pre-rendered), so
+  // the feature works before this function is redeployed.
+  const tplOverrides = (run.metadata as { template_overrides?: Record<string, string> } | null)?.template_overrides;
+  if (tplOverrides && tplOverrides[run.current_stage]) {
+    console.log("[send-flow-email] using per-send template override:", tplOverrides[run.current_stage]);
+    templateKey = String(tplOverrides[run.current_stage]);
+  }
+
   const { data: tpl, error: tplErr } = await supabase
     .from("email_templates")
     .select("*")
@@ -871,6 +884,25 @@ Deno.serve(async (req: Request) => {
   }
   const ccList: string[] | undefined = ccSet.size ? [...ccSet] : undefined;
 
+  // ── User-uploaded attachments (CVs, logbooks) ──────────────────────────────
+  // Set on the run by the Send Profile dialog (metadata.attachments). These ride
+  // ONLY on the hospital-facing email — the CV is what the hospital wants to see;
+  // the doctor's own auto-continued heads-up email shouldn't echo it back. Each
+  // entry is { filename, path } where path is the public email-attachments URL
+  // Resend fetches server-side. Merged after the relocation guide attachments so
+  // a relocation send could carry both.
+  const userAttachmentsRaw = (md.attachments as unknown);
+  const userAttachments: Array<{ filename: string; path: string }> =
+    run.current_stage === "email_hospital" && Array.isArray(userAttachmentsRaw)
+      ? (userAttachmentsRaw as Array<Record<string, unknown>>)
+          .map(a => ({ filename: String(a?.filename ?? "attachment"), path: String(a?.path ?? "") }))
+          .filter(a => a.path.startsWith("http"))
+      : [];
+  const outgoingAttachments = [...relocationAttachments, ...userAttachments];
+  if (userAttachments.length) {
+    console.log(`[send-flow-email] ${userAttachments.length} user attachment(s) on ${run.current_stage}`);
+  }
+
   let resendRes: Response;
   try {
     resendRes = await fetch("https://api.resend.com/emails", {
@@ -889,9 +921,10 @@ Deno.serve(async (req: Request) => {
         html:    finalHtml,
         text:    finalText,
         headers,
-        // Resend fetches each `path` URL and attaches it. Only the relocation
-        // stage populates this; everything else sends with no attachments.
-        attachments: relocationAttachments.length > 0 ? relocationAttachments : undefined,
+        // Resend fetches each `path` URL and attaches it. Combines the
+        // relocation-guide PDFs (relocation stage) with any CV/logbook the team
+        // attached in the Send Profile dialog (hospital stage).
+        attachments: outgoingAttachments.length > 0 ? outgoingAttachments : undefined,
       }),
     });
   } catch (e) {

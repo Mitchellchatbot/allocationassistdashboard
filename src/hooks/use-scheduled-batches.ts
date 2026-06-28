@@ -11,9 +11,17 @@ import { useCallback } from "react";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { supabase } from "@/lib/supabase";
 import { useTableSubscription } from "@/lib/realtime-registry";
+import type { EmailAttachment } from "@/lib/email-attachments";
 
 export type BatchKind   = "daily_duo" | "tuesday_top_15" | "specialty_of_day";
 export type BatchStatus = "draft" | "sent" | "cancelled" | "failed";
+
+/** Recurrence rule for a scheduled batch (Amir #5). */
+export interface BatchRecurrence {
+  freq:     "none" | "weekly";
+  weekdays?: number[];   // 0=Sun … 6=Sat (for weekly)
+  until?:   string | null;
+}
 
 /** Invoke an edge function but never wait forever. supabase.functions.invoke
  *  has no built-in timeout, so a cold start or a dropped connection could
@@ -39,6 +47,10 @@ export interface ScheduledBatch {
   id:               string;
   kind:             BatchKind;
   scheduled_for:    string;             // ISO date
+  scheduled_at_time: string | null;     // "HH:MM" Gulf time (Amir #5)
+  timezone:         string | null;      // default Asia/Dubai
+  recurrence:       BatchRecurrence | null;
+  next_run_at:      string | null;
   specialty:        string | null;
   // ISO-or-display country name (UAE / Saudi Arabia / Qatar / Oman / etc).
   // When set, send-batch filters hospitals to those whose country matches.
@@ -47,6 +59,10 @@ export interface ScheduledBatch {
   country:          string | null;
   status:           BatchStatus;
   doctor_ids:       string[];
+  // CVs / logbooks attached to this batch's hospital email. Persisted on the
+  // row so the scheduler (which sends server-side, no UI) carries them too.
+  // send-batch forwards { filename, path } to Resend. Defaults to [].
+  attachments:      EmailAttachment[];
   hospital_count:   number | null;
   sent_at:          string | null;
   sent_message_id:  string | null;
@@ -142,6 +158,9 @@ export interface UpsertBatchInput {
   id?:            string;
   kind:           BatchKind;
   scheduled_for:  string;
+  scheduled_at_time?: string | null;
+  timezone?:      string | null;
+  recurrence?:    BatchRecurrence | null;
   specialty?:     string | null;
   country?:       string | null;
   doctor_ids?:    string[];
@@ -158,6 +177,9 @@ export function useUpsertBatch() {
         ...(input.id ? { id: input.id } : {}),
         kind:          input.kind,
         scheduled_for: input.scheduled_for,
+        ...(input.scheduled_at_time !== undefined ? { scheduled_at_time: input.scheduled_at_time } : {}),
+        ...(input.timezone   !== undefined ? { timezone: input.timezone } : {}),
+        ...(input.recurrence !== undefined ? { recurrence: input.recurrence } : {}),
         specialty:     input.specialty ?? null,
         country:       input.country   ?? null,
         doctor_ids:    input.doctor_ids ?? [],
