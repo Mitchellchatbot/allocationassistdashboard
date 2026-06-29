@@ -28,7 +28,7 @@ import {
 import {
   useWpCandidates, useSyncWpCandidates, useLinkWpCandidate,
   useUpsertWpCandidate, useUploadWpPhoto, useUploadWpCv, useDeleteWpCandidate,
-  useStagedProfiles, useCreateStagedProfile, useCreateProfileFromCv, useDeleteStagedProfile, usePublishStagedProfile, useUpdateStagedProfile,
+  useStagedProfiles, useCreateStagedProfile, useCreateProfileFromCv, useDeleteStagedProfile, usePublishStagedProfile, useUpdateStagedProfile, getStagedCvUrl,
   useWpCandidateById,
   type WpCandidate, type StagedProfile, type StagedProfileInput,
 } from "@/hooks/use-wp-candidates";
@@ -1588,6 +1588,21 @@ function StagedProfileDetailDialog({
   const cvInputRef = useRef<HTMLInputElement | null>(null);
   const update = useUpdateStagedProfile();
   const [chainOpen, setChainOpen] = useState(false);
+  const [openingCv, setOpeningCv] = useState(false);
+
+  // Open the dropped CV (private doctor-cvs bucket) via a 1h signed URL so
+  // reviewers can check the source before publishing — not just trust the
+  // extracted fields. The published candidate has its own "View Resume".
+  const viewCv = async () => {
+    if (!profile.cv_upload_id) return;
+    setOpeningCv(true);
+    try {
+      const url = await getStagedCvUrl(profile.cv_upload_id);
+      if (url) window.open(url, "_blank", "noopener");
+      else toast.error("Couldn't open the CV — it may still be processing.");
+    } catch { toast.error("Couldn't open the CV."); }
+    finally { setOpeningCv(false); }
+  };
 
   // Save handler. Writes acf[key] = value AND mirrors the flat
   // denormalised column (specialty, full_name, phone, etc.) so the
@@ -1940,6 +1955,18 @@ function StagedProfileDetailDialog({
               <Upload className="h-4 w-4 mr-1.5" />
               {cvFileName ? "Résumé attached ✓" : "Attach résumé"}
             </Button>
+            {profile.cv_upload_id && (
+              <Button
+                variant="outline"
+                className="border-teal-300 text-teal-700 hover:bg-teal-50"
+                onClick={viewCv}
+                disabled={openingCv}
+                title="Open the dropped CV in a new tab"
+              >
+                {openingCv ? <Loader2 className="h-4 w-4 mr-1.5 animate-spin" /> : <FileText className="h-4 w-4 mr-1.5" />}
+                View CV
+              </Button>
+            )}
           </div>
           <div className="flex gap-2">
             <Button

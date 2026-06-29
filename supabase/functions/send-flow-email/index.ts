@@ -885,16 +885,21 @@ Deno.serve(async (req: Request) => {
   const ccList: string[] | undefined = ccSet.size ? [...ccSet] : undefined;
 
   // ── User-uploaded attachments (CVs, logbooks) ──────────────────────────────
-  // Set on the run by the Send Profile dialog (metadata.attachments). These ride
-  // ONLY on the hospital-facing email — the CV is what the hospital wants to see;
-  // the doctor's own auto-continued heads-up email shouldn't echo it back. Each
-  // entry is { filename, path } where path is the public email-attachments URL
-  // Resend fetches server-side. Merged after the relocation guide attachments so
-  // a relocation send could carry both.
-  const userAttachmentsRaw = (md.attachments as unknown);
+  // Set on the run by the Send Profile dialog. Attachments are now PER-EMAIL so
+  // the dispatcher controls exactly which file rides which email:
+  //   • metadata.attachments         → the hospital-facing email (email_hospital)
+  //   • metadata.attachments_doctor  → the doctor heads-up email   (email_doctor)
+  // Legacy runs only set metadata.attachments (hospital), so the doctor set is
+  // simply absent for them — behaviour is unchanged. Each entry is
+  // { filename, path } where path is the public email-attachments URL Resend
+  // fetches server-side. Merged after any relocation-guide attachments.
+  const attachmentsForStage =
+    run.current_stage === "email_hospital" ? md.attachments
+    : run.current_stage === "email_doctor" ? md.attachments_doctor
+    : undefined;
   const userAttachments: Array<{ filename: string; path: string }> =
-    run.current_stage === "email_hospital" && Array.isArray(userAttachmentsRaw)
-      ? (userAttachmentsRaw as Array<Record<string, unknown>>)
+    Array.isArray(attachmentsForStage)
+      ? (attachmentsForStage as Array<Record<string, unknown>>)
           .map(a => ({ filename: String(a?.filename ?? "attachment"), path: String(a?.path ?? "") }))
           .filter(a => a.path.startsWith("http"))
       : [];

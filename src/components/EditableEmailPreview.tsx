@@ -62,6 +62,10 @@ export function EditableEmailPreview({
   const savedRange = useRef<Range | null>(null);
   const [tableOpen, setTableOpen] = useState(false);
   const [fullOpen, setFullOpen]   = useState(false);
+  // Snapshot of the live body HTML taken when full-screen opens. The full-screen
+  // editor seeds from this stable value (re-seeding every keystroke would fight
+  // the caret); its edits flow back here via onHtmlChange below.
+  const [fsHtml, setFsHtml]       = useState("");
 
   // Seed / re-seed the contentEditable body from the upstream HTML. Runs on the
   // first render, whenever a new preview arrives (`html`), and on an explicit
@@ -193,7 +197,7 @@ export function EditableEmailPreview({
           <ToolBtn onClick={() => exec("insertOrderedList")}   title="Numbered list"><ListOrdered className="h-3.5 w-3.5" /></ToolBtn>
           <ToolBtn onClick={makeLink}                    title="Insert link"><Link2 className="h-3.5 w-3.5" /></ToolBtn>
           <Divider />
-          <ToolBtn onClick={() => setFullOpen(true)} title="Full-screen preview" primary>
+          <ToolBtn onClick={() => { setFsHtml(bodyRef.current?.innerHTML ?? html); setFullOpen(true); }} title="Full-screen editor" primary>
             <Maximize2 className="h-3.5 w-3.5" /> <span className="text-[11px] font-medium">Full screen</span>
           </ToolBtn>
         </div>
@@ -224,10 +228,16 @@ export function EditableEmailPreview({
         open={fullOpen}
         onClose={() => setFullOpen(false)}
         subject={subject}
-        html={bodyRef.current?.innerHTML ?? html}
+        html={fsHtml}
         text={text}
         from={from}
         to={to}
+        // Editable full-screen: subject + body edits sync straight back to the
+        // inline editor (DOM + onHtmlChange), so closing keeps every change.
+        onSubjectChange={onSubjectChange}
+        onHtmlChange={(v) => { if (bodyRef.current && bodyRef.current.innerHTML !== v) bodyRef.current.innerHTML = v; onHtmlChange(v); }}
+        edited={edited}
+        onReset={onReset ? () => { onReset(); setFsHtml(html); } : undefined}
       />
     </div>
   );

@@ -34,6 +34,9 @@ export function AttachmentsPicker({
   const inputRef = useRef<HTMLInputElement>(null);
   const [uploading, setUploading] = useState(false);
   const [dragging, setDragging] = useState(false);
+  // Paste is scoped to the hovered picker so that, when two pickers are on
+  // screen (hospital + doctor email), a pasted file lands on exactly one.
+  const hoveredRef = useRef(false);
 
   const handleFiles = async (files: FileList | null) => {
     if (!files || files.length === 0) return;
@@ -59,13 +62,15 @@ export function AttachmentsPicker({
     removeEmailAttachment(att.storage_path);
   };
 
-  // Paste (Ctrl+V) a copied file or screenshot anywhere in the dialog → attach.
+  // Paste (Ctrl+V) a copied file or screenshot → attach. Scoped to the picker
+  // the pointer is over (hoveredRef) so two pickers don't both grab the paste.
   // Only acts when the clipboard carries FILES, so pasting text into the email
   // body is untouched. Re-bound when `attachments` changes so handleFiles closes
   // over the latest list.
   useEffect(() => {
     if (disabled) return;
     const onPaste = (e: ClipboardEvent) => {
+      if (!hoveredRef.current) return;
       const files = e.clipboardData?.files;
       if (files && files.length > 0) { e.preventDefault(); handleFiles(files); }
     };
@@ -76,6 +81,8 @@ export function AttachmentsPicker({
 
   return (
     <div
+      onMouseEnter={() => { hoveredRef.current = true; }}
+      onMouseLeave={() => { hoveredRef.current = false; }}
       onDragOver={(e) => { if (!disabled) { e.preventDefault(); setDragging(true); } }}
       onDragLeave={(e) => { e.preventDefault(); setDragging(false); }}
       onDrop={(e) => { e.preventDefault(); setDragging(false); if (!disabled) handleFiles(e.dataTransfer.files); }}

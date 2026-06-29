@@ -214,7 +214,23 @@ export function useUpdateBatch() {
       if (error) throw new Error(error.message || error.details || error.hint || "Batch update failed");
       return data as ScheduledBatch;
     },
-    onSuccess: () => qc.invalidateQueries({ queryKey: BATCHES_KEY }),
+    // Optimistic: patch the cached row immediately so attachment chips, queued
+    // doctors and reorders appear/disappear instantly instead of waiting a DB
+    // round-trip (matches the in-memory feel of the Send Profile flow). Roll
+    // back on error; reconcile on settle.
+    onMutate: async ({ id, patch }: { id: string; patch: Partial<ScheduledBatch> }) => {
+      await qc.cancelQueries({ queryKey: BATCHES_KEY });
+      const prev = qc.getQueryData<ScheduledBatch[]>(BATCHES_KEY);
+      if (prev) {
+        qc.setQueryData<ScheduledBatch[]>(BATCHES_KEY, prev.map(b => b.id === id ? { ...b, ...patch } : b));
+      }
+      return { prev };
+    },
+    onError: (_e, _vars, ctx) => {
+      const c = ctx as { prev?: ScheduledBatch[] } | undefined;
+      if (c?.prev) qc.setQueryData(BATCHES_KEY, c.prev);
+    },
+    onSettled: () => qc.invalidateQueries({ queryKey: BATCHES_KEY }),
   });
 }
 

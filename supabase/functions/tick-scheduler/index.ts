@@ -946,7 +946,7 @@ interface ProfileSendRow {
   doctor_phone: string | null; doctor_speciality: string | null; hospital_ids: string[];
   custom_message: string | null; bcc_override: string[] | null; cc_override: string[] | null;
   stage_overrides: Record<string, unknown> | null; template_overrides: Record<string, string> | null;
-  attachments: unknown; scheduled_for: string; scheduled_at_time: string | null; created_by: string | null;
+  attachments: unknown; attachments_doctor: unknown; scheduled_for: string; scheduled_at_time: string | null; created_by: string | null;
 }
 
 /** Fire scheduled Send-Profile campaigns (Amir #5). Replays exactly what
@@ -1001,6 +1001,7 @@ async function runScheduledProfileSweep(
             ...(s.stage_overrides ? { stage_overrides: s.stage_overrides } : {}),
             ...(s.template_overrides ? { template_overrides: s.template_overrides } : {}),
             ...(Array.isArray(s.attachments) && s.attachments.length ? { attachments: s.attachments } : {}),
+            ...(Array.isArray(s.attachments_doctor) && s.attachments_doctor.length ? { attachments_doctor: s.attachments_doctor } : {}),
           },
         }).select("id").single();
         if (runErr || !runRow) { failed++; lastErr = runErr?.message ?? "run insert failed"; continue; }

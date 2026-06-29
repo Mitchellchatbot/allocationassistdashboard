@@ -3,8 +3,18 @@ import * as DialogPrimitive from "@radix-ui/react-dialog";
 import {
   X, Monitor, Tablet, Smartphone, Mail as MailIcon, ZoomIn, ZoomOut,
   Code2, FileText, Copy, Check, Download, Image as ImageIcon, Sun, Moon,
+  Bold, Italic, Underline, List, ListOrdered, Link2, Pencil,
 } from "lucide-react";
 import { toast } from "sonner";
+import { cn } from "@/lib/utils";
+
+// Same email body styling as the inline EditableEmailPreview so the editable
+// full-screen surface renders identically to what sends.
+const FS_BODY_CLASS =
+  "bg-white rounded-md text-[14px] leading-relaxed text-slate-800 " +
+  "[&_a]:text-teal-600 [&_a:hover]:underline [&_p]:my-3 [&_h2]:font-semibold [&_h2]:my-3 " +
+  "[&_h3]:font-semibold [&_h3]:my-2 [&_ul]:list-disc [&_ul]:pl-5 [&_ol]:list-decimal [&_ol]:pl-5 " +
+  "[&_li]:my-1 [&_pre]:whitespace-pre-wrap [&_pre]:font-sans";
 
 /**
  * FullScreenEmailPreview — Amir #7. A true full-viewport review of an email
@@ -27,6 +37,14 @@ export interface FullScreenEmailPreviewProps {
   from?:       string;
   to?:         string;
   attachments?: string[];
+  /** When BOTH are provided the full-screen view becomes a live editor: the
+   *  subject is an input and the rendered pane is contentEditable. Edits flow
+   *  straight back to the caller (same overrides the inline editor ships). */
+  onSubjectChange?: (subject: string) => void;
+  onHtmlChange?:    (html: string) => void;
+  /** Shows a "Reset to template" chip when something diverges. */
+  edited?:  boolean;
+  onReset?: () => void;
 }
 
 type DeviceKey = "desktop" | "tablet" | "outlook" | "mobile";
@@ -38,21 +56,64 @@ const DEVICES: { key: DeviceKey; label: string; width: number | null; icon: Reac
 ];
 
 export function FullScreenEmailPreview(props: FullScreenEmailPreviewProps) {
-  const { open, onClose, subject, html, text, from, to, attachments } = props;
+  const { open, onClose, subject, html, text, from, to, attachments,
+          onSubjectChange, onHtmlChange, edited, onReset } = props;
+  const editable = !!(onSubjectChange && onHtmlChange);
   const [device, setDevice]   = useState<DeviceKey>("desktop");
   const [zoom, setZoom]       = useState(100);
   const [dark, setDark]       = useState(false);
   const [showImages, setShowImages] = useState(true);
   const [pane, setPane]       = useState<"rendered" | "html" | "text">("rendered");
   const [copied, setCopied]   = useState(false);
+  // Live edited HTML — drives the HTML pane + Copy while editing, separately
+  // from the stable `html` snapshot that seeds the contentEditable (changing
+  // the seed every keystroke would fight the caret).
+  const [liveHtml, setLiveHtml] = useState(html);
   const frameWrapRef = useRef<HTMLDivElement>(null);
+  const editRef      = useRef<HTMLDivElement>(null);
+  const savedRange   = useRef<Range | null>(null);
+  const effectiveHtml = editable ? liveHtml : html;
+
+  // Resync the live copy whenever a fresh snapshot arrives (open / reset).
+  useEffect(() => { setLiveHtml(html); }, [html, open]);
 
   // Esc + scroll-lock + focus management are handled by Radix Dialog below.
 
   // Reset transient view state each time it opens.
   useEffect(() => { if (open) { setPane("rendered"); setZoom(100); } }, [open]);
 
+  // Seed / re-seed the contentEditable from the upstream HTML — on open and when
+  // a fresh `html` arrives, but NOT on every keystroke (the guard keeps the
+  // caret put: after typing, innerHTML already equals `html`). Re-runs when the
+  // rendered pane is (re)shown so switching panes and back restores the editor.
+  useEffect(() => {
+    if (!editable || pane !== "rendered") return;
+    if (editRef.current && editRef.current.innerHTML !== html) {
+      editRef.current.innerHTML = html;
+    }
+  }, [editable, pane, html, open]);
+
   const width = DEVICES.find(d => d.key === device)?.width ?? null;
+
+  // ── Inline rich-text editing (editable mode) ──────────────────────────────
+  const saveSelection = () => {
+    const sel = window.getSelection();
+    if (sel && sel.rangeCount > 0 && editRef.current?.contains(sel.anchorNode)) {
+      savedRange.current = sel.getRangeAt(0).cloneRange();
+    }
+  };
+  const flush = () => { if (editRef.current) onHtmlChange?.(editRef.current.innerHTML); };
+  const exec = (command: string, value?: string) => {
+    const body = editRef.current; if (!body) return;
+    body.focus();
+    if (savedRange.current && body.contains(savedRange.current.commonAncestorContainer)) {
+      const sel = window.getSelection();
+      sel?.removeAllRanges(); sel?.addRange(savedRange.current);
+    }
+    try { document.execCommand(command, false, value); } catch { /* unsupported — no-op */ }
+    flush();
+  };
+  const makeLink = () => { const url = window.prompt("Link URL", "https://"); if (url) exec("createLink", url); };
 
   // Wrap the email HTML in a minimal document. Optionally strip <img> so the
   // team can review the text-only fallback view (how it looks with images off).
@@ -64,7 +125,7 @@ export function FullScreenEmailPreview(props: FullScreenEmailPreviewProps) {
   }, [html, showImages]);
 
   const copyHtml = async () => {
-    try { await navigator.clipboard.writeText(html); setCopied(true); setTimeout(() => setCopied(false), 1500); toast.success("HTML copied"); }
+    try { await navigator.clipboard.writeText(effectiveHtml); setCopied(true); setTimeout(() => setCopied(false), 1500); toast.success("HTML copied"); }
     catch { toast.error("Couldn't copy"); }
   };
 
@@ -72,8 +133,9 @@ export function FullScreenEmailPreview(props: FullScreenEmailPreviewProps) {
     try {
       const el = frameWrapRef.current?.querySelector("iframe");
       // Prefer printing the iframe's own document so the email paginates cleanly.
+      // In editable mode there's no iframe — print the contentEditable instead.
       const doc = (el as HTMLIFrameElement | null)?.contentDocument;
-      const target = doc?.body ?? frameWrapRef.current;
+      const target = doc?.body ?? editRef.current ?? frameWrapRef.current;
       if (!target) return;
       const mod = await import("html2pdf.js");
       const html2pdf = (mod as unknown as { default: (...a: unknown[]) => { set: (o: unknown) => { from: (e: unknown) => { save: () => Promise<void> } } } }).default;
@@ -118,18 +180,32 @@ export function FullScreenEmailPreview(props: FullScreenEmailPreviewProps) {
               ))}
             </ToolGroup>
 
-            {/* Zoom */}
-            <ToolGroup>
-              <IconBtn onClick={() => setZoom(z => Math.max(40, z - 10))} title="Zoom out"><ZoomOut className="h-3.5 w-3.5" /></IconBtn>
-              <span className="px-1 text-[11px] tabular-nums w-10 text-center">{zoom}%</span>
-              <IconBtn onClick={() => setZoom(z => Math.min(200, z + 10))} title="Zoom in"><ZoomIn className="h-3.5 w-3.5" /></IconBtn>
-            </ToolGroup>
+            {/* Zoom — preview only (a CSS scale would shift the editor caret). */}
+            {!editable && (
+              <ToolGroup>
+                <IconBtn onClick={() => setZoom(z => Math.max(40, z - 10))} title="Zoom out"><ZoomOut className="h-3.5 w-3.5" /></IconBtn>
+                <span className="px-1 text-[11px] tabular-nums w-10 text-center">{zoom}%</span>
+                <IconBtn onClick={() => setZoom(z => Math.min(200, z + 10))} title="Zoom in"><ZoomIn className="h-3.5 w-3.5" /></IconBtn>
+              </ToolGroup>
+            )}
 
-            {/* Canvas + images */}
+            {/* Canvas + images — image hiding is a preview-only review aid. */}
             <ToolGroup>
               <IconBtn onClick={() => setDark(d => !d)} title={dark ? "Light canvas" : "Dark canvas"}>{dark ? <Sun className="h-3.5 w-3.5" /> : <Moon className="h-3.5 w-3.5" />}</IconBtn>
-              <IconBtn onClick={() => setShowImages(s => !s)} title={showImages ? "Hide images" : "Show images"} active={!showImages}><ImageIcon className="h-3.5 w-3.5" /></IconBtn>
+              {!editable && <IconBtn onClick={() => setShowImages(s => !s)} title={showImages ? "Hide images" : "Show images"} active={!showImages}><ImageIcon className="h-3.5 w-3.5" /></IconBtn>}
             </ToolGroup>
+
+            {/* Rich-text formatting — only when editing. */}
+            {editable && (
+              <ToolGroup>
+                <IconBtn onMouseDown={(e) => e.preventDefault()} onClick={() => exec("bold")}          title="Bold"><Bold className="h-3.5 w-3.5" /></IconBtn>
+                <IconBtn onMouseDown={(e) => e.preventDefault()} onClick={() => exec("italic")}        title="Italic"><Italic className="h-3.5 w-3.5" /></IconBtn>
+                <IconBtn onMouseDown={(e) => e.preventDefault()} onClick={() => exec("underline")}     title="Underline"><Underline className="h-3.5 w-3.5" /></IconBtn>
+                <IconBtn onMouseDown={(e) => e.preventDefault()} onClick={() => exec("insertUnorderedList")} title="Bulleted list"><List className="h-3.5 w-3.5" /></IconBtn>
+                <IconBtn onMouseDown={(e) => e.preventDefault()} onClick={() => exec("insertOrderedList")}   title="Numbered list"><ListOrdered className="h-3.5 w-3.5" /></IconBtn>
+                <IconBtn onMouseDown={(e) => e.preventDefault()} onClick={makeLink}                    title="Insert link"><Link2 className="h-3.5 w-3.5" /></IconBtn>
+              </ToolGroup>
+            )}
           </>
         )}
 
@@ -153,29 +229,79 @@ export function FullScreenEmailPreview(props: FullScreenEmailPreviewProps) {
         </div>
       )}
 
-      {/* Canvas */}
-      <div className={`flex-1 min-h-0 overflow-auto ${dark ? "bg-slate-950" : "bg-slate-200"}`}>
-        {pane === "rendered" && (
-          <div ref={frameWrapRef} className="min-h-full flex justify-center py-6 px-4">
-            <div
-              className="bg-white shadow-2xl rounded-md overflow-hidden transition-[width] duration-200"
-              style={{
-                width: width ? `${width}px` : "min(1100px, 100%)",
-                transform: `scale(${zoom / 100})`,
-                transformOrigin: "top center",
-              }}
+      {/* Editable subject row — only in edit mode. The rendered pane below
+          becomes a live contentEditable surface; HTML/Text panes stay read-only. */}
+      {editable && (
+        <div className="px-4 py-2 bg-slate-800/60 border-b border-white/5 flex items-center gap-3">
+          <span className="inline-flex items-center gap-1 text-teal-300 text-[10px] uppercase tracking-wider shrink-0">
+            <Pencil className="h-3 w-3" /> Editing
+          </span>
+          <input
+            value={subject}
+            onChange={(e) => onSubjectChange?.(e.target.value)}
+            placeholder="Subject line"
+            className="flex-1 min-w-0 rounded-md border border-white/10 bg-slate-900/70 px-2.5 py-1.5 text-[13px] font-medium text-slate-100 outline-none focus:border-teal-400 focus:ring-1 focus:ring-teal-500/40"
+          />
+          {edited && onReset && (
+            <button
+              type="button"
+              onClick={onReset}
+              className="inline-flex items-center gap-1 rounded-md border border-white/15 bg-white/5 px-2 py-1 text-[11px] font-medium text-slate-200 hover:bg-white/10 transition-colors shrink-0"
+              title="Discard edits and restore the template version"
             >
-              <iframe
-                title="Email full preview"
-                srcDoc={srcDoc}
-                className="w-full border-0 bg-white"
-                style={{ height: "calc(100vh - 160px)" }}
-              />
+              Reset to template
+            </button>
+          )}
+        </div>
+      )}
+
+      {/* Canvas — light for the rendered email card; dark for the HTML/text
+          source panes (whose font is light, so a light canvas = white-on-white). */}
+      <div className={`flex-1 min-h-0 overflow-auto ${pane !== "rendered" ? "bg-slate-900" : dark ? "bg-slate-950" : "bg-slate-200"}`}>
+        {pane === "rendered" && (
+          editable ? (
+            // Live editor. No zoom transform here — a CSS scale shifts the caret
+            // hit-testing, so editing stays at 100% and the device toggles drive
+            // width only. The email's own inline styles render as they send.
+            <div className="min-h-full flex justify-center py-6 px-4">
+              <div
+                className="bg-white shadow-2xl rounded-md w-full transition-[max-width] duration-200"
+                style={{ maxWidth: width ? `${width}px` : "1000px" }}
+              >
+                <div
+                  ref={editRef}
+                  contentEditable
+                  suppressContentEditableWarning
+                  onInput={(e) => { const v = (e.target as HTMLDivElement).innerHTML; setLiveHtml(v); onHtmlChange?.(v); }}
+                  onKeyUp={saveSelection}
+                  onMouseUp={saveSelection}
+                  onBlur={saveSelection}
+                  className={cn(FS_BODY_CLASS, "p-6 sm:p-8 outline-none min-h-[calc(100vh-220px)] cursor-text")}
+                />
+              </div>
             </div>
-          </div>
+          ) : (
+            <div ref={frameWrapRef} className="min-h-full flex justify-center py-6 px-4">
+              <div
+                className="bg-white shadow-2xl rounded-md overflow-hidden transition-[width] duration-200"
+                style={{
+                  width: width ? `${width}px` : "min(1100px, 100%)",
+                  transform: `scale(${zoom / 100})`,
+                  transformOrigin: "top center",
+                }}
+              >
+                <iframe
+                  title="Email full preview"
+                  srcDoc={srcDoc}
+                  className="w-full border-0 bg-white"
+                  style={{ height: "calc(100vh - 160px)" }}
+                />
+              </div>
+            </div>
+          )
         )}
         {pane === "html" && (
-          <pre className="p-6 text-[12px] leading-relaxed text-slate-200 font-mono whitespace-pre-wrap break-words max-w-[1100px] mx-auto">{html}</pre>
+          <pre className="p-6 text-[12px] leading-relaxed text-slate-200 font-mono whitespace-pre-wrap break-words max-w-[1100px] mx-auto">{effectiveHtml}</pre>
         )}
         {pane === "text" && (
           <pre className="p-6 text-[12.5px] leading-relaxed text-slate-200 font-mono whitespace-pre-wrap break-words max-w-[800px] mx-auto">{text || "(no plain-text version)"}</pre>
@@ -203,9 +329,9 @@ function Seg({ active, onClick, icon: Icon, label, compact }: { active: boolean;
   );
 }
 
-function IconBtn({ children, onClick, title, active }: { children: React.ReactNode; onClick: () => void; title: string; active?: boolean }) {
+function IconBtn({ children, onClick, onMouseDown, title, active }: { children: React.ReactNode; onClick: () => void; onMouseDown?: (e: React.MouseEvent) => void; title: string; active?: boolean }) {
   return (
-    <button onClick={onClick} title={title} className={`inline-flex items-center justify-center rounded-md px-1.5 py-1 transition-colors ${active ? "bg-teal-500 text-white" : "text-slate-300 hover:bg-white/10"}`}>
+    <button onClick={onClick} onMouseDown={onMouseDown} title={title} className={`inline-flex items-center justify-center rounded-md px-1.5 py-1 transition-colors ${active ? "bg-teal-500 text-white" : "text-slate-300 hover:bg-white/10"}`}>
       {children}
     </button>
   );

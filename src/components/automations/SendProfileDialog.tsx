@@ -252,10 +252,12 @@ export function SendProfileDialog({ open, onClose }: Props) {
 
   const handleConfirm = async (
     stageOverrides?: Record<string, SendOverrides>,
-    attachments?: EmailAttachment[],
+    attachments?: { hospital?: EmailAttachment[]; doctor?: EmailAttachment[] },
     templateKeys?: { hospital: string; doctor: string },
     schedule?: { date: string; time: string },
   ) => {
+    const hospitalAttach = attachments?.hospital ?? [];
+    const doctorAttach   = attachments?.doctor ?? [];
     if (!selectedDoctor || selectedHospitals.length === 0) return;
     // Edits only apply to a single-hospital send — the preview (and so the
     // edited HTML) is rendered for one hospital, and the override would bake
@@ -291,7 +293,8 @@ export function SendProfileDialog({ open, onClose }: Props) {
           cc_override:       recipientsSplit.cc.length ? recipientsSplit.cc : null,
           stage_overrides:   effectiveStageOverrides ?? null,
           template_overrides: templateOverridesPayload,
-          attachments:       attachments?.map(a => ({ filename: a.filename, path: a.path })) ?? [],
+          attachments:        hospitalAttach.map(a => ({ filename: a.filename, path: a.path })),
+          attachments_doctor: doctorAttach.map(a => ({ filename: a.filename, path: a.path })),
           scheduled_for:     schedule.date,
           scheduled_at_time: schedule.time || "09:00",
           timezone:          "Asia/Dubai",
@@ -347,11 +350,15 @@ export function SendProfileDialog({ open, onClose }: Props) {
               // fires — including the doctor heads-up that auto-continues
               // server-side — and ships that edited version verbatim.
               ...(effectiveStageOverrides ? { stage_overrides: effectiveStageOverrides } : {}),
-              // CVs / logbooks attached in the preview. Same files for every
-              // hospital in a BCC batch; send-flow-email attaches them on the
-              // hospital email only. Store the minimal Resend shape.
-              ...(attachments?.length
-                ? { attachments: attachments.map(a => ({ filename: a.filename, path: a.path })) }
+              // CVs / logbooks attached in the preview — PER EMAIL. Same files
+              // for every hospital in a BCC batch. send-flow-email reads
+              // `attachments` on the hospital stage and `attachments_doctor` on
+              // the doctor stage. Store the minimal Resend shape.
+              ...(hospitalAttach.length
+                ? { attachments: hospitalAttach.map(a => ({ filename: a.filename, path: a.path })) }
+                : {}),
+              ...(doctorAttach.length
+                ? { attachments_doctor: doctorAttach.map(a => ({ filename: a.filename, path: a.path })) }
                 : {}),
               // Per-send template pick (Amir #3). send-flow-email reads
               // template_overrides[<stage>] and renders that template server-side
@@ -705,7 +712,7 @@ function PreviewConfirm({
   doctorSubject: string;
   doctorBody: string;
   onBack: () => void;
-  onConfirm: (stageOverrides?: Record<string, SendOverrides>, attachments?: EmailAttachment[], templateKeys?: { hospital: string; doctor: string }, schedule?: { date: string; time: string }) => void;
+  onConfirm: (stageOverrides?: Record<string, SendOverrides>, attachments?: { hospital?: EmailAttachment[]; doctor?: EmailAttachment[] }, templateKeys?: { hospital: string; doctor: string }, schedule?: { date: string; time: string }) => void;
   submitting: boolean;
   bccList: string[];
   setBccList: (next: string[]) => void;
@@ -723,9 +730,12 @@ function PreviewConfirm({
   // Per-stage overrides captured from the editable previews (null = unedited).
   const [hospitalOv, setHospitalOv] = useState<SendOverrides | null>(null);
   const [doctorOv,   setDoctorOv]   = useState<SendOverrides | null>(null);
-  // CVs / logbooks to attach to the hospital email. Uploaded to the public
-  // email-attachments bucket on pick; the URLs ride along in run metadata.
-  const [attachments, setAttachments] = useState<EmailAttachment[]>([]);
+  // CVs / logbooks to attach — PER EMAIL, so the dispatcher controls exactly
+  // which file rides which email. Uploaded to the public email-attachments
+  // bucket on pick; the URLs ride along in run metadata (attachments =
+  // hospital email, attachments_doctor = doctor email).
+  const [hospitalAttachments, setHospitalAttachments] = useState<EmailAttachment[]>([]);
+  const [doctorAttachments, setDoctorAttachments]     = useState<EmailAttachment[]>([]);
   // Send now vs schedule for later (Amir #5).
   const [sendMode, setSendMode] = useState<"now" | "later">("now");
   const [schedDate, setSchedDate] = useState<string>(() => new Date(Date.now() + 86_400_000).toISOString().slice(0, 10));
@@ -878,6 +888,12 @@ function PreviewConfirm({
           onChange={setHospitalOv}
           plainBody={renderedHospitalBody}
         />
+        <AttachmentsPicker
+          attachments={hospitalAttachments}
+          onChange={setHospitalAttachments}
+          disabled={submitting}
+          hint="ride on THIS hospital email — CV, logbook, etc."
+        />
       </div>
 
       <div className="space-y-1.5 rounded-md border bg-white p-2">
@@ -899,6 +915,12 @@ function PreviewConfirm({
           onChange={setDoctorOv}
           plainBody={renderTemplate(doctorBody, vars)}
         />
+        <AttachmentsPicker
+          attachments={doctorAttachments}
+          onChange={setDoctorAttachments}
+          disabled={submitting}
+          hint="ride on THIS doctor email — usually none"
+        />
       </div>
 
       <div className="text-[10.5px] text-muted-foreground px-0.5">
@@ -908,8 +930,6 @@ function PreviewConfirm({
             ? <span className="text-teal-700 font-medium">You've edited {hospitalOv && doctorOv ? "both emails" : hospitalOv ? "the hospital email" : "the doctor email"} — your version sends instead of the template.</span>
             : "Click Edit email on either preview to tweak the wording before it sends."}
       </div>
-
-      <AttachmentsPicker attachments={attachments} onChange={setAttachments} disabled={submitting} />
 
       {/* Send now vs schedule for later (Amir #5). */}
       <div className="rounded-md border bg-slate-50/40 p-2.5 space-y-2">
@@ -971,7 +991,10 @@ function PreviewConfirm({
             };
             onConfirm(
               Object.keys(stageOverrides).length ? stageOverrides : undefined,
-              attachments.length ? attachments : undefined,
+              {
+                hospital: hospitalAttachments.length ? hospitalAttachments : undefined,
+                doctor:   doctorAttachments.length   ? doctorAttachments   : undefined,
+              },
               { hospital: hospitalTemplateKey, doctor: doctorTemplateKey },
               sendMode === "later" ? { date: schedDate, time: schedTime } : undefined,
             );
@@ -1249,7 +1272,7 @@ function EditableEmailSection({
         from={from}
         to={to}
         text={plainBody}
-        className="border-0 rounded-none h-[58vh] max-h-[58vh]"
+        className="border-0 rounded-none min-h-[220px] max-h-[60vh]"
       />
     </div>
   );

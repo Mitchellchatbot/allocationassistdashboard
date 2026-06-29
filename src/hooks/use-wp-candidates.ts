@@ -386,6 +386,18 @@ export function useCreateStagedProfile() {
  *  triggers Claude extraction. Returns the new staged id so the caller can
  *  auto-open the editor. extraction_ok=false means the row exists but Claude
  *  parsing failed — the team can retry from the staging dialog. */
+/** Signed URL (1h) for a staged profile's dropped CV — the doctor-cvs bucket is
+ *  private, so the "View CV" button in the staging dialog resolves the file via
+ *  its cv_upload_id → file_path → signed URL. Returns null if not found. */
+export async function getStagedCvUrl(cvUploadId: string): Promise<string | null> {
+  const { data: up } = await supabase
+    .from("cv_uploads").select("file_path").eq("id", cvUploadId).maybeSingle();
+  const path = (up as { file_path?: string } | null)?.file_path;
+  if (!path) return null;
+  const { data } = await supabase.storage.from("doctor-cvs").createSignedUrl(path, 3600);
+  return data?.signedUrl ?? null;
+}
+
 export function useCreateProfileFromCv() {
   const qc = useQueryClient();
   return useMutation({

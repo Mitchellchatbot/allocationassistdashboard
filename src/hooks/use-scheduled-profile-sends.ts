@@ -23,6 +23,7 @@ export interface ScheduledProfileSend {
   stage_overrides:    Record<string, unknown> | null;
   template_overrides: Record<string, string> | null;
   attachments:        Array<{ filename: string; path: string }>;
+  attachments_doctor: Array<{ filename: string; path: string }>;
   scheduled_for:      string;
   scheduled_at_time:  string | null;
   timezone:           string | null;
@@ -46,6 +47,7 @@ export interface ScheduleProfileSendInput {
   stage_overrides?:   Record<string, unknown> | null;
   template_overrides?: Record<string, string> | null;
   attachments?:       Array<{ filename: string; path: string }>;
+  attachments_doctor?: Array<{ filename: string; path: string }>;
   scheduled_for:      string;
   scheduled_at_time?: string | null;
   timezone?:          string | null;
@@ -85,7 +87,8 @@ export function useScheduleProfileSend() {
         .from("scheduled_profile_sends")
         .insert({
           ...input,
-          attachments: input.attachments ?? [],
+          attachments:        input.attachments ?? [],
+          attachments_doctor: input.attachments_doctor ?? [],
           recurrence:  input.recurrence ?? { freq: "none" },
           timezone:    input.timezone ?? "Asia/Dubai",
           status:      "draft",
