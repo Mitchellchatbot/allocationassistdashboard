@@ -25,32 +25,30 @@ export default defineConfig(({ mode }) => ({
     // crashes). Costs ~7MB of extra files but they sit alongside the
     // bundle, only downloaded if the user opens devtools.
     sourcemap: true,
-    // Bucket every node_modules package into its own cacheable vendor chunk,
-    // separate from the app's own code. Two wins: (1) the initial download
-    // parallelises across chunks instead of one fat `index`, and (2) vendor
-    // code (which rarely changes) stays cached across deploys — only the small
-    // app chunk re-downloads when we ship. The React core stays in ONE chunk:
-    // splitting react / react-dom / scheduler apart breaks module init order.
+    // Split heavy dependencies into their own chunks so the initial JS
+    // download is leaner and pages that don't need them (e.g. Dashboard)
+    // don't pay the recharts / html2pdf tax.
+    //
+    // NOTE: this is the conservative OBJECT form. An earlier attempt at a
+    // function-based manualChunks (one bucket per node_modules package) split
+    // circularly-dependent modules across chunks and broke production with
+    // "Cannot access 'S' before initialization" in recharts' Layer.js — a
+    // module-init-order (TDZ) crash that only shows at runtime, not at build.
+    // Keep recharts/d3 together with Vite's defaults; don't over-split.
     rollupOptions: {
       output: {
-        manualChunks(id) {
-          if (!id.includes("node_modules")) return undefined;
-          // React + routing core — must stay together and load first.
-          if (/[\\/]node_modules[\\/](react|react-dom|scheduler|react-router|react-router-dom)[\\/]/.test(id)) return "vendor-react";
-          if (id.includes("@tanstack"))                                   return "vendor-query";
-          if (id.includes("@radix-ui"))                                   return "vendor-radix";
-          if (id.includes("recharts") || /[\\/]node_modules[\\/](d3-|victory-vendor)/.test(id)) return "vendor-charts";
-          if (id.includes("html2pdf"))                                    return "vendor-pdf";
-          if (/[\\/]node_modules[\\/]xlsx/.test(id))                      return "vendor-xlsx";
-          if (id.includes("@supabase"))                                   return "vendor-supabase";
-          if (id.includes("lucide-react"))                                return "vendor-icons";
-          if (id.includes("framer-motion"))                               return "vendor-motion";
-          if (id.includes("date-fns"))                                    return "vendor-date";
-          // Everything else: let Vite's default splitting decide. Returning a
-          // single "vendor" bucket here was a trap — it forced lazy-page-only
-          // libs (carousel, day-picker, cmdk…) into the eager initial load.
-          // Undefined keeps them co-located with the lazy chunk that uses them.
-          return undefined;
+        manualChunks: {
+          "vendor-charts":   ["recharts"],
+          "vendor-pdf":      ["html2pdf.js"],
+          "vendor-xlsx":     ["xlsx"],
+          "vendor-supabase": ["@supabase/supabase-js"],
+          "vendor-radix":    [
+            "@radix-ui/react-dialog",
+            "@radix-ui/react-popover",
+            "@radix-ui/react-select",
+            "@radix-ui/react-tooltip",
+            "@radix-ui/react-tabs",
+          ],
         },
       },
     },
