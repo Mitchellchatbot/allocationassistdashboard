@@ -73,6 +73,7 @@ const Vacancies       = lazy(() => import("./pages/Vacancies"));
 const Reports         = lazy(() => import("./pages/Reports"));
 const Batches         = lazy(() => import("./pages/Batches"));
 const PastSent        = lazy(() => import("./pages/PastSent"));
+const ProfileSent     = lazy(() => import("./pages/ProfileSent"));
 const FeatureLab      = lazy(() => import("./pages/FeatureLab"));
 const MyWorkspace     = lazy(() => import("./pages/MyWorkspace"));
 const BulkImport      = lazy(() => import("./pages/BulkImport"));
@@ -224,6 +225,7 @@ const App = () => (
                 <Route path="/vacancies"      element={<Vacancies />} />
                 <Route path="/reports"        element={<Reports />} />
                 <Route path="/batches"        element={<Batches />} />
+                <Route path="/profile-sent"   element={<ProfileSent />} />
                 <Route path="/past-sent"      element={<PastSent />} />
                 <Route path="/feature-lab"    element={<FeatureLab />} />
                 <Route path="/import-bulk"    element={<BulkImport />} />

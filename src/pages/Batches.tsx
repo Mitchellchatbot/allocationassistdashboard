@@ -805,7 +805,7 @@ function SpecialtyRotationCard({ rotation }: { rotation: ReturnType<typeof useSp
 // Scheduled Send-Profile campaigns (Amir #5) — future hospital+doctor sends
 // queued from the Send Profile dialog. Cron firing is deploy-gated; the queue
 // is fully visible + cancellable in the UI now.
-function ScheduledProfileSendsCard() {
+export function ScheduledProfileSendsCard() {
   const { data: scheduled = [], isLoading, isError, refetch } = useScheduledProfileSends();
   const cancel = useCancelScheduledProfileSend();
   if (isLoading) return null;
