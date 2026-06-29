@@ -2,9 +2,10 @@ import { useMemo, useState } from "react";
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
 import { Input } from "@/components/ui/input";
 import { Badge } from "@/components/ui/badge";
-import { ChevronDown, Search, Check, RotateCcw, Mail } from "lucide-react";
+import { ChevronDown, Search, Check, RotateCcw, Mail, Star, Clock } from "lucide-react";
 import { renderTemplate, type EmailTemplate } from "@/hooks/use-email-templates";
 import { FLOW_DEFINITIONS } from "@/lib/automation-flows";
+import { getFavorites, toggleFavorite, getRecent, pushRecent } from "@/lib/template-prefs";
 import { cn } from "@/lib/utils";
 
 /**
@@ -29,8 +30,23 @@ export function TemplatePicker({
   const [open, setOpen]   = useState(false);
   const [query, setQuery] = useState("");
   const [hoverKey, setHoverKey] = useState<string | null>(null);
+  const [favorites, setFavorites] = useState<string[]>(() => getFavorites());
+  const [recent, setRecent]       = useState<string[]>(() => getRecent());
 
   const selected = templates.find(t => t.key === value);
+
+  // Pick = record as recent + delegate to the caller.
+  const pick = (key: string) => { setRecent(pushRecent(key)); onChange(key); setOpen(false); };
+  const onToggleFav = (key: string) => setFavorites(toggleFavorite(key));
+
+  const searching = query.trim().length > 0;
+
+  // Favorites / recently-used quick rows — only when NOT searching (search should
+  // show the full matching set). De-duped: recent excludes anything already
+  // pinned. Limited to templates that still exist.
+  const byKey = useMemo(() => new Map(templates.map(t => [t.key, t])), [templates]);
+  const favItems   = useMemo(() => (searching ? [] : favorites.map(k => byKey.get(k)).filter((t): t is EmailTemplate => !!t)), [searching, favorites, byKey]);
+  const recentItems = useMemo(() => (searching ? [] : recent.filter(k => !favorites.includes(k)).map(k => byKey.get(k)).filter((t): t is EmailTemplate => !!t)), [searching, recent, favorites, byKey]);
 
   const groups = useMemo(() => {
     const q = query.trim().toLowerCase();
@@ -98,36 +114,33 @@ export function TemplatePicker({
                   <Input value={query} onChange={e => setQuery(e.target.value)} placeholder="Search templates…" className="h-8 pl-7 text-[12px]" />
                 </div>
               </div>
+              {/* Favorites + recently-used quick rows (browse shortcut for big
+                  template sets). Hidden while searching — search shows the full
+                  matching list. */}
+              {favItems.length > 0 && (
+                <div>
+                  <div className="px-2.5 py-1 text-[9px] uppercase tracking-wider text-amber-600 bg-amber-50/60 sticky top-[49px] flex items-center gap-1"><Star className="h-2.5 w-2.5 fill-amber-400 text-amber-400" /> Favorites</div>
+                  {favItems.map(t => (
+                    <TemplateRow key={`fav-${t.key}`} t={t} value={value} defaultKey={defaultKey} isFav onPick={pick} onToggleFav={onToggleFav} onHover={setHoverKey} />
+                  ))}
+                </div>
+              )}
+              {recentItems.length > 0 && (
+                <div>
+                  <div className="px-2.5 py-1 text-[9px] uppercase tracking-wider text-slate-500 bg-slate-50/70 sticky top-[49px] flex items-center gap-1"><Clock className="h-2.5 w-2.5" /> Recently used</div>
+                  {recentItems.map(t => (
+                    <TemplateRow key={`recent-${t.key}`} t={t} value={value} defaultKey={defaultKey} isFav={favorites.includes(t.key)} onPick={pick} onToggleFav={onToggleFav} onHover={setHoverKey} />
+                  ))}
+                </div>
+              )}
+
               {groups.length === 0 && <div className="p-4 text-[11px] text-muted-foreground italic">No templates match.</div>}
               {groups.map(([flow, items]) => (
                 <div key={flow}>
                   <div className="px-2.5 py-1 text-[9px] uppercase tracking-wider text-muted-foreground bg-slate-50/70 sticky top-[49px]">{flowLabel(flow)}</div>
-                  {items.map(t => {
-                    const isDraft = t.body_text.startsWith("PLACEHOLDER");
-                    return (
-                      <button
-                        key={t.key}
-                        type="button"
-                        onMouseEnter={() => setHoverKey(t.key)}
-                        onFocus={() => setHoverKey(t.key)}
-                        onClick={() => { onChange(t.key); setOpen(false); }}
-                        className={cn(
-                          "w-full text-left px-2.5 py-1.5 flex items-start gap-1.5 hover:bg-teal-50/60 transition-colors",
-                          t.key === value && "bg-teal-50",
-                        )}
-                      >
-                        {t.key === value ? <Check className="h-3.5 w-3.5 text-teal-600 mt-0.5 shrink-0" /> : <span className="w-3.5 shrink-0" />}
-                        <span className="min-w-0">
-                          <span className="flex items-center gap-1.5">
-                            <span className="text-[12px] font-medium truncate">{t.name}</span>
-                            {t.key === defaultKey && <Badge variant="outline" className="text-[8px] bg-slate-50 text-slate-500 border-slate-200 uppercase">default</Badge>}
-                            {isDraft && <Badge variant="outline" className="text-[8px] bg-amber-50 text-amber-700 border-amber-200 uppercase">draft</Badge>}
-                          </span>
-                          <span className="block text-[10px] text-muted-foreground truncate">{t.subject}</span>
-                        </span>
-                      </button>
-                    );
-                  })}
+                  {items.map(t => (
+                    <TemplateRow key={t.key} t={t} value={value} defaultKey={defaultKey} isFav={favorites.includes(t.key)} onPick={pick} onToggleFav={onToggleFav} onHover={setHoverKey} />
+                  ))}
                 </div>
               ))}
             </div>
@@ -146,6 +159,57 @@ export function TemplatePicker({
           </div>
         </PopoverContent>
       </Popover>
+    </div>
+  );
+}
+
+/** One selectable template row, with a pin (favorite) toggle. Shared by the
+ *  Favorites / Recently-used / flow-grouped sections. */
+function TemplateRow({ t, value, defaultKey, isFav, onPick, onToggleFav, onHover }: {
+  t:           EmailTemplate;
+  value:       string;
+  defaultKey?: string;
+  isFav:       boolean;
+  onPick:      (key: string) => void;
+  onToggleFav: (key: string) => void;
+  onHover:     (key: string) => void;
+}) {
+  const isDraft = t.body_text.startsWith("PLACEHOLDER");
+  return (
+    <div
+      onMouseEnter={() => onHover(t.key)}
+      className={cn(
+        "group w-full px-2.5 py-1.5 flex items-start gap-1.5 hover:bg-teal-50/60 transition-colors",
+        t.key === value && "bg-teal-50",
+      )}
+    >
+      <button
+        type="button"
+        onClick={() => onPick(t.key)}
+        onFocus={() => onHover(t.key)}
+        className="flex-1 min-w-0 text-left flex items-start gap-1.5"
+      >
+        {t.key === value ? <Check className="h-3.5 w-3.5 text-teal-600 mt-0.5 shrink-0" /> : <span className="w-3.5 shrink-0" />}
+        <span className="min-w-0">
+          <span className="flex items-center gap-1.5">
+            <span className="text-[12px] font-medium truncate">{t.name}</span>
+            {t.key === defaultKey && <Badge variant="outline" className="text-[8px] bg-slate-50 text-slate-500 border-slate-200 uppercase">default</Badge>}
+            {isDraft && <Badge variant="outline" className="text-[8px] bg-amber-50 text-amber-700 border-amber-200 uppercase">draft</Badge>}
+          </span>
+          <span className="block text-[10px] text-muted-foreground truncate">{t.subject}</span>
+        </span>
+      </button>
+      <button
+        type="button"
+        onClick={() => onToggleFav(t.key)}
+        title={isFav ? "Unpin from favorites" : "Pin to favorites"}
+        className={cn(
+          "shrink-0 mt-0.5 rounded p-0.5 transition-opacity",
+          isFav ? "opacity-100" : "opacity-0 group-hover:opacity-100",
+        )}
+      >
+        <Star className={cn("h-3.5 w-3.5", isFav ? "fill-amber-400 text-amber-400" : "text-slate-400 hover:text-amber-400")} />
+      </button>
     </div>
   );
 }
