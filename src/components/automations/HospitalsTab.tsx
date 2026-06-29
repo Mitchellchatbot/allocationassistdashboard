@@ -207,6 +207,7 @@ function HospitalDialog({
     country:                 initial.country ?? "",
     primary_recruiter_email: initial.primary_recruiter_email ?? "",
     primary_contact_name:    initial.primary_contact_name ?? "",
+    greet_with_contact_name: initial.greet_with_contact_name ?? false,
     recruiter_phone:         initial.recruiter_phone ?? "",
     template_key:            initial.template_key ?? "",
     notes:                   initial.notes ?? "",
@@ -223,6 +224,7 @@ function HospitalDialog({
       country:                 initial.country ?? "",
       primary_recruiter_email: initial.primary_recruiter_email ?? "",
       primary_contact_name:    initial.primary_contact_name ?? "",
+      greet_with_contact_name: initial.greet_with_contact_name ?? false,
       recruiter_phone:         initial.recruiter_phone ?? "",
       template_key:            initial.template_key ?? "",
       notes:                   initial.notes ?? "",
@@ -268,6 +270,25 @@ function HospitalDialog({
             value={form.primary_contact_name ?? ""} onChange={v => setForm(f => ({ ...f, primary_contact_name: v }))} />
           <Field label="Phone"
             value={form.recruiter_phone ?? ""} onChange={v => setForm(f => ({ ...f, recruiter_phone: v }))} />
+          {/* Greeting source — does the hospital email open with the hospital
+              name or the named contact person? */}
+          <div className="col-span-2 space-y-1">
+            <Label className="text-[11px] uppercase tracking-wider text-muted-foreground">Email greeting uses</Label>
+            <div className="flex items-center gap-1 rounded-lg bg-slate-100 p-0.5 text-[12px] w-fit">
+              <button type="button" onClick={() => setForm(f => ({ ...f, greet_with_contact_name: false }))}
+                className={`rounded-md px-3 py-1 font-medium transition-colors ${!form.greet_with_contact_name ? "bg-white shadow-sm text-teal-700" : "text-slate-500"}`}>
+                Hospital name
+              </button>
+              <button type="button" onClick={() => setForm(f => ({ ...f, greet_with_contact_name: true }))}
+                className={`rounded-md px-3 py-1 font-medium transition-colors ${form.greet_with_contact_name ? "bg-white shadow-sm text-teal-700" : "text-slate-500"}`}>
+                Contact name
+              </button>
+            </div>
+            <p className="text-[10px] text-muted-foreground">
+              Preview: <span className="font-medium text-slate-600">Hello {(form.greet_with_contact_name ? (form.primary_contact_name?.trim() || form.name?.trim()) : form.name?.trim()) || "the team"}!</span>
+              {form.greet_with_contact_name && !form.primary_contact_name?.trim() && <span className="text-amber-600"> — no contact name set, falls back to the hospital name.</span>}
+            </p>
+          </div>
           <Field label="Template key (override)" placeholder="e.g. profile_sent_american_hospital" className="col-span-2"
             value={form.template_key ?? ""} onChange={v => setForm(f => ({ ...f, template_key: v }))} />
           <div className="col-span-2">

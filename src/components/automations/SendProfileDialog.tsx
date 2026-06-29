@@ -797,7 +797,11 @@ function PreviewConfirm({
     doctor_phone:       doctor.phone ?? "",
     doctor_speciality:  doctor.speciality ?? "",
     hospital_name:      sampleHospital?.name ?? "",
-    hospital_contact_name: sampleHospital?.primary_contact_name ?? "Team",
+    // Greeting name honours the per-hospital toggle so the preview matches what
+    // send-flow-email will render (contact person when ON + on file, else name).
+    hospital_contact_name: (sampleHospital?.greet_with_contact_name && sampleHospital?.primary_contact_name?.trim())
+      ? sampleHospital.primary_contact_name
+      : (sampleHospital?.name ?? "Team"),
     // city / country come from the hospital record so the doctor email's
     // "Working Opportunity in {{city}}" line resolves in the preview.
     city:               sampleHospital?.city ?? "",

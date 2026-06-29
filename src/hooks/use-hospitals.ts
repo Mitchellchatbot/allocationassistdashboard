@@ -8,6 +8,8 @@ export interface Hospital {
   country:                 string | null;
   primary_recruiter_email: string | null;
   primary_contact_name:    string | null;
+  /** false → greet with the hospital name; true → greet with the contact name. */
+  greet_with_contact_name: boolean;
   recruiter_phone:         string | null;
   template_key:            string | null;
   notes:                   string | null;

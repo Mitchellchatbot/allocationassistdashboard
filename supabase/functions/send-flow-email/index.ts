@@ -662,7 +662,13 @@ Deno.serve(async (req: Request) => {
     doctor_phone:       String(run.doctor_phone ?? ""),
     doctor_speciality:  String(md.doctor_speciality ?? ""),
     hospital_name:      String(run.hospital ?? ""),
-    hospital_contact_name: String(hospital?.primary_contact_name ?? ""),
+    // Greeting name — per-hospital toggle (hospitals.greet_with_contact_name):
+    // ON + a contact on file → the named person; otherwise the hospital name.
+    hospital_contact_name: String(
+      hospital?.greet_with_contact_name && String(hospital?.primary_contact_name ?? "").trim()
+        ? hospital.primary_contact_name
+        : (run.hospital ?? ""),
+    ),
     city:               String(hospital?.city ?? md.city ?? ""),
     country:            String(hospital?.country ?? ""),
     // Placeholder URLs/values for systems not yet wired. The sender renders
