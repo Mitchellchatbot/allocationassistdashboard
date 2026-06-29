@@ -363,10 +363,10 @@ export function FullScreenEmailPreview(props: FullScreenEmailPreviewProps) {
       </div>
 
       {/* Attachments — manage right here in the editor (same list the parent
-          dialog owns). Slim bar pinned under the canvas. */}
+          dialog owns). A floating light card over the canvas, not a dark bar. */}
       {canAttach && pane === "rendered" && (
-        <div className="shrink-0 border-t border-white/10 bg-slate-900 px-4 py-2 max-h-[30vh] overflow-y-auto">
-          <div className="max-w-[1000px] mx-auto">
+        <div className="shrink-0 px-4 pb-4 pt-1 flex justify-center max-h-[32vh] overflow-y-auto">
+          <div className="w-full max-w-[760px] rounded-xl bg-white shadow-2xl ring-1 ring-black/10 overflow-hidden">
             <AttachmentsPicker
               attachments={attachmentItems ?? []}
               onChange={onAttachmentItemsChange!}
@@ -376,7 +376,8 @@ export function FullScreenEmailPreview(props: FullScreenEmailPreviewProps) {
         </div>
       )}
 
-      <TableInsertDialog open={tableOpen} onOpenChange={setTableOpen} onInsert={insertHtml} />
+      {/* Raised above the full-screen overlay (z-[101]) so it isn't hidden. */}
+      <TableInsertDialog open={tableOpen} onOpenChange={setTableOpen} onInsert={insertHtml} contentClassName="z-[200]" overlayClassName="z-[190]" />
         </DialogPrimitive.Content>
       </DialogPrimitive.Portal>
     </DialogPrimitive.Root>

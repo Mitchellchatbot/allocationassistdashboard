@@ -8,6 +8,7 @@ import { Checkbox } from "@/components/ui/checkbox";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Table2, Plus, Minus, ClipboardPaste, Upload, Grid3x3 } from "lucide-react";
 import { toast } from "sonner";
+import { cn } from "@/lib/utils";
 import {
   gridToHtmlTable, parseDelimited, normaliseGrid,
   type TableStyleOptions, type CellAlign, type TablePreset, AA_TEAL,
@@ -21,11 +22,15 @@ import {
  * the exact email-safe HTML that gets inserted. No backend — pure frontend.
  */
 export function TableInsertDialog({
-  open, onOpenChange, onInsert,
+  open, onOpenChange, onInsert, contentClassName, overlayClassName,
 }: {
   open: boolean;
   onOpenChange: (v: boolean) => void;
   onInsert: (html: string) => void;
+  /** Raise the dialog's z-index when opened from inside another full-screen
+   *  overlay (e.g. the full-screen editor), so it isn't hidden behind it. */
+  contentClassName?: string;
+  overlayClassName?: string;
 }) {
   const [mode, setMode]   = useState<"build" | "paste" | "upload">("build");
   const [grid, setGrid]   = useState<string[][]>(() => seedGrid(3, 3));
@@ -105,7 +110,7 @@ export function TableInsertDialog({
 
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
-      <DialogContent className="sm:max-w-[860px] max-h-[90vh] overflow-y-auto">
+      <DialogContent className={cn("sm:max-w-[860px] max-h-[90vh] overflow-y-auto", contentClassName)} overlayClassName={overlayClassName}>
         <DialogHeader>
           <DialogTitle className="flex items-center gap-2"><Table2 className="h-4 w-4 text-teal-600" /> Insert a table</DialogTitle>
           <DialogDescription className="text-[12px]">
