@@ -806,21 +806,40 @@ function SpecialtyRotationCard({ rotation }: { rotation: ReturnType<typeof useSp
 // queued from the Send Profile dialog. Cron firing is deploy-gated; the queue
 // is fully visible + cancellable in the UI now.
 function ScheduledProfileSendsCard() {
-  const { data: scheduled = [], isLoading } = useScheduledProfileSends();
+  const { data: scheduled = [], isLoading, isError, refetch } = useScheduledProfileSends();
   const cancel = useCancelScheduledProfileSend();
-  if (isLoading || scheduled.length === 0) return null;
+  if (isLoading) return null;
+  // Always render once loaded — even with nothing queued — so a send you just
+  // scheduled has a guaranteed home on this page. (Previously this returned null
+  // when empty, which read as "my scheduled email vanished" if the list hadn't
+  // refetched yet.) A manual Refresh covers any missed realtime event.
   return (
     <Card>
       <CardHeader className="pb-3">
         <CardTitle className="text-base flex items-center gap-2">
           <UserSquare2 className="h-4 w-4 text-teal-600" /> Scheduled profile sends
           <Badge variant="outline" className="text-[9px] bg-amber-50 text-amber-700 border-amber-200">{scheduled.length}</Badge>
+          <button
+            type="button"
+            onClick={() => refetch()}
+            className="ml-auto inline-flex items-center gap-1 rounded-md border px-2 py-0.5 text-[10px] font-medium text-slate-500 hover:bg-slate-50"
+            title="Refresh the queue"
+          >
+            <RefreshCw className="h-3 w-3" /> Refresh
+          </button>
         </CardTitle>
         <CardDescription className="text-[11px]">
-          Future hospital + doctor sends queued from Send Profile. The scheduler sends each automatically at its Gulf-time slot (checked every ~5 min). Cancel one below to stop it.
+          Future hospital + doctor sends queued from Send Profile. The scheduler sends each automatically at its scheduled slot (checked every ~5 min). Cancel one below to stop it.
         </CardDescription>
       </CardHeader>
       <CardContent className="p-0">
+        {scheduled.length === 0 ? (
+          <div className="px-4 py-6 text-center text-[12px] text-muted-foreground">
+            {isError
+              ? <>Couldn't load the queue. <button onClick={() => refetch()} className="text-teal-600 hover:underline">Try again</button>.</>
+              : <>Nothing scheduled yet. Sends you queue from <span className="font-medium text-slate-600">Send Profile → Schedule for later</span> show up here.</>}
+          </div>
+        ) : (
         <div className="divide-y">
           {scheduled.map(s => (
             <div key={s.id} className="px-4 py-3 flex items-center gap-3">
@@ -847,6 +866,7 @@ function ScheduledProfileSendsCard() {
             </div>
           ))}
         </div>
+        )}
       </CardContent>
     </Card>
   );

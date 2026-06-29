@@ -23,7 +23,7 @@ import { type EmailAttachment } from "@/lib/email-attachments";
 import { AttachmentsPicker } from "@/components/automations/AttachmentsPicker";
 import { TemplatePicker } from "@/components/automations/TemplatePicker";
 import { useScheduleProfileSend } from "@/hooks/use-scheduled-profile-sends";
-import { GulfClock, composeGulfDateTime } from "@/components/GulfClock";
+import { GulfClock, composeLocalDateTime, localToGulfParts, localDateInDays } from "@/components/GulfClock";
 import { Clock } from "lucide-react";
 import { useNavigate } from "react-router-dom";
 import { useQueryClient } from "@tanstack/react-query";
@@ -281,6 +281,12 @@ export function SendProfileDialog({ open, onClose }: Props) {
     if (schedule?.date) {
       setSubmitting(true);
       try {
+        // The team picks the slot in THEIR local time; the scheduler fires on
+        // Gulf-time wall clock, so convert here while preserving the absolute
+        // moment. A PST 11pm pick becomes the right next-day Dubai time.
+        const gulf = localToGulfParts(schedule.date, schedule.time || "09:00");
+        const localLabel = new Intl.DateTimeFormat(undefined, { weekday: "short", month: "short", day: "numeric", hour: "2-digit", minute: "2-digit", hour12: true })
+          .format(composeLocalDateTime(schedule.date, schedule.time || "09:00"));
         await scheduleProfileSend.mutateAsync({
           doctor_id:         selectedDoctor.id,
           doctor_name:       selectedDoctor.name,
@@ -295,11 +301,11 @@ export function SendProfileDialog({ open, onClose }: Props) {
           template_overrides: templateOverridesPayload,
           attachments:        hospitalAttach.map(a => ({ filename: a.filename, path: a.path })),
           attachments_doctor: doctorAttach.map(a => ({ filename: a.filename, path: a.path })),
-          scheduled_for:     schedule.date,
-          scheduled_at_time: schedule.time || "09:00",
+          scheduled_for:     gulf.date,
+          scheduled_at_time: gulf.time,
           timezone:          "Asia/Dubai",
         });
-        toast.success(`Scheduled for ${schedule.date} ${schedule.time || "09:00"} GST — ${selectedDoctor.name} → ${selectedHospitals.length} hospital${selectedHospitals.length === 1 ? "" : "s"}`, {
+        toast.success(`Scheduled for ${localLabel} (your time) — ${selectedDoctor.name} → ${selectedHospitals.length} hospital${selectedHospitals.length === 1 ? "" : "s"}`, {
           action: { label: "View queue", onClick: () => navigate("/batches") },
         });
         onClose();
@@ -738,7 +744,7 @@ function PreviewConfirm({
   const [doctorAttachments, setDoctorAttachments]     = useState<EmailAttachment[]>([]);
   // Send now vs schedule for later (Amir #5).
   const [sendMode, setSendMode] = useState<"now" | "later">("now");
-  const [schedDate, setSchedDate] = useState<string>(() => new Date(Date.now() + 86_400_000).toISOString().slice(0, 10));
+  const [schedDate, setSchedDate] = useState<string>(() => localDateInDays(1));
   const [schedTime, setSchedTime] = useState<string>("09:00");
   // Who'll be on the From line — derived from the current user, which
   // matches what send-flow-email does at send time (looks up
@@ -944,12 +950,12 @@ function PreviewConfirm({
         {sendMode === "later" && (
           <div className="flex items-end gap-2 flex-wrap">
             <div className="space-y-1"><span className="text-[10px] uppercase tracking-wider text-muted-foreground">Date</span><Input type="date" value={schedDate} onChange={e => setSchedDate(e.target.value)} className="h-8 text-[12px] w-[150px]" /></div>
-            <div className="space-y-1"><span className="text-[10px] uppercase tracking-wider text-muted-foreground">Time (GST)</span><Input type="time" value={schedTime} onChange={e => setSchedTime(e.target.value)} className="h-8 text-[12px] w-[120px]" /></div>
-            <div className="pb-1.5"><GulfClock when={composeGulfDateTime(schedDate, schedTime)} /></div>
+            <div className="space-y-1"><span className="text-[10px] uppercase tracking-wider text-muted-foreground">Time (your local time)</span><Input type="time" value={schedTime} onChange={e => setSchedTime(e.target.value)} className="h-8 text-[12px] w-[120px]" /></div>
+            <div className="pb-1.5"><GulfClock when={composeLocalDateTime(schedDate, schedTime)} /></div>
           </div>
         )}
         {sendMode === "later" && (
-          <p className="text-[10px] text-teal-700">Saved to the scheduled queue — the scheduler sends it automatically at the chosen Gulf time (checked every ~5 min). Cancel or send early any time from <strong>Batches → Scheduled profile sends</strong>.</p>
+          <p className="text-[10px] text-teal-700">Saved to the scheduled queue — the scheduler sends it automatically at the time you picked (your local time, checked every ~5 min). Cancel or send early any time from <strong>Batches → Scheduled profile sends</strong>.</p>
         )}
       </div>
 
@@ -1272,7 +1278,7 @@ function EditableEmailSection({
         from={from}
         to={to}
         text={plainBody}
-        className="border-0 rounded-none min-h-[220px] max-h-[60vh]"
+        className="border-0 rounded-none max-h-[60vh]"
       />
     </div>
   );

@@ -197,7 +197,7 @@ export function EditableEmailPreview({
           <ToolBtn onClick={() => exec("insertOrderedList")}   title="Numbered list"><ListOrdered className="h-3.5 w-3.5" /></ToolBtn>
           <ToolBtn onClick={makeLink}                    title="Insert link"><Link2 className="h-3.5 w-3.5" /></ToolBtn>
           <Divider />
-          <ToolBtn onClick={() => { setFsHtml(bodyRef.current?.innerHTML ?? html); setFullOpen(true); }} title="Full-screen editor" primary>
+          <ToolBtn onClick={() => { const snap = bodyRef.current?.innerHTML; setFsHtml(snap && snap.trim() ? snap : html); setFullOpen(true); }} title="Full-screen editor" primary>
             <Maximize2 className="h-3.5 w-3.5" /> <span className="text-[11px] font-medium">Full screen</span>
           </ToolBtn>
         </div>

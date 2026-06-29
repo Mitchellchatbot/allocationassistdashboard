@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import * as DialogPrimitive from "@radix-ui/react-dialog";
 import {
   X, Monitor, Tablet, Smartphone, Mail as MailIcon, ZoomIn, ZoomOut,
@@ -72,26 +72,34 @@ export function FullScreenEmailPreview(props: FullScreenEmailPreviewProps) {
   const frameWrapRef = useRef<HTMLDivElement>(null);
   const editRef      = useRef<HTMLDivElement>(null);
   const savedRange   = useRef<Range | null>(null);
+  // The exact content the editor should currently hold. Updated on open/reset
+  // (to the incoming snapshot) and on every keystroke (to the live edit), so a
+  // (re)mount of the contentEditable — opening, or switching panes and back —
+  // always re-seeds from the latest content rather than a stale snapshot.
+  const latestHtmlRef = useRef(html);
   const effectiveHtml = editable ? liveHtml : html;
 
-  // Resync the live copy whenever a fresh snapshot arrives (open / reset).
-  useEffect(() => { setLiveHtml(html); }, [html, open]);
+  // Resync the live copy + the seed target whenever a fresh snapshot arrives
+  // (open / reset). useLayoutEffect so the ref is correct BEFORE the seeding
+  // layout effect below reads it on the same commit.
+  useLayoutEffect(() => { setLiveHtml(html); latestHtmlRef.current = html; }, [html, open]);
 
   // Esc + scroll-lock + focus management are handled by Radix Dialog below.
 
   // Reset transient view state each time it opens.
   useEffect(() => { if (open) { setPane("rendered"); setZoom(100); } }, [open]);
 
-  // Seed / re-seed the contentEditable from the upstream HTML — on open and when
-  // a fresh `html` arrives, but NOT on every keystroke (the guard keeps the
-  // caret put: after typing, innerHTML already equals `html`). Re-runs when the
-  // rendered pane is (re)shown so switching panes and back restores the editor.
-  useEffect(() => {
-    if (!editable || pane !== "rendered") return;
-    if (editRef.current && editRef.current.innerHTML !== html) {
-      editRef.current.innerHTML = html;
+  // Seed the contentEditable from latestHtmlRef whenever the rendered pane is
+  // (re)shown — runs at layout time so it never races the node's mount, and is
+  // idempotent (the guard skips when the content already matches, so typing,
+  // which doesn't change `open`/`pane`, never triggers a caret-resetting reseed).
+  useLayoutEffect(() => {
+    if (!editable || !open || pane !== "rendered") return;
+    const el = editRef.current;
+    if (el && el.innerHTML !== latestHtmlRef.current) {
+      el.innerHTML = latestHtmlRef.current;
     }
-  }, [editable, pane, html, open]);
+  }, [editable, open, pane, html]);
 
   const width = DEVICES.find(d => d.key === device)?.width ?? null;
 
@@ -272,7 +280,7 @@ export function FullScreenEmailPreview(props: FullScreenEmailPreviewProps) {
                   ref={editRef}
                   contentEditable
                   suppressContentEditableWarning
-                  onInput={(e) => { const v = (e.target as HTMLDivElement).innerHTML; setLiveHtml(v); onHtmlChange?.(v); }}
+                  onInput={(e) => { const v = (e.target as HTMLDivElement).innerHTML; latestHtmlRef.current = v; setLiveHtml(v); onHtmlChange?.(v); }}
                   onKeyUp={saveSelection}
                   onMouseUp={saveSelection}
                   onBlur={saveSelection}
