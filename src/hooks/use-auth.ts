@@ -116,11 +116,18 @@ export function useAuth() {
           allowedPages: data.allowed_pages ?? [],
           fullName:     data.full_name ?? null,
         });
-      } else {
+      } else if (!profileCache.current) {
+        // First load only. fetchProfile re-runs on every auth event (token
+        // refresh, tab focus); a NULL here is almost always the 8s timeout, not
+        // a deleted row. The email fallback defaults unknown emails to ADMIN /
+        // ALL_PAGES, so applying it on a re-fetch would ELEVATE a restricted
+        // user to "see every tab" until the next good fetch (the reported
+        // "other tabs appear for a couple of minutes" bug — a fail-open). Once
+        // we've loaded a real profile, keep it on any transient failure.
         fallbackByEmail();
       }
     } catch {
-      fallbackByEmail();
+      if (!profileCache.current) fallbackByEmail();
     }
   }
 
