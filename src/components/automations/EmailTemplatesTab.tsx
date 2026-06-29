@@ -5,6 +5,7 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Textarea } from "@/components/ui/textarea";
 import { Badge } from "@/components/ui/badge";
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Mail, Save, Eye, AlertTriangle, Search } from "lucide-react";
 import { toast } from "sonner";
 import {
@@ -198,6 +199,7 @@ function TemplateEditor({ template }: { template: EmailTemplate }) {
   const [subject,  setSubject]  = useState(template.subject);
   const [bodyText, setBodyText] = useState(template.body_text);
   const [bodyHtml, setBodyHtml] = useState(template.body_html);
+  const [flowKey,  setFlowKey]  = useState(template.flow_key ?? "other");
   const [mode,     setMode]     = useState<"edit" | "preview">("edit");
   const [fs,       setFs]       = useState(false);
   const update = useUpdateEmailTemplate();
@@ -209,15 +211,21 @@ function TemplateEditor({ template }: { template: EmailTemplate }) {
     setSubject(template.subject);
     setBodyText(template.body_text);
     setBodyHtml(template.body_html);
-  }, [template.id, template.subject, template.body_text, template.body_html]);
+    setFlowKey(template.flow_key ?? "other");
+  }, [template.id, template.subject, template.body_text, template.body_html, template.flow_key]);
 
   const dirty =
     subject  !== template.subject  ||
     bodyText !== template.body_text ||
-    bodyHtml !== template.body_html;
+    bodyHtml !== template.body_html ||
+    flowKey  !== (template.flow_key ?? "other");
 
   const handleSave = async () => {
-    await update.mutateAsync({ id: template.id, subject, body_text: bodyText, body_html: bodyHtml });
+    await update.mutateAsync({
+      id: template.id, subject, body_text: bodyText, body_html: bodyHtml,
+      // "other" means ungrouped — store NULL so it falls under the Other bucket.
+      flow_key: flowKey === "other" ? null : flowKey,
+    });
     toast.success(`Saved ${template.name}`);
   };
 
@@ -233,11 +241,24 @@ function TemplateEditor({ template }: { template: EmailTemplate }) {
     <Card>
       <CardHeader className="pb-3">
         <div className="flex items-start justify-between gap-3">
-          <div>
+          <div className="min-w-0">
             <CardTitle className="text-base">{template.name}</CardTitle>
-            <CardDescription className="text-[11px] mt-0.5">
+            <CardDescription className="text-[11px] mt-0.5 flex items-center gap-1.5 flex-wrap">
               <code className="bg-slate-100 px-1 py-0.5 rounded">{template.key}</code>
-              {template.flow_key && (<> · flow: <code className="bg-slate-100 px-1 py-0.5 rounded">{template.flow_key}</code></>)}
+              <span>· type:</span>
+              <Select value={flowKey} onValueChange={setFlowKey}>
+                <SelectTrigger className="h-6 text-[11px] w-auto gap-1 px-2 py-0">
+                  <SelectValue />
+                </SelectTrigger>
+                <SelectContent>
+                  {FLOW_ORDER.map(fk => (
+                    <SelectItem key={fk} value={fk} className="text-[12px]">{FLOW_DEFINITIONS[fk].name}</SelectItem>
+                  ))}
+                  <SelectItem value="onboarding" className="text-[12px]">{FLOW_DEFINITIONS.onboarding?.name ?? "Onboarding"}</SelectItem>
+                  <SelectItem value="other" className="text-[12px]">Other / ungrouped</SelectItem>
+                </SelectContent>
+              </Select>
+              {flowKey !== (template.flow_key ?? "other") && <span className="text-amber-600">· unsaved</span>}
             </CardDescription>
           </div>
           <div className="flex items-center gap-2">

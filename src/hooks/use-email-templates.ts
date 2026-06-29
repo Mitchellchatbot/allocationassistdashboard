@@ -35,7 +35,7 @@ export function useEmailTemplates() {
 export function useUpdateEmailTemplate() {
   const qc = useQueryClient();
   return useMutation({
-    mutationFn: async (input: { id: string; subject?: string; body_html?: string; body_text?: string; name?: string }) => {
+    mutationFn: async (input: { id: string; subject?: string; body_html?: string; body_text?: string; name?: string; flow_key?: string | null }) => {
       const { id, ...patch } = input;
       const { error } = await supabase
         .from("email_templates")
