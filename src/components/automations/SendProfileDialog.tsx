@@ -447,7 +447,7 @@ export function SendProfileDialog({ open, onClose }: Props) {
 
   return (
     <Dialog open={open} onOpenChange={(v) => !v && onClose()}>
-      <DialogContent className="w-[95vw] sm:max-w-[1120px] max-h-[88vh] overflow-y-auto">
+      <DialogContent className="w-[92vw] max-w-[92vw] sm:max-w-[92vw] max-h-[92vh] overflow-x-hidden overflow-y-auto">
         <DialogHeader>
           <DialogTitle className="flex items-center gap-2">
             <Send className="h-4 w-4 text-teal-600" /> Send Profile to Hospital
