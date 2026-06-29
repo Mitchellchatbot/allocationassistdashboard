@@ -24,7 +24,7 @@ import { AttachmentsPicker } from "@/components/automations/AttachmentsPicker";
 import { TemplatePicker } from "@/components/automations/TemplatePicker";
 import { useScheduleProfileSend } from "@/hooks/use-scheduled-profile-sends";
 import { GulfClock, composeLocalDateTime, localToGulfParts, localDateInDays } from "@/components/GulfClock";
-import { Clock } from "lucide-react";
+import { Clock, Loader2 } from "lucide-react";
 import { useNavigate } from "react-router-dom";
 import { useQueryClient } from "@tanstack/react-query";
 
@@ -835,6 +835,38 @@ function PreviewConfirm({
   const doctorDraft   = !doctorOv   && isPlaceholder(doctorTemplateKey);
   const anyDraft = hospitalDraft || doctorDraft;
 
+  // Single submit path shared by the footer button and the contextual
+  // "Schedule" button inside the schedule card — so the schedule action is
+  // reachable right where the team picks the time, not only at the far bottom.
+  const submit = () => {
+    // A non-default template pick ships as a stage override too (the rendered
+    // template), so single-hospital sends honour the pick with no deploy.
+    // Manual edits (hospitalOv/doctorOv) take precedence. Multi-hospital relies
+    // on metadata.template_overrides (per-hospital server render).
+    const hospitalOverride = hospitalOv
+      ?? (isSingle && hospitalTemplateKey !== "profile_sent_hospital"
+            ? { subject_override: renderedHospitalSubject, html_override: hospitalHtml } : null);
+    const doctorOverride = doctorOv
+      ?? (isSingle && doctorTemplateKey !== "profile_sent_doctor"
+            ? { subject_override: renderedDoctorSubject, html_override: doctorHtml } : null);
+    const stageOverrides: Record<string, SendOverrides> = {
+      ...(hospitalOverride ? { email_hospital: hospitalOverride } : {}),
+      ...(doctorOverride   ? { email_doctor:   doctorOverride }   : {}),
+    };
+    onConfirm(
+      Object.keys(stageOverrides).length ? stageOverrides : undefined,
+      {
+        hospital: hospitalAttachments.length ? hospitalAttachments : undefined,
+        doctor:   doctorAttachments.length   ? doctorAttachments   : undefined,
+      },
+      { hospital: hospitalTemplateKey, doctor: doctorTemplateKey },
+      sendMode === "later" ? { date: schedDate, time: schedTime } : undefined,
+    );
+  };
+  // Human-readable local label of the chosen slot, for the schedule button.
+  const schedLocalLabel = new Intl.DateTimeFormat(undefined, { weekday: "short", month: "short", day: "numeric", hour: "2-digit", minute: "2-digit", hour12: true })
+    .format(composeLocalDateTime(schedDate, schedTime));
+
   return (
     <div className="space-y-3">
       <div className="rounded-md border bg-slate-50/50 p-3 text-[12px] space-y-1">
@@ -955,7 +987,19 @@ function PreviewConfirm({
           </div>
         )}
         {sendMode === "later" && (
-          <p className="text-[10px] text-teal-700">Saved to the scheduled queue — the scheduler sends it automatically at the time you picked (your local time, checked every ~5 min). Cancel or send early any time from <strong>Batches → Scheduled profile sends</strong>.</p>
+          <>
+            <Button
+              onClick={submit}
+              disabled={submitting || anyDraft}
+              className="w-full bg-teal-600 hover:bg-teal-700 text-white"
+              title={anyDraft ? "Pick a finished template or edit the copy first." : undefined}
+            >
+              {submitting
+                ? <><Loader2 className="h-4 w-4 mr-1.5 animate-spin" /> Scheduling…</>
+                : <><Clock className="h-4 w-4 mr-1.5" /> Schedule for {schedLocalLabel} ({hospitals.length} send{hospitals.length === 1 ? "" : "s"})</>}
+            </Button>
+            <p className="text-[10px] text-teal-700">Lands in the scheduled queue and sends automatically at the time you picked (your local time, checked every ~5 min). Manage it any time under <strong>Batches → Scheduled profile sends</strong>.</p>
+          </>
         )}
       </div>
 
@@ -979,32 +1023,7 @@ function PreviewConfirm({
           <ChevronLeft className="h-3.5 w-3.5 mr-1" /> Back
         </Button>
         <Button
-          onClick={() => {
-            // A non-default template pick ships as a stage override too (the
-            // rendered template), so single-hospital sends honour the pick with
-            // no deploy. Manual edits (hospitalOv/doctorOv) take precedence.
-            // Multi-hospital relies on metadata.template_overrides (per-hospital
-            // server render), which the parent writes from templateKeys below.
-            const hospitalOverride = hospitalOv
-              ?? (isSingle && hospitalTemplateKey !== "profile_sent_hospital"
-                    ? { subject_override: renderedHospitalSubject, html_override: hospitalHtml } : null);
-            const doctorOverride = doctorOv
-              ?? (isSingle && doctorTemplateKey !== "profile_sent_doctor"
-                    ? { subject_override: renderedDoctorSubject, html_override: doctorHtml } : null);
-            const stageOverrides: Record<string, SendOverrides> = {
-              ...(hospitalOverride ? { email_hospital: hospitalOverride } : {}),
-              ...(doctorOverride   ? { email_doctor:   doctorOverride }   : {}),
-            };
-            onConfirm(
-              Object.keys(stageOverrides).length ? stageOverrides : undefined,
-              {
-                hospital: hospitalAttachments.length ? hospitalAttachments : undefined,
-                doctor:   doctorAttachments.length   ? doctorAttachments   : undefined,
-              },
-              { hospital: hospitalTemplateKey, doctor: doctorTemplateKey },
-              sendMode === "later" ? { date: schedDate, time: schedTime } : undefined,
-            );
-          }}
+          onClick={submit}
           disabled={submitting || anyDraft}
           title={anyDraft ? "Pick a finished template or edit the copy first — the selected template still has placeholder text." : undefined}
         >
