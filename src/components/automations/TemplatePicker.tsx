@@ -18,7 +18,7 @@ import { cn } from "@/lib/utils";
  * persist a default, …). Fully testable in npm run dev.
  */
 export function TemplatePicker({
-  templates, value, onChange, defaultKey, renderVars, label,
+  templates: allTemplates, value, onChange, defaultKey, renderVars, label, flowFilter,
 }: {
   templates: EmailTemplate[];
   value: string;
@@ -26,6 +26,9 @@ export function TemplatePicker({
   defaultKey?: string;
   renderVars: Record<string, string>;
   label: string;
+  /** Restrict the choosable list to one flow (e.g. "profile_sent"), so the
+   *  profile-send pickers don't surface shortlist/interview/etc. templates. */
+  flowFilter?: string;
 }) {
   const [open, setOpen]   = useState(false);
   const [query, setQuery] = useState("");
@@ -33,7 +36,15 @@ export function TemplatePicker({
   const [favorites, setFavorites] = useState<string[]>(() => getFavorites());
   const [recent, setRecent]       = useState<string[]>(() => getRecent());
 
-  const selected = templates.find(t => t.key === value);
+  // The choosable set — scoped to flowFilter when provided. `allTemplates` is
+  // still used for resolving the current selection / preview, so a value that's
+  // somehow out of scope still renders in the trigger + preview.
+  const templates = useMemo(
+    () => (flowFilter ? allTemplates.filter(t => (t.flow_key ?? "other") === flowFilter) : allTemplates),
+    [allTemplates, flowFilter],
+  );
+
+  const selected = allTemplates.find(t => t.key === value);
 
   // Pick = record as recent + delegate to the caller.
   const pick = (key: string) => { setRecent(pushRecent(key)); onChange(key); setOpen(false); };
@@ -68,7 +79,7 @@ export function TemplatePicker({
   const flowLabel = (k: string) =>
     (FLOW_DEFINITIONS as Record<string, { label?: string }>)[k]?.label ?? (k === "other" ? "Other" : k);
 
-  const previewTpl = templates.find(t => t.key === (hoverKey ?? value));
+  const previewTpl = allTemplates.find(t => t.key === (hoverKey ?? value));
   const previewHtml = previewTpl
     ? renderTemplate(previewTpl.body_html || previewTpl.body_text, renderVars, { html: true })
     : "";

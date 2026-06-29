@@ -218,8 +218,8 @@ export function BulkProfileSendDialog({ open, onClose }: { open: boolean; onClos
 
         {/* Templates */}
         <div className="grid grid-cols-2 gap-3">
-          <TemplatePicker templates={templates} value={hospitalTemplateKey} onChange={setHospitalTemplateKey} defaultKey={HOSPITAL_DEFAULT_KEY} renderVars={sampleVars(selectedDocs[0] ?? docPool[0] ?? { key: "", doctor_id: null, name: "Dr. Example", email: null, phone: null, speciality: "Cardiology" })} label="Hospital email template" />
-          <TemplatePicker templates={templates} value={doctorTemplateKey} onChange={setDoctorTemplateKey} defaultKey={DOCTOR_DEFAULT_KEY} renderVars={sampleVars(selectedDocs[0] ?? docPool[0] ?? { key: "", doctor_id: null, name: "Dr. Example", email: null, phone: null, speciality: "Cardiology" })} label="Doctor 'working opportunity' template" />
+          <TemplatePicker templates={templates} value={hospitalTemplateKey} onChange={setHospitalTemplateKey} defaultKey={HOSPITAL_DEFAULT_KEY} renderVars={sampleVars(selectedDocs[0] ?? docPool[0] ?? { key: "", doctor_id: null, name: "Dr. Example", email: null, phone: null, speciality: "Cardiology" })} label="Hospital email template" flowFilter="profile_sent" />
+          <TemplatePicker templates={templates} value={doctorTemplateKey} onChange={setDoctorTemplateKey} defaultKey={DOCTOR_DEFAULT_KEY} renderVars={sampleVars(selectedDocs[0] ?? docPool[0] ?? { key: "", doctor_id: null, name: "Dr. Example", email: null, phone: null, speciality: "Cardiology" })} label="Doctor 'working opportunity' template" flowFilter="profile_sent" />
         </div>
 
         <div className="space-y-1">
