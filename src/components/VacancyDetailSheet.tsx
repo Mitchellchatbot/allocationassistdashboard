@@ -1,16 +1,21 @@
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { Sheet, SheetContent, SheetHeader, SheetTitle, SheetDescription } from "@/components/ui/sheet";
 import { Card, CardContent } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
-import { UserSquare, Mail, Phone, Plus, Link2, ClipboardList, Sparkles, Inbox } from "lucide-react";
+import { Input } from "@/components/ui/input";
+import { Label } from "@/components/ui/label";
+import { Textarea } from "@/components/ui/textarea";
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
+import { UserSquare, Mail, Phone, Plus, Link2, ClipboardList, Sparkles, Inbox, Pencil, Save, X } from "lucide-react";
 import { Tabs, TabsList, TabsTrigger, TabsContent } from "@/components/ui/tabs";
 import { toast } from "sonner";
 import {
   useMatchingDoctors, useVacancyLinks,
-  useLinkLeadToVacancy, useUnlinkLead,
-  type Vacancy,
+  useLinkLeadToVacancy, useUnlinkLead, useUpdateVacancy,
+  type Vacancy, type VacancyStatus, type VacancyPriority,
 } from "@/hooks/use-vacancies";
+import { useHospitals } from "@/hooks/use-hospitals";
 import { MatchScoreChip } from "@/components/DoctorVacancyMatches";
 import { DoctorLicensePills } from "@/components/DoctorLicensePills";
 import { useAuth } from "@/hooks/use-auth";
@@ -32,15 +37,76 @@ interface Props {
  * This is the reverse direction of the doctor → vacancies surfacing on the
  * Doctor Profiles page — same scorer, just rotated.
  */
+interface EditForm {
+  hospital_id:      string;
+  hospital_name:    string;
+  specialty:        string;
+  priority:         VacancyPriority;
+  status:           VacancyStatus;
+  target_fill_days: string;
+  notes:            string;
+}
+
 export function VacancyDetailSheet({ vacancy, open, onClose }: Props) {
   const { user } = useAuth();
   const matches  = useMatchingDoctors(vacancy);
   const { data: existing = [] } = useVacancyLinks(vacancy?.id ?? null);
+  const { data: hospitals = [] } = useHospitals();
   const link   = useLinkLeadToVacancy();
   const unlink = useUnlinkLead();
+  const update = useUpdateVacancy();
   const [busyId, setBusyId] = useState<string | null>(null);
+  const [editing, setEditing] = useState(false);
+  const [saving, setSaving]   = useState(false);
+  const [form, setForm]       = useState<EditForm | null>(null);
+
+  // Drop out of edit mode whenever the sheet switches to a different vacancy
+  // (or closes) so edits never bleed across rows.
+  useEffect(() => { setEditing(false); }, [vacancy?.id, open]);
 
   if (!vacancy) return null;
+
+  const startEdit = () => {
+    setForm({
+      hospital_id:      vacancy.hospital_id ?? "",
+      hospital_name:    vacancy.hospital_name ?? "",
+      specialty:        vacancy.specialty ?? "",
+      priority:         vacancy.priority,
+      status:           vacancy.status,
+      target_fill_days: vacancy.target_fill_days != null ? String(vacancy.target_fill_days) : "",
+      notes:            vacancy.notes ?? "",
+    });
+    setEditing(true);
+  };
+
+  const saveEdit = async () => {
+    if (!form) return;
+    if (!form.hospital_name.trim() || !form.specialty.trim()) {
+      toast.error("Hospital and specialty are required.");
+      return;
+    }
+    setSaving(true);
+    try {
+      await update.mutateAsync({
+        id: vacancy.id,
+        patch: {
+          hospital_id:      form.hospital_id || null,
+          hospital_name:    form.hospital_name.trim(),
+          specialty:        form.specialty.trim(),
+          priority:         form.priority,
+          status:           form.status,
+          target_fill_days: form.target_fill_days.trim() ? Number(form.target_fill_days) : null,
+          notes:            form.notes.trim() || null,
+        },
+      });
+      toast.success("Vacancy updated.");
+      setEditing(false);
+    } catch (e) {
+      toast.error(e instanceof Error ? e.message : "Update failed");
+    } finally {
+      setSaving(false);
+    }
+  };
   const linkedIds = new Set(existing.map(l => l.doctor_id));
   const strongMatches = matches.filter(m => m.score.tier === "strong");
   const decentMatches = matches.filter(m => m.score.tier === "decent");
@@ -95,7 +161,107 @@ export function VacancyDetailSheet({ vacancy, open, onClose }: Props) {
           </SheetDescription>
         </SheetHeader>
 
-        {vacancy.notes && (
+        {!editing && (
+          <div className="mt-2 flex justify-end">
+            <Button variant="outline" size="sm" className="h-7 text-[11px]" onClick={startEdit}>
+              <Pencil className="h-3 w-3 mr-1.5" /> Edit details
+            </Button>
+          </div>
+        )}
+
+        {editing && form && (
+          <Card className="mt-3 border-teal-300 ring-1 ring-teal-100">
+            <CardContent className="py-3 px-3 space-y-3">
+              <div className="text-[10px] uppercase tracking-wider text-teal-700 font-semibold">Edit vacancy</div>
+
+              <div className="space-y-1">
+                <Label className="text-[11px]">Hospital</Label>
+                <Select
+                  value={form.hospital_id}
+                  onValueChange={(v) => { const h = hospitals.find(x => x.id === v); setForm(f => f && ({ ...f, hospital_id: v, hospital_name: h?.name ?? f.hospital_name })); }}
+                >
+                  <SelectTrigger className="h-9 text-[12px]"><SelectValue placeholder="— pick a hospital —" /></SelectTrigger>
+                  <SelectContent>
+                    {hospitals.map(h => <SelectItem key={h.id} value={h.id}>{h.name}</SelectItem>)}
+                  </SelectContent>
+                </Select>
+                <Input
+                  value={form.hospital_name}
+                  onChange={(e) => setForm(f => f && ({ ...f, hospital_name: e.target.value }))}
+                  placeholder="…or type a hospital name"
+                  className="h-9 text-[12px] mt-1"
+                />
+              </div>
+
+              <div className="space-y-1">
+                <Label className="text-[11px]">Specialty</Label>
+                <Input
+                  value={form.specialty}
+                  onChange={(e) => setForm(f => f && ({ ...f, specialty: e.target.value }))}
+                  placeholder="e.g. Cardiology"
+                  className="h-9 text-[12px]"
+                />
+              </div>
+
+              <div className="grid grid-cols-2 gap-3">
+                <div className="space-y-1">
+                  <Label className="text-[11px]">Priority</Label>
+                  <Select value={form.priority} onValueChange={(v) => setForm(f => f && ({ ...f, priority: v as VacancyPriority }))}>
+                    <SelectTrigger className="h-9 text-[12px]"><SelectValue /></SelectTrigger>
+                    <SelectContent>
+                      <SelectItem value="high">High</SelectItem>
+                      <SelectItem value="medium">Medium</SelectItem>
+                      <SelectItem value="low">Low</SelectItem>
+                    </SelectContent>
+                  </Select>
+                </div>
+                <div className="space-y-1">
+                  <Label className="text-[11px]">Status</Label>
+                  <Select value={form.status} onValueChange={(v) => setForm(f => f && ({ ...f, status: v as VacancyStatus }))}>
+                    <SelectTrigger className="h-9 text-[12px]"><SelectValue /></SelectTrigger>
+                    <SelectContent>
+                      <SelectItem value="open">Open</SelectItem>
+                      <SelectItem value="filled">Filled</SelectItem>
+                      <SelectItem value="closed">Closed</SelectItem>
+                    </SelectContent>
+                  </Select>
+                </div>
+              </div>
+
+              <div className="space-y-1">
+                <Label className="text-[11px]">Target fill (days)</Label>
+                <Input
+                  type="number"
+                  value={form.target_fill_days}
+                  onChange={(e) => setForm(f => f && ({ ...f, target_fill_days: e.target.value }))}
+                  placeholder="e.g. 30"
+                  className="h-9 text-[12px]"
+                />
+              </div>
+
+              <div className="space-y-1">
+                <Label className="text-[11px]">Notes</Label>
+                <Textarea
+                  value={form.notes}
+                  onChange={(e) => setForm(f => f && ({ ...f, notes: e.target.value }))}
+                  placeholder="Context, contacts, requirements…"
+                  className="text-[12px] min-h-[60px]"
+                />
+              </div>
+
+              <div className="flex justify-end gap-2 pt-1">
+                <Button variant="outline" size="sm" onClick={() => setEditing(false)} disabled={saving}>
+                  <X className="h-3.5 w-3.5 mr-1" /> Cancel
+                </Button>
+                <Button size="sm" onClick={saveEdit} disabled={saving} className="bg-teal-600 hover:bg-teal-700 text-white">
+                  <Save className="h-3.5 w-3.5 mr-1.5" /> {saving ? "Saving…" : "Save changes"}
+                </Button>
+              </div>
+            </CardContent>
+          </Card>
+        )}
+
+        {!editing && vacancy.notes && (
           <Card className="mt-3 border-amber-200 bg-amber-50/40">
             <CardContent className="py-2 px-3 text-[11px] text-amber-900">
               <span className="font-medium">Notes: </span>{vacancy.notes}
