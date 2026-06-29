@@ -248,6 +248,11 @@ export async function enrichProfile(input: EnrichmentInput): Promise<EnrichmentR
     cv.full_name,
   ));
 
+  // Date of birth — from the CV on the no-form path (forms already map it and
+  // win via `set`). The WP candidate's age + DOB line are both derived from
+  // this field at send time, so filling it fixes a blank DOB AND a blank age.
+  set("date_of_birth", cv.date_of_birth);
+
   // Age — typed into Zoho or stated on CV.
   set("age", pickFirst(cv.age, dob.Age, lead.Age));
 

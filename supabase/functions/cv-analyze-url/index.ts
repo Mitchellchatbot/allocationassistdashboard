@@ -46,7 +46,8 @@ Return a JSON object with these exact keys:
   "country_training": string | null,
   "years_experience": number | null,    // Integer, computable from work history.
   "nationality": string | null,         // Only when explicit/strongly implied by passport/citizenship — NOT inferred from training country.
-  "age": number | null,                 // From DOB only.
+  "date_of_birth": string | null,       // ISO "YYYY-MM-DD" when the CV states a birth date ("DOB: 15/04/1982", "April 15, 1982"). Ambiguous numeric dates → D/M/Y unless clearly US-style. Null if absent.
+  "age": number | null,                 // From the date of birth only.
   "marital_status": string | null,
   "family_status": string | null,
   "license": string | null,             // UAE/GCC medical license only; null for non-medical.
