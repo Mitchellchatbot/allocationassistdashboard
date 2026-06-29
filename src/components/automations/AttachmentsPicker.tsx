@@ -1,8 +1,9 @@
-import { useRef, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { Button } from "@/components/ui/button";
 import { Paperclip, Loader2, FileText, X } from "lucide-react";
 import { toast } from "sonner";
 import { uploadEmailAttachment, removeEmailAttachment, type EmailAttachment } from "@/lib/email-attachments";
+import { cn } from "@/lib/utils";
 
 /** Format bytes for an attachment chip, e.g. "248 KB" / "1.2 MB". */
 function formatBytes(n?: number): string {
@@ -32,6 +33,7 @@ export function AttachmentsPicker({
 }) {
   const inputRef = useRef<HTMLInputElement>(null);
   const [uploading, setUploading] = useState(false);
+  const [dragging, setDragging] = useState(false);
 
   const handleFiles = async (files: FileList | null) => {
     if (!files || files.length === 0) return;
@@ -57,13 +59,36 @@ export function AttachmentsPicker({
     removeEmailAttachment(att.storage_path);
   };
 
+  // Paste (Ctrl+V) a copied file or screenshot anywhere in the dialog → attach.
+  // Only acts when the clipboard carries FILES, so pasting text into the email
+  // body is untouched. Re-bound when `attachments` changes so handleFiles closes
+  // over the latest list.
+  useEffect(() => {
+    if (disabled) return;
+    const onPaste = (e: ClipboardEvent) => {
+      const files = e.clipboardData?.files;
+      if (files && files.length > 0) { e.preventDefault(); handleFiles(files); }
+    };
+    document.addEventListener("paste", onPaste);
+    return () => document.removeEventListener("paste", onPaste);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [disabled, attachments]);
+
   return (
-    <div className="rounded-md border bg-slate-50/40 p-2.5 space-y-2">
+    <div
+      onDragOver={(e) => { if (!disabled) { e.preventDefault(); setDragging(true); } }}
+      onDragLeave={(e) => { e.preventDefault(); setDragging(false); }}
+      onDrop={(e) => { e.preventDefault(); setDragging(false); if (!disabled) handleFiles(e.dataTransfer.files); }}
+      className={cn(
+        "rounded-md border bg-slate-50/40 p-2.5 space-y-2 transition-colors",
+        dragging && "border-teal-400 border-dashed bg-teal-50",
+      )}
+    >
       <div className="flex items-center justify-between">
         <div className="text-[10px] uppercase tracking-wider text-muted-foreground flex items-center gap-1.5">
           <Paperclip className="h-3 w-3" /> Attachments
           <span className="normal-case tracking-normal text-[10.5px] text-muted-foreground/80">
-            — {hint ?? "CV, logbook, etc. (sent to the hospital)"}
+            — {hint ?? "CV, logbook, etc. — attached to the hospital email only"}
           </span>
         </div>
         <Button
@@ -83,7 +108,7 @@ export function AttachmentsPicker({
       </div>
 
       {attachments.length === 0 ? (
-        <div className="text-[11px] text-muted-foreground">No attachments. PDF, DOC, DOCX, PNG or JPG up to 25MB each.</div>
+        <div className="text-[11px] text-muted-foreground">{dragging ? "Drop to attach…" : "Drag files here, paste (Ctrl+V), or click Add file. PDF, DOC, DOCX, PNG or JPG up to 25MB each."}</div>
       ) : (
         <div className="flex flex-wrap gap-1.5">
           {attachments.map(att => (

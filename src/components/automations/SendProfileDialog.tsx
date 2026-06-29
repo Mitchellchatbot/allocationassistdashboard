@@ -25,6 +25,7 @@ import { TemplatePicker } from "@/components/automations/TemplatePicker";
 import { useScheduleProfileSend } from "@/hooks/use-scheduled-profile-sends";
 import { GulfClock, composeGulfDateTime } from "@/components/GulfClock";
 import { Clock } from "lucide-react";
+import { useNavigate } from "react-router-dom";
 import { useQueryClient } from "@tanstack/react-query";
 
 // Persisted per-recruiter template preference (Amir #3 "save as my default").
@@ -145,6 +146,7 @@ export function SendProfileDialog({ open, onClose }: Props) {
   const { data: templates = [] } = useEmailTemplates();
   const { user } = useAuth();
   const scheduleProfileSend = useScheduleProfileSend();
+  const navigate = useNavigate();
 
   // Reset whenever the dialog re-opens.
   useEffect(() => {
@@ -294,7 +296,9 @@ export function SendProfileDialog({ open, onClose }: Props) {
           scheduled_at_time: schedule.time || "09:00",
           timezone:          "Asia/Dubai",
         });
-        toast.success(`Scheduled for ${schedule.date} ${schedule.time || "09:00"} GST — ${selectedDoctor.name} → ${selectedHospitals.length} hospital${selectedHospitals.length === 1 ? "" : "s"}`);
+        toast.success(`Scheduled for ${schedule.date} ${schedule.time || "09:00"} GST — ${selectedDoctor.name} → ${selectedHospitals.length} hospital${selectedHospitals.length === 1 ? "" : "s"}`, {
+          action: { label: "View queue", onClick: () => navigate("/batches") },
+        });
         onClose();
       } catch (err) {
         toast.error(err instanceof Error ? err.message : "Could not schedule");
@@ -804,6 +808,17 @@ function PreviewConfirm({
 
   const anyEdited = !!hospitalOv || !!doctorOv;
 
+  // Draft-template guard: a template whose copy still starts with PLACEHOLDER
+  // must not be emailed to a real hospital/doctor. Picking it ships via
+  // stage_overrides, which BYPASSES send-flow-email's own placeholder guard, so
+  // we block here. Editing the email inline (sets an override) clears the flag,
+  // so the team can still send an edited version of a draft template.
+  const isPlaceholder = (key: string) =>
+    (templates.find(t => t.key === key)?.body_text ?? "").trim().toUpperCase().startsWith("PLACEHOLDER");
+  const hospitalDraft = !hospitalOv && isPlaceholder(hospitalTemplateKey);
+  const doctorDraft   = !doctorOv   && isPlaceholder(doctorTemplateKey);
+  const anyDraft = hospitalDraft || doctorDraft;
+
   return (
     <div className="space-y-3">
       <div className="rounded-md border bg-slate-50/50 p-3 text-[12px] space-y-1">
@@ -847,7 +862,7 @@ function PreviewConfirm({
             <TemplatePicker templates={templates} value={hospitalTemplateKey} onChange={setHospitalTemplateKey} defaultKey="profile_sent_hospital" renderVars={vars} label="Hospital email template" />
           </div>
           {hospitalTemplateKey !== "profile_sent_hospital" && (
-            <button type="button" onClick={() => onSaveDefault("hospital", hospitalTemplateKey)} className="text-[10px] text-slate-500 hover:underline whitespace-nowrap mt-4">Save as my default</button>
+            <button type="button" onClick={() => { onSaveDefault("hospital", hospitalTemplateKey); toast.success("Saved as your default hospital template"); }} className="text-[10px] text-slate-500 hover:underline whitespace-nowrap mt-4">Save as my default</button>
           )}
         </div>
         {hospitalTemplateKey !== "profile_sent_hospital" && !isSingle && (
@@ -871,7 +886,7 @@ function PreviewConfirm({
             <TemplatePicker templates={templates} value={doctorTemplateKey} onChange={setDoctorTemplateKey} defaultKey="profile_sent_doctor" renderVars={vars} label="Doctor 'working opportunity' email template" />
           </div>
           {doctorTemplateKey !== "profile_sent_doctor" && (
-            <button type="button" onClick={() => onSaveDefault("doctor", doctorTemplateKey)} className="text-[10px] text-slate-500 hover:underline whitespace-nowrap mt-4">Save as my default</button>
+            <button type="button" onClick={() => { onSaveDefault("doctor", doctorTemplateKey); toast.success("Saved as your default doctor template"); }} className="text-[10px] text-slate-500 hover:underline whitespace-nowrap mt-4">Save as my default</button>
           )}
         </div>
         <EditableEmailSection
@@ -924,6 +939,15 @@ function PreviewConfirm({
         </div>
       )}
 
+      {anyDraft && (
+        <div className="rounded-md border border-rose-200 bg-rose-50 p-2 text-[11px] text-rose-900 flex items-start gap-2">
+          <AlertTriangle className="h-3.5 w-3.5 mt-[2px] shrink-0" />
+          <div>
+            The <strong>{hospitalDraft && doctorDraft ? "hospital and doctor templates" : hospitalDraft ? "hospital template" : "doctor template"}</strong> still {hospitalDraft && doctorDraft ? "contain" : "contains"} placeholder copy (<code>PLACEHOLDER…</code>). Pick a finished template above, or click into the email to edit the wording before sending.
+          </div>
+        </div>
+      )}
+
       <DialogFooter className="sticky bottom-0 z-20 -mx-6 -mb-6 px-6 py-3 bg-background border-t border-slate-200">
         <Button variant="outline" onClick={onBack} disabled={submitting}>
           <ChevronLeft className="h-3.5 w-3.5 mr-1" /> Back
@@ -952,7 +976,8 @@ function PreviewConfirm({
               sendMode === "later" ? { date: schedDate, time: schedTime } : undefined,
             );
           }}
-          disabled={submitting}
+          disabled={submitting || anyDraft}
+          title={anyDraft ? "Pick a finished template or edit the copy first — the selected template still has placeholder text." : undefined}
         >
           {submitting
             ? (sendMode === "later" ? "Scheduling..." : "Queueing...")

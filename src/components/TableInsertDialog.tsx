@@ -1,4 +1,4 @@
-import { useMemo, useRef, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription, DialogFooter } from "@/components/ui/dialog";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -42,6 +42,15 @@ export function TableInsertDialog({
   const [align, setAlign]         = useState<CellAlign>("left");
   const [accent, setAccent]       = useState(AA_TEAL);
   const [caption, setCaption]     = useState("");
+
+  // Reset the data each time the dialog opens so a second insert doesn't reuse
+  // the previous table's grid/paste/caption. Style preset + accent stay sticky.
+  useEffect(() => {
+    if (open) {
+      setMode("build"); setGrid(seedGrid(3, 3)); setPasteText(""); setCaption("");
+      setSheetNames([]); setWorkbook(null);
+    }
+  }, [open]);
 
   const opts: Partial<TableStyleOptions> = { preset, headerRow, striped, bordered, align, accent, caption };
 

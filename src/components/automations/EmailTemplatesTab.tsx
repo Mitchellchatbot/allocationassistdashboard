@@ -13,6 +13,7 @@ import {
 } from "@/hooks/use-email-templates";
 import { FLOW_DEFINITIONS, FLOW_ORDER } from "@/lib/automation-flows";
 import { EmailPreview } from "@/components/EmailPreview";
+import { FullScreenEmailPreview } from "@/components/FullScreenEmailPreview";
 
 // Preview tokens used to render templates in the editor. Use the
 // production app origin so previews read like the real thing — not
@@ -198,6 +199,7 @@ function TemplateEditor({ template }: { template: EmailTemplate }) {
   const [bodyText, setBodyText] = useState(template.body_text);
   const [bodyHtml, setBodyHtml] = useState(template.body_html);
   const [mode,     setMode]     = useState<"edit" | "preview">("edit");
+  const [fs,       setFs]       = useState(false);
   const update = useUpdateEmailTemplate();
 
   // Reset local state when a different template is selected. The `key` prop
@@ -329,8 +331,10 @@ function TemplateEditor({ template }: { template: EmailTemplate }) {
             to="[Recipient]"
             templateKey={template.key}
             banner={<>Rendered with <strong>sample values</strong> — real sends use the live doctor/hospital data.</>}
+            onExpand={() => setFs(true)}
           />
         )}
+        <FullScreenEmailPreview open={fs} onClose={() => setFs(false)} subject={previewSubject} html={previewHtml} text={previewText} from="Hospital Intro <hospitalintro@allocationassist.com>" to="[Recipient]" />
       </CardContent>
     </Card>
   );

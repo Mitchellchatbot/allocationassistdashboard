@@ -14,6 +14,7 @@ import {
 import { useSearchIndex, type SearchKind, type SearchEntity } from "@/hooks/use-search-index";
 import { useRecentItems } from "@/hooks/use-recent-items";
 import { useSavedSearches } from "@/hooks/use-saved-searches";
+import { toast } from "sonner";
 import { SearchFilterChips, chipMatches, type SentChip } from "@/components/search/SearchFilterChips";
 
 // Visual identity per kind: icon, group heading, sort order in results, and
@@ -141,9 +142,10 @@ function SearchContents({ open, onClose }: { open: boolean; onClose: () => void 
         <SearchFilterChips active={chip} onChange={setChip} counts={chipCounts} />
         <button
           type="button"
-          title="Save this search"
-          onClick={() => save(query, chip, query || (chip !== "all" ? chip : "All sent"))}
-          className="ml-auto inline-flex items-center gap-1 rounded-md border border-slate-200 px-1.5 py-0.5 text-[10px] text-slate-500 hover:text-teal-700 hover:border-teal-300 shrink-0"
+          title={(!query.trim() && chip === "all") ? "Type a query or pick a chip to save a search" : "Save this search"}
+          disabled={!query.trim() && chip === "all"}
+          onClick={() => { save(query, chip, query || (chip !== "all" ? chip : "All sent")); toast.success("Search saved"); }}
+          className="ml-auto inline-flex items-center gap-1 rounded-md border border-slate-200 px-1.5 py-0.5 text-[10px] text-slate-500 hover:text-teal-700 hover:border-teal-300 shrink-0 disabled:opacity-40 disabled:cursor-not-allowed disabled:hover:text-slate-500 disabled:hover:border-slate-200"
         >
           <Star className="h-3 w-3" /> Save
         </button>

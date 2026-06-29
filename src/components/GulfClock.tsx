@@ -1,3 +1,4 @@
+import { useEffect, useState } from "react";
 import { Clock } from "lucide-react";
 import { cn } from "@/lib/utils";
 
@@ -7,6 +8,14 @@ import { cn } from "@/lib/utils";
  * client-side so scheduled rows read correctly in npm run dev without any cron.
  */
 export function GulfClock({ when, className, showRelative = true }: { when: string | Date | null; className?: string; showRelative?: boolean }) {
+  // Re-render every minute so the "fires in N / overdue" label stays truthful.
+  const [, setTick] = useState(0);
+  useEffect(() => {
+    if (!showRelative) return;
+    const t = setInterval(() => setTick(x => x + 1), 60_000);
+    return () => clearInterval(t);
+  }, [showRelative]);
+
   if (!when) return null;
   const d = typeof when === "string" ? new Date(when) : when;
   if (Number.isNaN(d.getTime())) return null;
