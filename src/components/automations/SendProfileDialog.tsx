@@ -447,7 +447,7 @@ export function SendProfileDialog({ open, onClose }: Props) {
 
   return (
     <Dialog open={open} onOpenChange={(v) => !v && onClose()}>
-      <DialogContent className="w-[92vw] max-w-[92vw] sm:max-w-[92vw] max-h-[92vh] overflow-x-hidden overflow-y-auto">
+      <DialogContent className="w-[90vw] max-w-[1100px] sm:max-w-[1100px] max-h-[92vh] overflow-x-hidden overflow-y-auto">
         <DialogHeader>
           <DialogTitle className="flex items-center gap-2">
             <Send className="h-4 w-4 text-teal-600" /> Send Profile to Hospital
@@ -914,7 +914,7 @@ function PreviewConfirm({
           </div>
         )}
         {sendMode === "later" && (
-          <p className="text-[10px] text-amber-700">Saved to the scheduled queue. The server-side scheduler fires it once the edge functions are deployed; until then use “Send now”.</p>
+          <p className="text-[10px] text-teal-700">Saved to the scheduled queue — the scheduler sends it automatically at the chosen Gulf time (checked every ~5 min). Cancel or send early any time from <strong>Batches → Scheduled profile sends</strong>.</p>
         )}
       </div>
 
@@ -924,7 +924,7 @@ function PreviewConfirm({
         </div>
       )}
 
-      <DialogFooter>
+      <DialogFooter className="sticky bottom-0 z-20 -mx-6 -mb-6 px-6 py-3 bg-background border-t border-slate-200">
         <Button variant="outline" onClick={onBack} disabled={submitting}>
           <ChevronLeft className="h-3.5 w-3.5 mr-1" /> Back
         </Button>
@@ -1224,7 +1224,7 @@ function EditableEmailSection({
         from={from}
         to={to}
         text={plainBody}
-        className="border-0 rounded-none max-h-[440px]"
+        className="border-0 rounded-none h-[58vh] max-h-[58vh]"
       />
     </div>
   );

@@ -817,7 +817,7 @@ function ScheduledProfileSendsCard() {
           <Badge variant="outline" className="text-[9px] bg-amber-50 text-amber-700 border-amber-200">{scheduled.length}</Badge>
         </CardTitle>
         <CardDescription className="text-[11px]">
-          Future hospital + doctor sends queued from Send Profile. The scheduler fires these server-side once edge functions are deployed.
+          Future hospital + doctor sends queued from Send Profile. The scheduler sends each automatically at its Gulf-time slot (checked every ~5 min). Cancel one below to stop it.
         </CardDescription>
       </CardHeader>
       <CardContent className="p-0">

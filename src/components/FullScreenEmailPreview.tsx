@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useRef, useState } from "react";
-import { createPortal } from "react-dom";
+import * as DialogPrimitive from "@radix-ui/react-dialog";
 import {
   X, Monitor, Tablet, Smartphone, Mail as MailIcon, ZoomIn, ZoomOut,
   Code2, FileText, Copy, Check, Download, Image as ImageIcon, Sun, Moon,
@@ -47,15 +47,7 @@ export function FullScreenEmailPreview(props: FullScreenEmailPreviewProps) {
   const [copied, setCopied]   = useState(false);
   const frameWrapRef = useRef<HTMLDivElement>(null);
 
-  // Esc closes; lock body scroll while open.
-  useEffect(() => {
-    if (!open) return;
-    const onKey = (e: KeyboardEvent) => { if (e.key === "Escape") onClose(); };
-    document.addEventListener("keydown", onKey);
-    const prevOverflow = document.body.style.overflow;
-    document.body.style.overflow = "hidden";
-    return () => { document.removeEventListener("keydown", onKey); document.body.style.overflow = prevOverflow; };
-  }, [open, onClose]);
+  // Esc + scroll-lock + focus management are handled by Radix Dialog below.
 
   // Reset transient view state each time it opens.
   useEffect(() => { if (open) { setPane("rendered"); setZoom(100); } }, [open]);
@@ -94,10 +86,15 @@ export function FullScreenEmailPreview(props: FullScreenEmailPreviewProps) {
     }
   };
 
-  if (!open) return null;
-
-  return createPortal(
-    <div className="fixed inset-0 z-[100] flex flex-col bg-slate-900/95 backdrop-blur-sm">
+  return (
+    <DialogPrimitive.Root open={open} onOpenChange={(v) => { if (!v) onClose(); }}>
+      <DialogPrimitive.Portal>
+        <DialogPrimitive.Overlay className="fixed inset-0 z-[100] bg-slate-950/70 backdrop-blur-sm data-[state=open]:animate-in data-[state=closed]:animate-out data-[state=open]:fade-in-0 data-[state=closed]:fade-out-0" />
+        <DialogPrimitive.Content
+          aria-describedby={undefined}
+          className="fixed inset-0 z-[101] flex flex-col bg-slate-900/95 outline-none data-[state=open]:animate-in data-[state=closed]:animate-out data-[state=open]:fade-in-0 data-[state=closed]:fade-out-0 data-[state=open]:zoom-in-95 data-[state=closed]:zoom-out-95 duration-200"
+        >
+          <DialogPrimitive.Title className="sr-only">Full-screen email preview — {subject || "email"}</DialogPrimitive.Title>
       {/* Toolbar */}
       <div className="flex items-center gap-2 px-4 py-2.5 bg-slate-900 border-b border-white/10 text-slate-200 flex-wrap">
         <div className="flex items-center gap-1.5 mr-2 min-w-0">
@@ -184,8 +181,9 @@ export function FullScreenEmailPreview(props: FullScreenEmailPreviewProps) {
           <pre className="p-6 text-[12.5px] leading-relaxed text-slate-200 font-mono whitespace-pre-wrap break-words max-w-[800px] mx-auto">{text || "(no plain-text version)"}</pre>
         )}
       </div>
-    </div>,
-    document.body,
+        </DialogPrimitive.Content>
+      </DialogPrimitive.Portal>
+    </DialogPrimitive.Root>
   );
 }
 
