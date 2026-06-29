@@ -279,6 +279,13 @@ export function SendProfileDialog({ open, onClose }: Props) {
     // in a scheduled_profile_sends row. A deployed scheduler expands it later;
     // the Scheduled queue lets the team Send now / Reschedule / Cancel.
     if (schedule?.date) {
+      // Guard against a cleared/half-typed slot — localToGulfParts + Intl.format
+      // below throw on an Invalid Date. The buttons already disable on this, so
+      // this is just belt-and-suspenders.
+      if (Number.isNaN(composeLocalDateTime(schedule.date, schedule.time || "09:00").getTime())) {
+        toast.error("Pick a valid date and time to schedule.");
+        return;
+      }
       setSubmitting(true);
       try {
         // The team picks the slot in THEIR local time; the scheduler fires on
@@ -864,8 +871,14 @@ function PreviewConfirm({
     );
   };
   // Human-readable local label of the chosen slot, for the schedule button.
-  const schedLocalLabel = new Intl.DateTimeFormat(undefined, { weekday: "short", month: "short", day: "numeric", hour: "2-digit", minute: "2-digit", hour12: true })
-    .format(composeLocalDateTime(schedDate, schedTime));
+  // A cleared/half-typed date or time yields an Invalid Date — Intl.format()
+  // THROWS on that, which would crash the whole dialog mid-render, so guard it
+  // and gate the schedule action on a valid moment.
+  const schedWhen = composeLocalDateTime(schedDate, schedTime);
+  const schedValid = !Number.isNaN(schedWhen.getTime());
+  const schedLocalLabel = schedValid
+    ? new Intl.DateTimeFormat(undefined, { weekday: "short", month: "short", day: "numeric", hour: "2-digit", minute: "2-digit", hour12: true }).format(schedWhen)
+    : "the selected time";
 
   return (
     <div className="space-y-3">
@@ -925,6 +938,8 @@ function PreviewConfirm({
           editable={isSingle}
           onChange={setHospitalOv}
           plainBody={renderedHospitalBody}
+          attachments={hospitalAttachments}
+          onAttachmentsChange={setHospitalAttachments}
         />
         <AttachmentsPicker
           attachments={hospitalAttachments}
@@ -952,6 +967,8 @@ function PreviewConfirm({
           editable={isSingle}
           onChange={setDoctorOv}
           plainBody={renderTemplate(doctorBody, vars)}
+          attachments={doctorAttachments}
+          onAttachmentsChange={setDoctorAttachments}
         />
         <AttachmentsPicker
           attachments={doctorAttachments}
@@ -983,16 +1000,16 @@ function PreviewConfirm({
           <div className="flex items-end gap-2 flex-wrap">
             <div className="space-y-1"><span className="text-[10px] uppercase tracking-wider text-muted-foreground">Date</span><Input type="date" value={schedDate} onChange={e => setSchedDate(e.target.value)} className="h-8 text-[12px] w-[150px]" /></div>
             <div className="space-y-1"><span className="text-[10px] uppercase tracking-wider text-muted-foreground">Time (your local time)</span><Input type="time" value={schedTime} onChange={e => setSchedTime(e.target.value)} className="h-8 text-[12px] w-[120px]" /></div>
-            <div className="pb-1.5"><GulfClock when={composeLocalDateTime(schedDate, schedTime)} /></div>
+            <div className="pb-1.5">{schedValid ? <GulfClock when={schedWhen} /> : <span className="text-[10px] text-rose-600">Enter a valid date &amp; time</span>}</div>
           </div>
         )}
         {sendMode === "later" && (
           <>
             <Button
               onClick={submit}
-              disabled={submitting || anyDraft}
+              disabled={submitting || anyDraft || !schedValid}
               className="w-full bg-teal-600 hover:bg-teal-700 text-white"
-              title={anyDraft ? "Pick a finished template or edit the copy first." : undefined}
+              title={anyDraft ? "Pick a finished template or edit the copy first." : !schedValid ? "Enter a valid date and time first." : undefined}
             >
               {submitting
                 ? <><Loader2 className="h-4 w-4 mr-1.5 animate-spin" /> Scheduling…</>
@@ -1024,8 +1041,8 @@ function PreviewConfirm({
         </Button>
         <Button
           onClick={submit}
-          disabled={submitting || anyDraft}
-          title={anyDraft ? "Pick a finished template or edit the copy first — the selected template still has placeholder text." : undefined}
+          disabled={submitting || anyDraft || (sendMode === "later" && !schedValid)}
+          title={anyDraft ? "Pick a finished template or edit the copy first — the selected template still has placeholder text." : (sendMode === "later" && !schedValid) ? "Enter a valid date and time first." : undefined}
         >
           {submitting
             ? (sendMode === "later" ? "Scheduling..." : "Queueing...")
@@ -1248,6 +1265,7 @@ function looksLikeHtml(s: string): boolean {
  *  doctor email so either can be edited before sending. */
 function EditableEmailSection({
   label, subject, html, plainBody, from, to, editable, onChange,
+  attachments, onAttachmentsChange,
 }: {
   label:     string;
   subject:   string;   // pristine rendered subject
@@ -1257,6 +1275,8 @@ function EditableEmailSection({
   to?:       string;
   editable:  boolean;
   onChange:  (ov: SendOverrides | null) => void;
+  attachments?:        EmailAttachment[];
+  onAttachmentsChange?: (next: EmailAttachment[]) => void;
 }) {
   const [subj, setSubj] = useState(subject);
   const [body, setBody] = useState(html);
@@ -1297,6 +1317,8 @@ function EditableEmailSection({
         from={from}
         to={to}
         text={plainBody}
+        attachments={attachments}
+        onAttachmentsChange={onAttachmentsChange}
         className="border-0 rounded-none max-h-[60vh]"
       />
     </div>

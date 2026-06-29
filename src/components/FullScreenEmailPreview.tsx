@@ -1,12 +1,15 @@
-import { useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import * as DialogPrimitive from "@radix-ui/react-dialog";
 import {
   X, Monitor, Tablet, Smartphone, Mail as MailIcon, ZoomIn, ZoomOut,
   Code2, FileText, Copy, Check, Download, Image as ImageIcon, Sun, Moon,
-  Bold, Italic, Underline, List, ListOrdered, Link2, Pencil,
+  Bold, Italic, Underline, List, ListOrdered, Link2, Pencil, Table2,
 } from "lucide-react";
 import { toast } from "sonner";
 import { cn } from "@/lib/utils";
+import { TableInsertDialog } from "@/components/TableInsertDialog";
+import { AttachmentsPicker } from "@/components/automations/AttachmentsPicker";
+import type { EmailAttachment } from "@/lib/email-attachments";
 
 // Same email body styling as the inline EditableEmailPreview so the editable
 // full-screen surface renders identically to what sends.
@@ -14,7 +17,10 @@ const FS_BODY_CLASS =
   "bg-white rounded-md text-[14px] leading-relaxed text-slate-800 " +
   "[&_a]:text-teal-600 [&_a:hover]:underline [&_p]:my-3 [&_h2]:font-semibold [&_h2]:my-3 " +
   "[&_h3]:font-semibold [&_h3]:my-2 [&_ul]:list-disc [&_ul]:pl-5 [&_ol]:list-decimal [&_ol]:pl-5 " +
-  "[&_li]:my-1 [&_pre]:whitespace-pre-wrap [&_pre]:font-sans";
+  "[&_li]:my-1 [&_pre]:whitespace-pre-wrap [&_pre]:font-sans " +
+  // Display-only containment so a wide table/image can't push the editor wider
+  // than the screen (the saved innerHTML keeps its real widths).
+  "[&_table]:max-w-full [&_table]:!w-full [&_table]:table-fixed [&_td]:break-words [&_th]:break-words [&_img]:max-w-full [&_img]:h-auto";
 
 /**
  * FullScreenEmailPreview — Amir #7. A true full-viewport review of an email
@@ -45,6 +51,10 @@ export interface FullScreenEmailPreviewProps {
   /** Shows a "Reset to template" chip when something diverges. */
   edited?:  boolean;
   onReset?: () => void;
+  /** When provided (with the editor active) the full-screen view also manages
+   *  the email's attachments inline — same list the parent dialog owns. */
+  attachmentItems?:       EmailAttachment[];
+  onAttachmentItemsChange?: (next: EmailAttachment[]) => void;
 }
 
 type DeviceKey = "desktop" | "tablet" | "outlook" | "mobile";
@@ -57,48 +67,60 @@ const DEVICES: { key: DeviceKey; label: string; width: number | null; icon: Reac
 
 export function FullScreenEmailPreview(props: FullScreenEmailPreviewProps) {
   const { open, onClose, subject, html, text, from, to, attachments,
-          onSubjectChange, onHtmlChange, edited, onReset } = props;
+          onSubjectChange, onHtmlChange, edited, onReset,
+          attachmentItems, onAttachmentItemsChange } = props;
   const editable = !!(onSubjectChange && onHtmlChange);
+  const canAttach = editable && !!onAttachmentItemsChange;
   const [device, setDevice]   = useState<DeviceKey>("desktop");
   const [zoom, setZoom]       = useState(100);
   const [dark, setDark]       = useState(false);
   const [showImages, setShowImages] = useState(true);
   const [pane, setPane]       = useState<"rendered" | "html" | "text">("rendered");
   const [copied, setCopied]   = useState(false);
+  const [tableOpen, setTableOpen] = useState(false);
   // Live edited HTML — drives the HTML pane + Copy while editing, separately
   // from the stable `html` snapshot that seeds the contentEditable (changing
   // the seed every keystroke would fight the caret).
   const [liveHtml, setLiveHtml] = useState(html);
   const frameWrapRef = useRef<HTMLDivElement>(null);
-  const editRef      = useRef<HTMLDivElement>(null);
+  const editRef      = useRef<HTMLDivElement | null>(null);
   const savedRange   = useRef<Range | null>(null);
-  // The exact content the editor should currently hold. Updated on open/reset
-  // (to the incoming snapshot) and on every keystroke (to the live edit), so a
-  // (re)mount of the contentEditable — opening, or switching panes and back —
-  // always re-seeds from the latest content rather than a stale snapshot.
+  // The exact content the editor should currently hold. A FRESH snapshot (open
+  // or Reset → the `html` prop changes) becomes the new seed target; typing
+  // (html stable) leaves it on the live edit so a pane-switch remount restores
+  // the edits. Tracked DURING render so it's correct before the callback ref or
+  // any effect runs — no race with Radix mounting the dialog content.
   const latestHtmlRef = useRef(html);
+  const prevHtmlRef   = useRef<string | null>(null);
+  if (html !== prevHtmlRef.current) {
+    prevHtmlRef.current = html;
+    latestHtmlRef.current = html;
+  }
   const effectiveHtml = editable ? liveHtml : html;
 
-  // Resync the live copy + the seed target whenever a fresh snapshot arrives
-  // (open / reset). useLayoutEffect so the ref is correct BEFORE the seeding
-  // layout effect below reads it on the same commit.
-  useLayoutEffect(() => { setLiveHtml(html); latestHtmlRef.current = html; }, [html, open]);
+  // Keep the HTML/Copy panes in sync with fresh snapshots (open / reset).
+  useLayoutEffect(() => { setLiveHtml(html); }, [html, open]);
 
   // Esc + scroll-lock + focus management are handled by Radix Dialog below.
 
   // Reset transient view state each time it opens.
   useEffect(() => { if (open) { setPane("rendered"); setZoom(100); } }, [open]);
 
-  // Seed the contentEditable from latestHtmlRef whenever the rendered pane is
-  // (re)shown — runs at layout time so it never races the node's mount, and is
-  // idempotent (the guard skips when the content already matches, so typing,
-  // which doesn't change `open`/`pane`, never triggers a caret-resetting reseed).
+  // Seed the editor the INSTANT its node mounts — a callback ref fires exactly
+  // on attach, so it can't race the mount the way a layout effect can when
+  // Radix mounts the dialog content (that race left the editor blank on first
+  // open). Fires on every (re)mount: opening, and switching panes and back.
+  const seedEditor = useCallback((el: HTMLDivElement | null) => {
+    editRef.current = el;
+    if (el && el.innerHTML !== latestHtmlRef.current) el.innerHTML = latestHtmlRef.current;
+  }, []);
+
+  // Reseed when a fresh snapshot arrives while the editor is ALREADY mounted
+  // (e.g. Reset to template) — the callback ref won't refire without a remount.
   useLayoutEffect(() => {
     if (!editable || !open || pane !== "rendered") return;
     const el = editRef.current;
-    if (el && el.innerHTML !== latestHtmlRef.current) {
-      el.innerHTML = latestHtmlRef.current;
-    }
+    if (el && el.innerHTML !== latestHtmlRef.current) el.innerHTML = latestHtmlRef.current;
   }, [editable, open, pane, html]);
 
   const width = DEVICES.find(d => d.key === device)?.width ?? null;
@@ -122,6 +144,29 @@ export function FullScreenEmailPreview(props: FullScreenEmailPreviewProps) {
     flush();
   };
   const makeLink = () => { const url = window.prompt("Link URL", "https://"); if (url) exec("createLink", url); };
+  // Insert a built table (or any HTML) at the saved caret, or append to the end.
+  const insertHtml = (snippet: string) => {
+    const body = editRef.current; if (!body) return;
+    body.focus();
+    const sel = window.getSelection();
+    let range = savedRange.current;
+    if (!range || !body.contains(range.commonAncestorContainer)) {
+      range = document.createRange();
+      range.selectNodeContents(body);
+      range.collapse(false);
+    }
+    sel?.removeAllRanges(); sel?.addRange(range);
+    const holder = document.createElement("div");
+    holder.innerHTML = snippet;
+    const frag = document.createDocumentFragment();
+    while (holder.firstChild) frag.appendChild(holder.firstChild);
+    const r = sel?.getRangeAt(0);
+    if (r) { r.deleteContents(); r.insertNode(frag); r.collapse(false); }
+    else body.insertAdjacentHTML("beforeend", snippet);
+    savedRange.current = null;
+    const v = body.innerHTML;
+    latestHtmlRef.current = v; setLiveHtml(v); onHtmlChange?.(v);
+  };
 
   // Wrap the email HTML in a minimal document. Optionally strip <img> so the
   // team can review the text-only fallback view (how it looks with images off).
@@ -206,6 +251,7 @@ export function FullScreenEmailPreview(props: FullScreenEmailPreviewProps) {
             {/* Rich-text formatting — only when editing. */}
             {editable && (
               <ToolGroup>
+                <IconBtn onMouseDown={(e) => e.preventDefault()} onClick={() => { saveSelection(); setTableOpen(true); }} title="Insert table"><Table2 className="h-3.5 w-3.5" /></IconBtn>
                 <IconBtn onMouseDown={(e) => e.preventDefault()} onClick={() => exec("bold")}          title="Bold"><Bold className="h-3.5 w-3.5" /></IconBtn>
                 <IconBtn onMouseDown={(e) => e.preventDefault()} onClick={() => exec("italic")}        title="Italic"><Italic className="h-3.5 w-3.5" /></IconBtn>
                 <IconBtn onMouseDown={(e) => e.preventDefault()} onClick={() => exec("underline")}     title="Underline"><Underline className="h-3.5 w-3.5" /></IconBtn>
@@ -277,7 +323,7 @@ export function FullScreenEmailPreview(props: FullScreenEmailPreviewProps) {
                 style={{ maxWidth: width ? `${width}px` : "1000px" }}
               >
                 <div
-                  ref={editRef}
+                  ref={seedEditor}
                   contentEditable
                   suppressContentEditableWarning
                   onInput={(e) => { const v = (e.target as HTMLDivElement).innerHTML; latestHtmlRef.current = v; setLiveHtml(v); onHtmlChange?.(v); }}
@@ -315,6 +361,22 @@ export function FullScreenEmailPreview(props: FullScreenEmailPreviewProps) {
           <pre className="p-6 text-[12.5px] leading-relaxed text-slate-200 font-mono whitespace-pre-wrap break-words max-w-[800px] mx-auto">{text || "(no plain-text version)"}</pre>
         )}
       </div>
+
+      {/* Attachments — manage right here in the editor (same list the parent
+          dialog owns). Slim bar pinned under the canvas. */}
+      {canAttach && pane === "rendered" && (
+        <div className="shrink-0 border-t border-white/10 bg-slate-900 px-4 py-2 max-h-[30vh] overflow-y-auto">
+          <div className="max-w-[1000px] mx-auto">
+            <AttachmentsPicker
+              attachments={attachmentItems ?? []}
+              onChange={onAttachmentItemsChange!}
+              hint="ride on this email"
+            />
+          </div>
+        </div>
+      )}
+
+      <TableInsertDialog open={tableOpen} onOpenChange={setTableOpen} onInsert={insertHtml} />
         </DialogPrimitive.Content>
       </DialogPrimitive.Portal>
     </DialogPrimitive.Root>

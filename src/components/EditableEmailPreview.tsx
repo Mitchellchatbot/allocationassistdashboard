@@ -3,6 +3,7 @@ import { Pencil, RotateCcw, Bold, Italic, Underline, List, ListOrdered, Link2, T
 import { cn } from "@/lib/utils";
 import { TableInsertDialog } from "@/components/TableInsertDialog";
 import { FullScreenEmailPreview } from "@/components/FullScreenEmailPreview";
+import type { EmailAttachment } from "@/lib/email-attachments";
 
 /**
  * EditableEmailPreview — the rendered email, editable in place. The subject is
@@ -46,17 +47,25 @@ interface EditableEmailPreviewProps {
   tools?:          boolean;
   /** Plain-text body, forwarded to the full-screen preview. */
   text?:           string;
+  /** When provided, the full-screen editor also manages this email's
+   *  attachments inline (same list the parent dialog owns). */
+  attachments?:        EmailAttachment[];
+  onAttachmentsChange?: (next: EmailAttachment[]) => void;
 }
 
 const BODY_CLASS =
   "bg-white rounded-md text-[13px] leading-relaxed text-slate-800 " +
   "[&_a]:text-teal-600 [&_a:hover]:underline [&_p]:my-3 [&_h2]:font-semibold [&_h2]:my-3 " +
   "[&_h3]:font-semibold [&_h3]:my-2 [&_ul]:list-disc [&_ul]:pl-5 [&_ol]:list-decimal [&_ol]:pl-5 " +
-  "[&_li]:my-1 [&_table]:text-[11px] [&_pre]:whitespace-pre-wrap [&_pre]:font-sans";
+  "[&_li]:my-1 [&_table]:text-[11px] [&_pre]:whitespace-pre-wrap [&_pre]:font-sans " +
+  // Display-only containment: a wide table/image fits the editor width instead
+  // of pushing the whole dialog sideways. The innerHTML (what actually sends)
+  // keeps its real widths — this CSS only governs how it looks in the editor.
+  "[&_table]:max-w-full [&_table]:!w-full [&_table]:table-fixed [&_td]:break-words [&_th]:break-words [&_img]:max-w-full [&_img]:h-auto";
 
 export function EditableEmailPreview({
   subject, html, onSubjectChange, onHtmlChange, resetKey, edited, onReset, from, to, className,
-  tools = true, text,
+  tools = true, text, attachments, onAttachmentsChange,
 }: EditableEmailPreviewProps) {
   const bodyRef = useRef<HTMLDivElement>(null);
   const savedRange = useRef<Range | null>(null);
@@ -238,6 +247,8 @@ export function EditableEmailPreview({
         onHtmlChange={(v) => { if (bodyRef.current && bodyRef.current.innerHTML !== v) bodyRef.current.innerHTML = v; onHtmlChange(v); }}
         edited={edited}
         onReset={onReset ? () => { onReset(); setFsHtml(html); } : undefined}
+        attachmentItems={attachments}
+        onAttachmentItemsChange={onAttachmentsChange}
       />
     </div>
   );

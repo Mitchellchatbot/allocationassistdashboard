@@ -262,6 +262,12 @@ Deno.serve(async (req: Request) => {
     // forwarded to auto-continue sends, so a bundled follow-up (e.g. the doctor
     // heads-up after the hospital intro) still uses its own template.
     subject_override?: string; html_override?: string; text_override?: string;
+    // One-shot attachments for THIS send (already uploaded to the public
+    // email-attachments bucket — entries are { filename, path:<https URL> }).
+    // Used by FlowSendPreviewDialog so any flow email can carry a CV/doc. Only
+    // consulted when the run's metadata has no per-stage attachments, and NOT
+    // forwarded to auto-continue sends (they re-invoke with run_id only).
+    attachments?: Array<{ filename?: string; path?: string }>;
   };
   try { body = await req.json(); } catch { return json({ ok: false, error: "Invalid JSON body" }, 400); }
   const runId = body.run_id;
@@ -885,18 +891,23 @@ Deno.serve(async (req: Request) => {
   const ccList: string[] | undefined = ccSet.size ? [...ccSet] : undefined;
 
   // ── User-uploaded attachments (CVs, logbooks) ──────────────────────────────
-  // Set on the run by the Send Profile dialog. Attachments are now PER-EMAIL so
-  // the dispatcher controls exactly which file rides which email:
-  //   • metadata.attachments         → the hospital-facing email (email_hospital)
-  //   • metadata.attachments_doctor  → the doctor heads-up email   (email_doctor)
-  // Legacy runs only set metadata.attachments (hospital), so the doctor set is
-  // simply absent for them — behaviour is unchanged. Each entry is
-  // { filename, path } where path is the public email-attachments URL Resend
-  // fetches server-side. Merged after any relocation-guide attachments.
-  const attachmentsForStage =
+  // Source order (first non-empty wins), so ANY stage can carry attachments:
+  //   1. metadata.attachments_<stage>  → per-stage set written on the run
+  //   2. legacy keys for the two original stages — metadata.attachments
+  //      (email_hospital) / metadata.attachments_doctor (email_doctor), so old
+  //      runs keep working with NO migration
+  //   3. body.attachments              → one-shot set on THIS invoke, used by
+  //      FlowSendPreviewDialog so any flow email can carry a CV/doc
+  // Each entry is { filename, path } where path is the public email-attachments
+  // URL Resend fetches server-side. Merged after any relocation-guide files.
+  // Auto-continue re-invokes with run_id only, so body attachments are one-shot.
+  const metadataKey = `attachments_${run.current_stage}`;
+  const legacyAttachments =
     run.current_stage === "email_hospital" ? md.attachments
     : run.current_stage === "email_doctor" ? md.attachments_doctor
     : undefined;
+  const attachmentsForStage =
+    (md[metadataKey] as unknown) ?? legacyAttachments ?? (body.attachments as unknown);
   const userAttachments: Array<{ filename: string; path: string }> =
     Array.isArray(attachmentsForStage)
       ? (attachmentsForStage as Array<Record<string, unknown>>)

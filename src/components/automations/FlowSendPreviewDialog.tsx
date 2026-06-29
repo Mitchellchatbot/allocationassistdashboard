@@ -22,13 +22,20 @@ import { Send, RefreshCw, AlertTriangle } from "lucide-react";
 import { supabase } from "@/lib/supabase";
 import { toast } from "sonner";
 import { EditableEmailPreview } from "@/components/EditableEmailPreview";
+import { AttachmentsPicker } from "@/components/automations/AttachmentsPicker";
+import type { EmailAttachment } from "@/lib/email-attachments";
 
 interface FlowPreview { from: string; to: string; subject: string; html: string; text?: string }
 
 /** Edits captured from the preview, passed to onConfirm so the caller can
  *  forward them to send-flow-email (which ships them verbatim). Empty when the
- *  team sent the template version unchanged. */
-export interface EmailOverrides { subject_override?: string; html_override?: string }
+ *  team sent the template version unchanged. `attachments` ride this one send —
+ *  send-flow-email reads them from the invoke body (already-uploaded http URLs). */
+export interface EmailOverrides {
+  subject_override?: string;
+  html_override?: string;
+  attachments?: Array<{ filename: string; path: string }>;
+}
 
 /** dry-run preview with a hard timeout — supabase.functions.invoke can hang on
  *  a cold start / dropped connection, leaving the spinner forever. */
@@ -81,6 +88,7 @@ export function FlowSendPreviewDialog({
   const [editSubject, setEditSubject] = useState("");
   const [editHtml,    setEditHtml]    = useState("");
   const [resetTick,   setResetTick]   = useState(0);
+  const [attachments, setAttachments] = useState<EmailAttachment[]>([]);
 
   const edited = !!preview && (editSubject !== preview.subject || editHtml !== preview.html);
 
@@ -88,7 +96,7 @@ export function FlowSendPreviewDialog({
   useEffect(() => {
     if (!open || !runId) { setPreview(null); setErr(null); return; }
     let cancelled = false;
-    setLoading(true); setErr(null); setPreview(null);
+    setLoading(true); setErr(null); setPreview(null); setAttachments([]);
     fetchPreview(runId, previewStage, previewMetadata)
       .then(p => {
         if (cancelled) return;
@@ -108,7 +116,11 @@ export function FlowSendPreviewDialog({
   const handleSend = async () => {
     setSending(true);
     try {
-      await onConfirm(edited ? { subject_override: editSubject, html_override: editHtml } : undefined);
+      const overrides: EmailOverrides = {
+        ...(edited ? { subject_override: editSubject, html_override: editHtml } : {}),
+        ...(attachments.length ? { attachments: attachments.map(a => ({ filename: a.filename, path: a.path })) } : {}),
+      };
+      await onConfirm(Object.keys(overrides).length ? overrides : undefined);
       onClose();
     } catch (e) {
       toast.error(e instanceof Error ? e.message : "Send failed");
@@ -157,8 +169,22 @@ export function FlowSendPreviewDialog({
             }}
             from={preview.from}
             to={preview.to}
-            className="flex-1 min-h-[62vh]"
+            text={preview.text}
+            attachments={attachments}
+            onAttachmentsChange={setAttachments}
+            className="flex-1 min-h-[52vh]"
           />
+        )}
+
+        {preview && !loading && !err && (
+          <div className="shrink-0">
+            <AttachmentsPicker
+              attachments={attachments}
+              onChange={setAttachments}
+              disabled={sending}
+              hint="CV, logbook, etc. — rides on this email"
+            />
+          </div>
         )}
 
         <DialogFooter>
