@@ -114,6 +114,12 @@ Deno.serve(async (req: Request) => {
   }
   const uploadId = String(upload.id);
 
+  // Link the CV to the staging profile so (a) the "View Resume" button resolves
+  // it and (b) Publish hands cv_upload_id to wordpress-candidate-upload-cv,
+  // which attaches the file to WordPress (cv_resume → cv_url). Without this the
+  // dropped CV would extract but never appear behind the résumé button.
+  await supabase.from("staged_doctor_profiles").update({ cv_upload_id: uploadId }).eq("id", stagedId);
+
   // ── 4. Trigger cv-extract ───────────────────────────────────────────────
   // Fire it inline and await so the staging row is fully populated by the
   // time the caller refetches. If extraction fails, the row still exists

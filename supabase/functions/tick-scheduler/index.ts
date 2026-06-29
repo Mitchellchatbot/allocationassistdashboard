@@ -345,12 +345,12 @@ Deno.serve(async (req: Request) => {
   const otwNotifs = await runDoctorsOnTheWaySweep(supabase, now);
   for (const n of otwNotifs) actions.push(n);
 
-  // ── Phase 6 · Auto-fire scheduled batches ────────────────────────────────
-  // Daily duo: Mon-Fri at/after 10:30 AM. Tuesday top 15: Tue 11 AM-4 PM.
-  // Specialty of day: Wed-Fri any time. Each kind only fires once (status
-  // flips to 'sent' on success), so multiple ticks in the window are safe.
-  const batchActs = await runBatchSendSweep(supabase, now);
-  for (const a of batchActs) actions.push(a);
+  // ── Phase 6 · Scheduled batch + profile sends ────────────────────────────
+  // MOVED to the dedicated `tick-sends` function (its own 5-min cron). This
+  // monolith runs many heavy sweeps and can hit the worker resource limit;
+  // keeping the (latency-sensitive, email-firing) scheduled sends in a small
+  // separate function makes them reliable and lets them honour per-row send
+  // times. See supabase/functions/tick-sends + 20260629000000_tick_sends_cron.
 
   // ── Sheet connection auto-sync ───────────────────────────────────────────
   // Re-pull every active sheet whose last_synced_at is older than its
@@ -831,39 +831,68 @@ async function maybeEscalateSyncBreach(
 // ── Phase 6 · Auto-fire scheduled batches ──────────────────────────────────
 // Time windows are based on UTC for stable scheduling — Dubai is UTC+4 so
 // 10:30 AM Dubai is 06:30 UTC, 11 AM is 07:00 UTC, 4 PM is 12:00 UTC.
+// ── Gulf-time helpers (Amir #5) ──────────────────────────────────────────────
+// GST is a fixed UTC+4 (no DST), so we can shift the clock and read UTC parts.
+interface GulfNow { today: string; mins: number; dow: number }
+function gulfParts(now: Date): GulfNow {
+  const g = new Date(now.getTime() + 4 * 3600 * 1000);
+  return { today: g.toISOString().slice(0, 10), mins: g.getUTCHours() * 60 + g.getUTCMinutes(), dow: g.getUTCDay() };
+}
+function hhmmToMins(t: string | null | undefined): number {
+  const m = /^(\d{1,2}):(\d{2})/.exec(String(t ?? ""));
+  return m ? (+m[1]) * 60 + (+m[2]) : 0;
+}
+/** Is a row due as of Gulf `g`? Fires only on its OWN day, once the time passes
+ *  (any later tick the same day catches up). We deliberately do NOT retroactively
+ *  fire cross-day-overdue rows — a missed day is missed, not blasted later. */
+function dueAt(scheduledFor: string, scheduledAtTime: string | null, g: GulfNow): boolean {
+  return scheduledFor === g.today && g.mins >= hhmmToMins(scheduledAtTime ?? "09:00");
+}
+/** Next calendar date (YYYY-MM-DD) after `fromStr` whose weekday is in the set. */
+function nextWorkingDay(fromStr: string, weekdays: number[]): string {
+  const set = new Set(weekdays.length ? weekdays : [1, 2, 3, 4, 5]);
+  const base = new Date(fromStr + "T00:00:00Z").getTime();
+  for (let i = 1; i <= 14; i++) {
+    const nd = new Date(base + i * 86_400_000);
+    if (set.has(nd.getUTCDay())) return nd.toISOString().slice(0, 10);
+  }
+  return new Date(base + 86_400_000).toISOString().slice(0, 10);
+}
+
+interface BatchRow {
+  id: string; kind: string; doctor_ids: string[]; scheduled_for: string;
+  scheduled_at_time: string | null; country: string | null; specialty: string | null;
+  recurrence: { freq?: string; weekdays?: number[]; until?: string | null } | null;
+}
+
+/** Fire scheduled batch sends. Honours the new per-row Gulf-time
+ *  (scheduled_at_time) when set; falls back to the legacy per-kind windows for
+ *  older rows that only carry a date. A weekly-recurring batch seeds the next
+ *  working day's draft (empty queue, so the team picks fresh doctors). */
 async function runBatchSendSweep(
   supabase: ReturnType<typeof createClient>,
   now: Date,
 ): Promise<TickAction[]> {
   const acts: TickAction[] = [];
   try {
-    const dayOfWeek = now.getUTCDay();        // 0 Sun .. 6 Sat
-    const hourUtc   = now.getUTCHours();
-    const minUtc    = now.getUTCMinutes();
-    const minsSinceMidnight = hourUtc * 60 + minUtc;
-    const todayStr = now.toISOString().slice(0, 10);
-
-    // Window decisions (Dubai local → UTC):
-    //   Mon-Fri 10:30 Dubai = 06:30 UTC  → minute >= 390
-    //   Tue     11:00 Dubai = 07:00 UTC  → minute >= 420  (until 16:00 Dubai = 12:00 UTC, minute <= 720)
-    //   Wed-Fri any time today
-    const dailyDuoFiresNow      = dayOfWeek >= 1 && dayOfWeek <= 5 && minsSinceMidnight >= 390;
-    const tuesdayTop15FiresNow  = dayOfWeek === 2 && minsSinceMidnight >= 420 && minsSinceMidnight <= 720;
-    const specialtyOfDayFires   = dayOfWeek >= 3 && dayOfWeek <= 5;
-
+    const g = gulfParts(now);
     const { data: batches, error } = await supabase
       .from("scheduled_batch_sends")
-      .select("id, kind, doctor_ids")
-      .eq("scheduled_for", todayStr)
-      .eq("status", "draft");
+      .select("id, kind, doctor_ids, scheduled_for, scheduled_at_time, country, specialty, recurrence")
+      .eq("status", "draft")
+      .eq("scheduled_for", g.today);
     if (error) throw error;
 
-    for (const b of (batches ?? []) as Array<{ id: string; kind: string; doctor_ids: string[] }>) {
-      const shouldFire =
-        (b.kind === "daily_duo"        && dailyDuoFiresNow)     ||
-        (b.kind === "tuesday_top_15"   && tuesdayTop15FiresNow) ||
-        (b.kind === "specialty_of_day" && specialtyOfDayFires);
-      if (!shouldFire) continue;
+    for (const b of (batches ?? []) as BatchRow[]) {
+      // Due? Time-of-day rows use dueAt(); legacy date-only rows use the old
+      // per-kind windows (Gulf minutes: 10:30=630, 11:00-16:00=660-960).
+      const due = b.scheduled_at_time
+        ? dueAt(b.scheduled_for, b.scheduled_at_time, g)
+        : (b.kind === "daily_duo"        && g.dow >= 1 && g.dow <= 5 && g.mins >= 630) ||
+          (b.kind === "tuesday_top_15"   && g.dow === 2 && g.mins >= 660 && g.mins <= 960) ||
+          (b.kind === "specialty_of_day" && g.dow >= 3 && g.dow <= 5);
+      if (!due) continue;
+
       if (!b.doctor_ids || b.doctor_ids.length === 0) {
         acts.push({ run_id: b.id, doctor: "(batch)", flow: "batch_send", stage: b.kind, reason: "no doctors queued", result: "skipped" });
         continue;
@@ -871,15 +900,13 @@ async function runBatchSendSweep(
       try {
         const r = await fetch(`${SUPABASE_URL}/functions/v1/send-batch`, {
           method: "POST",
-          headers: {
-            "Content-Type":  "application/json",
-            "Authorization": `Bearer ${SUPABASE_SERVICE_ROLE_KEY}`,
-          },
+          headers: { "Content-Type": "application/json", "Authorization": `Bearer ${SUPABASE_SERVICE_ROLE_KEY}` },
           body: JSON.stringify({ batch_id: b.id }),
         });
         const txt = await r.text();
         if (r.ok) {
           acts.push({ run_id: b.id, doctor: "(batch)", flow: "batch_send", stage: b.kind, reason: "auto-fired", result: "sent", detail: txt.slice(0, 120) });
+          await maybeRecurBatch(supabase, b);
         } else {
           acts.push({ run_id: b.id, doctor: "(batch)", flow: "batch_send", stage: b.kind, reason: `HTTP ${r.status}`, result: "error", detail: txt.slice(0, 120) });
           await notifyBatchFailure(supabase, now, b.id, b.kind, `HTTP ${r.status}: ${txt.slice(0, 160)}`);
@@ -891,6 +918,111 @@ async function runBatchSendSweep(
     }
   } catch (e) {
     console.error("[tick-scheduler] batch sweep failed:", e);
+  }
+  return acts;
+}
+
+/** Weekly recurrence: after a batch fires, seed the next working day's draft
+ *  (same kind/country/specialty/time, EMPTY queue) so the slot repeats but the
+ *  team queues fresh doctors rather than re-sending the same set. */
+async function maybeRecurBatch(supabase: ReturnType<typeof createClient>, b: BatchRow): Promise<void> {
+  const rec = b.recurrence;
+  if (!rec || rec.freq !== "weekly") return;
+  const next = nextWorkingDay(b.scheduled_for, rec.weekdays ?? [1, 2, 3, 4, 5]);
+  if (rec.until && next > rec.until) return;
+  try {
+    await supabase.from("scheduled_batch_sends").insert({
+      kind: b.kind, scheduled_for: next, scheduled_at_time: b.scheduled_at_time,
+      timezone: "Asia/Dubai", recurrence: rec, specialty: b.specialty, country: b.country,
+      doctor_ids: [], status: "draft", created_by: "tick-scheduler",
+    });
+  } catch (e) {
+    console.warn("[tick-scheduler] could not seed recurring batch:", e);
+  }
+}
+
+interface ProfileSendRow {
+  id: string; doctor_id: string; doctor_name: string; doctor_email: string | null;
+  doctor_phone: string | null; doctor_speciality: string | null; hospital_ids: string[];
+  custom_message: string | null; bcc_override: string[] | null; cc_override: string[] | null;
+  stage_overrides: Record<string, unknown> | null; template_overrides: Record<string, string> | null;
+  attachments: unknown; scheduled_for: string; scheduled_at_time: string | null; created_by: string | null;
+}
+
+/** Fire scheduled Send-Profile campaigns (Amir #5). Replays exactly what
+ *  SendProfileDialog.handleConfirm does: one automation_flow_runs row per
+ *  hospital carrying the captured edits/template/attachments, then invokes
+ *  send-flow-email. Claims each row atomically (draft → scheduled) so two
+ *  overlapping ticks can't double-send. Keep this in lockstep with handleConfirm. */
+async function runScheduledProfileSweep(
+  supabase: ReturnType<typeof createClient>,
+  now: Date,
+): Promise<TickAction[]> {
+  const acts: TickAction[] = [];
+  try {
+    const g = gulfParts(now);
+    const { data: rows, error } = await supabase
+      .from("scheduled_profile_sends")
+      .select("*")
+      .eq("status", "draft")
+      .eq("scheduled_for", g.today);
+    if (error) throw error;
+
+    for (const s of (rows ?? []) as ProfileSendRow[]) {
+      if (!dueAt(s.scheduled_for, s.scheduled_at_time, g)) continue;
+      // Atomic claim: only one tick proceeds.
+      const { data: claimed } = await supabase
+        .from("scheduled_profile_sends")
+        .update({ status: "scheduled", updated_at: now.toISOString() })
+        .eq("id", s.id).eq("status", "draft").select("id");
+      if (!claimed || claimed.length === 0) continue;
+
+      const ids = s.hospital_ids ?? [];
+      const { data: hospitals } = await supabase
+        .from("hospitals").select("id, name, primary_recruiter_email").in("id", ids.length ? ids : ["__none__"]);
+      const hmap = new Map((hospitals ?? []).map((h: { id: string }) => [h.id, h]));
+      const batchId = crypto.randomUUID();
+      let sent = 0, failed = 0, lastErr = "";
+
+      for (const hid of ids) {
+        const h = hmap.get(hid) as { id: string; name: string; primary_recruiter_email: string | null } | undefined;
+        if (!h) { failed++; lastErr = "hospital not found"; continue; }
+        const { data: runRow, error: runErr } = await supabase.from("automation_flow_runs").insert({
+          flow_key: "profile_sent", doctor_id: s.doctor_id, doctor_name: s.doctor_name,
+          doctor_email: s.doctor_email, doctor_phone: s.doctor_phone, hospital: h.name,
+          current_stage: "email_hospital", status: "active", created_by: s.created_by,
+          metadata: {
+            batch_id: batchId, hospital_id: h.id, hospital_email: h.primary_recruiter_email,
+            bcc: ids.length > 1, total_in_batch: ids.length,
+            custom_message: s.custom_message ?? null, doctor_speciality: s.doctor_speciality ?? null,
+            triggered_via: "scheduled_profile_send",
+            ...(s.bcc_override ? { bcc_override: s.bcc_override } : {}),
+            ...(s.cc_override ? { cc_override: s.cc_override } : {}),
+            ...(s.stage_overrides ? { stage_overrides: s.stage_overrides } : {}),
+            ...(s.template_overrides ? { template_overrides: s.template_overrides } : {}),
+            ...(Array.isArray(s.attachments) && s.attachments.length ? { attachments: s.attachments } : {}),
+          },
+        }).select("id").single();
+        if (runErr || !runRow) { failed++; lastErr = runErr?.message ?? "run insert failed"; continue; }
+        const res = await invokeSendFlow((runRow as { id: string }).id);
+        if (res.ok) sent++; else { failed++; lastErr = res.detail ?? "send failed"; }
+      }
+
+      await supabase.from("scheduled_profile_sends").update({
+        status: sent > 0 ? "sent" : "failed",
+        sent_at: now.toISOString(),
+        error: failed > 0 ? lastErr.slice(0, 300) : null,
+        updated_at: now.toISOString(),
+      }).eq("id", s.id);
+
+      acts.push({
+        run_id: s.id, doctor: s.doctor_name, flow: "scheduled_profile_send",
+        stage: "email_hospital", reason: "auto-fired",
+        result: sent > 0 ? "sent" : "error", detail: `${sent} sent, ${failed} failed`,
+      });
+    }
+  } catch (e) {
+    console.error("[tick-scheduler] profile-send sweep failed:", e);
   }
   return acts;
 }
