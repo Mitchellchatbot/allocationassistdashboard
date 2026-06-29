@@ -93,7 +93,8 @@ export function TemplatePicker({
         <PopoverTrigger asChild>
           <button
             type="button"
-            className="w-full inline-flex items-center justify-between gap-2 rounded-md border border-slate-200 bg-white px-2.5 py-1.5 text-[12px] hover:border-teal-300 transition-colors"
+            title="Click to choose a different template"
+            className="w-full inline-flex items-center justify-between gap-2 rounded-md border border-slate-300 bg-white px-2.5 py-1.5 text-[12px] hover:border-teal-400 hover:bg-teal-50/30 transition-colors"
           >
             <span className="flex items-center gap-1.5 min-w-0">
               <Mail className="h-3.5 w-3.5 text-teal-600 shrink-0" />
@@ -101,7 +102,9 @@ export function TemplatePicker({
               {selected && value === defaultKey && <Badge variant="outline" className="text-[8px] bg-slate-50 text-slate-500 border-slate-200 uppercase">default</Badge>}
               {selected && selected.body_text.startsWith("PLACEHOLDER") && <Badge variant="outline" className="text-[8px] bg-amber-50 text-amber-700 border-amber-200 uppercase">draft</Badge>}
             </span>
-            <ChevronDown className="h-3.5 w-3.5 text-slate-400 shrink-0" />
+            <span className="shrink-0 inline-flex items-center gap-1 rounded-full bg-teal-50 text-teal-700 border border-teal-200 px-2 py-0.5 text-[10px] font-semibold">
+              Change<ChevronDown className="h-3 w-3" />
+            </span>
           </button>
         </PopoverTrigger>
         <PopoverContent align="start" className="w-[560px] p-0 overflow-hidden">
