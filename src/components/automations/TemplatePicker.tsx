@@ -107,10 +107,10 @@ export function TemplatePicker({
             </span>
           </button>
         </PopoverTrigger>
-        <PopoverContent align="start" className="w-[560px] p-0 overflow-hidden">
+        <PopoverContent align="start" className="w-[740px] max-w-[92vw] p-0 overflow-hidden">
           <div className="grid grid-cols-[260px_1fr]">
             {/* List */}
-            <div className="border-r max-h-[360px] overflow-y-auto">
+            <div className="border-r max-h-[420px] overflow-y-auto">
               <div className="sticky top-0 bg-white p-2 border-b">
                 <div className="relative">
                   <Search className="absolute left-2 top-1/2 -translate-y-1/2 h-3.5 w-3.5 text-slate-400" />
@@ -147,16 +147,20 @@ export function TemplatePicker({
                 </div>
               ))}
             </div>
-            {/* Mini preview */}
+            {/* Preview */}
             <div className="flex flex-col min-w-0">
-              <div className="px-3 py-2 border-b bg-slate-50/60">
-                <div className="text-[9px] uppercase tracking-wider text-muted-foreground">Preview</div>
-                <div className="text-[12px] font-medium truncate">{previewSubject || "—"}</div>
+              <div className="px-4 py-2.5 border-b bg-slate-50/60">
+                <div className="text-[9px] uppercase tracking-wider text-muted-foreground">Subject</div>
+                <div className="text-[13px] font-semibold text-slate-800 leading-snug">{previewSubject || "—"}</div>
               </div>
-              <div className="flex-1 min-h-0 bg-slate-100/50 p-2">
+              <div className="flex-1 min-h-0 bg-slate-100/50 p-3">
                 {previewHtml
-                  ? <iframe title="Template preview" srcDoc={`<!doctype html><html><body style="margin:0;padding:12px;font-family:Garamond,Georgia,serif;font-size:13px;color:#1a2332;">${previewHtml}</body></html>`} className="w-full h-[280px] bg-white rounded border-0" />
-                  : <div className="p-4 text-[11px] text-muted-foreground italic">Hover a template to preview it.</div>}
+                  ? <iframe
+                      title="Template preview"
+                      srcDoc={`<!doctype html><html><head><style>html,body{margin:0;padding:0;}body{padding:22px 26px;font-family:Garamond,'EB Garamond',Georgia,serif;font-size:15px;line-height:1.65;color:#1f2937;background:#fff;}p{margin:0 0 12px;}a{color:#0d9488;word-break:break-word;}strong{color:#0f172a;}img{max-width:100%;height:auto;}table{max-width:100%;}</style></head><body>${previewHtml}</body></html>`}
+                      className="w-full h-[360px] bg-white rounded-md border border-slate-200 shadow-sm"
+                    />
+                  : <div className="p-4 text-[12px] text-muted-foreground italic">Hover a template to preview it.</div>}
               </div>
             </div>
           </div>
