@@ -124,6 +124,61 @@ async function fetchAllPages<T>(
   return all;
 }
 
+/**
+ * Latest Zoho note per lead, for the Sales-tracker "contacted" rule. Walks the
+ * Notes module newest-first and records the FIRST note seen for each lead id
+ * (= the latest), stopping once every lead is covered or maxPages is hit.
+ *
+ * Fully defensive: any error (Notes not enabled, sort unsupported, rate limit
+ * exhausted) returns whatever was collected so far and NEVER throws, so the main
+ * sync is unaffected. Note content is truncated — only enough to match a
+ * call-outcome phrase.
+ */
+async function fetchLatestNoteByLead(
+  token: string,
+  leadIds: Set<string>,
+  maxPages = 120,
+): Promise<Record<string, { note: string; at: string }>> {
+  const out: Record<string, { note: string; at: string }> = {};
+  try {
+    for (let p = 1; p <= maxPages; p++) {
+      const url = new URL(`${API_DOMAIN}/crm/v2/Notes`);
+      url.searchParams.set('fields', 'Note_Content,Created_Time,Parent_Id');
+      url.searchParams.set('per_page', '200');
+      url.searchParams.set('page', String(p));
+      url.searchParams.set('sort_by', 'Created_Time');
+      url.searchParams.set('sort_order', 'desc');
+
+      let json: { data?: Array<Record<string, unknown>>; info?: { more_records?: boolean } } | null = null;
+      for (let attempt = 0; attempt < 3; attempt++) {
+        const res = await fetch(url.toString(), { headers: { Authorization: `Zoho-oauthtoken ${token}` } });
+        if (res.status === 429) { await new Promise(r => setTimeout(r, 1000 * Math.pow(2, attempt))); continue; }
+        if (res.status === 204) return out;                       // no more notes
+        if (!res.ok) { console.warn(`[zoho-sync] Notes page ${p} HTTP ${res.status} — stopping notes walk`); return out; }
+        const text = await res.text();
+        json = text ? JSON.parse(text) : null;
+        break;
+      }
+      const data = json?.data ?? [];
+      if (data.length === 0) break;
+      for (const n of data) {
+        const parent = n?.Parent_Id;
+        const pid = parent && typeof parent === 'object'
+          ? (parent as { id?: string }).id
+          : (typeof parent === 'string' ? parent : undefined);
+        const id = pid ? String(pid) : '';
+        if (!id || !leadIds.has(id) || out[id]) continue;        // first-seen (newest) wins
+        out[id] = { note: String(n?.Note_Content ?? '').slice(0, 240), at: String(n?.Created_Time ?? '') };
+      }
+      if (Object.keys(out).length >= leadIds.size) break;        // every lead covered
+      if (!json?.info?.more_records) break;
+    }
+  } catch (e) {
+    console.warn('[zoho-sync] Notes walk failed (non-fatal):', e);
+  }
+  return out;
+}
+
 serve(async (req: Request) => {
   if (req.method === 'OPTIONS') return new Response(null, { headers: CORS });
 
@@ -175,6 +230,15 @@ serve(async (req: Request) => {
       'Created_Time', 'Modified_Time', 'Has_DOH', 'Has_DHA', 'Has_MOH', 'License',
       'Recruiter', 'Age', 'Prime_Classification',
     ]);
+
+    // Latest note per lead → powers the Sales-tracker "contacted" rule (a rep
+    // who logs "no answer" without moving the status still counts as contacted).
+    // Defensive: never throws, so a Notes failure can't break the lead sync.
+    const leadIds = new Set(
+      (leads as Array<{ id?: string }>).map(l => String(l.id ?? '')).filter(Boolean),
+    );
+    const leadNotes = await fetchLatestNoteByLead(token, leadIds);
+    console.log(`[zoho-sync] leadNotes: ${Object.keys(leadNotes).length}/${leadIds.size} leads have a latest note`);
 
     // Run remaining modules SEQUENTIALLY (was Promise.all). Zoho rate-limits
     // to ~10 concurrent connections / 100 calls per minute per user — running
@@ -282,6 +346,12 @@ serve(async (req: Request) => {
           campaigns:        keep(campaigns, 'campaigns'),
           doctorsOnBoard,
           hospitalContacts: keep(hospitalContacts, 'hospitalContacts'),
+          // Map of lead id → latest note. Preserve the last good copy if this
+          // run's Notes walk came back empty (Notes API hiccup) so the
+          // contacted rule doesn't flip back to status-only.
+          leadNotes: Object.keys(leadNotes).length > 0
+            ? leadNotes
+            : (prev.leadNotes ?? leadNotes),
         },
         synced_at: syncedAt,
       });

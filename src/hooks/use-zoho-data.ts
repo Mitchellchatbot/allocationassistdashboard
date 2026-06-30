@@ -16,6 +16,7 @@ import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { zohoFetchAll, zohoGetEmailCounts, zohoSync } from '@/lib/zoho';
 import { supabase } from '@/lib/supabase';
 import { stripTestRows } from '@/lib/test-data';
+import { isLeadContacted, isLeadUncontacted } from '@/lib/lead-contact';
 
 const CACHE_MAX_AGE_MS = 30 * 60 * 1000; // 30 min — past this, a page load fires a background re-sync
 
@@ -44,6 +45,11 @@ export interface ZohoLead {
   Recruiter: string | null;
   Age: number | null;
   Prime_Classification: string | null;
+  // Latest Zoho note text + time, attached from the cache by zoho-sync. Powers
+  // the note-aware "contacted" rule (see lib/lead-contact). Absent until a sync
+  // with notes has run.
+  latest_note?: string | null;
+  latest_note_at?: string | null;
 }
 
 export interface ZohoDeal {
@@ -641,7 +647,7 @@ export function aggregateZohoData(
   const workflow = pipelineStages.map(s => ({ name: s.stage, count: s.count }));
 
   // ── Real stage conversion rates ───────────────────────────────────────────
-  const contacted      = leads.filter(l => l.Lead_Status !== 'Not Contacted'
+  const contacted      = leads.filter(l => isLeadContacted(l)
     && l.Lead_Status !== 'Unqualified Leads'
     && l.Lead_Status !== 'Not Interested').length;
   const callCompleted  = leads.filter(l =>
@@ -759,7 +765,7 @@ export function aggregateZohoData(
     .filter(([name]) => name !== 'Unknown')
     .map(([name, rLeads]) => {
       const rActiveLeads   = rLeads.filter(l => activeStatuses.has(l.Lead_Status));
-      const contacted      = rActiveLeads.filter(l => l.Lead_Status !== 'Not Contacted').length;
+      const contacted      = rActiveLeads.filter(l => isLeadContacted(l)).length;
       const highPri        = rLeads.filter(l => l.Lead_Status === 'High Priority Follow up').length;
       const contactRate    = rActiveLeads.length > 0 ? Math.round((contacted / rActiveLeads.length) * 100) : 0;
       // Conversions = Doctors on Board owned by this rep — the company-wide
@@ -883,7 +889,7 @@ export function aggregateZohoData(
   // ── Real bottlenecks from Zoho data ──────────────────────────────────────
   const highPriorityLeads  = leads.filter(l => l.Lead_Status === 'High Priority Follow up');
   const noResponseLeads    = leads.filter(l => l.Lead_Status === 'Attempted to Contact');
-  const uncontactedLeads   = leads.filter(l => l.Lead_Status === 'Not Contacted');
+  const uncontactedLeads   = leads.filter(l => isLeadUncontacted(l));
   const inProgressLicense  = leads.filter(
     l => l.Has_DOH === 'In Progress' || l.Has_DHA === 'In Progress' || l.Has_MOH === 'In Progress'
   );
@@ -942,7 +948,7 @@ export function aggregateZohoData(
 
   // ── Real alerts derived from Zoho data (replaces hardcoded notifications) ──
   const thirtyDaysAgo = Date.now() - 30 * 86_400_000;
-  const staleUncontacted = leads.filter(l => l.Lead_Status === 'Not Contacted' && new Date(l.Created_Time).getTime() < thirtyDaysAgo);
+  const staleUncontacted = leads.filter(l => isLeadUncontacted(l) && new Date(l.Created_Time).getTime() < thirtyDaysAgo);
   const alerts: Array<{ type: 'warning' | 'info' | 'success'; message: string }> = [];
   if (highPriorityLeads.length > 0) alerts.push({ type: 'warning', message: `${highPriorityLeads.length} doctors need urgent follow-up` });
   if (inProgressLicense.length > 0) alerts.push({ type: 'info', message: `${inProgressLicense.length} license applications currently in progress` });
@@ -1044,12 +1050,23 @@ const CAMPAIGN_FIELDS = [
 ];
 
 function parseCacheRow(row: { data: unknown; synced_at: string }) {
-  const { leads: leadsRaw, deals, calls, accounts, campaigns, doctorsOnBoard: dobRaw, emailData } = row.data as {
+  const { leads: leadsRaw0, deals, calls, accounts, campaigns, doctorsOnBoard: dobRaw, emailData, leadNotes } = row.data as {
     leads: ZohoLead[]; deals: ZohoDeal[]; calls: ZohoCall[];
     accounts: ZohoAccount[]; campaigns: ZohoCampaign[];
     doctorsOnBoard?: ZohoDoctorOnBoard[];
     emailData?: { total: number; bySender: Record<string, number>; sampled: number };
+    leadNotes?: Record<string, { note: string; at: string }>;
   };
+
+  // Attach each lead's latest Zoho note (synced into the cache) so the
+  // contacted rule can see "no answer"-style notes. No-op when notes haven't
+  // synced yet (leadNotes absent) — falls back to status-only behaviour.
+  const leadsRaw = leadNotes
+    ? (leadsRaw0 ?? []).map(l => {
+        const n = leadNotes[String(l.id)];
+        return n ? { ...l, latest_note: n.note, latest_note_at: n.at } : l;
+      })
+    : leadsRaw0;
 
   // Strip test rows ("TEST TEST", test@…, etc.) for METRIC computation only.
   // The unfiltered arrays are still exposed as `rawLeadsAll` / `rawDoctorsOnBoardAll`

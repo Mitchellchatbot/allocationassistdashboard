@@ -4,6 +4,7 @@ import { ExpandableKPICard } from "@/components/ExpandableKPICard";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { InfoIcon } from "@/components/InfoIcon";
 import { useFilteredData } from "@/hooks/use-filtered-data";
+import { isLeadContacted } from "@/lib/lead-contact";
 import { useAuth } from "@/hooks/use-auth";
 import { useSalesBoardMembers, useRemoveSalesBoardMember } from "@/hooks/use-sales-board";
 import { AddSalespersonDialog } from "@/components/sales/AddSalespersonDialog";
@@ -123,7 +124,7 @@ const Sales = () => {
   // Qualified→Converted card — keep them distinct.
   const qualifiedStatuses = new Set(['Not Contacted', 'Attempted to Contact', 'Initial Sales Call Completed', 'High Priority Follow up']);
   const qualifiedLeads = filteredLeads.filter(l => qualifiedStatuses.has(l.Lead_Status));
-  const qualifiedContacted = qualifiedLeads.filter(l => l.Lead_Status !== 'Not Contacted');
+  const qualifiedContacted = qualifiedLeads.filter(l => isLeadContacted(l));
   const qualifiedContactRate = qualifiedLeads.length > 0
     ? parseFloat(((qualifiedContacted.length / qualifiedLeads.length) * 100).toFixed(1))
     : 0;
