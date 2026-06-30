@@ -13,7 +13,7 @@ import { SalesActivity } from "@/components/sales/SalesActivity";
 import { Phone, Mail, Clock, Users, UserCheck, Activity, ArrowRight, PhoneCall, AlertTriangle, Plus, X } from "lucide-react";
 
 const Sales = () => {
-  const { pipeline, sales, recruiters, stageConversion, filteredLeads } = useFilteredData();
+  const { pipelineRaw, sales, recruiters, stageConversion, filteredLeads } = useFilteredData();
   const { role, user } = useAuth();
   const isAdmin = role === "admin";
   const { data: boardMembers = [] } = useSalesBoardMembers();
@@ -70,9 +70,9 @@ const Sales = () => {
   // 2. Active in Pipeline → pipeline stage breakdown
   const activePipelineContent = (
     <div className="space-y-2">
-      {pipeline.length === 0
+      {pipelineRaw.length === 0
         ? <p className="text-[11px] text-muted-foreground py-2">No pipeline data</p>
-        : pipeline.slice(0, 6).map(s => {
+        : pipelineRaw.slice(0, 6).map(s => {
           const pct = sales.activeInPipeline > 0 ? Math.round((s.count / sales.activeInPipeline) * 100) : 0;
           return (
             <div key={s.stage}>
@@ -271,14 +271,14 @@ const Sales = () => {
         </CardHeader>
         <CardContent className="px-5 pb-5">
           <div className="flex flex-wrap items-stretch gap-1.5">
-            {pipeline.slice(0, 5).map((stage, i) => (
+            {pipelineRaw.slice(0, 5).map((stage, i) => (
               <div key={stage.stage} className="flex items-center gap-1.5">
                 <div className="rounded-xl border border-border/50 bg-card px-4 py-3 text-center min-w-[90px] hover:border-primary/30 hover:shadow-sm hover:scale-[1.02] transition-all duration-200">
                   <div className="h-[3px] rounded-full mb-2 w-6 mx-auto" style={{ backgroundColor: stage.color }} />
                   <p className="text-[18px] font-bold text-foreground tabular-nums leading-none mb-0.5">{stage.count.toLocaleString()}</p>
                   <p className="text-[10px] text-muted-foreground leading-tight">{stage.stage}</p>
                 </div>
-                {i < Math.min(pipeline.length, 5) - 1 && <ArrowRight className="h-3 w-3 text-border/60 shrink-0" />}
+                {i < Math.min(pipelineRaw.length, 5) - 1 && <ArrowRight className="h-3 w-3 text-border/60 shrink-0" />}
               </div>
             ))}
           </div>

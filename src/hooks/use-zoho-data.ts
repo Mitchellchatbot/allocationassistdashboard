@@ -218,7 +218,7 @@ export function displaySource(src: string | null): string {
   // Agencies / external job boards
   if (s.includes('go hire') || s.includes('gohire')) return 'Go Hire';
   if (s.includes('naukri')) return 'Naukri Gulf';
-  if (s === 'indeed' || s.startsWith('indeed')) return 'Indeed';
+  if (s.includes('indeed')) return 'Indeed';
   if (s === 'jobsoid' || s.startsWith('jobsoid')) return 'Jobsoid';
   if (s === 'bmj ads' || s.startsWith('bmj')) return 'BMJ Ads';
 
@@ -635,6 +635,19 @@ export function aggregateZohoData(
       color: STAGE_COLORS[stage] ?? 'hsl(210, 75%, 52%)',
     }));
 
+  // Same breakdown but keyed by the REAL Zoho Lead_Status (no friendly rename),
+  // for the Sales "Active in Pipeline" KPI — the team wants the exact Zoho stage
+  // names there, not the dashboard's display labels. Colour still resolves
+  // through the friendly map so the bars keep their palette.
+  const rawStatusCounts = countBy(leads, l => l.Lead_Status);
+  const pipelineStagesRaw = Object.entries(rawStatusCounts)
+    .sort((a, b) => b[1] - a[1])
+    .map(([stage, count]) => ({
+      stage,
+      count,
+      color: STAGE_COLORS[STATUS_LABEL[stage] ?? stage] ?? 'hsl(210, 75%, 52%)',
+    }));
+
   // Deal stages
   const dealStageCounts = countBy(deals, d => d.Stage);
   const dealStages = Object.entries(dealStageCounts).map(([stage, count]) => ({
@@ -987,6 +1000,7 @@ export function aggregateZohoData(
     leadsOverTime,
     placementFunnel,
     pipelineStages,
+    pipelineStagesRaw,
     dealStages,
     channels,
     marketing,

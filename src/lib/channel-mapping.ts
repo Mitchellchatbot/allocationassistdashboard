@@ -12,7 +12,7 @@ export type ChannelKey =
   | "YouTube"  | "Snapchat" | "Twitter"  | "WhatsApp"
   | "Website / SEO" | "Landing Page" | "Referrals" | "Email" | "Influencer"
   | "Print"    | "Outdoor"  | "Radio"    | "TV"     | "Events"
-  | "Go Hire"  | "Dave"     | "Other";
+  | "Go Hire"  | "Indeed"   | "Dave"     | "Other";
 
 const RULES: { match: RegExp; key: ChannelKey }[] = [
   // Meta = Facebook + Instagram + Messenger + Audience Network (all Meta-owned).
@@ -38,6 +38,7 @@ const RULES: { match: RegExp; key: ChannelKey }[] = [
   { match: /^tv$|television/i,                             key: "TV" },
   { match: /event|conference|expo/i,                       key: "Events" },
   { match: /go\s*hire|gohire/i,                            key: "Go Hire" },
+  { match: /indeed/i,                                      key: "Indeed" },
   // Dave's recruitment fees are filed under "DILO" in marketing_expenses but
   // appear as "Dave" on the lead side (Lead_Source). Map both → "Dave" so
   // his spend and conversions land on the same channel row.

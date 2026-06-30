@@ -24,7 +24,7 @@ export function useFilteredData() {
     if (!zoho) {
       return {
         kpis: [], timeData: [], funnel: [], channels: [], regions: [],
-        pipeline: [], workflow: [], sales: {
+        pipeline: [], pipelineRaw: [], workflow: [], sales: {
           dealsClosed: 0, conversionRate: 0, avgCycleTime: "—",
           outboundCalls: 0, emailsSent: 0, followUpsPending: 0,
           totalLeadsManaged: 0, activeInPipeline: 0, contactedRate: 0,
@@ -261,6 +261,7 @@ export function useFilteredData() {
       channels:    agg.channels,
       regions,
       pipeline:    agg.pipelineStages,
+      pipelineRaw: agg.pipelineStagesRaw,
       workflow:    agg.workflow,
       sales:       agg.sales,
       recruiters,

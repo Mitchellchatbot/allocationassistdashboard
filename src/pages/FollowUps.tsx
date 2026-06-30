@@ -10,7 +10,7 @@ import { supabase } from "@/lib/supabase";
 import {
   AlertTriangle, Clock, CheckCircle, Search,
   Phone, Calendar, ChevronDown, ChevronUp,
-  Loader2, Check, Flame,
+  Loader2, Check, Flame, StickyNote, PhoneCall,
 } from "lucide-react";
 import { useVacancies } from "@/hooks/use-vacancies";
 import { rollupSpecialty } from "@/lib/specialty-groups";
@@ -174,6 +174,38 @@ function CallLogPanel({ doctorName }: { doctorName: string }) {
   );
 }
 
+// ── Expanded lead panel — Zoho note first (instant), call history on demand ──
+
+function LeadExpandPanel({ lead, name }: {
+  lead: { latest_note?: string | null; latest_note_at?: string | null };
+  name: string;
+}) {
+  const [showCalls, setShowCalls] = useState(false);
+  const note = lead.latest_note?.trim();
+  const noteDate = lead.latest_note_at ? new Date(lead.latest_note_at) : null;
+  return (
+    <div className="border-t border-border/30 bg-muted/20">
+      <div className="px-4 py-3 space-y-2.5">
+        <p className="text-[10px] font-semibold text-muted-foreground uppercase tracking-wide flex items-center gap-1.5">
+          <StickyNote className="h-3 w-3" /> Latest Zoho note
+          {noteDate && !Number.isNaN(noteDate.getTime()) && (
+            <span className="font-normal normal-case text-muted-foreground/70">· {noteDate.toLocaleDateString("en-GB", { day: "numeric", month: "short", year: "numeric" })}</span>
+          )}
+        </p>
+        {note
+          ? <p className="text-[12px] text-foreground leading-relaxed whitespace-pre-wrap rounded-lg border border-border/40 bg-card px-3 py-2">{note}</p>
+          : <p className="text-[11px] text-muted-foreground italic">No Zoho note synced for this lead yet. (Notes appear after the next Zoho sync.)</p>}
+        {!showCalls && (
+          <button onClick={() => setShowCalls(true)} className="text-[11px] text-primary hover:underline inline-flex items-center gap-1">
+            <Phone className="h-3 w-3" /> Show full call history
+          </button>
+        )}
+      </div>
+      {showCalls && <CallLogPanel doctorName={name} />}
+    </div>
+  );
+}
+
 // ── Status change options ─────────────────────────────────────────────────────
 
 const STATUS_OPTIONS = [
@@ -189,9 +221,16 @@ const STATUS_OPTIONS = [
 const TAB_STATUSES = {
   high:   "High Priority Follow up",
   future: "Contact in Future",
+  calls:  "Initial Sales Call Completed",
 } as const;
 
 type Tab = keyof typeof TAB_STATUSES;
+
+const TAB_META: Record<Tab, { label: string; Icon: typeof AlertTriangle; activeCls: string; badgeActiveCls: string }> = {
+  high:   { label: "High Priority",     Icon: AlertTriangle, activeCls: "bg-destructive/10 border-destructive/40 text-destructive", badgeActiveCls: "bg-destructive/20 text-destructive" },
+  future: { label: "Contact in Future", Icon: Clock,         activeCls: "bg-info/10 border-info/40 text-info",                       badgeActiveCls: "bg-info/20 text-info" },
+  calls:  { label: "Initial Sales Call", Icon: PhoneCall,    activeCls: "bg-primary/10 border-primary/40 text-primary",              badgeActiveCls: "bg-primary/20 text-primary" },
+};
 
 // ── Main page ─────────────────────────────────────────────────────────────────
 
@@ -211,8 +250,11 @@ const FollowUps = () => {
   const rawLeads = zoho?.rawLeads ?? [];
 
   // Counts for tab badges
-  const highCount   = rawLeads.filter(l => l.Lead_Status === TAB_STATUSES.high).length;
-  const futureCount = rawLeads.filter(l => l.Lead_Status === TAB_STATUSES.future).length;
+  const tabCounts: Record<Tab, number> = {
+    high:   rawLeads.filter(l => l.Lead_Status === TAB_STATUSES.high).length,
+    future: rawLeads.filter(l => l.Lead_Status === TAB_STATUSES.future).length,
+    calls:  rawLeads.filter(l => l.Lead_Status === TAB_STATUSES.calls).length,
+  };
 
   // Recruiter options
   const recruiters = useMemo(() => {
@@ -320,30 +362,24 @@ const FollowUps = () => {
     <DashboardLayout title="Follow-ups" subtitle="All leads needing action — High Priority and Contact in Future in one place" docSlug="sales/follow-ups">
 
       {/* ── Tab bar ── */}
-      <div className="flex items-center gap-2 mb-4" data-tour="followups-tabs">
-        {(["high", "future"] as Tab[]).map(t => {
-          const count   = t === "high" ? highCount : futureCount;
-          const active  = tab === t;
-          const isHigh  = t === "high";
+      <div className="flex items-center gap-2 mb-4 flex-wrap" data-tour="followups-tabs">
+        {(["high", "future", "calls"] as Tab[]).map(t => {
+          const meta   = TAB_META[t];
+          const active = tab === t;
+          const Icon   = meta.Icon;
           return (
             <button
               key={t}
               onClick={() => { setTab(t); setExpandedId(null); }}
               className={`flex items-center gap-2 px-4 py-2 rounded-lg border text-[13px] font-medium transition-all ${
-                active
-                  ? isHigh
-                    ? "bg-destructive/10 border-destructive/40 text-destructive"
-                    : "bg-info/10 border-info/40 text-info"
-                  : "bg-card border-border/50 text-muted-foreground hover:border-border"
+                active ? meta.activeCls : "bg-card border-border/50 text-muted-foreground hover:border-border"
               }`}
             >
-              {isHigh ? <AlertTriangle className="h-3.5 w-3.5" /> : <Clock className="h-3.5 w-3.5" />}
-              {isHigh ? "High Priority" : "Contact in Future"}
+              <Icon className="h-3.5 w-3.5" />
+              {meta.label}
               <span className={`rounded-full px-2 py-0.5 text-[11px] font-semibold ${
-                active
-                  ? isHigh ? "bg-destructive/20 text-destructive" : "bg-info/20 text-info"
-                  : "bg-muted text-muted-foreground"
-              }`}>{count}</span>
+                active ? meta.badgeActiveCls : "bg-muted text-muted-foreground"
+              }`}>{tabCounts[t]}</span>
             </button>
           );
         })}
@@ -417,7 +453,7 @@ const FollowUps = () => {
       <Card className="shadow-sm border-border/50">
         <CardHeader className="pb-2 pt-4 px-4">
           <CardTitle className="text-[12px] font-medium text-muted-foreground uppercase tracking-wide">
-            {ranked.length} {tab === "high" ? "High Priority" : "Contact in Future"} leads
+            {ranked.length} {TAB_META[tab].label} leads
           </CardTitle>
         </CardHeader>
         <CardContent className="p-0">
@@ -513,8 +549,8 @@ const FollowUps = () => {
                       </div>
                     </div>
 
-                    {/* Expandable call log */}
-                    {expanded && <CallLogPanel doctorName={name} />}
+                    {/* Expandable: Zoho note first (instant), call history on demand */}
+                    {expanded && <LeadExpandPanel lead={lead} name={name} />}
                   </div>
                 );
               })}
