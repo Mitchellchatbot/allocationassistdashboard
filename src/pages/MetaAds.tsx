@@ -37,7 +37,7 @@ const META_KPI_HINTS: Record<string, { meaning: string; source: string }> = {
   "CPM":                     { meaning: "Cost per 1,000 impressions.",                                                   source: "Meta Marketing API." },
   "Leads from Ads":          { meaning: "Leads Meta attributes to your ads in the period.",                              source: "Meta Marketing API (lead actions)." },
   "Cost Per Lead (forms)":   { meaning: "Meta spend ÷ form-lead submissions. The honest CPL.",                           source: "Meta API + Supabase meta_leads." },
-  "Cost Per Qualified":      { meaning: 'Meta spend ÷ qualified form-leads. "Contact in Future" excluded.',              source: "Meta API + meta_leads × Zoho Lead_Status." },
+  "Cost Per Qualified":      { meaning: 'Meta spend ÷ qualified Meta leads (Zoho Lead_Status — same as the Sales tracker). "Contact in Future" excluded.', source: "Meta API spend + Zoho leads where Lead_Source = Meta." },
   "Cost per Conversion":     { meaning: "Meta spend ÷ conversions (Doctors on Board attributed to the Meta channel).", source: "Meta API + Zoho Doctors on Board module." },
 };
 
@@ -847,6 +847,23 @@ const MetaAds = () => {
       return t >= from && t <= to && displaySource(l.Lead_Source) === "Meta";
     }).length;
   }, [zoho?.rawLeads, metaDateRange]);
+  // Qualified Meta leads, Zoho Lead_Status based — the SAME definition the Sales
+  // tracker uses (a Meta-sourced Zoho lead that reached "Initial Sales Call
+  // Completed" or "High Priority Follow up"). The boss confirmed this is the
+  // correct Meta-qualified figure; the old meta_leads-form count diverged from
+  // it, so the Qualified KPI now reads from Zoho, not the form table.
+  const zohoMetaQualified = useMemo(() => {
+    if (!zoho?.rawLeads) return 0;
+    const from = metaDateRange.from.getTime();
+    const to   = metaDateRange.to.getTime();
+    const QUALIFIED = new Set(["Initial Sales Call Completed", "High Priority Follow up"]);
+    return zoho.rawLeads.filter(l => {
+      const t = new Date(l.Created_Time).getTime();
+      return t >= from && t <= to
+        && displaySource(l.Lead_Source) === "Meta"
+        && QUALIFIED.has(l.Lead_Status);
+    }).length;
+  }, [zoho?.rawLeads, metaDateRange]);
   const [previewCampaign, setPreviewCampaign] = useState<{ id: string; name: string } | null>(null);
   const [directPreviewAd, setDirectPreviewAd] = useState<MetaTopAd | null>(null);
   const [showAllActions, setShowAllActions] = useState(false);
@@ -1476,7 +1493,7 @@ const MetaAds = () => {
             {(() => {
               const adSpend          = summary?.spend ?? 0;
               const totalLeads       = data?.total          ?? 0;
-              const qualifiedLeads   = data?.qualifiedCount ?? 0;
+              const qualifiedLeads   = zohoMetaQualified;   // Zoho Lead_Status based — matches the Sales tracker
               // Conversions: a DoB counts as a Meta conversion if its Lead_Source
               // resolves to Meta OR its email/phone is in meta_leads — the SAME
               // attribution the Marketing page uses, so the two reconcile.
@@ -1516,7 +1533,7 @@ const MetaAds = () => {
                   <MetaKpiCard
                     icon={Zap} label="Cost Per Qualified" color="text-emerald-600" bg="bg-emerald-50"
                     value={cpq > 0 ? fmtC(toDisplay(cpq), currency) : "—"}
-                    sub={cpq > 0 ? `${fmtN(qualifiedLeads)} qualified · ${totalLeads > 0 ? Math.round((qualifiedLeads / totalLeads) * 100) : 0}% rate` : "no qualified leads in period"}
+                    sub={cpq > 0 ? `${fmtN(qualifiedLeads)} qualified · ${zohoMetaLeads > 0 ? Math.round((qualifiedLeads / zohoMetaLeads) * 100) : 0}% rate` : "no qualified leads in period"}
                     back={
                       <div className="space-y-2 text-[11px]">
                         <p className="text-muted-foreground">Qualified = lead's <strong>stage</strong> is "Initial Sales Call Completed" or "High Priority Follow up". "Contact in Future" is excluded — that's a deferred conversation, not a qualification.</p>
