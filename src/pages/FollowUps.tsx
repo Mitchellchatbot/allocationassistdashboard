@@ -240,14 +240,13 @@ const FollowUps = () => {
   const { data: vacancies = [] } = useVacancies();
   const queryClient          = useQueryClient();
   const [tab, setTab]        = useState<Tab>("high");
-  const [rankMode, setRankMode] = useState<"smart" | "overdue">("smart");
   const [search, setSearch]  = useState("");
   const [expandedId, setExpandedId] = useState<string | null>(null);
   const [updatedIds, setUpdatedIds] = useState<Set<string>>(new Set());
   const [pendingId,  setPendingId]  = useState<string | null>(null);
   const [errorMsg,   setErrorMsg]   = useState<string | null>(null);
   const [recruiterFilter, setRecruiterFilter] = useState("");
-  const [noteFilter, setNoteFilter] = useState<"all" | "contacted" | "uncontacted">("all");
+  const [noteFilter, setNoteFilter] = useState<"contacted" | "uncontacted">("contacted");
 
   const rawLeads = zoho?.rawLeads ?? [];
 
@@ -265,14 +264,24 @@ const FollowUps = () => {
     return Array.from(seen).sort();
   }, [rawLeads]);
 
-  // Filtered leads for current tab (status + search + recruiter — NOT the
-  // contact-note split, so its counts reflect the whole section).
+  // Filtered leads (status + search + recruiter — NOT the contact-note split,
+  // so its counts reflect the whole section). Search is GLOBAL: with a query we
+  // look across all three sections (and across name/specialty/owner/country);
+  // with no query we stay within the active tab.
+  const searching = search.trim().length > 0;
   const tabLeads = useMemo(() => {
+    const q = search.trim().toLowerCase();
     const targetStatus = TAB_STATUSES[tab];
+    const sectionStatuses = new Set<string>(Object.values(TAB_STATUSES));
     return rawLeads.filter(l => {
-      if (l.Lead_Status !== targetStatus) return false;
-      const name = (l.Full_Name || `${l.First_Name ?? ""} ${l.Last_Name ?? ""}`).toLowerCase();
-      if (search && !name.includes(search.toLowerCase())) return false;
+      if (q ? !sectionStatuses.has(l.Lead_Status) : l.Lead_Status !== targetStatus) return false;
+      if (q) {
+        const hay = [
+          l.Full_Name, l.First_Name, l.Last_Name, l.Specialty, l.Specialty_New,
+          l.Owner?.name, l.Country_of_Specialty_training,
+        ].filter(Boolean).join(" ").toLowerCase();
+        if (!hay.includes(q)) return false;
+      }
       if (recruiterFilter && l.Owner?.name !== recruiterFilter) return false;
       return true;
     });
@@ -296,11 +305,12 @@ const FollowUps = () => {
   );
   const noNoteCount = ageCapped.length - contactedCount;
 
-  const leads = useMemo(() => {
-    if (noteFilter === "contacted")   return ageCapped.filter(l =>  noteIndicatesContact(l.latest_note));
-    if (noteFilter === "uncontacted") return ageCapped.filter(l => !noteIndicatesContact(l.latest_note));
-    return ageCapped;
-  }, [ageCapped, noteFilter]);
+  const leads = useMemo(
+    () => noteFilter === "contacted"
+      ? ageCapped.filter(l =>  noteIndicatesContact(l.latest_note))
+      : ageCapped.filter(l => !noteIndicatesContact(l.latest_note)),
+    [ageCapped, noteFilter],
+  );
 
   // Open vacancies per specialty group → graded demand signal for ranking.
   const demandCounts = useMemo(() => {
@@ -313,8 +323,8 @@ const FollowUps = () => {
     return m;
   }, [vacancies]);
 
-  // Rank: "smart" = priority score (urgency + open-vacancy demand + freshness +
-  // source), "overdue" = pure least-recently-touched.
+  // Rank by smart priority score (urgency + open-vacancy demand + freshness +
+  // source), tie-broken by least-recently-touched.
   const ranked = useMemo(() => {
     const truthy = (v: string | null) => !!v && !/^(no|false|0|n)$/i.test(v.trim());
     const items = leads.map(lead => ({
@@ -331,14 +341,10 @@ const FollowUps = () => {
         }).length,
       }),
     }));
-    if (rankMode === "overdue") {
-      items.sort((a, b) => (daysSinceTouched(b.lead) ?? -1) - (daysSinceTouched(a.lead) ?? -1));
-    } else {
-      items.sort((a, b) => b.rank.score - a.rank.score
-        || (daysSinceTouched(b.lead) ?? -1) - (daysSinceTouched(a.lead) ?? -1));
-    }
+    items.sort((a, b) => b.rank.score - a.rank.score
+      || (daysSinceTouched(b.lead) ?? -1) - (daysSinceTouched(a.lead) ?? -1));
     return items;
-  }, [leads, demandCounts, rankMode]);
+  }, [leads, demandCounts]);
 
   // Status update mutation (same pattern as LeadsPipeline — updates Zoho + cache)
   const updateStatus = useMutation({
@@ -409,7 +415,7 @@ const FollowUps = () => {
         <div className="relative">
           <Search className="absolute left-2.5 top-1/2 -translate-y-1/2 h-3.5 w-3.5 text-muted-foreground pointer-events-none" />
           <Input
-            placeholder="Search doctors…"
+            placeholder="Search all sections…"
             value={search}
             onChange={e => setSearch(e.target.value)}
             className="pl-8 h-8 text-[12px] w-48"
@@ -439,7 +445,6 @@ const FollowUps = () => {
         {/* Contact-note split — works inside whichever section (tab) is active */}
         <div className="inline-flex h-8 rounded-md border border-border/60 overflow-hidden text-[11px] font-medium ml-auto self-center">
           {([
-            { v: "all",         label: "All",       count: ageCapped.length },
             { v: "contacted",   label: "Contacted", count: contactedCount },
             { v: "uncontacted", label: "No note",   count: noNoteCount },
           ] as const).map(opt => {
@@ -449,11 +454,9 @@ const FollowUps = () => {
                 key={opt.v}
                 type="button"
                 onClick={() => { setNoteFilter(opt.v); setExpandedId(null); }}
-                title={
-                  opt.v === "contacted"   ? "Doctors whose latest Zoho note reads like a contact attempt (no answer, spoke, voicemail…)" :
-                  opt.v === "uncontacted" ? "Doctors with no contact-style Zoho note yet" :
-                  "Everyone in this section"
-                }
+                title={opt.v === "contacted"
+                  ? "Doctors whose latest Zoho note reads like a contact attempt (no answer, spoke, voicemail…)"
+                  : "Doctors with no contact-style Zoho note yet"}
                 className={`flex items-center gap-1.5 px-2.5 transition-colors ${active ? "bg-primary text-white" : "bg-card text-muted-foreground hover:bg-muted/40"}`}
               >
                 {opt.v === "contacted" && <PhoneCall className="h-3 w-3" />}
@@ -469,38 +472,27 @@ const FollowUps = () => {
         <div className="mb-3 rounded-md bg-destructive/10 border border-destructive/30 px-3 py-2 text-[12px] text-destructive">{errorMsg}</div>
       )}
 
-      {/* ── Ranking controls + note ── */}
-      <div className="mb-3 flex flex-wrap items-center justify-between gap-2 rounded-md bg-muted/40 border border-border/50 px-3 py-2 text-[11px] text-muted-foreground">
+      {/* ── Ranking note ── */}
+      <div className="mb-3 flex flex-wrap items-center gap-2 rounded-md bg-muted/40 border border-border/50 px-3 py-2 text-[11px] text-muted-foreground">
         <div className="flex items-center gap-1.5 min-w-0">
-          {rankMode === "smart"
-            ? <><Flame className="h-3.5 w-3.5 shrink-0 text-amber-500" /> <span className="truncate">Ranked by priority — timing (peaks at ~2 months), plus open-vacancy demand &amp; Gulf licenses held.</span></>
-            : <><Clock className="h-3.5 w-3.5 shrink-0" /> <span className="truncate">Sorted by least-recently-touched — longest-waiting first.</span></>}
+          <Flame className="h-3.5 w-3.5 shrink-0 text-amber-500" />
+          <span className="truncate">Ranked by priority — timing (peaks at ~2 months), plus open-vacancy demand &amp; Gulf licenses held.</span>
           {coldHidden > 0 && (
             <span className="ml-1 shrink-0 text-muted-foreground/70">· {coldHidden} cold hidden (no activity in {Math.round(FOLLOWUP_STALE_CAP_DAYS / 30)} months)</span>
           )}
         </div>
-        <div className="inline-flex rounded-md border border-border/60 overflow-hidden text-[10px] font-medium shrink-0">
-          {([
-            { v: "smart",   label: "Smart priority" },
-            { v: "overdue", label: "Most overdue"   },
-          ] as const).map(opt => (
-            <button
-              key={opt.v}
-              type="button"
-              onClick={() => setRankMode(opt.v)}
-              className={`px-2.5 py-1 transition-colors ${rankMode === opt.v ? "bg-primary text-white" : "bg-card text-muted-foreground hover:bg-muted/40"}`}
-            >
-              {opt.label}
-            </button>
-          ))}
-        </div>
+        {searching && (
+          <span className="ml-auto shrink-0 inline-flex items-center gap-1 text-primary font-medium">
+            <Search className="h-3 w-3" /> Searching all sections
+          </span>
+        )}
       </div>
 
       {/* ── Lead cards ── */}
       <Card className="shadow-sm border-border/50">
         <CardHeader className="pb-2 pt-4 px-4">
           <CardTitle className="text-[12px] font-medium text-muted-foreground uppercase tracking-wide">
-            {ranked.length} {TAB_META[tab].label} leads
+            {ranked.length}{" "}{searching ? "matches · all sections" : `${TAB_META[tab].label} leads`}
             {noteFilter === "contacted"   && <span className="text-emerald-600"> · with a contact note</span>}
             {noteFilter === "uncontacted" && <span className="normal-case"> · no contact note yet</span>}
           </CardTitle>
