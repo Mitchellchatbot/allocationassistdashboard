@@ -16,6 +16,7 @@ import { useVacancies } from "@/hooks/use-vacancies";
 import { rollupSpecialty } from "@/lib/specialty-groups";
 import { detectLicenses } from "@/lib/license-info";
 import { scoreFollowUp, FOLLOWUP_STALE_CAP_DAYS } from "@/lib/followup-rank";
+import { noteIndicatesContact } from "@/lib/lead-contact";
 
 // ── Types ─────────────────────────────────────────────────────────────────────
 
@@ -246,6 +247,7 @@ const FollowUps = () => {
   const [pendingId,  setPendingId]  = useState<string | null>(null);
   const [errorMsg,   setErrorMsg]   = useState<string | null>(null);
   const [recruiterFilter, setRecruiterFilter] = useState("");
+  const [noteFilter, setNoteFilter] = useState<"all" | "contacted" | "uncontacted">("all");
 
   const rawLeads = zoho?.rawLeads ?? [];
 
@@ -263,7 +265,8 @@ const FollowUps = () => {
     return Array.from(seen).sort();
   }, [rawLeads]);
 
-  // Filtered leads for current tab
+  // Filtered leads for current tab (status + search + recruiter — NOT the
+  // contact-note split, so its counts reflect the whole section).
   const tabLeads = useMemo(() => {
     const targetStatus = TAB_STATUSES[tab];
     return rawLeads.filter(l => {
@@ -277,11 +280,27 @@ const FollowUps = () => {
 
   // Hard age cap — drop cold leads with no activity in FOLLOWUP_STALE_CAP_DAYS
   // (so years-old leads stop surfacing).
-  const leads = useMemo(
+  const ageCapped = useMemo(
     () => tabLeads.filter(l => (daysSinceTouched(l) ?? 0) <= FOLLOWUP_STALE_CAP_DAYS),
     [tabLeads],
   );
-  const coldHidden = tabLeads.length - leads.length;
+  const coldHidden = tabLeads.length - ageCapped.length;
+
+  // Split each section by whether the lead's LATEST Zoho note reads like a
+  // contact attempt ("no answer", "spoke", "voicemail"…). Every lead in these
+  // tabs has a status past "Not Contacted", so status can't tell them apart —
+  // the note text can. Lets a rep work the already-reached doctors separately.
+  const contactedCount = useMemo(
+    () => ageCapped.filter(l => noteIndicatesContact(l.latest_note)).length,
+    [ageCapped],
+  );
+  const noNoteCount = ageCapped.length - contactedCount;
+
+  const leads = useMemo(() => {
+    if (noteFilter === "contacted")   return ageCapped.filter(l =>  noteIndicatesContact(l.latest_note));
+    if (noteFilter === "uncontacted") return ageCapped.filter(l => !noteIndicatesContact(l.latest_note));
+    return ageCapped;
+  }, [ageCapped, noteFilter]);
 
   // Open vacancies per specialty group → graded demand signal for ranking.
   const demandCounts = useMemo(() => {
@@ -416,6 +435,34 @@ const FollowUps = () => {
             Clear
           </button>
         )}
+
+        {/* Contact-note split — works inside whichever section (tab) is active */}
+        <div className="inline-flex h-8 rounded-md border border-border/60 overflow-hidden text-[11px] font-medium ml-auto self-center">
+          {([
+            { v: "all",         label: "All",       count: ageCapped.length },
+            { v: "contacted",   label: "Contacted", count: contactedCount },
+            { v: "uncontacted", label: "No note",   count: noNoteCount },
+          ] as const).map(opt => {
+            const active = noteFilter === opt.v;
+            return (
+              <button
+                key={opt.v}
+                type="button"
+                onClick={() => { setNoteFilter(opt.v); setExpandedId(null); }}
+                title={
+                  opt.v === "contacted"   ? "Doctors whose latest Zoho note reads like a contact attempt (no answer, spoke, voicemail…)" :
+                  opt.v === "uncontacted" ? "Doctors with no contact-style Zoho note yet" :
+                  "Everyone in this section"
+                }
+                className={`flex items-center gap-1.5 px-2.5 transition-colors ${active ? "bg-primary text-white" : "bg-card text-muted-foreground hover:bg-muted/40"}`}
+              >
+                {opt.v === "contacted" && <PhoneCall className="h-3 w-3" />}
+                {opt.label}
+                <span className={`rounded-full px-1.5 py-0.5 text-[10px] font-semibold ${active ? "bg-white/20 text-white" : "bg-muted text-muted-foreground"}`}>{opt.count}</span>
+              </button>
+            );
+          })}
+        </div>
       </div>
 
       {errorMsg && (
@@ -454,13 +501,21 @@ const FollowUps = () => {
         <CardHeader className="pb-2 pt-4 px-4">
           <CardTitle className="text-[12px] font-medium text-muted-foreground uppercase tracking-wide">
             {ranked.length} {TAB_META[tab].label} leads
+            {noteFilter === "contacted"   && <span className="text-emerald-600"> · with a contact note</span>}
+            {noteFilter === "uncontacted" && <span className="normal-case"> · no contact note yet</span>}
           </CardTitle>
         </CardHeader>
         <CardContent className="p-0">
           {ranked.length === 0 ? (
             <div className="flex flex-col items-center justify-center py-12 text-muted-foreground gap-2">
               <CheckCircle className="h-8 w-8 text-success/40" />
-              <p className="text-[13px]">All clear — no leads here right now.</p>
+              <p className="text-[13px]">
+                {noteFilter === "contacted"
+                  ? "No doctors in this section have a contact-style Zoho note yet."
+                  : noteFilter === "uncontacted"
+                  ? "Every doctor in this section already has a contact note."
+                  : "All clear — no leads here right now."}
+              </p>
             </div>
           ) : (
             <div className="divide-y divide-border/40">
@@ -494,6 +549,14 @@ const FollowUps = () => {
                           {isUpdated && (
                             <span className="inline-flex items-center gap-0.5 rounded-full bg-success/15 border border-success/30 px-1.5 py-0.5 text-[9px] font-semibold text-success">
                               <Check className="h-2.5 w-2.5" /> Updated
+                            </span>
+                          )}
+                          {noteIndicatesContact(lead.latest_note) && (
+                            <span
+                              className="inline-flex items-center gap-0.5 rounded-full bg-emerald-50 border border-emerald-200 px-1.5 py-0.5 text-[9px] font-semibold text-emerald-700"
+                              title="Latest Zoho note reads like a contact attempt"
+                            >
+                              <PhoneCall className="h-2.5 w-2.5" /> Contacted
                             </span>
                           )}
                         </div>
