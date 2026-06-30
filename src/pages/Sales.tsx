@@ -1,10 +1,14 @@
-import { useState } from "react";
+import { useState, useMemo } from "react";
 import { DashboardLayout } from "@/components/layout/DashboardLayout";
 import { ExpandableKPICard } from "@/components/ExpandableKPICard";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { InfoIcon } from "@/components/InfoIcon";
 import { useFilteredData } from "@/hooks/use-filtered-data";
 import { isLeadContacted } from "@/lib/lead-contact";
+import { useVacancies } from "@/hooks/use-vacancies";
+import { rollupSpecialty } from "@/lib/specialty-groups";
+import { detectLicenses } from "@/lib/license-info";
+import { scoreFollowUp } from "@/lib/followup-rank";
 import { useAuth } from "@/hooks/use-auth";
 import { useSalesBoardMembers, useRemoveSalesBoardMember } from "@/hooks/use-sales-board";
 import { AddSalespersonDialog } from "@/components/sales/AddSalespersonDialog";
@@ -12,8 +16,20 @@ import { SectionDateRange } from "@/components/SectionDateRange";
 import { SalesActivity } from "@/components/sales/SalesActivity";
 import { Phone, Mail, Clock, Users, UserCheck, Activity, ArrowRight, PhoneCall, AlertTriangle, Plus, X } from "lucide-react";
 
+// Days since a lead was last touched (Modified_Time → Created_Time) — the same
+// recency the Follow-ups smart ranking uses.
+function daysSinceTouched(lead: { Modified_Time?: string | null; Created_Time?: string | null }): number | null {
+  const iso = lead.Modified_Time || lead.Created_Time;
+  if (!iso) return null;
+  const t = new Date(iso).getTime();
+  if (Number.isNaN(t)) return null;
+  return Math.max(0, Math.floor((Date.now() - t) / 86_400_000));
+}
+const flagTruthy = (v: string | null) => !!v && !/^(no|false|0|n)$/i.test(v.trim());
+
 const Sales = () => {
   const { pipelineRaw, sales, recruiters, stageConversion, filteredLeads } = useFilteredData();
+  const { data: vacancies = [] } = useVacancies();
   const { role, user } = useAuth();
   const isAdmin = role === "admin";
   const { data: boardMembers = [] } = useSalesBoardMembers();
@@ -153,13 +169,37 @@ const Sales = () => {
     </div>
   );
 
-  // 5. Urgent Follow-ups → high-priority leads, oldest first (stalest = most
-  // urgent). Leads don't carry a status-change timestamp, so we show real total
-  // lead age (Created_Time) — not a fabricated "days in stage".
-  const urgentLeads = filteredLeads
-    .filter(l => l.Lead_Status === 'High Priority Follow up')
-    .sort((a, b) => new Date(a.Created_Time).getTime() - new Date(b.Created_Time).getTime())
-    .slice(0, 8);
+  // 5. Urgent Follow-ups → high-priority leads, ranked by the SAME smart
+  // algorithm the Follow-ups page uses (timing peaks at ~2 months + open-vacancy
+  // demand for the specialty + Gulf licenses held), newest-touched as tiebreak.
+  const urgentDemandCounts = useMemo(() => {
+    const m = new Map<string, number>();
+    for (const v of vacancies) {
+      if (v.status !== "open") continue;
+      const g = rollupSpecialty(v.specialty);
+      if (g) m.set(g, (m.get(g) ?? 0) + 1);
+    }
+    return m;
+  }, [vacancies]);
+  const urgentLeads = useMemo(() =>
+    filteredLeads
+      .filter(l => l.Lead_Status === 'High Priority Follow up')
+      .map(l => ({
+        lead: l,
+        score: scoreFollowUp({
+          daysSinceTouched: daysSinceTouched(l),
+          specialty:        l.Specialty || l.Specialty_New,
+          demandCounts:     urgentDemandCounts,
+          licenseCount:     detectLicenses({
+            has_dha: flagTruthy(l.Has_DHA), has_doh: flagTruthy(l.Has_DOH),
+            has_moh: flagTruthy(l.Has_MOH), license_text: l.License,
+          }).length,
+        }).score,
+      }))
+      .sort((a, b) => b.score - a.score || (daysSinceTouched(b.lead) ?? -1) - (daysSinceTouched(a.lead) ?? -1))
+      .slice(0, 8)
+      .map(x => x.lead),
+    [filteredLeads, urgentDemandCounts]);
   const urgentContent = (
     <div className="divide-y divide-border/30">
       {urgentLeads.length === 0
