@@ -1442,9 +1442,14 @@ function StagedRow({ profile, autoOpen, onAutoOpened }: { profile: StagedProfile
   const publish = usePublishStagedProfile();
   const del     = useDeleteStagedProfile();
   const uploadCv = useUploadWpCv();
+  const uploadPhoto = useUploadWpPhoto();
   const [detailOpen, setDetailOpen] = useState(false);
-  // CV the user attached in the editor — auto-uploaded to WordPress on Publish.
+  // CV + photo the user attached in the editor — held here until Publish/Draft
+  // creates the WP candidate, then auto-uploaded + attached to it.
   const [cvFile, setCvFile] = useState<File | null>(null);
+  const [photoFile, setPhotoFile] = useState<File | null>(null);
+  const photoPreview = useMemo(() => (photoFile ? URL.createObjectURL(photoFile) : null), [photoFile]);
+  useEffect(() => () => { if (photoPreview) URL.revokeObjectURL(photoPreview); }, [photoPreview]);
   // Live publish progress, rendered as an actual bar in the row.
   const [pubProgress, setPubProgress] = useState<{ pct: number; label: string } | null>(null);
   // Auto-open the editor when this row was just created via "New profile".
@@ -1481,20 +1486,27 @@ function StagedRow({ profile, autoOpen, onAutoOpened }: { profile: StagedProfile
       const r = await publish.mutateAsync({ profile, status });
       const dropped = (r as { dropped_fields?: string[] })?.dropped_fields ?? [];
       const wpId    = (r as { id?: number })?.id;
-      // Auto-upload the attached résumé to the freshly-created WP candidate.
+      // Auto-upload the attached résumé + photo to the freshly-created WP candidate.
       let cvError: string | null = null;
+      let photoError: string | null = null;
+      if (wpId && (cvFile || photoFile)) clearInterval(creep);
       if (cvFile && wpId) {
-        clearInterval(creep);
-        setPubProgress({ pct: 90, label: "Uploading résumé…" });
+        setPubProgress({ pct: 88, label: "Uploading résumé…" });
         try { await uploadCv.mutateAsync({ file: cvFile, candidateId: wpId }); }
         catch (e) { cvError = (e as Error).message; }
       }
+      if (photoFile && wpId) {
+        setPubProgress({ pct: 94, label: "Uploading photo…" });
+        try { await uploadPhoto.mutateAsync({ file: photoFile, candidateId: wpId }); }
+        catch (e) { photoError = (e as Error).message; }
+      }
       setPubProgress({ pct: 100, label: "Done" });
       const base = status === "publish" ? "Published to WordPress" : "Saved as WordPress draft";
-      if (cvError) {
-        // The profile DID land on WP — only the résumé attach failed. Make that
-        // the headline so it isn't masked by a green success toast.
-        toast.error(`${base}, but the résumé did NOT attach`, { description: cvError });
+      if (cvError || photoError) {
+        // The profile DID land on WP — only an attachment failed. Make that the
+        // headline so it isn't masked by a green success toast.
+        const failed = [cvError && "résumé", photoError && "photo"].filter(Boolean).join(" + ");
+        toast.error(`${base}, but the ${failed} did NOT attach`, { description: cvError ?? photoError ?? undefined });
       } else if (dropped.length) {
         toast.warning(base, { description: `Couldn't set: ${dropped.join(", ")} — WordPress rejected the value(s). Set them by hand on the profile.` });
       } else {
@@ -1534,7 +1546,7 @@ function StagedRow({ profile, autoOpen, onAutoOpened }: { profile: StagedProfile
       title="Click to preview the merged data before publishing"
     >
       <Avatar
-        src={buildPhotoProxyUrl(profile.picture_url, profile.form_id)}
+        src={photoPreview ?? buildPhotoProxyUrl(profile.picture_url, profile.form_id)}
         name={profile.full_name ?? profile.email ?? "?"}
         size={28}
       />
@@ -1553,9 +1565,14 @@ function StagedRow({ profile, autoOpen, onAutoOpened }: { profile: StagedProfile
       <Badge variant="outline" className="text-[9px] bg-slate-100 text-slate-600 border-slate-200 shrink-0" title="Not yet on WordPress. Hit Publish or Save as draft to push.">
         not on WP
       </Badge>
-      {hasPicture && (
+      {hasPicture && !photoFile && (
         <Badge variant="outline" className="text-[9px] bg-blue-50 text-blue-700 border-blue-200 shrink-0" title="Profile picture captured from JotForm. Will upload to WP on Publish.">
           + photo
+        </Badge>
+      )}
+      {photoFile && (
+        <Badge variant="outline" className="text-[9px] bg-teal-50 text-teal-700 border-teal-200 shrink-0" title="New photo attached — uploads to WordPress on Publish / Save as draft.">
+          + new photo
         </Badge>
       )}
       {hasCv && (
@@ -1620,6 +1637,9 @@ function StagedRow({ profile, autoOpen, onAutoOpened }: { profile: StagedProfile
       onOpenChange={setDetailOpen}
       cvFileName={cvFile?.name ?? null}
       onPickCv={setCvFile}
+      photoFileName={photoFile?.name ?? null}
+      photoPreviewUrl={photoPreview}
+      onPickPhoto={setPhotoFile}
       onPublish={() => { setDetailOpen(false); handlePublish("publish"); }}
       onSaveDraft={() => { setDetailOpen(false); handlePublish("draft"); }}
       onDelete={() => { setDetailOpen(false); handleDelete(); }}
@@ -1636,13 +1656,16 @@ function StagedRow({ profile, autoOpen, onAutoOpened }: { profile: StagedProfile
  *  candidate will look like on WordPress was the user's ask — this is
  *  it, just before the Publish click. */
 function StagedProfileDetailDialog({
-  profile, open, onOpenChange, cvFileName, onPickCv, onPublish, onSaveDraft, onDelete,
+  profile, open, onOpenChange, cvFileName, onPickCv, photoFileName, photoPreviewUrl, onPickPhoto, onPublish, onSaveDraft, onDelete,
 }: {
   profile: StagedProfile;
   open: boolean;
   onOpenChange: (open: boolean) => void;
   cvFileName:   string | null;
   onPickCv:     (file: File | null) => void;
+  photoFileName:   string | null;
+  photoPreviewUrl: string | null;
+  onPickPhoto:     (file: File | null) => void;
   onPublish:    () => void;
   onSaveDraft:  () => void;
   onDelete:     () => void;
@@ -1651,6 +1674,7 @@ function StagedProfileDetailDialog({
   const cv  = (profile.extracted_cv_data ?? {}) as Record<string, unknown>;
   const [tab, setTab] = useState<"education" | "experience">("education");
   const cvInputRef = useRef<HTMLInputElement | null>(null);
+  const photoInputRef = useRef<HTMLInputElement | null>(null);
   const update = useUpdateStagedProfile();
   const [chainOpen, setChainOpen] = useState(false);
   const [openingCv, setOpeningCv] = useState(false);
@@ -1801,10 +1825,15 @@ function StagedProfileDetailDialog({
           {/* ── Left: teal avatar card ─────────────────────────────────── */}
           <div className="space-y-3">
             <div className="rounded-2xl bg-gradient-to-b from-teal-400 to-teal-500 text-white p-6 text-center shadow-sm">
-              <div className="mx-auto h-40 w-40 rounded-full bg-white ring-4 ring-white/40 overflow-hidden flex items-center justify-center">
-                {photoSrc ? (
+              <button
+                type="button"
+                onClick={() => photoInputRef.current?.click()}
+                className="relative group mx-auto h-40 w-40 rounded-full bg-white ring-4 ring-white/40 overflow-hidden flex items-center justify-center cursor-pointer"
+                title={(photoPreviewUrl ?? photoSrc) ? "Click to change the photo — uploads to WordPress on Publish / Save as draft" : "Click to add a photo — uploads to WordPress on Publish / Save as draft"}
+              >
+                {(photoPreviewUrl ?? photoSrc) ? (
                   <img
-                    src={photoSrc}
+                    src={(photoPreviewUrl ?? photoSrc) || undefined}
                     alt={fullName}
                     className="h-full w-full object-cover"
                     onError={e => { (e.currentTarget as HTMLImageElement).style.display = "none"; }}
@@ -1812,7 +1841,20 @@ function StagedProfileDetailDialog({
                 ) : (
                   <Avatar src={null} name={fullName} size={160} />
                 )}
-              </div>
+                {/* Hover overlay — upload affordance, matching the published
+                    candidate dialog. */}
+                <span className="absolute inset-0 rounded-full flex flex-col items-center justify-center bg-black/55 text-white text-[10.5px] font-medium opacity-0 group-hover:opacity-100 transition-opacity">
+                  <Camera className="h-5 w-5 mb-1" />
+                  {(photoPreviewUrl ?? photoSrc) ? "Change photo" : "Add photo"}
+                </span>
+              </button>
+              <input
+                ref={photoInputRef}
+                type="file"
+                accept="image/*"
+                hidden
+                onChange={e => { const f = e.target.files?.[0] ?? null; onPickPhoto(f); e.target.value = ""; }}
+              />
               <div className="mt-4 text-[19px] font-semibold leading-tight">
                 <EditableText
                   value={fullName}
@@ -1871,7 +1913,11 @@ function StagedProfileDetailDialog({
 
             <div className="flex flex-wrap gap-1.5">
               <Badge variant="outline" className="text-[10px] bg-amber-50 text-amber-700 border-amber-200">not on WP</Badge>
-              {photoSrc && <Badge variant="outline" className="text-[10px] bg-blue-50 text-blue-700 border-blue-200">+ photo</Badge>}
+              {(photoPreviewUrl ?? photoSrc) && (
+                <Badge variant="outline" className={`text-[10px] ${photoPreviewUrl ? "bg-teal-50 text-teal-700 border-teal-200" : "bg-blue-50 text-blue-700 border-blue-200"}`}>
+                  {photoPreviewUrl ? "+ new photo" : "+ photo"}
+                </Badge>
+              )}
               {Object.keys(cv).length > 0 && <Badge variant="outline" className="text-[10px] bg-emerald-50 text-emerald-700 border-emerald-200">+ CV parsed</Badge>}
             </div>
           </div>
@@ -2019,6 +2065,17 @@ function StagedProfileDetailDialog({
             >
               <Upload className="h-4 w-4 mr-1.5" />
               {cvFileName ? "Résumé attached ✓" : "Attach résumé"}
+            </Button>
+            {/* Attach a profile photo — held until Publish/Draft, then uploaded
+                to the WP candidate's profile_picture (same as clicking the photo). */}
+            <Button
+              variant="outline"
+              className={photoFileName ? "border-emerald-300 text-emerald-700 hover:bg-emerald-50" : "border-slate-300 text-slate-600 hover:bg-slate-50"}
+              onClick={() => photoInputRef.current?.click()}
+              title={photoFileName ? `Photo attached: ${photoFileName} — uploads to WordPress on Publish` : "Attach a profile photo — uploads to WordPress on Publish"}
+            >
+              <Camera className="h-4 w-4 mr-1.5" />
+              {photoFileName ? "Photo attached ✓" : "Attach photo"}
             </Button>
             {profile.cv_upload_id && (
               <Button
