@@ -725,7 +725,16 @@ Deno.serve(async (req: Request) => {
   // website's coloured profile look, rendered in-email (table colour + CV /
   // full-profile buttons). Built from the vars above and injected as a RAW
   // token so it survives plainifyBody (which strips the DB template's styles).
-  vars.doctor_card_html = doctorCardHtml(vars);
+  //
+  // Card-as-image (Hasan): if the dispatcher captured a screenshot of the card
+  // in the Send Profile dialog, ship that flat PNG inline INSTEAD of the HTML
+  // card — it renders pixel-perfect in every client (Outlook/dark-mode safe).
+  // Still a RAW token so the <img> survives plainifyBody. The card's buttons
+  // become non-clickable pixels (accepted trade-off); the body's links are fine.
+  const cardImageUrl = String(md.doctor_card_image_url ?? "").trim();
+  vars.doctor_card_html = cardImageUrl
+    ? `<img src="${escapeHtml(cardImageUrl)}" alt="Doctor profile" style="display:block;width:100%;max-width:700px;height:auto;border:0;margin:20px 0 0;border-radius:14px;" />`
+    : doctorCardHtml(vars);
   // The full horizontal data row UNDER the card (team's existing hospital-comms
   // format), minus the Area of Interest column. Styled token so it survives
   // plainifyBody and keeps its coloured header.

@@ -6,7 +6,8 @@ import { Label } from "@/components/ui/label";
 import { Textarea } from "@/components/ui/textarea";
 import { Badge } from "@/components/ui/badge";
 import { Checkbox } from "@/components/ui/checkbox";
-import { Search, Send, X, Eye, ChevronLeft, AlertTriangle, Mail, ChevronDown } from "lucide-react";
+import { Search, Send, X, Eye, ChevronLeft, AlertTriangle, Mail, ChevronDown, Camera, Image as ImageIcon } from "lucide-react";
+import { captureDownloadAndUploadCard, cardImageTag } from "@/lib/card-screenshot";
 import { toast } from "sonner";
 import { useDoctorLifecycleMap } from "@/hooks/use-doctor-lifecycle";
 import { useAuth } from "@/hooks/use-auth";
@@ -153,6 +154,11 @@ function SendProfileDialogBody({ onClose }: { onClose: () => void }) {
   // Manual per-hospital recipient override (hospitalId → chosen contact email)
   // for THIS send only — overrides the hospital's primary/cycle routing.
   const [recipientOverrides, setRecipientOverrides] = useState<Record<string, string>>({});
+  // When set, the doctor CARD ships as a flat inline image (a screenshot) in
+  // the hospital email instead of the {{doctor_card_html}} block. One image per
+  // doctor → applies to every hospital in a BCC batch. Captured on demand from
+  // the preview via the "Download & attach card screenshot" button.
+  const [cardImageUrl, setCardImageUrl] = useState<string | null>(null);
   // Per-send template keys (Amir #3). Persisted preference re-loads on open.
   const [hospitalTemplateKey, setHospitalTemplateKey] = useState<string>(() => loadDefaultTemplate("hospital"));
   const [doctorTemplateKey,   setDoctorTemplateKey]   = useState<string>(() => loadDefaultTemplate("doctor"));
@@ -182,6 +188,7 @@ function SendProfileDialogBody({ onClose }: { onClose: () => void }) {
     setBccList(me ? [me.email] : []);
     setHospitalTemplateKey(loadDefaultTemplate("hospital"));
     setDoctorTemplateKey(loadDefaultTemplate("doctor"));
+    setCardImageUrl(null);
   }, [user?.email]);
 
   // Phase 4 — hide signed + unavailable doctors from the send list. Spec:
@@ -425,6 +432,11 @@ function SendProfileDialogBody({ onClose }: { onClose: () => void }) {
                     ...(templateKeys.doctor   !== DOCTOR_DEFAULT_KEY   ? { email_doctor:   templateKeys.doctor }   : {}),
                   } }
                 : {}),
+              // Card-as-image (Hasan): a captured screenshot of the doctor card,
+              // rendered inline in the hospital email in place of the HTML card
+              // so it looks identical in every client. Same image for every
+              // hospital in the batch (the card is doctor-specific).
+              ...(cardImageUrl ? { doctor_card_image_url: cardImageUrl } : {}),
             },
           })
           .select("id")
@@ -578,6 +590,8 @@ function SendProfileDialogBody({ onClose }: { onClose: () => void }) {
               if (email) next[id] = email; else delete next[id];
               return next;
             })}
+            cardImageUrl={cardImageUrl}
+            onSetCardImage={setCardImageUrl}
           />
         )}
     </>
@@ -825,11 +839,79 @@ function HospitalRecipientsOverride({ hospitals, contacts, overrides, onOverride
   );
 }
 
+/**
+ * "Download & attach card screenshot" — one button, two birds. Rasterises the
+ * doctor profile card to a flat PNG (html2canvas), downloads a copy locally,
+ * uploads it to the public email-card-images bucket, and reports the URL up so
+ * the hospital email swaps its {{doctor_card_html}} block for that inline image.
+ * Once captured, shows a thumbnail with Re-capture / Undo.
+ */
+function CardScreenshotControl({
+  cardHtml, doctorName, cardImageUrl, onSetCardImage,
+}: {
+  cardHtml: string;
+  doctorName: string;
+  cardImageUrl: string | null;
+  onSetCardImage: (url: string | null) => void;
+}) {
+  const [busy, setBusy] = useState(false);
+  const capture = async () => {
+    setBusy(true);
+    try {
+      const url = await captureDownloadAndUploadCard(cardHtml, doctorName);
+      onSetCardImage(url);
+      toast.success("Card screenshot downloaded & attached — it'll send as an inline image.");
+    } catch (e) {
+      toast.error(e instanceof Error ? e.message : "Couldn't capture the card. Try again.");
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  if (cardImageUrl) {
+    return (
+      <div className="flex items-center gap-2 rounded-md border border-emerald-200 bg-emerald-50 px-2 py-1.5">
+        <img
+          src={cardImageUrl}
+          alt="Doctor card screenshot"
+          className="h-9 w-16 shrink-0 rounded border border-emerald-200 object-cover object-top"
+        />
+        <div className="min-w-0 flex-1 text-[11px] leading-tight">
+          <div className="flex items-center gap-1 font-medium text-emerald-800">
+            <ImageIcon className="h-3 w-3 shrink-0" /> Card sends as an image
+          </div>
+          <div className="truncate text-emerald-700/80">Pixel-perfect in any client · buttons in the card aren't clickable.</div>
+        </div>
+        <button type="button" onClick={capture} disabled={busy} className="shrink-0 text-[10px] font-medium text-emerald-700 hover:underline disabled:opacity-50">
+          {busy ? "…" : "Re-capture"}
+        </button>
+        <button type="button" onClick={() => { onSetCardImage(null); toast.message("Reverted — the card will send as HTML."); }} className="shrink-0 text-[10px] text-slate-500 hover:underline">
+          Undo
+        </button>
+      </div>
+    );
+  }
+
+  return (
+    <button
+      type="button"
+      onClick={capture}
+      disabled={busy}
+      className="flex w-full items-center justify-center gap-1.5 rounded-md border border-teal-200 bg-teal-50 px-2 py-1.5 text-[11px] font-medium text-teal-700 transition-colors hover:bg-teal-100 disabled:opacity-60"
+      title="Screenshot the profile card, download a copy, and send it as a pixel-perfect inline image in the hospital email"
+    >
+      {busy ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Camera className="h-3.5 w-3.5" />}
+      {busy ? "Capturing…" : "Download & attach card screenshot"}
+    </button>
+  );
+}
+
 function PreviewConfirm({
   doctor, hospitals, customMessage, hospitalSubject, hospitalBody, doctorSubject, doctorBody,
   onBack, onConfirm, submitting, bccList, setBccList,
   templates, hospitalTemplateKey, doctorTemplateKey, setDoctorTemplateKey, onSaveDefault,
   hospitalContacts, recipientOverrides, onOverrideRecipient,
+  cardImageUrl, onSetCardImage,
 }: {
   doctor: DoctorOption;
   hospitals: Hospital[];
@@ -851,6 +933,8 @@ function PreviewConfirm({
   hospitalContacts: { forHospital: (name: string) => HospitalContact[] };
   recipientOverrides: Record<string, string>;
   onOverrideRecipient: (hospitalId: string, email: string | null) => void;
+  cardImageUrl: string | null;
+  onSetCardImage: (url: string | null) => void;
 }) {
   // Editing is offered for single-hospital sends only — the preview (and the
   // edited HTML) is rendered for one hospital, so reusing it across a BCC
@@ -939,11 +1023,13 @@ function PreviewConfirm({
     };
     // Build the card + data-table tokens the same way send-flow-email does, so
     // this preview matches the actual send (otherwise they'd show as literal
-    // {{doctor_card_html}} / {{doctor_row_table_html}}).
-    v.doctor_card_html      = previewDoctorCardHtml(v);
+    // {{doctor_card_html}} / {{doctor_row_table_html}}). When a card screenshot
+    // has been captured, the card ships as a flat inline image instead — mirror
+    // that here so the dispatcher previews exactly what the hospital receives.
+    v.doctor_card_html      = cardImageUrl ? cardImageTag(cardImageUrl) : previewDoctorCardHtml(v);
     v.doctor_row_table_html = previewDoctorRowTableHtml(v);
     return v;
-  }, [mergedProfileTokens, doctor, sampleHospital]);
+  }, [mergedProfileTokens, doctor, sampleHospital, cardImageUrl]);
 
   // The exact emails the team sees. Bodies are wrapped in the same font shell
   // send-flow-email uses, so edits shipped verbatim render like a normal send.
@@ -1058,6 +1144,15 @@ function PreviewConfirm({
           <span className="font-medium text-slate-700">Hospital intro email</span>
           <span className="min-w-0 truncate">— uses the standard template; edit the wording below if needed.</span>
         </div>
+        {/* Card-as-image: capture the doctor profile card as a flat PNG so it
+            renders pixel-perfect in the hospital's inbox (no client quirks),
+            download a copy, and send it inline in place of the HTML card. */}
+        <CardScreenshotControl
+          cardHtml={previewDoctorCardHtml(vars)}
+          doctorName={doctor.name}
+          cardImageUrl={cardImageUrl}
+          onSetCardImage={onSetCardImage}
+        />
         <EditableEmailSection
           label={`To hospital · ${hospitalRecipient}`}
           subject={renderedHospitalSubject}
