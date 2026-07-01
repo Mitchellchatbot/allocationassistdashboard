@@ -79,6 +79,21 @@ export interface ZohoAccount {
   Owner: { name: string; email: string };
 }
 
+/** A hospital contact from Zoho's custom "Hospitals" (contacts) module — each
+ *  is a person at a hospital, linked to the parent Account via the Hospital
+ *  lookup, with a Primary/Secondary Contact_Type. */
+export interface ZohoHospitalContact {
+  id: string;
+  Name: string | null;
+  Email: string | null;
+  Phone: string | null;
+  Contact_Type: string | null;                              // "Primary" | "Secondary"
+  Hospital: { name?: string; id?: string } | string | null; // lookup → parent Account
+  Emirate?: string | null;
+  Owner?: { name?: string; email?: string } | null;
+  title?: string | null;                                    // HR / CEO — filled once the sync fetches it
+}
+
 export interface ZohoCampaign {
   id: string;
   Campaign_Name: string;
@@ -1068,12 +1083,13 @@ const CAMPAIGN_FIELDS = [
 ];
 
 function parseCacheRow(row: { data: unknown; synced_at: string }) {
-  const { leads: leadsRaw0, deals, calls, accounts, campaigns, doctorsOnBoard: dobRaw, emailData, leadNotes } = row.data as {
+  const { leads: leadsRaw0, deals, calls, accounts, campaigns, doctorsOnBoard: dobRaw, emailData, leadNotes, hospitalContacts } = row.data as {
     leads: ZohoLead[]; deals: ZohoDeal[]; calls: ZohoCall[];
     accounts: ZohoAccount[]; campaigns: ZohoCampaign[];
     doctorsOnBoard?: ZohoDoctorOnBoard[];
     emailData?: { total: number; bySender: Record<string, number>; sampled: number };
     leadNotes?: Record<string, { note: string; at: string }>;
+    hospitalContacts?: ZohoHospitalContact[];
   };
 
   // Attach each lead's latest Zoho note (synced into the cache) so the
@@ -1145,6 +1161,7 @@ function parseCacheRow(row: { data: unknown; synced_at: string }) {
     // continue using `rawLeads` / `rawDoctorsOnBoard` (the filtered ones).
     rawLeadsAll:           leadsRaw ?? [],
     rawDoctorsOnBoardAll:  dobRaw ?? [],
+    rawHospitalContacts:   hospitalContacts ?? [],
     syncedAt: row.synced_at,
   };
   if (import.meta.env.DEV) {
