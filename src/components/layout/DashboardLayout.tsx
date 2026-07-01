@@ -312,7 +312,7 @@ export function DashboardLayout({ children, title: pageTitle, subtitle: pageSubt
       <SidebarOpener />
       <div className="h-screen flex w-full bg-muted/40 overflow-hidden">
         <AppSidebar />
-        <div className="flex-1 flex flex-col min-w-0 pt-2 pr-2 pb-2 gap-2">
+        <div className="flex-1 flex flex-col min-w-0 min-h-0 pt-2 pr-2 pb-2 gap-2">
           {/* Top header bar — its own floating pill panel: margins on
               all sides, rounded, drop-shadow. Sits visually parallel to
               the floating sidebar. */}

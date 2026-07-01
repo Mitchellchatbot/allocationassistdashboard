@@ -73,8 +73,6 @@ export function useDebounce(value: string, delay = 300) {
   return debounced;
 }
 
-const PAGE_SIZE = 100;
-
 export interface LeadsFilters {
   stage?:     string; // Lead_Status value, e.g. "Not Contacted"
   recruiter?: string; // Owner.name
@@ -99,12 +97,6 @@ function getBadge(l: ZohoLead): Doctor["status"] {
 
 export function useZohoLeads(search: string, filters: LeadsFilters = {}) {
   const { data: zoho, isLoading } = useZohoData();
-  const [shownCount, setShownCount] = useState(PAGE_SIZE);
-
-  // Reset to first page whenever search or filters change
-  useEffect(() => {
-    setShownCount(PAGE_SIZE);
-  }, [search, filters.stage, filters.recruiter, filters.badge, filters.source]);
 
   // Client-side filtering across search + all filter dimensions — no network calls
   const filtered = useMemo(() => {
@@ -172,17 +164,11 @@ export function useZohoLeads(search: string, filters: LeadsFilters = {}) {
     });
   }, [zoho?.rawLeads, search, filters.stage, filters.recruiter, filters.badge, filters.source]);
 
-  const doctors = useMemo(
-    () => filtered.slice(0, shownCount).map(mapLead),
-    [filtered, shownCount]
-  );
+  const doctors = useMemo(() => filtered.map(mapLead), [filtered]);
 
   return {
     doctors,
-    hasNextPage:        shownCount < filtered.length,
-    fetchNextPage:      () => setShownCount(c => c + 50),
     isLoading,
-    isFetchingNextPage: false,
-    totalCount:         filtered.length,
+    totalCount: filtered.length,
   };
 }

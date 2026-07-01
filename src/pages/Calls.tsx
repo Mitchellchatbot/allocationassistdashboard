@@ -446,34 +446,32 @@ export default function Calls() {
             <EmptyState syncing={syncing} />
           ) : (
             <>
-              <div className="overflow-x-auto">
-                <Table>
-                  <TableHeader>
-                    <TableRow className="hover:bg-transparent">
-                      <TableHead className="text-[10px] uppercase tracking-wide h-8">Date</TableHead>
-                      <TableHead className="text-[10px] uppercase tracking-wide h-8">Call</TableHead>
-                      <TableHead className="text-[10px] uppercase tracking-wide h-8">Host</TableHead>
-                      <TableHead className="text-[10px] uppercase tracking-wide h-8">Insights</TableHead>
-                      <TableHead className="text-[10px] uppercase tracking-wide h-8 text-right">Duration</TableHead>
-                      <TableHead className="text-[10px] uppercase tracking-wide h-8 text-right"></TableHead>
-                    </TableRow>
-                  </TableHeader>
-                  <TableBody>
-                    {paginatedRows.map(({ call: c, tldr, hasSummary, hasTranscript, actionCount }) => (
-                      <CallRow
-                        key={c.id}
-                        call={c}
-                        tldr={tldr}
-                        hasSummary={hasSummary}
-                        hasTranscript={hasTranscript}
-                        actionCount={actionCount}
-                        enriching={enriching}
-                        onOpen={openCall}
-                      />
-                    ))}
-                  </TableBody>
-                </Table>
-              </div>
+              <Table>
+                <TableHeader>
+                  <TableRow className="hover:bg-transparent">
+                    <TableHead className="text-[10px] uppercase tracking-wide h-8">Date</TableHead>
+                    <TableHead className="text-[10px] uppercase tracking-wide h-8">Call</TableHead>
+                    <TableHead className="text-[10px] uppercase tracking-wide h-8">Host</TableHead>
+                    <TableHead className="text-[10px] uppercase tracking-wide h-8">Insights</TableHead>
+                    <TableHead className="text-[10px] uppercase tracking-wide h-8 text-right">Duration</TableHead>
+                    <TableHead className="text-[10px] uppercase tracking-wide h-8 text-right"></TableHead>
+                  </TableRow>
+                </TableHeader>
+                <TableBody>
+                  {paginatedRows.map(({ call: c, tldr, hasSummary, hasTranscript, actionCount }) => (
+                    <CallRow
+                      key={c.id}
+                      call={c}
+                      tldr={tldr}
+                      hasSummary={hasSummary}
+                      hasTranscript={hasTranscript}
+                      actionCount={actionCount}
+                      enriching={enriching}
+                      onOpen={openCall}
+                    />
+                  ))}
+                </TableBody>
+              </Table>
               {totalPages > 1 && (
                 <Pagination className="mt-2 mb-2">
                   <PaginationContent>

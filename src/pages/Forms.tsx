@@ -36,13 +36,18 @@ import { zohoPut, zohoPost } from "@/lib/zoho";
 import { useQueryClient } from "@tanstack/react-query";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import {
-  useForms, useFormResponsesInfinite, useFormStats, useCreateForm, useUpdateForm, useDeleteForm,
+  useForms, useFormResponsesPage, useFormResponsesFilteredCount, fetchAllFormResponses,
+  FORM_RESPONSES_PAGE_SIZE, useFormStats, useCreateForm, useUpdateForm, useDeleteForm,
   useUpdateFormResponseOutreach, useBackfillFormCsv, useLinkFormResponseToDoctor,
   useArchiveFormResponse, useRestoreFormResponse, useHardDeleteFormResponse,
   type OutreachStatus,
   useSyncTypeformHistory, useSyncJotformHistory, generateWebhookSecret,
   type Form, type FormResponse,
 } from "@/hooks/use-forms";
+import {
+  Pagination, PaginationContent, PaginationItem, PaginationLink,
+  PaginationPrevious, PaginationNext, PaginationEllipsis,
+} from "@/components/ui/pagination";
 import { toast } from "sonner";
 import { supabase } from "@/lib/supabase";
 import { useWpCandidateByContact, useWpContactSet, normalizePhone } from "@/hooks/use-wp-candidates";
@@ -199,37 +204,46 @@ function FormDetail({ form }: { form: Form }) {
   // Live vs Archived view. Default 'live' — archived rows are hidden
   // until the user explicitly switches.
   const [view, setView] = useState<"live" | "archived">("live");
+  const [page, setPage] = useState(1);
+  useEffect(() => { setPage(1); }, [search, dateFilter, sortDir, outreachFilter, view]);
   const wpContacts = useWpContactSet();
   const { user } = useAuth();
 
-  // Server-side paginated + filtered feed. First page is 200 rows; each
-  // scroll fires a fetchNextPage() for 50 more. Search/date/outreach all
-  // push down to the DB so we never have to load the full table.
-  const feed = useFormResponsesInfinite(form.id, {
-    search:           search.trim(),
-    date:             dateFilter,
-    sort:             sortDir,
-    outreach:         outreachFilter,
+  const serverFilters = useMemo(() => ({
+    search:            search.trim(),
+    date:              dateFilter,
+    sort:              sortDir,
+    outreach:          outreachFilter,
     currentOwnerEmail: user?.email ?? undefined,
     view,
-  });
+  }), [search, dateFilter, sortDir, outreachFilter, user?.email, view]);
+
+  const pageFeed  = useFormResponsesPage(form.id, serverFilters, page);
+  const countFeed = useFormResponsesFilteredCount(form.id, serverFilters);
+  const totalFilteredCount = countFeed.data ?? 0;
+  const totalPages = Math.max(1, Math.ceil(totalFilteredCount / FORM_RESPONSES_PAGE_SIZE));
+  const safePage   = Math.min(page, totalPages);
+  const pageNumbers = useMemo((): Array<number | "..."> => {
+    if (totalPages <= 7) return Array.from({ length: totalPages }, (_, i) => i + 1);
+    const out: Array<number | "..."> = [1];
+    if (safePage > 3) out.push("...");
+    for (let i = Math.max(2, safePage - 1); i <= Math.min(totalPages - 1, safePage + 1); i++) out.push(i);
+    if (safePage < totalPages - 2) out.push("...");
+    out.push(totalPages);
+    return out;
+  }, [safePage, totalPages]);
+
   const responses = useMemo(() => {
-    const flat = feed.data?.pages.flatMap(p => p.rows) ?? [];
-    // WP-presence filter is client-side (the lookup data lives in a
-    // separate table). Applied here so the rest of the render path
-    // sees an already-trimmed list. While the email set is still
-    // loading we pass everything through rather than blanking the
-    // list — avoids a momentary empty state on first paint.
-    const filtered = (!isDoctorIntake || wpFilter === "all" || !wpContacts.data) ? flat : flat.filter(r => {
+    const flat = pageFeed.data ?? [];
+    if (!isDoctorIntake || wpFilter === "all" || !wpContacts.data) return flat;
+    return flat.filter(r => {
       const e = (r.respondent_email ?? "").toLowerCase().trim();
       const p = normalizePhone(phoneFor(r));
       const inWp = (!!e && wpContacts.data!.emails.has(e))
                 || (!!p && wpContacts.data!.phones.has(p));
       return wpFilter === "in" ? inWp : !inWp;
     });
-    if ((form.lead_value_cents ?? 0) > 0) return filtered;
-    return filtered;
-  }, [feed.data, form.lead_value_cents, isDoctorIntake, wpFilter, wpContacts.data]);
+  }, [pageFeed.data, isDoctorIntake, wpFilter, wpContacts.data]);
 
   // KPIs from cheap server-side count queries — total / last 7 days /
   // Zoho-linked — no longer dependent on the loaded set.
@@ -243,23 +257,8 @@ function FormDetail({ form }: { form: Form }) {
   const paidPerLead        = (form.lead_value_cents ?? 0) / 100;
   const isPaidForm         = paidPerLead > 0;
 
-  // Sentinel for infinite scroll.
-  const sentinelRef = useRef<HTMLDivElement | null>(null);
-  useEffect(() => {
-    const el = sentinelRef.current;
-    if (!el) return;
-    const io = new IntersectionObserver((entries) => {
-      for (const e of entries) {
-        if (e.isIntersecting && feed.hasNextPage && !feed.isFetchingNextPage) {
-          feed.fetchNextPage();
-        }
-      }
-    }, { rootMargin: "300px" });
-    io.observe(el);
-    return () => io.disconnect();
-  }, [feed.hasNextPage, feed.isFetchingNextPage, feed.fetchNextPage]);
-
-  const isLoading = feed.isLoading;
+  const isLoading  = pageFeed.isLoading;
+  const [exporting, setExporting] = useState(false);
   const isSearching = !!search.trim();
 
   // ⌘K / Ctrl+K to focus the search bar from anywhere on the page.
@@ -285,42 +284,43 @@ function FormDetail({ form }: { form: Form }) {
     }
   };
 
-  const handleExportCsv = () => {
-    // Now that we paginate, "Export" dumps what's currently loaded —
-    // tell the user explicitly so they don't think they got everything
-    // when they've only scrolled through a hundred rows.
-    if (responses.length === 0) { toast.error("Nothing to export."); return; }
-    if (responses.length < total && !confirm(
-      `You've loaded ${responses.length} of ${total.toLocaleString()} submissions. Export only the loaded ones?`
-    )) return;
-
-    // Stable column per question across the exported set.
-    const keys = new Set<string>();
-    for (const r of responses) for (const k of Object.keys(r.answers ?? {})) keys.add(k);
-    const headers = ["submitted_at", "respondent_name", "respondent_email", "doctor_id", ...Array.from(keys)];
-    const esc = (s: string | null | undefined) => {
-      const v = s == null ? "" : String(s);
-      return /[",\n]/.test(v) ? `"${v.replace(/"/g, '""')}"` : v;
-    };
-    const lines = [headers.join(",")];
-    for (const r of responses) {
-      const row = [
-        r.submitted_at,
-        r.respondent_name ?? "",
-        r.respondent_email ?? "",
-        r.doctor_id ?? "",
-        ...Array.from(keys).map(k => esc((r.answers ?? {})[k] ?? "")),
-      ];
-      lines.push(row.map(esc).join(","));
+  const handleExportCsv = async () => {
+    if (totalFilteredCount === 0) { toast.error("Nothing to export."); return; }
+    setExporting(true);
+    try {
+      const all = await fetchAllFormResponses(form.id, serverFilters);
+      if (all.length === 0) { toast.error("Nothing to export."); return; }
+      const keys = new Set<string>();
+      for (const r of all) for (const k of Object.keys(r.answers ?? {})) keys.add(k);
+      const headers = ["submitted_at", "respondent_name", "respondent_email", "doctor_id", ...Array.from(keys)];
+      const esc = (s: string | null | undefined) => {
+        const v = s == null ? "" : String(s);
+        return /[",\n]/.test(v) ? `"${v.replace(/"/g, '""')}"` : v;
+      };
+      const lines = [headers.join(",")];
+      for (const r of all) {
+        const row = [
+          r.submitted_at,
+          r.respondent_name ?? "",
+          r.respondent_email ?? "",
+          r.doctor_id ?? "",
+          ...Array.from(keys).map(k => esc((r.answers ?? {})[k] ?? "")),
+        ];
+        lines.push(row.map(esc).join(","));
+      }
+      const blob = new Blob([lines.join("\n")], { type: "text/csv;charset=utf-8" });
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement("a");
+      a.href = url;
+      a.download = `${form.name.replace(/[^a-z0-9]+/gi, "_")}-${new Date().toISOString().slice(0, 10)}.csv`;
+      document.body.appendChild(a); a.click(); a.remove();
+      URL.revokeObjectURL(url);
+      toast.success(`Exported ${all.length} responses.`);
+    } catch (e) {
+      toast.error(e instanceof Error ? e.message : "Export failed");
+    } finally {
+      setExporting(false);
     }
-    const blob = new Blob([lines.join("\n")], { type: "text/csv;charset=utf-8" });
-    const url = URL.createObjectURL(blob);
-    const a = document.createElement("a");
-    a.href = url;
-    a.download = `${form.name.replace(/[^a-z0-9]+/gi, "_")}-${new Date().toISOString().slice(0, 10)}.csv`;
-    document.body.appendChild(a); a.click(); a.remove();
-    URL.revokeObjectURL(url);
-    toast.success(`Exported ${responses.length} responses.`);
   };
 
   return (
@@ -348,8 +348,8 @@ function FormDetail({ form }: { form: Form }) {
                   </Button>
                 </a>
               )}
-              <Button size="sm" variant="outline" onClick={handleExportCsv} title={`Export ${responses.length} loaded response${responses.length === 1 ? "" : "s"} to CSV`}>
-                <Download className="h-3.5 w-3.5 mr-1" /> Export
+              <Button size="sm" variant="outline" onClick={handleExportCsv} disabled={exporting} title={`Export ${totalFilteredCount.toLocaleString()} filtered response${totalFilteredCount === 1 ? "" : "s"} to CSV`}>
+                {exporting ? <Loader2 className="h-3.5 w-3.5 mr-1 animate-spin" /> : <Download className="h-3.5 w-3.5 mr-1" />} Export
               </Button>
               {form.provider === "typeform" && <TypeformSyncButton form={form} />}
               {form.provider === "jotform"  && <JotformSyncButton  form={form} />}
@@ -556,10 +556,9 @@ function FormDetail({ form }: { form: Form }) {
                 { value: "oldest", label: "Oldest first" },
               ]}
             />
-            <span className="ml-auto text-[11px] text-muted-foreground tabular-nums">
-              {isSearching
-                ? `${responses.length}${feed.hasNextPage ? "+" : ""} matches`
-                : `${responses.length.toLocaleString()} of ${total.toLocaleString()} loaded`}
+            <span className="ml-auto flex items-center gap-1.5 text-[11px] text-muted-foreground tabular-nums">
+              {countFeed.isLoading && <Loader2 className="h-3 w-3 animate-spin" />}
+              {totalFilteredCount.toLocaleString()} result{totalFilteredCount === 1 ? "" : "s"}
             </span>
           </div>
         </CardContent>
@@ -614,21 +613,43 @@ function FormDetail({ form }: { form: Form }) {
                   formProvider={form.provider}
                 />
               ))}
-              {/* Infinite-scroll sentinel — fires fetchNextPage() ~300px
-                  before reaching the bottom so there's no perceptible
-                  pause on fast scrolls. */}
-              {feed.hasNextPage ? (
-                <div ref={sentinelRef} className="w-full py-3 flex items-center justify-center gap-2 text-[11px] text-muted-foreground">
-                  <Loader2 className="h-3 w-3 animate-spin" />
-                  Loading more…
-                </div>
-              ) : responses.length > 0 ? (
-                <div className="w-full py-3 text-center text-[10px] text-muted-foreground/70">
-                  {isSearching
-                    ? `${responses.length} match${responses.length === 1 ? "" : "es"} loaded`
-                    : `All ${responses.length.toLocaleString()} loaded`}
-                </div>
-              ) : null}
+              {totalPages > 1 && (
+                <Pagination className="mt-4">
+                  <PaginationContent>
+                    <PaginationItem>
+                      <PaginationPrevious
+                        href="#"
+                        onClick={(e) => { e.preventDefault(); setPage(p => Math.max(1, p - 1)); }}
+                        aria-disabled={safePage === 1}
+                        className={safePage === 1 ? "pointer-events-none opacity-50" : ""}
+                      />
+                    </PaginationItem>
+                    {pageNumbers.map((n, i) =>
+                      n === "..." ? (
+                        <PaginationItem key={`ell-${i}`}><PaginationEllipsis /></PaginationItem>
+                      ) : (
+                        <PaginationItem key={n}>
+                          <PaginationLink
+                            href="#"
+                            isActive={safePage === n}
+                            onClick={(e) => { e.preventDefault(); setPage(n as number); }}
+                          >
+                            {n}
+                          </PaginationLink>
+                        </PaginationItem>
+                      )
+                    )}
+                    <PaginationItem>
+                      <PaginationNext
+                        href="#"
+                        onClick={(e) => { e.preventDefault(); setPage(p => Math.min(totalPages, p + 1)); }}
+                        aria-disabled={safePage === totalPages}
+                        className={safePage === totalPages ? "pointer-events-none opacity-50" : ""}
+                      />
+                    </PaginationItem>
+                  </PaginationContent>
+                </Pagination>
+              )}
             </>
           )}
         </CardContent>

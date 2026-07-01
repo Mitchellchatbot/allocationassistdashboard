@@ -13,8 +13,14 @@ import { TableSkeleton } from "@/components/ui/data-skeleton";
 import { LinkToVacancyDialog, type LinkLeadInput } from "@/components/sales/LinkToVacancyDialog";
 import { Input } from "@/components/ui/input";
 import { InfoIcon } from "@/components/InfoIcon";
-import { useState, useRef, useEffect, useMemo, useCallback, memo, Fragment } from "react";
+import { useState, useEffect, useMemo, useCallback, memo, Fragment } from "react";
 import type { Doctor } from "@/hooks/use-meta-leads";
+import {
+  Pagination, PaginationContent, PaginationItem, PaginationLink,
+  PaginationPrevious, PaginationNext, PaginationEllipsis,
+} from "@/components/ui/pagination";
+
+const PAGE_SIZE = 30;
 
 // Short stage explanations.
 const STAGE_HINTS: Record<string, string> = {
@@ -240,13 +246,15 @@ const LeadsPipeline = ({ embedded }: LeadsPipelineProps = {}) => {
     recruiter: searchParams.get("recruiter") ?? undefined,
     source:    searchParams.get("source")    ?? undefined,
   });
-  const sentinelRef = useRef<HTMLDivElement>(null);
   const queryClient = useQueryClient();
   const [updatedIds, setUpdatedIds] = useState<Set<string>>(new Set());
   const [pendingId,  setPendingId]  = useState<string | null>(null);
   const [errorMsg,   setErrorMsg]   = useState<string | null>(null);
   const [expandedId, setExpandedId] = useState<string | null>(null);
   const [linkLead, setLinkLead] = useState<LinkLeadInput | null>(null);
+
+  const [page, setPage] = useState(1);
+  useEffect(() => { setPage(1); }, [debouncedSearch, filters.stage, filters.recruiter, filters.badge, filters.source]);
 
   const setFilter = useCallback(<K extends keyof LeadsFilters>(key: K, value: LeadsFilters[K]) =>
     setFilters(prev => ({ ...prev, [key]: value || undefined })), []);
@@ -274,11 +282,21 @@ const LeadsPipeline = ({ embedded }: LeadsPipelineProps = {}) => {
   const {
     doctors,
     isLoading,
-    isFetchingNextPage,
-    hasNextPage,
-    fetchNextPage,
     totalCount,
   } = useZohoLeads(debouncedSearch, filters);
+
+  const totalPages  = Math.max(1, Math.ceil(doctors.length / PAGE_SIZE));
+  const safePage    = Math.min(page, totalPages);
+  const paginated   = doctors.slice((safePage - 1) * PAGE_SIZE, safePage * PAGE_SIZE);
+  const pageNumbers = useMemo((): Array<number | "..."> => {
+    if (totalPages <= 7) return Array.from({ length: totalPages }, (_, i) => i + 1);
+    const out: Array<number | "..."> = [1];
+    if (safePage > 3) out.push("...");
+    for (let i = Math.max(2, safePage - 1); i <= Math.min(totalPages - 1, safePage + 1); i++) out.push(i);
+    if (safePage < totalPages - 2) out.push("...");
+    out.push(totalPages);
+    return out;
+  }, [safePage, totalPages]);
 
   const updateStatus = useMutation({
     mutationFn: ({ zohoId, newStatus }: { zohoId: string; newStatus: string }) =>
@@ -372,24 +390,6 @@ const LeadsPipeline = ({ embedded }: LeadsPipelineProps = {}) => {
     });
   }, []);
 
-  // Infinite scroll: fetch next page when sentinel enters viewport
-  useEffect(() => {
-    const el = sentinelRef.current;
-    if (!el) return;
-
-    const observer = new IntersectionObserver(
-      ([entry]) => {
-        if (entry.isIntersecting && hasNextPage && !isFetchingNextPage) {
-          fetchNextPage();
-        }
-      },
-      { rootMargin: "200px" }
-    );
-
-    observer.observe(el);
-    return () => observer.disconnect();
-  }, [hasNextPage, isFetchingNextPage, fetchNextPage]);
-
   const body = (
     <>
       <Card className="mb-5 shadow-sm border-border/50">
@@ -428,7 +428,7 @@ const LeadsPipeline = ({ embedded }: LeadsPipelineProps = {}) => {
                 All Doctors
                 {totalCount > 0 && (
                   <span className="ml-1 normal-case font-normal">
-                    ({doctors.length.toLocaleString()} of {totalCount.toLocaleString()})
+                    ({totalCount.toLocaleString()})
                   </span>
                 )}
               </CardTitle>
@@ -569,65 +569,78 @@ const LeadsPipeline = ({ embedded }: LeadsPipelineProps = {}) => {
             )
           ) : (
             <>
-              <div className="overflow-x-auto -mx-4 px-4">
-                <Table>
-                  <TableHeader>
-                    <TableRow className="hover:bg-transparent">
-                      <TableHead className="text-[10px] uppercase tracking-wide h-8">ID</TableHead>
-                      <TableHead className="text-[10px] uppercase tracking-wide h-8">Doctor</TableHead>
-                      <TableHead className="text-[10px] uppercase tracking-wide h-8 hidden sm:table-cell">Specialty</TableHead>
-                      <TableHead className="text-[10px] uppercase tracking-wide h-8">Current Step (click to change)</TableHead>
-                      <TableHead className="text-[10px] uppercase tracking-wide h-8 hidden md:table-cell">From → To</TableHead>
-                      <TableHead className="text-[10px] uppercase tracking-wide h-8 hidden lg:table-cell">License Type</TableHead>
-                      <TableHead className="text-[10px] uppercase tracking-wide h-8 hidden lg:table-cell">Sales Consultant</TableHead>
-                      <TableHead className="text-[10px] uppercase tracking-wide h-8 text-right">Days in Step</TableHead>
-                      <TableHead className="text-[10px] uppercase tracking-wide h-8">Status</TableHead>
-                    </TableRow>
-                  </TableHeader>
-                  <TableBody>
-                    {doctors.map(doc => {
-                      const key = doc.zohoId ?? doc.id;
-                      // Pull the avatar from the WP candidate mirror if the
-                      // doctor has been linked there. Try `lead:` then `dob:`
-                      // — most pipeline rows come from the Zoho Leads module.
-                      // Fall back to a JotForm 'professional picture' answer
-                      // if no WP photo exists yet — same doctor_id keys.
-                      const photo = doc.zohoId
-                        ? (photoByZohoId.get(doc.zohoId) ?? null)
-                        : null;
-                      return (
-                        <PipelineRow
-                          key={key}
-                          doc={doc}
-                          photo={photo}
-                          leadStatuses={leadStatuses}
-                          isExpanded={expandedId === key}
-                          isPending={pendingId === doc.zohoId}
-                          isUpdated={!!doc.zohoId && updatedIds.has(doc.zohoId)}
-                          onToggleExpand={onToggleExpand}
-                          onStatusChange={onStatusChange}
-                          onLinkLead={onLinkLead}
-                        />
-                      );
-                    })}
-                  </TableBody>
-                </Table>
-              </div>
+              <Table>
+                <TableHeader>
+                  <TableRow className="hover:bg-transparent">
+                    <TableHead className="text-[10px] uppercase tracking-wide h-8">ID</TableHead>
+                    <TableHead className="text-[10px] uppercase tracking-wide h-8">Doctor</TableHead>
+                    <TableHead className="text-[10px] uppercase tracking-wide h-8 hidden sm:table-cell">Specialty</TableHead>
+                    <TableHead className="text-[10px] uppercase tracking-wide h-8">Current Step (click to change)</TableHead>
+                    <TableHead className="text-[10px] uppercase tracking-wide h-8 hidden md:table-cell">From → To</TableHead>
+                    <TableHead className="text-[10px] uppercase tracking-wide h-8 hidden lg:table-cell">License Type</TableHead>
+                    <TableHead className="text-[10px] uppercase tracking-wide h-8 hidden lg:table-cell">Sales Consultant</TableHead>
+                    <TableHead className="text-[10px] uppercase tracking-wide h-8 text-right">Days in Step</TableHead>
+                    <TableHead className="text-[10px] uppercase tracking-wide h-8">Status</TableHead>
+                  </TableRow>
+                </TableHeader>
+                <TableBody>
+                  {paginated.map(doc => {
+                    const key = doc.zohoId ?? doc.id;
+                    const photo = doc.zohoId
+                      ? (photoByZohoId.get(doc.zohoId) ?? null)
+                      : null;
+                    return (
+                      <PipelineRow
+                        key={key}
+                        doc={doc}
+                        photo={photo}
+                        leadStatuses={leadStatuses}
+                        isExpanded={expandedId === key}
+                        isPending={pendingId === doc.zohoId}
+                        isUpdated={!!doc.zohoId && updatedIds.has(doc.zohoId)}
+                        onToggleExpand={onToggleExpand}
+                        onStatusChange={onStatusChange}
+                        onLinkLead={onLinkLead}
+                      />
+                    );
+                  })}
+                </TableBody>
+              </Table>
 
-              {/* Sentinel for IntersectionObserver */}
-              <div ref={sentinelRef} className="h-1" />
-
-              {isFetchingNextPage && (
-                <div className="flex items-center justify-center gap-2 py-4 text-[11px] text-muted-foreground">
-                  <Loader2 className="h-3 w-3 animate-spin" />
-                  Loading more…
-                </div>
-              )}
-
-              {!hasNextPage && doctors.length > 0 && (
-                <p className="text-center text-[11px] text-muted-foreground py-3">
-                  All {doctors.length.toLocaleString()} doctors loaded
-                </p>
+              {totalPages > 1 && (
+                <Pagination className="mt-4">
+                  <PaginationContent>
+                    <PaginationItem>
+                      <PaginationPrevious
+                        href="#"
+                        onClick={(e) => { e.preventDefault(); setPage(p => Math.max(1, p - 1)); }}
+                        aria-disabled={safePage === 1}
+                        className={safePage === 1 ? "pointer-events-none opacity-50" : ""}
+                      />
+                    </PaginationItem>
+                    {pageNumbers.map((n, i) =>
+                      n === "..." ? (
+                        <PaginationItem key={`ell-${i}`}><PaginationEllipsis /></PaginationItem>
+                      ) : (
+                        <PaginationItem key={n}>
+                          <PaginationLink
+                            href="#"
+                            isActive={safePage === n}
+                            onClick={(e) => { e.preventDefault(); setPage(n as number); }}
+                          >{n}</PaginationLink>
+                        </PaginationItem>
+                      )
+                    )}
+                    <PaginationItem>
+                      <PaginationNext
+                        href="#"
+                        onClick={(e) => { e.preventDefault(); setPage(p => Math.min(totalPages, p + 1)); }}
+                        aria-disabled={safePage === totalPages}
+                        className={safePage === totalPages ? "pointer-events-none opacity-50" : ""}
+                      />
+                    </PaginationItem>
+                  </PaginationContent>
+                </Pagination>
               )}
             </>
           )}

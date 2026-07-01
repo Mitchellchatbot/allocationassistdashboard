@@ -261,6 +261,169 @@ export function useFormResponsesInfinite(formId: string | null, filters: FormRes
   return q;
 }
 
+// ─── numbered pagination: per-page query + filter-aware count ─────────
+
+/** Pre-resolve the `uncontacted-zoho` doctor id set via RPC so it can
+ *  be shared across a page fetch AND its count query without doubling
+ *  the Supabase round-trip. Returns `null` (filter not active),
+ *  `"empty"` (RPC returned zero ids → zero-result page), or the ids. */
+async function resolveUncontactedZohoIds(
+  filters: FormResponseFilters,
+): Promise<string[] | "empty" | null> {
+  if (filters.outreach !== "uncontacted-zoho") return null;
+  const { data, error } = await supabase.rpc("uncontacted_zoho_doctor_ids");
+  if (error) throw error;
+  const ids = Array.isArray(data) ? (data as string[]) : [];
+  return ids.length === 0 ? "empty" : ids;
+}
+
+/** Apply all filter predicates to a Supabase query builder. The
+ *  uncontacted-zoho ids must be pre-resolved; they are NOT re-fetched
+ *  here so a pagination loop can reuse a single RPC result. */
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
+function applyFormFilters(q: any, filters: FormResponseFilters, zohoIds?: string[]): any {
+  const view = filters.view ?? "live";
+  if (view === "live")          q = q.is("archived_at", null);
+  else if (view === "archived") q = q.not("archived_at", "is", null);
+
+  if (filters.date && filters.date !== "all") {
+    const days = filters.date === "7d" ? 7 : filters.date === "30d" ? 30 : 90;
+    q = q.gte("submitted_at", new Date(Date.now() - days * 86_400_000).toISOString());
+  }
+  if (filters.link === "linked")   q = q.not("doctor_id", "is", null);
+  if (filters.link === "unlinked") q = q.is("doctor_id", null);
+
+  if (filters.outreach && filters.outreach !== "all") {
+    if (filters.outreach === "mine") {
+      q = q
+        .not("outreach_status", "in", "(closed,declined)")
+        .or(filters.currentOwnerEmail
+          ? `outreach_owner.eq.${filters.currentOwnerEmail},outreach_owner.is.null`
+          : "outreach_owner.is.null");
+    } else if (filters.outreach === "uncontacted-zoho") {
+      if (zohoIds) q = q.in("doctor_id", zohoIds);
+    } else if (filters.outreach === "unqualified") {
+      q = q.is("doctor_id", null);
+    } else {
+      q = q.eq("outreach_status", filters.outreach);
+    }
+  }
+
+  const term = filters.search?.trim().toLowerCase();
+  if (term) q = q.ilike("search_text", `%${term}%`);
+  return q;
+}
+
+export const FORM_RESPONSES_PAGE_SIZE = 30;
+
+const RESP_PAGE_KEY = (formId: string | null, f: FormResponseFilters, page: number) =>
+  ["form-responses-page", formId ?? "_", page,
+   f.search ?? "", f.date ?? "all", f.link ?? "all",
+   f.sort ?? "newest", f.view ?? "live", f.outreach ?? "all",
+   f.currentOwnerEmail ?? ""] as const;
+
+const RESP_COUNT_KEY = (formId: string | null, f: FormResponseFilters) =>
+  ["form-responses-count", formId ?? "_",
+   f.search ?? "", f.date ?? "all", f.link ?? "all",
+   f.view ?? "live", f.outreach ?? "all", f.currentOwnerEmail ?? ""] as const;
+
+/** Single-page row fetch for numbered pagination. Query key includes the
+ *  page number so TanStack Query caches each page independently —
+ *  navigating back to page 1 is a cache hit. Uses `placeholderData`
+ *  so the previous page's rows stay visible while the next page loads. */
+export function useFormResponsesPage(
+  formId: string | null,
+  filters: FormResponseFilters,
+  page: number,
+) {
+  const qc = useQueryClient();
+  const q = useQuery({
+    queryKey: RESP_PAGE_KEY(formId, filters, page),
+    enabled:  !!formId,
+    placeholderData: (prev: FormResponse[] | undefined) => prev,
+    queryFn: async () => {
+      if (!formId) return [] as FormResponse[];
+      const zohoIds = await resolveUncontactedZohoIds(filters);
+      if (zohoIds === "empty") return [] as FormResponse[];
+      const offset = (page - 1) * FORM_RESPONSES_PAGE_SIZE;
+      let query = supabase
+        .from("form_responses")
+        .select("*")
+        .eq("form_id", formId)
+        .order("submitted_at", { ascending: filters.sort === "oldest", nullsFirst: false });
+      query = applyFormFilters(query, filters, zohoIds ?? undefined);
+      const { data, error } = await query.range(offset, offset + FORM_RESPONSES_PAGE_SIZE - 1);
+      if (error) throw error;
+      return (data ?? []) as FormResponse[];
+    },
+    staleTime: 15_000,
+  });
+
+  useTableSubscription("form_responses", useCallback(() => {
+    if (formId) {
+      qc.invalidateQueries({ queryKey: ["form-responses-page",  formId] });
+      qc.invalidateQueries({ queryKey: ["form-responses-count", formId] });
+    }
+  }, [qc, formId]));
+
+  return q;
+}
+
+/** Filter-aware total row count — used to compute `totalPages`. */
+export function useFormResponsesFilteredCount(
+  formId: string | null,
+  filters: FormResponseFilters,
+) {
+  return useQuery({
+    queryKey: RESP_COUNT_KEY(formId, filters),
+    enabled:  !!formId,
+    queryFn:  async () => {
+      if (!formId) return 0;
+      const zohoIds = await resolveUncontactedZohoIds(filters);
+      if (zohoIds === "empty") return 0;
+      let query = supabase
+        .from("form_responses")
+        .select("id", { count: "exact", head: true })
+        .eq("form_id", formId);
+      query = applyFormFilters(query, filters, zohoIds ?? undefined);
+      const { count, error } = await query;
+      if (error) throw error;
+      return count ?? 0;
+    },
+    staleTime: 15_000,
+  });
+}
+
+/** Fetch ALL rows matching `filters` — called by the CSV export button.
+ *  Loops in 1 000-row chunks so very large result sets don't hit
+ *  Supabase's default 1 000-row cap. The uncontacted-zoho RPC is called
+ *  only once regardless of how many chunks are needed. */
+export async function fetchAllFormResponses(
+  formId: string,
+  filters: FormResponseFilters,
+): Promise<FormResponse[]> {
+  const CHUNK = 1000;
+  const zohoIds = await resolveUncontactedZohoIds(filters);
+  if (zohoIds === "empty") return [];
+  const ids = zohoIds ?? undefined;
+
+  const all: FormResponse[] = [];
+  for (let from = 0; from < 100_000; from += CHUNK) {
+    let q = supabase
+      .from("form_responses")
+      .select("*")
+      .eq("form_id", formId)
+      .order("submitted_at", { ascending: filters.sort === "oldest", nullsFirst: false });
+    q = applyFormFilters(q, filters, ids);
+    const { data, error } = await q.range(from, from + CHUNK - 1);
+    if (error) throw error;
+    const batch = (data ?? []) as FormResponse[];
+    all.push(...batch);
+    if (batch.length < CHUNK) break;
+  }
+  return all;
+}
+
 /** Cheap per-form stat counters. Three server-side count queries —
  *  total, last-7-days, doctor-linked. Used by the KPI strip on /forms,
  *  which used to compute these client-side from the full response set. */
@@ -373,6 +536,8 @@ export function useLinkFormResponseToDoctor() {
     },
     onSuccess: () => {
       qc.invalidateQueries({ queryKey: ["form-responses-infinite"] });
+      qc.invalidateQueries({ queryKey: ["form-responses-page"] });
+      qc.invalidateQueries({ queryKey: ["form-responses-count"] });
       qc.invalidateQueries({ queryKey: ["form-stats"] });
     },
   });
@@ -414,6 +579,8 @@ export function useUpdateFormResponseOutreach() {
     // Invalidate any infinite-feed cache + the stats counters.
     onSuccess: () => {
       qc.invalidateQueries({ queryKey: ["form-responses-infinite"] });
+      qc.invalidateQueries({ queryKey: ["form-responses-page"] });
+      qc.invalidateQueries({ queryKey: ["form-responses-count"] });
       qc.invalidateQueries({ queryKey: ["form-stats"] });
     },
   });
@@ -522,6 +689,8 @@ export function useBackfillFormCsv() {
     },
     onSuccess: (_, vars) => {
       qc.invalidateQueries({ queryKey: ["form-responses-infinite", vars.formId] });
+      qc.invalidateQueries({ queryKey: ["form-responses-page",     vars.formId] });
+      qc.invalidateQueries({ queryKey: ["form-responses-count",    vars.formId] });
       qc.invalidateQueries({ queryKey: ["form-stats", vars.formId] });
       qc.invalidateQueries({ queryKey: FORMS_KEY });
     },
@@ -624,6 +793,8 @@ export function useSyncJotformHistory() {
         // debounce coalesces the in-flight writes; this kick makes
         // sure the page refetches when the chunk completes.
         qc.invalidateQueries({ queryKey: ["form-responses-infinite", formId] });
+        qc.invalidateQueries({ queryKey: ["form-responses-page",     formId] });
+        qc.invalidateQueries({ queryKey: ["form-responses-count",    formId] });
         qc.invalidateQueries({ queryKey: ["form-stats", formId] });
         if (resp.done) break;
       }
@@ -632,6 +803,8 @@ export function useSyncJotformHistory() {
     onSuccess: (_, vars) => {
       qc.invalidateQueries({ queryKey: RESP_KEY(vars.formId) });
       qc.invalidateQueries({ queryKey: ["form-responses-infinite", vars.formId] });
+      qc.invalidateQueries({ queryKey: ["form-responses-page",     vars.formId] });
+      qc.invalidateQueries({ queryKey: ["form-responses-count",    vars.formId] });
       qc.invalidateQueries({ queryKey: ["form-stats", vars.formId] });
       qc.invalidateQueries({ queryKey: FORMS_KEY });
       qc.invalidateQueries({ queryKey: ["wp-candidates"] });
@@ -689,6 +862,8 @@ export function useArchiveFormResponse() {
         },
       );
       qc.invalidateQueries({ queryKey: ["form-responses-infinite"] });
+      qc.invalidateQueries({ queryKey: ["form-responses-page"] });
+      qc.invalidateQueries({ queryKey: ["form-responses-count"] });
       qc.invalidateQueries({ queryKey: ["form-stats"] });
     },
   });
@@ -716,6 +891,8 @@ export function useRestoreFormResponse() {
         },
       );
       qc.invalidateQueries({ queryKey: ["form-responses-infinite"] });
+      qc.invalidateQueries({ queryKey: ["form-responses-page"] });
+      qc.invalidateQueries({ queryKey: ["form-responses-count"] });
       qc.invalidateQueries({ queryKey: ["form-stats"] });
     },
   });
@@ -741,6 +918,8 @@ export function useHardDeleteFormResponse() {
         },
       );
       qc.invalidateQueries({ queryKey: ["form-responses-infinite"] });
+      qc.invalidateQueries({ queryKey: ["form-responses-page"] });
+      qc.invalidateQueries({ queryKey: ["form-responses-count"] });
       qc.invalidateQueries({ queryKey: ["form-stats"] });
     },
   });

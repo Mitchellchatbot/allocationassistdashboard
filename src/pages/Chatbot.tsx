@@ -1,10 +1,11 @@
-import { useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { DashboardLayout } from "@/components/layout/DashboardLayout";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { SectionDateRange } from "@/components/SectionDateRange";
 import { useFilters } from "@/lib/filters";
 import { useChatbotStats, useChatbotInsights, useChatbotLeadDetail } from "@/hooks/use-chatbot-stats";
+import { Progress } from "@/components/ui/progress";
 import {
   ComposedChart, Bar, Line, XAxis, YAxis, Tooltip, ResponsiveContainer, CartesianGrid, Legend, BarChart,
 } from "recharts";
@@ -324,6 +325,35 @@ function ChatbotLeadDrawer({ visitorId, fallbackName, onClose }: { visitorId: st
   const { data, isLoading, error } = useChatbotLeadDetail(visitorId);
   const v = data?.visitor;
   const z = data?.zoho;
+
+  // Simulated progress: climbs toward ~90% on a decelerating curve while the
+  // request is in-flight (value += (90 - value) * 0.12 every 120ms), then
+  // snaps to 100% the moment data or error arrives. `completing` keeps the
+  // loading UI visible for 280ms so the final fill animation is visible.
+  const [progress, setProgress] = useState(0);
+  const [completing, setCompleting] = useState(false);
+  const wasLoadingRef = useRef(false);
+
+  useEffect(() => {
+    if (isLoading) {
+      wasLoadingRef.current = true;
+      setProgress(0);
+      setCompleting(false);
+      const id = setInterval(() => {
+        setProgress(p => p + (90 - p) * 0.12);
+      }, 120);
+      return () => clearInterval(id);
+    } else if (wasLoadingRef.current) {
+      wasLoadingRef.current = false;
+      setCompleting(true);
+      setProgress(100);
+      const t = setTimeout(() => setCompleting(false), 280);
+      return () => clearTimeout(t);
+    }
+  }, [isLoading]);
+
+  const showLoader = isLoading || completing;
+
   return (
     <div className="fixed inset-0 z-50">
       <div className="absolute inset-0 bg-black/40" onClick={onClose} />
@@ -338,8 +368,11 @@ function ChatbotLeadDrawer({ visitorId, fallbackName, onClose }: { visitorId: st
           </div>
 
           <div className="flex-1 overflow-y-auto p-5 space-y-6">
-            {isLoading ? (
-              <div className="flex items-center justify-center gap-2 text-[12px] text-muted-foreground py-12"><Loader2 className="h-4 w-4 animate-spin" /> Loading lead detail…</div>
+            {showLoader ? (
+              <div className="flex flex-col items-center gap-3 py-12 px-2">
+                <Progress value={progress} className="h-1" />
+                <span className="text-[12px] text-muted-foreground">Loading lead detail…</span>
+              </div>
             ) : error ? (
               <div className="flex items-start gap-2 text-[12px] text-rose-700"><AlertCircle className="h-3.5 w-3.5 shrink-0 mt-0.5" /><span>{error.message}</span></div>
             ) : !data ? null : (
