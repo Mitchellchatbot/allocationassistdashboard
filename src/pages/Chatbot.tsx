@@ -326,21 +326,23 @@ function ChatbotLeadDrawer({ visitorId, fallbackName, onClose }: { visitorId: st
   const v = data?.visitor;
   const z = data?.zoho;
 
-  // Simulated progress: climbs toward ~90% on a decelerating curve while the
-  // request is in-flight (value += (90 - value) * 0.12 every 120ms), then
-  // snaps to 100% the moment data or error arrives. `completing` keeps the
-  // loading UI visible for 280ms so the final fill animation is visible.
+  // Simulated progress: climbs toward a randomized ceiling (82–94%) on a
+  // decelerating curve while the request is in-flight, then snaps to 100%
+  // the moment data or error arrives. `completing` keeps the loading UI
+  // visible for 280ms so the final fill animation is visible.
   const [progress, setProgress] = useState(0);
   const [completing, setCompleting] = useState(false);
   const wasLoadingRef = useRef(false);
+  const ceilingRef = useRef(90);
 
   useEffect(() => {
     if (isLoading) {
+      ceilingRef.current = 50 + Math.random() * 45; // fresh ceiling per open, 50–95%
       wasLoadingRef.current = true;
       setProgress(0);
       setCompleting(false);
       const id = setInterval(() => {
-        setProgress(p => p + (90 - p) * 0.12);
+        setProgress(p => p + (ceilingRef.current - p) * 0.12);
       }, 120);
       return () => clearInterval(id);
     } else if (wasLoadingRef.current) {
@@ -369,9 +371,12 @@ function ChatbotLeadDrawer({ visitorId, fallbackName, onClose }: { visitorId: st
 
           <div className="flex-1 overflow-y-auto p-5 space-y-6">
             {showLoader ? (
-              <div className="flex flex-col items-center gap-3 py-12 px-2">
+              <div className="flex flex-col gap-2 py-12 px-2">
+                <div className="flex items-center justify-between text-[12px] text-muted-foreground">
+                  <span>Loading lead detail…</span>
+                  <span className="tabular-nums">{Math.round(progress)}%</span>
+                </div>
                 <Progress value={progress} className="h-1" />
-                <span className="text-[12px] text-muted-foreground">Loading lead detail…</span>
               </div>
             ) : error ? (
               <div className="flex items-start gap-2 text-[12px] text-rose-700"><AlertCircle className="h-3.5 w-3.5 shrink-0 mt-0.5" /><span>{error.message}</span></div>
