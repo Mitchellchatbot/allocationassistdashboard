@@ -1,6 +1,7 @@
 import { createRoot } from "react-dom/client";
 import App from "./App.tsx";
 import "./index.css";
+import { recordClientError } from "@/lib/client-errors";
 
 // ── Chunk-load recovery ──────────────────────────────────────────────────
 // When a new build ships, the old index.html cached in the user's browser
@@ -43,6 +44,13 @@ window.addEventListener("error", (event) => {
     console.error("[GlobalError]", err.message);
     if (err.stack) console.error("[GlobalError.stack]", err.stack);
   }
+  // Buffer it so the FeedbackWidget can auto-attach recent errors to a report.
+  recordClientError({
+    kind: "error",
+    message: err instanceof Error ? err.message : String(event.message ?? "Unknown error"),
+    source: event.filename ? `${event.filename}:${event.lineno}:${event.colno}` : undefined,
+    stack: err instanceof Error ? err.stack : undefined,
+  });
 });
 window.addEventListener("unhandledrejection", (event) => {
   maybeReload(event.reason);
@@ -66,6 +74,11 @@ window.addEventListener("unhandledrejection", (event) => {
   } else {
     console.error("[UnhandledRejection]", r);
   }
+  recordClientError({
+    kind: "rejection",
+    message: msg || "Unhandled promise rejection",
+    stack: r instanceof Error ? r.stack : undefined,
+  });
 });
 
 createRoot(document.getElementById("root")!).render(<App />);
