@@ -13,6 +13,15 @@ export default defineConfig(({ mode }) => ({
     },
   },
   plugins: [react(), mode === "development" && componentTagger()].filter(Boolean),
+  // Strip diagnostic console.log/info/debug/table at build time so they cost
+  // nothing in production (esbuild drops calls whose result is unused and whose
+  // args are side-effect-free). console.error/console.warn are deliberately
+  // KEPT — main.tsx's global error handlers rely on them for prod crash
+  // visibility. Dev keeps everything. This is a superset of the per-file
+  // import.meta.env.DEV gating and mops up any stray prod logs.
+  esbuild: mode === "production"
+    ? { pure: ["console.log", "console.info", "console.debug", "console.table"] }
+    : undefined,
   resolve: {
     alias: {
       "@": path.resolve(__dirname, "./src"),

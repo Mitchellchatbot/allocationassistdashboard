@@ -1203,6 +1203,18 @@ export function useZohoData() {
             .then(() => queryClient.invalidateQueries({ queryKey: ['zoho-data'] }))
             .catch(() => {});
         }
+        // Skip the full parse+aggregate when the snapshot hasn't advanced since
+        // the last successful read. parseCacheRow is a ~1100-line pass over
+        // ~28k leads + ~2900 DoBs; re-running it for an identical snapshot on
+        // every 20-min refetchInterval tick (on a long-open tab) is wasted CPU
+        // AND returns a fresh object reference that busts every downstream memo.
+        // Returning the prior result preserves referential stability and any
+        // in-place setQueryData patches (e.g. a lead status edit), which the
+        // patched cache row would reproduce identically anyway.
+        const prev = queryClient.getQueryData<ReturnType<typeof parseCacheRow>>(['zoho-data']);
+        if (prev && prev.syncedAt === cached.synced_at) {
+          return prev;
+        }
         return parseCacheRow(cached);
       }
 

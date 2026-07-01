@@ -2,7 +2,7 @@ import { DashboardLayout } from "@/components/layout/DashboardLayout";
 import { PortalDigest } from "@/components/PortalDigest";
 import { DashboardGreeting } from "@/components/DashboardGreeting";
 import { SectionDateRange } from "@/components/SectionDateRange";
-import { ExpandableKPICard } from "@/components/ExpandableKPICard";
+import { ExpandableKPICard as ExpandableKPICardBase } from "@/components/ExpandableKPICard";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { useFilteredData } from "@/hooks/use-filtered-data";
 import { useFilters } from "@/lib/filters";
@@ -37,7 +37,12 @@ const FUNNEL_STAGE_HINTS: Record<string, string> = {
 };
 import { ChannelIcon } from "@/components/ChannelIcon";
 import { Link } from "react-router-dom";
-import { useState, useMemo } from "react";
+import { useState, useMemo, memo } from "react";
+
+// Memoized wrapper so stable (useMemo'd) kpiDefs let each card skip re-render
+// when its props are referentially unchanged. Same component, same props,
+// same output — React.memo only adds a shallow-prop bail-out.
+const ExpandableKPICard = memo(ExpandableKPICardBase);
 
 const activityIcons: Record<string, React.ReactNode> = {
   lead:        <UserPlus   className="h-3 w-3 text-info" />,
@@ -179,7 +184,7 @@ const Index = () => {
 
   const winner = bestChannelData.ranked[0];
 
-  const bestChannelContent = (
+  const bestChannelContent = useMemo(() => (
     <div className="space-y-3">
       <p className="text-[10px] text-muted-foreground/80 leading-relaxed">
         Channel ranked by revenue in the selected period — the sum of each converted doctor's <strong>actual Zoho Books invoices</strong> (a {fmtAED(REVENUE_PER_CONVERSION_AED)} estimate fills in for doctors not invoiced yet).
@@ -202,10 +207,10 @@ const Index = () => {
         </div>
       </div>
     </div>
-  );
+  ), [bestChannelData, fmtAED]);
 
   // 2. Lead → Placement → conversion funnel steps
-  const conversionContent = (
+  const conversionContent = useMemo(() => (
     <div className="space-y-2.5">
       {stageConversion.length === 0
         ? <p className="text-[11px] text-muted-foreground py-2">No data</p>
@@ -226,14 +231,14 @@ const Index = () => {
         })
       }
     </div>
-  );
+  ), [stageConversion]);
 
   // 3. Pipeline Value → top open deals
   const openDeals = useMemo(() => filteredDeals
     .filter(d => d.Stage !== 'Closed Won' && d.Stage !== 'Closed Lost')
     .sort((a, b) => b.Amount - a.Amount)
     .slice(0, 5), [filteredDeals]);
-  const pipelineContent = (
+  const pipelineContent = useMemo(() => (
     <div className="divide-y divide-border/30">
       {openDeals.length === 0
         ? <p className="text-[11px] text-muted-foreground py-2">No open deals</p>
@@ -248,7 +253,7 @@ const Index = () => {
         ))
       }
     </div>
-  );
+  ), [openDeals, fmtAED]);
 
   // 4. Qualified Leads → top recently-qualified leads in the selected date range.
   // Strict qualified definition: Initial Sales Call Completed + High Priority Follow up.
@@ -258,7 +263,7 @@ const Index = () => {
     .sort((a, b) => new Date(b.Created_Time).getTime() - new Date(a.Created_Time).getTime())
     .slice(0, 5), [filteredLeads]);
   const notContactedCount = useMemo(() => filteredLeads.filter(l => l.Lead_Status === 'Not Contacted').length, [filteredLeads]);
-  const qualifiedLeadsContent = (
+  const qualifiedLeadsContent = useMemo(() => (
     <div className="space-y-2">
       <div className="divide-y divide-border/30">
         {qualifiedLeadsList.length === 0
@@ -289,7 +294,7 @@ const Index = () => {
         </Link>
       )}
     </div>
-  );
+  ), [qualifiedLeadsList, notContactedCount]);
 
   // 5. Time to Placement → avg DoB-record cycle duration. Drill-down shows
   // the 5 placements CLOSEST TO the average — the most "typical" sample so
@@ -309,7 +314,7 @@ const Index = () => {
       .sort((a, b) => a.days - b.days);
     return { durations, avgDays, representative };
   }, [placementDurations]);
-  const cycleContent = (() => {
+  const cycleContent = useMemo(() => {
     const { durations, avgDays, representative } = cycleData;
     return (
       <div className="space-y-3">
@@ -348,7 +353,7 @@ const Index = () => {
         </div>
       </div>
     );
-  })();
+  }, [cycleData]);
 
   // 6. Qualification Rate → qualified vs unqualified breakdown.
   // Strict qualified definition: Initial Sales Call Completed + High Priority Follow up.
@@ -363,12 +368,12 @@ const Index = () => {
     }
     return { qualCount, unqualCount, notIntCount, total: filteredLeads.length };
   }, [filteredLeads]);
-  const qualCats = [
+  const qualCats = useMemo(() => [
     { label: 'Qualified',           count: qualCount,   color: 'bg-success'       },
     { label: 'Unqualified',         count: unqualCount, color: 'bg-warning'        },
     { label: 'Not Interested',      count: notIntCount, color: 'bg-destructive/70' },
-  ];
-  const qualRateContent = (
+  ], [qualCount, unqualCount, notIntCount]);
+  const qualRateContent = useMemo(() => (
     <div className="space-y-2.5">
       {qualCats.map(c => (
         <div key={c.label}>
@@ -385,10 +390,10 @@ const Index = () => {
         </div>
       ))}
     </div>
-  );
+  ), [qualCats, total]);
 
   // ── KPI card definitions ─────────────────────────────────────────────────────
-  const kpiDefs = kpis.length > 0 ? [
+  const kpiDefs = useMemo(() => kpis.length > 0 ? [
     {
       title: 'Best Channel',
       value: winner ? winner.channel : '—',
@@ -451,7 +456,7 @@ const Index = () => {
       expandedContent: qualRateContent,
       expandedHeight: 220,
     },
-  ] : [];
+  ] : [], [kpis, winner, fmtAED, bestChannelContent, conversionContent, pipelineContent, qualifiedLeadsContent, cycleContent, qualRateContent]);
 
   return (
     <DashboardLayout title="Dashboard" subtitle="A quick look at how doctor placements and operations are performing" docSlug="overview/dashboard">

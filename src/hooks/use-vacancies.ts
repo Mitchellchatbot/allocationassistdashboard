@@ -530,7 +530,7 @@ export function useVacancyLinksByDoctor(doctorId: string | null | undefined) {
       if (!doctorId) return [];
       const { data, error } = await supabase
         .from("vacancy_lead_links")
-        .select("*, vacancy:vacancies(*)")
+        .select("*, vacancy:vacancies(id,hospital_name,specialty,status,priority,opened_at)")
         .eq("doctor_id", doctorId)
         .order("linked_at", { ascending: false });
       if (error) throw error;

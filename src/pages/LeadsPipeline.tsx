@@ -13,7 +13,8 @@ import { TableSkeleton } from "@/components/ui/data-skeleton";
 import { LinkToVacancyDialog, type LinkLeadInput } from "@/components/sales/LinkToVacancyDialog";
 import { Input } from "@/components/ui/input";
 import { InfoIcon } from "@/components/InfoIcon";
-import { useState, useRef, useEffect, useMemo, memo, Fragment } from "react";
+import { useState, useRef, useEffect, useMemo, useCallback, memo, Fragment } from "react";
+import type { Doctor } from "@/hooks/use-meta-leads";
 
 // Short stage explanations.
 const STAGE_HINTS: Record<string, string> = {
@@ -224,7 +225,7 @@ const LeadsPipeline = ({ embedded }: LeadsPipelineProps = {}) => {
   const urlQ = searchParams.get("q") ?? "";
   const [localSearch, setLocalSearch] = useState(urlQ);
   const search = embedded ? urlQ : localSearch;
-  const setSearch = (v: string) => {
+  const setSearch = useCallback((v: string) => {
     if (embedded) {
       const next = new URLSearchParams(searchParams);
       if (v) next.set("q", v); else next.delete("q");
@@ -232,7 +233,7 @@ const LeadsPipeline = ({ embedded }: LeadsPipelineProps = {}) => {
     } else {
       setLocalSearch(v);
     }
-  };
+  }, [embedded, searchParams, setSearchParams]);
   const debouncedSearch = useDebounce(search, 300);
   const [filters, setFilters] = useState<LeadsFilters>({
     stage:     searchParams.get("stage")     ?? undefined,
@@ -247,10 +248,10 @@ const LeadsPipeline = ({ embedded }: LeadsPipelineProps = {}) => {
   const [expandedId, setExpandedId] = useState<string | null>(null);
   const [linkLead, setLinkLead] = useState<LinkLeadInput | null>(null);
 
-  const setFilter = <K extends keyof LeadsFilters>(key: K, value: LeadsFilters[K]) =>
-    setFilters(prev => ({ ...prev, [key]: value || undefined }));
+  const setFilter = useCallback(<K extends keyof LeadsFilters>(key: K, value: LeadsFilters[K]) =>
+    setFilters(prev => ({ ...prev, [key]: value || undefined })), []);
 
-  const clearFilters = () => { setFilters({}); setSearch(""); };
+  const clearFilters = useCallback(() => { setFilters({}); setSearch(""); }, [setSearch]);
   const hasActiveFilters = search || filters.stage || filters.recruiter || filters.badge || filters.source;
 
   // Build option lists from actual Zoho data — no hardcoding
@@ -351,6 +352,25 @@ const LeadsPipeline = ({ embedded }: LeadsPipelineProps = {}) => {
     }
     return map;
   }, [doctors, photoMap, jfPhotoMap]);
+
+  // Stable per-row handlers so each PipelineRow only re-renders when its own
+  // props change (photo/isExpanded/isPending/isUpdated), not on unrelated
+  // state churn (expandedId/pendingId/updatedIds/the 2s checkmark timer).
+  const onToggleExpand = useCallback((key: string) => {
+    setExpandedId(prev => prev === key ? null : key);
+  }, []);
+  // `updateStatus.mutate` is referentially stable across renders (react-query),
+  // so this callback identity stays stable even as the mutation object churns.
+  const onStatusChange = useCallback((zohoId: string, newStatus: string) => {
+    updateStatus.mutate({ zohoId, newStatus });
+  }, [updateStatus.mutate]);
+  const onLinkLead = useCallback((doc: Doctor) => {
+    setLinkLead({
+      doctor_id:         doc.zohoId ?? doc.id,
+      doctor_name:       doc.name,
+      doctor_speciality: doc.specialty ?? null,
+    });
+  }, []);
 
   // Infinite scroll: fetch next page when sentinel enters viewport
   useEffect(() => {
@@ -566,8 +586,7 @@ const LeadsPipeline = ({ embedded }: LeadsPipelineProps = {}) => {
                   </TableHeader>
                   <TableBody>
                     {doctors.map(doc => {
-                      const st = statusConfig[doc.status];
-                      const StIcon = st.icon;
+                      const key = doc.zohoId ?? doc.id;
                       // Pull the avatar from the WP candidate mirror if the
                       // doctor has been linked there. Try `lead:` then `dob:`
                       // — most pipeline rows come from the Zoho Leads module.
@@ -577,88 +596,18 @@ const LeadsPipeline = ({ embedded }: LeadsPipelineProps = {}) => {
                         ? (photoByZohoId.get(doc.zohoId) ?? null)
                         : null;
                       return (
-                        <Fragment key={doc.zohoId ?? doc.id}>
-                          <TableRow className="hover:bg-muted/30">
-                            <TableCell className="text-[10px] font-mono text-muted-foreground py-2.5">{doc.id}</TableCell>
-                            <TableCell className="text-[12px] font-medium py-2.5">
-                              <div
-                                className="flex items-center gap-2 cursor-pointer select-none"
-                                onClick={() => {
-                                  const key = doc.zohoId ?? doc.id;
-                                  setExpandedId(prev => prev === key ? null : key);
-                                }}
-                              >
-                                <ChevronDown className={`h-3 w-3 text-muted-foreground transition-transform duration-200 shrink-0 ${expandedId === (doc.zohoId ?? doc.id) ? "rotate-180" : ""}`} />
-                                <DoctorAvatar src={photo} name={doc.name} size={24} />
-                                {doc.name}
-                              </div>
-                            </TableCell>
-                            <TableCell className="text-[11px] text-muted-foreground py-2.5 hidden sm:table-cell">{doc.specialty}</TableCell>
-                            <TableCell className="py-2.5">
-                              {doc.zohoId ? (
-                                <div className="flex items-center gap-1">
-                                  <Select
-                                    value={doc.leadStatus ?? ""}
-                                    onValueChange={(newStatus) =>
-                                      updateStatus.mutate({ zohoId: doc.zohoId!, newStatus })
-                                    }
-                                    disabled={pendingId === doc.zohoId}
-                                  >
-                                    <SelectTrigger className="h-6 w-[150px] text-[10px] border-border/50 bg-secondary/40 px-2 py-0">
-                                      <SelectValue />
-                                    </SelectTrigger>
-                                    <SelectContent>
-                                      {leadStatuses.map(s => (
-                                        <SelectItem key={s} value={s} className="text-[11px]">
-                                          {s}
-                                        </SelectItem>
-                                      ))}
-                                    </SelectContent>
-                                  </Select>
-                                  {pendingId === doc.zohoId && (
-                                    <Loader2 className="h-3 w-3 animate-spin text-muted-foreground shrink-0" />
-                                  )}
-                                  {doc.zohoId && updatedIds.has(doc.zohoId) && (
-                                    <Check className="h-3 w-3 text-success shrink-0" />
-                                  )}
-                                </div>
-                              ) : (
-                                <span className="text-[10px] text-muted-foreground">{doc.stage}</span>
-                              )}
-                            </TableCell>
-                            <TableCell className="text-[10px] text-muted-foreground py-2.5 hidden md:table-cell">{doc.origin} → {doc.destination}</TableCell>
-                            <TableCell className="text-[10px] font-medium py-2.5 hidden lg:table-cell">{doc.license}</TableCell>
-                            <TableCell className="text-[11px] text-muted-foreground py-2.5 hidden lg:table-cell">{doc.assignedTo}</TableCell>
-                            <TableCell className="text-[12px] text-right font-medium py-2.5 tabular-nums">{doc.daysInStage}</TableCell>
-                            <TableCell className="py-2.5">
-                              <div className={`inline-flex items-center gap-0.5 rounded-full border px-1.5 py-0.5 text-[9px] font-medium ${st.className}`}>
-                                <StIcon className="h-2.5 w-2.5" />{st.label}
-                              </div>
-                            </TableCell>
-                          </TableRow>
-                          {expandedId === (doc.zohoId ?? doc.id) && (
-                            <TableRow className="hover:bg-transparent">
-                              <TableCell colSpan={9} className="p-0 border-b border-border/30">
-                                <div className="border-b border-border/30 px-3 py-2 flex items-center justify-end gap-2 bg-muted/20">
-                                  <Button
-                                    size="sm"
-                                    variant="outline"
-                                    className="h-7 text-[11px]"
-                                    onClick={() => setLinkLead({
-                                      doctor_id:         doc.zohoId ?? doc.id,
-                                      doctor_name:       doc.name,
-                                      doctor_speciality: doc.specialty ?? null,
-                                    })}
-                                  >
-                                    <ClipboardList className="h-3 w-3 mr-1 text-orange-600" />
-                                    Link to vacancy
-                                  </Button>
-                                </div>
-                                <CallLogPanel doctorName={doc.name} />
-                              </TableCell>
-                            </TableRow>
-                          )}
-                        </Fragment>
+                        <PipelineRow
+                          key={key}
+                          doc={doc}
+                          photo={photo}
+                          leadStatuses={leadStatuses}
+                          isExpanded={expandedId === key}
+                          isPending={pendingId === doc.zohoId}
+                          isUpdated={!!doc.zohoId && updatedIds.has(doc.zohoId)}
+                          onToggleExpand={onToggleExpand}
+                          onStatusChange={onStatusChange}
+                          onLinkLead={onLinkLead}
+                        />
                       );
                     })}
                   </TableBody>
@@ -700,6 +649,113 @@ const LeadsPipeline = ({ embedded }: LeadsPipelineProps = {}) => {
     </DashboardLayout>
   );
 };
+
+/** One pipeline table row (+ its expandable call-log panel). Memoized so a
+ *  row only re-renders when its own inputs change — not on unrelated parent
+ *  state churn (a different row's expand toggle, another lead's pending/updated
+ *  status, or the 2s checkmark timer). Rendered output + handler behavior are
+ *  identical to the previous inline doctors.map body. */
+const PipelineRow = memo(function PipelineRow({
+  doc,
+  photo,
+  leadStatuses,
+  isExpanded,
+  isPending,
+  isUpdated,
+  onToggleExpand,
+  onStatusChange,
+  onLinkLead,
+}: {
+  doc: Doctor;
+  photo: string | null;
+  leadStatuses: string[];
+  isExpanded: boolean;
+  isPending: boolean;
+  isUpdated: boolean;
+  onToggleExpand: (key: string) => void;
+  onStatusChange: (zohoId: string, newStatus: string) => void;
+  onLinkLead: (doc: Doctor) => void;
+}) {
+  const st = statusConfig[doc.status];
+  const StIcon = st.icon;
+  return (
+    <Fragment>
+      <TableRow className="hover:bg-muted/30">
+        <TableCell className="text-[10px] font-mono text-muted-foreground py-2.5">{doc.id}</TableCell>
+        <TableCell className="text-[12px] font-medium py-2.5">
+          <div
+            className="flex items-center gap-2 cursor-pointer select-none"
+            onClick={() => onToggleExpand(doc.zohoId ?? doc.id)}
+          >
+            <ChevronDown className={`h-3 w-3 text-muted-foreground transition-transform duration-200 shrink-0 ${isExpanded ? "rotate-180" : ""}`} />
+            <DoctorAvatar src={photo} name={doc.name} size={24} />
+            {doc.name}
+          </div>
+        </TableCell>
+        <TableCell className="text-[11px] text-muted-foreground py-2.5 hidden sm:table-cell">{doc.specialty}</TableCell>
+        <TableCell className="py-2.5">
+          {doc.zohoId ? (
+            <div className="flex items-center gap-1">
+              <Select
+                value={doc.leadStatus ?? ""}
+                onValueChange={(newStatus) =>
+                  onStatusChange(doc.zohoId!, newStatus)
+                }
+                disabled={isPending}
+              >
+                <SelectTrigger className="h-6 w-[150px] text-[10px] border-border/50 bg-secondary/40 px-2 py-0">
+                  <SelectValue />
+                </SelectTrigger>
+                <SelectContent>
+                  {leadStatuses.map(s => (
+                    <SelectItem key={s} value={s} className="text-[11px]">
+                      {s}
+                    </SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+              {isPending && (
+                <Loader2 className="h-3 w-3 animate-spin text-muted-foreground shrink-0" />
+              )}
+              {doc.zohoId && isUpdated && (
+                <Check className="h-3 w-3 text-success shrink-0" />
+              )}
+            </div>
+          ) : (
+            <span className="text-[10px] text-muted-foreground">{doc.stage}</span>
+          )}
+        </TableCell>
+        <TableCell className="text-[10px] text-muted-foreground py-2.5 hidden md:table-cell">{doc.origin} → {doc.destination}</TableCell>
+        <TableCell className="text-[10px] font-medium py-2.5 hidden lg:table-cell">{doc.license}</TableCell>
+        <TableCell className="text-[11px] text-muted-foreground py-2.5 hidden lg:table-cell">{doc.assignedTo}</TableCell>
+        <TableCell className="text-[12px] text-right font-medium py-2.5 tabular-nums">{doc.daysInStage}</TableCell>
+        <TableCell className="py-2.5">
+          <div className={`inline-flex items-center gap-0.5 rounded-full border px-1.5 py-0.5 text-[9px] font-medium ${st.className}`}>
+            <StIcon className="h-2.5 w-2.5" />{st.label}
+          </div>
+        </TableCell>
+      </TableRow>
+      {isExpanded && (
+        <TableRow className="hover:bg-transparent">
+          <TableCell colSpan={9} className="p-0 border-b border-border/30">
+            <div className="border-b border-border/30 px-3 py-2 flex items-center justify-end gap-2 bg-muted/20">
+              <Button
+                size="sm"
+                variant="outline"
+                className="h-7 text-[11px]"
+                onClick={() => onLinkLead(doc)}
+              >
+                <ClipboardList className="h-3 w-3 mr-1 text-orange-600" />
+                Link to vacancy
+              </Button>
+            </div>
+            <CallLogPanel doctorName={doc.name} />
+          </TableCell>
+        </TableRow>
+      )}
+    </Fragment>
+  );
+});
 
 /** Tiny avatar for pipeline rows. Falls back to initials when there's
  *  no photo (which is most of the time — only doctors linked to a WP

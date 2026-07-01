@@ -72,6 +72,17 @@ export function useFilteredData() {
     const filteredCampaigns = zoho.rawCampaigns;
     const filteredDoB       = (zoho.rawDoctorsOnBoard ?? [])
       .filter(d => inWindow(d.Created_Time));
+    // Precompute the epoch-ms for each DoB row's Created_Time / Modified_Time
+    // once, keyed by the row object, so the two iteration sites below can reuse
+    // them instead of re-parsing the same date strings. Computed exactly as the
+    // later sites did (new Date(str).getTime()) to preserve NaN/edge behaviour.
+    const dobMs = new Map<(typeof filteredDoB)[number], { createdMs: number; modifiedMs: number }>();
+    for (const d of filteredDoB) {
+      dobMs.set(d, {
+        createdMs:  new Date(d.Created_Time).getTime(),
+        modifiedMs: new Date(d.Modified_Time as string).getTime(),
+      });
+    }
 
     // ── Re-aggregate ──────────────────────────────────────────────────────
     const agg = aggregateZohoData(
@@ -133,7 +144,7 @@ export function useFilteredData() {
       else if (dobName  && byName.has(dobName))   { lead = byName.get(dobName);   hitName++;  }
       else { missed++; continue; }
       if (!lead?.Created_Time) { missed++; continue; }
-      const days = (new Date(dob.Created_Time).getTime() - new Date(lead.Created_Time).getTime()) / 86_400_000;
+      const days = (dobMs.get(dob)!.createdMs - new Date(lead.Created_Time).getTime()) / 86_400_000;
       if (days < 0 || days > 730) { missed++; continue; }
       cycles.push({
         name: dob.Full_Name || `${dob.First_Name ?? ''} ${dob.Last_Name ?? ''}`.trim() || '—',
@@ -184,8 +195,9 @@ export function useFilteredData() {
     const placementDurations: { name: string; days: number }[] = [];
     for (const dob of filteredDoB) {
       if (!dob.Created_Time || !dob.Modified_Time) continue;
-      const created  = new Date(dob.Created_Time).getTime();
-      const modified = new Date(dob.Modified_Time).getTime();
+      const ms = dobMs.get(dob)!;
+      const created  = ms.createdMs;
+      const modified = ms.modifiedMs;
       const days = (modified - created) / 86_400_000;
       if (days <= 0 || days > 730) continue;   // sanity bounds: 0–2 years
       placementDurations.push({

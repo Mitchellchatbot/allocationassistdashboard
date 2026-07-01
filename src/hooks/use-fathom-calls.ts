@@ -484,7 +484,11 @@ export function useFathomAutoSync(): {
             .select("id", { head: true, count: "exact" })
             .is("duration_seconds", null);
           const c = count ?? 0;
-          qc.invalidateQueries({ queryKey: FATHOM_CALLS_KEY });
+          if (c < lastCount) {
+            // A row actually filled in — invalidate so newly-enriched rows
+            // replace their spinners with real data.
+            qc.invalidateQueries({ queryKey: FATHOM_CALLS_KEY });
+          }
           if (c === 0) {
             clearInterval(poll);
             setEnriching(false);

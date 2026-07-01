@@ -84,6 +84,27 @@ export function wpCandidateProfileText(c: WpCandidate | null | undefined): strin
 
 const KEY = ["wp-candidates"] as const;
 
+/** Every column on WpCandidate EXCEPT raw_acf — the explicit projection
+ *  for the paginated list query. raw_acf is the full ACF jsonb blob; no
+ *  list consumer reads it (only server-side edge functions and the
+ *  by-id detail fetch, both of which select it themselves), so we omit
+ *  it here to shrink the ~1.2k-row payload. Kept in WpCandidate field
+ *  order so it's trivial to audit against the type. */
+const WP_CANDIDATE_LIST_COLUMNS = [
+  "id", "wp_slug", "wp_link", "status", "title",
+  "full_name", "job_title", "email", "phone", "date_of_birth",
+  "nationality", "specialty", "subspecialty", "area_of_interest",
+  "years_experience", "license_status", "license_types", "family_status",
+  "has_dependents", "country_of_training", "current_location", "rank",
+  "languages", "english_level", "current_salary", "expected_salary",
+  "notice_period", "targeted_locations", "cv_url", "photo_url",
+  "education_title", "education_academy", "education_start", "education_end",
+  "education_present", "education_description",
+  "experience_title", "experience_company", "experience_start", "experience_end",
+  "experience_present", "experience_description",
+  "doctor_id", "wp_date", "wp_modified", "last_synced_at",
+].join(", ");
+
 /** Invoke an edge function and surface the REAL error on failure.
  *
  *  supabase.functions.invoke collapses ANY non-2xx response into a generic
@@ -120,7 +141,14 @@ export function useWpCandidates() {
       for (let from = 0; from < 50_000; from += PAGE) {
         const { data, error } = await supabase
           .from("wordpress_candidates")
-          .select("*")
+          // Explicit column list = every field on WpCandidate EXCEPT
+          // raw_acf (the full ACF blob). No list consumer reads raw_acf —
+          // it's only used server-side by edge functions (which issue their
+          // own selects) and by the detail dialog, which fetches via
+          // useWpCandidateById's select('*'). Dropping the heavy jsonb blob
+          // from the ~1.2k-row list payload without changing any row shape a
+          // consumer observes.
+          .select(WP_CANDIDATE_LIST_COLUMNS)
           .order("wp_date", { ascending: false, nullsFirst: false })
           .range(from, from + PAGE - 1);
         if (error) throw error;
@@ -754,38 +782,31 @@ export function normalizePhone(raw: string | null | undefined): string | null {
  *  filter chip + the per-row badge: any candidate matched on email OR
  *  phone counts. Pre-fetching the full set once is cheaper than per
  *  row lookups, and the table is ~1.2k rows. Refreshes on the shared
- *  realtime channel so newly-created candidates flip badges live. */
-export function useWpContactSet() {
-  const qc = useQueryClient();
-  const q = useQuery<{ emails: Set<string>; phones: Set<string> }>({
-    queryKey: ["wp-candidate-contact-set"],
-    queryFn: async () => {
-      const emails = new Set<string>();
-      const phones = new Set<string>();
-      const PAGE = 1000;
-      for (let from = 0; from < 50_000; from += PAGE) {
-        const { data, error } = await supabase
-          .from("wordpress_candidates")
-          .select("email, phone")
-          .range(from, from + PAGE - 1);
-        if (error) throw error;
-        const batch = (data ?? []) as Array<{ email: string | null; phone: string | null }>;
-        for (const r of batch) {
-          const e = (r.email ?? "").toLowerCase().trim();
-          if (e) emails.add(e);
-          const p = normalizePhone(r.phone);
-          if (p) phones.add(p);
-        }
-        if (batch.length < PAGE) break;
-      }
-      return { emails, phones };
-    },
-    staleTime: 60_000,
-  });
-  useTableSubscription("wordpress_candidates", useCallback(() => {
-    qc.invalidateQueries({ queryKey: ["wp-candidate-contact-set"] });
-  }, [qc]));
-  return q;
+ *  realtime channel so newly-created candidates flip badges live.
+ *
+ *  Derived from the same cached useWpCandidates() query — no extra
+ *  fetch. Building {emails,phones} from those rows is byte-for-byte the
+ *  same as the old dedicated `select("email, phone")` query: the Sets
+ *  are order-independent, so paginating in one hook vs. the other yields
+ *  identical membership. `.data` stays `undefined` until the underlying
+ *  list has loaded (so the Forms "pass everything through on first
+ *  paint" guard still fires), and the realtime refresh + 60s staleTime
+ *  now ride on useWpCandidates' own subscription. */
+export function useWpContactSet(): { data: { emails: Set<string>; phones: Set<string> } | undefined } {
+  const { data: rows } = useWpCandidates();
+  const data = useMemo(() => {
+    if (!rows) return undefined;
+    const emails = new Set<string>();
+    const phones = new Set<string>();
+    for (const r of rows) {
+      const e = (r.email ?? "").toLowerCase().trim();
+      if (e) emails.add(e);
+      const p = normalizePhone(r.phone);
+      if (p) phones.add(p);
+    }
+    return { emails, phones };
+  }, [rows]);
+  return { data };
 }
 
 /** Map of doctor_id → JotForm picture proxy URL for every form_response

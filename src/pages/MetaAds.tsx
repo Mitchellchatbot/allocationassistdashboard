@@ -1,4 +1,4 @@
-import { useState, useMemo, useEffect } from "react";
+import { useState, useMemo, useEffect, memo } from "react";
 import { motion, LayoutGroup } from "framer-motion";
 import { SectionDateRange } from "@/components/SectionDateRange";
 import { useSetAIPageContext } from "@/lib/ai-page-context";
@@ -76,7 +76,7 @@ function fmtN(v: number) {
 }
 
 // ── Flip KPI card (same 3-D flip as Dashboard) ────────────────────────────────
-function MetaKpiCard({
+const MetaKpiCard = memo(function MetaKpiCard({
   icon: Icon, label, value, sub, color, bg, back, backHeight = 220,
 }: {
   icon: React.ElementType; label: string; value: string; sub?: string;
@@ -143,7 +143,7 @@ function MetaKpiCard({
       </div>
     </div>
   );
-}
+});
 
 // ── Ad preview modal (centered, rendered via portal) ──────────────────────────
 const RANK_COLORS: Record<string, string> = {
@@ -733,7 +733,7 @@ function SectionLabel({ children }: { children: React.ReactNode }) {
 // SortableTH lives in a shared component so Marketing's channel table reuses it.
 import { SortableTH } from "@/components/SortableTH";
 
-function RankList({ items, useOwnTotal = false, onItemClick }: { items: GroupedStat[]; useOwnTotal?: boolean; onItemClick?: (label: string) => void }) {
+const RankList = memo(function RankList({ items, useOwnTotal = false, onItemClick }: { items: GroupedStat[]; useOwnTotal?: boolean; onItemClick?: (label: string) => void }) {
   if (items.length === 0) return <p className="text-[11px] text-muted-foreground py-6 text-center">No data</p>;
   const maxCount = items[0]?.count ?? 1;
   const sumCount = useOwnTotal ? items.reduce((a, r) => a + r.count, 0) : maxCount;
@@ -766,9 +766,9 @@ function RankList({ items, useOwnTotal = false, onItemClick }: { items: GroupedS
       })}
     </div>
   );
-}
+});
 
-function HBarChart({ data, color, height = 260 }: { data: GroupedStat[]; color: string; height?: number }) {
+const HBarChart = memo(function HBarChart({ data, color, height = 260 }: { data: GroupedStat[]; color: string; height?: number }) {
   if (data.length === 0) return <p className="text-[11px] text-muted-foreground text-center py-12">No data</p>;
   return (
     <ResponsiveContainer width="100%" height={height}>
@@ -782,7 +782,7 @@ function HBarChart({ data, color, height = 260 }: { data: GroupedStat[]; color: 
       </BarChart>
     </ResponsiveContainer>
   );
-}
+});
 
 // ── Main page ─────────────────────────────────────────────────────────────────
 const MetaAds = () => {
@@ -1036,6 +1036,11 @@ const MetaAds = () => {
   const bySpeciality    = data?.bySpeciality    ?? [];
   const creativeFunnels = data?.creativeFunnels ?? [];
   const trackedPct      = total > 0 ? Math.round((withUtm / total) * 100) : 0;
+  // Stabilise the sliced arrays passed to the memoized HBarChart/RankList so a
+  // parent re-render with unchanged data doesn't hand them a fresh array ref.
+  const byCampaignTop8   = useMemo(() => byCampaign.slice(0, 8),   [byCampaign]);
+  const byLocationTop10  = useMemo(() => byLocation.slice(0, 10),  [byLocation]);
+  const bySpecialityTop10 = useMemo(() => bySpeciality.slice(0, 10), [bySpeciality]);
 
   // Meta API doesn't return lead-action data for this account (their pixel
   // tracks `purchase`/`messaging`, not `lead*`), so c.leads on every campaign
@@ -1242,7 +1247,7 @@ const MetaAds = () => {
   // ── Back-side content for each KPI flip card ──────────────────────────────
   const topCampBySpend = useMemo(() => campaigns.slice(0, 5), [campaigns]);
   const maxSpendCamp = topCampBySpend[0]?.spend ?? 1;
-  const spendBack = (
+  const spendBack = useMemo(() => (
     <div className="space-y-2">
       {topCampBySpend.map(c => (
         <div key={c.id}>
@@ -1256,11 +1261,11 @@ const MetaAds = () => {
         </div>
       ))}
     </div>
-  );
+  ), [topCampBySpend, maxSpendCamp, toDisplay, currency]);
 
   const topCampByImpr = useMemo(() => campaigns.slice().sort((a, b) => b.impressions - a.impressions).slice(0, 5), [campaigns]);
   const maxImprCamp = topCampByImpr[0]?.impressions ?? 1;
-  const imprBack = (
+  const imprBack = useMemo(() => (
     <div className="space-y-2">
       {topCampByImpr.length === 0
         ? <p className="text-[10px] text-muted-foreground">No data</p>
@@ -1276,11 +1281,11 @@ const MetaAds = () => {
           </div>
         ))}
     </div>
-  );
+  ), [topCampByImpr, maxImprCamp]);
 
   const topCampByReach = useMemo(() => campaigns.slice().sort((a, b) => b.reach - a.reach).slice(0, 5), [campaigns]);
   const maxReachCamp = topCampByReach[0]?.reach ?? 1;
-  const reachBack = (
+  const reachBack = useMemo(() => (
     <div className="space-y-2">
       {topCampByReach.length === 0
         ? <p className="text-[10px] text-muted-foreground">No data</p>
@@ -1296,10 +1301,10 @@ const MetaAds = () => {
           </div>
         ))}
     </div>
-  );
+  ), [topCampByReach, maxReachCamp]);
 
   const topCampByCtr = useMemo(() => campaigns.slice().sort((a, b) => b.ctr - a.ctr).slice(0, 5), [campaigns]);
-  const clicksBack = (
+  const clicksBack = useMemo(() => (
     <div className="space-y-1.5">
       {topCampByCtr.map(c => (
         <div key={c.id} className="flex items-center justify-between">
@@ -1308,9 +1313,9 @@ const MetaAds = () => {
         </div>
       ))}
     </div>
-  );
+  ), [topCampByCtr]);
 
-  const freqBack = (
+  const freqBack = useMemo(() => (
     <div className="space-y-2">
       <p className="text-[10px] text-muted-foreground">Avg. times each unique person saw your ads</p>
       <div className="grid grid-cols-3 gap-2 pt-1">
@@ -1326,7 +1331,7 @@ const MetaAds = () => {
         ))}
       </div>
     </div>
-  );
+  ), [summary?.impressions, summary?.reach, summary?.frequency]);
 
   const topCampByCpm = useMemo(() => campaigns
     .filter(c => c.impressions > 0)
@@ -1334,7 +1339,7 @@ const MetaAds = () => {
     .sort((a, b) => b.spend - a.spend)
     .slice(0, 5), [campaigns]);
   const maxCpmSpend = topCampByCpm[0]?.spend ?? 1;
-  const cpmBack = (
+  const cpmBack = useMemo(() => (
     <div className="space-y-2">
       {topCampByCpm.length === 0
         ? <p className="text-[10px] text-muted-foreground">No data</p>
@@ -1352,7 +1357,7 @@ const MetaAds = () => {
           </div>
         ))}
     </div>
-  );
+  ), [topCampByCpm, maxCpmSpend, toDisplay, currency]);
 
   const topCampByLeads = useMemo(() => campaigns.filter(c => c.leads > 0).sort((a, b) => b.leads - a.leads).slice(0, 5), [campaigns]);
   const maxLeads = topCampByLeads[0]?.leads ?? 1;
@@ -1378,7 +1383,7 @@ const MetaAds = () => {
     }).length;
   }, [zoho?.rawDoctorsOnBoard, metaDateRange, data?.metaLeadEmails, data?.metaLeadPhones]);
   const maxZohoLeads = Math.max(...zohoMetaChannels.map(c => c.doctors), 1);
-  const leadsBack = (
+  const leadsBack = useMemo(() => (
     <div className="space-y-2">
       {topCampByLeads.length > 0
         ? topCampByLeads.map(c => (
@@ -1410,14 +1415,14 @@ const MetaAds = () => {
         : <p className="text-[10px] text-muted-foreground">No lead data</p>
       }
     </div>
-  );
+  ), [topCampByLeads, maxLeads, zohoMetaChannels, maxZohoLeads]);
 
   const topCampByCpc = useMemo(() => campaigns
     .filter(c => c.clicks > 0 && c.spend > 0)
     .map(c => ({ ...c, cpc: c.spend / c.clicks }))
     .sort((a, b) => a.cpc - b.cpc)
     .slice(0, 5), [campaigns]);
-  const cplBack = (
+  const cplBack = useMemo(() => (
     <div className="space-y-2">
       <p className="text-[9px] text-muted-foreground uppercase tracking-wide">Best cost-per-click by campaign</p>
       {topCampByCpc.length === 0
@@ -1429,7 +1434,7 @@ const MetaAds = () => {
           </div>
         ))}
     </div>
-  );
+  ), [topCampByCpc, toDisplay, currency]);
 
   return (
     <DashboardLayout title="Meta Ads" subtitle="Live performance from Facebook Marketing API · Lead form data from Supabase" docSlug="growth/meta-ads">
@@ -2254,7 +2259,7 @@ const MetaAds = () => {
                 <CardTitle className="text-[12px] font-medium text-muted-foreground uppercase tracking-wide">Leads by Campaign</CardTitle>
               </CardHeader>
               <CardContent className="px-2 sm:px-4 pb-4">
-                <HBarChart data={byCampaign.slice(0, 8)} color="hsl(170,55%,45%)" height={300} />
+                <HBarChart data={byCampaignTop8} color="hsl(170,55%,45%)" height={300} />
               </CardContent>
             </Card>
             <Card className="shadow-sm border-border/50">
@@ -2283,7 +2288,7 @@ const MetaAds = () => {
                 <CardTitle className="text-[12px] font-medium text-muted-foreground uppercase tracking-wide">Leads by Country</CardTitle>
               </CardHeader>
               <CardContent className="px-2 sm:px-4 pb-4">
-                <HBarChart data={byLocation.slice(0, 10)} color="hsl(210,75%,52%)" />
+                <HBarChart data={byLocationTop10} color="hsl(210,75%,52%)" />
               </CardContent>
             </Card>
             <Card className="shadow-sm border-border/50">
@@ -2291,7 +2296,7 @@ const MetaAds = () => {
                 <CardTitle className="text-[12px] font-medium text-muted-foreground uppercase tracking-wide">Top Specialities</CardTitle>
               </CardHeader>
               <CardContent className="px-4 pb-4">
-                <RankList items={bySpeciality.slice(0, 10)} useOwnTotal />
+                <RankList items={bySpecialityTop10} useOwnTotal />
               </CardContent>
             </Card>
           </div>

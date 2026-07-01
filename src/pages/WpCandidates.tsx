@@ -77,7 +77,7 @@ export default function WpCandidates({ embedded }: WpCandidatesProps = {}) {
   // The team's rule is stage-first: nothing lands on WordPress until an
   // explicit Publish. This is a fast local insert (no WP round trip), and
   // we auto-open the staging editor so the user fills it in, then Publishes.
-  const handleNewProfile = async () => {
+  const handleNewProfile = useCallback(async () => {
     setStagingProgress({ pct: 10, label: "Adding to staging…" });
     const creep = setInterval(() => {
       setStagingProgress(p => (p && p.pct < 85 ? { ...p, pct: p.pct + Math.max(1, (85 - p.pct) * 0.12) } : p));
@@ -94,11 +94,11 @@ export default function WpCandidates({ embedded }: WpCandidatesProps = {}) {
       setStagingProgress(null);
       toast.error(e instanceof Error ? e.message : "Failed to create");
     }
-  };
+  }, [createStaged]);
 
   // Drop a CV PDF/DOCX → Claude parses it into a staged profile, no form.
   // The same staging progress bar runs while the file uploads + extracts.
-  const handleCvFile = async (file: File | null | undefined) => {
+  const handleCvFile = useCallback(async (file: File | null | undefined) => {
     if (!file) return;
     setStagingProgress({ pct: 8, label: `Parsing ${file.name}…` });
     const creep = setInterval(() => {
@@ -120,7 +120,7 @@ export default function WpCandidates({ embedded }: WpCandidatesProps = {}) {
       setStagingProgress(null);
       toast.error(e instanceof Error ? e.message : "CV upload failed");
     }
-  };
+  }, [createFromCv]);
 
   // Search + filter state — same architecture as /forms.
   // In embedded mode the URL `q` is the source of truth (shell owns the
@@ -144,7 +144,10 @@ export default function WpCandidates({ embedded }: WpCandidatesProps = {}) {
   const [licenseFilter, setLicenseFilter] = useState<"all" | "DHA" | "DOH" | "MOH" | "SCFHS" | "QCHP">("all");
   const [renderLimit, setRenderLimit] = useState(60);
   const searchRef = useRef<HTMLInputElement | null>(null);
-  const sentinelRef = useRef<HTMLDivElement | null>(null);
+  // Single long-lived IntersectionObserver for the infinite-scroll
+  // sentinel. Held in a ref so it's created once and survives every
+  // +100 render-window bump instead of being torn down and rebuilt.
+  const ioRef = useRef<IntersectionObserver | null>(null);
 
   // Pre-build search corpus once per data refresh. Per-keystroke
   // filter is then plain string.includes() — fast at 1k+ rows.
@@ -180,17 +183,29 @@ export default function WpCandidates({ embedded }: WpCandidatesProps = {}) {
   // every row in memory). 200px rootMargin so we start rendering the
   // next batch slightly before the user reaches the bottom — avoids a
   // visible "Loading…" flicker on fast scrolls.
-  useEffect(() => {
-    const el = sentinelRef.current;
-    if (!el) return;
-    const io = new IntersectionObserver((entries) => {
-      for (const e of entries) {
-        if (e.isIntersecting) setRenderLimit(n => n + 100);
-      }
-    }, { rootMargin: "200px" });
-    io.observe(el);
-    return () => io.disconnect();
-  }, [sentinelRef.current, renderLimit]);
+  //
+  // Callback ref instead of an effect: the sentinel unmounts once the
+  // whole list is loaded (filtered.length <= renderLimit) and remounts
+  // when a filter re-expands the list. A callback ref (dis)connects a
+  // SINGLE long-lived observer on those mount/unmount transitions, so a
+  // +100 bump never tears the observer down — and re-attaches cleanly
+  // when the sentinel comes back. setRenderLimit is functional, so this
+  // callback closes over nothing reactive and stays stable for the whole
+  // component lifetime.
+  const sentinelRef = useCallback((el: HTMLDivElement | null) => {
+    if (el) {
+      const io =
+        ioRef.current ??
+        (ioRef.current = new IntersectionObserver((entries) => {
+          for (const e of entries) {
+            if (e.isIntersecting) setRenderLimit(n => n + 100);
+          }
+        }, { rootMargin: "200px" }));
+      io.observe(el);
+    } else {
+      ioRef.current?.disconnect();
+    }
+  }, []);
 
   // ⌘F to focus search.
   useEffect(() => {
@@ -206,7 +221,7 @@ export default function WpCandidates({ embedded }: WpCandidatesProps = {}) {
     return () => window.removeEventListener("keydown", onKey);
   }, []);
 
-  const handleSync = async () => {
+  const handleSync = useCallback(async () => {
     try {
       const r = await sync.mutateAsync();
       // Sync auto-links freshly added rows on its way out, so this single
@@ -217,7 +232,7 @@ export default function WpCandidates({ embedded }: WpCandidatesProps = {}) {
     } catch (e) {
       toast.error(e instanceof Error ? e.message : "Sync failed");
     }
-  };
+  }, [sync]);
 
   // KPI snapshot — taken on the FULL list, not the filter, so it stays
   // stable as the user types.
@@ -230,42 +245,16 @@ export default function WpCandidates({ embedded }: WpCandidatesProps = {}) {
   }), [candidates]);
 
   const headerButtons = (
-    <div className="flex items-center gap-2">
-      {stagingProgress ? (
-        <div className="w-[160px]" title={stagingProgress.label}>
-          <div className="text-[9px] text-slate-500 mb-0.5 truncate">{stagingProgress.label}</div>
-          <div className="h-1.5 rounded-full bg-slate-200 overflow-hidden">
-            <div className="h-full rounded-full bg-teal-500 transition-[width] duration-200 ease-out" style={{ width: `${stagingProgress.pct}%` }} />
-          </div>
-        </div>
-      ) : (
-        <>
-          <Button size="sm" onClick={handleNewProfile} disabled={createStaged.isPending}>
-            {createStaged.isPending ? <Loader2 className="h-3.5 w-3.5 mr-1 animate-spin" /> : <Plus className="h-3.5 w-3.5 mr-1" />}
-            New profile
-          </Button>
-          {/* Drop a CV → Claude builds the staging profile (no form). */}
-          <Button
-            size="sm" variant="outline"
-            onClick={() => cvInputRef.current?.click()}
-            disabled={createFromCv.isPending}
-            title="Upload a CV PDF/DOCX and build a profile straight from it"
-          >
-            {createFromCv.isPending ? <Loader2 className="h-3.5 w-3.5 mr-1 animate-spin" /> : <Upload className="h-3.5 w-3.5 mr-1" />}
-            Profile from CV
-          </Button>
-          <input
-            ref={cvInputRef} type="file" hidden
-            accept=".pdf,.doc,.docx"
-            onChange={(e) => { handleCvFile(e.target.files?.[0]); if (e.target) e.target.value = ""; }}
-          />
-        </>
-      )}
-      <Button size="sm" variant="outline" onClick={handleSync} disabled={sync.isPending}>
-        {sync.isPending ? <RefreshCw className="h-3.5 w-3.5 mr-1 animate-spin" /> : <History className="h-3.5 w-3.5 mr-1" />}
-        {sync.isPending ? "Syncing…" : "Sync from WordPress"}
-      </Button>
-    </div>
+    <HeaderButtons
+      stagingProgress={stagingProgress}
+      onNewProfile={handleNewProfile}
+      newProfilePending={createStaged.isPending}
+      cvInputRef={cvInputRef}
+      onCvFile={handleCvFile}
+      cvPending={createFromCv.isPending}
+      onSync={handleSync}
+      syncPending={sync.isPending}
+    />
   );
 
   const body = (
@@ -428,6 +417,69 @@ export default function WpCandidates({ embedded }: WpCandidatesProps = {}) {
   if (embedded) return withDialog;
   return <DashboardLayout>{withDialog}</DashboardLayout>;
 }
+
+/**
+ * Page-header action buttons (New profile / Profile from CV / Sync),
+ * plus the staging progress bar that replaces them mid-create.
+ *
+ * Extracted + memoized so it only re-renders when one of its inputs
+ * actually changes (staging progress, a mutation's pending flag, or a
+ * handler identity) — not on every keystroke-driven search/renderLimit
+ * re-render of the parent. Rendered output is byte-for-byte identical to
+ * the inline JSX it replaced.
+ */
+const HeaderButtons = memo(function HeaderButtons({
+  stagingProgress, onNewProfile, newProfilePending, cvInputRef,
+  onCvFile, cvPending, onSync, syncPending,
+}: {
+  stagingProgress: { pct: number; label: string } | null;
+  onNewProfile: () => void;
+  newProfilePending: boolean;
+  cvInputRef: React.RefObject<HTMLInputElement | null>;
+  onCvFile: (file: File | null | undefined) => void;
+  cvPending: boolean;
+  onSync: () => void;
+  syncPending: boolean;
+}) {
+  return (
+    <div className="flex items-center gap-2">
+      {stagingProgress ? (
+        <div className="w-[160px]" title={stagingProgress.label}>
+          <div className="text-[9px] text-slate-500 mb-0.5 truncate">{stagingProgress.label}</div>
+          <div className="h-1.5 rounded-full bg-slate-200 overflow-hidden">
+            <div className="h-full rounded-full bg-teal-500 transition-[width] duration-200 ease-out" style={{ width: `${stagingProgress.pct}%` }} />
+          </div>
+        </div>
+      ) : (
+        <>
+          <Button size="sm" onClick={onNewProfile} disabled={newProfilePending}>
+            {newProfilePending ? <Loader2 className="h-3.5 w-3.5 mr-1 animate-spin" /> : <Plus className="h-3.5 w-3.5 mr-1" />}
+            New profile
+          </Button>
+          {/* Drop a CV → Claude builds the staging profile (no form). */}
+          <Button
+            size="sm" variant="outline"
+            onClick={() => cvInputRef.current?.click()}
+            disabled={cvPending}
+            title="Upload a CV PDF/DOCX and build a profile straight from it"
+          >
+            {cvPending ? <Loader2 className="h-3.5 w-3.5 mr-1 animate-spin" /> : <Upload className="h-3.5 w-3.5 mr-1" />}
+            Profile from CV
+          </Button>
+          <input
+            ref={cvInputRef} type="file" hidden
+            accept=".pdf,.doc,.docx"
+            onChange={(e) => { onCvFile(e.target.files?.[0]); if (e.target) e.target.value = ""; }}
+          />
+        </>
+      )}
+      <Button size="sm" variant="outline" onClick={onSync} disabled={syncPending}>
+        {syncPending ? <RefreshCw className="h-3.5 w-3.5 mr-1 animate-spin" /> : <History className="h-3.5 w-3.5 mr-1" />}
+        {syncPending ? "Syncing…" : "Sync from WordPress"}
+      </Button>
+    </div>
+  );
+});
 
 const CandidateRow = memo(function CandidateRow({ candidate, highlight, onOpen }: { candidate: WpCandidate; highlight: string; onOpen: (id: number) => void }) {
   const subtitle = [candidate.job_title, candidate.country_of_training].filter(Boolean).join(" · ");

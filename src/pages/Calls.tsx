@@ -185,43 +185,48 @@ export default function Calls() {
   // unchanged (setActiveId is stable, so this closure never changes identity).
   const openCall = useCallback((fathomId: string) => setActiveId(fathomId), []);
 
+  // Pre-decorate every table row once per data change — the page re-renders
+  // every second (live sync pill), so we keep the per-row regex/parse work out
+  // of the render path. This is the SINGLE parse pass for normActions/summaryTldr:
+  // the recap memos below derive from these rows instead of re-parsing `calls`.
+  const decoratedRows = useMemo(
+    () => (calls ?? []).map(c => {
+      const actions = normActions(c.action_items);
+      const tldr    = summaryTldr(c.summary);
+      return {
+        call:          c,
+        actions,
+        tldr,
+        hasSummary:    !!c.summary,
+        hasTranscript: !!(c.transcript_plaintext || c.transcript_segments?.length),
+        actionCount:   actions.length,
+      };
+    }),
+    [calls],
+  );
+
   // Recap panels built from the loaded list (newest first) — an at-a-glance
   // "what to follow up on + what just happened" without opening each call.
   // Both draw from the most recent calls that actually carry the data, so the
-  // panels never pad themselves with empty rows.
+  // panels never pad themselves with empty rows. Derived from decoratedRows
+  // (same order) so normActions/summaryTldr are only parsed once, above.
   const recentActionGroups = useMemo(() => {
     const groups: Array<{ call: FathomCall; items: NormAction[] }> = [];
-    for (const c of calls ?? []) {
-      const items = normActions(c.action_items);
-      if (items.length) groups.push({ call: c, items });
+    for (const r of decoratedRows) {
+      if (r.actions.length) groups.push({ call: r.call, items: r.actions });
       if (groups.length >= 3) break;
     }
     return groups;
-  }, [calls]);
+  }, [decoratedRows]);
 
   const latestSummaries = useMemo(() => {
     const out: Array<{ call: FathomCall; tldr: string }> = [];
-    for (const c of calls ?? []) {
-      const tldr = summaryTldr(c.summary);
-      if (tldr) out.push({ call: c, tldr });
+    for (const r of decoratedRows) {
+      if (r.tldr) out.push({ call: r.call, tldr: r.tldr });
       if (out.length >= 3) break;
     }
     return out;
-  }, [calls]);
-
-  // Pre-decorate every table row once per data change — the page re-renders
-  // every second (live sync pill), so we keep the per-row regex/parse work out
-  // of the render path.
-  const decoratedRows = useMemo(
-    () => (calls ?? []).map(c => ({
-      call:          c,
-      tldr:          summaryTldr(c.summary),
-      hasSummary:    !!c.summary,
-      hasTranscript: !!(c.transcript_plaintext || c.transcript_segments?.length),
-      actionCount:   normActions(c.action_items).length,
-    })),
-    [calls],
-  );
+  }, [decoratedRows]);
 
   return (
     <DashboardLayout
@@ -777,12 +782,23 @@ function CallDetailDrawer({ fathomId, onClose }: { fathomId: string; onClose: ()
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [call?.fathom_id, call?.summary, hasTranscript]);
 
+  // Precompute the lowercased text per segment ONCE per call so the per-keystroke
+  // filter compares against the cache instead of calling seg.text.toLowerCase()
+  // for every segment on every keystroke. `undefined` mirrors the original
+  // `seg.text?.toLowerCase()` short-circuit (nullish text → excluded from matches).
+  const segmentsLower = useMemo(
+    () => call?.transcript_segments?.map(seg =>
+      seg.text != null ? seg.text.toLowerCase() : undefined,
+    ) ?? null,
+    [call],
+  );
+
   const filteredSegments = useMemo(() => {
     if (!call?.transcript_segments) return null;
     const s = searchInTranscript.trim().toLowerCase();
     if (!s) return call.transcript_segments;
-    return call.transcript_segments.filter(seg => seg.text?.toLowerCase().includes(s));
-  }, [call, searchInTranscript]);
+    return call.transcript_segments.filter((seg, i) => segmentsLower?.[i]?.includes(s));
+  }, [call, searchInTranscript, segmentsLower]);
 
   const TABS = [
     { key: "summary"    as const, label: "Summary",      icon: <Sparkles    className="h-3.5 w-3.5" />, dot: !!call?.summary, dotColor: "bg-violet-500" },

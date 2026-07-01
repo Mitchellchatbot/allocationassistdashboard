@@ -5,7 +5,7 @@ import logo from "@/assets/logo.png";
 import { useAuth } from "@/hooks/use-auth";
 import { useWorkerEntries, useSaveEntries, useUpdateEntry, useDeleteEntry, CALL_TYPES, type WorkerEntry } from "@/hooks/use-worker-entries";
 import { fetchWeeklySalesRaw } from "@/hooks/use-weekly-sales";
-import { useZohoData } from "@/hooks/use-zoho-data";
+import { useZohoData, type ZohoLead } from "@/hooks/use-zoho-data";
 import { useQuery } from "@tanstack/react-query";
 import { getPresetRange, type TimeRangePreset } from "@/lib/filters";
 import {
@@ -744,6 +744,40 @@ type DoctorMatch = {
   country: string;
 };
 
+// Shared lowercased-name index over zoho.rawLeads. Each editable row's
+// DoctorSearchInput used to re-scan all rawLeads per keystroke, recomputing
+// `Full_Name ?? ""`, `.toLowerCase()` and the DoctorMatch payload for every
+// lead every time. That per-lead work is identical across rows and depends
+// only on the rawLeads reference, so we precompute it ONCE — keyed on that
+// reference (which useZohoData keeps stable across renders/rows until a new
+// sync) — and reuse it in every row. Order and derived values mirror the
+// original loop exactly, so per-row filtering returns identical suggestions.
+type LeadIndexEntry = { name: string; lower: string; match: DoctorMatch };
+
+let _leadIndexRef: readonly ZohoLead[] | null = null;
+let _leadIndex: LeadIndexEntry[] = [];
+
+function getLeadIndex(rawLeads: readonly ZohoLead[]): LeadIndexEntry[] {
+  if (rawLeads === _leadIndexRef) return _leadIndex;
+  const built: LeadIndexEntry[] = new Array(rawLeads.length);
+  for (let i = 0; i < rawLeads.length; i++) {
+    const l = rawLeads[i];
+    const name = l.Full_Name ?? "";
+    built[i] = {
+      name,
+      lower: name.toLowerCase(),
+      match: {
+        name,
+        specialty: l.Specialty_New || l.Specialty || "",
+        country:   l.Country_of_Specialty_training ?? "",
+      },
+    };
+  }
+  _leadIndexRef = rawLeads;
+  _leadIndex = built;
+  return built;
+}
+
 function DoctorSearchInput({
   value, onPick, onChangeText,
 }: { value: string; onPick: (d: DoctorMatch) => void; onChangeText: (v: string) => void }) {
@@ -754,19 +788,18 @@ function DoctorSearchInput({
   const matches = useMemo<DoctorMatch[]>(() => {
     const q = value.trim().toLowerCase();
     if (q.length < 2 || !zoho?.rawLeads) return [];
+    // Reuse the shared precomputed index instead of re-scanning rawLeads and
+    // recomputing per-lead name/toLowerCase/payload in every row. The filter
+    // logic below is byte-for-byte equivalent to the original inline loop.
+    const index = getLeadIndex(zoho.rawLeads);
     const seen = new Set<string>();
     const out: DoctorMatch[] = [];
-    for (const l of zoho.rawLeads) {
+    for (const it of index) {
       if (out.length >= 8) break;
-      const name = l.Full_Name ?? "";
-      if (!name || seen.has(name.toLowerCase())) continue;
-      if (name.toLowerCase().includes(q)) {
-        seen.add(name.toLowerCase());
-        out.push({
-          name,
-          specialty: l.Specialty_New || l.Specialty || "",
-          country:   l.Country_of_Specialty_training ?? "",
-        });
+      if (!it.name || seen.has(it.lower)) continue;
+      if (it.lower.includes(q)) {
+        seen.add(it.lower);
+        out.push(it.match);
       }
     }
     return out;

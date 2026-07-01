@@ -51,7 +51,7 @@ export function useWorkerEntries(filter: DateFilter = "all", userId?: string) {
     queryFn: async () => {
       let q = supabase
         .from("worker_entries")
-        .select("*")
+        .select("id, call_date, call_type, status, name, specialty, qualifications, state, meeting_type, country_of_training, notes, worker_email, created_by, created_at")
         .order("call_date", { ascending: false })
         .order("created_at", { ascending: false });
 

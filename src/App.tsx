@@ -1,4 +1,4 @@
-import { Suspense, lazy as reactLazy, type ComponentType } from "react";
+import { Suspense, useEffect, lazy as reactLazy, type ComponentType } from "react";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { restoreQueryCache, startQueryPersist } from "@/lib/query-persist";
 import { BrowserRouter, Route, Routes, Outlet, useLocation, Navigate } from "react-router-dom";
@@ -173,7 +173,38 @@ function requiredPageForPath(pathname: string): string {
   return pathname;
 }
 
-const App = () => (
+// One-shot guard: prefetch the likely-next route chunks only once per page
+// load, even if <App/> ever remounts.
+let didPrefetchRoutes = false;
+
+const App = () => {
+  // On idle after mount, warm the module cache for the highest-traffic routes
+  // by calling the SAME dynamic-import factories React.lazy uses above. React
+  // .lazy reuses the resolved import promise from the module registry, so this
+  // is purely a cache warm-up: render order and Suspense fallbacks are
+  // unchanged, and it never renders or navigates anything. Best-effort only —
+  // failures are swallowed (the real lazy() path handles chunk-miss reloads).
+  useEffect(() => {
+    if (didPrefetchRoutes) return;
+    didPrefetchRoutes = true;
+
+    const prefetch = () => {
+      void import("./pages/Index").catch(() => {});
+      void import("./pages/Sales").catch(() => {});
+      void import("./pages/Doctors").catch(() => {});
+    };
+
+    const ric = (window as unknown as {
+      requestIdleCallback?: (cb: () => void) => number;
+    }).requestIdleCallback;
+    if (typeof ric === "function") {
+      ric(prefetch);
+    } else {
+      window.setTimeout(prefetch, 2000);
+    }
+  }, []);
+
+  return (
   <QueryClientProvider client={queryClient}>
     <TooltipProvider>
       <AIPageContextProvider>
@@ -246,6 +277,7 @@ const App = () => (
       </AIPageContextProvider>
     </TooltipProvider>
   </QueryClientProvider>
-);
+  );
+};
 
 export default App;

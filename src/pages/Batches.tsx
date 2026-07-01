@@ -1103,6 +1103,21 @@ function BatchDialog({ target, onTargetChange, batches, suggestedSpecialty }: {
   const effectiveSpecialty = batch?.specialty
     ?? (batch && batch.kind !== "specialty_of_day" ? suggestedSpecialty : null);
 
+  // Eligible + website-only pool, scored and sorted by readiness. This is the
+  // exact base pool the ranked candidate list starts from and the one
+  // Auto-pick draws its top-N from — factored out here so a click doesn't
+  // re-filter + re-score the whole roster. Search/specialty toggles do NOT
+  // enter here (they shape the list downstream), so this stays keyed only on
+  // its real inputs. Order matches the inline sort it replaces exactly.
+  const rankedEligiblePool = useMemo(() => {
+    if (!batch) return [] as { d: DoctorOption; score: number }[];
+    return allDoctors
+      .filter(d => d.eligible && !batch.doctor_ids.includes(d.id))
+      .filter(d => !websiteOnly || d.onWebsite)
+      .map(d => ({ d, score: scoreDoctor(d, batch, effectiveSpecialty).score }))
+      .sort((a, b) => b.score - a.score);
+  }, [batch, allDoctors, websiteOnly, effectiveSpecialty]);
+
   const q = search.trim().toLowerCase();
   const candidatePool = useMemo(() => {
     if (!batch) return [];
@@ -1188,12 +1203,9 @@ function BatchDialog({ target, onTargetChange, batches, suggestedSpecialty }: {
     if (!batch) return;
     const need = Math.max(0, expectedCount - batch.doctor_ids.length);
     if (need === 0) { toast.info("Already at the target count."); return; }
-    // Match what the list shows — website-only when that toggle is on.
-    const pool = allDoctors
-      .filter(d => d.eligible && !batch.doctor_ids.includes(d.id))
-      .filter(d => !websiteOnly || d.onWebsite)
-      .map(d => ({ d, score: scoreDoctor(d, batch, effectiveSpecialty).score }))
-      .sort((a, b) => b.score - a.score)
+    // Match what the list shows — website-only when that toggle is on. Reuses
+    // the shared, already-scored/sorted eligible pool instead of rebuilding it.
+    const pool = rankedEligiblePool
       .slice(0, need)
       .map(x => x.d.id);
     if (pool.length === 0) { toast.error("No eligible candidates to auto-pick."); return; }
