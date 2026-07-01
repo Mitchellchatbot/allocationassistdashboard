@@ -410,7 +410,7 @@ export function DashboardLayout({ children, title: pageTitle, subtitle: pageSubt
               {subtitle && <p className="text-[13px] text-muted-foreground mt-1">{subtitle}</p>}
             </div>
 
-            <main className="flex-1 overflow-auto px-4 lg:px-6 pb-6 pt-5">
+            <main className="flex-1 overflow-auto overscroll-contain px-4 lg:px-6 pb-6 pt-5">
               <div className="max-w-[1400px] mx-auto">
                 <PageTransition>{children}</PageTransition>
               </div>

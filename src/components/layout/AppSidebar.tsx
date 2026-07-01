@@ -27,12 +27,13 @@ import {
   Send,
   type LucideIcon,
 } from "lucide-react";
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useMemo, useState } from "react";
+import { motion, LayoutGroup } from "framer-motion";
 import logo from "@/assets/logo.png";
 import { NavLink } from "@/components/NavLink";
 import { useAuth } from "@/hooks/use-auth";
 import { canSeeFinance } from "@/lib/finance-access";
-import { useNavigate, Link } from "react-router-dom";
+import { useNavigate, useLocation, Link } from "react-router-dom";
 import {
   Sidebar,
   SidebarContent,
@@ -190,6 +191,36 @@ export function AppSidebar() {
 
   const visibleAdmin: NavSection | null = role === "admin" ? ADMIN_SECTION : null;
 
+  // ── Active-item tracking for the sliding highlight ──────────────────────────
+  const { pathname } = useLocation();
+  // Optimistic highlight: light the clicked tab the INSTANT it's clicked, before
+  // the route (and its lazy page chunk) resolve — so the pill glides right away
+  // instead of waiting. Cleared once the real route lands (they then agree).
+  const [optimistic, setOptimistic] = useState<string | null>(null);
+  useEffect(() => { setOptimistic(null); }, [pathname]);
+
+  const allUrls = useMemo(() => {
+    const urls = visibleSections.flatMap(s => s.items.map(i => i.url));
+    if (visibleAdmin) urls.push(...visibleAdmin.items.map(i => i.url));
+    return urls;
+  }, [visibleSections, visibleAdmin]);
+
+  // Best match for the current path: exact for "/", else the longest url-prefix
+  // (so /doctors/123 still lights /doctors) — mirrors NavLink's own matching.
+  const activeFromPath = useMemo(() => {
+    if (allUrls.includes(pathname)) return pathname;
+    let best: string | null = null;
+    for (const u of allUrls) {
+      if (u === "/") continue;
+      if (pathname === u || pathname.startsWith(u + "/")) {
+        if (!best || u.length > best.length) best = u;
+      }
+    }
+    return best ?? (pathname === "/" ? "/" : null);
+  }, [allUrls, pathname]);
+
+  const activeUrl = optimistic ?? activeFromPath;
+
   const handleSignOut = async () => {
     await signOut();
     navigate("/login", { replace: true });
@@ -228,6 +259,7 @@ export function AppSidebar() {
           </button>
         )}
 
+        <LayoutGroup id="aa-sidebar-nav">
         {visibleSections.map(section => {
           const isCollapsed = tourActive ? false : !!collapsedMap[section.label];
           return (
@@ -244,7 +276,7 @@ export function AppSidebar() {
                 <SidebarGroupContent>
                   <SidebarMenu>
                     {section.items.map(item => (
-                      <NavRow key={item.url} item={item} collapsed={collapsed} badgeCtx={badgeCtx} accent={section.accent} />
+                      <NavRow key={item.url} item={item} collapsed={collapsed} badgeCtx={badgeCtx} accent={section.accent} isActive={item.url === activeUrl} onSelect={setOptimistic} />
                     ))}
                   </SidebarMenu>
                 </SidebarGroupContent>
@@ -267,13 +299,14 @@ export function AppSidebar() {
               <SidebarGroupContent>
                 <SidebarMenu>
                   {visibleAdmin.items.map(item => (
-                    <NavRow key={item.url} item={item} collapsed={collapsed} badgeCtx={badgeCtx} accent={visibleAdmin.accent} />
+                    <NavRow key={item.url} item={item} collapsed={collapsed} badgeCtx={badgeCtx} accent={visibleAdmin.accent} isActive={item.url === activeUrl} onSelect={setOptimistic} />
                   ))}
                 </SidebarMenu>
               </SidebarGroupContent>
             )}
           </SidebarGroup>
         )}
+        </LayoutGroup>
       </SidebarContent>
 
       <SidebarFooter className="px-2 pb-3 border-t border-white/10 pt-3">
@@ -354,20 +387,35 @@ function CollapsibleHeader({
   );
 }
 
-function NavRow({ item, collapsed, badgeCtx, accent }: { item: NavItem; collapsed: boolean; badgeCtx: BadgeContext; accent: string }) {
+function NavRow({ item, collapsed, badgeCtx, accent, isActive, onSelect }: { item: NavItem; collapsed: boolean; badgeCtx: BadgeContext; accent: string; isActive: boolean; onSelect: (url: string) => void }) {
   const badge = item.badge ? item.badge(badgeCtx) : 0;
   // Onboarding-tour hook so HI_TOUR_STEPS can spotlight each sidebar entry.
   // e.g. /my-workspace → data-tour="sidebar-my-workspace".
   const tourId = `sidebar-${item.url.replace(/^\//, "").replace(/\//g, "-") || "dashboard"}`;
   return (
-    <SidebarMenuItem>
+    <SidebarMenuItem className="relative">
+      {/* Sliding highlight — one shared pill (layoutId) glides between items with
+          a spring bounce. `isActive` is driven optimistically off the clicked
+          item, so it moves the instant you click, before the route resolves. */}
+      {isActive && (
+        <motion.span
+          layoutId="aa-sidebar-active"
+          initial={false}
+          transition={{ type: "spring", stiffness: 480, damping: 26 }}
+          className="absolute inset-0 rounded-full bg-white/10 shadow-[inset_0_0_0_1px_rgba(255,255,255,0.12)] pointer-events-none"
+        />
+      )}
       <SidebarMenuButton asChild>
         <NavLink
           to={item.url}
           end={item.url === "/"}
+          onClick={() => onSelect(item.url)}
           data-tour={tourId}
-          className="rounded-full px-3 py-1.5 text-[13px] text-sidebar-foreground/75 hover:bg-sidebar-accent/70 hover:text-sidebar-accent-foreground transition-all duration-150"
-          activeClassName="bg-white/10 text-white font-medium shadow-[inset_0_0_0_1px_rgba(255,255,255,0.12)]"
+          className={`relative z-10 rounded-full px-3 py-1.5 text-[13px] transition-colors duration-150 ${
+            isActive
+              ? "text-white font-medium"
+              : "text-sidebar-foreground/75 hover:bg-sidebar-accent/70 hover:text-sidebar-accent-foreground"
+          }`}
         >
           {/* Icon sits inside a small filled-circle that picks up the
               section's accent colour. White glyph inside reads against

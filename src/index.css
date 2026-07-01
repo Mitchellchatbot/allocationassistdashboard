@@ -93,7 +93,9 @@
 
 .aa-fade-up {
   animation: aa-fade-up 0.35s cubic-bezier(0.4, 0, 0.2, 1) both;
-  will-change: transform, opacity;
+  /* No permanent will-change: on list-heavy pages it would pin hundreds of
+     compositor layers (memory + scroll jank). transform/opacity animate
+     smoothly on the compositor without the hint. */
 }
 
 @media (prefers-reduced-motion: reduce) {
@@ -169,6 +171,8 @@
     inset 0 1px 0 hsl(155, 95%, 80% / 0.35),
     inset 0 -1px 0 hsl(175, 50%, 8% / 0.7),
     inset 1px 0 0 hsl(155, 90%, 70% / 0.18);
-  backdrop-filter: blur(22px) saturate(180%);
-  -webkit-backdrop-filter: blur(22px) saturate(180%);
+  /* Intentionally NO backdrop-filter. The panel base above is fully opaque, so
+     a blur() showed nothing — yet it forced the compositor to re-sample + blur
+     the backdrop on every scroll frame, which is the "jelly"/rubbery scroll.
+     Dropping it is a pure win: identical look, no per-frame blur cost. */
 }
