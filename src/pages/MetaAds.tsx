@@ -1,4 +1,4 @@
-import { useState, useMemo, useEffect, memo } from "react";
+import { useState, useMemo, useEffect, memo, lazy, Suspense } from "react";
 import { motion, LayoutGroup } from "framer-motion";
 import { SectionDateRange } from "@/components/SectionDateRange";
 import { useSetAIPageContext } from "@/lib/ai-page-context";
@@ -15,10 +15,6 @@ import { MetaLeadsModal } from "@/components/MetaLeadsModal";
 import { useZohoData, displaySource } from "@/hooks/use-zoho-data";
 import { useFilters } from "@/lib/filters";
 import { useQueryClient } from "@tanstack/react-query";
-import {
-  AreaChart, Area, BarChart, Bar, PieChart, Pie, Cell,
-  XAxis, YAxis, CartesianGrid, Tooltip, Legend, ResponsiveContainer,
-} from "recharts";
 import { InfoIcon } from "@/components/InfoIcon";
 import {
   Users, Megaphone, Globe, Loader2, TrendingUp, DollarSign,
@@ -39,20 +35,6 @@ const META_KPI_HINTS: Record<string, { meaning: string; source: string }> = {
   "Cost Per Lead (forms)":   { meaning: "Meta spend ÷ form-lead submissions. The honest CPL.",                           source: "Meta API + Supabase meta_leads." },
   "Cost Per Qualified":      { meaning: 'Meta spend ÷ qualified Meta leads (Zoho Lead_Status — same as the Sales tracker). "Contact in Future" excluded.', source: "Meta API spend + Zoho leads where Lead_Source = Meta." },
   "Cost per Conversion":     { meaning: "Meta spend ÷ conversions (Doctors on Board attributed to the Meta channel).", source: "Meta API + Zoho Doctors on Board module." },
-};
-
-// ── Colours ───────────────────────────────────────────────────────────────────
-const PIE_COLORS = [
-  "hsl(170,55%,45%)", "hsl(210,75%,52%)", "hsl(340,70%,55%)",
-  "hsl(38,92%,50%)",  "hsl(270,60%,55%)", "hsl(158,50%,42%)",
-  "hsl(0,65%,55%)",   "hsl(200,80%,48%)", "hsl(50,85%,50%)",
-  "hsl(290,55%,52%)",
-];
-
-const tip = {
-  backgroundColor: "#fff", border: "1px solid hsl(220,14%,90%)",
-  borderRadius: "8px", fontSize: "11px",
-  boxShadow: "0 4px 12px rgba(0,0,0,0.08)", padding: "8px 12px",
 };
 
 // ── Formatters ────────────────────────────────────────────────────────────────
@@ -768,21 +750,13 @@ const RankList = memo(function RankList({ items, useOwnTotal = false, onItemClic
   );
 });
 
-const HBarChart = memo(function HBarChart({ data, color, height = 260 }: { data: GroupedStat[]; color: string; height?: number }) {
-  if (data.length === 0) return <p className="text-[11px] text-muted-foreground text-center py-12">No data</p>;
-  return (
-    <ResponsiveContainer width="100%" height={height}>
-      <BarChart data={data} layout="vertical" barCategoryGap="20%">
-        <CartesianGrid strokeDasharray="3 3" stroke="hsl(220,14%,92%)" />
-        <XAxis type="number" fontSize={10} tickLine={false} axisLine={false} stroke="hsl(220,10%,55%)" />
-        <YAxis dataKey="label" type="category" fontSize={9} tickLine={false} axisLine={false} width={130} stroke="hsl(220,10%,55%)"
-          tickFormatter={(v: string) => v.length > 22 ? v.slice(0, 22) + "…" : v} />
-        <Tooltip contentStyle={tip} formatter={(v: number) => [v.toLocaleString(), "Leads"]} />
-        <Bar dataKey="count" fill={color} radius={[0, 4, 4, 0]} name="Leads" />
-      </BarChart>
-    </ResponsiveContainer>
-  );
-});
+// ── Charts (recharts) are lazy-loaded so the vendor-charts chunk is deferred ────
+// until a chart first mounts on this page. All recharts JSX lives in the
+// co-located ./MetaAdsCharts module (recharts stays whole in that one file).
+const HBarChart          = lazy(() => import("./MetaAdsCharts").then(m => ({ default: m.HBarChart })));
+const DailySpendClicksChart = lazy(() => import("./MetaAdsCharts").then(m => ({ default: m.DailySpendClicksChart })));
+const AgeGenderChart     = lazy(() => import("./MetaAdsCharts").then(m => ({ default: m.AgeGenderChart })));
+const PlatformPieChart   = lazy(() => import("./MetaAdsCharts").then(m => ({ default: m.PlatformPieChart })));
 
 // ── Main page ─────────────────────────────────────────────────────────────────
 const MetaAds = () => {
@@ -1606,29 +1580,9 @@ const MetaAds = () => {
                 <CardTitle className="text-[12px] font-medium text-muted-foreground uppercase tracking-wide">Daily Spend & Clicks</CardTitle>
               </CardHeader>
               <CardContent className="px-2 pb-4">
-                <ResponsiveContainer width="100%" height={220}>
-                  <AreaChart data={dailySeries}>
-                    <defs>
-                      <linearGradient id="spG" x1="0" y1="0" x2="0" y2="1">
-                        <stop offset="5%"  stopColor="hsl(170,55%,45%)" stopOpacity={0.18} />
-                        <stop offset="95%" stopColor="hsl(170,55%,45%)" stopOpacity={0} />
-                      </linearGradient>
-                      <linearGradient id="clG" x1="0" y1="0" x2="0" y2="1">
-                        <stop offset="5%"  stopColor="hsl(210,75%,52%)" stopOpacity={0.14} />
-                        <stop offset="95%" stopColor="hsl(210,75%,52%)" stopOpacity={0} />
-                      </linearGradient>
-                    </defs>
-                    <CartesianGrid strokeDasharray="3 3" stroke="hsl(220,14%,93%)" />
-                    <XAxis dataKey="date" fontSize={9} tickLine={false} axisLine={false}
-                      interval={Math.max(0, Math.floor(dailySeries.length / 10) - 1)} />
-                    <YAxis yAxisId="s" orientation="left"  fontSize={9} tickLine={false} axisLine={false} tickFormatter={v => fmtC(toDisplay(v), currency)} width={65} />
-                    <YAxis yAxisId="c" orientation="right" fontSize={9} tickLine={false} axisLine={false} tickFormatter={v => fmtN(v)} width={42} />
-                    <Tooltip contentStyle={tip} formatter={(v: number, name: string) => name === "Spend" ? [fmtC(toDisplay(v), currency), name] : [fmtN(v), name]} />
-                    <Legend iconSize={8} iconType="circle" formatter={v => <span style={{ fontSize: 10 }}>{v}</span>} />
-                    <Area yAxisId="s" type="monotone" dataKey="spend"  stroke="hsl(170,55%,45%)" strokeWidth={2} fill="url(#spG)" name="Spend" />
-                    <Area yAxisId="c" type="monotone" dataKey="clicks" stroke="hsl(210,75%,52%)" strokeWidth={2} fill="url(#clG)" name="Clicks" />
-                  </AreaChart>
-                </ResponsiveContainer>
+                <Suspense fallback={<div style={{ height: 220 }} />}>
+                  <DailySpendClicksChart dailySeries={dailySeries} toDisplay={toDisplay} currency={currency} />
+                </Suspense>
               </CardContent>
             </Card>
           )}
@@ -1667,17 +1621,9 @@ const MetaAds = () => {
                     <CardTitle className="text-[12px] font-medium text-muted-foreground uppercase tracking-wide">Impressions by Age & Gender</CardTitle>
                   </CardHeader>
                   <CardContent className="px-2 pb-4">
-                    <ResponsiveContainer width="100%" height={210}>
-                      <BarChart data={byAge} barCategoryGap="20%">
-                        <CartesianGrid strokeDasharray="3 3" stroke="hsl(220,14%,93%)" />
-                        <XAxis dataKey="age" fontSize={9} tickLine={false} axisLine={false} />
-                        <YAxis fontSize={9} tickLine={false} axisLine={false} tickFormatter={v => fmtN(v)} width={38} />
-                        <Tooltip contentStyle={tip} formatter={(v: number) => [fmtN(v), ""]} />
-                        <Legend iconSize={8} iconType="circle" formatter={v => <span style={{ fontSize: 10 }}>{v}</span>} />
-                        <Bar dataKey="male"   fill="hsl(210,75%,52%)" name="Male"   radius={[2, 2, 0, 0]} />
-                        <Bar dataKey="female" fill="hsl(340,70%,58%)" name="Female" radius={[2, 2, 0, 0]} />
-                      </BarChart>
-                    </ResponsiveContainer>
+                    <Suspense fallback={<div style={{ height: 210 }} />}>
+                      <AgeGenderChart byAge={byAge} />
+                    </Suspense>
                   </CardContent>
                 </Card>
               )}
@@ -2259,7 +2205,9 @@ const MetaAds = () => {
                 <CardTitle className="text-[12px] font-medium text-muted-foreground uppercase tracking-wide">Leads by Campaign</CardTitle>
               </CardHeader>
               <CardContent className="px-2 sm:px-4 pb-4">
-                <HBarChart data={byCampaignTop8} color="hsl(170,55%,45%)" height={300} />
+                <Suspense fallback={<div style={{ height: 300 }} />}>
+                  <HBarChart data={byCampaignTop8} color="hsl(170,55%,45%)" height={300} />
+                </Suspense>
               </CardContent>
             </Card>
             <Card className="shadow-sm border-border/50">
@@ -2268,15 +2216,9 @@ const MetaAds = () => {
               </CardHeader>
               <CardContent className="px-4 pb-4 flex items-center justify-center">
                 {byPlatformL.length === 0 ? <p className="text-[11px] text-muted-foreground py-6">No data</p> : (
-                  <ResponsiveContainer width="100%" height={260}>
-                    <PieChart>
-                      <Pie data={byPlatformL} dataKey="count" nameKey="label" cx="50%" cy="50%" outerRadius={90} innerRadius={40} paddingAngle={2}>
-                        {byPlatformL.map((_, i) => <Cell key={i} fill={PIE_COLORS[i % PIE_COLORS.length]} />)}
-                      </Pie>
-                      <Tooltip contentStyle={tip} formatter={(v: number) => [v.toLocaleString(), ""]} />
-                      <Legend iconSize={8} iconType="circle" formatter={v => <span style={{ fontSize: 10 }}>{v}</span>} />
-                    </PieChart>
-                  </ResponsiveContainer>
+                  <Suspense fallback={<div style={{ height: 260, width: "100%" }} />}>
+                    <PlatformPieChart byPlatformL={byPlatformL} />
+                  </Suspense>
                 )}
               </CardContent>
             </Card>
@@ -2288,7 +2230,9 @@ const MetaAds = () => {
                 <CardTitle className="text-[12px] font-medium text-muted-foreground uppercase tracking-wide">Leads by Country</CardTitle>
               </CardHeader>
               <CardContent className="px-2 sm:px-4 pb-4">
-                <HBarChart data={byLocationTop10} color="hsl(210,75%,52%)" />
+                <Suspense fallback={<div style={{ height: 260 }} />}>
+                  <HBarChart data={byLocationTop10} color="hsl(210,75%,52%)" />
+                </Suspense>
               </CardContent>
             </Card>
             <Card className="shadow-sm border-border/50">

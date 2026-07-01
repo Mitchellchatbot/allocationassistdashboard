@@ -1,4 +1,4 @@
-import { useState, useCallback, useRef, useMemo, useEffect, memo } from "react";
+import { useState, useCallback, useRef, useMemo, useEffect, memo, lazy, Suspense } from "react";
 import { createPortal } from "react-dom";
 import { useNavigate } from "react-router-dom";
 import logo from "@/assets/logo.png";
@@ -9,16 +9,37 @@ import { useZohoData, type ZohoLead } from "@/hooks/use-zoho-data";
 import { useDebounce } from "@/hooks/use-zoho-leads";
 import { useQuery } from "@tanstack/react-query";
 import { getPresetRange, type TimeRangePreset } from "@/lib/filters";
-import {
-  AreaChart, Area, BarChart, Bar, PieChart, Pie, Cell,
-  XAxis, YAxis, CartesianGrid, Tooltip, Legend, ResponsiveContainer,
-} from "recharts";
 import { InfoIcon } from "@/components/InfoIcon";
 import {
   ClipboardList, PlusCircle, LogOut, Loader2, Save, Trash2,
   CalendarDays, Clock, BarChart2, ChevronDown, Check, X,
-  Users, TrendingUp, LayoutDashboard, Search, Award, Phone,
+  Users, LayoutDashboard, Search, Award, Phone,
 } from "lucide-react";
+
+// Charts are code-split into a co-located module so the recharts (vendor-charts)
+// chunk is only fetched when a chart first mounts. Each is lazily imported and
+// wrapped in <Suspense> with a fallback matching the chart's placeholder height.
+const ActivityChartLazy = lazy(() =>
+  import("./WorkerDashboardCharts").then(m => ({ default: m.ActivityChart })));
+const StatusPieChartLazy = lazy(() =>
+  import("./WorkerDashboardCharts").then(m => ({ default: m.StatusPieChart })));
+const WorkerBarChartLazy = lazy(() =>
+  import("./WorkerDashboardCharts").then(m => ({ default: m.WorkerBarChart })));
+const PerformanceTrendsChartLazy = lazy(() =>
+  import("./WorkerDashboardCharts").then(m => ({ default: m.PerformanceTrendsChart })));
+const PerformanceTopDaysChartLazy = lazy(() =>
+  import("./WorkerDashboardCharts").then(m => ({ default: m.PerformanceTopDaysChart })));
+
+// Fallback matching a card-wrapped chart's footprint (Loader2 centered inside a
+// card of the given content height) so layout doesn't jump before the chunk loads.
+function ChartFallback({ height }: { height: number }) {
+  return (
+    <div className="rounded-xl border border-border/60 bg-card p-5 flex items-center justify-center"
+      style={{ height: height + 40 }}>
+      <Loader2 className="h-4 w-4 animate-spin text-muted-foreground" />
+    </div>
+  );
+}
 
 // Short {meaning, source} pair shown in the (i) popover next to each tile.
 const KPI_TILE_HINTS: Record<string, { meaning: string; source: string }> = {
@@ -251,48 +272,16 @@ function ActivityChart({ entries, workerEmails, title, subtitle }: {
     : [{ key: "Entries", total: entries.length, color: "hsl(170,45%,28%)" }], [entries, workerEmails]);
 
   return (
-    <div className="rounded-xl border border-border/60 bg-card p-5">
-      <div className="flex items-start justify-between mb-4">
-        <div>
-          <p className="text-[13px] font-semibold text-foreground flex items-center gap-1.5">
-            <TrendingUp className="h-3.5 w-3.5 text-primary" />
-            {title}
-          </p>
-          <p className="text-[11px] text-muted-foreground mt-0.5">{subtitle}</p>
-        </div>
-        <div className="flex items-center gap-4 shrink-0 ml-4">
-          {totals.map(t => (
-            <div key={t.key} className="text-right">
-              <p className="text-[18px] font-semibold tabular-nums leading-none" style={{ color: t.color }}>{t.total}</p>
-              <p className="text-[9px] text-muted-foreground capitalize">{t.key}</p>
-            </div>
-          ))}
-        </div>
-      </div>
-      <ResponsiveContainer width="100%" height={200}>
-        <AreaChart data={data} margin={{ top: 4, right: 8, left: -20, bottom: 0 }}>
-          <defs>
-            {keys.map((k, i) => (
-              <linearGradient key={k} id={`wdGrad-${k}`} x1="0" y1="0" x2="0" y2="1">
-                <stop offset="5%"  stopColor={WORKER_COLORS[i % WORKER_COLORS.length]} stopOpacity={0.7} />
-                <stop offset="95%" stopColor={WORKER_COLORS[i % WORKER_COLORS.length]} stopOpacity={0.15} />
-              </linearGradient>
-            ))}
-          </defs>
-          <CartesianGrid strokeDasharray="3 3" stroke="hsl(var(--border))" />
-          <XAxis dataKey="date" tick={{ fontSize: 9, fill: "hsl(var(--muted-foreground))" }} tickLine={false} interval={4} />
-          <YAxis tick={{ fontSize: 9, fill: "hsl(var(--muted-foreground))" }} tickLine={false} allowDecimals={false} />
-          <Tooltip contentStyle={{ fontSize: 11, borderRadius: 8, border: "1px solid hsl(var(--border))" }} />
-          {keys.length > 1 && <Legend wrapperStyle={{ fontSize: 10 }} />}
-          {keys.map((k, i) => (
-            <Area key={k} type="monotone" dataKey={k}
-              stroke={WORKER_COLORS[i % WORKER_COLORS.length]}
-              fill={`url(#wdGrad-${k})`}
-              strokeWidth={2} dot={false} activeDot={{ r: 4 }} />
-          ))}
-        </AreaChart>
-      </ResponsiveContainer>
-    </div>
+    <Suspense fallback={<ChartFallback height={200} />}>
+      <ActivityChartLazy
+        data={data}
+        keys={keys}
+        totals={totals}
+        colors={WORKER_COLORS}
+        title={title}
+        subtitle={subtitle}
+      />
+    </Suspense>
   );
 }
 
@@ -308,20 +297,9 @@ function StatusPieChart({ entries }: { entries: WorkerEntry[] }) {
   );
 
   return (
-    <div className="rounded-xl border border-border/60 bg-card p-5">
-      <p className="text-[13px] font-semibold text-foreground mb-1">Entries by Status</p>
-      <ResponsiveContainer width="100%" height={220}>
-        <PieChart>
-          <Pie data={data} cx="50%" cy="50%" innerRadius={52} outerRadius={82} paddingAngle={2} dataKey="value">
-            {data.map(entry => (
-              <Cell key={entry.name} fill={STATUS_CHART_COLOR[entry.name] ?? "#9ca3af"} />
-            ))}
-          </Pie>
-          <Tooltip contentStyle={{ fontSize: 11, borderRadius: 8, border: "1px solid hsl(var(--border))" }} />
-          <Legend wrapperStyle={{ fontSize: 10 }} formatter={v => <span style={{ color: "hsl(var(--muted-foreground))" }}>{v}</span>} />
-        </PieChart>
-      </ResponsiveContainer>
-    </div>
+    <Suspense fallback={<ChartFallback height={220} />}>
+      <StatusPieChartLazy data={data} colorFor={STATUS_CHART_COLOR} />
+    </Suspense>
   );
 }
 
@@ -332,20 +310,9 @@ function WorkerBarChart({ entries, workerEmails }: { entries: WorkerEntry[]; wor
   if (data.length === 0) return null;
 
   return (
-    <div className="rounded-xl border border-border/60 bg-card p-5">
-      <p className="text-[13px] font-semibold text-foreground mb-1">Entries by Worker</p>
-      <ResponsiveContainer width="100%" height={220}>
-        <BarChart data={data} margin={{ top: 4, right: 8, left: -20, bottom: 0 }}>
-          <CartesianGrid strokeDasharray="3 3" stroke="hsl(var(--border))" vertical={false} />
-          <XAxis dataKey="name" tick={{ fontSize: 10, fill: "hsl(var(--muted-foreground))" }} tickLine={false} />
-          <YAxis tick={{ fontSize: 9, fill: "hsl(var(--muted-foreground))" }} tickLine={false} allowDecimals={false} />
-          <Tooltip contentStyle={{ fontSize: 11, borderRadius: 8, border: "1px solid hsl(var(--border))" }} />
-          <Bar dataKey="Entries" radius={[4, 4, 0, 0]}>
-            {data.map((entry, i) => <Cell key={i} fill={entry.fill} />)}
-          </Bar>
-        </BarChart>
-      </ResponsiveContainer>
-    </div>
+    <Suspense fallback={<ChartFallback height={220} />}>
+      <WorkerBarChartLazy data={data} />
+    </Suspense>
   );
 }
 
@@ -681,56 +648,14 @@ function PerformanceTab({ memberName }: { memberName: string }) {
       ) : (
         <>
           {/* Trends area chart */}
-          <div className="rounded-xl border border-border/60 bg-card p-5">
-            <p className="text-[13px] font-semibold text-foreground mb-1 flex items-center gap-1.5">
-              <TrendingUp className="h-3.5 w-3.5 text-primary" />
-              Daily Trends
-            </p>
-            <p className="text-[11px] text-muted-foreground mb-4">Calls and conversions over time</p>
-            <ResponsiveContainer width="100%" height={260}>
-              <AreaChart data={chartData} margin={{ top: 4, right: 8, left: -20, bottom: 0 }}>
-                <defs>
-                  <linearGradient id="perfCalls" x1="0" y1="0" x2="0" y2="1">
-                    <stop offset="5%"  stopColor="hsl(170, 45%, 35%)" stopOpacity={0.7} />
-                    <stop offset="95%" stopColor="hsl(170, 45%, 35%)" stopOpacity={0.1} />
-                  </linearGradient>
-                  <linearGradient id="perfGood" x1="0" y1="0" x2="0" y2="1">
-                    <stop offset="5%"  stopColor="#0ea5e9" stopOpacity={0.7} />
-                    <stop offset="95%" stopColor="#0ea5e9" stopOpacity={0.1} />
-                  </linearGradient>
-                  <linearGradient id="perfSales" x1="0" y1="0" x2="0" y2="1">
-                    <stop offset="5%"  stopColor="#10b981" stopOpacity={0.7} />
-                    <stop offset="95%" stopColor="#10b981" stopOpacity={0.1} />
-                  </linearGradient>
-                </defs>
-                <CartesianGrid strokeDasharray="3 3" stroke="hsl(var(--border))" vertical={false} />
-                <XAxis dataKey="date" tick={{ fontSize: 9, fill: "hsl(var(--muted-foreground))" }} tickLine={false} interval="preserveStartEnd" />
-                <YAxis tick={{ fontSize: 9, fill: "hsl(var(--muted-foreground))" }} tickLine={false} allowDecimals={false} />
-                <Tooltip contentStyle={{ fontSize: 11, borderRadius: 8, border: "1px solid hsl(var(--border))" }} />
-                <Legend wrapperStyle={{ fontSize: 10 }} />
-                <Area type="monotone" dataKey="calls" name="Sales Calls" stroke="hsl(170, 45%, 35%)" fill="url(#perfCalls)" strokeWidth={2} dot={false} activeDot={{ r: 4 }} />
-                <Area type="monotone" dataKey="good"  name="Good Calls"  stroke="#0ea5e9" fill="url(#perfGood)"  strokeWidth={2} dot={false} activeDot={{ r: 4 }} />
-                <Area type="monotone" dataKey="sales" name="Sales Closed" stroke="#10b981" fill="url(#perfSales)" strokeWidth={2} dot={false} activeDot={{ r: 4 }} />
-              </AreaChart>
-            </ResponsiveContainer>
-          </div>
+          <Suspense fallback={<ChartFallback height={260} />}>
+            <PerformanceTrendsChartLazy data={chartData} />
+          </Suspense>
 
           {/* Bar chart — top days */}
-          <div className="rounded-xl border border-border/60 bg-card p-5">
-            <p className="text-[13px] font-semibold text-foreground mb-1">Top Days by Sales Calls</p>
-            <p className="text-[11px] text-muted-foreground mb-4">Your highest-volume days in this period</p>
-            <ResponsiveContainer width="100%" height={220}>
-              <BarChart data={chartData.slice().sort((a, b) => b.calls - a.calls).slice(0, 10).reverse()} margin={{ top: 4, right: 8, left: -20, bottom: 0 }}>
-                <CartesianGrid strokeDasharray="3 3" stroke="hsl(var(--border))" vertical={false} />
-                <XAxis dataKey="date" tick={{ fontSize: 9, fill: "hsl(var(--muted-foreground))" }} tickLine={false} />
-                <YAxis tick={{ fontSize: 9, fill: "hsl(var(--muted-foreground))" }} tickLine={false} allowDecimals={false} />
-                <Tooltip contentStyle={{ fontSize: 11, borderRadius: 8, border: "1px solid hsl(var(--border))" }} />
-                <Legend wrapperStyle={{ fontSize: 10 }} />
-                <Bar dataKey="calls" name="Sales Calls" fill="hsl(170, 45%, 35%)" radius={[4, 4, 0, 0]} />
-                <Bar dataKey="good"  name="Good Calls"  fill="#0ea5e9" radius={[4, 4, 0, 0]} />
-              </BarChart>
-            </ResponsiveContainer>
-          </div>
+          <Suspense fallback={<ChartFallback height={220} />}>
+            <PerformanceTopDaysChartLazy data={chartData} />
+          </Suspense>
         </>
       )}
     </div>

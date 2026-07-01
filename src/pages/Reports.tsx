@@ -1,4 +1,4 @@
-import { memo, useMemo, useState } from "react";
+import { memo, useMemo, useState, lazy, Suspense } from "react";
 import { DashboardLayout } from "@/components/layout/DashboardLayout";
 import { DocLink } from "@/components/DocLink";
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "@/components/ui/card";
@@ -15,7 +15,6 @@ import {
   CalendarCheck, FileSignature, MapPin, CreditCard, CheckCircle2, ArrowRight,
   Inbox, CalendarRange, ServerCog,
 } from "lucide-react";
-import { ResponsiveContainer, LineChart, Line, XAxis, YAxis, Tooltip as ChartTooltip, CartesianGrid, Legend } from "recharts";
 import { useReportingMetrics } from "@/hooks/use-reporting-metrics";
 import { defaultRange, type ReportingFilters } from "@/lib/hospital-reporting";
 import { ExpandableKPICard } from "@/components/ExpandableKPICard";
@@ -29,6 +28,11 @@ import { DoctorTable } from "@/components/reports/DoctorTable";
 import { CollapsibleSection, ScopeChip } from "@/components/reports/CollapsibleSection";
 import { TopOfFunnelContent, useTopOfFunnelStats } from "@/components/reports/TopOfFunnelCard";
 import { OperationsContent, useOperationsSummary } from "@/components/reports/OperationsCard";
+
+// Lazy so the recharts (vendor-charts) chunk is deferred until the trend
+// chart actually mounts. Wrapped in <Suspense> at the usage site with a
+// 260px fallback matching the chart height so layout doesn't jump.
+const ReportsTrendChart = lazy(() => import("./ReportsTrendChart"));
 
 /**
  * Phase 5 — Hospital Introduction Department reporting page.
@@ -135,7 +139,9 @@ export default function Reports() {
               </CardDescription>
             </CardHeader>
             <CardContent>
-              <TrendChart trend={bundle.trend} />
+              <Suspense fallback={<div className="h-[260px] w-full" />}>
+                <ReportsTrendChart trend={bundle.trend} />
+              </Suspense>
             </CardContent>
           </Card>
 
@@ -634,31 +640,6 @@ function relativeShort(iso: string | null | undefined): string {
   if (days < 30)  return `${days}d ago`;
   try { return new Date(iso).toLocaleDateString(undefined, { month: "short", day: "numeric" }); }
   catch { return iso; }
-}
-
-function TrendChart({ trend }: { trend: ReturnType<typeof useReportingMetrics>["trend"] }) {
-  if (!trend || trend.length === 0) {
-    return <div className="text-center text-[12px] text-muted-foreground py-12">No activity in this range.</div>;
-  }
-  return (
-    <div className="h-[260px] w-full">
-      <ResponsiveContainer width="100%" height="100%">
-        <LineChart data={trend} margin={{ top: 10, right: 10, left: 0, bottom: 0 }}>
-          <CartesianGrid strokeDasharray="3 3" stroke="#eef0f3" />
-          <XAxis dataKey="weekStart" tick={{ fontSize: 10 }} tickFormatter={(d: string) => new Date(d).toLocaleDateString(undefined, { month: "short", day: "numeric" })} />
-          <YAxis tick={{ fontSize: 10 }} allowDecimals={false} />
-          <ChartTooltip
-            labelFormatter={(d: string) => `Week of ${new Date(d).toLocaleDateString()}`}
-            contentStyle={{ fontSize: 11, borderRadius: 6 }}
-          />
-          <Legend wrapperStyle={{ fontSize: 10 }} />
-          <Line type="monotone" dataKey="shortlisted" stroke="#8b5cf6" strokeWidth={2} dot={false} />
-          <Line type="monotone" dataKey="interviews"  stroke="#0284c7" strokeWidth={2} dot={false} />
-          <Line type="monotone" dataKey="signed"      stroke="#14a098" strokeWidth={2} dot={false} />
-        </LineChart>
-      </ResponsiveContainer>
-    </div>
-  );
 }
 
 function TeamTable({ rows, loading }: { rows: ReturnType<typeof useReportingMetrics>["team"]; loading: boolean }) {
