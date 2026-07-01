@@ -15,6 +15,7 @@ export interface FeedbackRow {
   status:         FeedbackStatus;
   reporter_email: string | null;
   context:        Record<string, unknown>;
+  screenshots:    string[];
 }
 
 export interface NewFeedback {
@@ -25,9 +26,23 @@ export interface NewFeedback {
   section?:        string | null;
   reporter_email?: string | null;
   context?:        Record<string, unknown>;
+  screenshots?:    string[];
 }
 
 const KEY = ["feedback"] as const;
+
+/** Upload one screenshot (paste/drop/pick) to the public `feedback` bucket and
+ *  return its public URL. Throws on failure so the caller can surface it. */
+export async function uploadFeedbackScreenshot(file: Blob, ext = "png"): Promise<string> {
+  const rand = (globalThis.crypto?.randomUUID?.() ?? `${Date.now()}-${Math.round(Math.random() * 1e9)}`);
+  const path = `${new Date().toISOString().slice(0, 10)}/${rand}.${ext}`;
+  const { error } = await supabase.storage.from("feedback").upload(path, file, {
+    contentType: file.type || "image/png",
+    upsert: false,
+  });
+  if (error) throw error;
+  return supabase.storage.from("feedback").getPublicUrl(path).data.publicUrl;
+}
 
 /** File a bug report / feature suggestion. */
 export function useSubmitFeedback() {
@@ -42,6 +57,7 @@ export function useSubmitFeedback() {
         section:        input.section         ?? null,
         reporter_email: input.reporter_email ?? null,
         context:        input.context        ?? {},
+        screenshots:    input.screenshots    ?? [],
       });
       if (error) throw error;
     },

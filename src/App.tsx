@@ -82,6 +82,7 @@ const SharedProfile   = lazy(() => import("./pages/SharedProfile"));
 const Forms           = lazy(() => import("./pages/Forms"));
 const Doctors         = lazy(() => import("./pages/Doctors"));
 const Docs            = lazy(() => import("./pages/Docs"));
+const Feedback        = lazy(() => import("./pages/Feedback"));
 const NotFound        = lazy(() => import("./pages/NotFound"));
 
 // Global react-query defaults tuned for this dashboard:
@@ -238,6 +239,7 @@ const App = () => {
                 <Route path="/team"           element={<TeamPerformance />} />
                 <Route path="/finance"        element={<Finance />} />
                 <Route path="/settings"       element={<Settings />} />
+                <Route path="/feedback"       element={<Feedback />} />
                 <Route path="/meta-ads"       element={<MetaAds />} />
                 <Route path="/worker"         element={<WorkerDashboard />} />
                 <Route path="/import"         element={<CallLogImport />} />
