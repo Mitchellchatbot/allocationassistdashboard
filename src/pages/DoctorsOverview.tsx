@@ -13,7 +13,7 @@
  * Doctor key: a DoB row maps to the AA id `dob:<zohoId>` — the same key that
  * doctor_profiles / form_responses / cv_uploads carry, so the join is exact.
  */
-import { memo, useMemo, useState, type ReactNode } from "react";
+import { memo, useEffect, useMemo, useState, type ReactNode } from "react";
 import { useSearchParams } from "react-router-dom";
 import { useZohoData, type ZohoDoctorOnBoard } from "@/hooks/use-zoho-data";
 import { useDebounce } from "@/hooks/use-zoho-leads";
@@ -33,6 +33,12 @@ import {
   FileText, IdCard, Calendar, ExternalLink, Loader2, FileSearch, CircleUser,
   Pencil, ScanLine, Check, X, Banknote, Receipt,
 } from "lucide-react";
+import {
+  Pagination, PaginationContent, PaginationEllipsis,
+  PaginationItem, PaginationLink, PaginationNext, PaginationPrevious,
+} from "@/components/ui/pagination";
+
+const PAGE_SIZE = 30;
 
 type RangeKey = "all" | "7" | "30" | "90" | "365";
 const RANGE_LABELS: Record<RangeKey, string> = {
@@ -82,6 +88,7 @@ export default function DoctorsOverview() {
   const [range, setRange] = useState<RangeKey>("all");
 
   const [billFilter, setBillFilter] = useState<BillFilter>("all");
+  const [page, setPage] = useState(1);
 
   const { data: zoho, isLoading } = useZohoData();
   const { data: allInvoices = [] } = useBooksInvoices();
@@ -128,6 +135,21 @@ export default function DoctorsOverview() {
       .sort((a, b) => b.t - a.t);
   }, [dob, range, qDebounced, billFilter, billingByName]);
 
+  useEffect(() => { setPage(1); }, [qDebounced, range, billFilter]);
+
+  const totalPages = Math.max(1, Math.ceil(filtered.length / PAGE_SIZE));
+  const safePage = Math.min(page, totalPages);
+  const paginated = filtered.slice((safePage - 1) * PAGE_SIZE, safePage * PAGE_SIZE);
+  const pageNumbers = useMemo((): Array<number | "..."> => {
+    if (totalPages <= 7) return Array.from({ length: totalPages }, (_, i) => i + 1);
+    const out: Array<number | "..."> = [1];
+    if (safePage > 3) out.push("...");
+    for (let i = Math.max(2, safePage - 1); i <= Math.min(totalPages - 1, safePage + 1); i++) out.push(i);
+    if (safePage < totalPages - 2) out.push("...");
+    out.push(totalPages);
+    return out;
+  }, [safePage, totalPages]);
+
   return (
     <div className="space-y-3">
       {/* Filter bar */}
@@ -169,8 +191,45 @@ export default function DoctorsOverview() {
       )}
 
       <div className="space-y-2">
-        {filtered.map(({ d, billing }) => <DoctorRow key={d.id} d={d} billing={billing} />)}
+        {paginated.map(({ d, billing }) => <DoctorRow key={d.id} d={d} billing={billing} />)}
       </div>
+      {totalPages > 1 && (
+        <Pagination className="mt-2">
+          <PaginationContent>
+            <PaginationItem>
+              <PaginationPrevious
+                href="#"
+                onClick={(e) => { e.preventDefault(); setPage(p => Math.max(1, p - 1)); }}
+                aria-disabled={safePage === 1}
+                className={safePage === 1 ? "pointer-events-none opacity-50" : ""}
+              />
+            </PaginationItem>
+            {pageNumbers.map((n, i) =>
+              n === "..." ? (
+                <PaginationItem key={`ell-${i}`}><PaginationEllipsis /></PaginationItem>
+              ) : (
+                <PaginationItem key={n}>
+                  <PaginationLink
+                    href="#"
+                    isActive={safePage === n}
+                    onClick={(e) => { e.preventDefault(); setPage(n as number); }}
+                  >
+                    {n}
+                  </PaginationLink>
+                </PaginationItem>
+              )
+            )}
+            <PaginationItem>
+              <PaginationNext
+                href="#"
+                onClick={(e) => { e.preventDefault(); setPage(p => Math.min(totalPages, p + 1)); }}
+                aria-disabled={safePage === totalPages}
+                className={safePage === totalPages ? "pointer-events-none opacity-50" : ""}
+              />
+            </PaginationItem>
+          </PaginationContent>
+        </Pagination>
+      )}
     </div>
   );
 }

@@ -17,6 +17,12 @@ import { rollupSpecialty } from "@/lib/specialty-groups";
 import { detectLicenses } from "@/lib/license-info";
 import { scoreFollowUp, FOLLOWUP_STALE_CAP_DAYS } from "@/lib/followup-rank";
 import { noteIndicatesContact } from "@/lib/lead-contact";
+import {
+  Pagination, PaginationContent, PaginationItem, PaginationLink,
+  PaginationPrevious, PaginationNext, PaginationEllipsis,
+} from "@/components/ui/pagination";
+
+const PAGE_SIZE = 30;
 
 // ── Types ─────────────────────────────────────────────────────────────────────
 
@@ -247,6 +253,7 @@ const FollowUps = () => {
   const [errorMsg,   setErrorMsg]   = useState<string | null>(null);
   const [recruiterFilter, setRecruiterFilter] = useState("");
   const [noteFilter, setNoteFilter] = useState<"contacted" | "uncontacted">("contacted");
+  const [page, setPage] = useState(1);
 
   const rawLeads = zoho?.rawLeads ?? [];
 
@@ -345,6 +352,22 @@ const FollowUps = () => {
       || (daysSinceTouched(b.lead) ?? -1) - (daysSinceTouched(a.lead) ?? -1));
     return items;
   }, [leads, demandCounts]);
+
+  useEffect(() => { setPage(1); }, [tab, noteFilter, search, recruiterFilter]);
+  useEffect(() => { setExpandedId(null); }, [page]);
+
+  const totalPages = Math.max(1, Math.ceil(ranked.length / PAGE_SIZE));
+  const safePage = Math.min(page, totalPages);
+  const paginated = ranked.slice((safePage - 1) * PAGE_SIZE, safePage * PAGE_SIZE);
+  const pageNumbers = useMemo((): Array<number | "..."> => {
+    if (totalPages <= 7) return Array.from({ length: totalPages }, (_, i) => i + 1);
+    const out: Array<number | "..."> = [1];
+    if (safePage > 3) out.push("...");
+    for (let i = Math.max(2, safePage - 1); i <= Math.min(totalPages - 1, safePage + 1); i++) out.push(i);
+    if (safePage < totalPages - 2) out.push("...");
+    out.push(totalPages);
+    return out;
+  }, [safePage, totalPages]);
 
   // Status update mutation (same pattern as LeadsPipeline — updates Zoho + cache)
   const updateStatus = useMutation({
@@ -511,7 +534,7 @@ const FollowUps = () => {
             </div>
           ) : (
             <div className="divide-y divide-border/40">
-              {ranked.map(({ lead, rank }) => {
+              {paginated.map(({ lead, rank }) => {
                 const name    = (lead.Full_Name || `${lead.First_Name ?? ""} ${lead.Last_Name ?? ""}`).trim() || "—";
                 const recency = daysSinceTouched(lead);
                 const specialty = lead.Specialty || lead.Specialty_New;
@@ -610,6 +633,43 @@ const FollowUps = () => {
                 );
               })}
             </div>
+          )}
+          {totalPages > 1 && (
+            <Pagination className="mt-2 mb-2">
+              <PaginationContent>
+                <PaginationItem>
+                  <PaginationPrevious
+                    href="#"
+                    onClick={(e) => { e.preventDefault(); setPage(p => Math.max(1, p - 1)); }}
+                    aria-disabled={safePage === 1}
+                    className={safePage === 1 ? "pointer-events-none opacity-50" : ""}
+                  />
+                </PaginationItem>
+                {pageNumbers.map((n, i) =>
+                  n === "..." ? (
+                    <PaginationItem key={`ell-${i}`}><PaginationEllipsis /></PaginationItem>
+                  ) : (
+                    <PaginationItem key={n}>
+                      <PaginationLink
+                        href="#"
+                        isActive={safePage === n}
+                        onClick={(e) => { e.preventDefault(); setPage(n as number); }}
+                      >
+                        {n}
+                      </PaginationLink>
+                    </PaginationItem>
+                  )
+                )}
+                <PaginationItem>
+                  <PaginationNext
+                    href="#"
+                    onClick={(e) => { e.preventDefault(); setPage(p => Math.min(totalPages, p + 1)); }}
+                    aria-disabled={safePage === totalPages}
+                    className={safePage === totalPages ? "pointer-events-none opacity-50" : ""}
+                  />
+                </PaginationItem>
+              </PaginationContent>
+            </Pagination>
           )}
         </CardContent>
       </Card>

@@ -14,6 +14,12 @@ import {
   type FathomCall,
 } from "@/hooks/use-fathom-calls";
 import { isSalesRepHost } from "@/lib/sales-team";
+import {
+  Pagination, PaginationContent, PaginationItem, PaginationLink,
+  PaginationPrevious, PaginationNext, PaginationEllipsis,
+} from "@/components/ui/pagination";
+
+const PAGE_SIZE = 30;
 import { useDebounce } from "@/hooks/use-zoho-leads";
 import { Button } from "@/components/ui/button";
 import {
@@ -154,6 +160,7 @@ export default function Calls() {
   const [search,     setSearch]     = useState("");
   const [hostFilter, setHostFilter] = useState<string>("");
   const [activeId,   setActiveId]   = useState<string | null>(null);
+  const [page,       setPage]       = useState(1);
 
   // Debounce the search so the Fathom query only fires once typing settles.
   // The raw `search` stays bound to the <Input> for instant typing; the
@@ -212,6 +219,21 @@ export default function Calls() {
     }),
     [calls],
   );
+
+  useEffect(() => { setPage(1); }, [debouncedSearch, hostFilter]);
+
+  const totalPages = Math.max(1, Math.ceil(decoratedRows.length / PAGE_SIZE));
+  const safePage = Math.min(page, totalPages);
+  const paginatedRows = decoratedRows.slice((safePage - 1) * PAGE_SIZE, safePage * PAGE_SIZE);
+  const pageNumbers = useMemo((): Array<number | "..."> => {
+    if (totalPages <= 7) return Array.from({ length: totalPages }, (_, i) => i + 1);
+    const out: Array<number | "..."> = [1];
+    if (safePage > 3) out.push("...");
+    for (let i = Math.max(2, safePage - 1); i <= Math.min(totalPages - 1, safePage + 1); i++) out.push(i);
+    if (safePage < totalPages - 2) out.push("...");
+    out.push(totalPages);
+    return out;
+  }, [safePage, totalPages]);
 
   // Recap panels built from the loaded list (newest first) — an at-a-glance
   // "what to follow up on + what just happened" without opening each call.
@@ -423,34 +445,73 @@ export default function Calls() {
           ) : !calls || calls.length === 0 ? (
             <EmptyState syncing={syncing} />
           ) : (
-            <div className="overflow-x-auto">
-              <Table>
-                <TableHeader>
-                  <TableRow className="hover:bg-transparent">
-                    <TableHead className="text-[10px] uppercase tracking-wide h-8">Date</TableHead>
-                    <TableHead className="text-[10px] uppercase tracking-wide h-8">Call</TableHead>
-                    <TableHead className="text-[10px] uppercase tracking-wide h-8">Host</TableHead>
-                    <TableHead className="text-[10px] uppercase tracking-wide h-8">Insights</TableHead>
-                    <TableHead className="text-[10px] uppercase tracking-wide h-8 text-right">Duration</TableHead>
-                    <TableHead className="text-[10px] uppercase tracking-wide h-8 text-right"></TableHead>
-                  </TableRow>
-                </TableHeader>
-                <TableBody>
-                  {decoratedRows.map(({ call: c, tldr, hasSummary, hasTranscript, actionCount }) => (
-                    <CallRow
-                      key={c.id}
-                      call={c}
-                      tldr={tldr}
-                      hasSummary={hasSummary}
-                      hasTranscript={hasTranscript}
-                      actionCount={actionCount}
-                      enriching={enriching}
-                      onOpen={openCall}
-                    />
-                  ))}
-                </TableBody>
-              </Table>
-            </div>
+            <>
+              <div className="overflow-x-auto">
+                <Table>
+                  <TableHeader>
+                    <TableRow className="hover:bg-transparent">
+                      <TableHead className="text-[10px] uppercase tracking-wide h-8">Date</TableHead>
+                      <TableHead className="text-[10px] uppercase tracking-wide h-8">Call</TableHead>
+                      <TableHead className="text-[10px] uppercase tracking-wide h-8">Host</TableHead>
+                      <TableHead className="text-[10px] uppercase tracking-wide h-8">Insights</TableHead>
+                      <TableHead className="text-[10px] uppercase tracking-wide h-8 text-right">Duration</TableHead>
+                      <TableHead className="text-[10px] uppercase tracking-wide h-8 text-right"></TableHead>
+                    </TableRow>
+                  </TableHeader>
+                  <TableBody>
+                    {paginatedRows.map(({ call: c, tldr, hasSummary, hasTranscript, actionCount }) => (
+                      <CallRow
+                        key={c.id}
+                        call={c}
+                        tldr={tldr}
+                        hasSummary={hasSummary}
+                        hasTranscript={hasTranscript}
+                        actionCount={actionCount}
+                        enriching={enriching}
+                        onOpen={openCall}
+                      />
+                    ))}
+                  </TableBody>
+                </Table>
+              </div>
+              {totalPages > 1 && (
+                <Pagination className="mt-2 mb-2">
+                  <PaginationContent>
+                    <PaginationItem>
+                      <PaginationPrevious
+                        href="#"
+                        onClick={(e) => { e.preventDefault(); setPage(p => Math.max(1, p - 1)); }}
+                        aria-disabled={safePage === 1}
+                        className={safePage === 1 ? "pointer-events-none opacity-50" : ""}
+                      />
+                    </PaginationItem>
+                    {pageNumbers.map((n, i) =>
+                      n === "..." ? (
+                        <PaginationItem key={`ell-${i}`}><PaginationEllipsis /></PaginationItem>
+                      ) : (
+                        <PaginationItem key={n}>
+                          <PaginationLink
+                            href="#"
+                            isActive={safePage === n}
+                            onClick={(e) => { e.preventDefault(); setPage(n as number); }}
+                          >
+                            {n}
+                          </PaginationLink>
+                        </PaginationItem>
+                      )
+                    )}
+                    <PaginationItem>
+                      <PaginationNext
+                        href="#"
+                        onClick={(e) => { e.preventDefault(); setPage(p => Math.min(totalPages, p + 1)); }}
+                        aria-disabled={safePage === totalPages}
+                        className={safePage === totalPages ? "pointer-events-none opacity-50" : ""}
+                      />
+                    </PaginationItem>
+                  </PaginationContent>
+                </Pagination>
+              )}
+            </>
           )}
         </CardContent>
       </Card>

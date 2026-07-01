@@ -1,4 +1,4 @@
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { DashboardLayout } from "@/components/layout/DashboardLayout";
 import { DocLink } from "@/components/DocLink";
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "@/components/ui/card";
@@ -24,6 +24,12 @@ import {
   type Vacancy, type VacancyPriority, type VacancyStatus,
 } from "@/hooks/use-vacancies";
 import { VacancyDetailSheet } from "@/components/VacancyDetailSheet";
+import {
+  Pagination, PaginationContent, PaginationItem, PaginationLink,
+  PaginationPrevious, PaginationNext, PaginationEllipsis,
+} from "@/components/ui/pagination";
+
+const PAGE_SIZE = 30;
 
 /**
  * Phase 3 — Vacancy Management. Source: Saif Ullah, May 20 2026.
@@ -74,6 +80,22 @@ export default function Vacancies() {
     });
     return list;
   }, [vacancies, search, filterStatus, filterPriority, sortBy, sortDir]);
+
+  const [page, setPage] = useState(1);
+  useEffect(() => { setPage(1); }, [search, filterStatus, filterPriority, sortBy, sortDir]);
+
+  const totalPages = Math.max(1, Math.ceil(filtered.length / PAGE_SIZE));
+  const safePage = Math.min(page, totalPages);
+  const paginated = filtered.slice((safePage - 1) * PAGE_SIZE, safePage * PAGE_SIZE);
+  const pageNumbers = useMemo((): Array<number | "..."> => {
+    if (totalPages <= 7) return Array.from({ length: totalPages }, (_, i) => i + 1);
+    const out: Array<number | "..."> = [1];
+    if (safePage > 3) out.push("...");
+    for (let i = Math.max(2, safePage - 1); i <= Math.min(totalPages - 1, safePage + 1); i++) out.push(i);
+    if (safePage < totalPages - 2) out.push("...");
+    out.push(totalPages);
+    return out;
+  }, [safePage, totalPages]);
 
   const stats = useMemo(() => {
     const open = vacancies.filter(v => v.status === "open");
@@ -201,7 +223,7 @@ export default function Vacancies() {
                   </TableRow>
                 </TableHeader>
                 <TableBody>
-                  {filtered.map(v => (
+                  {paginated.map(v => (
                     <VacancyRow
                       key={v.id}
                       v={v}
@@ -220,6 +242,43 @@ export default function Vacancies() {
                   ))}
                 </TableBody>
               </Table>
+            )}
+            {!isLoading && totalPages > 1 && (
+              <Pagination className="mt-2 mb-2">
+                <PaginationContent>
+                  <PaginationItem>
+                    <PaginationPrevious
+                      href="#"
+                      onClick={(e) => { e.preventDefault(); setPage(p => Math.max(1, p - 1)); }}
+                      aria-disabled={safePage === 1}
+                      className={safePage === 1 ? "pointer-events-none opacity-50" : ""}
+                    />
+                  </PaginationItem>
+                  {pageNumbers.map((n, i) =>
+                    n === "..." ? (
+                      <PaginationItem key={`ell-${i}`}><PaginationEllipsis /></PaginationItem>
+                    ) : (
+                      <PaginationItem key={n}>
+                        <PaginationLink
+                          href="#"
+                          isActive={safePage === n}
+                          onClick={(e) => { e.preventDefault(); setPage(n as number); }}
+                        >
+                          {n}
+                        </PaginationLink>
+                      </PaginationItem>
+                    )
+                  )}
+                  <PaginationItem>
+                    <PaginationNext
+                      href="#"
+                      onClick={(e) => { e.preventDefault(); setPage(p => Math.min(totalPages, p + 1)); }}
+                      aria-disabled={safePage === totalPages}
+                      className={safePage === totalPages ? "pointer-events-none opacity-50" : ""}
+                    />
+                  </PaginationItem>
+                </PaginationContent>
+              </Pagination>
             )}
           </CardContent>
         </Card>

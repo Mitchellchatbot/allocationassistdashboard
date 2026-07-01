@@ -37,6 +37,12 @@ import { Plus, Camera, Loader2, Check, AlertCircle, Pencil, Trash2, Send, Sparkl
 import { EmailChainPreviewDialog } from "@/components/EmailChainPreviewDialog";
 import { Textarea } from "@/components/ui/textarea";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
+import {
+  Pagination, PaginationContent, PaginationItem, PaginationLink,
+  PaginationPrevious, PaginationNext, PaginationEllipsis,
+} from "@/components/ui/pagination";
+
+const PAGE_SIZE = 30;
 
 interface WpCandidatesProps { embedded?: boolean }
 
@@ -142,12 +148,8 @@ export default function WpCandidates({ embedded }: WpCandidatesProps = {}) {
   const search = useDebounce(searchRaw, 120);
   const [statusFilter, setStatusFilter] = useState<"all" | "publish" | "private" | "draft">("all");
   const [licenseFilter, setLicenseFilter] = useState<"all" | "DHA" | "DOH" | "MOH" | "SCFHS" | "QCHP">("all");
-  const [renderLimit, setRenderLimit] = useState(60);
+  const [page, setPage] = useState(1);
   const searchRef = useRef<HTMLInputElement | null>(null);
-  // Single long-lived IntersectionObserver for the infinite-scroll
-  // sentinel. Held in a ref so it's created once and survives every
-  // +100 render-window bump instead of being torn down and rebuilt.
-  const ioRef = useRef<IntersectionObserver | null>(null);
 
   // Pre-build search corpus once per data refresh. Per-keystroke
   // filter is then plain string.includes() — fast at 1k+ rows.
@@ -174,38 +176,20 @@ export default function WpCandidates({ embedded }: WpCandidatesProps = {}) {
     });
   }, [candidates, corpus, search, statusFilter, licenseFilter]);
 
-  // Reset render window when filter narrows.
-  useEffect(() => { setRenderLimit(60); }, [search, statusFilter, licenseFilter]);
+  useEffect(() => { setPage(1); }, [search, statusFilter, licenseFilter]);
 
-  // Infinite scroll — when the sentinel below the last row scrolls into
-  // view, bump the window by 100. Same pattern the Doctor Progress
-  // pipeline uses, just lazier (no network round-trip; we already have
-  // every row in memory). 200px rootMargin so we start rendering the
-  // next batch slightly before the user reaches the bottom — avoids a
-  // visible "Loading…" flicker on fast scrolls.
-  //
-  // Callback ref instead of an effect: the sentinel unmounts once the
-  // whole list is loaded (filtered.length <= renderLimit) and remounts
-  // when a filter re-expands the list. A callback ref (dis)connects a
-  // SINGLE long-lived observer on those mount/unmount transitions, so a
-  // +100 bump never tears the observer down — and re-attaches cleanly
-  // when the sentinel comes back. setRenderLimit is functional, so this
-  // callback closes over nothing reactive and stays stable for the whole
-  // component lifetime.
-  const sentinelRef = useCallback((el: HTMLDivElement | null) => {
-    if (el) {
-      const io =
-        ioRef.current ??
-        (ioRef.current = new IntersectionObserver((entries) => {
-          for (const e of entries) {
-            if (e.isIntersecting) setRenderLimit(n => n + 100);
-          }
-        }, { rootMargin: "200px" }));
-      io.observe(el);
-    } else {
-      ioRef.current?.disconnect();
-    }
-  }, []);
+  const totalPages = Math.max(1, Math.ceil(filtered.length / PAGE_SIZE));
+  const safePage = Math.min(page, totalPages);
+  const paginated = filtered.slice((safePage - 1) * PAGE_SIZE, safePage * PAGE_SIZE);
+  const pageNumbers = useMemo((): Array<number | "..."> => {
+    if (totalPages <= 7) return Array.from({ length: totalPages }, (_, i) => i + 1);
+    const out: Array<number | "..."> = [1];
+    if (safePage > 3) out.push("...");
+    for (let i = Math.max(2, safePage - 1); i <= Math.min(totalPages - 1, safePage + 1); i++) out.push(i);
+    if (safePage < totalPages - 2) out.push("...");
+    out.push(totalPages);
+    return out;
+  }, [safePage, totalPages]);
 
   // ⌘F to focus search.
   useEffect(() => {
@@ -369,20 +353,44 @@ export default function WpCandidates({ embedded }: WpCandidatesProps = {}) {
               </div>
             ) : (
               <>
-                {filtered.slice(0, renderLimit).map(c => <CandidateRow key={c.id} candidate={c} highlight={search.trim().toLowerCase()} onOpen={handleOpen} />)}
-                {/* Sentinel — when this scrolls into view (200px before
-                    actually), bump the render window by 100. Once we're
-                    past the end, render a quiet 'All loaded' line. */}
-                {filtered.length > renderLimit ? (
-                  <div ref={sentinelRef} className="w-full py-3 flex items-center justify-center gap-2 text-[11px] text-muted-foreground">
-                    <Loader2 className="h-3 w-3 animate-spin" />
-                    Loading more · {filtered.length - renderLimit} remaining
-                  </div>
-                ) : filtered.length > 60 ? (
-                  <div className="w-full py-3 text-center text-[10px] text-muted-foreground/70">
-                    All {filtered.length.toLocaleString()} loaded
-                  </div>
-                ) : null}
+                {paginated.map(c => <CandidateRow key={c.id} candidate={c} highlight={search.trim().toLowerCase()} onOpen={handleOpen} />)}
+                {totalPages > 1 && (
+                  <Pagination className="mt-2">
+                    <PaginationContent>
+                      <PaginationItem>
+                        <PaginationPrevious
+                          href="#"
+                          onClick={(e) => { e.preventDefault(); setPage(p => Math.max(1, p - 1)); }}
+                          aria-disabled={safePage === 1}
+                          className={safePage === 1 ? "pointer-events-none opacity-50" : ""}
+                        />
+                      </PaginationItem>
+                      {pageNumbers.map((n, i) =>
+                        n === "..." ? (
+                          <PaginationItem key={`ell-${i}`}><PaginationEllipsis /></PaginationItem>
+                        ) : (
+                          <PaginationItem key={n}>
+                            <PaginationLink
+                              href="#"
+                              isActive={safePage === n}
+                              onClick={(e) => { e.preventDefault(); setPage(n as number); }}
+                            >
+                              {n}
+                            </PaginationLink>
+                          </PaginationItem>
+                        )
+                      )}
+                      <PaginationItem>
+                        <PaginationNext
+                          href="#"
+                          onClick={(e) => { e.preventDefault(); setPage(p => Math.min(totalPages, p + 1)); }}
+                          aria-disabled={safePage === totalPages}
+                          className={safePage === totalPages ? "pointer-events-none opacity-50" : ""}
+                        />
+                      </PaginationItem>
+                    </PaginationContent>
+                  </Pagination>
+                )}
               </>
             )}
           </CardContent>

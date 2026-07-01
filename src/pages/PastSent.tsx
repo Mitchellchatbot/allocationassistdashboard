@@ -1,4 +1,4 @@
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { useNavigate } from "react-router-dom";
 import { DashboardLayout } from "@/components/layout/DashboardLayout";
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "@/components/ui/card";
@@ -9,6 +9,12 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@
 import { History, Search, Download, ArrowUpDown, ExternalLink } from "lucide-react";
 import { useSentHistory, SENT_KIND_LABEL, type SentRecord } from "@/hooks/use-sent-history";
 import { SearchFilterChips, chipMatches, type SentChip } from "@/components/search/SearchFilterChips";
+import {
+  Pagination, PaginationContent, PaginationItem, PaginationLink,
+  PaginationPrevious, PaginationNext, PaginationEllipsis,
+} from "@/components/ui/pagination";
+
+const PAGE_SIZE = 30;
 
 /**
  * Past Sent (Amir #6) — a searchable, filterable history of every batch + profile
@@ -67,6 +73,22 @@ export default function PastSent() {
     });
     return arr;
   }, [filtered, sortKey, sortDir]);
+
+  const [page, setPage] = useState(1);
+  useEffect(() => { setPage(1); }, [chip, country, range, raw, sortKey, sortDir]);
+
+  const totalPages = Math.max(1, Math.ceil(sorted.length / PAGE_SIZE));
+  const safePage = Math.min(page, totalPages);
+  const paginated = sorted.slice((safePage - 1) * PAGE_SIZE, safePage * PAGE_SIZE);
+  const pageNumbers = useMemo((): Array<number | "..."> => {
+    if (totalPages <= 7) return Array.from({ length: totalPages }, (_, i) => i + 1);
+    const out: Array<number | "..."> = [1];
+    if (safePage > 3) out.push("...");
+    for (let i = Math.max(2, safePage - 1); i <= Math.min(totalPages - 1, safePage + 1); i++) out.push(i);
+    if (safePage < totalPages - 2) out.push("...");
+    out.push(totalPages);
+    return out;
+  }, [safePage, totalPages]);
 
   const toggleSort = (k: SortKey) => {
     if (sortKey === k) setSortDir(d => (d === "asc" ? "desc" : "asc"));
@@ -154,7 +176,7 @@ export default function PastSent() {
                     </tr>
                   </thead>
                   <tbody>
-                    {sorted.slice(0, 500).map(r => (
+                    {paginated.map(r => (
                       <tr key={r.id} className="border-b border-border/40 hover:bg-muted/20">
                         <td className="py-2 px-3 font-medium">{r.doctorName}</td>
                         <td className="py-2 px-3 text-muted-foreground">{r.specialty ?? "—"}</td>
@@ -171,7 +193,43 @@ export default function PastSent() {
                     ))}
                   </tbody>
                 </table>
-                {sorted.length > 500 && <div className="px-3 py-2 text-[10px] text-muted-foreground italic">Showing first 500 of {sorted.length}. Narrow with search/filters or export CSV for the full set.</div>}
+                {totalPages > 1 && (
+                  <Pagination className="mt-2 mb-2">
+                    <PaginationContent>
+                      <PaginationItem>
+                        <PaginationPrevious
+                          href="#"
+                          onClick={(e) => { e.preventDefault(); setPage(p => Math.max(1, p - 1)); }}
+                          aria-disabled={safePage === 1}
+                          className={safePage === 1 ? "pointer-events-none opacity-50" : ""}
+                        />
+                      </PaginationItem>
+                      {pageNumbers.map((n, i) =>
+                        n === "..." ? (
+                          <PaginationItem key={`ell-${i}`}><PaginationEllipsis /></PaginationItem>
+                        ) : (
+                          <PaginationItem key={n}>
+                            <PaginationLink
+                              href="#"
+                              isActive={safePage === n}
+                              onClick={(e) => { e.preventDefault(); setPage(n as number); }}
+                            >
+                              {n}
+                            </PaginationLink>
+                          </PaginationItem>
+                        )
+                      )}
+                      <PaginationItem>
+                        <PaginationNext
+                          href="#"
+                          onClick={(e) => { e.preventDefault(); setPage(p => Math.min(totalPages, p + 1)); }}
+                          aria-disabled={safePage === totalPages}
+                          className={safePage === totalPages ? "pointer-events-none opacity-50" : ""}
+                        />
+                      </PaginationItem>
+                    </PaginationContent>
+                  </Pagination>
+                )}
               </div>
             )}
           </CardContent>
