@@ -22,6 +22,7 @@ import { useDoctorLifecycleMap } from "@/hooks/use-doctor-lifecycle";
 import { groupSpecialty } from "@/lib/specialty-groups";
 import { scoreCandidate, type MatchScore } from "@/lib/match-score";
 import { useWpCandidates, usePublishedWpCandidates, wpCandidateProfileText, type WpCandidate } from "@/hooks/use-wp-candidates";
+import { useDebounce } from "@/hooks/use-zoho-leads";
 import { MatchScoreChip, MatchReasons } from "@/components/DoctorVacancyMatches";
 import { EditableEmailPreview } from "@/components/EditableEmailPreview";
 import { AttachmentsPicker } from "@/components/automations/AttachmentsPicker";
@@ -987,6 +988,13 @@ function BatchDialog({ target, onTargetChange, batches, suggestedSpecialty }: {
 
   // Editor-only state.
   const [search, setSearch] = useState("");
+  // Debounced search term drives the heavy whole-roster scan/score in
+  // candidatePool; the <Input> below stays bound to the immediate `search`
+  // so typing is instant. Once typing settles (200ms) the debounced value
+  // catches up and the derived `q` — and everything keyed off it (list,
+  // empty/no-results states, keyword labels) — matches the raw input, so
+  // the final rendered result is identical; only the scan timing changes.
+  const debouncedSearch = useDebounce(search, 200);
   // specialtyOnly defaults ON whenever there's a specialty to scope to —
   // the batch's own specialty (specialty_of_day) OR today's rotation
   // specialty for the open-ended kinds (daily_duo / tuesday_top_15). The
@@ -1118,7 +1126,12 @@ function BatchDialog({ target, onTargetChange, batches, suggestedSpecialty }: {
       .sort((a, b) => b.score - a.score);
   }, [batch, allDoctors, websiteOnly, effectiveSpecialty]);
 
-  const q = search.trim().toLowerCase();
+  // NOTE: derived from the DEBOUNCED search so the expensive candidatePool
+  // scan only runs once typing settles. Every consumer of `q` (the memo dep,
+  // the empty/no-results conditions, and the keyword-hit labels) reads this
+  // same debounced value, so the list and its surrounding states stay in
+  // lockstep and the final output is identical to the pre-debounce behaviour.
+  const q = debouncedSearch.trim().toLowerCase();
   const candidatePool = useMemo(() => {
     if (!batch) return [];
     const batchGroup = effectiveSpecialty ? (groupSpecialty(effectiveSpecialty) ?? effectiveSpecialty) : null;
@@ -1446,7 +1459,7 @@ function BatchDialog({ target, onTargetChange, batches, suggestedSpecialty }: {
                           <div className="text-[10px] text-muted-foreground truncate">
                             {d.speciality ?? "—"}{d.email && ` · ${d.email}`}
                             {q && keywordHitLabel(d, q) && (
-                              <span className="text-teal-600"> · “{search.trim()}” in {keywordHitLabel(d, q)}</span>
+                              <span className="text-teal-600"> · “{debouncedSearch.trim()}” in {keywordHitLabel(d, q)}</span>
                             )}
                           </div>
                           {isOpen && <MatchReasons score={d._score} max={20} wrap className="mt-1" />}
@@ -1468,7 +1481,7 @@ function BatchDialog({ target, onTargetChange, batches, suggestedSpecialty }: {
                   </div>
                 )}
                 {q && candidatePool.length === 0 && (
-                  <div className="text-[11px] text-muted-foreground italic">No WordPress profile matches “{search.trim()}”.</div>
+                  <div className="text-[11px] text-muted-foreground italic">No WordPress profile matches “{debouncedSearch.trim()}”.</div>
                 )}
               </section>
             )}

@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useDeferredValue, useEffect, useMemo, useRef, useState } from "react";
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription, DialogFooter } from "@/components/ui/dialog";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -125,7 +125,23 @@ function recipientHint(selected: string[]): string {
  * row + initial events. The sender edge function (TBD) consumes those when it
  * comes online.
  */
+/**
+ * Public shell. Renders only the Dialog trigger/frame; the data-fetching body
+ * (six data hooks + the heavy completionIndex/doctorOptions indexes) is an
+ * inner component mounted ONLY while the dialog is open, so nothing fetches
+ * while closed. Once open, behaviour is identical to before the split.
+ */
 export function SendProfileDialog({ open, onClose }: Props) {
+  return (
+    <Dialog open={open} onOpenChange={(v) => !v && onClose()}>
+      <DialogContent className="w-[90vw] max-w-[1100px] sm:max-w-[1100px] max-h-[92vh] overflow-x-hidden overflow-y-auto">
+        {open && <SendProfileDialogBody onClose={onClose} />}
+      </DialogContent>
+    </Dialog>
+  );
+}
+
+function SendProfileDialogBody({ onClose }: { onClose: () => void }) {
   const [step,            setStep]            = useState<Step>("pick-doctor");
   const [selectedDoctor,  setSelectedDoctor]  = useState<DoctorOption | null>(null);
   const [selectedIds,     setSelectedIds]     = useState<string[]>([]);
@@ -148,22 +164,22 @@ export function SendProfileDialog({ open, onClose }: Props) {
   const scheduleProfileSend = useScheduleProfileSend();
   const navigate = useNavigate();
 
-  // Reset whenever the dialog re-opens.
+  // Reset whenever the dialog re-opens. The body only mounts while open, so
+  // "on open" == "on mount" here; re-run if the current user changes while
+  // open so the BCC default tracks them, exactly as before the split.
   useEffect(() => {
-    if (open) {
-      setStep("pick-doctor");
-      setSelectedDoctor(null);
-      setSelectedIds([]);
-      setCustomMessage("");
-      // Default the BCC list to the current user if they're a known
-      // sender — most common case is "I'm sending, BCC me on my own
-      // outbound". The Preview step exposes the dropdown for changes.
-      const me = findSenderByEmail(user?.email ?? null);
-      setBccList(me ? [me.email] : []);
-      setHospitalTemplateKey(loadDefaultTemplate("hospital"));
-      setDoctorTemplateKey(loadDefaultTemplate("doctor"));
-    }
-  }, [open, user?.email]);
+    setStep("pick-doctor");
+    setSelectedDoctor(null);
+    setSelectedIds([]);
+    setCustomMessage("");
+    // Default the BCC list to the current user if they're a known
+    // sender — most common case is "I'm sending, BCC me on my own
+    // outbound". The Preview step exposes the dropdown for changes.
+    const me = findSenderByEmail(user?.email ?? null);
+    setBccList(me ? [me.email] : []);
+    setHospitalTemplateKey(loadDefaultTemplate("hospital"));
+    setDoctorTemplateKey(loadDefaultTemplate("doctor"));
+  }, [user?.email]);
 
   // Phase 4 — hide signed + unavailable doctors from the send list. Spec:
   // "Signed status removes from public website (not eligible to be sent in
@@ -470,19 +486,18 @@ export function SendProfileDialog({ open, onClose }: Props) {
   };
 
   return (
-    <Dialog open={open} onOpenChange={(v) => !v && onClose()}>
-      <DialogContent className="w-[90vw] max-w-[1100px] sm:max-w-[1100px] max-h-[92vh] overflow-x-hidden overflow-y-auto">
-        <DialogHeader>
-          <DialogTitle className="flex items-center gap-2">
-            <Send className="h-4 w-4 text-teal-600" /> Send Profile to Hospital
-          </DialogTitle>
-          <DialogDescription className="text-[12px]">
-            Triggers Flow 2. Picks a doctor, selects hospital(s), and queues the introduction emails.
-            Multi-hospital sends BCC every hospital — they don't see each other.
-          </DialogDescription>
-        </DialogHeader>
+    <>
+      <DialogHeader>
+        <DialogTitle className="flex items-center gap-2">
+          <Send className="h-4 w-4 text-teal-600" /> Send Profile to Hospital
+        </DialogTitle>
+        <DialogDescription className="text-[12px]">
+          Triggers Flow 2. Picks a doctor, selects hospital(s), and queues the introduction emails.
+          Multi-hospital sends BCC every hospital — they don't see each other.
+        </DialogDescription>
+      </DialogHeader>
 
-        <Stepper step={step} />
+      <Stepper step={step} />
 
         {step === "pick-doctor" && (
           <DoctorPicker
@@ -528,8 +543,7 @@ export function SendProfileDialog({ open, onClose }: Props) {
             onSaveDefault={saveDefaultTemplate}
           />
         )}
-      </DialogContent>
-    </Dialog>
+    </>
   );
 }
 
@@ -558,15 +572,20 @@ function DoctorPicker({ options, isLoading, onPick }: {
   options: DoctorOption[]; isLoading: boolean; onPick: (d: DoctorOption) => void;
 }) {
   const [q, setQ] = useState("");
+  // Defer only the filter term: the <Input> stays controlled by the raw `q`
+  // (instant typing), while the options.filter runs against the deferred value
+  // so a large list stays responsive. Final filtered options/order are
+  // identical — the deferred value settles to `q` once React catches up.
+  const deferredQ = useDeferredValue(q);
   const filtered = useMemo(() => {
-    const term = q.trim().toLowerCase();
+    const term = deferredQ.trim().toLowerCase();
     if (!term) return options.slice(0, 50);
     return options.filter(o =>
       o.name.toLowerCase().includes(term) ||
       o.email?.toLowerCase().includes(term) ||
       o.speciality?.toLowerCase().includes(term),
     ).slice(0, 100);
-  }, [options, q]);
+  }, [options, deferredQ]);
 
   return (
     <div className="space-y-3">

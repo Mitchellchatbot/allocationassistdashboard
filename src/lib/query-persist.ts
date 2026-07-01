@@ -22,12 +22,23 @@ const STORAGE_KEY = "aa-rq-cache-v1";
 const MAX_CHARS = 2_000_000;
 // Don't hydrate anything older than this — avoids showing day-old numbers.
 const MAX_AGE_MS = 24 * 60 * 60 * 1000;
-const WRITE_THROTTLE_MS = 1500;
+// Trailing debounce window: a burst of cache mutations collapses into a single
+// write that fires only after things go quiet for this long. Raised from 1.5s
+// to 3s to cut the number of localStorage writes (each is a full re-dehydrate +
+// JSON.stringify of the whole persisted cache).
+const WRITE_THROTTLE_MS = 3000;
 
 // Queries we deliberately DON'T persist:
 //   - zoho-data: the whole Zoho cache (multi-MB) — would blow the size budget.
 //     It's a single fast zoho_cache row read on reload, not a bottleneck.
-const EXCLUDE_FIRST_KEY = new Set<string>(["zoho-data"]);
+//   - wp-candidates / form-responses-infinite: large lists that are cheap to
+//     refetch. Excluding them keeps the snapshot small; on reload they cold-start
+//     exactly like zoho-data (a normal fetch), not from the persisted cache.
+const EXCLUDE_FIRST_KEY = new Set<string>([
+  "zoho-data",
+  "wp-candidates",
+  "form-responses-infinite",
+]);
 
 function shouldPersist(q: Query): boolean {
   return q.state.status === "success" && !EXCLUDE_FIRST_KEY.has(String(q.queryKey[0]));
@@ -72,8 +83,12 @@ export function startQueryPersist(qc: QueryClient): () => void {
     }
   };
 
+  // Trailing debounce: each cache change resets the timer, so a rapid burst of
+  // mutations collapses into a single write that fires once things go quiet for
+  // WRITE_THROTTLE_MS. The persisted snapshot is always the full current cache
+  // at write time, so coalescing loses nothing — just fewer writes.
   const schedule = () => {
-    if (timer) return;
+    if (timer) clearTimeout(timer);
     timer = setTimeout(() => { timer = undefined; write(); }, WRITE_THROTTLE_MS);
   };
 

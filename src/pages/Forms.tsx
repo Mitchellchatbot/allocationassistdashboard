@@ -1257,18 +1257,6 @@ const ResponseRow = memo(function ResponseRow({
     }
   };
 
-  // Check whether a WP candidate already exists for this submission so
-  // we can either offer a 'Create WP profile' action (no match) or a
-  // 'View in WP' link (match). Matches on email OR normalised phone —
-  // a row that the doctor submitted with a different email but the
-  // same phone we already have on file is still in WP. Only matters
-  // for JotForm — Typeform / Elementor flows don't feed WP.
-  const wpQuery = useWpCandidateByContact(
-    (formProvider === "jotform" || formProvider === "typeform") ? response.respondent_email : null,
-    (formProvider === "jotform" || formProvider === "typeform") ? phone : null,
-  );
-  const existingWp = wpQuery.data;
-
   // Auto-expand when the search term hits something INSIDE this
   // response's answers (rather than just the header) — saves the user
   // clicking each row to verify what matched.
@@ -1280,6 +1268,38 @@ const ResponseRow = memo(function ResponseRow({
     return tokens.some(t => !headerHay.includes(t));
   }, [highlight, display.label, response.respondent_email]);
   const effectivelyOpen = open || matchesInBody;
+
+  const isWpProvider = formProvider === "jotform" || formProvider === "typeform";
+
+  // Collapsed in/out-of-WP badge is driven off the already-cached
+  // useWpContactSet() Set — O(1) Set.has, zero extra fetch — using the
+  // SAME normalisation the contact set builds its keys from
+  // (email → lowercased+trimmed; phone → normalizePhone/last-9). This
+  // reproduces today's binary in/out badge exactly without a per-row
+  // query. `.data` is undefined until the WP list has loaded; while
+  // it's loading we render nothing for the badge (same as the old
+  // `!wpQuery.isLoading` gate that hid the badge until the check
+  // resolved).
+  const wpContacts = useWpContactSet();
+  const inWpFromSet = useMemo(() => {
+    if (!isWpProvider || !wpContacts.data) return null;
+    const e = (response.respondent_email ?? "").toLowerCase().trim();
+    const p = normalizePhone(phone);
+    return (!!e && wpContacts.data.emails.has(e))
+        || (!!p && wpContacts.data.phones.has(p));
+  }, [isWpProvider, wpContacts.data, response.respondent_email, phone]);
+
+  // Live WP candidate lookup — only mounted when the row is actually
+  // expanded, since only the expanded panel needs the live
+  // wp_link / status / id. Passing null contacts keeps the query
+  // disabled (enabled: !!email || !!phone), so a collapsed row fires
+  // no per-row fetch. Matches on email OR normalised phone. Only
+  // matters for JotForm / Typeform — Elementor flows don't feed WP.
+  const wpQuery = useWpCandidateByContact(
+    (isWpProvider && effectivelyOpen) ? response.respondent_email : null,
+    (isWpProvider && effectivelyOpen) ? phone : null,
+  );
+  const existingWp = wpQuery.data;
   const summary = useMemo(() => entries.slice(0, 2).map(([k, v]) => `${k}: ${v}`).join(" · "), [entries]);
   const statusStyle = OUTREACH_STYLE[response.outreach_status] ?? OUTREACH_STYLE.new;
   const isPaid = leadValueCents > 0;
@@ -1369,12 +1389,14 @@ const ResponseRow = memo(function ResponseRow({
             JotForm feeds WP, so other providers stay silent. Match
             considers email OR phone so a doctor who re-submitted with
             a different email isn't flagged as missing. */}
-        {(formProvider === "jotform" || formProvider === "typeform") && !wpQuery.isLoading && (
-          existingWp ? (
+        {isWpProvider && inWpFromSet !== null && (
+          inWpFromSet ? (
             <button
               type="button"
               onClick={(e) => { e.stopPropagation(); openInDoctors("profiles"); }}
-              title={`WP candidate #${existingWp.id} · ${existingWp.status ?? ""} — open in Doctor Profiles`}
+              title={existingWp
+                ? `WP candidate #${existingWp.id} · ${existingWp.status ?? ""} — open in Doctor Profiles`
+                : "In WordPress — open in Doctor Profiles"}
               className="text-[9px] shrink-0 inline-flex items-center rounded-md border px-1.5 py-0.5 bg-violet-50 text-violet-700 border-violet-200 hover:bg-violet-100 transition-colors"
             >
               <Sparkles className="h-2.5 w-2.5 mr-0.5" /> in WordPress

@@ -309,11 +309,13 @@ export default function Automations() {
         })()}
       </div>
 
-      <RunDetailSheet
-        run={selectedRun}
-        open={!!selectedRunId}
-        onClose={() => setSelectedRunId(null)}
-      />
+      {selectedRun && (
+        <RunDetailSheet
+          run={selectedRun}
+          open={true}
+          onClose={() => setSelectedRunId(null)}
+        />
+      )}
 
       <SendProfileDialog
         open={sendProfileOpen}

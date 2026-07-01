@@ -16,6 +16,7 @@
 import { memo, useMemo, useState, type ReactNode } from "react";
 import { useSearchParams } from "react-router-dom";
 import { useZohoData, type ZohoDoctorOnBoard } from "@/hooks/use-zoho-data";
+import { useDebounce } from "@/hooks/use-zoho-leads";
 import { useDoctorProfile, calcCompletion } from "@/hooks/use-doctor-profiles";
 import { useWpCandidateForDoctor } from "@/hooks/use-wp-candidates";
 import { useForms, type FormResponse } from "@/hooks/use-forms";
@@ -75,6 +76,9 @@ const BILL_FILTER_LABELS: Record<BillFilter, string> = {
 export default function DoctorsOverview() {
   const [params] = useSearchParams();
   const q = (params.get("q") ?? "").trim().toLowerCase();
+  // Debounce only the value that drives the (potentially expensive) list
+  // recompute; the raw `q` still updates instantly for typing feedback.
+  const qDebounced = useDebounce(q, 300);
   const [range, setRange] = useState<RangeKey>("all");
 
   const [billFilter, setBillFilter] = useState<BillFilter>("all");
@@ -107,12 +111,12 @@ export default function DoctorsOverview() {
         if (cutoff != null) {
           if (!Number.isFinite(t) || t < cutoff) return false;
         }
-        if (q) {
+        if (qDebounced) {
           const hay = [
             d.Full_Name, d.Email, d.Phone, d.Mobile, specialtyOf(d),
             d.Country_of_Specialty_training, d.Owner?.name, d.Account_Name?.name,
           ].filter(Boolean).join(" ").toLowerCase();
-          if (!hay.includes(q)) return false;
+          if (!hay.includes(qDebounced)) return false;
         }
         if (billFilter !== "all") {
           const b = billing;
@@ -122,7 +126,7 @@ export default function DoctorsOverview() {
         return true;
       })
       .sort((a, b) => b.t - a.t);
-  }, [dob, range, q, billFilter, billingByName]);
+  }, [dob, range, qDebounced, billFilter, billingByName]);
 
   return (
     <div className="space-y-3">
@@ -132,7 +136,7 @@ export default function DoctorsOverview() {
           {isLoading ? "Loading doctors…" : (
             <><span className="font-semibold text-slate-800">{filtered.length}</span> doctor{filtered.length === 1 ? "" : "s"} on board
             {range !== "all" && <> · added in the {RANGE_LABELS[range].toLowerCase()}</>}
-            {q && <> · matching “{q}”</>}</>
+            {qDebounced && <> · matching “{qDebounced}”</>}</>
           )}
         </div>
         <div className="flex items-center gap-1.5">
@@ -160,7 +164,7 @@ export default function DoctorsOverview() {
       {/* List */}
       {!isLoading && filtered.length === 0 && (
         <div className="rounded-lg border border-dashed bg-slate-50/60 px-4 py-12 text-center text-[13px] text-muted-foreground">
-          No doctors on board {range !== "all" ? "in this time range" : ""}{q ? ` matching “${q}”` : ""}.
+          No doctors on board {range !== "all" ? "in this time range" : ""}{qDebounced ? ` matching “${qDebounced}”` : ""}.
         </div>
       )}
 

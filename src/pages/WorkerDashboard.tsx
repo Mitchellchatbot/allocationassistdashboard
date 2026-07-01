@@ -6,6 +6,7 @@ import { useAuth } from "@/hooks/use-auth";
 import { useWorkerEntries, useSaveEntries, useUpdateEntry, useDeleteEntry, CALL_TYPES, type WorkerEntry } from "@/hooks/use-worker-entries";
 import { fetchWeeklySalesRaw } from "@/hooks/use-weekly-sales";
 import { useZohoData, type ZohoLead } from "@/hooks/use-zoho-data";
+import { useDebounce } from "@/hooks/use-zoho-leads";
 import { useQuery } from "@tanstack/react-query";
 import { getPresetRange, type TimeRangePreset } from "@/lib/filters";
 import {
@@ -784,9 +785,12 @@ function DoctorSearchInput({
   const { data: zoho } = useZohoData();
   const [open, setOpen] = useState(false);
   const inputRef = useRef<HTMLInputElement>(null);
+  // Input stays bound to the instant `value`; only the suggestions derivation
+  // reads the debounced term so we don't recompute matches on every keystroke.
+  const debouncedValue = useDebounce(value, 200);
 
   const matches = useMemo<DoctorMatch[]>(() => {
-    const q = value.trim().toLowerCase();
+    const q = debouncedValue.trim().toLowerCase();
     if (q.length < 2 || !zoho?.rawLeads) return [];
     // Reuse the shared precomputed index instead of re-scanning rawLeads and
     // recomputing per-lead name/toLowerCase/payload in every row. The filter
@@ -803,7 +807,7 @@ function DoctorSearchInput({
       }
     }
     return out;
-  }, [value, zoho?.rawLeads]);
+  }, [debouncedValue, zoho?.rawLeads]);
 
   // Close on outside click
   useEffect(() => {
@@ -842,7 +846,7 @@ function DoctorSearchInput({
           ))}
         </div>
       )}
-      {open && value.trim().length >= 2 && matches.length === 0 && (
+      {open && debouncedValue.trim().length >= 2 && matches.length === 0 && (
         <div className="absolute z-50 top-full left-0 mt-1 w-72 rounded-lg border border-border bg-card shadow-xl px-3 py-2">
           <p className="text-[11px] text-muted-foreground">No match — typing will create a new doctor</p>
         </div>
@@ -861,6 +865,9 @@ function MyDoctorsTab({ memberName }: { memberName: string }) {
   const [countryFilter, setCountryFilter] = useState<string>("__all__");
   const [licenseFilter, setLicenseFilter] = useState<string>("__all__"); // all | DHA | DOH | MOH | none
   const [ageFilter, setAgeFilter] = useState<string>("__all__"); // all | new (<7d) | recent (7-30) | old (30-90) | stale (90+)
+  // Search <Input> stays bound to the instant `search`; only the `filtered`
+  // derivation reads this debounced term so we don't re-filter every keystroke.
+  const debouncedSearch = useDebounce(search, 250);
 
   const myLeads = useMemo(() => {
     if (!zoho?.rawLeads) return [];
@@ -921,8 +928,8 @@ function MyDoctorsTab({ memberName }: { memberName: string }) {
     if (countryFilter   !== "__all__") r = r.filter(l => l.Country_of_Specialty_training === countryFilter);
     if (licenseFilter   !== "__all__") r = r.filter(l => licenseOf(l) === licenseFilter);
     if (ageFilter       !== "__all__") r = r.filter(l => ageOf(l.Created_Time) === ageFilter);
-    if (search.trim()) {
-      const q = search.toLowerCase();
+    if (debouncedSearch.trim()) {
+      const q = debouncedSearch.toLowerCase();
       r = r.filter(l =>
         (l.Full_Name ?? "").toLowerCase().includes(q)
         || (l.Specialty_New ?? l.Specialty ?? "").toLowerCase().includes(q)
@@ -930,7 +937,7 @@ function MyDoctorsTab({ memberName }: { memberName: string }) {
       );
     }
     return r;
-  }, [myLeads, statusFilter, specialtyFilter, countryFilter, licenseFilter, ageFilter, search]);
+  }, [myLeads, statusFilter, specialtyFilter, countryFilter, licenseFilter, ageFilter, debouncedSearch]);
 
   const hasActiveFilters = search
     || statusFilter    !== "__all__"

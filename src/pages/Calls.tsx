@@ -14,6 +14,7 @@ import {
   type FathomCall,
 } from "@/hooks/use-fathom-calls";
 import { isSalesRepHost } from "@/lib/sales-team";
+import { useDebounce } from "@/hooks/use-zoho-leads";
 import { Button } from "@/components/ui/button";
 import {
   PhoneCall, Loader2, Search, ExternalLink, Sparkles,
@@ -154,6 +155,13 @@ export default function Calls() {
   const [hostFilter, setHostFilter] = useState<string>("");
   const [activeId,   setActiveId]   = useState<string | null>(null);
 
+  // Debounce the search so the Fathom query only fires once typing settles.
+  // The raw `search` stays bound to the <Input> for instant typing; the
+  // debounced value feeds the query key AND every search-driven guard below
+  // (insights/recap visibility, count badge, "showing latest") so those track
+  // the SAME term the fetched list was built from — no flicker mid-keystroke.
+  const debouncedSearch = useDebounce(search, 300);
+
   // Host roster across the WHOLE table. The Calls page is scoped to the SALES
   // TEAM — Abraham, Asser, Asim (Ammar 2026-06-10: "just show calls for these
   // people"). Match Fathom hosts to the reps by name/email, then restrict
@@ -171,9 +179,9 @@ export default function Calls() {
   );
 
   const filters = useMemo(() => ({
-    search: search || null,
+    search: debouncedSearch || null,
     hosts:  scopedHosts,
-  }), [search, scopedHosts]);
+  }), [debouncedSearch, scopedHosts]);
 
   const { data: calls, isLoading, error, isFetching } = useFathomCalls(filters);
   // Real totals over the scoped set (the list itself caps at 500 rows).
@@ -300,10 +308,10 @@ export default function Calls() {
       )}
 
       {/* ── AI insights: cross-call synthesis (on demand) ─────────────────── */}
-      {!search.trim() && <CallInsightsPanel hostEmails={scopedHosts} onOpenCall={setActiveId} />}
+      {!debouncedSearch.trim() && <CallInsightsPanel hostEmails={scopedHosts} onOpenCall={setActiveId} />}
 
       {/* ── Recap: action items + summary peeks from the most recent calls ─── */}
-      {(recentActionGroups.length > 0 || latestSummaries.length > 0) && !search.trim() && (
+      {(recentActionGroups.length > 0 || latestSummaries.length > 0) && !debouncedSearch.trim() && (
         <div className="grid grid-cols-1 lg:grid-cols-2 gap-4 mb-6">
           {/* Action items from the latest calls */}
           <Card className="shadow-sm border-border/60">
@@ -393,10 +401,10 @@ export default function Calls() {
             All calls
             {calls && (
               <Badge variant="secondary" className={`ml-1 text-[10px] ${CANDY.lilac.chip} ${CANDY.lilac.fg} border-0`}>
-                {search.trim() ? calls.length : (callStats?.count ?? calls.length)}
+                {debouncedSearch.trim() ? calls.length : (callStats?.count ?? calls.length)}
               </Badge>
             )}
-            {!search.trim() && callStats && calls && calls.length < callStats.count && (
+            {!debouncedSearch.trim() && callStats && calls && calls.length < callStats.count && (
               <span className="text-[10px] font-normal text-muted-foreground">
                 showing latest {calls.length}
               </span>
