@@ -19,6 +19,8 @@ import { useDoctorProfile, useDoctorProfiles, profileToTokens, calcCompletion, t
 import { useWpCandidateForDoctor, usePublishedWpCandidates, wpCandidateToTokens, normalizePhone, type WpCandidate } from "@/hooks/use-wp-candidates";
 import { useZohoData, type ZohoDoctorOnBoard, type ZohoLead } from "@/hooks/use-zoho-data";
 import { EditableEmailPreview } from "@/components/EditableEmailPreview";
+import { EmailFrame } from "@/components/EmailFrame";
+import { wrapBodyForSend } from "@/lib/email-preview";
 import { type EmailAttachment } from "@/lib/email-attachments";
 import { AttachmentsPicker } from "@/components/automations/AttachmentsPicker";
 import { TemplatePicker } from "@/components/automations/TemplatePicker";
@@ -77,15 +79,10 @@ function normName(n: string | null | undefined): string {
 }
 
 // ── Send-fidelity wrapper ───────────────────────────────────────────────────
-// When the team edits the hospital preview, we ship their HTML verbatim. To
-// match what send-flow-email produces, wrap the edited body in the SAME font
-// shell the server uses (FONT_IMPORT + Garamond container). Keep in sync with
-// FONT_IMPORT / FONT_STACK in supabase/functions/send-flow-email/index.ts.
-const SEND_FONT_STACK  = "Garamond, 'EB Garamond', Georgia, 'Times New Roman', serif";
-const SEND_FONT_IMPORT = `<style>@import url('https://fonts.googleapis.com/css2?family=Poppins:wght@400;500;600;700&display=swap');</style>`;
-function wrapBodyForSend(bodyHtml: string): string {
-  return `${SEND_FONT_IMPORT}<div style="font-family:${SEND_FONT_STACK};font-size:17px;color:#1a2332;line-height:1.55;">${bodyHtml}</div>`;
-}
+// wrapBodyForSend (the exact server send shell — FONT_IMPORT + Garamond
+// container) now lives in src/lib/email-preview.ts, so every preview surface
+// AND the send path share one source of truth kept in sync with the edge fns.
+// Imported above.
 
 interface SendOverrides { subject_override?: string; html_override?: string }
 
@@ -1384,44 +1381,12 @@ function PreviewBlock({ label, subject, body }: { label: string; subject: string
  *  fight with Tailwind, and any stray scripts (admin-controlled but
  *  still — defense in depth) can't touch the parent page. */
 function HtmlPreview({ html }: { html: string }) {
-  const iframeRef = useRef<HTMLIFrameElement | null>(null);
-  const [height, setHeight] = useState(280);
-
-  useEffect(() => {
-    const iframe = iframeRef.current;
-    if (!iframe) return;
-    const doc = iframe.contentDocument;
-    if (!doc) return;
-    const full = `<!doctype html><html><head><meta charset="utf-8"><meta name="viewport" content="width=device-width">
-      <link rel="preconnect" href="https://fonts.googleapis.com"><link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-      <link href="https://fonts.googleapis.com/css2?family=Poppins:wght@400;500;600;700&display=swap" rel="stylesheet">
-      <style>
-        body { font-family: Garamond,'EB Garamond',Georgia,'Times New Roman',serif; color:#1a2332; margin:0; padding:16px; font-size:17px; line-height:1.55; background:#ffffff; }
-        a { color:#1d4ed8; }
-        table { border-collapse: collapse; }
-        img { max-width: 100%; height: auto; }
-      </style>
-    </head><body>${html}</body></html>`;
-    doc.open();
-    doc.write(full);
-    doc.close();
-    // Resize iframe to fit the email content, capped so a long invoice
-    // letter doesn't push the modal off-screen.
-    const measure = () => {
-      const h = doc.body?.scrollHeight ?? 280;
-      setHeight(Math.min(Math.max(h + 8, 140), 480));
-    };
-    measure();
-    const t = setTimeout(measure, 80);   // re-measure after fonts/images
-    return () => clearTimeout(t);
-  }, [html]);
-
   return (
-    <iframe
-      ref={iframeRef}
-      title="Email preview"
-      sandbox="allow-same-origin"
-      style={{ width: "100%", height, border: "1px solid hsl(var(--border))", borderRadius: 6, background: "#fff" }}
+    <EmailFrame
+      html={html}
+      minHeight={140}
+      maxHeight={480}
+      style={{ border: "1px solid hsl(var(--border))", borderRadius: 6 }}
     />
   );
 }

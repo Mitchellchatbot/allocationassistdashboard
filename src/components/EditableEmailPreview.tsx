@@ -4,6 +4,7 @@ import { cn } from "@/lib/utils";
 import { TableInsertDialog } from "@/components/TableInsertDialog";
 import { FullScreenEmailPreview } from "@/components/FullScreenEmailPreview";
 import type { EmailAttachment } from "@/lib/email-attachments";
+import { EMAIL_BODY_STYLE, EMAIL_EDITOR_CHILD_CLASS } from "@/lib/email-preview";
 
 /**
  * EditableEmailPreview — the rendered email, editable in place. The subject is
@@ -53,15 +54,10 @@ interface EditableEmailPreviewProps {
   onAttachmentsChange?: (next: EmailAttachment[]) => void;
 }
 
-const BODY_CLASS =
-  "bg-white rounded-md text-[13px] leading-relaxed text-slate-800 " +
-  "[&_a]:text-teal-600 [&_a:hover]:underline [&_p]:my-3 [&_h2]:font-semibold [&_h2]:my-3 " +
-  "[&_h3]:font-semibold [&_h3]:my-2 [&_ul]:list-disc [&_ul]:pl-5 [&_ol]:list-decimal [&_ol]:pl-5 " +
-  "[&_li]:my-1 [&_table]:text-[11px] [&_pre]:whitespace-pre-wrap [&_pre]:font-sans " +
-  // Display-only containment: a wide table/image fits the editor width instead
-  // of pushing the whole dialog sideways. The innerHTML (what actually sends)
-  // keeps its real widths — this CSS only governs how it looks in the editor.
-  "[&_table]:max-w-full [&_table]:!w-full [&_table]:table-fixed [&_td]:break-words [&_th]:break-words [&_img]:max-w-full [&_img]:h-auto";
+// Mirrors the send shell (EMAIL_BODY_STYLE applied inline below) so the in-place
+// editor looks exactly like the delivered mail. Child rules + editor-only
+// containment for wide tables/images live in EMAIL_EDITOR_CHILD_CLASS.
+const BODY_CLASS = "bg-white rounded-md " + EMAIL_EDITOR_CHILD_CLASS;
 
 export function EditableEmailPreview({
   subject, html, onSubjectChange, onHtmlChange, resetKey, edited, onReset, from, to, className,
@@ -225,6 +221,7 @@ export function EditableEmailPreview({
           onKeyUp={saveSelection}
           onMouseUp={saveSelection}
           onBlur={saveSelection}
+          style={EMAIL_BODY_STYLE}
           className={cn(
             BODY_CLASS,
             "p-4 shadow-sm outline-none ring-1 ring-slate-200/70 focus:ring-2 focus:ring-teal-400 cursor-text",

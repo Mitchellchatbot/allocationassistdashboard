@@ -7,6 +7,7 @@ import { renderTemplate, type EmailTemplate } from "@/hooks/use-email-templates"
 import { FLOW_DEFINITIONS } from "@/lib/automation-flows";
 import { getFavorites, toggleFavorite, getRecent, pushRecent } from "@/lib/template-prefs";
 import { cn } from "@/lib/utils";
+import { EmailFrame } from "@/components/EmailFrame";
 
 /**
  * TemplatePicker — Amir #3. A grouped, searchable dropdown to choose WHICH
@@ -166,10 +167,11 @@ export function TemplatePicker({
               </div>
               <div className="flex-1 min-h-0 bg-slate-100/50 p-3">
                 {previewHtml
-                  ? <iframe
+                  ? <EmailFrame
+                      html={previewHtml}
                       title="Template preview"
-                      srcDoc={`<!doctype html><html><head><style>html,body{margin:0;padding:0;}body{padding:22px 26px;font-family:Garamond,'EB Garamond',Georgia,serif;font-size:15px;line-height:1.65;color:#1f2937;background:#fff;}p{margin:0 0 12px;}a{color:#0d9488;word-break:break-word;}strong{color:#0f172a;}img{max-width:100%;height:auto;}table{max-width:100%;}</style></head><body>${previewHtml}</body></html>`}
-                      className="w-full h-[360px] bg-white rounded-md border border-slate-200 shadow-sm"
+                      height={360}
+                      className="w-full bg-white rounded-md border border-slate-200 shadow-sm"
                     />
                   : <div className="p-4 text-[12px] text-muted-foreground italic">Hover a template to preview it.</div>}
               </div>

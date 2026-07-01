@@ -1,6 +1,7 @@
 import { useState, type ReactNode } from "react";
 import { ChevronDown, ChevronRight, Mail, Paperclip, Maximize2 } from "lucide-react";
 import { cn } from "@/lib/utils";
+import { EmailFrame } from "@/components/EmailFrame";
 
 interface EmailPreviewProps {
   /** Pre-rendered subject (tokens already substituted). */
@@ -117,12 +118,13 @@ export function EmailPreview({
 
       {banner && <div className="px-6 py-2 bg-amber-50 border-b border-amber-200 text-[11px] text-amber-900">{banner}</div>}
 
-      {/* Body — sits on a light grey "viewport" so the email's own card shows through visually */}
+      {/* Body — rendered in a sandboxed iframe with the EXACT send shell
+          (Garamond 17px #1a2332 …) so it matches what lands in Gmail, instead
+          of being repainted by the dashboard's own CSS. */}
       <div className="bg-slate-100/60 px-4 py-5">
-        <div
-          className="bg-white rounded-md shadow-sm overflow-x-auto text-[13px] leading-relaxed text-slate-800 [&_a]:text-teal-600 [&_a:hover]:underline [&_p]:my-3 [&_h2]:font-semibold [&_h2]:my-3 [&_h3]:font-semibold [&_h3]:my-2 [&_ul]:list-disc [&_ul]:pl-5 [&_ol]:list-decimal [&_ol]:pl-5 [&_li]:my-1 [&_table]:text-[11px] [&_pre]:whitespace-pre-wrap [&_pre]:font-sans"
-          dangerouslySetInnerHTML={{ __html: html }}
-        />
+        <div className="bg-white rounded-md shadow-sm overflow-hidden">
+          <EmailFrame html={html} minHeight={160} />
+        </div>
       </div>
 
       {/* Plain text fallback (collapsed) */}

@@ -10,17 +10,13 @@ import { cn } from "@/lib/utils";
 import { TableInsertDialog } from "@/components/TableInsertDialog";
 import { AttachmentsPicker } from "@/components/automations/AttachmentsPicker";
 import type { EmailAttachment } from "@/lib/email-attachments";
+import { buildEmailPreviewDoc, EMAIL_BODY_STYLE, EMAIL_EDITOR_CHILD_CLASS } from "@/lib/email-preview";
 
-// Same email body styling as the inline EditableEmailPreview so the editable
-// full-screen surface renders identically to what sends.
-const FS_BODY_CLASS =
-  "bg-white rounded-md text-[14px] leading-relaxed text-slate-800 " +
-  "[&_a]:text-teal-600 [&_a:hover]:underline [&_p]:my-3 [&_h2]:font-semibold [&_h2]:my-3 " +
-  "[&_h3]:font-semibold [&_h3]:my-2 [&_ul]:list-disc [&_ul]:pl-5 [&_ol]:list-decimal [&_ol]:pl-5 " +
-  "[&_li]:my-1 [&_pre]:whitespace-pre-wrap [&_pre]:font-sans " +
-  // Display-only containment so a wide table/image can't push the editor wider
-  // than the screen (the saved innerHTML keeps its real widths).
-  "[&_table]:max-w-full [&_table]:!w-full [&_table]:table-fixed [&_td]:break-words [&_th]:break-words [&_img]:max-w-full [&_img]:h-auto";
+// The editable full-screen surface can't be a sandboxed iframe (contentEditable
+// needs same-document nodes), so it mirrors the send shell via inline style
+// (EMAIL_BODY_STYLE) + child rules — rendering identically to what sends and to
+// the non-editable iframe preview.
+const FS_BODY_CLASS = "bg-white rounded-md " + EMAIL_EDITOR_CHILD_CLASS;
 
 /**
  * FullScreenEmailPreview — Amir #7. A true full-viewport review of an email
@@ -168,14 +164,10 @@ export function FullScreenEmailPreview(props: FullScreenEmailPreviewProps) {
     latestHtmlRef.current = v; setLiveHtml(v); onHtmlChange?.(v);
   };
 
-  // Wrap the email HTML in a minimal document. Optionally strip <img> so the
-  // team can review the text-only fallback view (how it looks with images off).
-  const srcDoc = useMemo(() => {
-    const body = showImages ? html : html.replace(/<img\b[^>]*>/gi, '<span style="color:#94a3b8;font-style:italic;">[image hidden]</span>');
-    return `<!doctype html><html><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">` +
-      `<style>html,body{margin:0;padding:0;background:transparent;} body{padding:20px;} *{box-sizing:border-box;}</style></head>` +
-      `<body>${body}</body></html>`;
-  }, [html, showImages]);
+  // Render inside the shared send-shell document so the full-screen preview
+  // matches the delivered mail exactly (Garamond 17px #1a2332 …). Optionally
+  // strip <img> for the text-only fallback review.
+  const srcDoc = useMemo(() => buildEmailPreviewDoc(html, { showImages }), [html, showImages]);
 
   const copyHtml = async () => {
     try { await navigator.clipboard.writeText(effectiveHtml); setCopied(true); setTimeout(() => setCopied(false), 1500); toast.success("HTML copied"); }
@@ -330,6 +322,7 @@ export function FullScreenEmailPreview(props: FullScreenEmailPreviewProps) {
                   onKeyUp={saveSelection}
                   onMouseUp={saveSelection}
                   onBlur={saveSelection}
+                  style={EMAIL_BODY_STYLE}
                   className={cn(FS_BODY_CLASS, "p-6 sm:p-8 outline-none min-h-[calc(100vh-220px)] cursor-text")}
                 />
               </div>
