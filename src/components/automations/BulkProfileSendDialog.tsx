@@ -216,9 +216,9 @@ export function BulkProfileSendDialog({ open, onClose }: { open: boolean; onClos
           />
         </div>
 
-        {/* Templates */}
-        <div className="grid grid-cols-2 gap-3">
-          <TemplatePicker templates={templates} value={hospitalTemplateKey} onChange={setHospitalTemplateKey} defaultKey={HOSPITAL_DEFAULT_KEY} renderVars={sampleVars(selectedDocs[0] ?? docPool[0] ?? { key: "", doctor_id: null, name: "Dr. Example", email: null, phone: null, speciality: "Cardiology" })} label="Hospital email template" flowFilter="profile_sent" />
+        {/* Template — only the doctor "working opportunity" email is pickable;
+            the hospital intro always uses the standard profile-sent template. */}
+        <div>
           <TemplatePicker templates={templates} value={doctorTemplateKey} onChange={setDoctorTemplateKey} defaultKey={DOCTOR_DEFAULT_KEY} renderVars={sampleVars(selectedDocs[0] ?? docPool[0] ?? { key: "", doctor_id: null, name: "Dr. Example", email: null, phone: null, speciality: "Cardiology" })} label="Doctor 'working opportunity' template" flowFilter="profile_sent" />
         </div>
 

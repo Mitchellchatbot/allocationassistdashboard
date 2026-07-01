@@ -568,7 +568,6 @@ function SendProfileDialogBody({ onClose }: { onClose: () => void }) {
             setBccList={setBccList}
             templates={templates}
             hospitalTemplateKey={hospitalTemplateKey}
-            setHospitalTemplateKey={setHospitalTemplateKey}
             doctorTemplateKey={doctorTemplateKey}
             setDoctorTemplateKey={setDoctorTemplateKey}
             onSaveDefault={saveDefaultTemplate}
@@ -829,7 +828,7 @@ function HospitalRecipientsOverride({ hospitals, contacts, overrides, onOverride
 function PreviewConfirm({
   doctor, hospitals, customMessage, hospitalSubject, hospitalBody, doctorSubject, doctorBody,
   onBack, onConfirm, submitting, bccList, setBccList,
-  templates, hospitalTemplateKey, setHospitalTemplateKey, doctorTemplateKey, setDoctorTemplateKey, onSaveDefault,
+  templates, hospitalTemplateKey, doctorTemplateKey, setDoctorTemplateKey, onSaveDefault,
   hospitalContacts, recipientOverrides, onOverrideRecipient,
 }: {
   doctor: DoctorOption;
@@ -846,7 +845,6 @@ function PreviewConfirm({
   setBccList: (next: string[]) => void;
   templates: import("@/hooks/use-email-templates").EmailTemplate[];
   hospitalTemplateKey: string;
-  setHospitalTemplateKey: (k: string) => void;
   doctorTemplateKey: string;
   setDoctorTemplateKey: (k: string) => void;
   onSaveDefault: (which: "hospital" | "doctor", key: string) => void;
@@ -1052,17 +1050,14 @@ function PreviewConfirm({
       )}
 
       <div className="space-y-1.5 rounded-md border bg-white p-2">
-        <div className="flex items-start justify-between gap-2">
-          <div className="flex-1 min-w-0">
-            <TemplatePicker templates={templates} value={hospitalTemplateKey} onChange={setHospitalTemplateKey} defaultKey="profile_sent_hospital" renderVars={vars} label="Hospital email template" flowFilter="profile_sent" />
-          </div>
-          {hospitalTemplateKey !== "profile_sent_hospital" && (
-            <button type="button" onClick={() => { onSaveDefault("hospital", hospitalTemplateKey); toast.success("Saved as your default hospital template"); }} className="text-[10px] text-slate-500 hover:underline whitespace-nowrap mt-4">Save as my default</button>
-          )}
+        {/* The hospital intro always uses the standard profile-sent template —
+            only the doctor's "working opportunity" email is template-pickable.
+            The wording is still editable below for one-off tweaks. */}
+        <div className="flex items-center gap-1.5 px-0.5 text-[11px] text-muted-foreground">
+          <Mail className="h-3.5 w-3.5 text-teal-600 shrink-0" />
+          <span className="font-medium text-slate-700">Hospital intro email</span>
+          <span className="min-w-0 truncate">— uses the standard template; edit the wording below if needed.</span>
         </div>
-        {hospitalTemplateKey !== "profile_sent_hospital" && !isSingle && (
-          <p className="text-[10px] text-teal-700 px-0.5">Rendered per-hospital at send time — works across a BCC batch.</p>
-        )}
         <EditableEmailSection
           label={`To hospital · ${hospitalRecipient}`}
           subject={renderedHospitalSubject}
