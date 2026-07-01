@@ -1,4 +1,4 @@
-import { useMemo, useState } from "react";
+import { memo, useMemo, useState } from "react";
 import { DashboardLayout } from "@/components/layout/DashboardLayout";
 import { DocLink } from "@/components/DocLink";
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "@/components/ui/card";
@@ -397,7 +397,7 @@ function KpiStrip({ bundle }: { bundle: ReturnType<typeof useReportingMetrics> }
     };
   }, [rawRuns, rawLifecycles, filters]);
 
-  const tiles: Array<{
+  const tiles = useMemo<Array<{
     label: string;
     value: number;
     icon: typeof Send;
@@ -412,7 +412,7 @@ function KpiStrip({ bundle }: { bundle: ReturnType<typeof useReportingMetrics> }
      *  Realises the grouping the old grid-cols-7 only hinted at in a
      *  comment. */
     group: "pipeline" | "outcomes";
-  }> = [
+  }>>(() => [
     // Palette is deliberately quieter than v1: every tile sits on the same
     // bg-card neutral, only the thin accent stripe + icon carry stage color.
     // Reads as one visual unit, not a 7-colour rainbow.
@@ -474,7 +474,7 @@ function KpiStrip({ bundle }: { bundle: ReturnType<typeof useReportingMetrics> }
       onClickThrough: () => navigate("/doctors?tab=profiles"),
       drilldown: <LifecycleList rows={drilldowns.paid} milestone="paid_at" onJump={(id) => navigate(`/doctors?tab=profiles&id=${encodeURIComponent(id)}`)} />,
     },
-  ];
+  ], [drilldowns, bundle.kpis, navigate]);
 
   const pipeline = tiles.filter(t => t.group === "pipeline");
   const outcomes = tiles.filter(t => t.group === "outcomes");
@@ -535,7 +535,7 @@ function KpiCluster({ label, tiles, className, innerCols, baseDelay = 0 }: {
   );
 }
 
-function RunsList({ rows, kind, emptyCta, onJump }: {
+const RunsList = memo(function RunsList({ rows, kind, emptyCta, onJump }: {
   rows: FlowRun[];
   kind: "hospital" | "stage";
   emptyCta: string;
@@ -570,9 +570,9 @@ function RunsList({ rows, kind, emptyCta, onJump }: {
       )}
     </div>
   );
-}
+});
 
-function LifecycleList({ rows, milestone, onJump }: {
+const LifecycleList = memo(function LifecycleList({ rows, milestone, onJump }: {
   rows: DoctorLifecycle[];
   milestone: "signed_at" | "joined_at" | "paid_at";
   onJump: (doctorId: string) => void;
@@ -605,7 +605,7 @@ function LifecycleList({ rows, milestone, onJump }: {
       )}
     </div>
   );
-}
+});
 
 function TableSkeleton({ rows, cols }: { rows: number; cols: number }) {
   return (

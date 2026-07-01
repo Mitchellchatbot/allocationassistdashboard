@@ -348,10 +348,11 @@ export function useMetaAdsApi(dateRange: { from: Date; to: Date }) {
   const fromClamped = dateRange.from < earliest ? earliest : dateRange.from;
   const since = ymdLocal(fromClamped);
   const until = ymdLocal(dateRange.to);
+  const token = getMetaToken();
 
   return useQuery<MetaAdsApiData>({
     queryKey:            ["meta-ads-api-v3", since, until],
-    enabled:             !!getMetaToken(),
+    enabled:             !!token,
     staleTime:           5 * 60 * 1000,
     refetchOnWindowFocus: false,
 
@@ -619,9 +620,10 @@ export function useMetaAdsApi(dateRange: { from: Date; to: Date }) {
 // ── useMetaCampaignAds — ads + creatives + adsets for a single campaign ─────────
 
 export function useMetaCampaignAds(campaignId: string | null, since: string, until: string) {
+  const token = getMetaToken();
   return useQuery<{ ads: MetaAdRow[]; adsets: MetaAdsetRow[] }>({
     queryKey: ["meta-campaign-ads-v2", campaignId, since, until],
-    enabled:  !!getMetaToken() && !!campaignId,
+    enabled:  !!token && !!campaignId,
     staleTime: 5 * 60 * 1000,
     refetchOnWindowFocus: false,
 
@@ -819,9 +821,10 @@ const ALL_STATUSES = JSON.stringify([
 // Search across ALL ad accounts — ads may live in any of them.
 export function useMetaAdsByName(adName: string | null, accountIds: string[]) {
   const key = accountIds.join(",");
+  const token = getMetaToken();
   return useQuery<MetaAdRow[]>({
     queryKey: ["meta-ads-by-name-v4", adName, key],
-    enabled:  !!adName && accountIds.length > 0 && !!getMetaToken(),
+    enabled:  !!adName && accountIds.length > 0 && !!token,
     staleTime: 10 * 60 * 1000,
     refetchOnWindowFocus: false,
 
@@ -883,12 +886,13 @@ const TOP_AD_FIELDS =
 
 export function useMetaTopAds(accountIds: string[], since: string, until: string) {
   const key = accountIds.join(",");
+  const token = getMetaToken();
   return useQuery<MetaTopAd[]>({
     // v3: added adset_id + campaign_id to TOP_AD_FIELDS so per-adset
     // rollups in MetaAds.tsx can resolve which adset each ad belongs to.
     // Bumping the cache key invalidates the v2 entries that lacked them.
     queryKey: ["meta-top-ads-v3", key, since, until],
-    enabled:  accountIds.length > 0 && !!getMetaToken(),
+    enabled:  accountIds.length > 0 && !!token,
     staleTime: 5 * 60 * 1000,
     refetchOnWindowFocus: false,
 
@@ -1001,9 +1005,10 @@ export interface MetaTopAdset {
 
 export function useMetaTopAdsets(accountIds: string[], since: string, until: string) {
   const key = accountIds.join(",");
+  const token = getMetaToken();
   return useQuery<MetaTopAdset[]>({
     queryKey: ["meta-top-adsets-v1", key, since, until],
-    enabled:  accountIds.length > 0 && !!getMetaToken(),
+    enabled:  accountIds.length > 0 && !!token,
     staleTime: 5 * 60 * 1000,
     refetchOnWindowFocus: false,
 

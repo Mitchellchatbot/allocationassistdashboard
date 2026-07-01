@@ -1,4 +1,4 @@
-import { useState, ReactNode } from "react";
+import { useState, useMemo, useCallback, ReactNode } from "react";
 import { FilterContext, type TimeRangePreset, type DateRange, getPresetRange } from "./filters";
 
 export function FilterProvider({ children }: { children: ReactNode }) {
@@ -8,31 +8,37 @@ export function FilterProvider({ children }: { children: ReactNode }) {
   const [preset, setPresetState] = useState<TimeRangePreset>("last3months");
   const [customRange, setCustomRangeState] = useState<DateRange | null>(null);
 
-  const dateRange: DateRange =
-    preset === "custom" && customRange ? customRange : getPresetRange(preset);
+  const dateRange: DateRange = useMemo(
+    () =>
+      preset === "custom" && customRange ? customRange : getPresetRange(preset),
+    [preset, customRange]
+  );
 
-  const setPreset = (p: TimeRangePreset) => {
+  const setPreset = useCallback((p: TimeRangePreset) => {
     setPresetState(p);
     if (p !== "custom") setCustomRangeState(null);
-  };
+  }, []);
 
-  const setCustomRange = (range: DateRange) => {
+  const setCustomRange = useCallback((range: DateRange) => {
     setCustomRangeState(range);
     setPresetState("custom");
-  };
+  }, []);
+
+  const value = useMemo(
+    () => ({
+      preset,
+      dateRange,
+      setPreset,
+      setCustomRange,
+      // backward-compat
+      timeRange:    preset,
+      setTimeRange: setPreset,
+    }),
+    [preset, dateRange, setPreset, setCustomRange]
+  );
 
   return (
-    <FilterContext.Provider
-      value={{
-        preset,
-        dateRange,
-        setPreset,
-        setCustomRange,
-        // backward-compat
-        timeRange:    preset,
-        setTimeRange: setPreset,
-      }}
-    >
+    <FilterContext.Provider value={value}>
       {children}
     </FilterContext.Provider>
   );

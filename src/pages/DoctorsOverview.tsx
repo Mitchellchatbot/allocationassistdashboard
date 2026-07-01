@@ -13,7 +13,7 @@
  * Doctor key: a DoB row maps to the AA id `dob:<zohoId>` — the same key that
  * doctor_profiles / form_responses / cv_uploads carry, so the join is exact.
  */
-import { useMemo, useState, type ReactNode } from "react";
+import { memo, useMemo, useState, type ReactNode } from "react";
 import { useSearchParams } from "react-router-dom";
 import { useZohoData, type ZohoDoctorOnBoard } from "@/hooks/use-zoho-data";
 import { useDoctorProfile, calcCompletion } from "@/hooks/use-doctor-profiles";
@@ -102,9 +102,9 @@ export default function DoctorsOverview() {
   const filtered = useMemo(() => {
     const cutoff = rangeCutoff(range);
     return dob
-      .filter(d => {
+      .map(d => ({ d, t: new Date(d.Created_Time).getTime(), billing: billingByName.get(normDoctorName(doctorDisplayName(d))) }))
+      .filter(({ d, t, billing }) => {
         if (cutoff != null) {
-          const t = new Date(d.Created_Time).getTime();
           if (!Number.isFinite(t) || t < cutoff) return false;
         }
         if (q) {
@@ -115,13 +115,13 @@ export default function DoctorsOverview() {
           if (!hay.includes(q)) return false;
         }
         if (billFilter !== "all") {
-          const b = billingByName.get(normDoctorName(doctorDisplayName(d)));
+          const b = billing;
           if (billFilter === "invoiced"    && (!b || b.count === 0))     return false;
           if (billFilter === "outstanding" && (!b || b.outstanding <= 0)) return false;
         }
         return true;
       })
-      .sort((a, b) => new Date(b.Created_Time).getTime() - new Date(a.Created_Time).getTime());
+      .sort((a, b) => b.t - a.t);
   }, [dob, range, q, billFilter, billingByName]);
 
   return (
@@ -165,13 +165,13 @@ export default function DoctorsOverview() {
       )}
 
       <div className="space-y-2">
-        {filtered.map(d => <DoctorRow key={d.id} d={d} billing={billingByName.get(normDoctorName(doctorDisplayName(d)))} />)}
+        {filtered.map(({ d, billing }) => <DoctorRow key={d.id} d={d} billing={billing} />)}
       </div>
     </div>
   );
 }
 
-function DoctorRow({ d, billing }: { d: ZohoDoctorOnBoard; billing?: BillingSummary }) {
+const DoctorRow = memo(function DoctorRow({ d, billing }: { d: ZohoDoctorOnBoard; billing?: BillingSummary }) {
   const [open, setOpen] = useState(false);
   const [editing, setEditing] = useState(false);
   // Bumped when the row's "Add cost" button is clicked — tells LicensingSpend
@@ -242,7 +242,7 @@ function DoctorRow({ d, billing }: { d: ZohoDoctorOnBoard; billing?: BillingSumm
       )}
     </div>
   );
-}
+});
 
 /** Inline editor for the doctor's Zoho (Doctors-on-Board / Contacts) fields.
  *  Saves straight back to Zoho and optimistically updates the local cache. */

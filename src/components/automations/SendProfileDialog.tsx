@@ -769,13 +769,16 @@ function PreviewConfirm({
   // the legacy doctor_profiles row so historical data still renders.
   const wpCandidate           = useWpCandidateForDoctor(doctor);
   const { data: profile }     = useDoctorProfile(doctor.id);
-  const wpTokens     = wpCandidateToTokens(wpCandidate);
-  const legacyTokens = profileToTokens(profile);
-  const mergedProfileTokens: Record<string, string> = { ...legacyTokens };
-  for (const [k, v] of Object.entries(wpTokens)) {
-    if (v) mergedProfileTokens[k] = v;                // WP wins when populated
-    else if (!(k in mergedProfileTokens)) mergedProfileTokens[k] = "";
-  }
+  const mergedProfileTokens: Record<string, string> = useMemo(() => {
+    const wpTokens     = wpCandidateToTokens(wpCandidate);
+    const legacyTokens = profileToTokens(profile);
+    const merged: Record<string, string> = { ...legacyTokens };
+    for (const [k, v] of Object.entries(wpTokens)) {
+      if (v) merged[k] = v;                // WP wins when populated
+      else if (!(k in merged)) merged[k] = "";
+    }
+    return merged;
+  }, [wpCandidate, profile]);
   // Completion %: prefer WP candidate filled-fields ratio; fall back to
   // the legacy profile's completion if no WP record exists. Same helper the
   // picker uses to drop 0%-complete doctors, so the two always agree.
@@ -784,54 +787,57 @@ function PreviewConfirm({
     : profile ? calcCompletion(profile) : 0;
   const sampleHospital = hospitals[0];
 
-  // Strip any redundant "Dr." prefix so templates that hard-code "Hi Dr.
-  // {{doctor_name}}" don't render "Hi Dr. Dr. Louise Denjean". Prefer
-  // the WP candidate's full_name when present (it's the canonical
-  // record); fall back to the Zoho-derived name otherwise.
-  const rawName = (wpCandidate?.full_name && wpCandidate.full_name.trim()) || doctor.name;
-  const cleanedDoctorName = rawName.replace(/^\s*Dr\.?\s+/i, "");
-  const vars: Record<string, string> = {
-    ...mergedProfileTokens,
-    doctor_name:        cleanedDoctorName,
-    doctor_email:       doctor.email ?? "",
-    doctor_phone:       doctor.phone ?? "",
-    doctor_speciality:  doctor.speciality ?? "",
-    hospital_name:      sampleHospital?.name ?? "",
-    // Greeting name honours the per-hospital toggle so the preview matches what
-    // send-flow-email will render (contact person when ON + on file, else name).
-    hospital_contact_name: (sampleHospital?.greet_with_contact_name && sampleHospital?.primary_contact_name?.trim())
-      ? sampleHospital.primary_contact_name
-      : (sampleHospital?.name ?? "Team"),
-    // city / country come from the hospital record so the doctor email's
-    // "Working Opportunity in {{city}}" line resolves in the preview.
-    city:               sampleHospital?.city ?? "",
-    country:            sampleHospital?.country ?? "",
-    // Preview-only URL — the real link is minted at send time by
-    // send-flow-email (shared_profile token, ${APP_ORIGIN}/shared-profile/<token>).
-    // Use the production app origin here so the preview reads like
-    // what hospitals actually receive, not 'aa.example'.
-    profile_link:       `https://allocationassist.com/shared-profile/${doctor.id}`,
-    // The {{signature}} token is injected by send-flow-email at send time;
-    // for the preview we render the same Allocation Assist branded block
-    // inline so the doctor-side preview shows it too.
-    signature:          PREVIEW_SIGNATURE_HTML,
-    signature_text:     PREVIEW_SIGNATURE_TEXT,
-  };
-  // Build the card + data-table tokens the same way send-flow-email does, so
-  // this preview matches the actual send (otherwise they'd show as literal
-  // {{doctor_card_html}} / {{doctor_row_table_html}}).
-  vars.doctor_card_html      = previewDoctorCardHtml(vars);
-  vars.doctor_row_table_html = previewDoctorRowTableHtml(vars);
+  const vars: Record<string, string> = useMemo(() => {
+    // Strip any redundant "Dr." prefix so templates that hard-code "Hi Dr.
+    // {{doctor_name}}" don't render "Hi Dr. Dr. Louise Denjean". Prefer
+    // the WP candidate's full_name when present (it's the canonical
+    // record); fall back to the Zoho-derived name otherwise.
+    const rawName = (wpCandidate?.full_name && wpCandidate.full_name.trim()) || doctor.name;
+    const cleanedDoctorName = rawName.replace(/^\s*Dr\.?\s+/i, "");
+    const v: Record<string, string> = {
+      ...mergedProfileTokens,
+      doctor_name:        cleanedDoctorName,
+      doctor_email:       doctor.email ?? "",
+      doctor_phone:       doctor.phone ?? "",
+      doctor_speciality:  doctor.speciality ?? "",
+      hospital_name:      sampleHospital?.name ?? "",
+      // Greeting name honours the per-hospital toggle so the preview matches what
+      // send-flow-email will render (contact person when ON + on file, else name).
+      hospital_contact_name: (sampleHospital?.greet_with_contact_name && sampleHospital?.primary_contact_name?.trim())
+        ? sampleHospital.primary_contact_name
+        : (sampleHospital?.name ?? "Team"),
+      // city / country come from the hospital record so the doctor email's
+      // "Working Opportunity in {{city}}" line resolves in the preview.
+      city:               sampleHospital?.city ?? "",
+      country:            sampleHospital?.country ?? "",
+      // Preview-only URL — the real link is minted at send time by
+      // send-flow-email (shared_profile token, ${APP_ORIGIN}/shared-profile/<token>).
+      // Use the production app origin here so the preview reads like
+      // what hospitals actually receive, not 'aa.example'.
+      profile_link:       `https://allocationassist.com/shared-profile/${doctor.id}`,
+      // The {{signature}} token is injected by send-flow-email at send time;
+      // for the preview we render the same Allocation Assist branded block
+      // inline so the doctor-side preview shows it too.
+      signature:          PREVIEW_SIGNATURE_HTML,
+      signature_text:     PREVIEW_SIGNATURE_TEXT,
+    };
+    // Build the card + data-table tokens the same way send-flow-email does, so
+    // this preview matches the actual send (otherwise they'd show as literal
+    // {{doctor_card_html}} / {{doctor_row_table_html}}).
+    v.doctor_card_html      = previewDoctorCardHtml(v);
+    v.doctor_row_table_html = previewDoctorRowTableHtml(v);
+    return v;
+  }, [mergedProfileTokens, doctor, sampleHospital]);
 
   // The exact emails the team sees. Bodies are wrapped in the same font shell
   // send-flow-email uses, so edits shipped verbatim render like a normal send.
-  const renderedHospitalSubject = renderTemplate(hospitalSubject, vars);
-  const renderedHospitalBody    = renderTemplate(hospitalBody, vars) + (customMessage ? `\n\n--- Custom note ---\n${customMessage}` : "");
-  const hospitalHtml            = wrapBodyForSend(renderedHospitalBody);
+  const renderedHospitalSubject = useMemo(() => renderTemplate(hospitalSubject, vars), [hospitalSubject, vars]);
+  const renderedHospitalBody    = useMemo(() => renderTemplate(hospitalBody, vars) + (customMessage ? `\n\n--- Custom note ---\n${customMessage}` : ""), [hospitalBody, vars, customMessage]);
+  const hospitalHtml            = useMemo(() => wrapBodyForSend(renderedHospitalBody), [renderedHospitalBody]);
   const hospitalRecipient       = isSingle ? (hospitals[0].primary_recruiter_email ?? "(no recruiter email)") : `${hospitals.length} recipients (BCC)`;
 
-  const renderedDoctorSubject   = renderTemplate(doctorSubject, vars);
-  const doctorHtml              = wrapBodyForSend(renderTemplate(doctorBody, vars));
+  const renderedDoctorSubject   = useMemo(() => renderTemplate(doctorSubject, vars), [doctorSubject, vars]);
+  const doctorHtml              = useMemo(() => wrapBodyForSend(renderTemplate(doctorBody, vars)), [doctorBody, vars]);
 
   const anyEdited = !!hospitalOv || !!doctorOv;
 

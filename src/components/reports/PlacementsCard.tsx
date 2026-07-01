@@ -15,7 +15,7 @@
  *   - This replaces the "Hammad" Google sheet. No bidirectional sync.
  *   - 45-day clock starts on joined_at; closed by paid_at.
  */
-import { useEffect, useMemo, useState } from "react";
+import { memo, useEffect, useMemo, useState } from "react";
 import { useSearchParams } from "react-router-dom";
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "@/components/ui/card";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
@@ -49,7 +49,7 @@ const daysSince = (iso: string | null): number | null => {
   return Math.floor((Date.now() - d.getTime()) / 86_400_000);
 };
 
-function PaymentStatus({ row }: { row: PlacementAttempt }) {
+const PaymentStatus = memo(function PaymentStatus({ row }: { row: PlacementAttempt }) {
   if (row.paid_at) {
     return <Badge variant="outline" className="bg-emerald-50 text-emerald-700 border-emerald-200 text-[9px]">Paid</Badge>;
   }
@@ -59,7 +59,7 @@ function PaymentStatus({ row }: { row: PlacementAttempt }) {
   if (remaining < 0)        return <Badge variant="outline" className="bg-rose-50 text-rose-700 border-rose-200 text-[9px]">Overdue · {Math.abs(remaining)}d</Badge>;
   if (remaining <= 15)      return <Badge variant="outline" className="bg-amber-50 text-amber-700 border-amber-200 text-[9px]">Due in {remaining}d</Badge>;
   return <Badge variant="outline" className="bg-sky-50 text-sky-700 border-sky-200 text-[9px]">{remaining}d left</Badge>;
-}
+});
 
 export interface PlacementsCardProps {
   /** Show only attempts whose MOST RECENT milestone date falls within

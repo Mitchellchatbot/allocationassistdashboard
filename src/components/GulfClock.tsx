@@ -2,6 +2,18 @@ import { useEffect, useState } from "react";
 import { Clock } from "lucide-react";
 import { cn } from "@/lib/utils";
 
+// Fixed-option formatters hoisted to module scope: their options never depend on
+// props/state, so reusing one instance yields byte-identical output while avoiding
+// a fresh Intl.DateTimeFormat construction on every render/tick.
+// Local wall-clock for the viewer (no timeZone => browser local).
+const LOCAL_FMT = new Intl.DateTimeFormat(undefined, {
+  month: "short", day: "numeric", hour: "2-digit", minute: "2-digit", hour12: true,
+});
+// Gulf equivalent, surfaced in the tooltip so the Dubai desk can cross-check.
+const GST_FMT = new Intl.DateTimeFormat(undefined, {
+  timeZone: "Asia/Dubai", month: "short", day: "numeric", hour: "2-digit", minute: "2-digit", hourCycle: "h23",
+});
+
 /**
  * GulfClock — Amir #5. Renders an absolute moment in the VIEWER's LOCAL time
  * (with the Gulf-time equivalent in the tooltip) plus a relative "due now /
@@ -24,13 +36,9 @@ export function GulfClock({ when, className, showRelative = true }: { when: stri
   if (Number.isNaN(d.getTime())) return null;
 
   // Local wall-clock for the viewer (no timeZone => browser local).
-  const local = new Intl.DateTimeFormat(undefined, {
-    month: "short", day: "numeric", hour: "2-digit", minute: "2-digit", hour12: true,
-  }).format(d);
+  const local = LOCAL_FMT.format(d);
   // Gulf equivalent, surfaced in the tooltip so the Dubai desk can cross-check.
-  const gst = new Intl.DateTimeFormat(undefined, {
-    timeZone: "Asia/Dubai", month: "short", day: "numeric", hour: "2-digit", minute: "2-digit", hourCycle: "h23",
-  }).format(d);
+  const gst = GST_FMT.format(d);
 
   return (
     <span className={cn("inline-flex items-center gap-1 text-[10px] text-slate-500", className)} title={`${local} your time  ·  ${gst} Gulf time  ·  ${d.toISOString()}`}>

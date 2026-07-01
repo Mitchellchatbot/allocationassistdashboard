@@ -283,8 +283,10 @@ export function useMatchingDoctors(vacancy: Vacancy | null | undefined): ScoredM
   const { data: wpCandidates = [] } = usePublishedWpCandidates();
   const zoho = useZohoData();
 
-  return useMemo<ScoredMatchingDoctor[]>(() => {
-    if (!vacancy) return [];
+  // Index build depends only on zoho.data + profiles, NOT on `vacancy`.
+  // Splitting it into its own memo avoids rebuilding the ~31k-row Zoho
+  // phone/email/name indexes every time the selected vacancy changes.
+  const idx = useMemo(() => {
     const z = zoho.data as { rawDoctorsOnBoard?: ZohoDoctorOnBoard[]; rawLeads?: ZohoLead[] } | undefined;
 
     const profileById = new Map<string, typeof profiles[number]>();
@@ -311,6 +313,19 @@ export function useMatchingDoctors(vacancy: Vacancy | null | undefined): ScoredM
     };
     const idxDob  = buildIdx((z?.rawDoctorsOnBoard ?? []) as unknown as Array<Record<string, unknown>>);
     const idxLead = buildIdx((z?.rawLeads ?? []) as unknown as Array<Record<string, unknown>>);
+    return { idxDob, idxLead, profileById };
+  }, [zoho.data, profiles]);
+
+  return useMemo<ScoredMatchingDoctor[]>(() => {
+    if (!vacancy) return [];
+    const { idxDob, idxLead, profileById } = idx;
+
+    type ZIdx = { phone: Map<string, Record<string, unknown>>; email: Map<string, Record<string, unknown>>; name: Map<string, Record<string, unknown>> };
+    const normName = (n: string | null | undefined) => (n ?? "").toLowerCase().replace(/\s+/g, " ").trim();
+    const phoneKey = (p: string | null | undefined) => {
+      const d = (p ?? "").replace(/\D/g, "");
+      return d.length >= 9 ? d.slice(-9) : (d || null);
+    };
     const matchZoho = (c: WpCandidate, idx: ZIdx): Record<string, unknown> | null => {
       const ph = phoneKey(c.phone);            if (ph && idx.phone.has(ph)) return idx.phone.get(ph)!;
       const em = (c.email ?? "").toLowerCase().trim(); if (em && idx.email.has(em)) return idx.email.get(em)!;
@@ -360,7 +375,7 @@ export function useMatchingDoctors(vacancy: Vacancy | null | undefined): ScoredM
 
     out.sort((a, b) => b.score.score - a.score.score);
     return out.slice(0, 50);
-  }, [vacancy, profiles, hospitals, wpCandidates, zoho.data]);
+  }, [vacancy, hospitals, wpCandidates, idx]);
 }
 
 export interface ScoredMatchingDoctor {

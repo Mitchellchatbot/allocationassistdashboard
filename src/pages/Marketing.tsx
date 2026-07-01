@@ -177,9 +177,9 @@ const Marketing = () => {
       });
   }, [zoho?.rawLeads, zoho?.rawDoctorsOnBoard, dateRange, metaStats?.metaLeadEmails, metaStats?.metaLeadPhones, revenueForDoctor]);
 
-  const bestChannel = marketing.length > 0
-    ? marketing.reduce((a, b) => (a.doctors > b.doctors ? a : b))
-    : null;
+  // Top-8 channels for the two bar charts — stable reference so recharts can
+  // skip reconciliation when `marketing` is unchanged.
+  const topChannels = useMemo(() => marketing.slice(0, 8), [marketing]);
 
   // Hide low-volume channels AND the "Undefined" bucket by default so the
   // grid stays scannable. Two independent toggles let users opt in.
@@ -210,9 +210,12 @@ const Marketing = () => {
       return true;
     });
   }, [marketing, showAllChannels, showUndefined, minLeadsThreshold]);
-  const undefinedRow         = marketing.find(c => c.channel === "Undefined");
+  const undefinedRow         = useMemo(() => marketing.find(c => c.channel === "Undefined"), [marketing]);
   const undefinedLeads       = undefinedRow?.doctors ?? 0;
-  const hiddenLowVolumeCount = marketing.filter(c => isLowSignal(c) && c.channel !== "Undefined").length;
+  const hiddenLowVolumeCount = useMemo(
+    () => marketing.filter(c => isLowSignal(c) && c.channel !== "Undefined").length,
+    [marketing, minLeadsThreshold],
+  );
 
   // KPI card expand panel
   const [selectedKpiChannel, setSelectedKpiChannel] = useState<string | null>(null);
@@ -320,6 +323,23 @@ const Marketing = () => {
     return { mostRevenue, bestQuality, lowestCPC };
   }, [channelRows]);
 
+  // Top-3 slices for the WinnerCard back panels — memoized so the
+  // filter/sort/slice doesn't re-run on every render. Each uses the EXACT
+  // predicate of its panel's JSX (over channelRows, which includes legacy —
+  // distinct from channelWinners' activeRows).
+  const topRevenueRows = useMemo(() => [...channelRows]
+    .filter(r => r.converted > 0)
+    .sort((a, b) => b.revenue - a.revenue)
+    .slice(0, 3), [channelRows]);
+  const topCheapestRows = useMemo(() => channelRows
+    .filter(r => r.spend > 0 && r.converted > 0 && r.cpc > 0)
+    .sort((a, b) => a.cpc - b.cpc)
+    .slice(0, 3), [channelRows]);
+  const topQualityRows = useMemo(() => channelRows
+    .filter(r => r.qualified >= 5 && r.quality > 0)
+    .sort((a, b) => b.quality - a.quality)
+    .slice(0, 3), [channelRows]);
+
   const kpiPanelDoctors = useMemo(() => {
     if (!selectedKpiChannel || !zoho?.rawLeads) return [];
     const fromMs = dateRange.from.getTime();
@@ -423,10 +443,7 @@ const Marketing = () => {
               <div>
                 <p className="text-[10px] uppercase tracking-wide font-semibold text-muted-foreground/70 mb-1">Top 3 by revenue</p>
                 <div className="divide-y divide-border/30">
-                  {[...channelRows]
-                    .filter(r => r.converted > 0)
-                    .sort((a, b) => b.revenue - a.revenue)
-                    .slice(0, 3)
+                  {topRevenueRows
                     .map(r => {
                       const revenue = r.revenue;
                       return (
@@ -463,10 +480,7 @@ const Marketing = () => {
               <div>
                 <p className="text-[10px] uppercase tracking-wide font-semibold text-muted-foreground/70 mb-1">Top 3 cheapest</p>
                 <div className="divide-y divide-border/30">
-                  {channelRows
-                    .filter(r => r.spend > 0 && r.converted > 0 && r.cpc > 0)
-                    .sort((a, b) => a.cpc - b.cpc)
-                    .slice(0, 3)
+                  {topCheapestRows
                     .map(r => (
                       <div key={r.channel} className="flex items-center justify-between py-1.5">
                         <div className="flex items-center gap-1.5">
@@ -500,10 +514,7 @@ const Marketing = () => {
               <div>
                 <p className="text-[10px] uppercase tracking-wide font-semibold text-muted-foreground/70 mb-1">Top 3 highest quality</p>
                 <div className="divide-y divide-border/30">
-                  {channelRows
-                    .filter(r => r.qualified >= 5 && r.quality > 0)
-                    .sort((a, b) => b.quality - a.quality)
-                    .slice(0, 3)
+                  {topQualityRows
                     .map(r => (
                       <div key={r.channel} className="flex items-center justify-between py-1.5">
                         <div className="flex items-center gap-1.5">
@@ -748,7 +759,7 @@ const Marketing = () => {
               <CardContent className="px-2 sm:px-4 pb-4">
                 <ResponsiveContainer width="100%" height={260}>
                   <BarChart
-                    data={marketing.slice(0, 8)}
+                    data={topChannels}
                     layout="vertical"
                     margin={{ left: 4, right: 40 }}
                   >
@@ -763,7 +774,7 @@ const Marketing = () => {
                     />
                     <Tooltip contentStyle={tip} formatter={(v: number) => [v.toLocaleString(), 'Doctors']} />
                     <Bar dataKey="doctors" radius={[0, 4, 4, 0]} name="Doctors" cursor="pointer" onClick={(data) => setAcquiredChannel(data.channel)}>
-                      {marketing.slice(0, 8).map((_, i) => (
+                      {topChannels.map((_, i) => (
                         <Cell key={i} fill={`hsl(170, ${55 - i * 3}%, ${42 + i * 3}%)`} />
                       ))}
                       <LabelList dataKey="doctors" position="right" fontSize={10} fill="hsl(220,10%,45%)" formatter={(v: number) => v.toLocaleString()} />
@@ -833,7 +844,7 @@ const Marketing = () => {
               <CardContent className="px-2 sm:px-4 pb-4">
                 <ResponsiveContainer width="100%" height={260}>
                   <BarChart
-                    data={marketing.slice(0, 8)}
+                    data={topChannels}
                     layout="vertical"
                     margin={{ left: 4, right: 36 }}
                   >

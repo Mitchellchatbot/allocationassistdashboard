@@ -6,6 +6,10 @@ import { useCurrency } from "@/lib/CurrencyProvider";
 
 const EMPTY_EMAIL = { total: 0, bySender: {} as Record<string, number>, sampled: 0 };
 
+const HONORIFIC_RE = /\b(dr|mr|mrs|ms|prof|sir|madam|md|mbbs|phd|frcs|mrcp|mrcs|do)\.?\b/gi;
+const NON_ALPHA_RE = /[^a-z\s]/g;
+const WHITESPACE_RE = /\s+/g;
+
 export function useFilteredData() {
   const { preset, dateRange } = useFilters();
   const { data: zoho, isLoading: zohoLoading, error: zohoError } = useZohoData();
@@ -92,9 +96,9 @@ export function useFilteredData() {
     // is the only path — has to be tolerant.
     const cleanName = (s: string | null | undefined) => (s ?? '')
       .toLowerCase()
-      .replace(/\b(dr|mr|mrs|ms|prof|sir|madam|md|mbbs|phd|frcs|mrcp|mrcs|do)\.?\b/gi, '')
-      .replace(/[^a-z\s]/g, ' ')
-      .replace(/\s+/g, ' ')
+      .replace(HONORIFIC_RE, '')
+      .replace(NON_ALPHA_RE, ' ')
+      .replace(WHITESPACE_RE, ' ')
       .trim();
     const nn = (f: string | null | undefined, l: string | null | undefined) =>
       cleanName(`${f ?? ''} ${l ?? ''}`);
@@ -142,27 +146,27 @@ export function useFilteredData() {
     if (import.meta.env.DEV) console.log(`[useFilteredData] placementCycles — DoBs in window:${filteredDoB.length} matched:${cycles.length} (email:${hitEmail} phone:${hitPhone} name:${hitName}) missed:${missed} | DoB fields populated → email:${dobHasEmail} phone:${dobHasPhone}`);
     // Sample 5 unmatched DoBs so we can verify the hypothesis: their original
     // Lead got converted out of the Leads module so it's missing from cache.
-    const unmatchedSamples: { dobEmail: string; dobPhone: string; dobName: string; emailExistsInLeads: boolean; phoneExistsInLeads: boolean }[] = [];
-    for (const dob of filteredDoB) {
-      if (unmatchedSamples.length >= 5) break;
-      const e = ne(dob.Email);
-      const p = np(dob.Phone ?? dob.Mobile);
-      const n = nn(dob.First_Name, dob.Last_Name) || nnFromFull(dob.Full_Name);
-      const matched =
-        (e && byEmail.has(e)) ||
-        (p && byPhone.has(p)) ||
-        (n && byName.has(n));
-      if (!matched && (e || p || n)) {
-        unmatchedSamples.push({
-          dobEmail: e || '(none)',
-          dobPhone: p || '(none)',
-          dobName: n || '(none)',
-          emailExistsInLeads: e ? byEmail.has(e) : false,
-          phoneExistsInLeads: p ? byPhone.has(p) : false,
-        });
-      }
-    }
     if (import.meta.env.DEV) {
+      const unmatchedSamples: { dobEmail: string; dobPhone: string; dobName: string; emailExistsInLeads: boolean; phoneExistsInLeads: boolean }[] = [];
+      for (const dob of filteredDoB) {
+        if (unmatchedSamples.length >= 5) break;
+        const e = ne(dob.Email);
+        const p = np(dob.Phone ?? dob.Mobile);
+        const n = nn(dob.First_Name, dob.Last_Name) || nnFromFull(dob.Full_Name);
+        const matched =
+          (e && byEmail.has(e)) ||
+          (p && byPhone.has(p)) ||
+          (n && byName.has(n));
+        if (!matched && (e || p || n)) {
+          unmatchedSamples.push({
+            dobEmail: e || '(none)',
+            dobPhone: p || '(none)',
+            dobName: n || '(none)',
+            emailExistsInLeads: e ? byEmail.has(e) : false,
+            phoneExistsInLeads: p ? byPhone.has(p) : false,
+          });
+        }
+      }
       console.log('[useFilteredData] sample unmatched DoBs:\n' + unmatchedSamples.map((s, i) => `  ${i + 1}. email="${s.dobEmail}" phone="${s.dobPhone}" name="${s.dobName}" → emailInLeads=${s.emailExistsInLeads} phoneInLeads=${s.phoneExistsInLeads}`).join('\n'));
       console.log(`[useFilteredData] lookup-map sizes — leads-by-email:${byEmail.size} leads-by-phone:${byPhone.size} leads-by-name:${byName.size} (universe: ${zoho.rawLeads.length} leads)`);
     }

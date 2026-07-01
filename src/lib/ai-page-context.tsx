@@ -1,4 +1,4 @@
-import { createContext, useContext, useState, useEffect, ReactNode } from "react";
+import { createContext, useContext, useState, useEffect, useMemo, ReactNode } from "react";
 
 export interface AIPageData {
   page: string;
@@ -17,8 +17,9 @@ const AIPageContext = createContext<AIPageContextValue>({
 
 export function AIPageContextProvider({ children }: { children: ReactNode }) {
   const [pageData, setPageData] = useState<AIPageData | null>(null);
+  const value = useMemo(() => ({ pageData, setPageData }), [pageData]);
   return (
-    <AIPageContext.Provider value={{ pageData, setPageData }}>
+    <AIPageContext.Provider value={value}>
       {children}
     </AIPageContext.Provider>
   );

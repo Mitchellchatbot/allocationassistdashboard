@@ -93,6 +93,48 @@ function formatSyncedAt(iso: string): string {
   return new Date(iso).toLocaleDateString("en-GB", { day: "numeric", month: "short" });
 }
 
+/** Sync chip — owns its own 60s tick so the "Synced Nm ago" relative-time
+ *  label keeps counting up on a long-open tab WITHOUT re-rendering the whole
+ *  app shell. Behavior matches the previous inline button verbatim. */
+function SyncedAtButton({ syncedAt, isPending, onSync }: {
+  syncedAt: string | undefined;
+  isPending: boolean;
+  onSync: () => void;
+}) {
+  const [, setSyncTick] = useState(0);
+  useEffect(() => {
+    const t = setInterval(() => setSyncTick(n => n + 1), 60_000);
+    return () => clearInterval(t);
+  }, []);
+  return (
+    <Tooltip>
+      <TooltipTrigger asChild>
+        <button
+          onClick={() => !isPending && onSync()}
+          disabled={isPending}
+          className="hidden sm:flex items-center gap-1.5 h-8 px-3 text-[11px] font-medium rounded-full border border-border/40 bg-muted/40 text-muted-foreground hover:text-foreground hover:bg-muted/60 transition-all duration-150 disabled:opacity-50"
+        >
+          <RefreshCw className={`h-3 w-3 shrink-0 ${isPending ? "animate-spin" : ""}`} />
+          {isPending
+            ? "Syncing…"
+            : syncedAt
+              ? `Synced ${formatSyncedAt(syncedAt)}`
+              : "Sync now"
+          }
+        </button>
+      </TooltipTrigger>
+      <TooltipContent side="bottom" className="text-[10px]">
+        {isPending
+          ? "Fetching latest data from Zoho CRM…"
+          : syncedAt
+            ? `Last synced at ${new Date(syncedAt).toLocaleTimeString("en-GB", { hour: "2-digit", minute: "2-digit" })} · Click to refresh now`
+            : "Click to pull latest data from Zoho CRM"
+        }
+      </TooltipContent>
+    </Tooltip>
+  );
+}
+
 /** Reopens the sidebar after navigation on desktop. The AI panel is
  *  a fixed overlay now (rendered by <AIPanelProvider>) so it doesn't
  *  compete for layout — we just always reopen the sidebar on nav. */
@@ -170,13 +212,8 @@ export function DashboardLayout({ children, title: pageTitle, subtitle: pageSubt
   useRecentItemsTracker(lookupRoute);
   const { data: zoho } = useZohoData();
   const syncedAt = zoho?.syncedAt;
-  // Re-render once a minute so the "Synced Nm ago" chip keeps counting up on a
-  // long-open tab instead of freezing at its first-render value.
-  const [, setSyncTick] = useState(0);
-  useEffect(() => {
-    const t = setInterval(() => setSyncTick(n => n + 1), 60_000);
-    return () => clearInterval(t);
-  }, []);
+  // The "Synced Nm ago" chip keeps counting up on a long-open tab via its own
+  // 60s tick inside <SyncedAtButton/> — no longer re-renders the whole shell.
   const queryClient = useQueryClient();
 
   // Prefetch weekly sales after a short delay so it doesn't compete with
@@ -253,10 +290,18 @@ export function DashboardLayout({ children, title: pageTitle, subtitle: pageSubt
       queryClient.invalidateQueries({ queryKey: ["zoho-data"] });
     },
   });
+  const onSync = useCallback(() => { sync.mutate(); }, [sync.mutate]);
+
+  const layoutCtxValue = useMemo(
+    () => ({ mounted: true, setTitle: setTitleState, setSubtitle: setSubtitleState, setDocSlug: setDocSlugState }),
+    [],
+  );
+  const openSearch = useCallback(() => setSearchOpen(true), []);
+  const searchCtxValue = useMemo(() => ({ open: openSearch }), [openSearch]);
 
   return (
-    <LayoutContext.Provider value={{ mounted: true, setTitle: setTitleState, setSubtitle: setSubtitleState, setDocSlug: setDocSlugState }}>
-    <UniversalSearchContext.Provider value={{ open: () => setSearchOpen(true) }}>
+    <LayoutContext.Provider value={layoutCtxValue}>
+    <UniversalSearchContext.Provider value={searchCtxValue}>
     <SidebarProvider>
       <style>{`
         @keyframes msgSlideUp {
@@ -292,31 +337,7 @@ export function DashboardLayout({ children, title: pageTitle, subtitle: pageSubt
               </nav>
             </div>
             <div className="flex items-center gap-1 sm:gap-1.5 shrink-0">
-              <Tooltip>
-                <TooltipTrigger asChild>
-                  <button
-                    onClick={() => !sync.isPending && sync.mutate()}
-                    disabled={sync.isPending}
-                    className="hidden sm:flex items-center gap-1.5 h-8 px-3 text-[11px] font-medium rounded-full border border-border/40 bg-muted/40 text-muted-foreground hover:text-foreground hover:bg-muted/60 transition-all duration-150 disabled:opacity-50"
-                  >
-                    <RefreshCw className={`h-3 w-3 shrink-0 ${sync.isPending ? "animate-spin" : ""}`} />
-                    {sync.isPending
-                      ? "Syncing…"
-                      : syncedAt
-                        ? `Synced ${formatSyncedAt(syncedAt)}`
-                        : "Sync now"
-                    }
-                  </button>
-                </TooltipTrigger>
-                <TooltipContent side="bottom" className="text-[10px]">
-                  {sync.isPending
-                    ? "Fetching latest data from Zoho CRM…"
-                    : syncedAt
-                      ? `Last synced at ${new Date(syncedAt).toLocaleTimeString("en-GB", { hour: "2-digit", minute: "2-digit" })} · Click to refresh now`
-                      : "Click to pull latest data from Zoho CRM"
-                  }
-                </TooltipContent>
-              </Tooltip>
+              <SyncedAtButton syncedAt={syncedAt} isPending={sync.isPending} onSync={onSync} />
               {replayTour && (
                 <Tooltip>
                   <TooltipTrigger asChild>

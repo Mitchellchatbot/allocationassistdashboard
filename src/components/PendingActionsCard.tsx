@@ -35,7 +35,7 @@ export function PendingActionsCard() {
     queryFn: async (): Promise<FlowRun[]> => {
       const { data, error } = await supabase
         .from("automation_flow_runs")
-        .select("*")
+        .select("id, flow_key, current_stage, last_event_at, doctor_name, hospital, status")
         .eq("status", "active")
         .order("last_event_at", { ascending: true })
         .limit(50);
@@ -51,7 +51,7 @@ export function PendingActionsCard() {
     queryFn: async (): Promise<Vacancy[]> => {
       const { data, error } = await supabase
         .from("vacancies")
-        .select("*")
+        .select("id, hospital_name, specialty, priority, opened_at, opened_by, status")
         .eq("status", "open")
         .order("opened_at", { ascending: true });
       if (error) throw error;

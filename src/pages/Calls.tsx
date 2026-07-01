@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState, lazy, Suspense, memo } from "react";
 import { DashboardLayout } from "@/components/layout/DashboardLayout";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
@@ -19,8 +19,21 @@ import {
   PhoneCall, Loader2, Search, ExternalLink, Sparkles,
   X, Mic, FileText, RefreshCw, CheckCircle2, AlertCircle,
 } from "lucide-react";
-import ReactMarkdown from "react-markdown";
-import remarkGfm from "remark-gfm";
+// react-markdown + remark-gfm are only needed inside the call detail drawer's
+// summary tab, which mounts on demand. Lazy-load them so they don't land in the
+// Calls route's initial chunk. The wrapper bakes in the same remarkGfm plugin so
+// the usage site passes identical props (remarkPlugins + custom components).
+const SummaryMarkdown = lazy(async () => {
+  const [{ default: ReactMarkdown }, { default: remarkGfm }] = await Promise.all([
+    import("react-markdown"),
+    import("remark-gfm"),
+  ]);
+  return {
+    default: (props: React.ComponentProps<typeof ReactMarkdown>) => (
+      <ReactMarkdown remarkPlugins={[remarkGfm]} {...props} />
+    ),
+  };
+});
 
 // ─── Candy palette ───────────────────────────────────────────────────────────
 // Mirrors the dashboard's ExpandableKPICard look:
@@ -167,7 +180,10 @@ export default function Calls() {
   const { data: callStats } = useFathomCallStats(useMemo(() => ({ hosts: scopedHosts }), [scopedHosts]));
   const { lastSyncAt, syncing, lastError, enriching } = useFathomAutoSync();
   const manualSync = useFathomSync();
-  const now = useNowTick(1000);
+
+  // Stable open handler so memoized rows don't re-render when their props are
+  // unchanged (setActiveId is stable, so this closure never changes identity).
+  const openCall = useCallback((fathomId: string) => setActiveId(fathomId), []);
 
   // Recap panels built from the loaded list (newest first) — an at-a-glance
   // "what to follow up on + what just happened" without opening each call.
@@ -249,7 +265,7 @@ export default function Calls() {
             <RefreshCw className={`h-3.5 w-3.5 mr-1.5 ${manualSync.isPending ? "animate-spin" : ""}`} />
             {manualSync.isPending ? "Syncing…" : "Sync now"}
           </Button>
-          <AutoSyncPill syncing={syncing || manualSync.isPending} lastSyncAt={lastSyncAt} now={now} />
+          <AutoSyncPill syncing={syncing || manualSync.isPending} lastSyncAt={lastSyncAt} />
         </div>
       </div>
 
@@ -408,74 +424,16 @@ export default function Calls() {
                 </TableHeader>
                 <TableBody>
                   {decoratedRows.map(({ call: c, tldr, hasSummary, hasTranscript, actionCount }) => (
-                    <TableRow
+                    <CallRow
                       key={c.id}
-                      className="hover:bg-muted/30 cursor-pointer"
-                      onClick={() => setActiveId(c.fathom_id)}
-                    >
-                      <TableCell className="text-[11px] text-muted-foreground py-3 align-top whitespace-nowrap tabular-nums">
-                        {fmtDate(c.recording_start)}
-                      </TableCell>
-                      <TableCell className="py-3 align-top max-w-[420px]">
-                        <p className="text-[12px] font-medium text-foreground truncate">
-                          {c.title || "Untitled call"}
-                        </p>
-                        {tldr ? (
-                          <p className="text-[11px] text-muted-foreground truncate mt-0.5">{tldr}</p>
-                        ) : (
-                          <p className="text-[11px] text-muted-foreground/50 italic mt-0.5">
-                            {hasTranscript ? "Summary generating…" : "No summary yet"}
-                          </p>
-                        )}
-                      </TableCell>
-                      <TableCell className="py-3 align-top">
-                        <div className="flex items-center gap-2">
-                          <div className={`h-6 w-6 rounded-full ${CANDY.pink.chip} ${CANDY.pink.fg} flex items-center justify-center text-[10px] font-semibold shrink-0`}>
-                            {hostInitials(c)}
-                          </div>
-                          <span className="text-[11px] text-foreground truncate max-w-[140px]">
-                            {c.host_name ?? c.host_email ?? "—"}
-                          </span>
-                        </div>
-                      </TableCell>
-                      <TableCell className="py-3 align-top">
-                        <div className="flex flex-wrap items-center gap-1.5">
-                          <InsightChip on={hasSummary} pending={hasTranscript} icon={<Sparkles className="h-3 w-3" />} label="Summary" palette={CANDY.lilac} />
-                          <InsightChip on={hasTranscript} icon={<Mic className="h-3 w-3" />} label="Transcript" palette={CANDY.mint} />
-                          {actionCount > 0 && (
-                            <span
-                              title={`${actionCount} action item${actionCount === 1 ? "" : "s"}`}
-                              className={`inline-flex items-center gap-1 rounded-full pl-1 pr-1.5 py-0.5 text-[10px] font-medium ${CANDY.peach.chip} ${CANDY.peach.fg}`}
-                            >
-                              <CheckCircle2 className="h-3 w-3" />{actionCount}
-                            </span>
-                          )}
-                        </div>
-                      </TableCell>
-                      <TableCell className="text-[12px] text-foreground py-3 align-top whitespace-nowrap text-right tabular-nums">
-                        {c.duration_seconds === null && enriching ? (
-                          <span className="inline-flex items-center gap-1 text-muted-foreground text-[11px]">
-                            <Loader2 className="h-3 w-3 animate-spin" />
-                            <span className="text-[10px]">fetching</span>
-                          </span>
-                        ) : (
-                          fmtDuration(c.duration_seconds)
-                        )}
-                      </TableCell>
-                      <TableCell className="py-3 align-top text-right">
-                        {c.share_url && (
-                          <a
-                            href={c.share_url}
-                            target="_blank"
-                            rel="noreferrer"
-                            onClick={(e) => e.stopPropagation()}
-                            className={`inline-flex items-center text-[10px] font-medium ${CANDY.sky.fg} hover:underline`}
-                          >
-                            Open <ExternalLink className="h-3 w-3 ml-0.5" />
-                          </a>
-                        )}
-                      </TableCell>
-                    </TableRow>
+                      call={c}
+                      tldr={tldr}
+                      hasSummary={hasSummary}
+                      hasTranscript={hasTranscript}
+                      actionCount={actionCount}
+                      enriching={enriching}
+                      onOpen={openCall}
+                    />
                   ))}
                 </TableBody>
               </Table>
@@ -665,9 +623,95 @@ function InsightChip({
   );
 }
 
+// One table row. Memoized so an unchanged row (stable decorated-row object from
+// decoratedRows, stable onOpen) skips re-render when the page re-renders for
+// reasons that don't touch this row's data.
+const CallRow = memo(function CallRow({
+  call: c, tldr, hasSummary, hasTranscript, actionCount, enriching, onOpen,
+}: {
+  call: FathomCall;
+  tldr: string | null;
+  hasSummary: boolean;
+  hasTranscript: boolean;
+  actionCount: number;
+  enriching: boolean;
+  onOpen: (fathomId: string) => void;
+}) {
+  return (
+    <TableRow
+      className="hover:bg-muted/30 cursor-pointer"
+      onClick={() => onOpen(c.fathom_id)}
+    >
+      <TableCell className="text-[11px] text-muted-foreground py-3 align-top whitespace-nowrap tabular-nums">
+        {fmtDate(c.recording_start)}
+      </TableCell>
+      <TableCell className="py-3 align-top max-w-[420px]">
+        <p className="text-[12px] font-medium text-foreground truncate">
+          {c.title || "Untitled call"}
+        </p>
+        {tldr ? (
+          <p className="text-[11px] text-muted-foreground truncate mt-0.5">{tldr}</p>
+        ) : (
+          <p className="text-[11px] text-muted-foreground/50 italic mt-0.5">
+            {hasTranscript ? "Summary generating…" : "No summary yet"}
+          </p>
+        )}
+      </TableCell>
+      <TableCell className="py-3 align-top">
+        <div className="flex items-center gap-2">
+          <div className={`h-6 w-6 rounded-full ${CANDY.pink.chip} ${CANDY.pink.fg} flex items-center justify-center text-[10px] font-semibold shrink-0`}>
+            {hostInitials(c)}
+          </div>
+          <span className="text-[11px] text-foreground truncate max-w-[140px]">
+            {c.host_name ?? c.host_email ?? "—"}
+          </span>
+        </div>
+      </TableCell>
+      <TableCell className="py-3 align-top">
+        <div className="flex flex-wrap items-center gap-1.5">
+          <InsightChip on={hasSummary} pending={hasTranscript} icon={<Sparkles className="h-3 w-3" />} label="Summary" palette={CANDY.lilac} />
+          <InsightChip on={hasTranscript} icon={<Mic className="h-3 w-3" />} label="Transcript" palette={CANDY.mint} />
+          {actionCount > 0 && (
+            <span
+              title={`${actionCount} action item${actionCount === 1 ? "" : "s"}`}
+              className={`inline-flex items-center gap-1 rounded-full pl-1 pr-1.5 py-0.5 text-[10px] font-medium ${CANDY.peach.chip} ${CANDY.peach.fg}`}
+            >
+              <CheckCircle2 className="h-3 w-3" />{actionCount}
+            </span>
+          )}
+        </div>
+      </TableCell>
+      <TableCell className="text-[12px] text-foreground py-3 align-top whitespace-nowrap text-right tabular-nums">
+        {c.duration_seconds === null && enriching ? (
+          <span className="inline-flex items-center gap-1 text-muted-foreground text-[11px]">
+            <Loader2 className="h-3 w-3 animate-spin" />
+            <span className="text-[10px]">fetching</span>
+          </span>
+        ) : (
+          fmtDuration(c.duration_seconds)
+        )}
+      </TableCell>
+      <TableCell className="py-3 align-top text-right">
+        {c.share_url && (
+          <a
+            href={c.share_url}
+            target="_blank"
+            rel="noreferrer"
+            onClick={(e) => e.stopPropagation()}
+            className={`inline-flex items-center text-[10px] font-medium ${CANDY.sky.fg} hover:underline`}
+          >
+            Open <ExternalLink className="h-3 w-3 ml-0.5" />
+          </a>
+        )}
+      </TableCell>
+    </TableRow>
+  );
+});
+
 function AutoSyncPill({
-  syncing, lastSyncAt, now,
-}: { syncing: boolean; lastSyncAt: number | null; now: number }) {
+  syncing, lastSyncAt,
+}: { syncing: boolean; lastSyncAt: number | null }) {
+  const now = useNowTick(1000);
   return (
     <div className={`inline-flex items-center gap-1.5 rounded-full border px-2.5 py-1 text-[11px] font-medium shrink-0 ${
       syncing
@@ -840,27 +884,33 @@ function CallDetailDrawer({ fathomId, onClose }: { fathomId: string; onClose: ()
                         prose-ul:my-1 prose-ul:pl-4 prose-li:my-0.5 prose-li:text-[12px] prose-li:marker:text-muted-foreground
                         prose-strong:text-foreground prose-strong:font-semibold"
                     >
-                      <ReactMarkdown
-                        remarkPlugins={[remarkGfm]}
-                        components={{
-                          // Fathom wraps each bullet's text in a link to its own
-                          // timestamp. Render those as normal text (not a wall of
-                          // teal) but keep them clickable — opens the moment in Fathom.
-                          a: ({ href, children, ...rest }) => (
-                            <a
-                              href={href}
-                              target="_blank"
-                              rel="noreferrer"
-                              className="text-inherit no-underline decoration-dotted underline-offset-2 hover:underline"
-                              {...rest}
-                            >
-                              {children}
-                            </a>
-                          ),
-                        }}
-                      >
-                        {call.summary}
-                      </ReactMarkdown>
+                      <Suspense fallback={
+                        <div className="flex items-center gap-2 text-[12px] text-muted-foreground">
+                          <Loader2 className="h-3.5 w-3.5 animate-spin" />
+                          Loading summary…
+                        </div>
+                      }>
+                        <SummaryMarkdown
+                          components={{
+                            // Fathom wraps each bullet's text in a link to its own
+                            // timestamp. Render those as normal text (not a wall of
+                            // teal) but keep them clickable — opens the moment in Fathom.
+                            a: ({ href, children, ...rest }) => (
+                              <a
+                                href={href}
+                                target="_blank"
+                                rel="noreferrer"
+                                className="text-inherit no-underline decoration-dotted underline-offset-2 hover:underline"
+                                {...rest}
+                              >
+                                {children}
+                              </a>
+                            ),
+                          }}
+                        >
+                          {call.summary}
+                        </SummaryMarkdown>
+                      </Suspense>
                     </div>
                   ) : hasTranscript ? (
                     summarize.isError ? (

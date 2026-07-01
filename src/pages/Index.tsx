@@ -66,6 +66,10 @@ const CHANNEL_RANGES = [
   { label: "1Y", days: 365 },
 ] as const;
 
+// Strict qualified definition: Initial Sales Call Completed + High Priority Follow up.
+const qualStatusesForCard = new Set(['Initial Sales Call Completed', 'High Priority Follow up']);
+const qualStatusesForRate = new Set(['Initial Sales Call Completed', 'High Priority Follow up']);
+
 const Index = () => {
   // fmtAED comes from the global currency context (AED/USD toggle in header).
   const { kpis, timeData, funnel, stageConversion, filteredLeads, filteredDeals, placementCycles, placementDurations, zohoLoading } = useFilteredData();
@@ -105,14 +109,16 @@ const Index = () => {
     }
     // Diagnostic: status breakdown per channel — helps explain why some
     // channels (e.g. Dave) have conversions but no qualified leads.
-    const statusByCh: Record<string, Record<string, number>> = {};
-    for (const l of filteredLeads) {
-      const ch  = displaySource(l.Lead_Source);
-      const st  = l.Lead_Status || '(empty)';
-      statusByCh[ch] = statusByCh[ch] ?? {};
-      statusByCh[ch][st] = (statusByCh[ch][st] ?? 0) + 1;
+    if (import.meta.env.DEV) {
+      const statusByCh: Record<string, Record<string, number>> = {};
+      for (const l of filteredLeads) {
+        const ch  = displaySource(l.Lead_Source);
+        const st  = l.Lead_Status || '(empty)';
+        statusByCh[ch] = statusByCh[ch] ?? {};
+        statusByCh[ch][st] = (statusByCh[ch][st] ?? 0) + 1;
+      }
+      console.log('[Index] Lead_Status counts by channel (in period):', statusByCh);
     }
-    console.log('[Index] Lead_Status counts by channel (in period):', statusByCh);
     return Object.entries(map)
       .sort((a, b) => b[1] - a[1])
       .map(([channel, count]) => ({ channel, count }));
@@ -223,10 +229,10 @@ const Index = () => {
   );
 
   // 3. Pipeline Value → top open deals
-  const openDeals = filteredDeals
+  const openDeals = useMemo(() => filteredDeals
     .filter(d => d.Stage !== 'Closed Won' && d.Stage !== 'Closed Lost')
     .sort((a, b) => b.Amount - a.Amount)
-    .slice(0, 5);
+    .slice(0, 5), [filteredDeals]);
   const pipelineContent = (
     <div className="divide-y divide-border/30">
       {openDeals.length === 0
@@ -247,12 +253,11 @@ const Index = () => {
   // 4. Qualified Leads → top recently-qualified leads in the selected date range.
   // Strict qualified definition: Initial Sales Call Completed + High Priority Follow up.
   // Closed Won is a placement, tracked separately via Deals.
-  const qualStatusesForCard = new Set(['Initial Sales Call Completed', 'High Priority Follow up']);
-  const qualifiedLeadsList = filteredLeads
+  const qualifiedLeadsList = useMemo(() => filteredLeads
     .filter(l => qualStatusesForCard.has(l.Lead_Status))
     .sort((a, b) => new Date(b.Created_Time).getTime() - new Date(a.Created_Time).getTime())
-    .slice(0, 5);
-  const notContactedCount = filteredLeads.filter(l => l.Lead_Status === 'Not Contacted').length;
+    .slice(0, 5), [filteredLeads]);
+  const notContactedCount = useMemo(() => filteredLeads.filter(l => l.Lead_Status === 'Not Contacted').length, [filteredLeads]);
   const qualifiedLeadsContent = (
     <div className="space-y-2">
       <div className="divide-y divide-border/30">
@@ -290,7 +295,7 @@ const Index = () => {
   // the 5 placements CLOSEST TO the average — the most "typical" sample so
   // users see what the headline number actually represents (not the
   // outliers).
-  const cycleContent = (() => {
+  const cycleData = useMemo(() => {
     const durations = placementDurations ?? [];
     const avgDays   = durations.length > 0
       ? Math.round(durations.reduce((s, d) => s + d.days, 0) / durations.length)
@@ -302,6 +307,10 @@ const Index = () => {
       .slice(0, 5)
       // Then re-sort by days asc so the list reads cleanly
       .sort((a, b) => a.days - b.days);
+    return { durations, avgDays, representative };
+  }, [placementDurations]);
+  const cycleContent = (() => {
+    const { durations, avgDays, representative } = cycleData;
     return (
       <div className="space-y-3">
         <p className="text-[10px] text-muted-foreground/80 leading-relaxed">
@@ -345,11 +354,15 @@ const Index = () => {
   // Strict qualified definition: Initial Sales Call Completed + High Priority Follow up.
   // Previous version used !unqualStatuses (a blocklist) which inflated the count by
   // also counting Not Contacted / Attempted / Contact in Future as qualified.
-  const qualStatusesForRate = new Set(['Initial Sales Call Completed', 'High Priority Follow up']);
-  const qualCount      = filteredLeads.filter(l => qualStatusesForRate.has(l.Lead_Status)).length;
-  const unqualCount    = filteredLeads.filter(l => l.Lead_Status === 'Unqualified Leads').length;
-  const notIntCount    = filteredLeads.filter(l => l.Lead_Status === 'Not Interested').length;
-  const total          = filteredLeads.length;
+  const { qualCount, unqualCount, notIntCount, total } = useMemo(() => {
+    let qualCount = 0, unqualCount = 0, notIntCount = 0;
+    for (const l of filteredLeads) {
+      if (qualStatusesForRate.has(l.Lead_Status)) qualCount++;
+      if (l.Lead_Status === 'Unqualified Leads') unqualCount++;
+      if (l.Lead_Status === 'Not Interested') notIntCount++;
+    }
+    return { qualCount, unqualCount, notIntCount, total: filteredLeads.length };
+  }, [filteredLeads]);
   const qualCats = [
     { label: 'Qualified',           count: qualCount,   color: 'bg-success'       },
     { label: 'Unqualified',         count: unqualCount, color: 'bg-warning'        },

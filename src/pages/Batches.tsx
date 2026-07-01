@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState, useMemo as useMemoReact } from "react";
+import { useCallback, useEffect, useMemo, useState, useMemo as useMemoReact, memo } from "react";
 import { DashboardLayout } from "@/components/layout/DashboardLayout";
 import { DocLink } from "@/components/DocLink";
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "@/components/ui/card";
@@ -53,11 +53,24 @@ export default function Batches() {
   // straight into queueing doctors with no popup hop.
   const [dialogTarget, setDialogTarget] = useState<"new" | string | null>(null);
 
-  const today = todayISO();
-  const upcoming = batches.filter(b => b.scheduled_for >= today && b.status !== "cancelled");
-  const past     = batches.filter(b => b.scheduled_for <  today || b.status === "sent" || b.status === "cancelled");
+  // Stable per-row edit handler so React.memo'd BatchRow rows don't re-render
+  // on unrelated parent state changes (e.g. opening the dialog).
+  const handleEditRow = useCallback((id: string) => setDialogTarget(id), []);
 
-  const eligibleRecipients = hospitals.filter(h => !!h.primary_recruiter_email).length;
+  const today = todayISO();
+  const upcoming = useMemo(
+    () => batches.filter(b => b.scheduled_for >= today && b.status !== "cancelled"),
+    [batches, today],
+  );
+  const past = useMemo(
+    () => batches.filter(b => b.scheduled_for <  today || b.status === "sent" || b.status === "cancelled"),
+    [batches, today],
+  );
+
+  const eligibleRecipients = useMemo(
+    () => hospitals.filter(h => !!h.primary_recruiter_email).length,
+    [hospitals],
+  );
 
   return (
     <DashboardLayout>
@@ -103,7 +116,7 @@ export default function Batches() {
             {!isLoading && upcoming.length > 0 && (
               <div className="divide-y">
                 {upcoming.map(b => (
-                  <BatchRow key={b.id} batch={b} onEdit={() => setDialogTarget(b.id)} />
+                  <BatchRow key={b.id} batch={b} onEdit={handleEditRow} />
                 ))}
               </div>
             )}
@@ -125,7 +138,7 @@ export default function Batches() {
             ) : (
               <div className="divide-y">
                 {past.slice(0, 20).map(b => (
-                  <BatchRow key={b.id} batch={b} onEdit={() => setDialogTarget(b.id)} compact />
+                  <BatchRow key={b.id} batch={b} onEdit={handleEditRow} compact />
                 ))}
               </div>
             )}
@@ -143,7 +156,7 @@ export default function Batches() {
   );
 }
 
-function BatchRow({ batch, onEdit, compact = false }: { batch: ScheduledBatch; onEdit: () => void; compact?: boolean }) {
+const BatchRow = memo(function BatchRow({ batch, onEdit, compact = false }: { batch: ScheduledBatch; onEdit: (id: string) => void; compact?: boolean }) {
   const sendNow = useSendBatchNow();
   const cancel  = useCancelBatch();
   const kindLabel = KIND_LABEL[batch.kind];
@@ -153,7 +166,7 @@ function BatchRow({ batch, onEdit, compact = false }: { batch: ScheduledBatch; o
   return (
     <div className={`px-4 py-3 flex items-center gap-3 ${isToday && batch.status === "draft" ? "bg-teal-50/30" : ""}`}>
       <KindIcon kind={batch.kind} />
-      <button onClick={onEdit} className="flex-1 min-w-0 text-left">
+      <button onClick={() => onEdit(batch.id)} className="flex-1 min-w-0 text-left">
         <div className="flex items-center gap-2 flex-wrap">
           <span className="text-[12px] font-medium">{kindLabel}</span>
           <Badge variant="outline" className="text-[9px] bg-slate-50 uppercase tracking-wider">{dayLabel}</Badge>
@@ -241,7 +254,7 @@ function BatchRow({ batch, onEdit, compact = false }: { batch: ScheduledBatch; o
       <ChevronRight className="h-3.5 w-3.5 text-slate-300 shrink-0" />
     </div>
   );
-}
+});
 
 function SpecialtyRotationCard({ rotation }: { rotation: ReturnType<typeof useSpecialtyRotation>["data"] }) {
   const update = useUpdateSpecialtyRotation();
@@ -434,6 +447,26 @@ function SpecialtyRotationCard({ rotation }: { rotation: ReturnType<typeof useSp
       .map(([raw, count]) => ({ raw, count }));
     return { groups, unmapped, unmappedTop };
   }, [zoho]);
+
+  // Today's-pick ranking — re-scoring the full rankable roster is expensive,
+  // so memoize on the exact inputs the computation reads (queue position +
+  // roster + specialty groups). Output/order identical to the inline IIFE.
+  const todaysPick = useMemoReact(() => {
+    const today = queue[cursor] ?? null;
+    const todayGroup = today ? zohoSpecialties.groups.find(g => g.name.toLowerCase() === today.toLowerCase()) : null;
+    // Use the canonical scoreCandidate so this ranking matches
+    // exactly what shows up when the team clicks into the
+    // doctor picker. Same algorithm, same numbers, same tier
+    // badges across all surfaces.
+    const ranked = today
+      ? rankableDoctors
+          .map(r => ({ r, m: scoreCandidate(r, today, {}) }))
+          .filter(x => x.m.score > 0)
+          .sort((a, b) => b.m.score - a.m.score)
+          .slice(0, 5)
+      : [];
+    return { today, todayGroup, ranked };
+  }, [rankableDoctors, queue, cursor, zohoSpecialties.groups]);
 
   const [showUnmapped, setShowUnmapped] = useState(false);
 
@@ -688,19 +721,7 @@ function SpecialtyRotationCard({ rotation }: { rotation: ReturnType<typeof useSp
                 so 'Cardiac Surgery' surfaces Cardiothoracic Surgeons etc.
                 instead of dead-ending at 'pick doctors manually'. */}
             {(() => {
-              const today = queue[cursor] ?? null;
-              const todayGroup = today ? zohoSpecialties.groups.find(g => g.name.toLowerCase() === today.toLowerCase()) : null;
-              // Use the canonical scoreCandidate so this ranking matches
-              // exactly what shows up when the team clicks into the
-              // doctor picker. Same algorithm, same numbers, same tier
-              // badges across all surfaces.
-              const ranked = today
-                ? rankableDoctors
-                    .map(r => ({ r, m: scoreCandidate(r, today, {}) }))
-                    .filter(x => x.m.score > 0)
-                    .sort((a, b) => b.m.score - a.m.score)
-                    .slice(0, 5)
-                : [];
+              const { today, todayGroup, ranked } = todaysPick;
               return today ? (
                 <div className="space-y-2">
                   <div className="rounded-xl border border-violet-200 bg-gradient-to-br from-violet-50 to-fuchsia-50/40 px-4 py-3 flex items-center gap-3">
@@ -881,13 +902,14 @@ function StatusBadge({ status }: { status: ScheduledBatch["status"] }) {
   return <Badge variant="outline" className={`${cls} text-[9px] uppercase tracking-wider`}>{status}</Badge>;
 }
 
+const KIND_ICON_MAP: Record<BatchKind, { Icon: typeof Calendar; cls: string }> = {
+  daily_duo:        { Icon: Calendar,  cls: "text-teal-600" },
+  tuesday_top_15:   { Icon: Sparkles,  cls: "text-amber-600" },
+  specialty_of_day: { Icon: RefreshCw, cls: "text-violet-600" },
+};
+
 function KindIcon({ kind }: { kind: BatchKind }) {
-  const map: Record<BatchKind, { Icon: typeof Calendar; cls: string }> = {
-    daily_duo:        { Icon: Calendar,  cls: "text-teal-600" },
-    tuesday_top_15:   { Icon: Sparkles,  cls: "text-amber-600" },
-    specialty_of_day: { Icon: RefreshCw, cls: "text-violet-600" },
-  };
-  const { Icon, cls } = map[kind];
+  const { Icon, cls } = KIND_ICON_MAP[kind];
   return <Icon className={`h-4 w-4 ${cls} shrink-0`} />;
 }
 
@@ -1056,7 +1078,17 @@ function BatchDialog({ target, onTargetChange, batches, suggestedSpecialty }: {
 
   // ── Doctor-picker logic (only when editingBatch is set) ─────────────────
   const batch = editingBatch;
-  const picked = batch ? batch.doctor_ids.map(id => allDoctors.find(d => d.id === id)).filter((d): d is DoctorOption => !!d) : [];
+  // id → DoctorOption lookup so resolving picked doctor_ids is O(picked)
+  // instead of O(picked × allDoctors) on every render.
+  const doctorById = useMemo(() => {
+    const m = new Map<string, DoctorOption>();
+    for (const d of allDoctors) m.set(d.id, d);
+    return m;
+  }, [allDoctors]);
+  const picked = useMemo(
+    () => batch ? batch.doctor_ids.map(id => doctorById.get(id)).filter((d): d is DoctorOption => !!d) : [],
+    [batch, doctorById],
+  );
 
   const expectedCount = batch ? (batch.kind === "daily_duo" ? 2 : batch.kind === "tuesday_top_15" ? 15 : 1) : 0;
 
@@ -1072,7 +1104,8 @@ function BatchDialog({ target, onTargetChange, batches, suggestedSpecialty }: {
     ?? (batch && batch.kind !== "specialty_of_day" ? suggestedSpecialty : null);
 
   const q = search.trim().toLowerCase();
-  const candidatePool = !batch ? [] : (() => {
+  const candidatePool = useMemo(() => {
+    if (!batch) return [];
     const batchGroup = effectiveSpecialty ? (groupSpecialty(effectiveSpecialty) ?? effectiveSpecialty) : null;
     // Default pool = doctors live on the AA website (have a WP candidate).
     // Toggle off to fall back to the full Zoho roster.
@@ -1122,7 +1155,7 @@ function BatchDialog({ target, onTargetChange, batches, suggestedSpecialty }: {
     // Show more when searching — an explicit lookup shouldn't get truncated
     // at the same shortlist length as the ranked default view.
     return scored.slice(0, q ? 100 : 30);
-  })();
+  }, [batch, allDoctors, websiteOnly, specialtyOnly, effectiveSpecialty, q]);
 
   const setDoctors = async (next: string[]) => {
     if (!batch) return;

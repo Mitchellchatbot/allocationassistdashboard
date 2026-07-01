@@ -1,4 +1,4 @@
-import { useState, useCallback, useRef, useMemo, useEffect } from "react";
+import { useState, useCallback, useRef, useMemo, useEffect, memo } from "react";
 import { createPortal } from "react-dom";
 import { useNavigate } from "react-router-dom";
 import logo from "@/assets/logo.png";
@@ -95,15 +95,34 @@ function fmtDay(iso: string) {
 
 function buildActivityData(entries: WorkerEntry[], workerEmails: string[]) {
   const days = getChartDays();
+  if (workerEmails.length === 0) {
+    // Single O(entries) bucketing pass: count entries per call_date.
+    const counts = new Map<string, number>();
+    for (const e of entries) {
+      if (e.call_date != null) counts.set(e.call_date, (counts.get(e.call_date) ?? 0) + 1);
+    }
+    return days.map(date => {
+      const point: Record<string, string | number> = { date: fmtDay(date) };
+      point["Entries"] = counts.get(date) ?? 0;
+      return point;
+    });
+  }
+  // Single O(entries) bucketing pass keyed by call_date then worker_email
+  // (nested map avoids any string-concat key collision).
+  const emailSet = new Set(workerEmails);
+  const counts = new Map<string, Map<string, number>>();
+  for (const e of entries) {
+    if (e.call_date == null || e.worker_email == null || !emailSet.has(e.worker_email)) continue;
+    let byEmail = counts.get(e.call_date);
+    if (!byEmail) { byEmail = new Map<string, number>(); counts.set(e.call_date, byEmail); }
+    byEmail.set(e.worker_email, (byEmail.get(e.worker_email) ?? 0) + 1);
+  }
   return days.map(date => {
     const point: Record<string, string | number> = { date: fmtDay(date) };
-    if (workerEmails.length === 0) {
-      point["Entries"] = entries.filter(e => e.call_date === date).length;
-    } else {
-      workerEmails.forEach(email => {
-        point[email.split("@")[0]] = entries.filter(e => e.call_date === date && e.worker_email === email).length;
-      });
-    }
+    const byEmail = counts.get(date);
+    workerEmails.forEach(email => {
+      point[email.split("@")[0]] = byEmail?.get(email) ?? 0;
+    });
     return point;
   });
 }
@@ -226,9 +245,9 @@ function ActivityChart({ entries, workerEmails, title, subtitle }: {
   const data = useMemo(() => buildActivityData(entries, workerEmails), [entries, workerEmails]);
   const keys = workerEmails.length > 0 ? workerEmails.map(e => e.split("@")[0]) : ["Entries"];
 
-  const totals = workerEmails.length > 0
+  const totals = useMemo(() => workerEmails.length > 0
     ? workerEmails.map((w, i) => ({ key: w.split("@")[0], total: entries.filter(e => e.worker_email === w).length, color: WORKER_COLORS[i % WORKER_COLORS.length] }))
-    : [{ key: "Entries", total: entries.length, color: "hsl(170,45%,28%)" }];
+    : [{ key: "Entries", total: entries.length, color: "hsl(170,45%,28%)" }], [entries, workerEmails]);
 
   return (
     <div className="rounded-xl border border-border/60 bg-card p-5">
@@ -357,11 +376,15 @@ function OverviewTab({ isAdmin, userId }: { isAdmin: boolean; userId?: string })
     [dateScopedEntries, selectedWorker]
   );
 
-  const t = todayISO();
-  const w = weekStartISO();
-  const todayCount = displayEntries.filter(e => e.call_date === t).length;
-  const weekCount  = displayEntries.filter(e => e.call_date >= w).length;
-  const highPri    = displayEntries.filter(e => e.status === "High Priority").length;
+  const { todayCount, weekCount, highPri } = useMemo(() => {
+    const t = todayISO();
+    const w = weekStartISO();
+    return {
+      todayCount: displayEntries.filter(e => e.call_date === t).length,
+      weekCount:  displayEntries.filter(e => e.call_date >= w).length,
+      highPri:    displayEntries.filter(e => e.status === "High Priority").length,
+    };
+  }, [displayEntries]);
 
   const chartWorkers = selectedWorker === "all" ? workerEmails : [selectedWorker];
 
@@ -1100,6 +1123,70 @@ function WorkerSidebar({ tab, setTab, isAdmin }: { tab: Tab; setTab: (t: Tab) =>
   );
 }
 
+// ── Add Entry row (memoized so a keystroke only re-renders the edited row) ──
+type AddEntryRowType = WorkerEntry & { _key: string };
+const AddEntryRow = memo(function AddEntryRow({ row, i, update, removeRow, inputCls }: {
+  row: AddEntryRowType;
+  i: number;
+  update: (key: string, field: keyof WorkerEntry, value: string) => void;
+  removeRow: (key: string) => void;
+  inputCls: string;
+}) {
+  return (
+      <tr key={row._key}
+        className={`border-t border-border/40 hover:bg-primary/[0.02] transition-colors ${i % 2 === 0 ? "bg-white" : "bg-muted/20"}`}>
+        <td className="px-2 py-1.5 border-r border-border/30">
+          <input type="date" value={row.call_date} onChange={e => update(row._key, "call_date", e.target.value)} className={inputCls} />
+        </td>
+        <td className="px-2 py-1.5 border-r border-border/30">
+          <select value={row.call_type} onChange={e => update(row._key, "call_type", e.target.value)} className={inputCls + " cursor-pointer"}>
+            {CALL_TYPES.map(t => <option key={t} value={t}>{t}</option>)}
+          </select>
+        </td>
+        <td className="px-2 py-1.5 border-r border-border/30">
+          <StatusSelect value={row.status} onChange={v => update(row._key, "status", v)} />
+        </td>
+        <td className="px-2 py-1.5 border-r border-border/30">
+          <DoctorSearchInput
+            value={row.name}
+            onChangeText={v => update(row._key, "name", v)}
+            onPick={d => {
+              update(row._key, "name", d.name);
+              if (d.specialty && !row.specialty) update(row._key, "specialty", d.specialty);
+              if (d.country   && !row.country_of_training) update(row._key, "country_of_training", d.country);
+            }}
+          />
+        </td>
+        <td className="px-2 py-1.5 border-r border-border/30">
+          <input placeholder="e.g. Cardiology" value={row.specialty} onChange={e => update(row._key, "specialty", e.target.value)} className={inputCls} />
+        </td>
+        <td className="px-2 py-1.5 border-r border-border/30">
+          <input placeholder="e.g. CCST 2014 UK" value={row.qualifications} onChange={e => update(row._key, "qualifications", e.target.value)} className={inputCls} />
+        </td>
+        <td className="px-2 py-1.5 border-r border-border/30">
+          <input placeholder="Full / Part" value={row.state} onChange={e => update(row._key, "state", e.target.value)} className={inputCls} />
+        </td>
+        <td className="px-2 py-1.5 border-r border-border/30">
+          <select value={row.meeting_type} onChange={e => update(row._key, "meeting_type", e.target.value)} className={inputCls + " cursor-pointer"}>
+            <option value="">— type —</option>
+            {MEETING_TYPES.map(m => <option key={m} value={m}>{m}</option>)}
+          </select>
+        </td>
+        <td className="px-2 py-1.5 border-r border-border/30">
+          <input placeholder="e.g. UK" value={row.country_of_training} onChange={e => update(row._key, "country_of_training", e.target.value)} className={inputCls} />
+        </td>
+        <td className="px-2 py-1.5 border-r border-border/30">
+          <input placeholder="Add notes…" value={row.notes} onChange={e => update(row._key, "notes", e.target.value)} className={inputCls} />
+        </td>
+        <td className="px-2 py-1.5 text-center">
+          <button onClick={() => removeRow(row._key)} className="text-muted-foreground/40 hover:text-destructive transition-colors">
+            <X className="h-3.5 w-3.5" />
+          </button>
+        </td>
+      </tr>
+  );
+});
+
 // ── Add Entry tab ─────────────────────────────────────────────────────────────
 
 function AddEntryTab() {
@@ -1113,9 +1200,9 @@ function AddEntryTab() {
     setRows(prev => prev.map(r => r._key === key ? { ...r, [field]: value } : r));
   }, []);
 
-  const removeRow = (key: string) => {
+  const removeRow = useCallback((key: string) => {
     setRows(prev => prev.length === 1 ? [emptyRow()] : prev.filter(r => r._key !== key));
-  };
+  }, []);
 
   const handleSave = async () => {
     setSaveError("");
@@ -1198,57 +1285,7 @@ function AddEntryTab() {
             </thead>
             <tbody>
               {rows.map((row, i) => (
-                <tr key={row._key}
-                  className={`border-t border-border/40 hover:bg-primary/[0.02] transition-colors ${i % 2 === 0 ? "bg-white" : "bg-muted/20"}`}>
-                  <td className="px-2 py-1.5 border-r border-border/30">
-                    <input type="date" value={row.call_date} onChange={e => update(row._key, "call_date", e.target.value)} className={inputCls} />
-                  </td>
-                  <td className="px-2 py-1.5 border-r border-border/30">
-                    <select value={row.call_type} onChange={e => update(row._key, "call_type", e.target.value)} className={inputCls + " cursor-pointer"}>
-                      {CALL_TYPES.map(t => <option key={t} value={t}>{t}</option>)}
-                    </select>
-                  </td>
-                  <td className="px-2 py-1.5 border-r border-border/30">
-                    <StatusSelect value={row.status} onChange={v => update(row._key, "status", v)} />
-                  </td>
-                  <td className="px-2 py-1.5 border-r border-border/30">
-                    <DoctorSearchInput
-                      value={row.name}
-                      onChangeText={v => update(row._key, "name", v)}
-                      onPick={d => {
-                        update(row._key, "name", d.name);
-                        if (d.specialty && !row.specialty) update(row._key, "specialty", d.specialty);
-                        if (d.country   && !row.country_of_training) update(row._key, "country_of_training", d.country);
-                      }}
-                    />
-                  </td>
-                  <td className="px-2 py-1.5 border-r border-border/30">
-                    <input placeholder="e.g. Cardiology" value={row.specialty} onChange={e => update(row._key, "specialty", e.target.value)} className={inputCls} />
-                  </td>
-                  <td className="px-2 py-1.5 border-r border-border/30">
-                    <input placeholder="e.g. CCST 2014 UK" value={row.qualifications} onChange={e => update(row._key, "qualifications", e.target.value)} className={inputCls} />
-                  </td>
-                  <td className="px-2 py-1.5 border-r border-border/30">
-                    <input placeholder="Full / Part" value={row.state} onChange={e => update(row._key, "state", e.target.value)} className={inputCls} />
-                  </td>
-                  <td className="px-2 py-1.5 border-r border-border/30">
-                    <select value={row.meeting_type} onChange={e => update(row._key, "meeting_type", e.target.value)} className={inputCls + " cursor-pointer"}>
-                      <option value="">— type —</option>
-                      {MEETING_TYPES.map(m => <option key={m} value={m}>{m}</option>)}
-                    </select>
-                  </td>
-                  <td className="px-2 py-1.5 border-r border-border/30">
-                    <input placeholder="e.g. UK" value={row.country_of_training} onChange={e => update(row._key, "country_of_training", e.target.value)} className={inputCls} />
-                  </td>
-                  <td className="px-2 py-1.5 border-r border-border/30">
-                    <input placeholder="Add notes…" value={row.notes} onChange={e => update(row._key, "notes", e.target.value)} className={inputCls} />
-                  </td>
-                  <td className="px-2 py-1.5 text-center">
-                    <button onClick={() => removeRow(row._key)} className="text-muted-foreground/40 hover:text-destructive transition-colors">
-                      <X className="h-3.5 w-3.5" />
-                    </button>
-                  </td>
-                </tr>
+                <AddEntryRow key={row._key} row={row} i={i} update={update} removeRow={removeRow} inputCls={inputCls} />
               ))}
             </tbody>
           </table>
@@ -1263,6 +1300,70 @@ function AddEntryTab() {
     </div>
   );
 }
+
+// ── Records table row (memoized so filter/state changes skip unedited rows) ──
+const RecordsRow = memo(function RecordsRow({ entry: e, i, wColor, isAdmin, del, updateEntry }: {
+  entry: WorkerEntry;
+  i: number;
+  wColor: string;
+  isAdmin: boolean;
+  del: (id: string) => void;
+  updateEntry: (vars: { id: string; patch: Partial<WorkerEntry> }) => void;
+}) {
+  const save = (patch: Partial<WorkerEntry>) => e.id && updateEntry({ id: e.id, patch });
+  return (
+      <tr key={e.id}
+        className={`border-t border-border/40 hover:bg-primary/[0.03] transition-colors ${i % 2 === 0 ? "bg-white" : "bg-muted/10"}`}>
+        {isAdmin && (
+          <td className="px-3 py-2 border-r border-border/30">
+            <span className="inline-flex items-center px-2 py-0.5 rounded-full text-[10px] font-medium whitespace-nowrap text-white"
+              style={{ backgroundColor: wColor }}>
+              {e.worker_email ? e.worker_email.split("@")[0] : "—"}
+            </span>
+          </td>
+        )}
+        <td className="px-3 py-2 text-[11px] text-foreground border-r border-border/30 whitespace-nowrap">
+          <input type="date" value={e.call_date ?? ""} onChange={ev => save({ call_date: ev.target.value })}
+            className="bg-transparent text-[11px] outline-none cursor-pointer hover:bg-primary/5 rounded px-1 py-0.5 -mx-1" />
+        </td>
+        <td className="px-3 py-2 border-r border-border/30">
+          <EditableSelectCell value={e.call_type ?? ""} options={CALL_TYPES} onSave={v => save({ call_type: v })} />
+        </td>
+        <td className="px-3 py-2 border-r border-border/30">
+          <StatusSelect value={e.status ?? ""} onChange={v => save({ status: v })} />
+        </td>
+        <td className="px-3 py-2 text-[11px] font-medium text-foreground border-r border-border/30">
+          <EditableTextCell value={e.name} placeholder="Name" onSave={v => save({ name: v })} />
+        </td>
+        <td className="px-3 py-2 text-[11px] text-foreground border-r border-border/30">
+          <EditableTextCell value={e.specialty} placeholder="Specialty" onSave={v => save({ specialty: v })} />
+        </td>
+        <td className="px-3 py-2 text-[11px] text-muted-foreground border-r border-border/30 max-w-[160px]">
+          <EditableTextCell value={e.qualifications} placeholder="Qualifications" onSave={v => save({ qualifications: v })} />
+        </td>
+        <td className="px-3 py-2 text-[11px] text-foreground border-r border-border/30">
+          <EditableTextCell value={e.state} placeholder="State" onSave={v => save({ state: v })} />
+        </td>
+        <td className="px-3 py-2 text-[11px] text-foreground border-r border-border/30">
+          <EditableSelectCell value={e.meeting_type} options={MEETING_TYPES} onSave={v => save({ meeting_type: v })} />
+        </td>
+        <td className="px-3 py-2 text-[11px] text-foreground border-r border-border/30">
+          <EditableTextCell value={e.country_of_training} placeholder="Country" onSave={v => save({ country_of_training: v })} />
+        </td>
+        <td className="px-3 py-2 text-[11px] text-muted-foreground border-r border-border/30 max-w-[200px]">
+          <EditableTextCell value={e.notes} placeholder="Notes" onSave={v => save({ notes: v })} />
+        </td>
+        <td className="px-3 py-2 text-center">
+          {e.id && (
+            <button onClick={() => window.confirm("Delete this entry?") && del(e.id!)}
+              className="text-muted-foreground/40 hover:text-destructive transition-colors">
+              <Trash2 className="h-3.5 w-3.5" />
+            </button>
+          )}
+        </td>
+      </tr>
+  );
+});
 
 // ── Records tab ───────────────────────────────────────────────────────────────
 
@@ -1328,6 +1429,12 @@ function RecordsTab({ filter, isAdmin, userId }: { filter: DateFilter; isAdmin: 
     [entries]
   );
 
+  const workerIndex = useMemo(() => {
+    const m = new Map<string, number>();
+    workerEmails.forEach((email, i) => { if (!m.has(email)) m.set(email, i); });
+    return m;
+  }, [workerEmails]);
+
   const filtered = useMemo(() => {
     let r = entries;
     if (statusFilter) r = r.filter(e => e.status === statusFilter);
@@ -1391,60 +1498,10 @@ function RecordsTab({ filter, isAdmin, userId }: { filter: DateFilter; isAdmin: 
               </thead>
               <tbody>
                 {filtered.map((e, i) => {
-                  const wIdx  = workerEmails.indexOf(e.worker_email ?? "");
+                  const wIdx  = workerIndex.get(e.worker_email ?? "") ?? -1;
                   const wColor = WORKER_COLORS[wIdx >= 0 ? wIdx % WORKER_COLORS.length : 0];
-                  const save = (patch: Partial<WorkerEntry>) => e.id && updateEntry({ id: e.id, patch });
                   return (
-                    <tr key={e.id}
-                      className={`border-t border-border/40 hover:bg-primary/[0.03] transition-colors ${i % 2 === 0 ? "bg-white" : "bg-muted/10"}`}>
-                      {isAdmin && (
-                        <td className="px-3 py-2 border-r border-border/30">
-                          <span className="inline-flex items-center px-2 py-0.5 rounded-full text-[10px] font-medium whitespace-nowrap text-white"
-                            style={{ backgroundColor: wColor }}>
-                            {e.worker_email ? e.worker_email.split("@")[0] : "—"}
-                          </span>
-                        </td>
-                      )}
-                      <td className="px-3 py-2 text-[11px] text-foreground border-r border-border/30 whitespace-nowrap">
-                        <input type="date" value={e.call_date ?? ""} onChange={ev => save({ call_date: ev.target.value })}
-                          className="bg-transparent text-[11px] outline-none cursor-pointer hover:bg-primary/5 rounded px-1 py-0.5 -mx-1" />
-                      </td>
-                      <td className="px-3 py-2 border-r border-border/30">
-                        <EditableSelectCell value={e.call_type ?? ""} options={CALL_TYPES} onSave={v => save({ call_type: v })} />
-                      </td>
-                      <td className="px-3 py-2 border-r border-border/30">
-                        <StatusSelect value={e.status ?? ""} onChange={v => save({ status: v })} />
-                      </td>
-                      <td className="px-3 py-2 text-[11px] font-medium text-foreground border-r border-border/30">
-                        <EditableTextCell value={e.name} placeholder="Name" onSave={v => save({ name: v })} />
-                      </td>
-                      <td className="px-3 py-2 text-[11px] text-foreground border-r border-border/30">
-                        <EditableTextCell value={e.specialty} placeholder="Specialty" onSave={v => save({ specialty: v })} />
-                      </td>
-                      <td className="px-3 py-2 text-[11px] text-muted-foreground border-r border-border/30 max-w-[160px]">
-                        <EditableTextCell value={e.qualifications} placeholder="Qualifications" onSave={v => save({ qualifications: v })} />
-                      </td>
-                      <td className="px-3 py-2 text-[11px] text-foreground border-r border-border/30">
-                        <EditableTextCell value={e.state} placeholder="State" onSave={v => save({ state: v })} />
-                      </td>
-                      <td className="px-3 py-2 text-[11px] text-foreground border-r border-border/30">
-                        <EditableSelectCell value={e.meeting_type} options={MEETING_TYPES} onSave={v => save({ meeting_type: v })} />
-                      </td>
-                      <td className="px-3 py-2 text-[11px] text-foreground border-r border-border/30">
-                        <EditableTextCell value={e.country_of_training} placeholder="Country" onSave={v => save({ country_of_training: v })} />
-                      </td>
-                      <td className="px-3 py-2 text-[11px] text-muted-foreground border-r border-border/30 max-w-[200px]">
-                        <EditableTextCell value={e.notes} placeholder="Notes" onSave={v => save({ notes: v })} />
-                      </td>
-                      <td className="px-3 py-2 text-center">
-                        {e.id && (
-                          <button onClick={() => window.confirm("Delete this entry?") && del(e.id!)}
-                            className="text-muted-foreground/40 hover:text-destructive transition-colors">
-                            <Trash2 className="h-3.5 w-3.5" />
-                          </button>
-                        )}
-                      </td>
-                    </tr>
+                    <RecordsRow key={e.id} entry={e} i={i} wColor={wColor} isAdmin={isAdmin} del={del} updateEntry={updateEntry} />
                   );
                 })}
               </tbody>
@@ -1455,6 +1512,42 @@ function RecordsTab({ filter, isAdmin, userId }: { filter: DateFilter; isAdmin: 
     </div>
   );
 }
+
+// ── Daily Log row (memoized; read-only display + delete) ──────────────────────
+const DailyRow = memo(function DailyRow({ entry: e, i, del }: {
+  entry: WorkerEntry;
+  i: number;
+  del: (id: string) => void;
+}) {
+  return (
+      <tr key={e.id}
+        className={`border-t border-border/40 hover:bg-primary/[0.03] transition-colors ${i % 2 === 0 ? "bg-white" : "bg-muted/10"}`}>
+        <td className="px-3 py-2 text-[11px] text-foreground border-r border-border/30 whitespace-nowrap">
+          {e.call_date ? new Date(e.call_date + "T00:00:00").toLocaleDateString("en-GB", { day: "numeric", month: "short", year: "2-digit" }) : "—"}
+        </td>
+        <td className="px-3 py-2 border-r border-border/30">
+          {e.status ? <StatusBadge status={e.status} /> : <span className="text-[10px] text-muted-foreground">—</span>}
+        </td>
+        <td className="px-3 py-2 text-[11px] font-medium text-foreground border-r border-border/30">{e.name || "—"}</td>
+        <td className="px-3 py-2 text-[11px] text-foreground border-r border-border/30">{e.specialty || "—"}</td>
+        <td className="px-3 py-2 text-[11px] text-muted-foreground border-r border-border/30 max-w-[140px] truncate">{e.qualifications || "—"}</td>
+        <td className="px-3 py-2 text-[11px] text-foreground border-r border-border/30">{e.state || "—"}</td>
+        <td className="px-3 py-2 text-[11px] text-foreground border-r border-border/30">{e.meeting_type || "—"}</td>
+        <td className="px-3 py-2 text-[11px] text-foreground border-r border-border/30">{e.country_of_training || "—"}</td>
+        <td className="px-3 py-2 text-[11px] text-muted-foreground border-r border-border/30 max-w-[180px]">
+          <span title={e.notes} className="line-clamp-2">{e.notes || "—"}</span>
+        </td>
+        <td className="px-3 py-2 text-center">
+          {e.id && (
+            <button onClick={() => window.confirm("Delete this entry?") && del(e.id!)}
+              className="text-muted-foreground/40 hover:text-destructive transition-colors">
+              <Trash2 className="h-3.5 w-3.5" />
+            </button>
+          )}
+        </td>
+      </tr>
+  );
+});
 
 // ── Daily Log tab (Add Entry + Today's saved entries combined) ────────────────
 
@@ -1501,32 +1594,7 @@ function DailyTab({ userId }: { userId?: string }) {
               </thead>
               <tbody>
                 {todayEntries.map((e, i) => (
-                  <tr key={e.id}
-                    className={`border-t border-border/40 hover:bg-primary/[0.03] transition-colors ${i % 2 === 0 ? "bg-white" : "bg-muted/10"}`}>
-                    <td className="px-3 py-2 text-[11px] text-foreground border-r border-border/30 whitespace-nowrap">
-                      {e.call_date ? new Date(e.call_date + "T00:00:00").toLocaleDateString("en-GB", { day: "numeric", month: "short", year: "2-digit" }) : "—"}
-                    </td>
-                    <td className="px-3 py-2 border-r border-border/30">
-                      {e.status ? <StatusBadge status={e.status} /> : <span className="text-[10px] text-muted-foreground">—</span>}
-                    </td>
-                    <td className="px-3 py-2 text-[11px] font-medium text-foreground border-r border-border/30">{e.name || "—"}</td>
-                    <td className="px-3 py-2 text-[11px] text-foreground border-r border-border/30">{e.specialty || "—"}</td>
-                    <td className="px-3 py-2 text-[11px] text-muted-foreground border-r border-border/30 max-w-[140px] truncate">{e.qualifications || "—"}</td>
-                    <td className="px-3 py-2 text-[11px] text-foreground border-r border-border/30">{e.state || "—"}</td>
-                    <td className="px-3 py-2 text-[11px] text-foreground border-r border-border/30">{e.meeting_type || "—"}</td>
-                    <td className="px-3 py-2 text-[11px] text-foreground border-r border-border/30">{e.country_of_training || "—"}</td>
-                    <td className="px-3 py-2 text-[11px] text-muted-foreground border-r border-border/30 max-w-[180px]">
-                      <span title={e.notes} className="line-clamp-2">{e.notes || "—"}</span>
-                    </td>
-                    <td className="px-3 py-2 text-center">
-                      {e.id && (
-                        <button onClick={() => window.confirm("Delete this entry?") && del(e.id!)}
-                          className="text-muted-foreground/40 hover:text-destructive transition-colors">
-                          <Trash2 className="h-3.5 w-3.5" />
-                        </button>
-                      )}
-                    </td>
-                  </tr>
+                  <DailyRow key={e.id} entry={e} i={i} del={del} />
                 ))}
               </tbody>
             </table>

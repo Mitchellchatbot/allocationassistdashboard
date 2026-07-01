@@ -217,7 +217,7 @@ export function useMyWorkspace() {
 
       let q = supabase
         .from("form_responses")
-        .select("*")
+        .select("id, form_id, respondent_name, respondent_email, outreach_status, outreach_owner, next_followup_at, last_contacted_at, submitted_at, archived_at")
         .is("archived_at", null)
         .not("outreach_status", "in", "(closed,declined)")
         .order("submitted_at", { ascending: false })

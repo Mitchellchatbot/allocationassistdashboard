@@ -838,32 +838,46 @@ const MetaAds = () => {
   // Count Zoho leads sourced from Meta (Facebook + Instagram, since they're
   // merged into a single channel everywhere else in the dashboard), filtered
   // by the Meta-side date range.
-  const zohoMetaLeads = useMemo(() => {
-    if (!zoho?.rawLeads) return 0;
+  // Single pass over zoho.rawLeads computing the three Meta-leads derivations
+  // (count, qualified count, and Instagram/Facebook channel buckets) that used
+  // to be three separate filters. Each predicate is preserved exactly:
+  //   - metaLeads / metaQualified use displaySource(...) === "Meta"
+  //     (qualified additionally gates on Lead_Status ∈ QUALIFIED)
+  //   - channels uses src.includes('facebook'|'instagram'|'meta') bucketing
+  // All three share the t >= from && t <= to window.
+  const zohoMetaAgg = useMemo(() => {
+    if (!zoho?.rawLeads) {
+      return { metaLeads: 0, metaQualified: 0, channels: [] as { channel: string; doctors: number }[] };
+    }
     const from = metaDateRange.from.getTime();
     const to   = metaDateRange.to.getTime();
-    return zoho.rawLeads.filter(l => {
+    const QUALIFIED = new Set(["Initial Sales Call Completed", "High Priority Follow up"]);
+    let metaLeads = 0;
+    let metaQualified = 0;
+    const counts: Record<string, number> = {};
+    for (const l of zoho.rawLeads) {
       const t = new Date(l.Created_Time).getTime();
-      return t >= from && t <= to && displaySource(l.Lead_Source) === "Meta";
-    }).length;
+      if (!(t >= from && t <= to)) continue;
+      if (displaySource(l.Lead_Source) === "Meta") {
+        metaLeads++;
+        if (QUALIFIED.has(l.Lead_Status)) metaQualified++;
+      }
+      const src = (l.Lead_Source ?? '').toLowerCase();
+      if (src.includes('facebook') || src.includes('instagram') || src.includes('meta')) {
+        const ch = src.includes('instagram') ? 'Instagram' : 'Facebook';
+        counts[ch] = (counts[ch] ?? 0) + 1;
+      }
+    }
+    const channels = Object.entries(counts).map(([channel, doctors]) => ({ channel, doctors }));
+    return { metaLeads, metaQualified, channels };
   }, [zoho?.rawLeads, metaDateRange]);
+  const zohoMetaLeads = zohoMetaAgg.metaLeads;
   // Qualified Meta leads, Zoho Lead_Status based — the SAME definition the Sales
   // tracker uses (a Meta-sourced Zoho lead that reached "Initial Sales Call
   // Completed" or "High Priority Follow up"). The boss confirmed this is the
   // correct Meta-qualified figure; the old meta_leads-form count diverged from
   // it, so the Qualified KPI now reads from Zoho, not the form table.
-  const zohoMetaQualified = useMemo(() => {
-    if (!zoho?.rawLeads) return 0;
-    const from = metaDateRange.from.getTime();
-    const to   = metaDateRange.to.getTime();
-    const QUALIFIED = new Set(["Initial Sales Call Completed", "High Priority Follow up"]);
-    return zoho.rawLeads.filter(l => {
-      const t = new Date(l.Created_Time).getTime();
-      return t >= from && t <= to
-        && displaySource(l.Lead_Source) === "Meta"
-        && QUALIFIED.has(l.Lead_Status);
-    }).length;
-  }, [zoho?.rawLeads, metaDateRange]);
+  const zohoMetaQualified = zohoMetaAgg.metaQualified;
   const [previewCampaign, setPreviewCampaign] = useState<{ id: string; name: string } | null>(null);
   const [directPreviewAd, setDirectPreviewAd] = useState<MetaTopAd | null>(null);
   const [showAllActions, setShowAllActions] = useState(false);
@@ -879,7 +893,7 @@ const MetaAds = () => {
     `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`;
   const since    = ymd(metaDateRange.from);
   const until    = ymd(metaDateRange.to);
-  const allAccountIds = api?.accounts?.map(a => a.id) ?? [];
+  const allAccountIds = useMemo(() => api?.accounts?.map(a => a.id) ?? [], [api?.accounts]);
 
   const { data: topAds = [], isLoading: topAdsLoading } = useMetaTopAds(allAccountIds, since, until);
   const { data: topAdsetsRaw = [] } = useMetaTopAdsets(allAccountIds, since, until);
@@ -1057,7 +1071,13 @@ const MetaAds = () => {
         case "leads":       return c.leads > 0 ? c.leads : formLeadsByCampaign(c);
       }
     };
-    return [...campaigns].sort((a, b) => (get(a) - get(b)) * sign);
+    return [...campaigns].sort((a, b) => (get(a) - get(b)) * sign).map(c => {
+      const formLeads = formLeadsByCampaign(c);
+      // Meta API leads first; fall back to form-side count.
+      const displayLeads = c.leads > 0 ? c.leads : formLeads;
+      const fromForms = c.leads === 0 && formLeads > 0;
+      return { ...c, displayLeads, fromForms };
+    });
   }, [campaigns, campSortKey, campSortDir, formLeadsByCampaign]);
 
   // ── Per-creative performance ──────────────────────────────────────────────
@@ -1220,7 +1240,7 @@ const MetaAds = () => {
   }, [topAds, creativeFunnels, creativeView, sortKey, sortDir]);
 
   // ── Back-side content for each KPI flip card ──────────────────────────────
-  const topCampBySpend = campaigns.slice(0, 5);
+  const topCampBySpend = useMemo(() => campaigns.slice(0, 5), [campaigns]);
   const maxSpendCamp = topCampBySpend[0]?.spend ?? 1;
   const spendBack = (
     <div className="space-y-2">
@@ -1238,7 +1258,7 @@ const MetaAds = () => {
     </div>
   );
 
-  const topCampByImpr = campaigns.slice().sort((a, b) => b.impressions - a.impressions).slice(0, 5);
+  const topCampByImpr = useMemo(() => campaigns.slice().sort((a, b) => b.impressions - a.impressions).slice(0, 5), [campaigns]);
   const maxImprCamp = topCampByImpr[0]?.impressions ?? 1;
   const imprBack = (
     <div className="space-y-2">
@@ -1258,7 +1278,7 @@ const MetaAds = () => {
     </div>
   );
 
-  const topCampByReach = campaigns.slice().sort((a, b) => b.reach - a.reach).slice(0, 5);
+  const topCampByReach = useMemo(() => campaigns.slice().sort((a, b) => b.reach - a.reach).slice(0, 5), [campaigns]);
   const maxReachCamp = topCampByReach[0]?.reach ?? 1;
   const reachBack = (
     <div className="space-y-2">
@@ -1278,7 +1298,7 @@ const MetaAds = () => {
     </div>
   );
 
-  const topCampByCtr = campaigns.slice().sort((a, b) => b.ctr - a.ctr).slice(0, 5);
+  const topCampByCtr = useMemo(() => campaigns.slice().sort((a, b) => b.ctr - a.ctr).slice(0, 5), [campaigns]);
   const clicksBack = (
     <div className="space-y-1.5">
       {topCampByCtr.map(c => (
@@ -1308,11 +1328,11 @@ const MetaAds = () => {
     </div>
   );
 
-  const topCampByCpm = campaigns
+  const topCampByCpm = useMemo(() => campaigns
     .filter(c => c.impressions > 0)
     .map(c => ({ ...c, cpm: (c.spend / c.impressions) * 1000 }))
     .sort((a, b) => b.spend - a.spend)
-    .slice(0, 5);
+    .slice(0, 5), [campaigns]);
   const maxCpmSpend = topCampByCpm[0]?.spend ?? 1;
   const cpmBack = (
     <div className="space-y-2">
@@ -1334,25 +1354,29 @@ const MetaAds = () => {
     </div>
   );
 
-  const topCampByLeads = campaigns.filter(c => c.leads > 0).sort((a, b) => b.leads - a.leads).slice(0, 5);
+  const topCampByLeads = useMemo(() => campaigns.filter(c => c.leads > 0).sort((a, b) => b.leads - a.leads).slice(0, 5), [campaigns]);
   const maxLeads = topCampByLeads[0]?.leads ?? 1;
-  const zohoMetaChannels = useMemo(() => {
-    if (!zoho?.rawLeads) return [] as { channel: string; doctors: number }[];
-    const from = metaDateRange.from.getTime();
-    const to   = metaDateRange.to.getTime();
-    const filtered = zoho.rawLeads.filter(l => {
-      const t = new Date(l.Created_Time).getTime();
-      const src = (l.Lead_Source ?? '').toLowerCase();
-      return t >= from && t <= to && (src.includes('facebook') || src.includes('instagram') || src.includes('meta'));
-    });
-    const counts: Record<string, number> = {};
-    for (const l of filtered) {
-      const src = (l.Lead_Source ?? '').toLowerCase();
-      const ch = src.includes('instagram') ? 'Instagram' : 'Facebook';
-      counts[ch] = (counts[ch] ?? 0) + 1;
-    }
-    return Object.entries(counts).map(([channel, doctors]) => ({ channel, doctors }));
-  }, [zoho?.rawLeads, metaDateRange]);
+  const zohoMetaChannels = zohoMetaAgg.channels;
+  // Conversions: Doctors-on-Board rows attributed to Meta. Hoisted out of the
+  // cost-per KPI IIFE (which re-runs on every render) into a memo so the
+  // per-row Date()/displaySource()/normalize scan only re-runs when its inputs
+  // change. Predicate preserved exactly (NaN handling, t<from / t>=to bounds,
+  // displaySource Meta/Undefined logic, email/phone rescue).
+  const metaConversions = useMemo(() => {
+    const metaFromMs = metaDateRange.from.getTime();
+    const metaToMs   = metaDateRange.to.getTime() + 86_400_000;  // include the full last day
+    const metaEmails = data?.metaLeadEmails ?? new Set<string>();
+    const metaPhones = data?.metaLeadPhones ?? new Set<string>();
+    return (zoho?.rawDoctorsOnBoard ?? []).filter(dob => {
+      const t = dob.Created_Time ? new Date(dob.Created_Time).getTime() : NaN;
+      if (isNaN(t) || t < metaFromMs || t >= metaToMs) return false;
+      const ds = displaySource(dob.Lead_Source);
+      if (ds === "Meta") return true;                       // raw FB/IG source
+      if (ds !== "Undefined") return false;                // a real non-Meta channel never counts as Meta
+      const e = normalizeEmail(dob.Email), p = normalizePhone(dob.Phone ?? dob.Mobile);
+      return (!!e && metaEmails.has(e)) || (!!p && metaPhones.has(p));  // junk source rescued by meta_leads
+    }).length;
+  }, [zoho?.rawDoctorsOnBoard, metaDateRange, data?.metaLeadEmails, data?.metaLeadPhones]);
   const maxZohoLeads = Math.max(...zohoMetaChannels.map(c => c.doctors), 1);
   const leadsBack = (
     <div className="space-y-2">
@@ -1388,11 +1412,11 @@ const MetaAds = () => {
     </div>
   );
 
-  const topCampByCpc = campaigns
+  const topCampByCpc = useMemo(() => campaigns
     .filter(c => c.clicks > 0 && c.spend > 0)
     .map(c => ({ ...c, cpc: c.spend / c.clicks }))
     .sort((a, b) => a.cpc - b.cpc)
-    .slice(0, 5);
+    .slice(0, 5), [campaigns]);
   const cplBack = (
     <div className="space-y-2">
       <p className="text-[9px] text-muted-foreground uppercase tracking-wide">Best cost-per-click by campaign</p>
@@ -1497,19 +1521,8 @@ const MetaAds = () => {
               // Conversions: a DoB counts as a Meta conversion if its Lead_Source
               // resolves to Meta OR its email/phone is in meta_leads — the SAME
               // attribution the Marketing page uses, so the two reconcile.
-              const metaFromMs = metaDateRange.from.getTime();
-              const metaToMs   = metaDateRange.to.getTime() + 86_400_000;  // include the full last day
-              const metaEmails = data?.metaLeadEmails ?? new Set<string>();
-              const metaPhones = data?.metaLeadPhones ?? new Set<string>();
-              const conversions = (zoho?.rawDoctorsOnBoard ?? []).filter(dob => {
-                const t = dob.Created_Time ? new Date(dob.Created_Time).getTime() : NaN;
-                if (isNaN(t) || t < metaFromMs || t >= metaToMs) return false;
-                const ds = displaySource(dob.Lead_Source);
-                if (ds === "Meta") return true;                       // raw FB/IG source
-                if (ds !== "Undefined") return false;                // a real non-Meta channel never counts as Meta
-                const e = normalizeEmail(dob.Email), p = normalizePhone(dob.Phone ?? dob.Mobile);
-                return (!!e && metaEmails.has(e)) || (!!p && metaPhones.has(p));  // junk source rescued by meta_leads
-              }).length;
+              // Computed once in the `metaConversions` memo above.
+              const conversions = metaConversions;
               const cpl = totalLeads     > 0 ? adSpend / totalLeads     : 0;
               const cpq = qualifiedLeads > 0 ? adSpend / qualifiedLeads : 0;
               const cpc = conversions    > 0 ? adSpend / conversions    : 0;
@@ -1624,8 +1637,7 @@ const MetaAds = () => {
                     <CardTitle className="text-[12px] font-medium text-muted-foreground uppercase tracking-wide">Spend by Platform</CardTitle>
                   </CardHeader>
                   <CardContent className="px-4 pb-4 space-y-2.5">
-                    {byPlatform.map(p => {
-                      const maxS = byPlatform[0]?.spend ?? 1;
+                    {(() => { const maxS = byPlatform[0]?.spend ?? 1; return byPlatform.map(p => {
                       return (
                         <div key={p.platform}>
                           <div className="flex items-center justify-between mb-1">
@@ -1640,7 +1652,7 @@ const MetaAds = () => {
                           </div>
                         </div>
                       );
-                    })}
+                    }); })()}
                   </CardContent>
                 </Card>
               )}
@@ -2106,10 +2118,8 @@ const MetaAds = () => {
                   <LayoutGroup>
                   <motion.tbody layout>
                     {sortedCampaigns.map(c => {
-                      const formLeads = formLeadsByCampaign(c);
-                      // Meta API leads first; fall back to form-side count.
-                      const displayLeads = c.leads > 0 ? c.leads : formLeads;
-                      const fromForms = c.leads === 0 && formLeads > 0;
+                      // displayLeads / fromForms precomputed in the sortedCampaigns memo.
+                      const { displayLeads, fromForms } = c;
                       return (
                       <motion.tr
                         key={c.id}
@@ -2183,8 +2193,7 @@ const MetaAds = () => {
               </CardHeader>
               <CardContent className="px-4 pb-3">
                 <div className="space-y-1">
-                  {visibleActions.map(a => {
-                    const maxVal = actions[0]?.value ?? 1;
+                  {(() => { const maxVal = actions[0]?.value ?? 1; return visibleActions.map(a => {
                     return (
                       <div key={a.type} className="flex items-center gap-3 py-1.5">
                         <span className="text-[11px] w-44 truncate shrink-0">{a.label}</span>
@@ -2197,7 +2206,7 @@ const MetaAds = () => {
                         )}
                       </div>
                     );
-                  })}
+                  }); })()}
                 </div>
                 {actions.length > 8 && (
                   <button onClick={() => setShowAllActions(v => !v)} className="mt-2 flex items-center gap-1 text-[10px] text-muted-foreground hover:text-foreground">

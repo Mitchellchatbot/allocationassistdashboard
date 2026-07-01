@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useState, memo } from "react";
 import { useSearchParams } from "react-router-dom";
 import { DashboardLayout } from "@/components/layout/DashboardLayout";
 import { AnimatedTabsList, AnimatedTabContent, AnimatedTabPanel, type AnimatedTabItem } from "@/components/AnimatedTabs";
@@ -74,6 +74,15 @@ function statusBadge(status: FlowRun["status"]) {
 
 type TabKey = FlowKey | "settings" | "hospitals" | "templates" | "queues";
 
+// Static admin tab items — reference no props/state, so hoisting to a module
+// constant keeps them referentially stable across renders.
+const ADMIN_TAB_ITEMS: AnimatedTabItem[] = [
+  { value: "queues",    label: <><Inbox        className="h-3.5 w-3.5" /> Queues</> },
+  { value: "hospitals", label: <><HospitalIcon className="h-3.5 w-3.5" /> Hospitals</> },
+  { value: "templates", label: <><Mail         className="h-3.5 w-3.5" /> Templates</> },
+  { value: "settings",  label: <><Settings     className="h-3.5 w-3.5" /> Default Flow Editor</> },
+];
+
 export default function Automations() {
   const [searchParams, setSearchParams] = useSearchParams();
   // Default tab is profile_sent now that Onboarding is hidden (Ammar
@@ -132,6 +141,30 @@ export default function Automations() {
     for (const r of runs) totals[r.status]++;
     return totals;
   }, [runs]);
+
+  // Flow tab items rebuilt only when run counts change. adminItems is hoisted
+  // to the module-level ADMIN_TAB_ITEMS constant (fully static).
+  const flowItems: AnimatedTabItem[] = useMemo(
+    () => FLOW_ORDER.map(key => ({
+      value: key,
+      label: FLOW_DEFINITIONS[key].shortName,
+      count: runsByFlow[key]?.length ?? 0,
+    })),
+    [runsByFlow],
+  );
+
+  // Stable callbacks so FlowTab's props keep referential identity, letting the
+  // memoized FlowTab skip re-renders when its own flow/runs are unchanged.
+  // setSelectedRunId / setSendProfileOpen / setTriggerFlow are stable React
+  // setters → empty dep arrays are correct.
+  const handleSendProfile = useCallback(() => setSendProfileOpen(true), []);
+  // Per-flow trigger callbacks, memoized as a stable map keyed by flow key so
+  // each panel receives the same function identity across renders.
+  const triggerFlowHandlers = useMemo(() => {
+    const m = {} as Record<FlowKey, () => void>;
+    for (const key of FLOW_ORDER) m[key] = () => setTriggerFlow(key);
+    return m;
+  }, []);
 
   // Manually invoke the tick-scheduler edge function. Same code path pg_cron
   // runs every 5 min — exposed here so the team can test time-gated stages
@@ -210,17 +243,6 @@ export default function Automations() {
         </Card>
 
         {(() => {
-          const flowItems: AnimatedTabItem[] = FLOW_ORDER.map(key => ({
-            value: key,
-            label: FLOW_DEFINITIONS[key].shortName,
-            count: runsByFlow[key]?.length ?? 0,
-          }));
-          const adminItems: AnimatedTabItem[] = [
-            { value: "queues",    label: <><Inbox        className="h-3.5 w-3.5" /> Queues</> },
-            { value: "hospitals", label: <><HospitalIcon className="h-3.5 w-3.5" /> Hospitals</> },
-            { value: "templates", label: <><Mail         className="h-3.5 w-3.5" /> Templates</> },
-            { value: "settings",  label: <><Settings     className="h-3.5 w-3.5" /> Default Flow Editor</> },
-          ];
           return (
             <>
               <div className="flex flex-wrap items-center gap-3">
@@ -234,7 +256,7 @@ export default function Automations() {
                 </div>
                 <div data-tour="automations-admin">
                   <AnimatedTabsList
-                    items={adminItems}
+                    items={ADMIN_TAB_ITEMS}
                     value={activeFlow}
                     onChange={v => setActiveFlow(v as TabKey)}
                     groupId="automation-admin"
@@ -249,7 +271,7 @@ export default function Automations() {
                       flow={FLOW_DEFINITIONS[key]}
                       runs={runsByFlow[key] ?? []}
                       onSelectRun={setSelectedRunId}
-                      onSendProfile={key === "profile_sent" ? () => setSendProfileOpen(true) : undefined}
+                      onSendProfile={key === "profile_sent" ? handleSendProfile : undefined}
                       onTriggerFlow={
                         // 'onboarding' intentionally absent — Sales sends
                         // the intake email from Zoho now (Ammar 2026-06-03).
@@ -260,7 +282,7 @@ export default function Automations() {
                         key === "interview"     ||
                         key === "contract_signing" ||
                         key === "second_payment"
-                          ? () => setTriggerFlow(key)
+                          ? triggerFlowHandlers[key]
                           : undefined
                       }
                     />
@@ -357,7 +379,7 @@ const TRIGGER_BUTTON_LABEL: Partial<Record<FlowKey, string>> = {
   second_payment:   "Set joining date",
 };
 
-function FlowTab({ flow, runs, onSelectRun, onSendProfile, onSendContract, onTriggerFlow }: {
+function FlowTabImpl({ flow, runs, onSelectRun, onSendProfile, onSendContract, onTriggerFlow }: {
   flow: FlowDefinition;
   runs: FlowRun[];
   onSelectRun: (id: string) => void;
@@ -490,6 +512,12 @@ function FlowTab({ flow, runs, onSelectRun, onSendProfile, onSendContract, onTri
   );
 }
 
+// Memoized so a panel re-renders only when its own flow/runs/callback props
+// change. Callback props are stabilized at the call site (useCallback / hoisted
+// constants), so this skips redundant getStageIndex/relativeTime work on every
+// parent render.
+const FlowTab = memo(FlowTabImpl);
+
 function Block({ label, value }: { label: string; value: React.ReactNode }) {
   return (
     <div>
@@ -506,6 +534,13 @@ function RunDetailSheet({ run, open, onClose }: { run: FlowRun | null; open: boo
   // call them on the next render → "different number of hooks" crash.
   const eventsQ = useFlowRunEvents(run?.id ?? null);
   const flow    = run ? FLOW_DEFINITIONS[run.flow_key] : null;
+  // O(stages) lookup map built once per flow, reused for every stage_key
+  // resolution below (focused stage, current stage, timeline rows) instead of a
+  // linear flow.stages.find per call. get() returns the identical stage object.
+  const stageByKey = useMemo(
+    () => new Map((flow?.stages ?? []).map(s => [s.key, s])),
+    [flow],
+  );
   const [selectedStage, setSelectedStage] = useState<string | null>(null);
   const [noteText, setNoteText] = useState("");
   const [classifyOpen, setClassifyOpen] = useState(false);
@@ -529,8 +564,8 @@ function RunDetailSheet({ run, open, onClose }: { run: FlowRun | null; open: boo
   const focusedStage = selectedStage ?? run?.current_stage ?? null;
   const focusedStageDef: FlowStage | null = useMemo(() => {
     if (!flow || !focusedStage) return null;
-    return flow.stages.find(s => s.key === focusedStage) ?? null;
-  }, [flow, focusedStage]);
+    return stageByKey.get(focusedStage) ?? null;
+  }, [flow, stageByKey, focusedStage]);
 
   const eventsForFocused = useMemo(
     () => (eventsQ.data ?? []).filter(e => e.stage_key === focusedStage),
@@ -552,7 +587,7 @@ function RunDetailSheet({ run, open, onClose }: { run: FlowRun | null; open: boo
   // "Send now" is available when the current stage is an email/reminder
   // kind. Hides itself once an email_sent event already exists for this
   // stage (so users don't accidentally double-send).
-  const currentStageDef = flow.stages.find(s => s.key === run.current_stage);
+  const currentStageDef = stageByKey.get(run.current_stage);
   // Relocation runs have their own dedicated panel (guide + attestation
   // buttons), so suppress the generic "Send now" for them — otherwise the
   // header button and the panel both target the same stage.
@@ -1037,7 +1072,7 @@ function RunDetailSheet({ run, open, onClose }: { run: FlowRun | null; open: boo
               ) : (
                 <ol className="relative border-l-2 border-slate-200 ml-2 space-y-3">
                   {(eventsQ.data ?? []).map(e => {
-                    const stage = flow.stages.find(s => s.key === e.stage_key);
+                    const stage = stageByKey.get(e.stage_key);
                     return (
                       <li key={e.id} className="ml-4 relative">
                         <div className="absolute -left-[22px] top-1 h-3 w-3 rounded-full bg-teal-500 ring-2 ring-white" />

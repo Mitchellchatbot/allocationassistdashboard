@@ -3,7 +3,7 @@
  * (new vacancy match, 72h post-interview chase, ...). Read by PendingActionsCard
  * on the main dashboard.
  */
-import { useCallback } from "react";
+import { useCallback, useMemo } from "react";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { supabase } from "@/lib/supabase";
 import { useTableSubscription } from "@/lib/realtime-registry";
@@ -35,6 +35,7 @@ export interface AppNotification {
 }
 
 const KEY = ["notifications"] as const;
+const EMPTY: AppNotification[] = [];
 
 export function useNotifications(): {
   notifications: AppNotification[];
@@ -78,9 +79,11 @@ export function useNotifications(): {
     qc.invalidateQueries({ queryKey: KEY });
   }, [qc]));
 
-  const notifications = q.data ?? [];
-  const unreadCount = notifications.filter(n => !n.read_at).length;
-  return { notifications, unreadCount, isLoading: q.isLoading };
+  return useMemo(() => {
+    const notifications = q.data ?? EMPTY;
+    const unreadCount = notifications.filter(n => !n.read_at).length;
+    return { notifications, unreadCount, isLoading: q.isLoading };
+  }, [q.data, q.isLoading]);
 }
 
 export function useMarkNotificationRead() {

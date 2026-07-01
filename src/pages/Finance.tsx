@@ -1,4 +1,4 @@
-import { useState, useEffect, useMemo, useRef, Fragment } from "react";
+import { useState, useEffect, useMemo, useRef } from "react";
 import { DashboardLayout } from "@/components/layout/DashboardLayout";
 import { SectionDateRange } from "@/components/SectionDateRange";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
@@ -17,14 +17,10 @@ import { useDoctorRevenue } from "@/hooks/use-doctor-dossier";
 import { ChannelRoiTable } from "@/components/finance/ChannelRoiTable";
 import { CompanyFinanceSankey } from "@/components/finance/CompanyFinanceSankey";
 import { ExpenseSearch } from "@/components/finance/ExpenseSearch";
-import {
-  BarChart, Bar, XAxis, YAxis, Tooltip, ResponsiveContainer, CartesianGrid, Cell,
-  AreaChart, Area, PieChart, Pie, Legend, LineChart, Line, ComposedChart,
-} from "recharts";
 import { InfoIcon } from "@/components/InfoIcon";
 import {
-  DollarSign, TrendingUp, TrendingDown, Crown, Receipt, Award, CalendarDays, ArrowUpRight,
-  Wallet, Target, Zap, Users, Search, ArrowUpDown, ArrowUp, ArrowDown, ChevronRight,
+  DollarSign, TrendingUp, TrendingDown, Crown, Receipt, Award,
+  Target, Zap, Users,
 } from "lucide-react";
 
 // Short {meaning, source} pair for every Finance KPI label.
@@ -49,20 +45,18 @@ function fmtPct(n: number): string {
   return `${s}${n.toFixed(1)}%`;
 }
 
-const tip = {
-  backgroundColor: "#fff",
-  border: "1px solid hsl(220,14%,90%)",
-  borderRadius: "6px",
-  fontSize: "11px",
-  boxShadow: "0 2px 8px rgba(0,0,0,0.08)",
-};
-
 const CAT_COLORS = [
   "hsl(170,55%,45%)", "hsl(210,75%,52%)", "hsl(280,55%,55%)", "hsl(35,85%,55%)",
   "hsl(340,60%,55%)", "hsl(145,55%,45%)", "hsl(200,70%,50%)", "hsl(260,55%,60%)",
   "hsl(20,85%,55%)",  "hsl(320,55%,55%)", "hsl(160,55%,48%)", "hsl(240,60%,55%)",
   "hsl(50,85%,50%)",  "hsl(190,60%,50%)",
 ];
+
+// "Contact in Future" is NOT qualified — recruiter deferred, not a pass.
+const QUALIFIED_STATUSES = new Set([
+  "Initial Sales Call Completed",
+  "High Priority Follow up",
+]);
 
 // Revenue per converted doctor lives in @/lib/revenue so Marketing + Finance
 // rank channels using the same fee.
@@ -470,70 +464,9 @@ const Finance = () => {
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
-  // Channel-breakdown drill-down — click a channel row to expand its
-  // individual transactions inline. Single-channel expansion at a time keeps
-  // the page short.
-  const [expandedCategory, setExpandedCategory] = useState<string | null>(null);
-  const txnsByCategory = useMemo(() => {
-    const m = new Map<string, typeof allTransactions>();
-    for (const t of allTransactions) {
-      const list = m.get(t.category) ?? [];
-      list.push(t);
-      m.set(t.category, list);
-    }
-    // Sort each list by date desc so the most recent shows first when expanded
-    for (const list of m.values()) {
-      list.sort((a, b) => (b.expense_date ?? "").localeCompare(a.expense_date ?? ""));
-    }
-    return m;
-  }, [allTransactions]);
-
-  // Legacy refs — kept for any back-card consumers (TopCategoryBack etc.)
-  const [txnSortKey, setTxnSortKey] = useState<"date" | "amount" | "category">("date");
-  const [txnSortDir, setTxnSortDir] = useState<"asc" | "desc">("desc");
-  const [txnSearch, setTxnSearch] = useState("");
-  const sortedTransactions = useMemo(() => {
-    const q = txnSearch.trim().toLowerCase();
-    const filtered = q
-      ? allTransactions.filter(t =>
-          (t.description ?? "").toLowerCase().includes(q) ||
-          (t.category ?? "").toLowerCase().includes(q)
-        )
-      : allTransactions;
-    return filtered.slice().sort((a, b) => {
-      let cmp = 0;
-      if (txnSortKey === "date")     cmp = (a.expense_date ?? "").localeCompare(b.expense_date ?? "");
-      else if (txnSortKey === "amount") cmp = (a.amount ?? 0) - (b.amount ?? 0);
-      else if (txnSortKey === "category") cmp = (a.category ?? "").localeCompare(b.category ?? "");
-      return txnSortDir === "asc" ? cmp : -cmp;
-    });
-  }, [allTransactions, txnSortKey, txnSortDir, txnSearch]);
-
-  function toggleTxnSort(key: "date" | "amount" | "category") {
-    if (txnSortKey === key) {
-      setTxnSortDir(d => (d === "asc" ? "desc" : "asc"));
-    } else {
-      setTxnSortKey(key);
-      setTxnSortDir(key === "amount" || key === "date" ? "desc" : "asc");
-    }
-  }
-
-  function SortIcon({ active, dir }: { active: boolean; dir: "asc" | "desc" }) {
-    if (!active) return <ArrowUpDown className="h-3 w-3 opacity-40 shrink-0" />;
-    return dir === "asc"
-      ? <ArrowUp className="h-3 w-3 text-foreground shrink-0" />
-      : <ArrowDown className="h-3 w-3 text-foreground shrink-0" />;
-  }
-
   // Zoho leads created in the selected period — the real signal of marketing working.
   // Revenue is not used here because Zoho Deals module has almost no data
   // (only ~4 Closed Won deals ever); using spend/leads is far more accurate.
-  // "Contact in Future" is NOT qualified — recruiter deferred, not a pass.
-  const QUALIFIED_STATUSES = new Set([
-    "Initial Sales Call Completed",
-    "High Priority Follow up",
-  ]);
-
   const leadStats = useMemo(() => {
     const leads = zoho?.rawLeads ?? [];
     const fromMs = dateRange.from.getTime();
@@ -671,7 +604,7 @@ const Finance = () => {
     }
     for (const k of rangeMonths) if (k >= WEBSITE_SEO_START_MONTH) monthSet.add(k);
     if (monthSet.size === 0) {
-      return { months: [] as { key: string; label: string }[], channels: [] as ChannelSpendRow[] };
+      return { months: [] as { key: string; label: string }[], channels: [] as ChannelSpendRow[], monthTotals: {} as Record<string, number>, grandTotal: 0 };
     }
     const months = Array.from(monthSet).sort().map(k => ({
       key:   k,
@@ -709,7 +642,15 @@ const Finance = () => {
     }
 
     channels.sort((a, b) => b.total - a.total);
-    return { months, channels };
+
+    // Footer totals — per-month column sums + grand total, precomputed here so
+    // the table footer doesn't re-run nested reduces on every render.
+    const monthTotals: Record<string, number> = {};
+    for (const m of months) {
+      monthTotals[m.key] = channels.reduce((s, c) => s + (c.perMonth[m.key] ?? 0), 0);
+    }
+    const grandTotal = channels.reduce((s, c) => s + c.total, 0);
+    return { months, channels, monthTotals, grandTotal };
   }, [allTransactions, monthly, metaAds, books, dateRange]);
 
   // ── Return on Investment by channel (spend vs revenue, per month) ──────────
@@ -859,21 +800,28 @@ const Finance = () => {
   // Marketing spend from the Monthly Marketing Spend by Channel table (Meta
   // live + Books vendor bills + the Website/SEO retainer) — the period total
   // and a per-channel breakdown for the Marketing Spend KPI card.
-  const marketingPeriodTotal = monthlySpendByChannel.channels.reduce((s, c) => s + c.total, 0);
-  const marketingByChannel: CategorySpend[] = monthlySpendByChannel.channels
-    .map(c => ({
-      category: c.channel,
-      amount: c.total,
-      pct: marketingPeriodTotal > 0 ? (c.total / marketingPeriodTotal) * 100 : 0,
-      count: 0,
-      avg: 0,
-    }))
-    .sort((a, b) => b.amount - a.amount);
+  const { marketingPeriodTotal, marketingByChannel } = useMemo(() => {
+    const marketingPeriodTotal = monthlySpendByChannel.channels.reduce((s, c) => s + c.total, 0);
+    const marketingByChannel: CategorySpend[] = monthlySpendByChannel.channels
+      .map(c => ({
+        category: c.channel,
+        amount: c.total,
+        pct: marketingPeriodTotal > 0 ? (c.total / marketingPeriodTotal) * 100 : 0,
+        count: 0,
+        avg: 0,
+      }))
+      .sort((a, b) => b.amount - a.amount);
+    return { marketingPeriodTotal, marketingByChannel };
+  }, [monthlySpendByChannel]);
 
   // Conversions + revenue attributed to the top channel (for its KPI back).
-  const topChannelRoi = topCategory
-    ? channelRoi.rows.find(r => r.channel === normalizeChannelKey(topCategory.category))
-    : undefined;
+  const topChannelRoi = useMemo(
+    () =>
+      topCategory
+        ? channelRoi.rows.find(r => r.channel === normalizeChannelKey(topCategory.category))
+        : undefined,
+    [topCategory, channelRoi.rows],
+  );
 
   return (
     <DashboardLayout title="Finance" subtitle="Revenue, spend, profit, and ROI across all channels" docSlug="growth/finance">
@@ -1160,7 +1108,7 @@ const Finance = () => {
                 <tr className="bg-blue-50/60 font-semibold border-t-2 border-blue-200">
                   <td className="py-3.5 px-5 text-[13px] text-foreground">Total marketing spend</td>
                   {monthlySpendByChannel.months.map(m => {
-                    const v = monthlySpendByChannel.channels.reduce((s, c) => s + (c.perMonth[m.key] ?? 0), 0);
+                    const v = monthlySpendByChannel.monthTotals[m.key] ?? 0;
                     return (
                       <td key={m.key} className="py-3.5 px-3 text-[14px] text-right tabular-nums">
                         {fmtAED(v)}
@@ -1168,7 +1116,7 @@ const Finance = () => {
                     );
                   })}
                   <td className="py-3.5 px-5 text-[15px] text-right tabular-nums font-bold text-blue-700">
-                    {fmtAED(monthlySpendByChannel.channels.reduce((s, c) => s + c.total, 0))}
+                    {fmtAED(monthlySpendByChannel.grandTotal ?? 0)}
                   </td>
                 </tr>
               </tbody>

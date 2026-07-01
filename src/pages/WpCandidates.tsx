@@ -10,7 +10,7 @@
  * manually linked to an existing AA doctor (Zoho lead / DoB) if the
  * names don't auto-match.
  */
-import { Fragment, useEffect, useMemo, useRef, useState } from "react";
+import { Fragment, memo, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useSearchParams } from "react-router-dom";
 import { DashboardLayout } from "@/components/layout/DashboardLayout";
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "@/components/ui/card";
@@ -48,6 +48,10 @@ export default function WpCandidates({ embedded }: WpCandidatesProps = {}) {
   const createFromCv = useCreateProfileFromCv();
   const cvInputRef = useRef<HTMLInputElement | null>(null);
   const [openDetailId, setOpenDetailId] = useState<number | null>(null);
+  // Stable row-open handler so memoized CandidateRow can bail out of
+  // re-reconciliation when only unrelated parent state (stagingProgress,
+  // renderLimit, debounced search) changes.
+  const handleOpen = useCallback((id: number) => setOpenDetailId(id), []);
   // Newly-created staged profile to auto-open in the staging editor.
   const [autoOpenStagedId, setAutoOpenStagedId] = useState<string | null>(null);
   // Progress bar for "New profile" → staging (mirrors the publish bar in
@@ -376,7 +380,7 @@ export default function WpCandidates({ embedded }: WpCandidatesProps = {}) {
               </div>
             ) : (
               <>
-                {filtered.slice(0, renderLimit).map(c => <CandidateRow key={c.id} candidate={c} highlight={search.trim().toLowerCase()} onOpen={() => setOpenDetailId(c.id)} />)}
+                {filtered.slice(0, renderLimit).map(c => <CandidateRow key={c.id} candidate={c} highlight={search.trim().toLowerCase()} onOpen={handleOpen} />)}
                 {/* Sentinel — when this scrolls into view (200px before
                     actually), bump the render window by 100. Once we're
                     past the end, render a quiet 'All loaded' line. */}
@@ -425,7 +429,7 @@ export default function WpCandidates({ embedded }: WpCandidatesProps = {}) {
   return <DashboardLayout>{withDialog}</DashboardLayout>;
 }
 
-function CandidateRow({ candidate, highlight, onOpen }: { candidate: WpCandidate; highlight: string; onOpen: () => void }) {
+const CandidateRow = memo(function CandidateRow({ candidate, highlight, onOpen }: { candidate: WpCandidate; highlight: string; onOpen: (id: number) => void }) {
   const subtitle = [candidate.job_title, candidate.country_of_training].filter(Boolean).join(" · ");
   const del = useDeleteWpCandidate();
 
@@ -445,7 +449,7 @@ function CandidateRow({ candidate, highlight, onOpen }: { candidate: WpCandidate
     <div className="rounded-md border bg-white flex items-stretch">
       <button
         type="button"
-        onClick={onOpen}
+        onClick={() => onOpen(candidate.id)}
         className="flex-1 min-w-0 flex items-center gap-2.5 px-3 py-2 text-left hover:bg-slate-50"
       >
         {/* Opens the centered profile dialog — arrow points outward
@@ -485,7 +489,7 @@ function CandidateRow({ candidate, highlight, onOpen }: { candidate: WpCandidate
       </button>
     </div>
   );
-}
+});
 
 /**
  * Inline-editable profile card.
@@ -1318,12 +1322,21 @@ function ChipGroup<T extends string>({ value, onChange, options }: {
 }
 
 function Hl({ text, q }: { text: string; q: string }) {
-  if (!q) return <>{text}</>;
-  const tokens = q.trim().split(/\s+/).filter(t => t.length > 0);
-  if (tokens.length === 0) return <>{text}</>;
-  const escaped = tokens.map(t => t.replace(/[.*+?^${}()|[\]\\]/g, "\\$&"));
-  const splitter = new RegExp(`(${escaped.join("|")})`, "gi");
-  const matcher  = new RegExp(`^(?:${escaped.join("|")})$`, "i");
+  // Derive the splitter/matcher pair once per query rather than rebuilding
+  // both RegExp objects on every call (this renders twice per row). The
+  // token derivation/escaping is identical to before.
+  const re = useMemo(() => {
+    if (!q) return null;
+    const tokens = q.trim().split(/\s+/).filter(t => t.length > 0);
+    if (tokens.length === 0) return null;
+    const escaped = tokens.map(t => t.replace(/[.*+?^${}()|[\]\\]/g, "\\$&"));
+    return {
+      splitter: new RegExp(`(${escaped.join("|")})`, "gi"),
+      matcher:  new RegExp(`^(?:${escaped.join("|")})$`, "i"),
+    };
+  }, [q]);
+  if (!re) return <>{text}</>;
+  const { splitter, matcher } = re;
   return (
     <>
       {text.split(splitter).map((p, i) =>

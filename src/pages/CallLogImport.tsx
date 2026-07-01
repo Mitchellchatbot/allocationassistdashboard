@@ -1,5 +1,4 @@
 import { useState, useCallback } from "react";
-import Papa from "papaparse";
 import { DashboardLayout } from "@/components/layout/DashboardLayout";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
@@ -595,6 +594,8 @@ function useImporter<T extends object>(
     setRows([]);
     setDone(0);
     setError("");
+
+    const Papa = (await import("papaparse")).default;
 
     // Support both CSV/TSV and XLSX. For xlsx we read the first sheet
     // and serialise to CSV, then feed it through Papa.parse the same

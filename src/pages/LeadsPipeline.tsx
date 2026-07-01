@@ -13,7 +13,7 @@ import { TableSkeleton } from "@/components/ui/data-skeleton";
 import { LinkToVacancyDialog, type LinkLeadInput } from "@/components/sales/LinkToVacancyDialog";
 import { Input } from "@/components/ui/input";
 import { InfoIcon } from "@/components/InfoIcon";
-import { useState, useRef, useEffect, useMemo, Fragment } from "react";
+import { useState, useRef, useEffect, useMemo, memo, Fragment } from "react";
 
 // Short stage explanations.
 const STAGE_HINTS: Record<string, string> = {
@@ -333,6 +333,25 @@ const LeadsPipeline = ({ embedded }: LeadsPipelineProps = {}) => {
     },
   });
 
+  // Resolve each row's avatar once per data change instead of running up to
+  // four chained Map lookups on every table re-render. Preserves the exact
+  // fallback chain (WP lead: -> WP dob: -> JotForm lead: -> JotForm dob: -> null).
+  const photoByZohoId = useMemo(() => {
+    const map = new Map<string, string | null>();
+    for (const doc of doctors) {
+      if (!doc.zohoId) continue;
+      map.set(
+        doc.zohoId,
+        photoMap?.get(`lead:${doc.zohoId}`)
+          ?? photoMap?.get(`dob:${doc.zohoId}`)
+          ?? jfPhotoMap?.get(`lead:${doc.zohoId}`)
+          ?? jfPhotoMap?.get(`dob:${doc.zohoId}`)
+          ?? null
+      );
+    }
+    return map;
+  }, [doctors, photoMap, jfPhotoMap]);
+
   // Infinite scroll: fetch next page when sentinel enters viewport
   useEffect(() => {
     const el = sentinelRef.current;
@@ -555,11 +574,7 @@ const LeadsPipeline = ({ embedded }: LeadsPipelineProps = {}) => {
                       // Fall back to a JotForm 'professional picture' answer
                       // if no WP photo exists yet — same doctor_id keys.
                       const photo = doc.zohoId
-                        ? (photoMap?.get(`lead:${doc.zohoId}`)
-                          ?? photoMap?.get(`dob:${doc.zohoId}`)
-                          ?? jfPhotoMap?.get(`lead:${doc.zohoId}`)
-                          ?? jfPhotoMap?.get(`dob:${doc.zohoId}`)
-                          ?? null)
+                        ? (photoByZohoId.get(doc.zohoId) ?? null)
                         : null;
                       return (
                         <Fragment key={doc.zohoId ?? doc.id}>
@@ -690,12 +705,12 @@ const LeadsPipeline = ({ embedded }: LeadsPipelineProps = {}) => {
  *  no photo (which is most of the time — only doctors linked to a WP
  *  candidate have one). Identical pattern to the avatar used in the
  *  Profiles tab so the same face shows up in both places. */
-function DoctorAvatar({ src, name, size }: { src: string | null; name: string; size: number }) {
+const DoctorAvatar = memo(function DoctorAvatar({ src, name, size }: { src: string | null; name: string; size: number }) {
   const [errored, setErrored] = useState(false);
-  const initials = (name || "?")
+  const initials = useMemo(() => (name || "?")
     .replace(/^Dr\.?\s+/i, "")
     .split(/\s+/).map(s => s[0]).filter(Boolean).slice(0, 2).join("")
-    .toUpperCase() || "?";
+    .toUpperCase() || "?", [name]);
   const showImage = src && !errored;
   return (
     <div
@@ -709,6 +724,6 @@ function DoctorAvatar({ src, name, size }: { src: string | null; name: string; s
       )}
     </div>
   );
-}
+});
 
 export default LeadsPipeline;

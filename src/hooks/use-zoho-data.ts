@@ -400,17 +400,19 @@ export function aggregateZohoData(
   const qualifiedLeads = leads.filter(l => qualifiedStatusSet.has(l.Lead_Status));
   const activeLeads    = leads.filter(l => activeStatuses.has(l.Lead_Status));
 
-  // Log unique deal stages so we can confirm the exact Zoho stage names
-  console.log('[deals] unique stages:', [...new Set(deals.map(d => d.Stage))]);
-  // Log unique lead statuses with counts so we can see every Lead_Status in use
-  const leadStatusCounts = leads.reduce<Record<string, number>>((acc, l) => {
-    const s = l.Lead_Status ?? '(empty)';
-    acc[s] = (acc[s] ?? 0) + 1;
-    return acc;
-  }, {});
-  console.log('[leads] unique statuses:',
-    Object.entries(leadStatusCounts).sort((a, b) => b[1] - a[1])
-  );
+  if (import.meta.env.DEV) {
+    // Log unique deal stages so we can confirm the exact Zoho stage names
+    console.log('[deals] unique stages:', [...new Set(deals.map(d => d.Stage))]);
+    // Log unique lead statuses with counts so we can see every Lead_Status in use
+    const leadStatusCounts = leads.reduce<Record<string, number>>((acc, l) => {
+      const s = l.Lead_Status ?? '(empty)';
+      acc[s] = (acc[s] ?? 0) + 1;
+      return acc;
+    }, {});
+    console.log('[leads] unique statuses:',
+      Object.entries(leadStatusCounts).sort((a, b) => b[1] - a[1])
+    );
+  }
 
   const closedWon      = deals.filter(d => d.Stage === 'Closed Won');
   const closedLost     = deals.filter(d => d.Stage === 'Closed Lost');
@@ -692,51 +694,53 @@ export function aggregateZohoData(
     },
   ];
 
-  // Debug: log unique Lead_Source values so we can verify channel coverage.
-  // (Facebook + Instagram are now merged into "Meta" via displaySource.)
-  const rawSources = leads.map(l => l.Lead_Source).filter(Boolean);
-  console.log('[ZohoData] raw Lead_Source values (sample 20):', [...new Set(rawSources)].slice(0, 20));
+  if (import.meta.env.DEV) {
+    // Debug: log unique Lead_Source values so we can verify channel coverage.
+    // (Facebook + Instagram are now merged into "Meta" via displaySource.)
+    const rawSources = leads.map(l => l.Lead_Source).filter(Boolean);
+    console.log('[ZohoData] raw Lead_Source values (sample 20):', [...new Set(rawSources)].slice(0, 20));
 
-  // Cross-module audit: every unique Lead_Source value across Leads + DoB,
-  // with row counts, sorted by total. The "metaSuspect" column highlights
-  // anything that smells like Facebook / Instagram / Meta — useful for
-  // discovering legacy / API-written values that aren't in Zoho's picklist.
-  const sourceCounts = new Map<string, { leads: number; dob: number }>();
-  for (const l of leads) {
-    const k = (l.Lead_Source ?? '(null)').trim() || '(empty)';
-    const cur = sourceCounts.get(k) ?? { leads: 0, dob: 0 };
-    cur.leads++;
-    sourceCounts.set(k, cur);
-  }
-  for (const d of doctorsOnBoard ?? []) {
-    const k = ((d as { Lead_Source?: string | null }).Lead_Source ?? '(null)').toString().trim() || '(empty)';
-    const cur = sourceCounts.get(k) ?? { leads: 0, dob: 0 };
-    cur.dob++;
-    sourceCounts.set(k, cur);
-  }
-  const META_RX = /(facebook|instagram|insta|^fb$|^ig$|meta|messenger|whatsapp)/i;
-  const allSourcesAudit = Array.from(sourceCounts.entries())
-    .map(([rawValue, c]) => ({
-      rawValue,
-      leads: c.leads,
-      dob: c.dob,
-      total: c.leads + c.dob,
-      metaSuspect: META_RX.test(rawValue) ? 'YES' : '',
-      normalizedTo: displaySource(rawValue === '(null)' || rawValue === '(empty)' ? null : rawValue),
-    }))
-    .sort((a, b) => b.total - a.total);
-  console.log('[ZohoData] all Lead_Source values across Leads + DoB:');
-  console.table(allSourcesAudit);
-  const metaSuspects = allSourcesAudit.filter(r => r.metaSuspect === 'YES');
-  console.log(`[ZohoData] Meta-suspect raw values (${metaSuspects.length}):`);
-  console.table(metaSuspects);
+    // Cross-module audit: every unique Lead_Source value across Leads + DoB,
+    // with row counts, sorted by total. The "metaSuspect" column highlights
+    // anything that smells like Facebook / Instagram / Meta — useful for
+    // discovering legacy / API-written values that aren't in Zoho's picklist.
+    const sourceCounts = new Map<string, { leads: number; dob: number }>();
+    for (const l of leads) {
+      const k = (l.Lead_Source ?? '(null)').trim() || '(empty)';
+      const cur = sourceCounts.get(k) ?? { leads: 0, dob: 0 };
+      cur.leads++;
+      sourceCounts.set(k, cur);
+    }
+    for (const d of doctorsOnBoard ?? []) {
+      const k = ((d as { Lead_Source?: string | null }).Lead_Source ?? '(null)').toString().trim() || '(empty)';
+      const cur = sourceCounts.get(k) ?? { leads: 0, dob: 0 };
+      cur.dob++;
+      sourceCounts.set(k, cur);
+    }
+    const META_RX = /(facebook|instagram|insta|^fb$|^ig$|meta|messenger|whatsapp)/i;
+    const allSourcesAudit = Array.from(sourceCounts.entries())
+      .map(([rawValue, c]) => ({
+        rawValue,
+        leads: c.leads,
+        dob: c.dob,
+        total: c.leads + c.dob,
+        metaSuspect: META_RX.test(rawValue) ? 'YES' : '',
+        normalizedTo: displaySource(rawValue === '(null)' || rawValue === '(empty)' ? null : rawValue),
+      }))
+      .sort((a, b) => b.total - a.total);
+    console.log('[ZohoData] all Lead_Source values across Leads + DoB:');
+    console.table(allSourcesAudit);
+    const metaSuspects = allSourcesAudit.filter(r => r.metaSuspect === 'YES');
+    console.log(`[ZohoData] Meta-suspect raw values (${metaSuspects.length}):`);
+    console.table(metaSuspects);
 
-  // Hunt for "Doctors Onboarded" / "Converted Doctor" — it isn't in Lead_Status
-  // or Deal Stage, so dump Prime_Classification + any other custom-ish field
-  // that might be carrying it. If it shows up here, we wire it; if nothing
-  // matches, the field hasn't been added to the synced field list yet.
-  const primeVals = [...new Set(leads.map(l => (l as { Prime_Classification?: string }).Prime_Classification).filter(Boolean))];
-  console.log('[ZohoData] unique Prime_Classification values:', primeVals);
+    // Hunt for "Doctors Onboarded" / "Converted Doctor" — it isn't in Lead_Status
+    // or Deal Stage, so dump Prime_Classification + any other custom-ish field
+    // that might be carrying it. If it shows up here, we wire it; if nothing
+    // matches, the field hasn't been added to the synced field list yet.
+    const primeVals = [...new Set(leads.map(l => (l as { Prime_Classification?: string }).Prime_Classification).filter(Boolean))];
+    console.log('[ZohoData] unique Prime_Classification values:', primeVals);
+  }
 
   // ── Source / channel performance ─────────────────────────────────────────
   const sourceGroups = countBy(leads, l => displaySource(l.Lead_Source));
@@ -1090,43 +1094,45 @@ function parseCacheRow(row: { data: unknown; synced_at: string }) {
   const doctorsOnBoard = stripTestRows(dobRaw);
   const droppedLeads = (leadsRaw?.length ?? 0) - leads.length;
   const droppedDoB   = (dobRaw?.length   ?? 0) - doctorsOnBoard.length;
-  if (droppedLeads > 0 || droppedDoB > 0) {
+  if (import.meta.env.DEV && (droppedLeads > 0 || droppedDoB > 0)) {
     console.log(`[ZohoData] stripped test rows for metrics — leads: ${droppedLeads}, doctorsOnBoard: ${droppedDoB}`);
   }
-  // Quick visibility for the new module — print Lead_Source distribution as
-  // a table, with the normalized channel each value resolves to.
-  // Pass the RAW value (including null) through displaySource so the log
-  // matches what the rest of the dashboard sees.
-  const dobBuckets = new Map<string, { rawSamples: Set<string>; count: number; normalized: string }>();
-  for (const d of doctorsOnBoard ?? []) {
-    const raw = (d as { Lead_Source?: string | null }).Lead_Source ?? null;
-    const normalized = displaySource(raw);
-    const cur = dobBuckets.get(normalized) ?? { rawSamples: new Set<string>(), count: 0, normalized };
-    cur.count++;
-    cur.rawSamples.add(raw === null ? "(null)" : raw);
-    dobBuckets.set(normalized, cur);
-  }
-  console.log(`[ZohoData] doctorsOnBoard rows: ${doctorsOnBoard?.length ?? 0}`);
-  const dobTable = Array.from(dobBuckets.values())
-    .sort((a, b) => b.count - a.count)
-    .map(r => ({ channel: r.normalized, count: r.count, rawValues: [...r.rawSamples].slice(0, 4).join(", ") }));
-  console.table(dobTable);
-  console.log(`[ZohoData] doctorsOnBoard rows attributed to Meta: ${dobBuckets.get("Meta")?.count ?? 0}`);
+  if (import.meta.env.DEV) {
+    // Quick visibility for the new module — print Lead_Source distribution as
+    // a table, with the normalized channel each value resolves to.
+    // Pass the RAW value (including null) through displaySource so the log
+    // matches what the rest of the dashboard sees.
+    const dobBuckets = new Map<string, { rawSamples: Set<string>; count: number; normalized: string }>();
+    for (const d of doctorsOnBoard ?? []) {
+      const raw = (d as { Lead_Source?: string | null }).Lead_Source ?? null;
+      const normalized = displaySource(raw);
+      const cur = dobBuckets.get(normalized) ?? { rawSamples: new Set<string>(), count: 0, normalized };
+      cur.count++;
+      cur.rawSamples.add(raw === null ? "(null)" : raw);
+      dobBuckets.set(normalized, cur);
+    }
+    console.log(`[ZohoData] doctorsOnBoard rows: ${doctorsOnBoard?.length ?? 0}`);
+    const dobTable = Array.from(dobBuckets.values())
+      .sort((a, b) => b.count - a.count)
+      .map(r => ({ channel: r.normalized, count: r.count, rawValues: [...r.rawSamples].slice(0, 4).join(", ") }));
+    console.table(dobTable);
+    console.log(`[ZohoData] doctorsOnBoard rows attributed to Meta: ${dobBuckets.get("Meta")?.count ?? 0}`);
 
-  // FULL audit: every unique raw Lead_Source value in DoB with counts, so we
-  // can reconcile against Zoho's picklist filter (which only sees current
-  // picklist values, not legacy/API-written ones).
-  const dobRawCounts: Record<string, number> = {};
-  for (const d of doctorsOnBoard ?? []) {
-    const raw = (d as { Lead_Source?: string | null }).Lead_Source;
-    const key = raw === null || raw === undefined ? '(null)' : raw;
-    dobRawCounts[key] = (dobRawCounts[key] ?? 0) + 1;
+    // FULL audit: every unique raw Lead_Source value in DoB with counts, so we
+    // can reconcile against Zoho's picklist filter (which only sees current
+    // picklist values, not legacy/API-written ones).
+    const dobRawCounts: Record<string, number> = {};
+    for (const d of doctorsOnBoard ?? []) {
+      const raw = (d as { Lead_Source?: string | null }).Lead_Source;
+      const key = raw === null || raw === undefined ? '(null)' : raw;
+      dobRawCounts[key] = (dobRawCounts[key] ?? 0) + 1;
+    }
+    const dobRawTable = Object.entries(dobRawCounts)
+      .sort((a, b) => b[1] - a[1])
+      .map(([rawValue, count]) => ({ rawValue, count, normalizedTo: displaySource(rawValue === '(null)' ? null : rawValue) }));
+    console.log('[ZohoData] DoB Lead_Source — every unique raw value:');
+    console.table(dobRawTable);
   }
-  const dobRawTable = Object.entries(dobRawCounts)
-    .sort((a, b) => b[1] - a[1])
-    .map(([rawValue, count]) => ({ rawValue, count, normalizedTo: displaySource(rawValue === '(null)' ? null : rawValue) }));
-  console.log('[ZohoData] DoB Lead_Source — every unique raw value:');
-  console.table(dobRawTable);
   const aggregated = aggregateZohoData(leads, deals, calls, accounts, campaigns,
     emailData ?? { total: 0, bySender: {} as Record<string, number>, sampled: 0 },
     doctorsOnBoard);
@@ -1141,7 +1147,9 @@ function parseCacheRow(row: { data: unknown; synced_at: string }) {
     rawDoctorsOnBoardAll:  dobRaw ?? [],
     syncedAt: row.synced_at,
   };
-  console.log(`[ZohoData] parseCacheRow returning — rawLeads:${(result as { rawLeads?: unknown[] }).rawLeads?.length ?? 'MISSING'} keys:[${Object.keys(result).join(', ')}]`);
+  if (import.meta.env.DEV) {
+    console.log(`[ZohoData] parseCacheRow returning — rawLeads:${(result as { rawLeads?: unknown[] }).rawLeads?.length ?? 'MISSING'} keys:[${Object.keys(result).join(', ')}]`);
+  }
   return result;
 }
 
@@ -1170,14 +1178,18 @@ export function useZohoData() {
         for (const r of rows as Array<{ id: number; data: Record<string, unknown>; synced_at: string }>) {
           seenIds.push(r.id);
           if (r.data) {
-            const keys = Object.keys(r.data);
-            const counts = Object.fromEntries(keys.map(k => [k, Array.isArray(r.data[k]) ? (r.data[k] as unknown[]).length : typeof r.data[k]]));
-            console.log(`[ZohoData] cache row id=${r.id} synced=${r.synced_at} keys=`, counts);
+            if (import.meta.env.DEV) {
+              const keys = Object.keys(r.data);
+              const counts = Object.fromEntries(keys.map(k => [k, Array.isArray(r.data[k]) ? (r.data[k] as unknown[]).length : typeof r.data[k]]));
+              console.log(`[ZohoData] cache row id=${r.id} synced=${r.synced_at} keys=`, counts);
+            }
             Object.assign(merged, r.data);
           }
           if (r.synced_at && r.synced_at > synced) synced = r.synced_at;
         }
-        console.log(`[ZohoData] merged keys: ${Object.keys(merged).join(', ')} | rows: ${seenIds.join(', ')}`);
+        if (import.meta.env.DEV) {
+          console.log(`[ZohoData] merged keys: ${Object.keys(merged).join(', ')} | rows: ${seenIds.join(', ')}`);
+        }
         if (!synced) return null;
         return { data: merged, synced_at: synced };
       };

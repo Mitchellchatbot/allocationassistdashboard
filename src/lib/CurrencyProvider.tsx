@@ -1,4 +1,4 @@
-import { createContext, useContext, useState, useEffect, ReactNode, useCallback } from "react";
+import { createContext, useContext, useState, useEffect, ReactNode, useCallback, useMemo } from "react";
 
 // The UAE dirham is pegged to the US dollar at 3.6725 (since 1997). We still
 // look up the live rate in the background and use it when the lookup succeeds,
@@ -67,8 +67,12 @@ export function CurrencyProvider({ children }: { children: ReactNode }) {
     [currency, rate],
   );
   const fmt = useCallback((v: number) => format(fromAED(v), currency), [fromAED, currency]);
+  const value = useMemo(
+    () => ({ currency, setCurrency, fromAED, fmt, rate, rateSource }),
+    [currency, fromAED, fmt, rate, rateSource],
+  );
   return (
-    <CurrencyContext.Provider value={{ currency, setCurrency, fromAED, fmt, rate, rateSource }}>
+    <CurrencyContext.Provider value={value}>
       {children}
     </CurrencyContext.Provider>
   );

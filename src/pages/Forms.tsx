@@ -16,7 +16,7 @@
  * Last tab is "+ Connect new" which opens the dialog to add a fresh
  * Typeform / Elementor form.
  */
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useEffect, useMemo, useRef, useState, memo } from "react";
 import { DashboardLayout } from "@/components/layout/DashboardLayout";
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
@@ -1126,7 +1126,7 @@ const OUTREACH_STYLE: Record<OutreachStatus, { label: string; className: string 
   closed:     { label: "Closed",     className: "bg-slate-100 text-slate-500 border-slate-200" },
 };
 
-function ResponseRow({
+const ResponseRow = memo(function ResponseRow({
   response, highlight = "", leadValueCents = 0, formType, formProvider,
 }: {
   response: FormResponse;
@@ -1142,7 +1142,7 @@ function ResponseRow({
   // server work (Zoho enrich, CV download + extract, picture parse), so we
   // creep a bar to ~85% then snap to 100% on success instead of a spinner.
   const [stageProgress, setStageProgress] = useState<{ pct: number; label: string } | null>(null);
-  const entries = Object.entries(response.answers ?? {});
+  const entries = useMemo(() => Object.entries(response.answers ?? {}), [response.answers]);
   const display = useMemo(() => displayNameFor(response), [response]);
   const phone   = useMemo(() => phoneFor(response), [response]);
   const avatar  = useMemo(() => pictureUrlFor(response), [response]);
@@ -1280,7 +1280,7 @@ function ResponseRow({
     return tokens.some(t => !headerHay.includes(t));
   }, [highlight, display.label, response.respondent_email]);
   const effectivelyOpen = open || matchesInBody;
-  const summary = entries.slice(0, 2).map(([k, v]) => `${k}: ${v}`).join(" · ");
+  const summary = useMemo(() => entries.slice(0, 2).map(([k, v]) => `${k}: ${v}`).join(" · "), [entries]);
   const statusStyle = OUTREACH_STYLE[response.outreach_status] ?? OUTREACH_STYLE.new;
   const isPaid = leadValueCents > 0;
   const isDueForFollowup = response.next_followup_at && new Date(response.next_followup_at).getTime() < Date.now();
@@ -1501,7 +1501,7 @@ function ResponseRow({
 
     </div>
   );
-}
+});
 
 /** Inline outreach editor — status pill bar, owner, notes, follow-up
  *  date, last-contacted stamp. Every change is a partial PATCH; tiny
@@ -1667,6 +1667,29 @@ function OutreachPanel({
  *     linked next render.
  *   - Unlinked + not expected (e.g. DoctorsFinder paid leads): renders
  *     nothing — these forms don't feed Zoho. */
+/** Shared Zoho lookups derived once per zoho-cache identity and reused
+ *  by every expanded ZohoBlock. Builds id→lead / id→dob Maps (first
+ *  occurrence wins, matching the previous Array.find semantics) and the
+ *  sorted distinct Lead_Status list. Keyed on the zoho cache object's
+ *  identity (stable across renders), so the heavy rawLeads scan runs
+ *  only when the cache actually changes. */
+function useZohoLookups() {
+  const { data: zoho } = useZohoData();
+  return useMemo(() => {
+    const byLead = new Map<string, ZohoLead>();
+    const statuses = new Set<string>();
+    for (const l of (zoho as { rawLeads?: ZohoLead[] } | undefined)?.rawLeads ?? []) {
+      if (!byLead.has(l.id)) byLead.set(l.id, l);
+      if (l.Lead_Status) statuses.add(l.Lead_Status);
+    }
+    const byDob = new Map<string, { id: string; Full_Name?: string | null }>();
+    for (const d of (zoho as { rawDoctorsOnBoard?: Array<{ id: string; Full_Name?: string | null }> } | undefined)?.rawDoctorsOnBoard ?? []) {
+      if (!byDob.has(d.id)) byDob.set(d.id, d);
+    }
+    return { byLead, byDob, leadStatuses: Array.from(statuses).sort() };
+  }, [zoho]);
+}
+
 function ZohoBlock({
   responseId, doctorId, email, phone, displayName, expectedInZoho,
 }: {
@@ -1677,10 +1700,10 @@ function ZohoBlock({
   displayName: string;
   expectedInZoho: boolean;
 }) {
-  const { data: zoho } = useZohoData();
   const link = useLinkFormResponseToDoctor();
   const qc = useQueryClient();
   const [busy, setBusy] = useState(false);
+  const { byLead, byDob, leadStatuses } = useZohoLookups();
 
   // Two link shapes: 'lead:<zoho_id>' = Zoho Leads module (full
   // Lead_Status workflow), 'dob:<zoho_id>' = Zoho Contacts (Doctors
@@ -1696,23 +1719,13 @@ function ZohoBlock({
 
   const lead = useMemo<ZohoLead | null>(() => {
     if (linkKind !== "lead" || !linkedZohoId) return null;
-    const all = (zoho as { rawLeads?: ZohoLead[] } | undefined)?.rawLeads ?? [];
-    return all.find(l => l.id === linkedZohoId) ?? null;
-  }, [linkKind, linkedZohoId, zoho]);
+    return byLead.get(linkedZohoId) ?? null;
+  }, [linkKind, linkedZohoId, byLead]);
 
   const dob = useMemo<{ id: string; Full_Name?: string | null } | null>(() => {
     if (linkKind !== "dob" || !linkedZohoId) return null;
-    const all = (zoho as { rawDoctorsOnBoard?: Array<{ id: string; Full_Name?: string | null }> } | undefined)?.rawDoctorsOnBoard ?? [];
-    return all.find(d => d.id === linkedZohoId) ?? null;
-  }, [linkKind, linkedZohoId, zoho]);
-
-  const leadStatuses = useMemo(() => {
-    const seen = new Set<string>();
-    for (const l of (zoho as { rawLeads?: ZohoLead[] } | undefined)?.rawLeads ?? []) {
-      if (l.Lead_Status) seen.add(l.Lead_Status);
-    }
-    return Array.from(seen).sort();
-  }, [zoho]);
+    return byDob.get(linkedZohoId) ?? null;
+  }, [linkKind, linkedZohoId, byDob]);
 
   // ─── Linked to a Doctors-on-Board contact (no Lead_Status workflow) ──
   if (dob || (linkKind === "dob" && linkedZohoId)) {
@@ -2114,12 +2127,18 @@ function prettyDateFromIso(iso: string): string | null {
 }
 
 function Hl({ text, q }: { text: string; q: string }) {
-  if (!q) return <>{text}</>;
-  const tokens = q.trim().split(/\s+/).filter(t => t.length > 0);
-  if (tokens.length === 0) return <>{text}</>;
-  const escaped = tokens.map(t => t.replace(/[.*+?^${}()|[\]\\]/g, "\\$&"));
-  const splitter = new RegExp(`(${escaped.join("|")})`, "gi");
-  const matcher  = new RegExp(`^(?:${escaped.join("|")})$`, "i");
+  const regex = useMemo(() => {
+    if (!q) return null;
+    const tokens = q.trim().split(/\s+/).filter(t => t.length > 0);
+    if (tokens.length === 0) return null;
+    const escaped = tokens.map(t => t.replace(/[.*+?^${}()|[\]\\]/g, "\\$&"));
+    return {
+      splitter: new RegExp(`(${escaped.join("|")})`, "gi"),
+      matcher:  new RegExp(`^(?:${escaped.join("|")})$`, "i"),
+    };
+  }, [q]);
+  if (!regex) return <>{text}</>;
+  const { splitter, matcher } = regex;
   const parts = text.split(splitter);
   return (
     <>
