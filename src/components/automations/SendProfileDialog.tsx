@@ -1193,6 +1193,21 @@ function PreviewConfirm({
           plainBody={renderTemplate(doctorBody, vars)}
           attachments={doctorAttachments}
           onAttachmentsChange={setDoctorAttachments}
+          // Same picker as above, forwarded into the full-screen editor so the
+          // doctor template can be swapped from full screen too. Popover raised
+          // above the full-screen overlay (z-[101]) via contentClassName.
+          templatePicker={
+            <TemplatePicker
+              templates={templates}
+              value={doctorTemplateKey}
+              onChange={setDoctorTemplateKey}
+              defaultKey="profile_sent_doctor"
+              renderVars={vars}
+              label="Doctor 'working opportunity' email template"
+              flowFilter="profile_sent"
+              contentClassName="z-[200]"
+            />
+          }
         />
         <AttachmentsPicker
           attachments={doctorAttachments}
@@ -1489,7 +1504,7 @@ function looksLikeHtml(s: string): boolean {
  *  doctor email so either can be edited before sending. */
 function EditableEmailSection({
   label, subject, html, plainBody, from, to, editable, onChange,
-  attachments, onAttachmentsChange,
+  attachments, onAttachmentsChange, templatePicker,
 }: {
   label:     string;
   subject:   string;   // pristine rendered subject
@@ -1501,6 +1516,9 @@ function EditableEmailSection({
   onChange:  (ov: SendOverrides | null) => void;
   attachments?:        EmailAttachment[];
   onAttachmentsChange?: (next: EmailAttachment[]) => void;
+  /** Optional template picker forwarded to the full-screen editor (doctor
+   *  email only) so the template can be swapped from full screen too. */
+  templatePicker?:     React.ReactNode;
 }) {
   const [subj, setSubj] = useState(subject);
   const [body, setBody] = useState(html);
@@ -1543,6 +1561,7 @@ function EditableEmailSection({
         text={plainBody}
         attachments={attachments}
         onAttachmentsChange={onAttachmentsChange}
+        templatePicker={templatePicker}
         className="border-0 rounded-none max-h-[60vh]"
       />
     </div>

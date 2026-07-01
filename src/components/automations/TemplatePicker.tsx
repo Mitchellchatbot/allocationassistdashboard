@@ -20,6 +20,7 @@ import { EmailFrame } from "@/components/EmailFrame";
  */
 export function TemplatePicker({
   templates: allTemplates, value, onChange, defaultKey, renderVars, label, flowFilter,
+  contentClassName,
 }: {
   templates: EmailTemplate[];
   value: string;
@@ -30,6 +31,9 @@ export function TemplatePicker({
   /** Restrict the choosable list to one flow (e.g. "profile_sent"), so the
    *  profile-send pickers don't surface shortlist/interview/etc. templates. */
   flowFilter?: string;
+  /** Extra classes for the popover panel — used to raise its z-index when the
+   *  picker lives inside the full-screen email preview (z-[101]). */
+  contentClassName?: string;
 }) {
   const [open, setOpen]   = useState(false);
   const [query, setQuery] = useState("");
@@ -122,7 +126,7 @@ export function TemplatePicker({
             </span>
           </button>
         </PopoverTrigger>
-        <PopoverContent align="start" collisionPadding={16} className="w-[740px] max-w-[92vw] p-0 overflow-hidden">
+        <PopoverContent align="start" collisionPadding={16} className={cn("w-[740px] max-w-[92vw] p-0 overflow-hidden", contentClassName)}>
           <div className="grid grid-cols-[260px_1fr]">
             {/* List */}
             <div className="border-r max-h-[420px] overflow-y-auto">

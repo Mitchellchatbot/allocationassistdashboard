@@ -52,6 +52,9 @@ interface EditableEmailPreviewProps {
    *  attachments inline (same list the parent dialog owns). */
   attachments?:        EmailAttachment[];
   onAttachmentsChange?: (next: EmailAttachment[]) => void;
+  /** Optional template picker forwarded to the full-screen editor so the
+   *  template can be swapped there too (doctor "working opportunity" email). */
+  templatePicker?:     React.ReactNode;
 }
 
 // Mirrors the send shell (EMAIL_BODY_STYLE applied inline below) so the in-place
@@ -61,7 +64,7 @@ const BODY_CLASS = "bg-white rounded-md " + EMAIL_EDITOR_CHILD_CLASS;
 
 export function EditableEmailPreview({
   subject, html, onSubjectChange, onHtmlChange, resetKey, edited, onReset, from, to, className,
-  tools = true, text, attachments, onAttachmentsChange,
+  tools = true, text, attachments, onAttachmentsChange, templatePicker,
 }: EditableEmailPreviewProps) {
   const bodyRef = useRef<HTMLDivElement>(null);
   const savedRange = useRef<Range | null>(null);
@@ -80,6 +83,17 @@ export function EditableEmailPreview({
       bodyRef.current.innerHTML = html;
     }
   }, [html, resetKey]);
+
+  // If a fresh template render arrives (e.g. the template was swapped via the
+  // full-screen picker) WHILE full-screen is open, re-seed its snapshot so the
+  // full-screen shows the new template. `html` only changes on a template /
+  // vars / reset change — edits flow up via onHtmlChange and don't touch it —
+  // so this can't clobber in-progress typing. Deliberately keyed on `html` only
+  // (adding fullOpen would re-seed on OPEN and discard the live-edit snapshot).
+  useEffect(() => {
+    if (fullOpen) setFsHtml(html);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [html]);
 
   // Remember where the caret is inside the body so an insert (which happens
   // after a toolbar click / dialog steals focus) lands where they were typing.
@@ -246,6 +260,7 @@ export function EditableEmailPreview({
         onReset={onReset ? () => { onReset(); setFsHtml(html); } : undefined}
         attachmentItems={attachments}
         onAttachmentItemsChange={onAttachmentsChange}
+        templatePicker={templatePicker}
       />
     </div>
   );

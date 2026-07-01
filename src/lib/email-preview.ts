@@ -48,13 +48,20 @@ export const EMAIL_BODY_STYLE: {
 
 /** Child-element rules that mirror the iframe's base CSS, for contentEditable
  *  surfaces. Link colour (#1155cc — a mail client's default for un-styled
- *  links; the body's own inline colours still win), constrained images, and
- *  editor-only containment so a very wide table/image doesn't stretch the
- *  dialog (the saved innerHTML keeps its true widths — this is display only). */
+ *  links; the body's own inline colours still win) and constrained images.
+ *
+ *  Deliberately NO table width/layout overrides. Wide data tables (e.g. the
+ *  doctor row table) are authored at their natural width with `white-space:
+ *  nowrap` headers, wrapped in their own `overflow-x:auto` div — exactly how
+ *  Gmail renders them (natural columns + a horizontal scrollbar). Forcing
+ *  `w-full` + `table-fixed` here used to crush every column to equal widths, so
+ *  the nowrap headers overflowed and overlapped. Letting the table keep its
+ *  true width lets its wrapper scroll, matching the delivered mail 1:1. The
+ *  outer preview panes are min-w-0 + overflow-auto, so nothing stretches the
+ *  dialog. */
 export const EMAIL_EDITOR_CHILD_CLASS =
   "[&_a]:[color:#1155cc] [&_a:hover]:underline " +
-  "[&_img]:max-w-full [&_img]:h-auto [&_table]:border-collapse " +
-  "[&_table]:max-w-full [&_table]:!w-full [&_table]:table-fixed [&_td]:break-words [&_th]:break-words";
+  "[&_img]:max-w-full [&_img]:h-auto [&_table]:border-collapse";
 
 /**
  * The exact server send shell around a rendered body. Use for the SEND payload
@@ -82,7 +89,10 @@ export const EMAIL_PREVIEW_CSS = `
   }
   a{color:#1155cc;}
   img{max-width:100%;height:auto;}
-  table{border-collapse:collapse;max-width:100%;}
+  /* No max-width on tables: wide data tables are authored at their natural
+     width inside their own overflow-x:auto wrapper (nowrap headers), so they
+     scroll horizontally exactly like Gmail instead of being crushed to fit. */
+  table{border-collapse:collapse;}
 `;
 
 /**

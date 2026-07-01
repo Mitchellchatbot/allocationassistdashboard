@@ -51,6 +51,11 @@ export interface FullScreenEmailPreviewProps {
    *  the email's attachments inline — same list the parent dialog owns. */
   attachmentItems?:       EmailAttachment[];
   onAttachmentItemsChange?: (next: EmailAttachment[]) => void;
+  /** Optional template picker (a rendered <TemplatePicker/>) shown in the
+   *  full-screen editor so the template can be swapped here too — used for the
+   *  doctor "working opportunity" email. Omitted for emails whose template is
+   *  fixed (e.g. the hospital intro). */
+  templatePicker?: React.ReactNode;
 }
 
 type DeviceKey = "desktop" | "tablet" | "outlook" | "mobile";
@@ -64,7 +69,7 @@ const DEVICES: { key: DeviceKey; label: string; width: number | null; icon: Reac
 export function FullScreenEmailPreview(props: FullScreenEmailPreviewProps) {
   const { open, onClose, subject, html, text, from, to, attachments,
           onSubjectChange, onHtmlChange, edited, onReset,
-          attachmentItems, onAttachmentItemsChange } = props;
+          attachmentItems, onAttachmentItemsChange, templatePicker } = props;
   const editable = !!(onSubjectChange && onHtmlChange);
   const canAttach = editable && !!onAttachmentItemsChange;
   const [device, setDevice]   = useState<DeviceKey>("desktop");
@@ -298,6 +303,19 @@ export function FullScreenEmailPreview(props: FullScreenEmailPreviewProps) {
               Reset to template
             </button>
           )}
+        </div>
+      )}
+
+      {/* Template picker — full-screen equivalent of the compact view's picker,
+          so the doctor "working opportunity" template can be swapped without
+          leaving full screen. On a light card so the picker's labels/preview
+          read clearly against the dark chrome. Popover is raised above the
+          full-screen overlay via contentClassName (z-[200]) at the call site. */}
+      {editable && templatePicker && pane === "rendered" && (
+        <div className="px-4 py-2 bg-slate-800/60 border-b border-white/5 flex justify-center">
+          <div className="w-full max-w-[760px] rounded-lg bg-white/95 px-3 py-2 shadow ring-1 ring-black/10">
+            {templatePicker}
+          </div>
         </div>
       )}
 
