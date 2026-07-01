@@ -870,7 +870,10 @@ function CardScreenshotControl({
 
   if (cardImageUrl) {
     return (
-      <div className="flex items-center gap-2 rounded-md border border-emerald-200 bg-emerald-50 px-2 py-1.5">
+      // Left-aligned + width-capped so it never stretches to the full dialog
+      // (where the right edge could be clipped by overflow-x-hidden). min-w-0
+      // children truncate instead of pushing the row wide.
+      <div className="flex items-center gap-2 rounded-md border border-emerald-200 bg-emerald-50 px-2 py-1.5 max-w-[520px] min-w-0">
         <img
           src={cardImageUrl}
           alt="Doctor card screenshot"
@@ -878,9 +881,9 @@ function CardScreenshotControl({
         />
         <div className="min-w-0 flex-1 text-[11px] leading-tight">
           <div className="flex items-center gap-1 font-medium text-emerald-800">
-            <ImageIcon className="h-3 w-3 shrink-0" /> Card sends as an image
+            <ImageIcon className="h-3 w-3 shrink-0" /> <span className="truncate">Card sends as an image</span>
           </div>
-          <div className="truncate text-emerald-700/80">Pixel-perfect in any client · buttons in the card aren't clickable.</div>
+          <div className="truncate text-emerald-700/80">Pixel-perfect in any client · card buttons aren't clickable.</div>
         </div>
         <button type="button" onClick={capture} disabled={busy} className="shrink-0 text-[10px] font-medium text-emerald-700 hover:underline disabled:opacity-50">
           {busy ? "…" : "Re-capture"}
@@ -893,15 +896,18 @@ function CardScreenshotControl({
   }
 
   return (
+    // Auto-width, left-aligned button (NOT w-full): a full-width bar's centered
+    // label ran off into the dialog's clipped right edge. inline-flex keeps it
+    // compact and tidy under the "Hospital intro email" label.
     <button
       type="button"
       onClick={capture}
       disabled={busy}
-      className="flex w-full items-center justify-center gap-1.5 rounded-md border border-teal-200 bg-teal-50 px-2 py-1.5 text-[11px] font-medium text-teal-700 transition-colors hover:bg-teal-100 disabled:opacity-60"
+      className="inline-flex max-w-full items-center gap-1.5 rounded-md border border-teal-200 bg-teal-50 px-2.5 py-1.5 text-[11px] font-medium text-teal-700 transition-colors hover:bg-teal-100 disabled:opacity-60"
       title="Screenshot the profile card, download a copy, and send it as a pixel-perfect inline image in the hospital email"
     >
-      {busy ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Camera className="h-3.5 w-3.5" />}
-      {busy ? "Capturing…" : "Download & attach card screenshot"}
+      {busy ? <Loader2 className="h-3.5 w-3.5 shrink-0 animate-spin" /> : <Camera className="h-3.5 w-3.5 shrink-0" />}
+      <span className="truncate">{busy ? "Capturing…" : "Download & attach card screenshot"}</span>
     </button>
   );
 }
