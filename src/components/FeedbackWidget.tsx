@@ -9,6 +9,7 @@ import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover
 import { Textarea } from "@/components/ui/textarea";
 import { useAuth } from "@/hooks/use-auth";
 import { useAIPageContext } from "@/lib/ai-page-context";
+import { useScrollLocked } from "@/lib/use-scroll-locked";
 import { lookupRoute } from "@/lib/route-labels";
 import { getRecentErrors } from "@/lib/client-errors";
 import {
@@ -64,6 +65,9 @@ export function FeedbackWidget() {
 
   const recentErrors = useMemo(() => (open ? getRecentErrors({ route: pathname }) : []), [open, pathname]);
   const submit = useSubmitFeedback();
+  // Get out of the way while a modal dialog is open so this button doesn't sit
+  // on top of the dialog's bottom-right action buttons.
+  const modalOpen = useScrollLocked();
 
   const addFiles = useCallback((files: FileList | File[]) => {
     const incoming = Array.from(files).filter(f => f.type.startsWith("image/"));
@@ -149,6 +153,10 @@ export function FeedbackWidget() {
   };
 
   const busy = submit.isPending || uploading;
+
+  // Hide entirely while a modal dialog is open (it would otherwise cover the
+  // dialog's action buttons in the bottom-right corner).
+  if (modalOpen && !open) return null;
 
   return (
     <Popover open={open} onOpenChange={(v) => { setOpen(v); if (v) setView("report"); }}>

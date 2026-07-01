@@ -122,7 +122,7 @@ export function TemplatePicker({
             </span>
           </button>
         </PopoverTrigger>
-        <PopoverContent align="start" className="w-[740px] max-w-[92vw] p-0 overflow-hidden">
+        <PopoverContent align="start" collisionPadding={16} className="w-[740px] max-w-[92vw] p-0 overflow-hidden">
           <div className="grid grid-cols-[260px_1fr]">
             {/* List */}
             <div className="border-r max-h-[420px] overflow-y-auto">
