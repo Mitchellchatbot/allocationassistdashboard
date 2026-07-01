@@ -79,7 +79,7 @@ async function fetchAllPages<T>(
     const results = await Promise.all(
       pages.map(async (p) => {
         const url = new URL(`${API_DOMAIN}/crm/v2/${module}`);
-        url.searchParams.set('fields', fields.join(','));
+        if (fields.length) url.searchParams.set('fields', fields.join(','));  // empty → Zoho returns all fields
         url.searchParams.set('per_page', '200');
         url.searchParams.set('page', String(p));
 
@@ -262,9 +262,29 @@ serve(async (req: Request) => {
     // "Hospital Contacts"); the actual hospitals live in Accounts. Each
     // contact has a `Hospital` lookup to the parent Account, a `Contact_Type`
     // (Primary/Secondary), Email, Name, Phone, Emirate.
-    const hospitalContacts = await fetchAllPages(token, 'Hospitals',
-      ['Name', 'Email', 'Phone', 'Contact_Type', 'Hospital', 'Emirate', 'Owner', 'Created_Time'], 25)
+    // Fetch ALL fields (empty list) so we capture the contact's title/position
+    // (HR / CEO) whatever its Zoho api_name is — then flatten to a lean shape.
+    const hospitalContactsRaw = await fetchAllPages<Record<string, unknown>>(token, 'Hospitals', [], 25)
       .catch((err) => { console.warn('[zoho-sync] Hospital Contacts (module=Hospitals) failed:', err); return []; });
+    // Log the field keys once so the exact title api_name is discoverable if
+    // it isn't one of the common candidates below.
+    if (hospitalContactsRaw[0]) console.log('[zoho-sync] hospitalContact field keys:', Object.keys(hospitalContactsRaw[0]).join(', '));
+    const TITLE_KEYS = ['Title', 'Designation', 'Position', 'Contact_Title', 'Job_Title', 'Role', 'Contact_Title_Position', 'Title_Position', 'Job_Position'];
+    const pickTitle = (c: Record<string, unknown>): string | null => {
+      for (const k of TITLE_KEYS) { const v = c[k]; if (v != null && String(v).trim()) return String(v).trim(); }
+      return null;
+    };
+    const hospitalContacts = hospitalContactsRaw.map((c) => ({
+      id:           c.id,
+      Name:         c.Name ?? null,
+      Email:        c.Email ?? null,
+      Phone:        c.Phone ?? null,
+      Contact_Type: c.Contact_Type ?? null,
+      Hospital:     c.Hospital ?? null,
+      Emirate:      c.Emirate ?? null,
+      Owner:        c.Owner ?? null,
+      title:        pickTitle(c),
+    }));
     console.log(`[zoho-sync] hospitalContacts: ${hospitalContacts.length} rows`);
 
     const campaigns = await fetchAllPages(token, 'Campaigns',
