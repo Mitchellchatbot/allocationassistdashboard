@@ -8,8 +8,15 @@ export interface Hospital {
   country:                 string | null;
   primary_recruiter_email: string | null;
   primary_contact_name:    string | null;
-  /** false → greet with the hospital name; true → greet with the contact name. */
+  /** false → greet with the hospital name; true → greet with the chosen contact's name. */
   greet_with_contact_name: boolean;
+  /** How a send picks its ONE recipient from the hospital's Zoho contacts.
+   *  'primary' → always the Primary contact; 'cycle' → round-robin. */
+  contact_mode:            "primary" | "cycle";
+  /** Next index in the cycle rotation (advances on each send). */
+  cycle_cursor:            number;
+  /** Contact emails to skip in the primary/cycle rotation. */
+  excluded_contact_emails: string[];
   recruiter_phone:         string | null;
   template_key:            string | null;
   notes:                   string | null;

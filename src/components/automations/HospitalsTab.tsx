@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useState, Fragment } from "react";
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -7,17 +7,129 @@ import { Textarea } from "@/components/ui/textarea";
 import { Badge } from "@/components/ui/badge";
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription, DialogFooter } from "@/components/ui/dialog";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
-import { Hospital as HospitalIcon, Plus, Pencil, Trash2, Search, Save } from "lucide-react";
+import { Hospital as HospitalIcon, Plus, Pencil, Trash2, Search, Save, ChevronRight, ChevronDown } from "lucide-react";
 import { toast } from "sonner";
 import {
   useHospitals, useCreateHospital, useUpdateHospital, useDeleteHospital,
   type Hospital, type HospitalInput,
 } from "@/hooks/use-hospitals";
+import { useHospitalContacts, eligibleRecipients, resolveRecipient, type HospitalContact } from "@/hooks/use-hospital-contacts";
 
 const BLANK: HospitalInput = {
   name: "", city: "", country: "", primary_recruiter_email: "",
   primary_contact_name: "", recruiter_phone: "", template_key: "", notes: "",
 };
+
+/** Expanded panel under a hospital row: its Zoho contacts + the per-hospital
+ *  send-routing settings (who to email + direct addressing). */
+function HospitalContactsPanel({ hospital, contacts, onUpdate }: {
+  hospital: Hospital;
+  contacts: HospitalContact[];
+  onUpdate: (patch: Partial<HospitalInput>) => Promise<unknown>;
+}) {
+  const mode = hospital.contact_mode ?? "primary";
+  const excluded = new Set((hospital.excluded_contact_emails ?? []).map(e => e.toLowerCase()));
+  const eligible = eligibleRecipients(contacts, hospital);
+  const next = resolveRecipient(contacts, hospital).contact;
+
+  const toggleExcluded = (email: string) => {
+    const set = new Set(excluded);
+    const k = email.toLowerCase();
+    if (set.has(k)) set.delete(k); else set.add(k);
+    void onUpdate({ excluded_contact_emails: Array.from(set) });
+  };
+
+  const seg = (active: boolean) =>
+    `px-2.5 py-1 text-[11px] font-medium transition-colors ${active ? "bg-teal-600 text-white" : "bg-white text-slate-500 hover:bg-slate-50"}`;
+
+  return (
+    <div className="px-4 py-3 space-y-3">
+      {/* Routing settings */}
+      <div className="flex flex-wrap items-center gap-x-4 gap-y-2">
+        <div className="flex items-center gap-1.5">
+          <span className="text-[11px] text-muted-foreground">Send each email to:</span>
+          <div className="inline-flex rounded-md border border-border/60 overflow-hidden">
+            <button type="button" className={seg(mode === "primary")} onClick={() => onUpdate({ contact_mode: "primary" })} title="Always email the Primary contact">
+              Primary contact
+            </button>
+            <button type="button" className={seg(mode === "cycle")} onClick={() => onUpdate({ contact_mode: "cycle" })} title="Rotate through all contacts — each send goes to the next one">
+              Cycle through all
+            </button>
+          </div>
+        </div>
+        <label className="flex items-center gap-1.5 text-[11px] cursor-pointer" title="Greet the chosen contact by their own name instead of the hospital name">
+          <input
+            type="checkbox"
+            className="h-3.5 w-3.5 accent-teal-600"
+            checked={hospital.greet_with_contact_name}
+            onChange={e => onUpdate({ greet_with_contact_name: e.target.checked })}
+          />
+          Direct addressing <span className="text-muted-foreground">(greet the contact by name)</span>
+        </label>
+        {mode === "cycle" && next && (
+          <span className="ml-auto text-[10.5px] text-muted-foreground">
+            Next up: <span className="font-medium text-foreground">{next.name || next.email}</span>
+          </span>
+        )}
+        {eligible.length > 0 && mode === "primary" && next && (
+          <span className="ml-auto text-[10.5px] text-muted-foreground">
+            Emails: <span className="font-medium text-foreground">{next.name || next.email}</span>
+          </span>
+        )}
+      </div>
+
+      {/* Contacts */}
+      {contacts.length === 0 ? (
+        <div className="text-[11px] text-muted-foreground italic">
+          No Zoho contacts matched this hospital by name. They appear after the next Zoho sync — or the hospital's name here differs from its Zoho account name.
+        </div>
+      ) : (
+        <div className="rounded-md border bg-white overflow-x-auto">
+          <table className="w-full text-[11px]">
+            <thead className="bg-slate-50 text-slate-500">
+              <tr>
+                <th className="text-left px-2 py-1.5 font-medium w-14" title="Include in the primary/cycle rotation">Email?</th>
+                <th className="text-left px-2 py-1.5 font-medium">Name</th>
+                <th className="text-left px-2 py-1.5 font-medium">Title</th>
+                <th className="text-left px-2 py-1.5 font-medium">Type</th>
+                <th className="text-left px-2 py-1.5 font-medium">Email</th>
+                <th className="text-left px-2 py-1.5 font-medium">Phone</th>
+              </tr>
+            </thead>
+            <tbody className="divide-y divide-border/40">
+              {contacts.map(c => {
+                const isExcluded = c.email ? excluded.has(c.email.toLowerCase()) : true;
+                return (
+                  <tr key={c.id} className={isExcluded ? "opacity-45" : ""}>
+                    <td className="px-2 py-1.5">
+                      <input
+                        type="checkbox"
+                        className="h-3.5 w-3.5 accent-teal-600"
+                        disabled={!c.email}
+                        checked={!!c.email && !isExcluded}
+                        onChange={() => c.email && toggleExcluded(c.email)}
+                        title={c.email ? "Include this contact when picking a recipient" : "No email — can't be a recipient"}
+                      />
+                    </td>
+                    <td className="px-2 py-1.5 font-medium text-slate-800">{c.name || "—"}</td>
+                    <td className="px-2 py-1.5 text-slate-600">{c.title ?? "—"}</td>
+                    <td className="px-2 py-1.5">
+                      {c.isPrimary
+                        ? <Badge variant="outline" className="text-[8px] bg-teal-50 text-teal-700 border-teal-200 uppercase">Primary</Badge>
+                        : <span className="text-slate-400">{c.type ?? "—"}</span>}
+                    </td>
+                    <td className="px-2 py-1.5 text-slate-600">{c.email ?? "—"}</td>
+                    <td className="px-2 py-1.5 text-slate-500">{c.phone ?? "—"}</td>
+                  </tr>
+                );
+              })}
+            </tbody>
+          </table>
+        </div>
+      )}
+    </div>
+  );
+}
 
 export function HospitalsTab() {
   const { data: hospitals = [], isLoading } = useHospitals();
@@ -28,6 +140,8 @@ export function HospitalsTab() {
   const [search,  setSearch]  = useState("");
   const [editing, setEditing] = useState<Hospital | null>(null);
   const [creating, setCreating] = useState(false);
+  const [expandedId, setExpandedId] = useState<string | null>(null);
+  const contacts = useHospitalContacts();
 
   const filtered = useMemo(() => {
     const q = search.trim().toLowerCase();
@@ -139,9 +253,26 @@ export function HospitalsTab() {
                 {!isLoading && filtered.length === 0 && (
                   <TableRow><TableCell colSpan={7} className="text-center text-[12px] text-muted-foreground py-6">No hospitals match.</TableCell></TableRow>
                 )}
-                {filtered.map(h => (
-                  <TableRow key={h.id} className="text-[12px]">
-                    <TableCell className="font-medium">{h.name}</TableCell>
+                {filtered.map(h => {
+                  const hc = contacts.forHospital(h.name);
+                  const expanded = expandedId === h.id;
+                  return (
+                  <Fragment key={h.id}>
+                  <TableRow className="text-[12px] cursor-pointer hover:bg-muted/30" onClick={() => setExpandedId(expanded ? null : h.id)}>
+                    <TableCell className="font-medium">
+                      <span className="inline-flex items-center gap-1.5">
+                        {expanded ? <ChevronDown className="h-3.5 w-3.5 text-muted-foreground shrink-0" /> : <ChevronRight className="h-3.5 w-3.5 text-muted-foreground shrink-0" />}
+                        {h.name}
+                        {hc.length > 0 && (
+                          <Badge variant="outline" className="text-[8px] bg-teal-50 text-teal-700 border-teal-200">
+                            {hc.length} contact{hc.length === 1 ? "" : "s"}
+                          </Badge>
+                        )}
+                        {h.contact_mode === "cycle" && (
+                          <Badge variant="outline" className="text-[8px] bg-violet-50 text-violet-700 border-violet-200">cycle</Badge>
+                        )}
+                      </span>
+                    </TableCell>
                     <TableCell>{h.city ?? "—"}</TableCell>
                     <TableCell>{h.country ?? "—"}</TableCell>
                     <TableCell className="text-muted-foreground">{h.primary_recruiter_email ?? "—"}</TableCell>
@@ -151,7 +282,7 @@ export function HospitalsTab() {
                         <code className="text-[10px] bg-slate-100 px-1.5 py-0.5 rounded">{h.template_key}</code>
                       ) : <span className="text-muted-foreground">default</span>}
                     </TableCell>
-                    <TableCell className="text-right">
+                    <TableCell className="text-right" onClick={e => e.stopPropagation()}>
                       <Button size="icon" variant="ghost" className="h-7 w-7" onClick={() => setEditing(h)}>
                         <Pencil className="h-3.5 w-3.5" />
                       </Button>
@@ -160,7 +291,20 @@ export function HospitalsTab() {
                       </Button>
                     </TableCell>
                   </TableRow>
-                ))}
+                  {expanded && (
+                    <TableRow className="bg-muted/20 hover:bg-muted/20">
+                      <TableCell colSpan={7} className="p-0">
+                        <HospitalContactsPanel
+                          hospital={h}
+                          contacts={hc}
+                          onUpdate={patch => updateH.mutateAsync({ id: h.id, name: h.name, ...patch })}
+                        />
+                      </TableCell>
+                    </TableRow>
+                  )}
+                  </Fragment>
+                  );
+                })}
               </TableBody>
             </Table>
           </div>

@@ -29,6 +29,7 @@ export const ROUTE_LABELS: Record<string, { label: string; section: string }> = 
   "/import-bulk":      { label: "Bulk Import",      section: "Admin" },
   "/import":           { label: "Import Data",      section: "Admin" },
   "/connections":      { label: "Connections",      section: "Admin" },
+  "/feedback":         { label: "Feedback",         section: "Admin" },
 };
 
 export function lookupRoute(pathname: string): { label: string; section: string } | null {

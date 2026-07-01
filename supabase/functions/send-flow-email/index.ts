@@ -663,10 +663,15 @@ Deno.serve(async (req: Request) => {
     doctor_speciality:  String(md.doctor_speciality ?? ""),
     hospital_name:      String(run.hospital ?? ""),
     // Greeting name — per-hospital toggle (hospitals.greet_with_contact_name):
-    // ON + a contact on file → the named person; otherwise the hospital name.
+    // ON → the chosen recipient's own name (metadata.hospital_contact_name,
+    // set by the send screen for the primary/cycle/override contact), falling
+    // back to the hospital's primary_contact_name, then the hospital name.
+    // OFF → the hospital name.
     hospital_contact_name: String(
-      hospital?.greet_with_contact_name && String(hospital?.primary_contact_name ?? "").trim()
-        ? hospital.primary_contact_name
+      hospital?.greet_with_contact_name
+        ? (String((md as { hospital_contact_name?: string }).hospital_contact_name ?? "").trim()
+           || String(hospital?.primary_contact_name ?? "").trim()
+           || (run.hospital ?? ""))
         : (run.hospital ?? ""),
     ),
     city:               String(hospital?.city ?? md.city ?? ""),

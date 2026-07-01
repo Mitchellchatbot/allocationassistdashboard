@@ -26,6 +26,7 @@ import remarkGfm from "remark-gfm";
 import { ChatChart, parseCharts } from "@/components/ChatChart";
 import { ChatActionBar, parseActions } from "@/components/ChatActions";
 import { useAIPageContext } from "@/lib/ai-page-context";
+import { useScrollLocked } from "@/lib/use-scroll-locked";
 
 const SUPABASE_URL      = import.meta.env.VITE_SUPABASE_URL      as string;
 const SUPABASE_ANON_KEY = import.meta.env.VITE_SUPABASE_ANON_KEY as string;
@@ -155,12 +156,16 @@ export function AIPanelProvider({ children }: { children: ReactNode }) {
     open, setOpen, toggle, messages, sendChat, loading, clearChat,
   }), [open, toggle, messages, sendChat, loading, clearChat]);
 
+  // Hide the floating launcher while a modal dialog is open.
+  const modalOpen = useScrollLocked();
+
   return (
     <Ctx.Provider value={value}>
       {children}
 
-      {/* Floating launcher — only when panel closed. */}
-      {!open && (
+      {/* Floating launcher — only when panel closed AND no modal is open (so it
+          doesn't cover a dialog's bottom-right action buttons). */}
+      {!open && !modalOpen && (
         <button
           onClick={() => setOpen(true)}
           data-tour="ai-floating-button"

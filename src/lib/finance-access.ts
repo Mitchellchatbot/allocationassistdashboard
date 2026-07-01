@@ -11,6 +11,7 @@
 export const FINANCE_ALLOWED_EMAILS = [
   "emilie@allocationassist.com",
   "dinithi@allocationassist.com",
+  "admin@allocationassist.com",
 ];
 
 const ALLOWED = new Set(FINANCE_ALLOWED_EMAILS.map(e => e.trim().toLowerCase()));

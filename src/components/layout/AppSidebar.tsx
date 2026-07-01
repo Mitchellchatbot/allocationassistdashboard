@@ -25,6 +25,7 @@ import {
   History,
   FlaskConical,
   Send,
+  Bug,
   type LucideIcon,
 } from "lucide-react";
 import { useCallback, useEffect, useMemo, useState } from "react";
@@ -130,6 +131,7 @@ const ADMIN_SECTION: NavSection = {
     { title: "Connections",  url: "/connections", icon: Link2 },
     { title: "Bulk Import",  url: "/import-bulk", icon: Upload },
     { title: "Import Data",  url: "/import",      icon: Upload },
+    { title: "Feedback",     url: "/feedback",    icon: Bug },
     { title: "Settings",     url: "/settings",    icon: Settings },
   ],
 };

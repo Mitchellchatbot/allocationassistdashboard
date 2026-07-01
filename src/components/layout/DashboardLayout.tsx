@@ -2,6 +2,7 @@ import { SidebarProvider, SidebarTrigger, useSidebar } from "@/components/ui/sid
 import { AppSidebar } from "./AppSidebar";
 import { PageTransition } from "./PageTransition";
 import { DocLink } from "@/components/DocLink";
+import { FeedbackWidget } from "@/components/FeedbackWidget";
 import { Bell, Download, AlertTriangle, ChevronRight, Home, Sparkles, RefreshCw, Info, CheckCircle2, Send, RotateCcw, X, Search, FileSignature, Copy, GraduationCap, Settings as SettingsIcon } from "lucide-react";
 import { useTour } from "@/components/OnboardingTour";
 import { tourForPath, buildOnboardingTour, hasOnboardingContent } from "@/lib/tours";
@@ -422,6 +423,10 @@ export function DashboardLayout({ children, title: pageTitle, subtitle: pageSubt
 
       {/* Universal search (Cmd+K) — fuzzy-matches across leads, deals, channels, recruiters, pages */}
       <UniversalSearch open={searchOpen} onOpenChange={setSearchOpen} />
+
+      {/* Report-a-bug / suggest-a-feature widget — on every page, auto-captures
+          the page + recent errors so reporting is one sentence + one click. */}
+      <FeedbackWidget />
     </SidebarProvider>
     </UniversalSearchContext.Provider>
     </LayoutContext.Provider>

@@ -13,7 +13,8 @@ import { useAuth } from "@/hooks/use-auth";
 import { AA_SENDERS, findSenderByEmail } from "@/lib/hi-team";
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
 import { supabase } from "@/lib/supabase";
-import { useHospitals, type Hospital } from "@/hooks/use-hospitals";
+import { useHospitals, useUpdateHospital, type Hospital } from "@/hooks/use-hospitals";
+import { useHospitalContacts, resolveRecipient, type HospitalContact } from "@/hooks/use-hospital-contacts";
 import { useEmailTemplates, renderTemplate } from "@/hooks/use-email-templates";
 import { useDoctorProfile, useDoctorProfiles, profileToTokens, calcCompletion, type DoctorProfile } from "@/hooks/use-doctor-profiles";
 import { useWpCandidateForDoctor, usePublishedWpCandidates, wpCandidateToTokens, normalizePhone, type WpCandidate } from "@/hooks/use-wp-candidates";
@@ -149,6 +150,9 @@ function SendProfileDialogBody({ onClose }: { onClose: () => void }) {
   // routing). Defaulted from the current user so their own outbound
   // copy lands in their inbox unless they actively change it.
   const [bccList,         setBccList]         = useState<string[]>([]);
+  // Manual per-hospital recipient override (hospitalId → chosen contact email)
+  // for THIS send only — overrides the hospital's primary/cycle routing.
+  const [recipientOverrides, setRecipientOverrides] = useState<Record<string, string>>({});
   // Per-send template keys (Amir #3). Persisted preference re-loads on open.
   const [hospitalTemplateKey, setHospitalTemplateKey] = useState<string>(() => loadDefaultTemplate("hospital"));
   const [doctorTemplateKey,   setDoctorTemplateKey]   = useState<string>(() => loadDefaultTemplate("doctor"));
@@ -158,6 +162,8 @@ function SendProfileDialogBody({ onClose }: { onClose: () => void }) {
   const { data: hospitals = [] } = useHospitals();
   const { data: templates = [] } = useEmailTemplates();
   const { user } = useAuth();
+  const hospitalContacts = useHospitalContacts();
+  const updateHospital = useUpdateHospital();
   const scheduleProfileSend = useScheduleProfileSend();
   const navigate = useNavigate();
 
@@ -345,7 +351,25 @@ function SendProfileDialogBody({ onClose }: { onClose: () => void }) {
       // in metadata so the BCC nature is queryable later.
       const batchId = crypto.randomUUID();
       const recipients = splitRecipients(bccList);
+      // Cycle-mode cursor advances, applied after the runs are created so the
+      // next send to each hospital rotates to its next contact.
+      const cursorAdvances: { id: string; name: string; next: number }[] = [];
       for (const h of selectedHospitals) {
+        // Resolve THIS send's recipient from the hospital's Zoho contacts +
+        // routing mode (primary vs cycle), honouring a manual override. Falls
+        // back to the hospital row's primary_recruiter_email if nothing matched.
+        const resolved = resolveRecipient(hospitalContacts.forHospital(h.name), h);
+        const overrideEmail = recipientOverrides[h.id];
+        const overrideContact = overrideEmail
+          ? hospitalContacts.forHospital(h.name).find(c => c.email?.toLowerCase() === overrideEmail.toLowerCase())
+          : undefined;
+        const recipientEmail = overrideEmail ?? resolved.contact?.email ?? h.primary_recruiter_email ?? null;
+        const recipientName  = (overrideContact?.name ?? resolved.contact?.name ?? h.primary_contact_name ?? "").trim();
+        // Only advance the cursor when we actually used the cycle rotation
+        // (no override, cycle mode, real matched contacts).
+        if (!overrideEmail && (h.contact_mode ?? "primary") === "cycle" && !resolved.fromHospitalRow && resolved.nextCursor !== (h.cycle_cursor ?? 0)) {
+          cursorAdvances.push({ id: h.id, name: h.name, next: resolved.nextCursor });
+        }
         const { data: runRow, error: runErr } = await supabase
           .from("automation_flow_runs")
           .insert({
@@ -361,7 +385,10 @@ function SendProfileDialogBody({ onClose }: { onClose: () => void }) {
             metadata: {
               batch_id:           batchId,
               hospital_id:        h.id,
-              hospital_email:     h.primary_recruiter_email,
+              hospital_email:     recipientEmail,
+              // The chosen contact's name → direct addressing (send-flow-email
+              // greets this person when hospitals.greet_with_contact_name is on).
+              ...(recipientName ? { hospital_contact_name: recipientName } : {}),
               bcc:                selectedHospitals.length > 1,
               total_in_batch:     selectedHospitals.length,
               custom_message:     customMessage || null,
@@ -423,12 +450,19 @@ function SendProfileDialogBody({ onClose }: { onClose: () => void }) {
             stage_key:  "email_hospital",
             event_type: "entered",
             message:    `Queued for sending. Template: ${h.template_key ?? "profile_sent_hospital"}.`,
-            payload:    { template_key: h.template_key ?? "profile_sent_hospital", recipient: h.primary_recruiter_email },
+            payload:    { template_key: h.template_key ?? "profile_sent_hospital", recipient: recipientEmail },
           },
         ]);
       }
 
       qc.invalidateQueries({ queryKey: ["automation-flow-runs"] });
+
+      // Advance each cycle-mode hospital's cursor so the NEXT send rotates to
+      // its next contact. Non-fatal — a failure just repeats a contact.
+      for (const adv of cursorAdvances) {
+        try { await updateHospital.mutateAsync({ id: adv.id, name: adv.name, cycle_cursor: adv.next }); }
+        catch { /* ignore — rotation retries next time */ }
+      }
 
       // ── Auto-send hospital emails for every run we just created ──────────
       // Without this, runs sit at email_hospital with no `email_sent` event
@@ -538,6 +572,13 @@ function SendProfileDialogBody({ onClose }: { onClose: () => void }) {
             doctorTemplateKey={doctorTemplateKey}
             setDoctorTemplateKey={setDoctorTemplateKey}
             onSaveDefault={saveDefaultTemplate}
+            hospitalContacts={hospitalContacts}
+            recipientOverrides={recipientOverrides}
+            onOverrideRecipient={(id, email) => setRecipientOverrides(prev => {
+              const next = { ...prev };
+              if (email) next[id] = email; else delete next[id];
+              return next;
+            })}
           />
         )}
     </>
@@ -728,10 +769,68 @@ function HospitalPicker({
   );
 }
 
+/** Per-hospital recipient line on the send screen: shows the auto-picked
+ *  contact (from the hospital's primary/cycle setting) and lets the sender
+ *  override it for THIS send. Hidden when no hospital has matched contacts. */
+function HospitalRecipientsOverride({ hospitals, contacts, overrides, onOverride }: {
+  hospitals: Hospital[];
+  contacts: { forHospital: (name: string) => HospitalContact[] };
+  overrides: Record<string, string>;
+  onOverride: (hospitalId: string, email: string | null) => void;
+}) {
+  const rows = hospitals.map(h => {
+    const hc = contacts.forHospital(h.name);
+    const resolved = resolveRecipient(hc, h).contact;
+    const override = overrides[h.id];
+    const chosen = override ? hc.find(c => c.email?.toLowerCase() === override.toLowerCase()) ?? resolved : resolved;
+    return { h, hc, resolved, override, chosen };
+  });
+  if (!rows.some(r => r.hc.length > 0)) return null;
+
+  return (
+    <div className="rounded-md border border-teal-200 bg-teal-50/40 p-3 space-y-2">
+      <div className="text-[11px] font-medium text-teal-800 flex items-center gap-1.5 flex-wrap">
+        <Mail className="h-3.5 w-3.5" /> Hospital recipient{rows.length > 1 ? "s" : ""}
+        <span className="text-[10px] font-normal text-teal-700/70">— auto-picked by each hospital's setting; override here for this send only</span>
+      </div>
+      <div className="space-y-1.5">
+        {rows.map(({ h, hc, resolved, override, chosen }) => (
+          <div key={h.id} className="flex items-center gap-2 text-[11px]">
+            <span className="w-40 shrink-0 truncate font-medium text-slate-700" title={h.name}>{h.name}</span>
+            {hc.length === 0 ? (
+              <span className="text-muted-foreground italic">{h.primary_recruiter_email ?? "no recipient"}</span>
+            ) : (
+              <>
+                <select
+                  value={override ?? "__auto__"}
+                  onChange={e => onOverride(h.id, e.target.value === "__auto__" ? null : e.target.value)}
+                  className="h-7 rounded-md border border-border/60 bg-white px-1.5 text-[11px] max-w-[300px]"
+                >
+                  <option value="__auto__">
+                    Auto ({h.contact_mode === "cycle" ? "cycle" : "primary"}) → {resolved?.name || resolved?.email || "—"}
+                  </option>
+                  {hc.filter(c => c.email).map(c => (
+                    <option key={c.id} value={c.email!}>
+                      {c.name || c.email}{c.title ? ` · ${c.title}` : ""}{c.isPrimary ? " · Primary" : ""}
+                    </option>
+                  ))}
+                </select>
+                {override && <span className="text-[9px] font-medium text-amber-600">overridden</span>}
+                <span className="ml-auto truncate max-w-[180px] text-[10px] text-muted-foreground">{chosen?.email ?? "—"}</span>
+              </>
+            )}
+          </div>
+        ))}
+      </div>
+    </div>
+  );
+}
+
 function PreviewConfirm({
   doctor, hospitals, customMessage, hospitalSubject, hospitalBody, doctorSubject, doctorBody,
   onBack, onConfirm, submitting, bccList, setBccList,
   templates, hospitalTemplateKey, setHospitalTemplateKey, doctorTemplateKey, setDoctorTemplateKey, onSaveDefault,
+  hospitalContacts, recipientOverrides, onOverrideRecipient,
 }: {
   doctor: DoctorOption;
   hospitals: Hospital[];
@@ -751,6 +850,9 @@ function PreviewConfirm({
   doctorTemplateKey: string;
   setDoctorTemplateKey: (k: string) => void;
   onSaveDefault: (which: "hospital" | "doctor", key: string) => void;
+  hospitalContacts: { forHospital: (name: string) => HospitalContact[] };
+  recipientOverrides: Record<string, string>;
+  onOverrideRecipient: (hospitalId: string, email: string | null) => void;
 }) {
   // Editing is offered for single-hospital sends only — the preview (and the
   // edited HTML) is rendered for one hospital, so reusing it across a BCC
@@ -908,6 +1010,12 @@ function PreviewConfirm({
 
   return (
     <div className="space-y-3">
+      <HospitalRecipientsOverride
+        hospitals={hospitals}
+        contacts={hospitalContacts}
+        overrides={recipientOverrides}
+        onOverride={onOverrideRecipient}
+      />
       <div className="rounded-md border bg-slate-50/50 p-3 text-[12px] space-y-1">
         <div><strong>{doctor.name}</strong> → {hospitals.length === 1 ? hospitals[0].name : `${hospitals.length} hospitals (BCC)`}</div>
         <div className="text-[11px] text-muted-foreground">
