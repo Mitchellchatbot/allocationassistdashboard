@@ -7,7 +7,8 @@ import { Textarea } from "@/components/ui/textarea";
 import { Badge } from "@/components/ui/badge";
 import { Checkbox } from "@/components/ui/checkbox";
 import { Search, Send, X, Eye, ChevronLeft, AlertTriangle, Mail, ChevronDown, Camera, Image as ImageIcon } from "lucide-react";
-import { captureDownloadAndUploadCard, cardImageTag } from "@/lib/card-screenshot";
+import { captureAndUploadCard } from "@/lib/card-screenshot";
+import { buildProfileCardHtml } from "@/lib/profile-card-html";
 import { toast } from "sonner";
 import { useDoctorLifecycleMap } from "@/hooks/use-doctor-lifecycle";
 import { useAuth } from "@/hooks/use-auth";
@@ -840,17 +841,17 @@ function HospitalRecipientsOverride({ hospitals, contacts, overrides, onOverride
 }
 
 /**
- * "Download & attach card screenshot" — one button, two birds. Rasterises the
- * doctor profile card to a flat PNG (html2canvas), downloads a copy locally,
+ * "Use profile card image" — rasterises the candidate profile card (the
+ * View-full-profile look, empty fields dropped) to a flat PNG via html2canvas,
  * uploads it to the public email-card-images bucket, and reports the URL up so
- * the hospital email swaps its {{doctor_card_html}} block for that inline image.
- * Once captured, shows a thumbnail with Re-capture / Undo.
+ * the hospital email renders that image IN PLACE OF the data table
+ * ({{#doctor_card_image_url}} section). Once captured, shows a thumbnail with
+ * Re-capture / Undo. No auto-download (the Save-As dialog was unwanted).
  */
 function CardScreenshotControl({
-  cardHtml, doctorName, cardImageUrl, onSetCardImage,
+  cardHtml, cardImageUrl, onSetCardImage,
 }: {
   cardHtml: string;
-  doctorName: string;
   cardImageUrl: string | null;
   onSetCardImage: (url: string | null) => void;
 }) {
@@ -858,11 +859,11 @@ function CardScreenshotControl({
   const capture = async () => {
     setBusy(true);
     try {
-      const url = await captureDownloadAndUploadCard(cardHtml, doctorName);
+      const url = await captureAndUploadCard(cardHtml);
       onSetCardImage(url);
-      toast.success("Card screenshot downloaded & attached — it'll send as an inline image.");
+      toast.success("Profile card attached — it'll replace the data table as a clean image.");
     } catch (e) {
-      toast.error(e instanceof Error ? e.message : "Couldn't capture the card. Try again.");
+      toast.error(e instanceof Error ? e.message : "Couldn't build the profile image. Try again.");
     } finally {
       setBusy(false);
     }
@@ -881,9 +882,9 @@ function CardScreenshotControl({
         />
         <div className="min-w-0 flex-1 text-[11px] leading-tight">
           <div className="flex items-center gap-1 font-medium text-emerald-800">
-            <ImageIcon className="h-3 w-3 shrink-0" /> <span className="truncate">Card sends as an image</span>
+            <ImageIcon className="h-3 w-3 shrink-0" /> <span className="truncate">Profile image replaces the table</span>
           </div>
-          <div className="truncate text-emerald-700/80">Pixel-perfect in any client · card buttons aren't clickable.</div>
+          <div className="truncate text-emerald-700/80">Clean card, empty fields dropped · pixel-perfect in any client.</div>
         </div>
         <button type="button" onClick={capture} disabled={busy} className="shrink-0 text-[10px] font-medium text-emerald-700 hover:underline disabled:opacity-50">
           {busy ? "…" : "Re-capture"}
@@ -904,10 +905,10 @@ function CardScreenshotControl({
       onClick={capture}
       disabled={busy}
       className="inline-flex max-w-full items-center gap-1.5 rounded-md border border-teal-200 bg-teal-50 px-2.5 py-1.5 text-[11px] font-medium text-teal-700 transition-colors hover:bg-teal-100 disabled:opacity-60"
-      title="Screenshot the profile card, download a copy, and send it as a pixel-perfect inline image in the hospital email"
+      title="Render the candidate profile card as a clean image (empty fields dropped) and send it in place of the data table"
     >
       {busy ? <Loader2 className="h-3.5 w-3.5 shrink-0 animate-spin" /> : <Camera className="h-3.5 w-3.5 shrink-0" />}
-      <span className="truncate">{busy ? "Capturing…" : "Download & attach card screenshot"}</span>
+      <span className="truncate">{busy ? "Building image…" : "Use profile card as image"}</span>
     </button>
   );
 }
@@ -1029,11 +1030,13 @@ function PreviewConfirm({
     };
     // Build the card + data-table tokens the same way send-flow-email does, so
     // this preview matches the actual send (otherwise they'd show as literal
-    // {{doctor_card_html}} / {{doctor_row_table_html}}). When a card screenshot
-    // has been captured, the card ships as a flat inline image instead — mirror
-    // that here so the dispatcher previews exactly what the hospital receives.
-    v.doctor_card_html      = cardImageUrl ? cardImageTag(cardImageUrl) : previewDoctorCardHtml(v);
+    // {{doctor_card_html}} / {{doctor_row_table_html}}).
+    v.doctor_card_html      = previewDoctorCardHtml(v);
     v.doctor_row_table_html = previewDoctorRowTableHtml(v);
+    // Captured profile-card image URL. The hospital template swaps its data
+    // table for this <img> via {{#/^doctor_card_image_url}} when it's set, so
+    // the preview reflects exactly what the hospital receives.
+    v.doctor_card_image_url = cardImageUrl ?? "";
     return v;
   }, [mergedProfileTokens, doctor, sampleHospital, cardImageUrl]);
 
@@ -1150,12 +1153,11 @@ function PreviewConfirm({
           <span className="font-medium text-slate-700">Hospital intro email</span>
           <span className="min-w-0 truncate">— uses the standard template; edit the wording below if needed.</span>
         </div>
-        {/* Card-as-image: capture the doctor profile card as a flat PNG so it
-            renders pixel-perfect in the hospital's inbox (no client quirks),
-            download a copy, and send it inline in place of the HTML card. */}
+        {/* Profile-as-image: render the candidate profile card (View-full-profile
+            look, empty fields dropped) to a flat PNG and send it IN PLACE OF the
+            data table, so the hospital sees a clean, pixel-perfect card. */}
         <CardScreenshotControl
-          cardHtml={previewDoctorCardHtml(vars)}
-          doctorName={doctor.name}
+          cardHtml={buildProfileCardHtml(vars)}
           cardImageUrl={cardImageUrl}
           onSetCardImage={onSetCardImage}
         />

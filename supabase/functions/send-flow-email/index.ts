@@ -725,16 +725,14 @@ Deno.serve(async (req: Request) => {
   // website's coloured profile look, rendered in-email (table colour + CV /
   // full-profile buttons). Built from the vars above and injected as a RAW
   // token so it survives plainifyBody (which strips the DB template's styles).
-  //
-  // Card-as-image (Hasan): if the dispatcher captured a screenshot of the card
-  // in the Send Profile dialog, ship that flat PNG inline INSTEAD of the HTML
-  // card — it renders pixel-perfect in every client (Outlook/dark-mode safe).
-  // Still a RAW token so the <img> survives plainifyBody. The card's buttons
-  // become non-clickable pixels (accepted trade-off); the body's links are fine.
-  const cardImageUrl = String(md.doctor_card_image_url ?? "").trim();
-  vars.doctor_card_html = cardImageUrl
-    ? `<img src="${escapeHtml(cardImageUrl)}" alt="Doctor profile" style="display:block;width:100%;max-width:700px;height:auto;border:0;margin:20px 0 0;border-radius:14px;" />`
-    : doctorCardHtml(vars);
+  vars.doctor_card_html = doctorCardHtml(vars);
+  // Card-as-image (Hasan): if the dispatcher captured a profile-card PNG in the
+  // Send Profile dialog, its URL rides in metadata. The profile_sent_hospital
+  // template renders it inline IN PLACE OF the data table via the
+  // {{#doctor_card_image_url}} / {{^doctor_card_image_url}} sections, so the
+  // hospital sees a pixel-perfect card (empty fields already dropped) instead of
+  // a table with blank cells. Empty string ⇒ the table renders as before.
+  vars.doctor_card_image_url = String(md.doctor_card_image_url ?? "").trim();
   // The full horizontal data row UNDER the card (team's existing hospital-comms
   // format), minus the Area of Interest column. Styled token so it survives
   // plainifyBody and keeps its coloured header.
@@ -1141,6 +1139,13 @@ function render(body: string, vars: Record<string, string>, html = false): strin
     const v = vars[key];
     if (v === undefined || v === null || v === "") return "";
     return inner;
+  });
+  // Pass 1b: inverted sections `{{^token}}...{{/token}}` — render inner only
+  // when the variable is FALSY (missing/empty). Lets the hospital template show
+  // the captured profile IMAGE when present, else fall back to the data table.
+  body = body.replace(/\{\{\^([a-zA-Z0-9_]+)\}\}([\s\S]*?)\{\{\/\1\}\}/g, (_m, key: string, inner: string) => {
+    const v = vars[key];
+    return (v === undefined || v === null || v === "") ? inner : "";
   });
   // Pass 2: variable substitution
   return body.replace(/\{\{\s*([a-zA-Z0-9_]+)\s*\}\}/g, (_m, key: string) => {

@@ -106,6 +106,14 @@ export function renderTemplate(
     if (v === undefined || v === null || v === "") return "";
     return inner;
   });
+  // Pass 1b: inverted sections `{{^token}}...{{/token}}` — render the inner
+  // block only when the variable is FALSY (missing/empty). Lets a template show
+  // A when a value is present and B when it's absent (e.g. an image if captured,
+  // else the fallback table).
+  body = body.replace(/\{\{\^([a-zA-Z0-9_]+)\}\}([\s\S]*?)\{\{\/\1\}\}/g, (_m, key: string, inner: string) => {
+    const v = vars[key];
+    return (v === undefined || v === null || v === "") ? inner : "";
+  });
   // Pass 2: regular variable substitution.
   return body.replace(/\{\{\s*([a-zA-Z0-9_]+)\s*\}\}/g, (_match, key) => {
     const v = vars[key];

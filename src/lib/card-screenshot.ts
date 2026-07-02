@@ -118,17 +118,11 @@ export function downloadBlob(blob: Blob, filename: string): void {
   setTimeout(() => URL.revokeObjectURL(url), 1_000);
 }
 
-/** Kill two birds: capture the card → download a copy locally AND upload it,
- *  returning the public URL to attach to the send. Slugged filename from the
- *  doctor name. Throws on capture/upload failure so the caller can toast. */
-export async function captureDownloadAndUploadCard(
-  cardHtml: string,
-  doctorName: string,
-): Promise<string> {
+/** Capture the card → upload it → return the public URL to attach to the send.
+ *  No auto-download (the browser's Save-As dialog was unwanted friction); use
+ *  `downloadBlob` separately if a local copy is ever needed. Throws on
+ *  capture/upload failure so the caller can toast. */
+export async function captureAndUploadCard(cardHtml: string): Promise<string> {
   const blob = await captureCardPng(cardHtml);
-  const slug =
-    (doctorName || "doctor").toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-+|-+$/g, "") ||
-    "doctor";
-  downloadBlob(blob, `${slug}-profile-card.png`);
   return uploadCardImage(blob);
 }
