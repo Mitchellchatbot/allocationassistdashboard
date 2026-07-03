@@ -16,6 +16,7 @@ import {
   type Vacancy, type VacancyStatus, type VacancyPriority,
 } from "@/hooks/use-vacancies";
 import { useHospitals } from "@/hooks/use-hospitals";
+import { SendProfileDialog, type SendProfileInitial } from "@/components/automations/SendProfileDialog";
 import { MatchScoreChip } from "@/components/DoctorVacancyMatches";
 import { DoctorLicensePills } from "@/components/DoctorLicensePills";
 import { useAuth } from "@/hooks/use-auth";
@@ -56,6 +57,14 @@ export function VacancyDetailSheet({ vacancy, open, onClose }: Props) {
   const unlink = useUnlinkLead();
   const update = useUpdateVacancy();
   const [busyId, setBusyId] = useState<string | null>(null);
+  // Pre-filled Send-Profile flow for a matched doctor → this vacancy's hospital.
+  const [sendInitial, setSendInitial] = useState<SendProfileInitial | null>(null);
+  const onEmailMatch = (m: ReturnType<typeof useMatchingDoctors>[number]) => setSendInitial({
+    doctorId:     m.doctor_id,
+    doctorEmail:  m.doctor_email,
+    hospitalId:   vacancy?.hospital_id ?? null,
+    hospitalName: vacancy?.hospital_name ?? null,
+  });
   const [editing, setEditing] = useState(false);
   const [saving, setSaving]   = useState(false);
   const [form, setForm]       = useState<EditForm | null>(null);
@@ -146,6 +155,7 @@ export function VacancyDetailSheet({ vacancy, open, onClose }: Props) {
   const daysOpen = Math.floor((Date.now() - new Date(vacancy.opened_at).getTime()) / 86_400_000);
 
   return (
+    <>
     <Sheet open={open} onOpenChange={(v) => !v && onClose()}>
       <SheetContent side="right" className="w-full sm:max-w-[640px] overflow-y-auto">
         <SheetHeader>
@@ -308,16 +318,16 @@ export function VacancyDetailSheet({ vacancy, open, onClose }: Props) {
               )}
 
               {strongMatches.length > 0 && (
-                <MatchGroup label="Strong fits" tone="emerald" matches={strongMatches} linkedIds={linkedIds} busyId={busyId} onLink={doLink} />
+                <MatchGroup label="Strong fits" tone="emerald" matches={strongMatches} linkedIds={linkedIds} busyId={busyId} onLink={doLink} onEmail={onEmailMatch} />
               )}
               {decentMatches.length > 0 && (
-                <MatchGroup label="Decent fits" tone="sky" matches={decentMatches} linkedIds={linkedIds} busyId={busyId} onLink={doLink} />
+                <MatchGroup label="Decent fits" tone="sky" matches={decentMatches} linkedIds={linkedIds} busyId={busyId} onLink={doLink} onEmail={onEmailMatch} />
               )}
               {weakMatches.length > 0 && (
                 <MatchGroup
                   label="Long shots" tone="slate"
                   matches={weakMatches.slice(0, 10)}
-                  linkedIds={linkedIds} busyId={busyId} onLink={doLink}
+                  linkedIds={linkedIds} busyId={busyId} onLink={doLink} onEmail={onEmailMatch}
                   collapsible={strongMatches.length + decentMatches.length > 0}
                 />
               )}
@@ -366,16 +376,21 @@ export function VacancyDetailSheet({ vacancy, open, onClose }: Props) {
         </section>
       </SheetContent>
     </Sheet>
+    {/* Pre-filled Send-Profile flow — introduce the picked doctor to this
+        vacancy's hospital (opens straight on the send preview). */}
+    <SendProfileDialog open={!!sendInitial} onClose={() => setSendInitial(null)} initial={sendInitial} />
+    </>
   );
 }
 
-function MatchGroup({ label, tone, matches, linkedIds, busyId, onLink, collapsible = false }: {
+function MatchGroup({ label, tone, matches, linkedIds, busyId, onLink, onEmail, collapsible = false }: {
   label:      string;
   tone:       "emerald" | "sky" | "slate";
   matches:    ReturnType<typeof useMatchingDoctors>;
   linkedIds:  Set<string>;
   busyId:     string | null;
   onLink:     (m: ReturnType<typeof useMatchingDoctors>[number]) => void;
+  onEmail:    (m: ReturnType<typeof useMatchingDoctors>[number]) => void;
   collapsible?: boolean;
 }) {
   const [expanded, setExpanded] = useState(!collapsible);
@@ -404,6 +419,7 @@ function MatchGroup({ label, tone, matches, linkedIds, busyId, onLink, collapsib
               linked={linkedIds.has(m.doctor_id)}
               busy={busyId === m.doctor_id}
               onLink={onLink}
+              onEmail={onEmail}
             />
           ))}
         </div>
@@ -418,7 +434,8 @@ function MatchGroup({ label, tone, matches, linkedIds, busyId, onLink, collapsib
  *  every signal the matcher used, plus a deep-link to open the
  *  doctor's full profile in the Doctors page. Action buttons
  *  (mailto, Link) stay clickable without triggering the toggle. */
-function MatchRow({ m, linked, busy, onLink }: {
+function MatchRow({ m, linked, busy, onLink, onEmail }: {
+  onEmail: (m: ReturnType<typeof useMatchingDoctors>[number]) => void;
   m:       ReturnType<typeof useMatchingDoctors>[number];
   linked:  boolean;
   busy:    boolean;
@@ -449,16 +466,14 @@ function MatchRow({ m, linked, busy, onLink }: {
           </div>
         </div>
         <MatchScoreChip score={m.score} />
-        {m.doctor_email && (
-          <a
-            href={`mailto:${m.doctor_email}`}
-            className="text-slate-400 hover:text-teal-600"
-            title={m.doctor_email}
-            onClick={(e) => e.stopPropagation()}
-          >
-            <Mail className="h-3 w-3" />
-          </a>
-        )}
+        <button
+          type="button"
+          className="inline-flex items-center gap-1 rounded-md border border-teal-200 bg-teal-50 px-1.5 py-0.5 text-[10px] font-medium text-teal-700 hover:bg-teal-100 transition-colors"
+          title={`Introduce ${m.doctor_name} to this hospital — opens the Send Profile flow, ready to send`}
+          onClick={(e) => { e.stopPropagation(); onEmail(m); }}
+        >
+          <Mail className="h-3 w-3" /> Send
+        </button>
         {linked
           ? <Badge variant="outline" className="bg-teal-50 text-teal-700 border-teal-200 text-[9px] uppercase tracking-wider">Linked</Badge>
           : (

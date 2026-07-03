@@ -52,6 +52,23 @@ function saveDefaultTemplate(which: "hospital" | "doctor", key: string): void {
 interface Props {
   open:    boolean;
   onClose: () => void;
+  /** Pre-fill the flow (e.g. from a vacancy's matched-doctor mail button): jump
+   *  straight to the send preview for this doctor → this hospital. Matched by
+   *  prefixed doctor id (falls back to email) and hospital id (falls back to
+   *  name). */
+  initial?: {
+    doctorId?:      string;
+    doctorEmail?:   string | null;
+    hospitalId?:    string | null;
+    hospitalName?:  string | null;
+  } | null;
+}
+
+export interface SendProfileInitial {
+  doctorId?:      string;
+  doctorEmail?:   string | null;
+  hospitalId?:    string | null;
+  hospitalName?:  string | null;
 }
 
 type Step = "pick-doctor" | "pick-hospitals" | "preview-confirm";
@@ -112,14 +129,14 @@ const CC_AMIR_EMAIL = "amir@allocationassist.com";
  * inner component mounted ONLY while the dialog is open, so nothing fetches
  * while closed. Once open, behaviour is identical to before the split.
  */
-export function SendProfileDialog({ open, onClose }: Props) {
+export function SendProfileDialog({ open, onClose, initial }: Props) {
   // The body owns its own modal frame so the preview step can swap the compact
   // picker dialog for the full 90×90 EmailPreviewStudio. Mounted only while
   // open (nothing fetches while closed).
-  return open ? <SendProfileDialogBody onClose={onClose} /> : null;
+  return open ? <SendProfileDialogBody onClose={onClose} initial={initial ?? null} /> : null;
 }
 
-function SendProfileDialogBody({ onClose }: { onClose: () => void }) {
+function SendProfileDialogBody({ onClose, initial }: { onClose: () => void; initial: SendProfileInitial | null }) {
   const [step,            setStep]            = useState<Step>("pick-doctor");
   const [selectedDoctor,  setSelectedDoctor]  = useState<DoctorOption | null>(null);
   const [selectedIds,     setSelectedIds]     = useState<string[]>([]);
@@ -248,6 +265,27 @@ function SendProfileDialogBody({ onClose }: { onClose: () => void }) {
     () => hospitals.filter(h => selectedIds.includes(h.id)),
     [hospitals, selectedIds],
   );
+
+  // Pre-fill (vacancy mail button): once the doctor list is loaded, select the
+  // doctor + hospital and jump straight to the send preview. Runs after the
+  // reset effect (doctorOptions load async), so it wins.
+  const [initialApplied, setInitialApplied] = useState(false);
+  useEffect(() => { setInitialApplied(false); }, [initial?.doctorId, initial?.doctorEmail, initial?.hospitalId, initial?.hospitalName]);
+  useEffect(() => {
+    if (initialApplied || !initial || !(initial.doctorId || initial.doctorEmail)) return;
+    if (doctorOptions.length === 0) return; // wait for the list to load
+    const doc =
+      (initial.doctorId    ? doctorOptions.find(d => d.id === initial.doctorId) : undefined) ??
+      (initial.doctorEmail ? doctorOptions.find(d => d.email?.toLowerCase() === initial.doctorEmail!.toLowerCase()) : undefined);
+    if (!doc) { setInitialApplied(true); return; } // not eligible → leave on step 1
+    setSelectedDoctor(doc);
+    const h =
+      (initial.hospitalId   ? hospitals.find(x => x.id === initial.hospitalId) : undefined) ??
+      (initial.hospitalName ? hospitals.find(x => x.name.trim().toLowerCase() === initial.hospitalName!.trim().toLowerCase()) : undefined);
+    if (h) { setSelectedIds([h.id]); setStep("preview-confirm"); }
+    else setStep("pick-hospitals");
+    setInitialApplied(true);
+  }, [initial, initialApplied, doctorOptions, hospitals]);
 
   // Per-send template selection (Amir #3). Defaults to the flow's two
   // hardcoded templates; the team can pick ANY template per send. The picked
