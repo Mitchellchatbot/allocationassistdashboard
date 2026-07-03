@@ -28,6 +28,7 @@ import { wrapBodyForSend } from "@/lib/email-preview";
 import { type EmailAttachment } from "@/lib/email-attachments";
 import { AttachmentsPicker } from "@/components/automations/AttachmentsPicker";
 import { TemplatePicker } from "@/components/automations/TemplatePicker";
+import { CcBccPicker } from "@/components/automations/CcBccPicker";
 import { useScheduleProfileSend } from "@/hooks/use-scheduled-profile-sends";
 import { GulfClock, composeLocalDateTime, localToGulfParts, localDateInDays } from "@/components/GulfClock";
 import { Clock, Loader2 } from "lucide-react";
@@ -90,31 +91,10 @@ function normName(n: string | null | undefined): string {
 
 interface SendOverrides { subject_override?: string; html_override?: string }
 
-// Recipient picker options. The AA sender roster is BCC'd ("loop colleagues
-// in"); Amir is offered as a CC (visible to the recipient) per request. The
-// `cc` flag routes a selection to cc_override instead of bcc_override at send.
+// Amir is offered as a CC quick-add (visible to the recipient) per request; the
+// AA sender roster (AA_SENDERS) is offered as BCC quick-adds. Both feed the
+// free-form CcBccPicker on the preview step.
 const CC_AMIR_EMAIL = "amir@allocationassist.com";
-const RECIPIENT_OPTIONS: Array<{ name: string; email: string; cc?: boolean }> = [
-  ...AA_SENDERS.map(s => ({ name: s.name, email: s.email })),
-  { name: "Amir", email: CC_AMIR_EMAIL, cc: true },
-];
-const CC_OPTION_EMAILS = new Set(RECIPIENT_OPTIONS.filter(o => o.cc).map(o => o.email.toLowerCase()));
-
-/** Split a picked-recipient list into the CC bucket (Amir) and the BCC bucket
- *  (everyone else). Used both for the live preview hint and the actual send. */
-function splitRecipients(selected: string[]): { cc: string[]; bcc: string[] } {
-  const cc: string[] = [], bcc: string[] = [];
-  for (const e of selected) (CC_OPTION_EMAILS.has(e.toLowerCase()) ? cc : bcc).push(e);
-  return { cc, bcc };
-}
-
-/** "BCC: a, b · CC: amir@…" — the recipient line shown under the picker. */
-function recipientHint(selected: string[]): string {
-  const { cc, bcc } = splitRecipients(selected);
-  const parts = [`BCC${bcc.length ? `: ${bcc.join(", ")}` : ": none"}`];
-  if (cc.length) parts.push(`CC: ${cc.join(", ")}`);
-  return parts.join(" · ");
-}
 
 /**
  * Triggers Flow 2 (Profile Sent to Hospital). Three steps:
@@ -149,6 +129,7 @@ function SendProfileDialogBody({ onClose }: { onClose: () => void }) {
   // function's default behaviour (auto-BCC the sender on personal
   // routing). Defaulted from the current user so their own outbound
   // copy lands in their inbox unless they actively change it.
+  const [ccList,          setCcList]          = useState<string[]>([]);
   const [bccList,         setBccList]         = useState<string[]>([]);
   // Manual per-hospital recipient override (hospitalId → chosen contact email)
   // for THIS send only — overrides the hospital's primary/cycle routing.
@@ -185,6 +166,7 @@ function SendProfileDialogBody({ onClose }: { onClose: () => void }) {
     // outbound". The Preview step exposes the dropdown for changes.
     const me = findSenderByEmail(user?.email ?? null);
     setBccList(me ? [me.email] : []);
+    setCcList([]);
     setHospitalTemplateKey(loadDefaultTemplate("hospital"));
     setDoctorTemplateKey(loadDefaultTemplate("doctor"));
     setCardImageUrl(null);
@@ -342,7 +324,6 @@ function SendProfileDialogBody({ onClose }: { onClose: () => void }) {
     const effectiveStageOverrides =
       selectedHospitals.length === 1 && stageOverrides && Object.keys(stageOverrides).length
         ? stageOverrides : undefined;
-    const recipientsSplit = splitRecipients(bccList);
     const templateOverridesPayload = templateKeys && (templateKeys.hospital !== HOSPITAL_DEFAULT_KEY || templateKeys.doctor !== DOCTOR_DEFAULT_KEY)
       ? {
           ...(templateKeys.hospital !== HOSPITAL_DEFAULT_KEY ? { email_hospital: templateKeys.hospital } : {}),
@@ -378,8 +359,8 @@ function SendProfileDialogBody({ onClose }: { onClose: () => void }) {
           doctor_speciality: selectedDoctor.speciality,
           hospital_ids:      selectedHospitals.map(h => h.id),
           custom_message:    customMessage || null,
-          bcc_override:      recipientsSplit.bcc,
-          cc_override:       recipientsSplit.cc.length ? recipientsSplit.cc : null,
+          bcc_override:      bccList,
+          cc_override:       ccList.length ? ccList : null,
           stage_overrides:   effectiveStageOverrides ?? null,
           template_overrides: templateOverridesPayload,
           attachments:        hospitalAttach.map(a => ({ filename: a.filename, path: a.path })),
@@ -407,7 +388,6 @@ function SendProfileDialogBody({ onClose }: { onClose: () => void }) {
       // For multi-hospital sends we group all runs under a shared batch_id
       // in metadata so the BCC nature is queryable later.
       const batchId = crypto.randomUUID();
-      const recipients = splitRecipients(bccList);
       // Cycle-mode cursor advances, applied after the runs are created so the
       // next send to each hospital rotates to its next contact.
       const cursorAdvances: { id: string; name: string; next: number }[] = [];
@@ -453,8 +433,8 @@ function SendProfileDialogBody({ onClose }: { onClose: () => void }) {
               triggered_via:      "send_profile_dialog",
               // Dispatcher-picked recipients. The roster is BCC'd; Amir (if
               // picked) is CC'd. send-flow-email reads bcc_override / cc_override.
-              bcc_override:       recipients.bcc,
-              ...(recipients.cc.length ? { cc_override: recipients.cc } : {}),
+              bcc_override:       bccList,
+              ...(ccList.length ? { cc_override: ccList } : {}),
               // Per-stage edits from the preview (email_hospital / email_doctor).
               // send-flow-email reads stage_overrides[<stage>] when each email
               // fires — including the doctor heads-up that auto-continues
@@ -607,6 +587,8 @@ function SendProfileDialogBody({ onClose }: { onClose: () => void }) {
               onBack={() => setStep("pick-hospitals")}
               onConfirm={handleConfirm}
               submitting={submitting}
+              ccList={ccList}
+              setCcList={setCcList}
               bccList={bccList}
               setBccList={setBccList}
               templates={templates}
@@ -986,7 +968,7 @@ function CardScreenshotControl({
 
 function PreviewConfirm({
   doctor, hospitals, customMessage, hospitalSubject, hospitalBody, doctorSubject, doctorBody,
-  onBack, onClose, onConfirm, submitting, bccList, setBccList,
+  onBack, onClose, onConfirm, submitting, ccList, setCcList, bccList, setBccList,
   templates, hospitalTemplateKey, setHospitalTemplateKey, doctorTemplateKey, setDoctorTemplateKey, onSaveDefault,
   hospitalContacts, recipientOverrides, onOverrideRecipient,
   cardImageUrl, onSetCardImage,
@@ -1002,6 +984,8 @@ function PreviewConfirm({
   onClose: () => void;
   onConfirm: (stageOverrides?: Record<string, SendOverrides>, attachments?: { hospital?: EmailAttachment[]; doctor?: EmailAttachment[] }, templateKeys?: { hospital: string; doctor: string }, schedule?: { date: string; time: string }) => void;
   submitting: boolean;
+  ccList: string[];
+  setCcList: (next: string[]) => void;
   bccList: string[];
   setBccList: (next: string[]) => void;
   templates: import("@/hooks/use-email-templates").EmailTemplate[];
@@ -1191,19 +1175,24 @@ function PreviewConfirm({
         <div className="text-[11px] text-muted-foreground pt-1 border-t border-slate-200/70 mt-1.5 space-y-1.5">
           <div>Sending as: <span className="font-medium text-slate-700">{senderLine}</span></div>
 
-          {/* BCC picker — choose any combination of the AA sender
-              roster. Defaulted to the current user so their own
-              outbound copy lands in their inbox; tick others to
-              loop them in on this send. */}
-          <BccPicker selected={bccList} onChange={setBccList} />
+          {/* CC + BCC — free-form on every send; AA team offered as BCC quick-adds
+              and Amir as a CC quick-add. Defaults to BCC'ing the sender. */}
+          <CcBccPicker
+            cc={ccList}
+            bcc={bccList}
+            onCcChange={setCcList}
+            onBccChange={setBccList}
+            bccRoster={AA_SENDERS.map(s => ({ name: s.name, email: s.email }))}
+            ccRoster={[{ name: "Amir", email: CC_AMIR_EMAIL }]}
+          />
 
           {sender ? (
             <div className="text-[10.5px] text-emerald-700">
-              Hospital replies will land in <span className="font-mono">{sender.email}</span>. {recipientHint(bccList)}.
+              Hospital replies land in <span className="font-mono">{sender.email}</span>.
             </div>
           ) : (
             <div className="text-[10.5px] text-amber-700">
-              Current user isn't in the verified sender roster, so the generic team address is used and replies route through the dashboard parser. {recipientHint(bccList)}.
+              Current user isn't in the verified sender roster, so the generic team address is used and replies route through the dashboard parser.
             </div>
           )}
         </div>
@@ -1732,71 +1721,3 @@ function HtmlPreview({ html }: { html: string }) {
   );
 }
 
-/** Multi-select dropdown for BCC. Choose any combination of the AA
- *  sender roster (Rodaina / Mohamed / Sohaila / Ishak / Ammar). The
- *  trigger label flips between 'BCC nobody' / 'BCC just me' / 'BCC X'
- *  / 'BCC X+1 others' depending on selection, so the closed state
- *  reads at a glance without needing to open the popover. */
-function BccPicker({ selected, onChange }: { selected: string[]; onChange: (next: string[]) => void }) {
-  const selectedSet = new Set(selected.map(e => e.toLowerCase()));
-
-  const toggle = (email: string) => {
-    const lc = email.toLowerCase();
-    if (selectedSet.has(lc)) {
-      onChange(selected.filter(e => e.toLowerCase() !== lc));
-    } else {
-      onChange([...selected, email]);
-    }
-  };
-
-  const summary = (() => {
-    if (selected.length === 0) return "Copy: nobody";
-    const first = RECIPIENT_OPTIONS.find(s => s.email.toLowerCase() === selected[0].toLowerCase());
-    if (selected.length === 1) return `Copy: ${first?.name ?? selected[0]}`;
-    return `Copy: ${first?.name ?? selected[0]} +${selected.length - 1}`;
-  })();
-
-  return (
-    <Popover>
-      <PopoverTrigger className="inline-flex items-center gap-1.5 text-[10.5px] h-6 px-2 rounded-full border border-slate-200 bg-white text-slate-700 hover:bg-slate-50 transition-colors">
-        <Mail className="h-3 w-3" />
-        <span>{summary}</span>
-        <ChevronDown className="h-3 w-3 opacity-60" />
-      </PopoverTrigger>
-      <PopoverContent className="w-[280px] p-2" align="start">
-        <div className="text-[10px] uppercase tracking-wider text-muted-foreground px-1.5 pb-1.5">
-          Copy colleagues on this send
-        </div>
-        <div className="space-y-0.5">
-          {RECIPIENT_OPTIONS.map(s => {
-            const checked = selectedSet.has(s.email.toLowerCase());
-            return (
-              <label
-                key={s.email}
-                className="flex items-center gap-2 px-1.5 py-1 rounded hover:bg-slate-50 cursor-pointer"
-              >
-                <Checkbox
-                  checked={checked}
-                  onCheckedChange={() => toggle(s.email)}
-                  className="h-3.5 w-3.5"
-                />
-                <span className="text-[12px] text-slate-800 flex-1">{s.name}</span>
-                <span className={`text-[9px] font-semibold uppercase tracking-wide rounded px-1 py-px ${s.cc ? "bg-blue-50 text-blue-600" : "bg-slate-100 text-slate-400"}`}>{s.cc ? "CC" : "BCC"}</span>
-                <span className="text-[10px] font-mono text-muted-foreground">{s.email.split("@")[0]}</span>
-              </label>
-            );
-          })}
-        </div>
-        {selected.length > 0 && (
-          <button
-            type="button"
-            onClick={() => onChange([])}
-            className="mt-1.5 text-[10.5px] text-slate-500 hover:text-slate-700 px-1.5"
-          >
-            Clear all
-          </button>
-        )}
-      </PopoverContent>
-    </Popover>
-  );
-}
