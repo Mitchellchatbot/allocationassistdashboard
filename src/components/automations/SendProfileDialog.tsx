@@ -727,7 +727,7 @@ function DoctorPicker({ options, isLoading, onPick }: {
           className="pl-7 text-[12px] bg-white"
         />
       </div>
-      <div className="min-h-0 flex-1 rounded-md border border-sidebar-border/40 bg-white overflow-y-auto divide-y">
+      <div className="min-h-0 flex-1 rounded-md border border-sidebar-border/40 bg-white overflow-y-auto divide-y aa-scrollbar-hide">
         {isLoading && <div className="px-4 py-6 text-[12px] text-muted-foreground text-center">Loading...</div>}
         {!isLoading && filtered.length === 0 && (
           <div className="px-4 py-6 text-[12px] text-muted-foreground text-center">No doctors match.</div>
@@ -819,7 +819,7 @@ function HospitalPicker({
         </div>
         {selectedIds.length > 1 && <Badge variant="outline" className="text-[10px] bg-amber-50 border-amber-200">BCC mode</Badge>}
       </div>
-      <div className="min-h-0 flex-1 rounded-md border border-sidebar-border/40 bg-white overflow-y-auto divide-y">
+      <div className="min-h-0 flex-1 rounded-md border border-sidebar-border/40 bg-white overflow-y-auto divide-y aa-scrollbar-hide">
         {filtered.length === 0 && (
           <div className="px-4 py-6 text-[12px] text-muted-foreground text-center">No hospitals match.</div>
         )}
