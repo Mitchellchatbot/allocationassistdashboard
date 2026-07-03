@@ -813,10 +813,10 @@ function HospitalPicker({
             type="button"
             onClick={toggleAll}
             disabled={filtered.length === 0}
-            className="inline-flex items-center gap-1 rounded-md border border-slate-200 px-2 py-1 text-[11px] font-medium text-slate-600 hover:border-teal-300 hover:text-teal-700 hover:bg-teal-50 transition-colors disabled:opacity-40"
+            className="inline-flex items-center gap-1 rounded-md border border-sidebar-border/50 bg-white/10 px-2 py-1 text-[11px] font-medium text-sidebar-foreground/85 hover:bg-white/20 hover:text-white transition-colors disabled:opacity-40"
           >
             {allFilteredSelected ? "Deselect all" : `Select all${q ? " (filtered)" : ""}`}
-            {!allFilteredSelected && <span className="text-slate-400">· {filtered.length}</span>}
+            {!allFilteredSelected && <span className="text-sidebar-foreground/55">· {filtered.length}</span>}
           </button>
           <span className="text-sidebar-foreground/70">{selectedIds.length} selected</span>
         </div>
@@ -832,7 +832,7 @@ function HospitalPicker({
             <label key={h.id} className="flex items-center gap-3 px-3 py-2 hover:bg-slate-50 cursor-pointer">
               <Checkbox checked={checked} onCheckedChange={() => onToggle(h.id)} />
               <div className="flex-1 min-w-0">
-                <div className="text-[13px] font-medium truncate">{h.name}</div>
+                <div className="text-[13px] font-medium truncate text-slate-800">{h.name?.trim() || "Unnamed hospital"}</div>
                 <div className="text-[11px] text-muted-foreground truncate">
                   {[h.city, h.country, h.primary_recruiter_email].filter(Boolean).join(" · ") || "—"}
                 </div>
