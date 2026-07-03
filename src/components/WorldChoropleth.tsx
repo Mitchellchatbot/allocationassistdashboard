@@ -67,10 +67,16 @@ export function WorldChoropleth({
   values,
   formatValue = (n: number) => n.toLocaleString(),
   className,
+  onSelect,
+  selectedKey,
 }: {
   values: Map<string, number>;
   formatValue?: (n: number) => string;
   className?: string;
+  /** Called with the GeoJSON country name when a country with data is clicked. */
+  onSelect?: (name: string) => void;
+  /** Currently-selected country name — gets a persistent teal outline. */
+  selectedKey?: string | null;
 }) {
   const [features, setFeatures] = useState<GeoFeature[] | null>(null);
   // Split so moving the mouse (position only) doesn't re-render all 180 paths —
@@ -100,13 +106,15 @@ export function WorldChoropleth({
     return m;
   }, [values]);
 
-  // Paint the hovered country LAST so its lift + shadow sit above its neighbours.
-  // Stable keys mean React moves the node (no remount), so the lift transitions.
+  // Paint the active (hovered, else selected) country LAST so its lift/outline
+  // sits above its neighbours. Stable keys → React moves the node (no remount),
+  // so the lift transitions.
+  const activeKey = hovered?.name ?? selectedKey ?? null;
   const ordered = useMemo(() => {
-    if (!hovered) return paths;
-    const one = paths.find(p => p.key === hovered.name);
-    return one ? [...paths.filter(p => p.key !== hovered.name), one] : paths;
-  }, [paths, hovered]);
+    if (!activeKey) return paths;
+    const one = paths.find(p => p.key === activeKey);
+    return one ? [...paths.filter(p => p.key !== activeKey), one] : paths;
+  }, [paths, activeKey]);
 
   if (features === null) {
     return (
@@ -130,13 +138,14 @@ export function WorldChoropleth({
         {ordered.map(p => {
           const v = values.get(p.key) ?? 0;
           const isHover = hovered?.name === p.key;
+          const isSelected = selectedKey === p.key;
           return (
             <path
               key={p.key}
               d={p.d}
               fill={fillFor(v, max)}
-              stroke={isHover ? "#0f766e" : "#ffffff"}
-              strokeWidth={isHover ? 0.9 : 0.4}
+              stroke={isHover || isSelected ? "#0f766e" : "#ffffff"}
+              strokeWidth={isHover ? 0.9 : isSelected ? 1.1 : 0.4}
               style={{
                 transform: isHover ? `translateY(-${LIFT}px)` : "translateY(0)",
                 transition: "transform 160ms ease, stroke-width 160ms ease",
@@ -148,6 +157,7 @@ export function WorldChoropleth({
                 const rect = wrapRef.current?.getBoundingClientRect();
                 setTip({ x: e.clientX - (rect?.left ?? 0), y: e.clientY - (rect?.top ?? 0) });
               }}
+              onClick={() => { if (v > 0 && onSelect) onSelect(p.key); }}
             />
           );
         })}
