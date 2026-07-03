@@ -2,6 +2,31 @@ import { useEffect, useMemo, useRef, useState, type CSSProperties } from "react"
 import { buildEmailPreviewDoc } from "@/lib/email-preview";
 
 /**
+ * Give any table wider than the email its OWN horizontal scroll box, so a wide
+ * data table (e.g. the hospital candidate table) scrolls independently instead
+ * of widening the whole email and forcing the iframe + preview pane to scroll
+ * sideways too. Only wraps tables that actually overflow and aren't already
+ * inside a scroll container — layout/signature tables that fit are left alone.
+ */
+function wrapWideTables(doc: Document) {
+  const bodyW = doc.body?.clientWidth ?? 0;
+  if (!bodyW) return;
+  doc.querySelectorAll("table").forEach((t) => {
+    if (t.getAttribute("data-aa-wrapped")) return;
+    const parent = t.parentElement;
+    if (!parent) return;
+    // Already in a horizontal scroll container (e.g. the doctor row table) → skip.
+    if (/(auto|scroll)/.test(getComputedStyle(parent).overflowX)) { t.setAttribute("data-aa-wrapped", "1"); return; }
+    if (t.scrollWidth <= bodyW + 2) return; // fits — leave it
+    t.setAttribute("data-aa-wrapped", "1");
+    const wrap = doc.createElement("div");
+    wrap.style.cssText = "overflow-x:auto;max-width:100%;";
+    parent.insertBefore(wrap, t);
+    wrap.appendChild(t);
+  });
+}
+
+/**
  * Sandboxed email renderer. Drops the rendered body into an <iframe> whose base
  * CSS is the exact send shell (Garamond 17px #1a2332 / line-height 1.55, mail-
  * client link/image/table defaults) — see src/lib/email-preview.ts. Isolation
@@ -56,8 +81,9 @@ export function EmailFrame({
     };
     let ro: ResizeObserver | null = null;
     const onLoad = () => {
-      measure();
       const doc = iframe.contentDocument;
+      if (doc?.body) wrapWideTables(doc);
+      measure();
       if (doc?.body && "ResizeObserver" in window) {
         ro = new ResizeObserver(measure);
         ro.observe(doc.documentElement);
