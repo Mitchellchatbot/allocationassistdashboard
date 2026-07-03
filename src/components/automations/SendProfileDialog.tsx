@@ -727,7 +727,7 @@ function DoctorPicker({ options, isLoading, onPick }: {
           value={q}
           onChange={e => setQ(e.target.value)}
           placeholder={isLoading ? "Loading doctors..." : "Search by name, email, or speciality..."}
-          className="pl-7 text-[12px] bg-white"
+          className="pl-7 text-[12px] bg-white text-slate-800"
         />
       </div>
       <div className="min-h-0 flex-1 rounded-md border border-sidebar-border/40 bg-white overflow-y-auto divide-y aa-scrollbar-hide">
@@ -805,7 +805,7 @@ function HospitalPicker({
       </div>
       <div className="relative shrink-0">
         <Search className="absolute left-2 top-1/2 -translate-y-1/2 h-3.5 w-3.5 text-muted-foreground" />
-        <Input value={q} onChange={e => setQ(e.target.value)} placeholder="Filter hospitals..." className="pl-7 text-[12px] bg-white" />
+        <Input value={q} onChange={e => setQ(e.target.value)} placeholder="Filter hospitals..." className="pl-7 text-[12px] bg-white text-slate-800" />
       </div>
       <div className="flex shrink-0 items-center justify-between text-[11px]">
         <div className="flex items-center gap-2">
@@ -846,7 +846,7 @@ function HospitalPicker({
         <Textarea
           value={customMessage}
           onChange={e => setCustomMessage(e.target.value)}
-          className="mt-1 text-[12px] min-h-[52px] bg-white"
+          className="mt-1 text-[12px] min-h-[52px] bg-white text-slate-800"
           placeholder="Anything to add to the introduction — context, urgency, etc."
         />
       </div>
@@ -1182,7 +1182,7 @@ function PreviewConfirm({
         overrides={recipientOverrides}
         onOverride={onOverrideRecipient}
       />
-      <div className="rounded-lg border border-sidebar-border/40 bg-white/95 p-3 text-[12px] space-y-1 shadow-sm">
+      <div className="rounded-lg border border-sidebar-border/40 bg-white/95 p-3 text-[12px] space-y-1 shadow-sm text-slate-700">
         <div><strong>{doctor.name}</strong> → {hospitals.length === 1 ? hospitals[0].name : `${hospitals.length} hospitals (BCC)`}</div>
         <div className="text-[11px] text-muted-foreground">
           One run per hospital will be created in Flow 2. Hospital + doctor emails fire automatically on confirm.
@@ -1225,8 +1225,9 @@ function PreviewConfirm({
             : "Click into either email to tweak the wording before it sends."}
       </div>
 
-      {/* Send now vs schedule for later (Amir #5). */}
-      <div className="rounded-lg border border-sidebar-border/40 bg-white/95 p-2.5 space-y-2 shadow-sm">
+      {/* Send now vs schedule for later (Amir #5). text-slate-700 baseline so the
+          date/time inputs on this white card aren't white-on-white. */}
+      <div className="rounded-lg border border-sidebar-border/40 bg-white/95 p-2.5 space-y-2 shadow-sm text-slate-700">
         <div className="flex items-center gap-1 rounded-lg bg-slate-100 p-0.5 text-[12px] w-fit">
           <button type="button" onClick={() => setSendMode("now")} className={`inline-flex items-center gap-1.5 rounded-md px-3 py-1 font-medium transition-colors ${sendMode === "now" ? "bg-white shadow-sm text-teal-700" : "text-slate-500"}`}>
             <Send className="h-3.5 w-3.5" /> Send now

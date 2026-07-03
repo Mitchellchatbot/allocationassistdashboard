@@ -176,9 +176,11 @@ export function EmailPreviewStudioLayout({
           </div>
         )}
 
-        {/* Action buttons pinned to the bottom of the rail. */}
+        {/* Action buttons pinned to the bottom of the rail. text-slate-700 so
+            white-bg outline buttons (Back / Cancel …) aren't white-on-white from
+            the rail's light foreground; solid buttons set their own colour. */}
         {footer && (
-          <div className="flex shrink-0 items-center gap-2 border-t border-sidebar-border/40 bg-sidebar px-3 py-2.5">
+          <div className="flex shrink-0 items-center gap-2 border-t border-sidebar-border/40 bg-sidebar px-3 py-2.5 text-slate-700">
             {footer}
           </div>
         )}
