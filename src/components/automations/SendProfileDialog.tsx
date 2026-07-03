@@ -1118,7 +1118,7 @@ function PreviewConfirm({
         overrides={recipientOverrides}
         onOverride={onOverrideRecipient}
       />
-      <div className="rounded-md border bg-slate-50/50 p-3 text-[12px] space-y-1">
+      <div className="rounded-lg border border-sidebar-border/40 bg-white/95 p-3 text-[12px] space-y-1 shadow-sm">
         <div><strong>{doctor.name}</strong> → {hospitals.length === 1 ? hospitals[0].name : `${hospitals.length} hospitals (BCC)`}</div>
         <div className="text-[11px] text-muted-foreground">
           One run per hospital will be created in Flow 2. Hospital + doctor emails fire automatically on confirm.
@@ -1153,16 +1153,16 @@ function PreviewConfirm({
         </div>
       )}
 
-      <div className="text-[10.5px] text-muted-foreground px-0.5">
+      <div className="text-[10.5px] text-sidebar-foreground/65 px-0.5">
         {!isSingle
           ? "Editing is available when sending to a single hospital (a shared edit can't be reused across a BCC batch)."
           : anyEdited
-            ? <span className="text-teal-700 font-medium">You've edited {hospitalOv && doctorOv ? "both emails" : hospitalOv ? "the hospital email" : "the doctor email"} — your version sends instead of the template.</span>
+            ? <span className="text-emerald-300 font-medium">You've edited {hospitalOv && doctorOv ? "both emails" : hospitalOv ? "the hospital email" : "the doctor email"} — your version sends instead of the template.</span>
             : "Click into either email to tweak the wording before it sends."}
       </div>
 
       {/* Send now vs schedule for later (Amir #5). */}
-      <div className="rounded-md border bg-slate-50/40 p-2.5 space-y-2">
+      <div className="rounded-lg border border-sidebar-border/40 bg-white/95 p-2.5 space-y-2 shadow-sm">
         <div className="flex items-center gap-1 rounded-lg bg-slate-100 p-0.5 text-[12px] w-fit">
           <button type="button" onClick={() => setSendMode("now")} className={`inline-flex items-center gap-1.5 rounded-md px-3 py-1 font-medium transition-colors ${sendMode === "now" ? "bg-white shadow-sm text-teal-700" : "text-slate-500"}`}>
             <Send className="h-3.5 w-3.5" /> Send now
@@ -1208,11 +1208,11 @@ function PreviewConfirm({
       subLabel: hospitalRecipient,
       controls: (
         <div className="space-y-2">
-          <div className="flex items-center gap-1.5 px-0.5 text-[11px] text-muted-foreground">
-            <Mail className="h-3.5 w-3.5 text-teal-600 shrink-0" />
-            <span className="font-medium text-slate-700">Hospital intro email</span>
+          <div className="flex items-center gap-1.5 px-0.5 text-[11px] text-sidebar-foreground/80">
+            <Mail className="h-3.5 w-3.5 text-sidebar-foreground/70 shrink-0" />
+            <span className="font-medium">Hospital intro email</span>
           </div>
-          <p className="px-0.5 text-[10.5px] text-muted-foreground">Uses the standard profile-sent template; edit the wording right in the preview.</p>
+          <p className="px-0.5 text-[10.5px] text-sidebar-foreground/55">Uses the standard profile-sent template; edit the wording right in the preview.</p>
           {/* Profile-as-image: render the candidate profile card (View-full-profile
               look, empty fields dropped) to a flat PNG and send it IN PLACE OF the
               data table, so the hospital sees a clean, pixel-perfect card. */}
@@ -1255,7 +1255,7 @@ function PreviewConfirm({
               <TemplatePicker templates={templates} value={doctorTemplateKey} onChange={setDoctorTemplateKey} defaultKey="profile_sent_doctor" renderVars={vars} label="Doctor 'working opportunity' email template" flowFilter="profile_sent" />
             </div>
             {doctorTemplateKey !== "profile_sent_doctor" && (
-              <button type="button" onClick={() => { onSaveDefault("doctor", doctorTemplateKey); toast.success("Saved as your default doctor template"); }} className="text-[10px] text-slate-500 hover:underline whitespace-nowrap mt-4">Save as my default</button>
+              <button type="button" onClick={() => { onSaveDefault("doctor", doctorTemplateKey); toast.success("Saved as your default doctor template"); }} className="text-[10px] text-sidebar-foreground/60 hover:text-sidebar-foreground hover:underline whitespace-nowrap mt-4">Save as my default</button>
             )}
           </div>
           <AttachmentsPicker

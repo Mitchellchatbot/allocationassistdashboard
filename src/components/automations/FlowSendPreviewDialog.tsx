@@ -132,7 +132,7 @@ export function FlowSendPreviewDialog({
   const ready = !!preview && !loading && !err;
 
   const headerExtra = (
-    <div className="rounded-md border bg-slate-50/60 p-2.5 text-[11px] text-muted-foreground">
+    <div className="rounded-lg border border-sidebar-border/40 bg-white/95 p-2.5 text-[11px] text-slate-500 shadow-sm">
       {edited
         ? <span className="font-medium text-teal-700">Edited — your version sends, not the template.</span>
         : preview

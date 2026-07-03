@@ -1525,7 +1525,7 @@ function BatchDialog({ target, onTargetChange, batches, suggestedSpecialty }: {
       title="Batch email preview"
       subtitle={typeof emailPreview?.bcc_count === "number" ? `BCC to ${emailPreview.bcc_count} hospital${emailPreview.bcc_count === 1 ? "" : "s"}` : undefined}
       headerExtra={
-        <div className="rounded-md border bg-slate-50/60 p-2.5 text-[11px] text-muted-foreground space-y-1">
+        <div className="rounded-lg border border-sidebar-border/40 bg-white/95 p-2.5 text-[11px] text-slate-500 space-y-1 shadow-sm">
           <div>
             {batchEdited
               ? <span className="font-medium text-teal-700">Edited — your version sends, not the template.</span>

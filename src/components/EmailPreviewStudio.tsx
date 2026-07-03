@@ -56,49 +56,52 @@ interface LayoutProps {
    *  wasteful. Default false — editable previews keep everything mounted so
    *  switching never discards edits. */
   mountActiveOnly?:  boolean;
+  /** Right-pane content shown when there are no emails yet (e.g. the wizard's
+   *  doctor/hospital steps show the template with unfilled placeholders). */
+  emptyState?:       ReactNode;
 }
 
+// Tabs live in the green rail: full-width segmented pills for a few emails, a
+// dropdown once there are too many (long chains).
 function Switcher({ emails, active, onChange }: { emails: StudioEmail[]; active: string; onChange: (k: string) => void }) {
-  // Segmented pills for a handful of emails; a compact dropdown once there are
-  // too many to fit (long chains).
   if (emails.length <= 4) {
     return (
-      <div className="inline-flex items-center rounded-lg bg-slate-100 p-0.5 gap-0.5">
+      <div className="grid gap-0.5 rounded-lg bg-sidebar-accent/40 p-0.5" style={{ gridTemplateColumns: `repeat(${emails.length}, minmax(0, 1fr))` }}>
         {emails.map(e => (
           <button
             key={e.key}
             type="button"
             onClick={() => onChange(e.key)}
             className={cn(
-              "inline-flex items-center gap-1.5 rounded-md px-3 py-1.5 text-[12px] font-medium transition-colors",
-              e.key === active ? "bg-white shadow-sm text-teal-700" : "text-slate-500 hover:text-slate-700",
+              "inline-flex items-center justify-center gap-1.5 rounded-md px-3 py-1.5 text-[12px] font-medium transition-colors",
+              e.key === active ? "bg-sidebar-primary text-sidebar-primary-foreground shadow-sm" : "text-sidebar-foreground/70 hover:text-sidebar-foreground hover:bg-sidebar-accent/60",
             )}
             title={e.subLabel ? `${e.label} — ${e.subLabel}` : e.label}
           >
-            <span className="truncate max-w-[160px]">{e.label}</span>
+            <span className="truncate">{e.label}</span>
           </button>
         ))}
       </div>
     );
   }
   return (
-    <div className="relative inline-flex items-center">
+    <div className="relative flex items-center">
       <select
         value={active}
         onChange={e => onChange(e.target.value)}
-        className="appearance-none rounded-lg border border-slate-200 bg-white pl-3 pr-8 py-1.5 text-[12px] font-medium text-slate-700 outline-none focus:border-teal-400"
+        className="w-full appearance-none rounded-lg border border-sidebar-border/50 bg-sidebar-accent/40 pl-3 pr-8 py-1.5 text-[12px] font-medium text-sidebar-foreground outline-none focus:border-sidebar-primary"
       >
         {emails.map((e, i) => (
-          <option key={e.key} value={e.key}>{i + 1}. {e.label}{e.subLabel ? ` — ${e.subLabel}` : ""}</option>
+          <option key={e.key} value={e.key} className="bg-white text-slate-800">{i + 1}. {e.label}{e.subLabel ? ` — ${e.subLabel}` : ""}</option>
         ))}
       </select>
-      <ChevronDown className="pointer-events-none absolute right-2.5 h-3.5 w-3.5 text-slate-400" />
+      <ChevronDown className="pointer-events-none absolute right-2.5 h-3.5 w-3.5 text-sidebar-foreground/60" />
     </div>
   );
 }
 
 export function EmailPreviewStudioLayout({
-  emails, activeKey, onActiveKeyChange, title, subtitle, headerExtra, footer, onClose, hideSwitcher, mountActiveOnly,
+  emails, activeKey, onActiveKeyChange, title, subtitle, headerExtra, footer, onClose, hideSwitcher, mountActiveOnly, emptyState,
 }: LayoutProps) {
   const [internal, setInternal] = useState(emails[0]?.key ?? "");
   const active = activeKey ?? internal;
@@ -116,43 +119,42 @@ export function EmailPreviewStudioLayout({
   // state survives switching, or just the active one for read-only browsers.
   const rendered = mountActiveOnly ? (activeEmail ? [activeEmail] : []) : emails;
 
+  // No top/bottom chrome bars — the green rail carries the title, tabs, controls
+  // AND the action buttons, so the right pane is all email, floor-to-ceiling.
   return (
-    <div className="flex h-full min-h-0 flex-col bg-slate-50">
-      {/* Header — title, email switcher, close. */}
-      <div className="flex shrink-0 items-center gap-3 border-b border-slate-200 bg-white px-4 py-2.5">
-        <div className="flex min-w-0 items-center gap-1.5">
-          <Mail className="h-4 w-4 shrink-0 text-teal-600" />
-          <div className="min-w-0">
-            <div className="truncate text-[13px] font-semibold text-slate-800">{title ?? "Email preview"}</div>
-            {subtitle && <div className="truncate text-[11px] text-slate-500">{subtitle}</div>}
+    <div className="flex h-full min-h-0">
+      {/* LEFT RAIL — sidebar-green, self-contained. */}
+      <aside className="flex w-[30%] min-w-[300px] max-w-[400px] shrink-0 flex-col bg-sidebar text-sidebar-foreground">
+        {/* Title + close */}
+        <div className="flex shrink-0 items-start gap-2 px-4 pt-3.5 pb-2">
+          <Mail className="mt-0.5 h-4 w-4 shrink-0 text-sidebar-foreground/70" />
+          <div className="min-w-0 flex-1">
+            <div className="truncate text-[13px] font-semibold leading-tight">{title ?? "Email preview"}</div>
+            {subtitle && <div className="truncate text-[11px] text-sidebar-foreground/55">{subtitle}</div>}
           </div>
+          {onClose && (
+            <button
+              type="button"
+              onClick={onClose}
+              className="inline-flex items-center gap-1 rounded-md bg-sidebar-accent/50 px-2 py-1 text-[11px] font-medium text-sidebar-foreground/80 transition-colors hover:bg-sidebar-accent hover:text-sidebar-foreground"
+              title="Close (Esc)"
+            >
+              <X className="h-3.5 w-3.5" /> Close
+            </button>
+          )}
         </div>
-        {multi && !hideSwitcher && <div className="mx-auto"><Switcher emails={emails} active={active} onChange={setActive} /></div>}
-        {onClose && (
-          <button
-            type="button"
-            onClick={onClose}
-            className={cn("inline-flex items-center gap-1 rounded-md bg-slate-100 px-2.5 py-1.5 text-[12px] font-medium text-slate-600 transition-colors hover:bg-slate-200", multi ? "" : "ml-auto")}
-            title="Close (Esc)"
-          >
-            <X className="h-4 w-4" /> Close
-          </button>
-        )}
-      </div>
 
-      {/* Body — 30 / 70 split. */}
-      <div className="flex min-h-0 flex-1">
-        {/* Left rail — controls. */}
-        <div className="flex w-[30%] min-w-[300px] max-w-[460px] shrink-0 flex-col overflow-y-auto border-r border-slate-200 bg-white">
-          <div className="space-y-3 p-3">
+        {/* Tabs */}
+        {multi && !hideSwitcher && (
+          <div className="shrink-0 px-3 pb-2">
+            <Switcher emails={emails} active={active} onChange={setActive} />
+          </div>
+        )}
+
+        {/* Scrolling controls */}
+        <div className="min-h-0 flex-1 overflow-y-auto px-3 py-2">
+          <div className="space-y-3">
             {headerExtra}
-            {activeEmail?.subLabel && (
-              <div className="rounded-md bg-slate-50 px-2.5 py-1.5 text-[11px] text-slate-500">
-                <span className="font-medium text-slate-700">{activeEmail.label}</span> · {activeEmail.subLabel}
-              </div>
-            )}
-            {/* Per-email controls: all mounted, only the active one shown, so
-                each email's control state (template key, attachments) persists. */}
             {rendered.map(e => (
               <div key={e.key} className={e.key === active ? "space-y-3" : "hidden"}>
                 {e.controls}
@@ -161,21 +163,24 @@ export function EmailPreviewStudioLayout({
           </div>
         </div>
 
-        {/* Right pane — one email at a time. */}
-        <div className="flex min-h-0 min-w-0 flex-1 bg-slate-100">
-          {rendered.map(e => (
-            <div key={e.key} className={cn("min-h-0 min-w-0 flex-1 p-3", e.key === active ? "flex" : "hidden")}>
-              {e.preview}
-            </div>
-          ))}
-        </div>
-      </div>
+        {/* Action buttons pinned to the bottom of the rail. */}
+        {footer && (
+          <div className="flex shrink-0 items-center gap-2 border-t border-sidebar-border/40 bg-sidebar px-3 py-2.5">
+            {footer}
+          </div>
+        )}
+      </aside>
 
-      {footer && (
-        <div className="flex shrink-0 items-center justify-end gap-2 border-t border-slate-200 bg-white px-4 py-2.5">
-          {footer}
-        </div>
-      )}
+      {/* RIGHT PANE — the email, maximized (no bars above or below). */}
+      <div className="flex min-h-0 min-w-0 flex-1 bg-slate-100">
+        {emails.length === 0
+          ? (emptyState && <div className="flex min-h-0 min-w-0 flex-1 p-2.5">{emptyState}</div>)
+          : rendered.map(e => (
+              <div key={e.key} className={cn("min-h-0 min-w-0 flex-1 p-2.5", e.key === active ? "flex" : "hidden")}>
+                {e.preview}
+              </div>
+            ))}
+      </div>
     </div>
   );
 }
@@ -195,7 +200,7 @@ export function EmailPreviewStudio({ open, onClose, title, ...layout }: StudioPr
         <DialogPrimitive.Overlay className="fixed inset-0 z-50 bg-slate-950/60 backdrop-blur-sm data-[state=open]:animate-in data-[state=closed]:animate-out data-[state=open]:fade-in-0 data-[state=closed]:fade-out-0" />
         <DialogPrimitive.Content
           aria-describedby={undefined}
-          className="fixed left-1/2 top-1/2 z-50 h-[90vh] w-[90vw] -translate-x-1/2 -translate-y-1/2 overflow-hidden rounded-xl bg-white shadow-2xl outline-none data-[state=open]:animate-in data-[state=closed]:animate-out data-[state=open]:fade-in-0 data-[state=closed]:fade-out-0 data-[state=open]:zoom-in-95 data-[state=closed]:zoom-out-95 duration-200"
+          className="fixed left-1/2 top-1/2 z-50 h-[92vh] w-[93vw] -translate-x-1/2 -translate-y-1/2 overflow-hidden rounded-xl bg-white shadow-2xl outline-none data-[state=open]:animate-in data-[state=closed]:animate-out data-[state=open]:fade-in-0 data-[state=closed]:fade-out-0 data-[state=open]:zoom-in-95 data-[state=closed]:zoom-out-95 duration-200"
         >
           <DialogPrimitive.Title className="sr-only">{typeof title === "string" ? title : "Email preview"}</DialogPrimitive.Title>
           <EmailPreviewStudioLayout title={title} onClose={onClose} {...layout} />

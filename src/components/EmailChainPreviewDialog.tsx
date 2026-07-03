@@ -239,12 +239,12 @@ export function EmailChainPreviewDialog({
   // studio's built-in switcher is hidden).
   const nav = (
     <div className="space-y-3">
-      <p className="px-1 text-[11px] text-muted-foreground">
+      <p className="px-1 text-[11px] text-sidebar-foreground/60">
         {totalEmails} emails across {CHAIN.length} flows, rendered with this doctor's data. Tokens use a placeholder hospital — the real send swaps in the actual one.
       </p>
       {CHAIN.map((group, gi) => (
         <div key={group.flowKey}>
-          <div className="mb-1 flex items-center gap-1.5 px-1 text-[10.5px] uppercase tracking-wider text-slate-400">
+          <div className="mb-1 flex items-center gap-1.5 px-1 text-[10.5px] uppercase tracking-wider text-sidebar-foreground/50">
             <span className="text-[13px]">{group.emoji}</span>
             <span className="font-semibold">{gi + 1}. {group.title}</span>
             <span className="ml-auto tabular-nums">{group.steps.length}</span>
@@ -259,10 +259,10 @@ export function EmailChainPreviewDialog({
                   onClick={() => setActive(step.templateKey)}
                   className={cn(
                     "flex w-full items-center gap-1.5 rounded-md px-2 py-1.5 text-left text-[12px] transition-colors",
-                    isActive ? "bg-teal-50 text-teal-800 ring-1 ring-teal-200" : "text-slate-600 hover:bg-slate-100",
+                    isActive ? "bg-sidebar-primary text-sidebar-primary-foreground shadow-sm" : "text-sidebar-foreground/75 hover:bg-sidebar-accent/50",
                   )}
                 >
-                  <span className="font-mono text-[9.5px] text-slate-400">#{si + 1}</span>
+                  <span className={cn("font-mono text-[9.5px]", isActive ? "text-sidebar-primary-foreground/70" : "text-sidebar-foreground/45")}>#{si + 1}</span>
                   <span className="min-w-0 flex-1 truncate">{step.label}</span>
                   <span className={cn("shrink-0 rounded border px-1 py-px text-[8.5px] font-medium uppercase tracking-wide", RECIPIENT_BADGE[step.recipient])}>{step.recipient}</span>
                 </button>
