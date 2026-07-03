@@ -632,26 +632,29 @@ function SendProfileDialogBody({ onClose }: { onClose: () => void }) {
               activeKey={wizardTab}
               onActiveKeyChange={setWizardTab}
               mountActiveOnly
+              railFill
               headerExtra={
-                <div className="space-y-2">
+                <div className="flex h-full min-h-0 flex-col gap-2">
                   <Stepper step={step} />
-                  {step === "pick-doctor" ? (
-                    <DoctorPicker
-                      options={doctorOptions}
-                      isLoading={zohoLoading || !completionReady}
-                      onPick={(d) => { setSelectedDoctor(d); setStep("pick-hospitals"); }}
-                    />
-                  ) : selectedDoctor ? (
-                    <HospitalPicker
-                      doctor={selectedDoctor}
-                      hospitals={hospitals}
-                      selectedIds={selectedIds}
-                      onToggle={(id) => setSelectedIds(prev => prev.includes(id) ? prev.filter(x => x !== id) : [...prev, id])}
-                      onSetSelected={setSelectedIds}
-                      customMessage={customMessage}
-                      setCustomMessage={setCustomMessage}
-                    />
-                  ) : null}
+                  <div className="min-h-0 flex-1">
+                    {step === "pick-doctor" ? (
+                      <DoctorPicker
+                        options={doctorOptions}
+                        isLoading={zohoLoading || !completionReady}
+                        onPick={(d) => { setSelectedDoctor(d); setStep("pick-hospitals"); }}
+                      />
+                    ) : selectedDoctor ? (
+                      <HospitalPicker
+                        doctor={selectedDoctor}
+                        hospitals={hospitals}
+                        selectedIds={selectedIds}
+                        onToggle={(id) => setSelectedIds(prev => prev.includes(id) ? prev.filter(x => x !== id) : [...prev, id])}
+                        onSetSelected={setSelectedIds}
+                        customMessage={customMessage}
+                        setCustomMessage={setCustomMessage}
+                      />
+                    ) : null}
+                  </div>
                 </div>
               }
               footer={step === "pick-hospitals" ? (
@@ -680,13 +683,13 @@ function Stepper({ step }: { step: Step }) {
   ];
   const currentIdx = steps.findIndex(s => s.key === step);
   return (
-    <div className="flex items-center gap-2 text-[11px] py-1">
+    <div className="flex items-center gap-1.5 text-[11px]">
       {steps.map((s, i) => (
         <span key={s.key} className={
-          i === currentIdx ? "font-medium text-teal-700" :
-          i <  currentIdx ? "text-emerald-600" : "text-muted-foreground"
+          i === currentIdx ? "font-semibold text-sidebar-foreground" :
+          i <  currentIdx ? "text-emerald-300" : "text-sidebar-foreground/45"
         }>
-          {s.label}{i < steps.length - 1 && " →"}
+          {s.label}{i < steps.length - 1 && <span className="text-sidebar-foreground/30"> → </span>}
         </span>
       ))}
     </div>
@@ -713,18 +716,18 @@ function DoctorPicker({ options, isLoading, onPick }: {
   }, [options, deferredQ]);
 
   return (
-    <div className="space-y-3">
-      <div className="relative">
+    <div className="flex h-full min-h-0 flex-col gap-2.5">
+      <div className="relative shrink-0">
         <Search className="absolute left-2 top-1/2 -translate-y-1/2 h-3.5 w-3.5 text-muted-foreground" />
         <Input
           autoFocus
           value={q}
           onChange={e => setQ(e.target.value)}
           placeholder={isLoading ? "Loading doctors..." : "Search by name, email, or speciality..."}
-          className="pl-7 text-[12px]"
+          className="pl-7 text-[12px] bg-white"
         />
       </div>
-      <div className="rounded-md border border-sidebar-border/40 bg-white max-h-[min(52vh,420px)] overflow-y-auto divide-y">
+      <div className="min-h-0 flex-1 rounded-md border border-sidebar-border/40 bg-white overflow-y-auto divide-y">
         {isLoading && <div className="px-4 py-6 text-[12px] text-muted-foreground text-center">Loading...</div>}
         {!isLoading && filtered.length === 0 && (
           <div className="px-4 py-6 text-[12px] text-muted-foreground text-center">No doctors match.</div>
@@ -750,7 +753,7 @@ function DoctorPicker({ options, isLoading, onPick }: {
           </button>
         ))}
       </div>
-      <div className="text-[10px] text-sidebar-foreground/60">
+      <div className="shrink-0 text-[10px] text-sidebar-foreground/60">
         Showing {filtered.length} of {options.length}. Refine search to narrow.
       </div>
     </div>
@@ -791,17 +794,17 @@ function HospitalPicker({
   };
 
   return (
-    <div className="space-y-3">
-      <div className="rounded-lg border border-sidebar-border/40 bg-white/95 p-2.5 shadow-sm">
+    <div className="flex h-full min-h-0 flex-col gap-2.5">
+      <div className="shrink-0 rounded-lg border border-sidebar-border/40 bg-white/95 p-2.5 shadow-sm">
         <div className="text-[10px] uppercase tracking-wider text-muted-foreground">Sending profile of</div>
         <div className="text-[13px] font-medium text-slate-800">{doctor.name}</div>
         <div className="text-[11px] text-muted-foreground">{doctor.speciality ?? "—"} · {doctor.email ?? doctor.phone ?? "no contact"}</div>
       </div>
-      <div className="relative">
+      <div className="relative shrink-0">
         <Search className="absolute left-2 top-1/2 -translate-y-1/2 h-3.5 w-3.5 text-muted-foreground" />
-        <Input value={q} onChange={e => setQ(e.target.value)} placeholder="Filter hospitals..." className="pl-7 text-[12px]" />
+        <Input value={q} onChange={e => setQ(e.target.value)} placeholder="Filter hospitals..." className="pl-7 text-[12px] bg-white" />
       </div>
-      <div className="flex items-center justify-between text-[11px]">
+      <div className="flex shrink-0 items-center justify-between text-[11px]">
         <div className="flex items-center gap-2">
           <button
             type="button"
@@ -816,7 +819,7 @@ function HospitalPicker({
         </div>
         {selectedIds.length > 1 && <Badge variant="outline" className="text-[10px] bg-amber-50 border-amber-200">BCC mode</Badge>}
       </div>
-      <div className="rounded-md border border-sidebar-border/40 bg-white max-h-[280px] overflow-y-auto divide-y">
+      <div className="min-h-0 flex-1 rounded-md border border-sidebar-border/40 bg-white overflow-y-auto divide-y">
         {filtered.length === 0 && (
           <div className="px-4 py-6 text-[12px] text-muted-foreground text-center">No hospitals match.</div>
         )}
@@ -835,12 +838,12 @@ function HospitalPicker({
           );
         })}
       </div>
-      <div>
+      <div className="shrink-0">
         <Label className="text-[10px] uppercase tracking-wider text-sidebar-foreground/70">Optional custom message</Label>
         <Textarea
           value={customMessage}
           onChange={e => setCustomMessage(e.target.value)}
-          className="mt-1 text-[12px] min-h-[60px] bg-white"
+          className="mt-1 text-[12px] min-h-[52px] bg-white"
           placeholder="Anything to add to the introduction — context, urgency, etc."
         />
       </div>

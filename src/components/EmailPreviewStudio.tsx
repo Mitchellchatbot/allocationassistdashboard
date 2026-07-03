@@ -59,6 +59,10 @@ interface LayoutProps {
   /** Right-pane content shown when there are no emails yet (e.g. the wizard's
    *  doctor/hospital steps show the template with unfilled placeholders). */
   emptyState?:       ReactNode;
+  /** Let the rail content fill the full height (one internal scroll area, e.g. a
+   *  picker list) instead of the default scroll-the-whole-rail behaviour. The
+   *  headerExtra's root should be `h-full flex flex-col` with a `flex-1` scroller. */
+  railFill?:         boolean;
 }
 
 // Tabs live in the green rail: full-width segmented pills for a few emails, a
@@ -101,7 +105,7 @@ function Switcher({ emails, active, onChange }: { emails: StudioEmail[]; active:
 }
 
 export function EmailPreviewStudioLayout({
-  emails, activeKey, onActiveKeyChange, title, subtitle, headerExtra, footer, onClose, hideSwitcher, mountActiveOnly, emptyState,
+  emails, activeKey, onActiveKeyChange, title, subtitle, headerExtra, footer, onClose, hideSwitcher, mountActiveOnly, emptyState, railFill,
 }: LayoutProps) {
   const [internal, setInternal] = useState(emails[0]?.key ?? "");
   const active = activeKey ?? internal;
@@ -151,17 +155,24 @@ export function EmailPreviewStudioLayout({
           </div>
         )}
 
-        {/* Scrolling controls */}
-        <div className="min-h-0 flex-1 overflow-y-auto px-3 py-2">
-          <div className="space-y-3">
+        {/* Rail content — either a single fill-height area (a picker, one
+            internal scroll) or the default scroll-the-whole-rail stack. */}
+        {railFill ? (
+          <div className="flex min-h-0 flex-1 flex-col px-3 py-2">
             {headerExtra}
-            {rendered.map(e => (
-              <div key={e.key} className={e.key === active ? "space-y-3" : "hidden"}>
-                {e.controls}
-              </div>
-            ))}
           </div>
-        </div>
+        ) : (
+          <div className="min-h-0 flex-1 overflow-y-auto px-3 py-2">
+            <div className="space-y-3">
+              {headerExtra}
+              {rendered.map(e => (
+                <div key={e.key} className={e.key === active ? "space-y-3" : "hidden"}>
+                  {e.controls}
+                </div>
+              ))}
+            </div>
+          </div>
+        )}
 
         {/* Action buttons pinned to the bottom of the rail. */}
         {footer && (
