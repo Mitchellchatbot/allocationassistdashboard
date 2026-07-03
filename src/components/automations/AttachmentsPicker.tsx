@@ -87,7 +87,7 @@ export function AttachmentsPicker({
       onDragLeave={(e) => { e.preventDefault(); setDragging(false); }}
       onDrop={(e) => { e.preventDefault(); setDragging(false); if (!disabled) handleFiles(e.dataTransfer.files); }}
       className={cn(
-        "rounded-md border bg-slate-50/40 p-2.5 space-y-2 transition-colors",
+        "rounded-lg border border-slate-200 bg-white p-2.5 space-y-2 shadow-sm transition-colors",
         dragging && "border-teal-400 border-dashed bg-teal-50",
       )}
     >

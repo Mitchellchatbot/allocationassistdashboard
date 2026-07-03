@@ -873,10 +873,10 @@ function HospitalRecipientsOverride({ hospitals, contacts, overrides, onOverride
   if (!rows.some(r => r.hc.length > 0)) return null;
 
   return (
-    <div className="rounded-md border border-teal-200 bg-teal-50/40 p-3 space-y-2">
-      <div className="text-[11px] font-medium text-teal-800 flex items-center gap-1.5 flex-wrap">
+    <div className="rounded-lg border border-sidebar-border/40 bg-white/95 p-3 space-y-2 shadow-sm text-slate-700">
+      <div className="text-[11px] font-medium text-teal-700 flex items-center gap-1.5 flex-wrap">
         <Mail className="h-3.5 w-3.5" /> Hospital recipient{rows.length > 1 ? "s" : ""}
-        <span className="text-[10px] font-normal text-teal-700/70">— auto-picked by each hospital's setting; override here for this send only</span>
+        <span className="text-[10px] font-normal text-muted-foreground">— auto-picked by each hospital's setting; override here for this send only</span>
       </div>
       <div className="space-y-1.5">
         {rows.map(({ h, hc, resolved, override }) => (
@@ -1224,28 +1224,19 @@ function PreviewConfirm({
             : "Click into either email to tweak the wording before it sends."}
       </div>
 
-      {/* Send now vs schedule for later (Amir #5). text-slate-700 baseline so the
-          date/time inputs on this white card aren't white-on-white. */}
-      <div className="rounded-lg border border-sidebar-border/40 bg-white/95 p-2.5 space-y-2 shadow-sm text-slate-700">
-        <div className="flex items-center gap-1 rounded-lg bg-slate-100 p-0.5 text-[12px] w-fit">
-          <button type="button" onClick={() => setSendMode("now")} className={`inline-flex items-center gap-1.5 rounded-md px-3 py-1 font-medium transition-colors ${sendMode === "now" ? "bg-white shadow-sm text-teal-700" : "text-slate-500"}`}>
-            <Send className="h-3.5 w-3.5" /> Send now
-          </button>
-          <button type="button" onClick={() => setSendMode("later")} className={`inline-flex items-center gap-1.5 rounded-md px-3 py-1 font-medium transition-colors ${sendMode === "later" ? "bg-white shadow-sm text-teal-700" : "text-slate-500"}`}>
-            <Clock className="h-3.5 w-3.5" /> Schedule for later
-          </button>
-        </div>
-        {sendMode === "later" && (
+      {/* Schedule details — only when "Schedule for later" is picked in the
+          footer action; the now-vs-later choice itself lives in the footer. */}
+      {sendMode === "later" && (
+        <div className="rounded-lg border border-sidebar-border/40 bg-white/95 p-2.5 space-y-2 shadow-sm text-slate-700">
+          <div className="flex items-center gap-1.5 text-[11px] font-medium text-teal-700"><Clock className="h-3.5 w-3.5" /> Schedule this send</div>
           <div className="flex items-end gap-2 flex-wrap">
-            <div className="space-y-1"><span className="text-[10px] uppercase tracking-wider text-muted-foreground">Date</span><Input type="date" value={schedDate} onChange={e => setSchedDate(e.target.value)} className="h-8 text-[12px] w-[150px]" /></div>
-            <div className="space-y-1"><span className="text-[10px] uppercase tracking-wider text-muted-foreground">Time (your local time)</span><Input type="time" value={schedTime} onChange={e => setSchedTime(e.target.value)} className="h-8 text-[12px] w-[120px]" /></div>
+            <div className="space-y-1"><span className="text-[10px] uppercase tracking-wider text-muted-foreground">Date</span><Input type="date" value={schedDate} onChange={e => setSchedDate(e.target.value)} className="h-8 text-[12px] w-[150px] bg-white text-slate-800" /></div>
+            <div className="space-y-1"><span className="text-[10px] uppercase tracking-wider text-muted-foreground">Time (your local time)</span><Input type="time" value={schedTime} onChange={e => setSchedTime(e.target.value)} className="h-8 text-[12px] w-[120px] bg-white text-slate-800" /></div>
             <div className="pb-1.5">{schedValid ? <GulfClock when={schedWhen} /> : <span className="text-[10px] text-rose-600">Enter a valid date &amp; time</span>}</div>
           </div>
-        )}
-        {sendMode === "later" && (
           <p className="text-[10px] text-teal-700">Lands in the scheduled queue and sends automatically at the time you picked (your local time, checked every ~5 min). Manage it any time under <strong>Batches → Scheduled profile sends</strong>.</p>
-        )}
-      </div>
+        </div>
+      )}
 
       {hospitals.some(h => !h.primary_recruiter_email) && (
         <div className="rounded-md border border-amber-200 bg-amber-50 p-2 text-[11px] text-amber-900">
@@ -1362,21 +1353,41 @@ function PreviewConfirm({
     },
   ];
 
-  const footer = (
+  // The now-vs-schedule choice IS the send action (no separate Queue button):
+  // in the default state, "Schedule for later" flips to scheduling mode
+  // (revealing the date/time card) and "Send now" fires immediately; once
+  // scheduling, the primary becomes "Schedule N sends" with a way back.
+  const sendCount = `${hospitals.length} send${hospitals.length === 1 ? "" : "s"}`;
+  const footer = sendMode === "later" ? (
     <>
       <Button variant="outline" onClick={onBack} disabled={submitting} className="mr-auto">
         <ChevronLeft className="h-3.5 w-3.5 mr-1" /> Back
       </Button>
+      <Button variant="ghost" onClick={() => setSendMode("now")} disabled={submitting} className="text-slate-600 hover:text-slate-800">
+        <Send className="h-3.5 w-3.5 mr-1" /> Send now instead
+      </Button>
       <Button
         onClick={submit}
-        disabled={submitting || anyDraft || (sendMode === "later" && !schedValid)}
-        title={anyDraft ? "Pick a finished template or edit the copy first — the selected template still has placeholder text." : (sendMode === "later" && !schedValid) ? "Enter a valid date and time first." : undefined}
+        disabled={submitting || anyDraft || !schedValid}
+        title={anyDraft ? "Pick a finished template or edit the copy first." : !schedValid ? "Enter a valid date and time first." : undefined}
       >
-        {submitting
-          ? (sendMode === "later" ? "Scheduling..." : "Queueing...")
-          : sendMode === "later"
-            ? <><Clock className="h-3.5 w-3.5 mr-1.5" /> Schedule {hospitals.length} send{hospitals.length === 1 ? "" : "s"}</>
-            : <><Send className="h-3.5 w-3.5 mr-1.5" /> Queue {hospitals.length} send{hospitals.length === 1 ? "" : "s"}</>}
+        {submitting ? "Scheduling…" : <><Clock className="h-3.5 w-3.5 mr-1.5" /> Schedule {sendCount}</>}
+      </Button>
+    </>
+  ) : (
+    <>
+      <Button variant="outline" onClick={onBack} disabled={submitting} className="mr-auto">
+        <ChevronLeft className="h-3.5 w-3.5 mr-1" /> Back
+      </Button>
+      <Button variant="outline" onClick={() => setSendMode("later")} disabled={submitting}>
+        <Clock className="h-3.5 w-3.5 mr-1.5" /> Schedule for later
+      </Button>
+      <Button
+        onClick={submit}
+        disabled={submitting || anyDraft}
+        title={anyDraft ? "Pick a finished template or edit the copy first — the selected template still has placeholder text." : undefined}
+      >
+        {submitting ? "Sending…" : <><Send className="h-3.5 w-3.5 mr-1.5" /> Send now · {sendCount}</>}
       </Button>
     </>
   );
