@@ -91,15 +91,12 @@ export function AttachmentsPicker({
         dragging && "border-teal-400 border-dashed bg-teal-50",
       )}
     >
-      <div className="flex items-center justify-between">
-        <div className="text-[10px] uppercase tracking-wider text-muted-foreground flex items-center gap-1.5">
+      <div className="flex items-center justify-between gap-2">
+        <span className="text-[10px] uppercase tracking-wider text-muted-foreground flex items-center gap-1.5 shrink-0">
           <Paperclip className="h-3 w-3" /> Attachments
-          <span className="normal-case tracking-normal text-[10.5px] text-muted-foreground/80">
-            — {hint ?? "CV, logbook, etc. — attached to the hospital email only"}
-          </span>
-        </div>
+        </span>
         <Button
-          type="button" variant="outline" size="sm" className="h-7 text-[11px]"
+          type="button" variant="outline" size="sm" className="h-7 text-[11px] shrink-0"
           disabled={disabled || uploading}
           onClick={() => inputRef.current?.click()}
         >
@@ -112,6 +109,9 @@ export function AttachmentsPicker({
           accept=".pdf,.doc,.docx,.png,.jpg,.jpeg"
           onChange={(e) => handleFiles(e.target.files)}
         />
+      </div>
+      <div className="text-[10.5px] leading-snug text-muted-foreground/80">
+        — {hint ?? "CV, logbook, etc. — attached to the hospital email only"}
       </div>
 
       {attachments.length === 0 ? (

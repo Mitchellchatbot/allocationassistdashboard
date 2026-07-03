@@ -1358,20 +1358,18 @@ function PreviewConfirm({
   // (revealing the date/time card) and "Send now" fires immediately; once
   // scheduling, the primary becomes "Schedule N sends" with a way back.
   const sendCount = `${hospitals.length} send${hospitals.length === 1 ? "" : "s"}`;
+  // Icon-only actions: clock = schedule, paper-plane = send now.
   const footer = sendMode === "later" ? (
     <>
       <Button variant="outline" onClick={onBack} disabled={submitting} className="mr-auto">
         <ChevronLeft className="h-3.5 w-3.5 mr-1" /> Back
       </Button>
-      <Button variant="ghost" onClick={() => setSendMode("now")} disabled={submitting} className="text-slate-600 hover:text-slate-800">
-        <Send className="h-3.5 w-3.5 mr-1" /> Send now instead
+      <Button variant="ghost" size="icon" onClick={() => setSendMode("now")} disabled={submitting} className="text-slate-600 hover:text-slate-800" title={`Send now instead · ${sendCount}`}>
+        <Send className="h-4 w-4" />
       </Button>
-      <Button
-        onClick={submit}
-        disabled={submitting || anyDraft || !schedValid}
-        title={anyDraft ? "Pick a finished template or edit the copy first." : !schedValid ? "Enter a valid date and time first." : undefined}
-      >
-        {submitting ? "Scheduling…" : <><Clock className="h-3.5 w-3.5 mr-1.5" /> Schedule {sendCount}</>}
+      <Button size="icon" onClick={submit} disabled={submitting || anyDraft || !schedValid}
+        title={anyDraft ? "Pick a finished template or edit the copy first." : !schedValid ? "Enter a valid date and time first." : `Schedule ${sendCount}`}>
+        {submitting ? <Loader2 className="h-4 w-4 animate-spin" /> : <Clock className="h-4 w-4" />}
       </Button>
     </>
   ) : (
@@ -1379,15 +1377,12 @@ function PreviewConfirm({
       <Button variant="outline" onClick={onBack} disabled={submitting} className="mr-auto">
         <ChevronLeft className="h-3.5 w-3.5 mr-1" /> Back
       </Button>
-      <Button variant="outline" onClick={() => setSendMode("later")} disabled={submitting}>
-        <Clock className="h-3.5 w-3.5 mr-1.5" /> Schedule for later
+      <Button variant="outline" size="icon" onClick={() => setSendMode("later")} disabled={submitting} title="Schedule for later">
+        <Clock className="h-4 w-4" />
       </Button>
-      <Button
-        onClick={submit}
-        disabled={submitting || anyDraft}
-        title={anyDraft ? "Pick a finished template or edit the copy first — the selected template still has placeholder text." : undefined}
-      >
-        {submitting ? "Sending…" : <><Send className="h-3.5 w-3.5 mr-1.5" /> Send now · {sendCount}</>}
+      <Button size="icon" onClick={submit} disabled={submitting || anyDraft}
+        title={anyDraft ? "Pick a finished template or edit the copy first — the selected template still has placeholder text." : `Send now · ${sendCount}`}>
+        {submitting ? <Loader2 className="h-4 w-4 animate-spin" /> : <Send className="h-4 w-4" />}
       </Button>
     </>
   );
