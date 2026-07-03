@@ -279,6 +279,8 @@ export function useSendBatchNow() {
         // Edits from the preview, shipped verbatim by send-batch instead of
         // re-rendering the template. Omit/blank → template version is sent.
         subjectOverride?: string; htmlOverride?: string; textOverride?: string;
+        // Extra CC / BCC from the preview, added on top of the hospital BCC list.
+        ccOverride?: string[]; bccOverride?: string[];
       },
     ): Promise<{ ok: boolean; bcc_count?: number; doctor_count?: number; message_id?: string; error?: string }> => {
       // Accept either a bare id (legacy callers) or an object with a force
@@ -289,6 +291,8 @@ export function useSendBatchNow() {
         ...(input.subjectOverride ? { subject_override: input.subjectOverride } : {}),
         ...(input.htmlOverride    ? { html_override:    input.htmlOverride }    : {}),
         ...(input.textOverride    ? { text_override:    input.textOverride }    : {}),
+        ...(input.ccOverride?.length  ? { cc_override:  input.ccOverride }  : {}),
+        ...(input.bccOverride?.length ? { bcc_override: input.bccOverride } : {}),
       };
       const { data, error } = await invokeWithTimeout<{ ok: boolean; bcc_count?: number; doctor_count?: number; message_id?: string; error?: string }>(
         "send-batch", { batch_id: batchId, force, ...overrides }, 90_000);

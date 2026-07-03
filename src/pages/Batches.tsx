@@ -26,6 +26,7 @@ import { useDebounce } from "@/hooks/use-zoho-leads";
 import { MatchScoreChip, MatchReasons } from "@/components/DoctorVacancyMatches";
 import { EditableEmailPreview } from "@/components/EditableEmailPreview";
 import { EmailPreviewStudio } from "@/components/EmailPreviewStudio";
+import { CcBccPicker } from "@/components/automations/CcBccPicker";
 import { AttachmentsPicker } from "@/components/automations/AttachmentsPicker";
 import type { EmailAttachment } from "@/lib/email-attachments";
 import { GulfClock, composeGulfDateTime } from "@/components/GulfClock";
@@ -963,6 +964,8 @@ function BatchDialog({ target, onTargetChange, batches, suggestedSpecialty }: {
   const [editSubject, setEditSubject] = useState("");
   const [editHtml, setEditHtml] = useState("");
   const [previewResetTick, setPreviewResetTick] = useState(0);
+  const [batchCc, setBatchCc] = useState<string[]>([]);
+  const [batchBcc, setBatchBcc] = useState<string[]>([]);
   // True once the team has actually changed the subject or body away from the
   // template render — gates the override on send and the "edited" UI hints.
   const batchEdited = !!emailPreview && (editSubject !== emailPreview.subject || editHtml !== emailPreview.html);
@@ -1496,6 +1499,7 @@ function BatchDialog({ target, onTargetChange, batches, suggestedSpecialty }: {
                   try {
                     const p = await previewMut.mutateAsync(batch.status === "sent" ? { batchId: batch.id, force: true } : batch.id);
                     setEmailPreview({ subject: p.subject, html: p.html, text: p.text, bcc_count: p.bcc_count });
+                    setBatchCc([]); setBatchBcc([]);
                     setEditSubject(p.subject);
                     setEditHtml(p.html);
                     setPreviewResetTick(t => t + 1);
@@ -1525,14 +1529,20 @@ function BatchDialog({ target, onTargetChange, batches, suggestedSpecialty }: {
       title="Batch email preview"
       subtitle={typeof emailPreview?.bcc_count === "number" ? `BCC to ${emailPreview.bcc_count} hospital${emailPreview.bcc_count === 1 ? "" : "s"}` : undefined}
       headerExtra={
-        <div className="rounded-lg border border-sidebar-border/40 bg-white/95 p-2.5 text-[11px] text-slate-500 space-y-1 shadow-sm">
-          <div>
-            {batchEdited
-              ? <span className="font-medium text-teal-700">Edited — your version sends, not the template.</span>
-              : "What you see is what goes out — edit the subject or body in the preview before sending."}
+        <div className="space-y-2">
+          <div className="rounded-lg border border-sidebar-border/40 bg-white/95 p-2.5 text-[11px] text-slate-500 space-y-1 shadow-sm">
+            <div>
+              {batchEdited
+                ? <span className="font-medium text-teal-700">Edited — your version sends, not the template.</span>
+                : "What you see is what goes out — edit the subject or body in the preview before sending."}
+            </div>
+            {typeof emailPreview?.bcc_count === "number" && <div>BCC to <span className="text-slate-700">{emailPreview.bcc_count}</span> hospital{emailPreview.bcc_count === 1 ? "" : "s"}.</div>}
+            {batch && (batch.attachments?.length ?? 0) > 0 && <div>{batch.attachments.length} attachment{batch.attachments.length === 1 ? "" : "s"} ride this send.</div>}
           </div>
-          {typeof emailPreview?.bcc_count === "number" && <div>BCC to <span className="text-slate-700">{emailPreview.bcc_count}</span> hospital{emailPreview.bcc_count === 1 ? "" : "s"}.</div>}
-          {batch && (batch.attachments?.length ?? 0) > 0 && <div>{batch.attachments.length} attachment{batch.attachments.length === 1 ? "" : "s"} ride this send.</div>}
+          <div className="rounded-lg border border-sidebar-border/40 bg-white/95 p-2 shadow-sm">
+            <div className="mb-1 px-0.5 text-[10px] text-slate-500">Extra recipients (on top of the hospital BCC):</div>
+            <CcBccPicker cc={batchCc} bcc={batchBcc} onCcChange={setBatchCc} onBccChange={setBatchBcc} disabled={sendNow.isPending} />
+          </div>
         </div>
       }
       emails={emailPreview ? [{
@@ -1568,9 +1578,11 @@ function BatchDialog({ target, onTargetChange, batches, suggestedSpecialty }: {
               if (batch.status === "sent"
                 && !confirm(`Resend this batch? Same ${picked.length} doctor${picked.length === 1 ? "" : "s"} will go out again.`)) return;
               try {
-                const overrides = batchEdited
-                  ? { subjectOverride: editSubject, htmlOverride: editHtml }
-                  : {};
+                const overrides = {
+                  ...(batchEdited ? { subjectOverride: editSubject, htmlOverride: editHtml } : {}),
+                  ...(batchCc.length  ? { ccOverride:  batchCc }  : {}),
+                  ...(batchBcc.length ? { bccOverride: batchBcc } : {}),
+                };
                 const res = await sendNow.mutateAsync(
                   batch.status === "sent"
                     ? { batchId: batch.id, force: true, ...overrides }

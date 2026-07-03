@@ -262,6 +262,10 @@ Deno.serve(async (req: Request) => {
     // forwarded to auto-continue sends, so a bundled follow-up (e.g. the doctor
     // heads-up after the hospital intro) still uses its own template.
     subject_override?: string; html_override?: string; text_override?: string;
+    // Per-send CC / BCC from the preview's CcBccPicker. When present these win
+    // over the run's metadata.cc_override / bcc_override, so any flow email can
+    // loop in extra recipients at send time.
+    cc_override?: string[]; bcc_override?: string[];
     // One-shot attachments for THIS send (already uploaded to the public
     // email-attachments bucket — entries are { filename, path:<https URL> }).
     // Used by FlowSendPreviewDialog so any flow email can carry a CV/doc. Only
@@ -866,7 +870,9 @@ Deno.serve(async (req: Request) => {
   // BCC list — explicit override from the dispatcher wins; otherwise
   // default to sender's mailbox under personal routing. TEST_OVERRIDE
   // bypasses BCC entirely so test runs don't double-deliver.
-  const bccOverrideRaw = (md.bcc_override as unknown);
+  // Body wins over run metadata so the preview's CcBccPicker can add recipients
+  // at send time; falls back to whatever was stashed on the run.
+  const bccOverrideRaw = (body.bcc_override ?? md.bcc_override) as unknown;
   const bccOverride: string[] | null = Array.isArray(bccOverrideRaw)
     ? (bccOverrideRaw as unknown[])
         .map(v => typeof v === "string" ? v.trim().toLowerCase() : "")
@@ -895,7 +901,7 @@ Deno.serve(async (req: Request) => {
 
   // Explicit CC override from the dispatcher (e.g. CC a manager on the send).
   // Merged with any test CCs, deduped, and never CC the To.
-  const ccOverrideRaw = (md.cc_override as unknown);
+  const ccOverrideRaw = (body.cc_override ?? md.cc_override) as unknown;
   const ccOverride: string[] = Array.isArray(ccOverrideRaw)
     ? (ccOverrideRaw as unknown[])
         .map(v => typeof v === "string" ? v.trim() : "")

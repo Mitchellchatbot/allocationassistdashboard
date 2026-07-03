@@ -90,6 +90,9 @@ Deno.serve(async (req: Request) => {
     // a dry run always returns the freshly-rendered template so "Reset to
     // template" works by simply re-previewing.
     subject_override?: string; html_override?: string; text_override?: string;
+    // Extra recipients from the preview's CcBccPicker — added ON TOP of the
+    // hospital BCC list (bcc) / shown to everyone (cc).
+    cc_override?: string[]; bcc_override?: string[];
   };
   try { body = await req.json(); } catch { return json({ ok: false, error: "Invalid JSON body" }, 400); }
   if (!body.batch_id) return json({ ok: false, error: "batch_id required" }, 400);
@@ -349,8 +352,15 @@ Deno.serve(async (req: Request) => {
   const toAddress  = TEST_OVERRIDE_LIST[0] || MAIL_FROM.replace(/.*<|>.*/g, "");
   // No automatic CC any more. Strip Ammar from the BCC list (he may still be in
   // the test-override env var) so he never receives a batch send.
-  const testCc: string[] | undefined = undefined;
-  const bccList    = bccListRaw.filter(a => a.toLowerCase() !== EXCLUDED_RECIPIENT);
+  // Extra CC / BCC from the preview's CcBccPicker (added on top of the hospital
+  // BCC list). Deduped, valid emails only, never the excluded recipient.
+  const clean = (arr: unknown): string[] => Array.isArray(arr)
+    ? [...new Set((arr as unknown[]).map(v => typeof v === "string" ? v.trim() : "").filter(v => v.includes("@") && v.toLowerCase() !== EXCLUDED_RECIPIENT))]
+    : [];
+  const extraBcc = clean(body.bcc_override);
+  const extraCc  = clean(body.cc_override);
+  const bccList    = [...new Set([...bccListRaw.filter(a => a.toLowerCase() !== EXCLUDED_RECIPIENT), ...extraBcc])];
+  const testCc: string[] | undefined = extraCc.length ? extraCc : undefined;
 
   // ── Attachments (CVs / logbooks) ──────────────────────────────────────
   // Stored on the batch row by the Batches dialog as { filename, path, … };

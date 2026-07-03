@@ -23,6 +23,7 @@ import { toast } from "sonner";
 import { EditableEmailPreview } from "@/components/EditableEmailPreview";
 import { EmailPreviewStudio, type StudioEmail } from "@/components/EmailPreviewStudio";
 import { AttachmentsPicker } from "@/components/automations/AttachmentsPicker";
+import { CcBccPicker } from "@/components/automations/CcBccPicker";
 import type { EmailAttachment } from "@/lib/email-attachments";
 
 interface FlowPreview { from: string; to: string; subject: string; html: string; text?: string }
@@ -35,6 +36,9 @@ export interface EmailOverrides {
   subject_override?: string;
   html_override?: string;
   attachments?: Array<{ filename: string; path: string }>;
+  /** Extra recipients for THIS send — send-flow-email reads these from the body. */
+  cc_override?: string[];
+  bcc_override?: string[];
 }
 
 /** dry-run preview with a hard timeout — supabase.functions.invoke can hang on
@@ -89,6 +93,8 @@ export function FlowSendPreviewDialog({
   const [editHtml,    setEditHtml]    = useState("");
   const [resetTick,   setResetTick]   = useState(0);
   const [attachments, setAttachments] = useState<EmailAttachment[]>([]);
+  const [cc,  setCc]  = useState<string[]>([]);
+  const [bcc, setBcc] = useState<string[]>([]);
 
   const edited = !!preview && (editSubject !== preview.subject || editHtml !== preview.html);
 
@@ -96,7 +102,7 @@ export function FlowSendPreviewDialog({
   useEffect(() => {
     if (!open || !runId) { setPreview(null); setErr(null); return; }
     let cancelled = false;
-    setLoading(true); setErr(null); setPreview(null); setAttachments([]);
+    setLoading(true); setErr(null); setPreview(null); setAttachments([]); setCc([]); setBcc([]);
     fetchPreview(runId, previewStage, previewMetadata)
       .then(p => {
         if (cancelled) return;
@@ -119,6 +125,8 @@ export function FlowSendPreviewDialog({
       const overrides: EmailOverrides = {
         ...(edited ? { subject_override: editSubject, html_override: editHtml } : {}),
         ...(attachments.length ? { attachments: attachments.map(a => ({ filename: a.filename, path: a.path })) } : {}),
+        ...(cc.length  ? { cc_override:  cc }  : {}),
+        ...(bcc.length ? { bcc_override: bcc } : {}),
       };
       await onConfirm(Object.keys(overrides).length ? overrides : undefined);
       onClose();
@@ -132,12 +140,19 @@ export function FlowSendPreviewDialog({
   const ready = !!preview && !loading && !err;
 
   const headerExtra = (
-    <div className="rounded-lg border border-sidebar-border/40 bg-white/95 p-2.5 text-[11px] text-slate-500 shadow-sm">
-      {edited
-        ? <span className="font-medium text-teal-700">Edited — your version sends, not the template.</span>
-        : preview
-          ? <>Review before sending{preview.to ? <> · To <span className="text-slate-700">{preview.to}</span></> : null} — edit the subject or body in the preview if needed.</>
-          : "What goes out — review before sending."}
+    <div className="space-y-2">
+      <div className="rounded-lg border border-sidebar-border/40 bg-white/95 p-2.5 text-[11px] text-slate-500 shadow-sm">
+        {edited
+          ? <span className="font-medium text-teal-700">Edited — your version sends, not the template.</span>
+          : preview
+            ? <>Review before sending{preview.to ? <> · To <span className="text-slate-700">{preview.to}</span></> : null} — edit the subject or body in the preview if needed.</>
+            : "What goes out — review before sending."}
+      </div>
+      {ready && (
+        <div className="rounded-lg border border-sidebar-border/40 bg-white/95 p-2 shadow-sm">
+          <CcBccPicker cc={cc} bcc={bcc} onCcChange={setCc} onBccChange={setBcc} disabled={sending} />
+        </div>
+      )}
     </div>
   );
 
