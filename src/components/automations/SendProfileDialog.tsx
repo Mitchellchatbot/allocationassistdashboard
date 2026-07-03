@@ -1,5 +1,4 @@
 import { useCallback, useDeferredValue, useEffect, useMemo, useRef, useState } from "react";
-import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription, DialogFooter } from "@/components/ui/dialog";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
@@ -21,8 +20,10 @@ import { useEmailTemplates, renderTemplate } from "@/hooks/use-email-templates";
 import { useDoctorProfile, useDoctorProfiles, profileToTokens, calcCompletion, type DoctorProfile } from "@/hooks/use-doctor-profiles";
 import { useWpCandidateForDoctor, usePublishedWpCandidates, wpCandidateToTokens, normalizePhone, type WpCandidate } from "@/hooks/use-wp-candidates";
 import { useZohoData, type ZohoDoctorOnBoard, type ZohoLead } from "@/hooks/use-zoho-data";
+import * as DialogPrimitive from "@radix-ui/react-dialog";
 import { EditableEmailPreview } from "@/components/EditableEmailPreview";
-import { EmailPreviewStudio, type StudioEmail } from "@/components/EmailPreviewStudio";
+import { EmailPreviewStudioLayout, type StudioEmail } from "@/components/EmailPreviewStudio";
+import { EmailPreview } from "@/components/EmailPreview";
 import { EmailFrame } from "@/components/EmailFrame";
 import { wrapBodyForSend } from "@/lib/email-preview";
 import { type EmailAttachment } from "@/lib/email-attachments";
@@ -274,6 +275,53 @@ function SendProfileDialogBody({ onClose }: { onClose: () => void }) {
     ?? templates.find(t => t.key === "profile_sent_hospital");
   const doctorTemplate   = templates.find(t => t.key === doctorTemplateKey)
     ?? templates.find(t => t.key === "profile_sent_doctor");
+
+  // ── Live-placeholder preview for the doctor/hospital picker steps ──────────
+  // The right pane always shows the two templates; unknown tokens stay as
+  // {{placeholders}} and fill in as a doctor / hospital is chosen. Lightweight
+  // (no WP-candidate merge — that richer render happens at the preview step).
+  const [wizardTab, setWizardTab] = useState<string>("hospital");
+  const previewVars = useMemo(() => {
+    const v: Record<string, string> = {
+      signature: PREVIEW_SIGNATURE_HTML, signature_text: PREVIEW_SIGNATURE_TEXT, logo_header: "",
+    };
+    if (selectedDoctor) {
+      v.doctor_name       = selectedDoctor.name.replace(/^\s*Dr\.?\s+/i, "");
+      v.doctor_email      = selectedDoctor.email ?? "";
+      v.doctor_phone      = selectedDoctor.phone ?? "";
+      v.doctor_speciality = selectedDoctor.speciality ?? "";
+      v.profile_link      = `https://allocationassist.com/shared-profile/${selectedDoctor.id}`;
+    }
+    const h = selectedHospitals[0];
+    if (h) {
+      v.hospital_name         = h.name;
+      v.hospital_contact_name = (h.greet_with_contact_name && h.primary_contact_name?.trim()) ? h.primary_contact_name : h.name;
+      v.city                  = h.city ?? "";
+      v.country               = h.country ?? "";
+    }
+    v.doctor_card_html      = previewDoctorCardHtml(v);
+    v.doctor_row_table_html = previewDoctorRowTableHtml(v);
+    v.doctor_card_image_url = "";
+    return v;
+  }, [selectedDoctor, selectedHospitals]);
+
+  const wizardEmails: StudioEmail[] = useMemo(() => {
+    const hSubj = renderTemplate(hospitalTemplate?.subject ?? "Candidate introduction — {{doctor_name}}", previewVars);
+    const hHtml = wrapBodyForSend(renderTemplate(hospitalTemplate?.body_html ?? hospitalTemplate?.body_text ?? "", previewVars) + (customMessage ? `\n\n--- Custom note ---\n${customMessage}` : ""));
+    const dSubj = renderTemplate(doctorTemplate?.subject ?? "Your profile has been sent to {{hospital_name}}", previewVars);
+    const dHtml = wrapBodyForSend(renderTemplate(doctorTemplate?.body_html ?? doctorTemplate?.body_text ?? "", previewVars));
+    const pane = (subject: string, html: string) => (
+      <div className="flex min-h-0 w-full flex-1 flex-col overflow-hidden rounded-md">
+        <div className="min-h-0 flex-1 overflow-auto">
+          <EmailPreview subject={subject} html={html} />
+        </div>
+      </div>
+    );
+    return [
+      { key: "hospital", label: "Hospital intro", subLabel: selectedHospitals[0]?.name ?? "pick a hospital", preview: pane(hSubj, hHtml) },
+      { key: "doctor",   label: "Doctor email",   subLabel: selectedDoctor?.email ?? "pick a doctor",        preview: pane(dSubj, dHtml) },
+    ];
+  }, [hospitalTemplate, doctorTemplate, previewVars, customMessage, selectedHospitals, selectedDoctor]);
 
   const handleConfirm = async (
     stageOverrides?: Record<string, SendOverrides>,
@@ -530,79 +578,97 @@ function SendProfileDialogBody({ onClose }: { onClose: () => void }) {
   // The preview step is its own full-screen studio modal (90×90, controls
   // left / email right). Render it directly — not inside the compact picker
   // dialog — so it owns the whole viewport.
-  if (step === "preview-confirm" && selectedDoctor) {
-    return (
-      <PreviewConfirm
-        onClose={onClose}
-            doctor={selectedDoctor}
-            hospitals={selectedHospitals}
-            customMessage={customMessage}
-            hospitalSubject={hospitalTemplate?.subject ?? "Candidate introduction — {{doctor_name}}"}
-            hospitalBody={hospitalTemplate?.body_html ?? hospitalTemplate?.body_text ?? ""}
-            doctorSubject={doctorTemplate?.subject ?? "Your profile has been sent to {{hospital_name}}"}
-            doctorBody={doctorTemplate?.body_html ?? doctorTemplate?.body_text ?? ""}
-            onBack={() => setStep("pick-hospitals")}
-            onConfirm={handleConfirm}
-            submitting={submitting}
-            bccList={bccList}
-            setBccList={setBccList}
-            templates={templates}
-            hospitalTemplateKey={hospitalTemplateKey}
-            doctorTemplateKey={doctorTemplateKey}
-            setDoctorTemplateKey={setDoctorTemplateKey}
-            onSaveDefault={saveDefaultTemplate}
-            hospitalContacts={hospitalContacts}
-            recipientOverrides={recipientOverrides}
-            onOverrideRecipient={(id, email) => setRecipientOverrides(prev => {
-              const next = { ...prev };
-              if (email) next[id] = email; else delete next[id];
-              return next;
-            })}
-            cardImageUrl={cardImageUrl}
-            onSetCardImage={setCardImageUrl}
-          />
-    );
-  }
-
-  // Doctor / hospital picker steps — compact centered dialog.
+  // One persistent modal frame for the whole flow — the inner content swaps per
+  // step, so stepping between pick-doctor → pick-hospitals → preview never
+  // re-animates the overlay. The 30% green rail carries the wizard (pickers,
+  // then the preview controls); the right pane always shows the templates.
   return (
-    <Dialog open onOpenChange={(v) => !v && onClose()}>
-      <DialogContent className="w-[90vw] max-w-[1100px] sm:max-w-[1100px] max-h-[92vh] overflow-x-hidden overflow-y-auto">
-        <DialogHeader>
-          <DialogTitle className="flex items-center gap-2">
-            <Send className="h-4 w-4 text-teal-600" /> Send Profile to Hospital
-          </DialogTitle>
-          <DialogDescription className="text-[12px]">
-            Triggers Flow 2. Picks a doctor, selects hospital(s), and queues the introduction emails.
-            Multi-hospital sends BCC every hospital — they don't see each other.
-          </DialogDescription>
-        </DialogHeader>
-
-        <Stepper step={step} />
-
-        {step === "pick-doctor" && (
-          <DoctorPicker
-            options={doctorOptions}
-            isLoading={zohoLoading || !completionReady}
-            onPick={(d) => { setSelectedDoctor(d); setStep("pick-hospitals"); }}
-          />
-        )}
-
-        {step === "pick-hospitals" && selectedDoctor && (
-          <HospitalPicker
-            doctor={selectedDoctor}
-            hospitals={hospitals}
-            selectedIds={selectedIds}
-            onToggle={(id) => setSelectedIds(prev => prev.includes(id) ? prev.filter(x => x !== id) : [...prev, id])}
-            onSetSelected={setSelectedIds}
-            onContinue={() => setStep("preview-confirm")}
-            onBack={() => setStep("pick-doctor")}
-            customMessage={customMessage}
-            setCustomMessage={setCustomMessage}
-          />
-        )}
-      </DialogContent>
-    </Dialog>
+    <DialogPrimitive.Root open onOpenChange={(v) => !v && onClose()}>
+      <DialogPrimitive.Portal>
+        <DialogPrimitive.Overlay className="fixed inset-0 z-50 bg-slate-950/60 backdrop-blur-sm data-[state=open]:animate-in data-[state=closed]:animate-out data-[state=open]:fade-in-0 data-[state=closed]:fade-out-0" />
+        <DialogPrimitive.Content
+          aria-describedby={undefined}
+          className="fixed left-1/2 top-1/2 z-50 h-[92vh] w-[93vw] -translate-x-1/2 -translate-y-1/2 overflow-hidden rounded-xl bg-white shadow-2xl outline-none data-[state=open]:animate-in data-[state=closed]:animate-out data-[state=open]:fade-in-0 data-[state=closed]:fade-out-0 data-[state=open]:zoom-in-95 data-[state=closed]:zoom-out-95 duration-200"
+        >
+          <DialogPrimitive.Title className="sr-only">Send Profile to Hospital</DialogPrimitive.Title>
+          {step === "preview-confirm" && selectedDoctor ? (
+            <PreviewConfirm
+              onClose={onClose}
+              doctor={selectedDoctor}
+              hospitals={selectedHospitals}
+              customMessage={customMessage}
+              hospitalSubject={hospitalTemplate?.subject ?? "Candidate introduction — {{doctor_name}}"}
+              hospitalBody={hospitalTemplate?.body_html ?? hospitalTemplate?.body_text ?? ""}
+              doctorSubject={doctorTemplate?.subject ?? "Your profile has been sent to {{hospital_name}}"}
+              doctorBody={doctorTemplate?.body_html ?? doctorTemplate?.body_text ?? ""}
+              onBack={() => setStep("pick-hospitals")}
+              onConfirm={handleConfirm}
+              submitting={submitting}
+              bccList={bccList}
+              setBccList={setBccList}
+              templates={templates}
+              hospitalTemplateKey={hospitalTemplateKey}
+              doctorTemplateKey={doctorTemplateKey}
+              setDoctorTemplateKey={setDoctorTemplateKey}
+              onSaveDefault={saveDefaultTemplate}
+              hospitalContacts={hospitalContacts}
+              recipientOverrides={recipientOverrides}
+              onOverrideRecipient={(id, email) => setRecipientOverrides(prev => {
+                const next = { ...prev };
+                if (email) next[id] = email; else delete next[id];
+                return next;
+              })}
+              cardImageUrl={cardImageUrl}
+              onSetCardImage={setCardImageUrl}
+            />
+          ) : (
+            <EmailPreviewStudioLayout
+              title="Send Profile to Hospital"
+              subtitle={step === "pick-doctor"
+                ? "Step 1 · Choose a doctor"
+                : `Step 2 · ${selectedDoctor?.name ?? "doctor"} → choose hospital(s)`}
+              onClose={onClose}
+              emails={wizardEmails}
+              activeKey={wizardTab}
+              onActiveKeyChange={setWizardTab}
+              mountActiveOnly
+              headerExtra={
+                <div className="space-y-2">
+                  <Stepper step={step} />
+                  {step === "pick-doctor" ? (
+                    <DoctorPicker
+                      options={doctorOptions}
+                      isLoading={zohoLoading || !completionReady}
+                      onPick={(d) => { setSelectedDoctor(d); setStep("pick-hospitals"); }}
+                    />
+                  ) : selectedDoctor ? (
+                    <HospitalPicker
+                      doctor={selectedDoctor}
+                      hospitals={hospitals}
+                      selectedIds={selectedIds}
+                      onToggle={(id) => setSelectedIds(prev => prev.includes(id) ? prev.filter(x => x !== id) : [...prev, id])}
+                      onSetSelected={setSelectedIds}
+                      customMessage={customMessage}
+                      setCustomMessage={setCustomMessage}
+                    />
+                  ) : null}
+                </div>
+              }
+              footer={step === "pick-hospitals" ? (
+                <>
+                  <Button variant="outline" onClick={() => setStep("pick-doctor")} className="mr-auto">
+                    <ChevronLeft className="h-3.5 w-3.5 mr-1" /> Back
+                  </Button>
+                  <Button onClick={() => setStep("preview-confirm")} disabled={selectedIds.length === 0}>
+                    Continue to preview →
+                  </Button>
+                </>
+              ) : undefined}
+            />
+          )}
+        </DialogPrimitive.Content>
+      </DialogPrimitive.Portal>
+    </DialogPrimitive.Root>
   );
 }
 
@@ -658,7 +724,7 @@ function DoctorPicker({ options, isLoading, onPick }: {
           className="pl-7 text-[12px]"
         />
       </div>
-      <div className="rounded-md border max-h-[420px] overflow-y-auto divide-y">
+      <div className="rounded-md border border-sidebar-border/40 bg-white max-h-[min(52vh,420px)] overflow-y-auto divide-y">
         {isLoading && <div className="px-4 py-6 text-[12px] text-muted-foreground text-center">Loading...</div>}
         {!isLoading && filtered.length === 0 && (
           <div className="px-4 py-6 text-[12px] text-muted-foreground text-center">No doctors match.</div>
@@ -682,7 +748,7 @@ function DoctorPicker({ options, isLoading, onPick }: {
           </button>
         ))}
       </div>
-      <div className="text-[10px] text-muted-foreground">
+      <div className="text-[10px] text-sidebar-foreground/60">
         Showing {filtered.length} of {options.length}. Refine search to narrow.
       </div>
     </div>
@@ -690,15 +756,13 @@ function DoctorPicker({ options, isLoading, onPick }: {
 }
 
 function HospitalPicker({
-  doctor, hospitals, selectedIds, onToggle, onSetSelected, onContinue, onBack, customMessage, setCustomMessage,
+  doctor, hospitals, selectedIds, onToggle, onSetSelected, customMessage, setCustomMessage,
 }: {
   doctor: DoctorOption;
   hospitals: Hospital[];
   selectedIds: string[];
   onToggle: (id: string) => void;
   onSetSelected: (ids: string[]) => void;
-  onContinue: () => void;
-  onBack: () => void;
   customMessage: string;
   setCustomMessage: (s: string) => void;
 }) {
@@ -726,9 +790,9 @@ function HospitalPicker({
 
   return (
     <div className="space-y-3">
-      <div className="rounded-md border bg-slate-50/50 p-2.5">
+      <div className="rounded-lg border border-sidebar-border/40 bg-white/95 p-2.5 shadow-sm">
         <div className="text-[10px] uppercase tracking-wider text-muted-foreground">Sending profile of</div>
-        <div className="text-[13px] font-medium">{doctor.name}</div>
+        <div className="text-[13px] font-medium text-slate-800">{doctor.name}</div>
         <div className="text-[11px] text-muted-foreground">{doctor.speciality ?? "—"} · {doctor.email ?? doctor.phone ?? "no contact"}</div>
       </div>
       <div className="relative">
@@ -746,11 +810,11 @@ function HospitalPicker({
             {allFilteredSelected ? "Deselect all" : `Select all${q ? " (filtered)" : ""}`}
             {!allFilteredSelected && <span className="text-slate-400">· {filtered.length}</span>}
           </button>
-          <span className="text-muted-foreground">{selectedIds.length} selected</span>
+          <span className="text-sidebar-foreground/70">{selectedIds.length} selected</span>
         </div>
         {selectedIds.length > 1 && <Badge variant="outline" className="text-[10px] bg-amber-50 border-amber-200">BCC mode</Badge>}
       </div>
-      <div className="rounded-md border max-h-[280px] overflow-y-auto divide-y">
+      <div className="rounded-md border border-sidebar-border/40 bg-white max-h-[280px] overflow-y-auto divide-y">
         {filtered.length === 0 && (
           <div className="px-4 py-6 text-[12px] text-muted-foreground text-center">No hospitals match.</div>
         )}
@@ -770,22 +834,14 @@ function HospitalPicker({
         })}
       </div>
       <div>
-        <Label className="text-[10px] uppercase tracking-wider text-muted-foreground">Optional custom message</Label>
+        <Label className="text-[10px] uppercase tracking-wider text-sidebar-foreground/70">Optional custom message</Label>
         <Textarea
           value={customMessage}
           onChange={e => setCustomMessage(e.target.value)}
-          className="mt-1 text-[12px] min-h-[60px]"
+          className="mt-1 text-[12px] min-h-[60px] bg-white"
           placeholder="Anything to add to the introduction — context, urgency, etc."
         />
       </div>
-      <DialogFooter className="pt-1">
-        <Button variant="outline" onClick={onBack}>
-          <ChevronLeft className="h-3.5 w-3.5 mr-1" /> Back
-        </Button>
-        <Button onClick={onContinue} disabled={selectedIds.length === 0}>
-          Continue to preview →
-        </Button>
-      </DialogFooter>
     </div>
   );
 }
@@ -1318,8 +1374,7 @@ function PreviewConfirm({
   );
 
   return (
-    <EmailPreviewStudio
-      open
+    <EmailPreviewStudioLayout
       onClose={onClose}
       title="Send Profile to Hospital"
       subtitle={`${doctor.name} → ${hospitals.length === 1 ? hospitals[0].name : `${hospitals.length} hospitals (BCC)`}`}
