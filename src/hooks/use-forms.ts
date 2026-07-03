@@ -120,6 +120,10 @@ export function useFormResponses(formId: string | null) {
 export interface FormResponseFilters {
   search?:     string;                                            // matched against search_text (ILIKE)
   date?:       "7d" | "30d" | "90d" | "all";
+  /** Custom inclusive date range on submitted_at (ISO yyyy-mm-dd). When
+   *  either is set the UI clears the `date` preset so they don't stack. */
+  from?:       string;
+  to?:         string;
   link?:       "all" | "linked" | "unlinked";
   sort?:       "newest" | "oldest";
   /** Outreach filter:
@@ -150,7 +154,7 @@ export const FORM_RESPONSES_FIRST_PAGE  = 200;
 export const FORM_RESPONSES_NEXT_PAGE   = 50;
 
 const RESP_INF_KEY = (formId: string | null, f: FormResponseFilters) =>
-  ["form-responses-infinite", formId ?? "_", f.search ?? "", f.date ?? "all", f.link ?? "all", f.sort ?? "newest", f.view ?? "live"] as const;
+  ["form-responses-infinite", formId ?? "_", f.search ?? "", f.date ?? "all", f.from ?? "", f.to ?? "", f.link ?? "all", f.sort ?? "newest", f.view ?? "live"] as const;
 
 /** Paginated + filterable response feed for one form. All filters
  *  including the search query are pushed down to PostgREST so we
@@ -196,6 +200,8 @@ export function useFormResponsesInfinite(formId: string | null, filters: FormRes
         const cutoff = new Date(Date.now() - days * 86_400_000).toISOString();
         query = query.gte("submitted_at", cutoff);
       }
+      if (filters.from) query = query.gte("submitted_at", `${filters.from}T00:00:00.000Z`);
+      if (filters.to)   query = query.lte("submitted_at", `${filters.to}T23:59:59.999Z`);
       if (filters.link === "linked")   query = query.not("doctor_id", "is", null);
       if (filters.link === "unlinked") query = query.is("doctor_id", null);
 
@@ -290,6 +296,9 @@ function applyFormFilters(q: any, filters: FormResponseFilters, zohoIds?: string
     const days = filters.date === "7d" ? 7 : filters.date === "30d" ? 30 : 90;
     q = q.gte("submitted_at", new Date(Date.now() - days * 86_400_000).toISOString());
   }
+  // Custom inclusive range (whole calendar days, UTC bounds).
+  if (filters.from) q = q.gte("submitted_at", `${filters.from}T00:00:00.000Z`);
+  if (filters.to)   q = q.lte("submitted_at", `${filters.to}T23:59:59.999Z`);
   if (filters.link === "linked")   q = q.not("doctor_id", "is", null);
   if (filters.link === "unlinked") q = q.is("doctor_id", null);
 
@@ -318,13 +327,13 @@ export const FORM_RESPONSES_PAGE_SIZE = 30;
 
 const RESP_PAGE_KEY = (formId: string | null, f: FormResponseFilters, page: number) =>
   ["form-responses-page", formId ?? "_", page,
-   f.search ?? "", f.date ?? "all", f.link ?? "all",
+   f.search ?? "", f.date ?? "all", f.from ?? "", f.to ?? "", f.link ?? "all",
    f.sort ?? "newest", f.view ?? "live", f.outreach ?? "all",
    f.currentOwnerEmail ?? ""] as const;
 
 const RESP_COUNT_KEY = (formId: string | null, f: FormResponseFilters) =>
   ["form-responses-count", formId ?? "_",
-   f.search ?? "", f.date ?? "all", f.link ?? "all",
+   f.search ?? "", f.date ?? "all", f.from ?? "", f.to ?? "", f.link ?? "all",
    f.view ?? "live", f.outreach ?? "all", f.currentOwnerEmail ?? ""] as const;
 
 /** Single-page row fetch for numbered pagination. Query key includes the

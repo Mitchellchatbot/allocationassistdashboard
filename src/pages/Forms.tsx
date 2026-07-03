@@ -28,7 +28,7 @@ import { Tabs, TabsList, TabsTrigger, TabsContent } from "@/components/ui/tabs";
 import {
   ClipboardList, Plus, ExternalLink, Copy, CheckCircle2, AlertCircle,
   Trash2, Inbox, ChevronRight, History, Sparkles, Mail, User as UserIcon, RefreshCw, Settings,
-  Search, Download, Loader2, Phone, DollarSign, CalendarClock, Save,
+  Search, Download, Loader2, Phone, DollarSign, CalendarClock, Save, X,
 } from "lucide-react";
 import { useAuth } from "@/hooks/use-auth";
 import { useZohoData, type ZohoLead } from "@/hooks/use-zoho-data";
@@ -178,6 +178,10 @@ function FormDetail({ form }: { form: Form }) {
   const [searchRaw, setSearchRaw] = useState("");
   const search = useDebounce(searchRaw, 250);
   const [dateFilter, setDateFilter] = useState<"all" | "7d" | "30d" | "90d">("all");
+  // Custom submitted-on range (ISO yyyy-mm-dd). Setting either clears the
+  // relative preset above so they don't stack.
+  const [fromDate, setFromDate] = useState("");
+  const [toDate, setToDate]     = useState("");
   const [sortDir, setSortDir]       = useState<"newest" | "oldest">("newest");
   // Default outreach filter by form type:
   // - Paid-lead (DoctorsFinder) → 'all' (Zoho-side buckets don't apply)
@@ -206,18 +210,20 @@ function FormDetail({ form }: { form: Form }) {
   // until the user explicitly switches.
   const [view, setView] = useState<"live" | "archived">("live");
   const [page, setPage] = useState(1);
-  useEffect(() => { setPage(1); }, [search, dateFilter, sortDir, outreachFilter, view]);
+  useEffect(() => { setPage(1); }, [search, dateFilter, fromDate, toDate, sortDir, outreachFilter, view]);
   const wpContacts = useWpContactSet();
   const { user } = useAuth();
 
   const serverFilters = useMemo(() => ({
     search:            search.trim(),
     date:              dateFilter,
+    from:              fromDate || undefined,
+    to:                toDate   || undefined,
     sort:              sortDir,
     outreach:          outreachFilter,
     currentOwnerEmail: user?.email ?? undefined,
     view,
-  }), [search, dateFilter, sortDir, outreachFilter, user?.email, view]);
+  }), [search, dateFilter, fromDate, toDate, sortDir, outreachFilter, user?.email, view]);
 
   const pageFeed  = useFormResponsesPage(form.id, serverFilters, page);
   const countFeed = useFormResponsesFilteredCount(form.id, serverFilters);
@@ -460,12 +466,15 @@ function FormDetail({ form }: { form: Form }) {
             count={
               (search.trim()           ? 1 : 0) +
               (dateFilter    !== "all" ? 1 : 0) +
+              ((fromDate || toDate)     ? 1 : 0) +
               (outreachFilter !== "all" ? 1 : 0) +
               (wpFilter      !== "all" ? 1 : 0)
             }
             onClear={() => {
               setSearchRaw("");
               setDateFilter("all");
+              setFromDate("");
+              setToDate("");
               setOutreachFilter("all");
               setWpFilter("all");
             }}
@@ -483,10 +492,10 @@ function FormDetail({ form }: { form: Form }) {
               ]}
             />
             <span className="text-muted-foreground/40">·</span>
-            {/* Date chips */}
+            {/* Date chips — picking a preset clears any custom range. */}
             <FilterChipGroup
-              value={dateFilter}
-              onChange={(v) => setDateFilter(v as typeof dateFilter)}
+              value={fromDate || toDate ? "all" : dateFilter}
+              onChange={(v) => { setDateFilter(v as typeof dateFilter); setFromDate(""); setToDate(""); }}
               options={[
                 { value: "all", label: "All time" },
                 { value: "7d",  label: "Last 7d" },
@@ -494,6 +503,35 @@ function FormDetail({ form }: { form: Form }) {
                 { value: "90d", label: "Last 90d" },
               ]}
             />
+            {/* Custom submitted-on range. Setting either bound clears the
+                relative preset (they'd otherwise intersect). Native date
+                inputs keep this dependency-free. */}
+            <span className="text-muted-foreground/40">·</span>
+            <div className="inline-flex items-center gap-1 rounded-md border border-border/60 bg-card px-1.5 h-7">
+              <CalendarClock className="h-3 w-3 text-muted-foreground shrink-0" />
+              <input
+                type="date"
+                value={fromDate}
+                max={toDate || undefined}
+                onChange={e => { setFromDate(e.target.value); if (e.target.value) setDateFilter("all"); }}
+                title="From date (submitted on/after)"
+                className="w-[7.5rem] bg-transparent text-[11px] text-foreground outline-none [color-scheme:light]"
+              />
+              <span className="text-muted-foreground/50">→</span>
+              <input
+                type="date"
+                value={toDate}
+                min={fromDate || undefined}
+                onChange={e => { setToDate(e.target.value); if (e.target.value) setDateFilter("all"); }}
+                title="To date (submitted on/before)"
+                className="w-[7.5rem] bg-transparent text-[11px] text-foreground outline-none [color-scheme:light]"
+              />
+              {(fromDate || toDate) && (
+                <button type="button" onClick={() => { setFromDate(""); setToDate(""); }} title="Clear range" className="text-muted-foreground hover:text-foreground">
+                  <X className="h-3 w-3" />
+                </button>
+              )}
+            </div>
             {/* Outreach lifecycle — chip order matches the typical
                 triage flow. 'Uncontacted in Zoho' first because that's
                 where the team starts each day; 'Unqualified' is the
@@ -585,11 +623,11 @@ function FormDetail({ form }: { form: Form }) {
               ))}
             </div>
           ) : responses.length === 0 ? (
-            isSearching || dateFilter !== "all" || outreachFilter !== "all" || wpFilter !== "all" ? (
+            isSearching || dateFilter !== "all" || fromDate || toDate || outreachFilter !== "all" || wpFilter !== "all" ? (
               <div className="rounded-md border border-dashed py-8 text-center">
                 <Search className="h-5 w-5 mx-auto mb-2 text-muted-foreground/60" />
                 <p className="text-[12px] text-muted-foreground">No matches for the current filter.</p>
-                <button onClick={() => { setSearchRaw(""); setDateFilter("all"); setOutreachFilter("all"); setWpFilter("all"); }} className="text-[11px] text-teal-700 hover:underline mt-1">
+                <button onClick={() => { setSearchRaw(""); setDateFilter("all"); setFromDate(""); setToDate(""); setOutreachFilter("all"); setWpFilter("all"); }} className="text-[11px] text-teal-700 hover:underline mt-1">
                   Clear filters
                 </button>
               </div>
