@@ -134,14 +134,32 @@ async function fetchAllPages<T>(
  * sync is unaffected. Note content is truncated — only enough to match a
  * call-outcome phrase.
  */
+interface NoteWalkResult {
+  notes:     Record<string, { note: string; at: string }>;
+  lastPage:  number;   // last Notes page actually fetched (for the backfill cursor)
+  seen:      number;   // total notes scanned this pass
+  exhausted: boolean;  // true = reached the end of Notes; false = stopped early (cap/budget)
+}
+
+/**
+ * Walk the Notes module newest-first from `startPage`, recording the latest note
+ * per lead, until the time budget / page window runs out. Returns the last page
+ * reached so the caller can resume a DEEP backfill on the next sync — the org
+ * has more notes than one rate-limited sync (~450ms/page) can scan in one go, so
+ * we sweep the tail across several background syncs and merge (see call site).
+ */
 async function fetchLatestNoteByLead(
   token: string,
   leadIds: Set<string>,
-  maxPages = 120,
-): Promise<Record<string, { note: string; at: string }>> {
+  opts: { startPage?: number; maxPages?: number; budgetMs?: number } = {},
+): Promise<NoteWalkResult> {
+  const { startPage = 1, maxPages = 120, budgetMs = 45_000 } = opts;
   const out: Record<string, { note: string; at: string }> = {};
+  const deadline = Date.now() + budgetMs;
+  let lastPage = startPage - 1, seen = 0, exhausted = false;
   try {
-    for (let p = 1; p <= maxPages; p++) {
+    for (let p = startPage; p < startPage + maxPages; p++) {
+      if (Date.now() > deadline) break;
       const url = new URL(`${API_DOMAIN}/crm/v2/Notes`);
       url.searchParams.set('fields', 'Note_Content,Created_Time,Parent_Id');
       url.searchParams.set('per_page', '200');
@@ -153,14 +171,16 @@ async function fetchLatestNoteByLead(
       for (let attempt = 0; attempt < 3; attempt++) {
         const res = await fetch(url.toString(), { headers: { Authorization: `Zoho-oauthtoken ${token}` } });
         if (res.status === 429) { await new Promise(r => setTimeout(r, 1000 * Math.pow(2, attempt))); continue; }
-        if (res.status === 204) return out;                       // no more notes
-        if (!res.ok) { console.warn(`[zoho-sync] Notes page ${p} HTTP ${res.status} — stopping notes walk`); return out; }
+        if (res.status === 204) { exhausted = true; return { notes: out, lastPage, seen, exhausted }; }  // no more notes
+        if (!res.ok) { console.warn(`[zoho-sync] Notes page ${p} HTTP ${res.status} — stopping notes walk`); return { notes: out, lastPage, seen, exhausted }; }
         const text = await res.text();
         json = text ? JSON.parse(text) : null;
         break;
       }
+      lastPage = p;
       const data = json?.data ?? [];
-      if (data.length === 0) break;
+      if (data.length === 0) { exhausted = true; break; }
+      seen += data.length;
       for (const n of data) {
         const parent = n?.Parent_Id;
         const pid = parent && typeof parent === 'object'
@@ -170,13 +190,12 @@ async function fetchLatestNoteByLead(
         if (!id || !leadIds.has(id) || out[id]) continue;        // first-seen (newest) wins
         out[id] = { note: String(n?.Note_Content ?? '').slice(0, 240), at: String(n?.Created_Time ?? '') };
       }
-      if (Object.keys(out).length >= leadIds.size) break;        // every lead covered
-      if (!json?.info?.more_records) break;
+      if (!json?.info?.more_records) { exhausted = true; break; }
     }
   } catch (e) {
     console.warn('[zoho-sync] Notes walk failed (non-fatal):', e);
   }
-  return out;
+  return { notes: out, lastPage, seen, exhausted };
 }
 
 serve(async (req: Request) => {
@@ -237,8 +256,35 @@ serve(async (req: Request) => {
     const leadIds = new Set(
       (leads as Array<{ id?: string }>).map(l => String(l.id ?? '')).filter(Boolean),
     );
-    const leadNotes = await fetchLatestNoteByLead(token, leadIds);
-    console.log(`[zoho-sync] leadNotes: ${Object.keys(leadNotes).length}/${leadIds.size} leads have a latest note`);
+    // Two passes, both merged with the last good copy so coverage accumulates +
+    // never regresses:
+    //   1. FRESH: pages 1..FRESH_PAGES every sync → newest notes always current
+    //      (drives the "attempted in last 4 weeks" recency).
+    //   2. BACKFILL: resumes from a persisted cursor and sweeps deeper into the
+    //      tail — the org has more notes than one rate-limited sync can scan, so
+    //      a few background syncs cover the whole history. Cursor wraps at the end.
+    const FRESH_PAGES = 60;
+    const { data: prevRow2n } = await supabase.from('zoho_cache').select('data').eq('id', 2).maybeSingle();
+    const prevDataN  = (prevRow2n?.data ?? {}) as Record<string, unknown>;
+    const prevNotes  = (prevDataN.leadNotes ?? {}) as Record<string, { note: string; at: string }>;
+    const cursor     = Math.max(FRESH_PAGES + 1, Number(prevDataN.notesCursor ?? (FRESH_PAGES + 1)) || (FRESH_PAGES + 1));
+
+    const fresh = await fetchLatestNoteByLead(token, leadIds, { startPage: 1,      maxPages: FRESH_PAGES, budgetMs: 30_000 });
+    const back  = await fetchLatestNoteByLead(token, leadIds, { startPage: cursor, maxPages: 140,         budgetMs: 45_000 });
+    // Merge fresh + backfill + previous, keeping the newest note per CURRENT lead
+    // (prunes deleted leads + bounds the map). ISO strings compare lexically.
+    const leadNotes: Record<string, { note: string; at: string }> = {};
+    for (const id of leadIds) {
+      let best = prevNotes[id];
+      for (const cand of [fresh.notes[id], back.notes[id]]) {
+        if (cand && (!best || !best.at || (cand.at && cand.at >= best.at))) best = cand;
+      }
+      if (best) leadNotes[id] = best;
+    }
+    // Advance the backfill cursor; wrap to just past the fresh window at the end.
+    const notesCursor = back.exhausted ? (FRESH_PAGES + 1) : (back.lastPage + 1);
+    const freshCovered = Object.keys(fresh.notes).length;
+    console.log(`[zoho-sync] leadNotes: ${Object.keys(leadNotes).length}/${leadIds.size} covered (this run's walk: ${freshCovered} fresh) · fresh p1-${fresh.lastPage} · backfill p${cursor}-${back.lastPage}${back.exhausted ? ' (end→wrap)' : ''} · next cursor ${notesCursor}`);
 
     // Run remaining modules SEQUENTIALLY (was Promise.all). Zoho rate-limits
     // to ~10 concurrent connections / 100 calls per minute per user — running
@@ -366,12 +412,12 @@ serve(async (req: Request) => {
           campaigns:        keep(campaigns, 'campaigns'),
           doctorsOnBoard,
           hospitalContacts: keep(hospitalContacts, 'hospitalContacts'),
-          // Map of lead id → latest note. Preserve the last good copy if this
-          // run's Notes walk came back empty (Notes API hiccup) so the
-          // contacted rule doesn't flip back to status-only.
-          leadNotes: Object.keys(leadNotes).length > 0
-            ? leadNotes
-            : (prev.leadNotes ?? leadNotes),
+          // Map of lead id → latest note. Already merged (fresh + backfill + last
+          // good copy, newest-per-lead, bounded to current leads) at the walk
+          // call site above. `notesCursor` persists the deep-backfill position so
+          // the next sync resumes sweeping the tail.
+          leadNotes,
+          notesCursor,
         },
         synced_at: syncedAt,
       });
@@ -386,6 +432,18 @@ serve(async (req: Request) => {
       leads: leads.length, deals: deals.length, calls: calls.length,
       accounts: accounts.length, campaigns: campaigns.length,
       doctorsOnBoard: doctorsOnBoard.length,
+      // Notes coverage — merged (fresh + rolling backfill + prior). `exhausted`
+      // true once the backfill has swept the whole tail; the cursor wraps and
+      // coverage stays complete via the merge from then on.
+      notes: {
+        covered:      Object.keys(leadNotes).length,
+        of:           leadIds.size,
+        freshTo:      fresh.lastPage,
+        backfillFrom: cursor,
+        backfillTo:   back.lastPage,
+        nextCursor:   notesCursor,
+        exhausted:    back.exhausted,
+      },
       skipped,   // rows NOT overwritten because the fetch returned empty
       synced_at: new Date().toISOString(),
     }), { status: 200, headers: { ...CORS, 'Content-Type': 'application/json' } });
