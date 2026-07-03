@@ -879,17 +879,17 @@ function HospitalRecipientsOverride({ hospitals, contacts, overrides, onOverride
         <span className="text-[10px] font-normal text-teal-700/70">— auto-picked by each hospital's setting; override here for this send only</span>
       </div>
       <div className="space-y-1.5">
-        {rows.map(({ h, hc, resolved, override, chosen }) => (
-          <div key={h.id} className="flex items-center gap-2 text-[11px]">
-            <span className="w-40 shrink-0 truncate font-medium text-slate-700" title={h.name}>{h.name}</span>
+        {rows.map(({ h, hc, resolved, override }) => (
+          <div key={h.id} className="flex min-w-0 items-center gap-2 text-[11px]">
+            <span className="w-24 shrink-0 truncate font-medium text-slate-700" title={h.name}>{h.name}</span>
             {hc.length === 0 ? (
-              <span className="text-muted-foreground italic">{h.primary_recruiter_email ?? "no recipient"}</span>
+              <span className="min-w-0 flex-1 truncate text-muted-foreground italic">{h.primary_recruiter_email ?? "no recipient"}</span>
             ) : (
               <>
                 <select
                   value={override ?? "__auto__"}
                   onChange={e => onOverride(h.id, e.target.value === "__auto__" ? null : e.target.value)}
-                  className="h-7 rounded-md border border-border/60 bg-white px-1.5 text-[11px] max-w-[300px]"
+                  className="h-7 min-w-0 flex-1 rounded-md border border-border/60 bg-white px-1.5 text-[11px] text-slate-800"
                 >
                   <option value="__auto__">
                     Auto ({h.contact_mode === "cycle" ? "cycle" : "primary"}) → {resolved?.name || resolved?.email || "—"}
@@ -900,8 +900,7 @@ function HospitalRecipientsOverride({ hospitals, contacts, overrides, onOverride
                     </option>
                   ))}
                 </select>
-                {override && <span className="text-[9px] font-medium text-amber-600">overridden</span>}
-                <span className="ml-auto truncate max-w-[180px] text-[10px] text-muted-foreground">{chosen?.email ?? "—"}</span>
+                {override && <span className="shrink-0 text-[9px] font-medium text-amber-600">overridden</span>}
               </>
             )}
           </div>
