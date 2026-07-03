@@ -1,6 +1,6 @@
 import { useMemo } from "react";
 import { useFilters, getTimeLabel } from "@/lib/filters";
-import { useZohoData, aggregateZohoData, type ZohoLead, type ZohoDeal } from "@/hooks/use-zoho-data";
+import { useZohoData, aggregateZohoData, type ZohoLead, type ZohoDeal, type ZohoDoctorOnBoard } from "@/hooks/use-zoho-data";
 import { useMarketingExpenses } from "@/hooks/use-marketing-expenses";
 import { useCurrency } from "@/lib/CurrencyProvider";
 
@@ -40,6 +40,7 @@ export function useFilteredData() {
         roadmapPhases: [], bottlenecks: [],
         licenseOverview: null, alerts: [],
         filteredLeads: [] as ZohoLead[], filteredDeals: [] as ZohoDeal[],
+        filteredDoB: [] as ZohoDoctorOnBoard[],
         zohoLoading, zohoError, isLive: false,
       };
     }
@@ -299,6 +300,7 @@ export function useFilteredData() {
       alerts: agg.alerts,
       filteredLeads,
       filteredDeals,
+      filteredDoB,
       zohoLoading,
       zohoError,
       isLive: true,

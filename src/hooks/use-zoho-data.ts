@@ -311,7 +311,7 @@ function normaliseStatus(raw: string | null | undefined): string {
 }
 
 /** Normalises a person's name — trims, collapses spaces, title-cases. */
-function normaliseName(raw: string | null | undefined): string {
+export function normaliseName(raw: string | null | undefined): string {
   if (!raw) return 'Unknown';
   return toTitleCase(raw);
 }

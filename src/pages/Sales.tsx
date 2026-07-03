@@ -4,6 +4,9 @@ import { ExpandableKPICard } from "@/components/ExpandableKPICard";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { InfoIcon } from "@/components/InfoIcon";
 import { useFilteredData } from "@/hooks/use-filtered-data";
+import { normaliseName, type ZohoLead, type ZohoDoctorOnBoard } from "@/hooks/use-zoho-data";
+import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog";
+import { cn } from "@/lib/utils";
 import { isLeadContacted } from "@/lib/lead-contact";
 import { useVacancies } from "@/hooks/use-vacancies";
 import { rollupSpecialty } from "@/lib/specialty-groups";
@@ -28,7 +31,21 @@ function daysSinceTouched(lead: { Modified_Time?: string | null; Created_Time?: 
 const flagTruthy = (v: string | null) => !!v && !/^(no|false|0|n)$/i.test(v.trim());
 
 const Sales = () => {
-  const { pipelineRaw, sales, recruiters, stageConversion, filteredLeads } = useFilteredData();
+  const { pipelineRaw, sales, recruiters, stageConversion, filteredLeads, filteredDoB } = useFilteredData();
+
+  // Drill-down: clicking a consultant's Leads / Contacted / Converted number
+  // opens the actual people behind it. Filtered from the same source arrays the
+  // counts are built from, so the list length always equals the number clicked.
+  const [drill, setDrill] = useState<{ name: string; kind: "leads" | "contacted" | "converted" } | null>(null);
+  const drillData = useMemo(() => {
+    if (!drill) return null;
+    if (drill.kind === "converted") {
+      const key = normaliseName(drill.name);
+      return { leads: [] as ZohoLead[], dob: filteredDoB.filter(d => normaliseName(d.Owner?.name) === key) };
+    }
+    const repLeads = filteredLeads.filter(l => (l.Owner?.name ?? "Unknown") === drill.name);
+    return { leads: drill.kind === "contacted" ? repLeads.filter(isLeadContacted) : repLeads, dob: [] as ZohoDoctorOnBoard[] };
+  }, [drill, filteredLeads, filteredDoB]);
   const { data: vacancies = [] } = useVacancies();
   const { role, user } = useAuth();
   const isAdmin = role === "admin";
@@ -456,9 +473,11 @@ const Sales = () => {
                       <span className="text-[13px] font-semibold text-foreground truncate">{rep.name}</span>
                     </div>
                   </td>
-                  <td className="py-3.5 px-3 text-right tabular-nums text-[13px] text-muted-foreground">{rep.doctors.toLocaleString()}</td>
+                  <td className="py-3.5 px-3 text-right tabular-nums text-[13px] text-muted-foreground">
+                    <DrillNum value={rep.doctors} onClick={() => setDrill({ name: rep.name, kind: "leads" })} />
+                  </td>
                   <td className="py-3.5 px-3 text-right tabular-nums text-[13px] text-foreground">
-                    {(rep as { contacted?: number }).contacted?.toLocaleString() ?? "—"}
+                    <DrillNum value={(rep as { contacted?: number }).contacted} onClick={() => setDrill({ name: rep.name, kind: "contacted" })} />
                   </td>
                   <td className={`py-3.5 px-3 text-right tabular-nums text-[13px] font-semibold hidden md:table-cell ${
                     ((rep as { contactRate?: number }).contactRate ?? 0) >= 70 ? "text-success" :
@@ -469,7 +488,7 @@ const Sales = () => {
                   <td className={`py-3.5 px-3 text-right tabular-nums text-[14px] font-bold ${
                     ((rep as { placements?: number }).placements ?? 0) > 0 ? "text-emerald-600" : "text-muted-foreground/40"
                   }`}>
-                    {((rep as { placements?: number }).placements ?? 0).toLocaleString()}
+                    <DrillNum value={(rep as { placements?: number }).placements ?? 0} onClick={() => setDrill({ name: rep.name, kind: "converted" })} />
                   </td>
                   <td className="py-3.5 px-2" />
                 </tr>
@@ -519,8 +538,98 @@ const Sales = () => {
           addedBy={user?.email ?? null}
         />
       )}
+
+      <PeopleDrilldown
+        drill={drill}
+        onClose={() => setDrill(null)}
+        leads={drillData?.leads ?? []}
+        dob={drillData?.dob ?? []}
+      />
     </DashboardLayout>
   );
 };
+
+/** A consultant metric number, clickable to reveal the people behind it. A zero
+ *  is shown plain (nothing to drill into). */
+function DrillNum({ value, onClick, className }: { value: number | undefined; onClick: () => void; className?: string }) {
+  if (value == null) return <span className={className}>—</span>;
+  if (value === 0)   return <span className={className}>0</span>;
+  return (
+    <button
+      type="button"
+      onClick={onClick}
+      title="Click to see the people"
+      className={cn("underline-offset-4 decoration-dotted hover:underline hover:opacity-80 cursor-pointer transition-opacity", className)}
+    >
+      {value.toLocaleString()}
+    </button>
+  );
+}
+
+const KIND_LABEL = { leads: "Leads", contacted: "Contacted", converted: "Converted" } as const;
+
+/** Lists the actual leads / contacted leads / placements behind a clicked
+ *  number. The list length equals the number clicked (same source + filter). */
+function PeopleDrilldown({
+  drill, onClose, leads, dob,
+}: {
+  drill: { name: string; kind: "leads" | "contacted" | "converted" } | null;
+  onClose: () => void;
+  leads: ZohoLead[];
+  dob: ZohoDoctorOnBoard[];
+}) {
+  const count = drill?.kind === "converted" ? dob.length : leads.length;
+  return (
+    <Dialog open={!!drill} onOpenChange={(o) => { if (!o) onClose(); }}>
+      <DialogContent className="max-w-lg max-h-[82vh] overflow-hidden flex flex-col p-0">
+        <DialogHeader className="px-5 pt-5 pb-3 border-b border-border/50">
+          <DialogTitle className="text-[14px] flex items-center gap-2">
+            <span className="font-semibold">{drill?.name}</span>
+            <span className="text-muted-foreground font-normal">·</span>
+            <span className="text-muted-foreground font-normal">{drill ? KIND_LABEL[drill.kind] : ""}</span>
+            <span className="ml-auto tabular-nums text-[12px] font-semibold text-primary">{count}</span>
+          </DialogTitle>
+        </DialogHeader>
+        <div className="overflow-y-auto px-2 py-1.5">
+          {count === 0 ? (
+            <div className="py-10 text-center text-[12px] text-muted-foreground">No one to show for this period.</div>
+          ) : drill?.kind === "converted" ? (
+            dob.map(d => (
+              <PersonRow
+                key={d.id}
+                name={d.Full_Name || [d.First_Name, d.Last_Name].filter(Boolean).join(" ") || "—"}
+                sub={d.Specialty_New || d.Speciality || undefined}
+                tag={d.Account_Name?.name ?? undefined}
+              />
+            ))
+          ) : (
+            leads.map(l => (
+              <PersonRow
+                key={l.id}
+                name={l.Full_Name || [l.First_Name, l.Last_Name].filter(Boolean).join(" ") || "—"}
+                sub={l.Specialty_New || l.Specialty || undefined}
+                tag={l.Lead_Status || undefined}
+              />
+            ))
+          )}
+        </div>
+      </DialogContent>
+    </Dialog>
+  );
+}
+
+function PersonRow({ name, sub, tag }: { name: string; sub?: string; tag?: string }) {
+  return (
+    <div className="flex items-center justify-between gap-3 px-3 py-2 rounded-lg hover:bg-muted/50">
+      <div className="min-w-0">
+        <div className="text-[13px] font-medium text-foreground truncate">{name}</div>
+        {sub && <div className="text-[11px] text-muted-foreground truncate">{sub}</div>}
+      </div>
+      {tag && (
+        <span className="shrink-0 text-[10px] px-2 py-0.5 rounded-full bg-muted text-muted-foreground whitespace-nowrap">{tag}</span>
+      )}
+    </div>
+  );
+}
 
 export default Sales;
