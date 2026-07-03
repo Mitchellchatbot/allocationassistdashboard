@@ -796,10 +796,18 @@ export function aggregateZohoData(
   const recruiters = Object.entries(leadsByOwner)
     .filter(([name]) => name !== 'Unknown')
     .map(([name, rLeads]) => {
-      const rActiveLeads   = rLeads.filter(l => activeStatuses.has(l.Lead_Status));
-      const contacted      = rActiveLeads.filter(l => isLeadContacted(l)).length;
+      // Contacted + contact-rate are measured over ALL leads this rep owns —
+      // the SAME population the "Leads" column shows — not just active-funnel
+      // leads. isLeadContacted is a historical fact ("was this lead ever
+      // reached?"), so a lead that was contacted and later marked Not Interested
+      // / Unqualified / Converted still counts. The old code counted `contacted`
+      // and divided by active leads only, while "Leads" showed all leads — so
+      // e.g. 169 contacted of 262 leads rendered as 92% (169 ÷ ~184 active)
+      // instead of a consistent Contacted ÷ Leads. Matches the company-wide
+      // `contacted` metric above and the column tooltips.
+      const contacted      = rLeads.filter(l => isLeadContacted(l)).length;
       const highPri        = rLeads.filter(l => l.Lead_Status === 'High Priority Follow up').length;
-      const contactRate    = rActiveLeads.length > 0 ? Math.round((contacted / rActiveLeads.length) * 100) : 0;
+      const contactRate    = rLeads.length > 0 ? Math.round((contacted / rLeads.length) * 100) : 0;
       // Conversions = Doctors on Board owned by this rep — the company-wide
       // conversion metric, consistent with Sales/Marketing/digest. (dobByOwner
       // is keyed by normalised name, so look it up normalised.)
