@@ -704,8 +704,12 @@ export function aggregateZohoData(
       rate: totalLeads > 0 ? parseFloat(((deals.length / totalLeads) * 100).toFixed(1)) : 0,
     },
     {
+      // Overall = the true end-to-end rate: Doctors on Board ÷ all leads. A
+      // doctor only counts as converted once it's on the Doctors on Board
+      // module. The old formula divided callCompleted (leads that merely had an
+      // Initial Sales Call) by leads, which massively overstated conversion.
       stage: 'Overall Conversion',
-      rate: totalLeads > 0 ? parseFloat(((callCompleted / totalLeads) * 100).toFixed(1)) : 0,
+      rate: totalLeads > 0 ? parseFloat(((convertedCount / totalLeads) * 100).toFixed(1)) : 0,
     },
   ];
 

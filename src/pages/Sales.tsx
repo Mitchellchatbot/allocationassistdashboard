@@ -1,11 +1,10 @@
-import { useState, useMemo } from "react";
+import { useState, useMemo, Fragment } from "react";
 import { DashboardLayout } from "@/components/layout/DashboardLayout";
 import { ExpandableKPICard } from "@/components/ExpandableKPICard";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { InfoIcon } from "@/components/InfoIcon";
 import { useFilteredData } from "@/hooks/use-filtered-data";
 import { normaliseName, type ZohoLead, type ZohoDoctorOnBoard } from "@/hooks/use-zoho-data";
-import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { cn } from "@/lib/utils";
 import { isLeadContacted } from "@/lib/lead-contact";
 import { useVacancies } from "@/hooks/use-vacancies";
@@ -17,7 +16,7 @@ import { useSalesBoardMembers, useRemoveSalesBoardMember } from "@/hooks/use-sal
 import { AddSalespersonDialog } from "@/components/sales/AddSalespersonDialog";
 import { SectionDateRange } from "@/components/SectionDateRange";
 import { SalesActivity } from "@/components/sales/SalesActivity";
-import { Phone, Mail, Clock, Users, UserCheck, Activity, ArrowRight, PhoneCall, AlertTriangle, Plus, X } from "lucide-react";
+import { Phone, Mail, Clock, Users, UserCheck, Activity, ArrowRight, PhoneCall, AlertTriangle, Plus, X, ChevronDown } from "lucide-react";
 
 // Days since a lead was last touched (Modified_Time → Created_Time) — the same
 // recency the Follow-ups smart ranking uses.
@@ -46,6 +45,28 @@ const Sales = () => {
     const repLeads = filteredLeads.filter(l => (l.Owner?.name ?? "Unknown") === drill.name);
     return { leads: drill.kind === "contacted" ? repLeads.filter(isLeadContacted) : repLeads, dob: [] as ZohoDoctorOnBoard[] };
   }, [drill, filteredLeads, filteredDoB]);
+
+  // Stage Distribution drill-down — the leads currently AT a clicked stage
+  // (stage label is the raw Lead_Status).
+  const [stageOpen, setStageOpen] = useState<string | null>(null);
+  const stageLeads = useMemo(
+    () => (stageOpen ? filteredLeads.filter(l => l.Lead_Status === stageOpen) : []),
+    [stageOpen, filteredLeads],
+  );
+
+  // Conversion-at-each-step drill-down — the people who reached each milestone.
+  // Steps are rates between stages, so each maps to the numerator's population.
+  const [stepOpen, setStepOpen] = useState<string | null>(null);
+  const stepData = useMemo((): { leads: ZohoLead[]; dob: ZohoDoctorOnBoard[] } => {
+    switch (stepOpen) {
+      case "Applied → Contacted":          return { leads: filteredLeads.filter(isLeadContacted), dob: [] };
+      case "Contacted → Initial Call":     return { leads: filteredLeads.filter(l => l.Lead_Status === "Initial Sales Call Completed" || l.Lead_Status === "High Priority Follow up"), dob: [] };
+      case "Initial Call → High Priority": return { leads: filteredLeads.filter(l => l.Lead_Status === "High Priority Follow up"), dob: [] };
+      case "Overall Conversion":           return { leads: [], dob: filteredDoB };
+      default:                              return { leads: [], dob: [] };  // "Leads → Deals" has no clean lead population
+    }
+  }, [stepOpen, filteredLeads, filteredDoB]);
+  const stepDrillable = (stage: string) => stage !== "Leads → Deals";
   const { data: vacancies = [] } = useVacancies();
   const { role, user } = useAuth();
   const isAdmin = role === "admin";
@@ -325,20 +346,40 @@ const Sales = () => {
       <Card className="mb-5 shadow-sm border-border/50">
         <CardHeader className="pb-2 pt-4 px-5">
           <CardTitle className="text-[13px] font-semibold text-foreground">Stage Distribution</CardTitle>
+          <p className="text-[11px] text-muted-foreground/80 mt-0.5">Click a stage to see the leads in it</p>
         </CardHeader>
         <CardContent className="px-5 pb-5">
           <div className="flex flex-wrap items-stretch gap-1.5">
-            {pipelineRaw.slice(0, 5).map((stage, i) => (
-              <div key={stage.stage} className="flex items-center gap-1.5">
-                <div className="rounded-xl border border-border/50 bg-card px-4 py-3 text-center min-w-[90px] hover:border-primary/30 hover:shadow-sm hover:scale-[1.02] transition-all duration-200">
-                  <div className="h-[3px] rounded-full mb-2 w-6 mx-auto" style={{ backgroundColor: stage.color }} />
-                  <p className="text-[18px] font-bold text-foreground tabular-nums leading-none mb-0.5">{stage.count.toLocaleString()}</p>
-                  <p className="text-[10px] text-muted-foreground leading-tight">{stage.stage}</p>
+            {pipelineRaw.slice(0, 5).map((stage, i) => {
+              const isOpen = stageOpen === stage.stage;
+              return (
+                <div key={stage.stage} className="flex items-center gap-1.5">
+                  <button
+                    type="button"
+                    onClick={() => setStageOpen(isOpen ? null : stage.stage)}
+                    className={cn(
+                      "rounded-xl border bg-card px-4 py-3 text-center min-w-[90px] transition-all duration-200 hover:shadow-sm cursor-pointer",
+                      isOpen ? "border-primary ring-1 ring-primary/30 shadow-sm" : "border-border/50 hover:border-primary/30 hover:scale-[1.02]",
+                    )}
+                  >
+                    <div className="h-[3px] rounded-full mb-2 w-6 mx-auto" style={{ backgroundColor: stage.color }} />
+                    <p className="text-[18px] font-bold text-foreground tabular-nums leading-none mb-0.5">{stage.count.toLocaleString()}</p>
+                    <p className="text-[10px] text-muted-foreground leading-tight">{stage.stage}</p>
+                  </button>
+                  {i < Math.min(pipelineRaw.length, 5) - 1 && <ArrowRight className="h-3 w-3 text-border/60 shrink-0" />}
                 </div>
-                {i < Math.min(pipelineRaw.length, 5) - 1 && <ArrowRight className="h-3 w-3 text-border/60 shrink-0" />}
-              </div>
-            ))}
+              );
+            })}
           </div>
+          {stageOpen && (
+            <PeoplePanel
+              title={stageOpen}
+              color={pipelineRaw.find(s => s.stage === stageOpen)?.color}
+              leads={stageLeads}
+              dob={[]}
+              onClose={() => setStageOpen(null)}
+            />
+          )}
         </CardContent>
       </Card>
 
@@ -383,25 +424,40 @@ const Sales = () => {
         <Card className="shadow-sm border-border/50">
           <CardHeader className="pb-2 pt-4 px-5">
             <CardTitle className="text-[13px] font-semibold text-foreground">Conversion at Each Step</CardTitle>
+            <p className="text-[11px] text-muted-foreground/80 mt-0.5">Click a step to see the people who reached it</p>
           </CardHeader>
           <CardContent className="px-5 pb-5 space-y-4">
             {stageConversion.map((s, i) => {
               const isLast = i === stageConversion.length - 1;
               const barColor = s.rate >= 50 ? "bg-success" : s.rate >= 20 ? "bg-primary" : s.rate >= 5 ? "bg-warning" : "bg-destructive/60";
+              const isOpen = stepOpen === s.stage;
+              const drillable = stepDrillable(s.stage);
               return (
                 <div key={s.stage}>
-                  <div className="flex items-center justify-between mb-1.5">
-                    <span className={`text-[12px] ${isLast ? "font-semibold text-foreground" : "text-muted-foreground"}`}>{s.stage}</span>
-                    <span className={`text-[13px] font-bold tabular-nums ${s.rate >= 50 ? "text-success" : s.rate >= 20 ? "text-primary" : s.rate >= 5 ? "text-warning" : "text-destructive"}`}>
-                      {s.rate}%
-                    </span>
+                  <div
+                    onClick={() => drillable && setStepOpen(isOpen ? null : s.stage)}
+                    className={cn("group", drillable && "cursor-pointer")}
+                  >
+                    <div className="flex items-center justify-between mb-1.5">
+                      <span className={cn(
+                        "text-[12px]",
+                        isLast ? "font-semibold text-foreground" : "text-muted-foreground",
+                        drillable && "group-hover:text-foreground transition-colors",
+                      )}>{s.stage}</span>
+                      <span className={`text-[13px] font-bold tabular-nums ${s.rate >= 50 ? "text-success" : s.rate >= 20 ? "text-primary" : s.rate >= 5 ? "text-warning" : "text-destructive"}`}>
+                        {s.rate}%
+                      </span>
+                    </div>
+                    <div className="h-2 rounded-full bg-muted overflow-hidden">
+                      <div
+                        className={`h-full rounded-full transition-all duration-700 ${barColor}`}
+                        style={{ width: `${Math.max(s.rate, 0.5)}%` }}
+                      />
+                    </div>
                   </div>
-                  <div className="h-2 rounded-full bg-muted overflow-hidden">
-                    <div
-                      className={`h-full rounded-full transition-all duration-700 ${barColor}`}
-                      style={{ width: `${Math.max(s.rate, 0.5)}%` }}
-                    />
-                  </div>
+                  {isOpen && (
+                    <PeoplePanel title={s.stage} leads={stepData.leads} dob={stepData.dob} onClose={() => setStepOpen(null)} />
+                  )}
                 </div>
               );
             })}
@@ -460,39 +516,60 @@ const Sales = () => {
               </tr>
             </thead>
             <tbody>
-              {recruiters.map((rep, i) => (
-                <tr key={rep.name} className="border-b border-border/30 hover:bg-muted/30 group">
-                  <td className="py-3.5 px-5">
-                    <div className="flex items-center gap-2.5 min-w-0">
-                      <div
-                        className="h-8 w-8 rounded-full flex items-center justify-center text-[11px] font-bold shrink-0 text-white"
-                        style={{ backgroundColor: `hsl(${(i * 47) % 360}, 55%, 50%)` }}
-                      >
-                        {rep.name.split(" ").map((n: string) => n[0]).join("").slice(0, 2).toUpperCase()}
-                      </div>
-                      <span className="text-[13px] font-semibold text-foreground truncate">{rep.name}</span>
-                    </div>
-                  </td>
-                  <td className="py-3.5 px-3 text-right tabular-nums text-[13px] text-muted-foreground">
-                    <DrillNum value={rep.doctors} onClick={() => setDrill({ name: rep.name, kind: "leads" })} />
-                  </td>
-                  <td className="py-3.5 px-3 text-right tabular-nums text-[13px] text-foreground">
-                    <DrillNum value={(rep as { contacted?: number }).contacted} onClick={() => setDrill({ name: rep.name, kind: "contacted" })} />
-                  </td>
-                  <td className={`py-3.5 px-3 text-right tabular-nums text-[13px] font-semibold hidden md:table-cell ${
-                    ((rep as { contactRate?: number }).contactRate ?? 0) >= 70 ? "text-success" :
-                    ((rep as { contactRate?: number }).contactRate ?? 0) >= 40 ? "text-primary" : "text-warning"
-                  }`}>
-                    {(rep as { contactRate?: number }).contactRate ?? 0}%
-                  </td>
-                  <td className={`py-3.5 px-3 text-right tabular-nums text-[14px] font-bold ${
-                    ((rep as { placements?: number }).placements ?? 0) > 0 ? "text-emerald-600" : "text-muted-foreground/40"
-                  }`}>
-                    <DrillNum value={(rep as { placements?: number }).placements ?? 0} onClick={() => setDrill({ name: rep.name, kind: "converted" })} />
-                  </td>
-                  <td className="py-3.5 px-2" />
-                </tr>
-              ))}
+              {recruiters.map((rep, i) => {
+                const r = rep as { name: string; doctors: number; contacted?: number; contactRate?: number; placements?: number };
+                const rate = r.contactRate ?? 0;
+                const isOpen = drill?.name === r.name;
+                const ratePill = rate >= 70 ? "bg-emerald-50 text-emerald-700" : rate >= 40 ? "bg-blue-50 text-blue-700" : "bg-amber-50 text-amber-700";
+                return (
+                  <Fragment key={r.name}>
+                    <tr
+                      onClick={() => setDrill(isOpen ? null : { name: r.name, kind: "leads" })}
+                      className={`border-b border-border/30 cursor-pointer transition-colors ${isOpen ? "bg-primary/5" : "hover:bg-muted/30"}`}
+                    >
+                      <td className="py-3.5 px-5">
+                        <div className="flex items-center gap-2.5 min-w-0">
+                          <div
+                            className="h-8 w-8 rounded-full flex items-center justify-center text-[11px] font-bold shrink-0 text-white"
+                            style={{ backgroundColor: `hsl(${(i * 47) % 360}, 55%, 50%)` }}
+                          >
+                            {r.name.split(" ").map((n: string) => n[0]).join("").slice(0, 2).toUpperCase()}
+                          </div>
+                          <span className="text-[13px] font-semibold text-foreground truncate">{r.name}</span>
+                        </div>
+                      </td>
+                      <td className="py-3.5 px-3 text-right tabular-nums text-[14px] font-semibold text-sky-600">
+                        <DrillNum value={r.doctors} onClick={() => setDrill({ name: r.name, kind: "leads" })} />
+                      </td>
+                      <td className="py-3.5 px-3 text-right tabular-nums text-[14px] font-semibold text-emerald-600">
+                        <DrillNum value={r.contacted} onClick={() => setDrill({ name: r.name, kind: "contacted" })} />
+                      </td>
+                      <td className="py-3.5 px-3 text-right tabular-nums text-[13px] font-semibold hidden md:table-cell">
+                        <span className={`inline-block px-2 py-0.5 rounded-md ${ratePill}`}>{rate}%</span>
+                      </td>
+                      <td className={`py-3.5 px-3 text-right tabular-nums text-[14px] font-bold ${(r.placements ?? 0) > 0 ? "text-violet-700" : "text-muted-foreground/40"}`}>
+                        <DrillNum value={r.placements ?? 0} onClick={() => setDrill({ name: r.name, kind: "converted" })} />
+                      </td>
+                      <td className="py-3.5 px-2 text-center">
+                        <ChevronDown className={`h-4 w-4 text-muted-foreground/60 inline-block transition-transform ${isOpen ? "rotate-180" : ""}`} />
+                      </td>
+                    </tr>
+                    {isOpen && (
+                      <tr className="bg-muted/10 border-b border-border/30">
+                        <td colSpan={6} className="px-5 py-3">
+                          <ConsultantExpansion
+                            counts={{ leads: r.doctors, contacted: r.contacted ?? 0, converted: r.placements ?? 0 }}
+                            kind={drill!.kind}
+                            onKind={(k) => setDrill({ name: r.name, kind: k })}
+                            leads={drillData?.leads ?? []}
+                            dob={drillData?.dob ?? []}
+                          />
+                        </td>
+                      </tr>
+                    )}
+                  </Fragment>
+                );
+              })}
 
               {/* Admin-pinned salespeople who don't auto-appear from Zoho yet. */}
               {manualOnly.map(m => (
@@ -539,25 +616,20 @@ const Sales = () => {
         />
       )}
 
-      <PeopleDrilldown
-        drill={drill}
-        onClose={() => setDrill(null)}
-        leads={drillData?.leads ?? []}
-        dob={drillData?.dob ?? []}
-      />
     </DashboardLayout>
   );
 };
 
 /** A consultant metric number, clickable to reveal the people behind it. A zero
- *  is shown plain (nothing to drill into). */
+ *  is shown plain (nothing to drill into). Stops row-click propagation so a
+ *  number opens the panel focused on THAT metric rather than the row default. */
 function DrillNum({ value, onClick, className }: { value: number | undefined; onClick: () => void; className?: string }) {
   if (value == null) return <span className={className}>—</span>;
   if (value === 0)   return <span className={className}>0</span>;
   return (
     <button
       type="button"
-      onClick={onClick}
+      onClick={(e) => { e.stopPropagation(); onClick(); }}
       title="Click to see the people"
       className={cn("underline-offset-4 decoration-dotted hover:underline hover:opacity-80 cursor-pointer transition-opacity", className)}
     >
@@ -566,55 +638,108 @@ function DrillNum({ value, onClick, className }: { value: number | undefined; on
   );
 }
 
-const KIND_LABEL = { leads: "Leads", contacted: "Contacted", converted: "Converted" } as const;
+const KIND_CHIP: { k: "leads" | "contacted" | "converted"; label: string }[] = [
+  { k: "leads", label: "Leads" }, { k: "contacted", label: "Contacted" }, { k: "converted", label: "Converted" },
+];
 
-/** Lists the actual leads / contacted leads / placements behind a clicked
- *  number. The list length equals the number clicked (same source + filter). */
-function PeopleDrilldown({
-  drill, onClose, leads, dob,
+/** Inline panel that slides open under a consultant row — Marketing-style
+ *  drill-down. Chips switch between Leads / Contacted / Converted; the list is
+ *  the actual people, so its length equals the chip's number. */
+function ConsultantExpansion({
+  counts, kind, onKind, leads, dob,
 }: {
-  drill: { name: string; kind: "leads" | "contacted" | "converted" } | null;
-  onClose: () => void;
+  counts: { leads: number; contacted: number; converted: number };
+  kind: "leads" | "contacted" | "converted";
+  onKind: (k: "leads" | "contacted" | "converted") => void;
   leads: ZohoLead[];
   dob: ZohoDoctorOnBoard[];
 }) {
-  const count = drill?.kind === "converted" ? dob.length : leads.length;
   return (
-    <Dialog open={!!drill} onOpenChange={(o) => { if (!o) onClose(); }}>
-      <DialogContent className="max-w-lg max-h-[82vh] overflow-hidden flex flex-col p-0">
-        <DialogHeader className="px-5 pt-5 pb-3 border-b border-border/50">
-          <DialogTitle className="text-[14px] flex items-center gap-2">
-            <span className="font-semibold">{drill?.name}</span>
-            <span className="text-muted-foreground font-normal">·</span>
-            <span className="text-muted-foreground font-normal">{drill ? KIND_LABEL[drill.kind] : ""}</span>
-            <span className="ml-auto tabular-nums text-[12px] font-semibold text-primary">{count}</span>
-          </DialogTitle>
-        </DialogHeader>
-        <div className="overflow-y-auto px-2 py-1.5">
-          {count === 0 ? (
-            <div className="py-10 text-center text-[12px] text-muted-foreground">No one to show for this period.</div>
-          ) : drill?.kind === "converted" ? (
-            dob.map(d => (
-              <PersonRow
-                key={d.id}
-                name={d.Full_Name || [d.First_Name, d.Last_Name].filter(Boolean).join(" ") || "—"}
-                sub={d.Specialty_New || d.Speciality || undefined}
-                tag={d.Account_Name?.name ?? undefined}
-              />
-            ))
-          ) : (
-            leads.map(l => (
-              <PersonRow
-                key={l.id}
-                name={l.Full_Name || [l.First_Name, l.Last_Name].filter(Boolean).join(" ") || "—"}
-                sub={l.Specialty_New || l.Specialty || undefined}
-                tag={l.Lead_Status || undefined}
-              />
-            ))
-          )}
-        </div>
-      </DialogContent>
-    </Dialog>
+    <div>
+      <div className="flex flex-wrap gap-1.5 mb-2.5">
+        {KIND_CHIP.map(c => (
+          <button
+            key={c.k}
+            onClick={(e) => { e.stopPropagation(); onKind(c.k); }}
+            className={cn(
+              "inline-flex items-center gap-1.5 rounded-full px-2.5 py-1 text-[11px] font-medium transition-colors",
+              kind === c.k ? "bg-primary text-white" : "bg-muted text-muted-foreground hover:bg-muted/70",
+            )}
+          >
+            {c.label}
+            <span className={cn("tabular-nums", kind === c.k ? "text-white/90" : "text-foreground/70")}>{counts[c.k].toLocaleString()}</span>
+          </button>
+        ))}
+      </div>
+      <div className="max-h-[300px] overflow-y-auto grid grid-cols-1 sm:grid-cols-2 gap-x-4">
+        {(kind === "converted" ? dob.length : leads.length) === 0 ? (
+          <div className="py-6 text-center text-[12px] text-muted-foreground col-span-full">No one to show for this period.</div>
+        ) : kind === "converted" ? (
+          dob.map(d => (
+            <PersonRow key={d.id}
+              name={d.Full_Name || [d.First_Name, d.Last_Name].filter(Boolean).join(" ") || "—"}
+              sub={d.Specialty_New || d.Speciality || undefined}
+              tag={d.Account_Name?.name ?? undefined}
+            />
+          ))
+        ) : (
+          leads.map(l => (
+            <PersonRow key={l.id}
+              name={l.Full_Name || [l.First_Name, l.Last_Name].filter(Boolean).join(" ") || "—"}
+              sub={l.Specialty_New || l.Specialty || undefined}
+              tag={l.Lead_Status || undefined}
+            />
+          ))
+        )}
+      </div>
+    </div>
+  );
+}
+
+/** A drill-down panel that slides open under a stage box / conversion step,
+ *  listing the actual people. `dob` takes precedence when non-empty. */
+function PeoplePanel({
+  title, color, leads, dob, onClose,
+}: {
+  title: string;
+  color?: string;
+  leads: ZohoLead[];
+  dob: ZohoDoctorOnBoard[];
+  onClose: () => void;
+}) {
+  const count = dob.length || leads.length;
+  return (
+    <div className="mt-3 rounded-xl border border-border/50 bg-muted/10 p-3">
+      <div className="flex items-center gap-2 mb-2">
+        {color && <span className="h-2.5 w-2.5 rounded-full inline-block shrink-0" style={{ backgroundColor: color }} />}
+        <span className="text-[12px] font-semibold truncate">{title}</span>
+        <span className="text-[11px] text-muted-foreground shrink-0">· {count} {count === 1 ? "person" : "people"}</span>
+        <button type="button" onClick={onClose} className="ml-auto shrink-0 text-muted-foreground hover:text-foreground transition-colors" title="Close">
+          <X className="h-3.5 w-3.5" />
+        </button>
+      </div>
+      <div className="max-h-[280px] overflow-y-auto grid grid-cols-1 sm:grid-cols-2 gap-x-4">
+        {count === 0 ? (
+          <div className="col-span-full py-6 text-center text-[12px] text-muted-foreground">No one to show for this period.</div>
+        ) : dob.length ? (
+          dob.map(d => (
+            <PersonRow key={d.id}
+              name={d.Full_Name || [d.First_Name, d.Last_Name].filter(Boolean).join(" ") || "—"}
+              sub={d.Specialty_New || d.Speciality || undefined}
+              tag={d.Account_Name?.name ?? undefined}
+            />
+          ))
+        ) : (
+          leads.map(l => (
+            <PersonRow key={l.id}
+              name={l.Full_Name || [l.First_Name, l.Last_Name].filter(Boolean).join(" ") || "—"}
+              sub={l.Specialty_New || l.Specialty || undefined}
+              tag={l.Lead_Status || undefined}
+            />
+          ))
+        )}
+      </div>
+    </div>
   );
 }
 
