@@ -1,8 +1,9 @@
 /**
  * /doctors — single hub for everything doctor-shaped.
  *
- * Two tabs, one shared search:
- *   - Doctor Progress  → <LeadsPipeline embedded /> — the pipeline view
+ * Tabs, one shared search:
+ *   - Overview         → <DoctorsOverview /> — everyone on the board (replaced
+ *                        the deprecated Doctor Progress pipeline)
  *   - Profiles         → <WpCandidates  embedded /> — the canonical
  *                        profile record for each doctor (mirror of the
  *                        WP candidate CPT). Linked rows are read-only
@@ -21,14 +22,13 @@ import { lazy, Suspense, useMemo } from "react";
 import { useSearchParams } from "react-router-dom";
 import { DashboardLayout } from "@/components/layout/DashboardLayout";
 import { Input } from "@/components/ui/input";
-import { Search, UserSquare, GitBranch, Inbox, LayoutGrid } from "lucide-react";
+import { Search, UserSquare, Inbox, LayoutGrid } from "lucide-react";
 
 const DoctorsOverview = lazy(() => import("./DoctorsOverview"));
-const LeadsPipeline  = lazy(() => import("./LeadsPipeline"));
 const WpCandidates   = lazy(() => import("./WpCandidates"));
 const Forms          = lazy(() => import("./Forms"));
 
-type Tab = "overview" | "responses" | "profiles" | "progress";
+type Tab = "overview" | "responses" | "profiles";
 
 const TAB_META: Record<Tab, { label: string; icon: typeof UserSquare; subtitle: string; placeholder: string }> = {
   overview: {
@@ -48,12 +48,6 @@ const TAB_META: Record<Tab, { label: string; icon: typeof UserSquare; subtitle: 
     icon:        UserSquare,
     subtitle:    "The canonical doctor profile — mirrors allocationassist.com. Edit any candidate (linked or not). New profiles auto-link to the AA roster.",
     placeholder: "Search any field — name, specialty, license, country, salary, location…",
-  },
-  progress: {
-    label:       "Doctor Progress",
-    icon:        GitBranch,
-    subtitle:    "Where each doctor sits in the placement pipeline — Zoho lead stages + AA's manual signals.",
-    placeholder: "Search by name, specialty, recruiter, country, license, destination…",
   },
 };
 
@@ -138,7 +132,6 @@ export default function Doctors() {
           {tab === "overview"  && <DoctorsOverview />}
           {tab === "responses" && <Forms         embedded />}
           {tab === "profiles"  && <WpCandidates  embedded />}
-          {tab === "progress"  && <LeadsPipeline embedded />}
         </div>
       </Suspense>
     </DashboardLayout>
@@ -146,10 +139,11 @@ export default function Doctors() {
 }
 
 function parseTab(raw: string | null): Tab {
-  if (raw === "overview" || raw === "responses" || raw === "progress" || raw === "profiles") return raw;
+  if (raw === "overview" || raw === "responses" || raw === "profiles") return raw;
   // Legacy `?tab=wp` (the old WP Candidates tab name) lands on Profiles.
   if (raw === "wp") return "profiles";
-  // Default landing — the new Overview tab.
+  // Legacy `?tab=progress` — the deprecated Doctor Progress pipeline, now folded
+  // into Overview. Land there so old links keep working.
   return "overview";
 }
 

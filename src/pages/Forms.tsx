@@ -1254,7 +1254,7 @@ const ResponseRow = memo(function ResponseRow({
   /** Cross-link helper: send the user to the unified Doctors page with
    *  the email (or fallback display name) pre-typed into the search,
    *  so they land directly on this person's record in the chosen tab. */
-  const openInDoctors = (tab: "progress" | "profiles") => {
+  const openInDoctors = (tab: "overview" | "profiles") => {
     const q = response.respondent_email || display.label || "";
     navigate(`/doctors?tab=${tab}${q ? `&q=${encodeURIComponent(q)}` : ""}`);
   };
@@ -1471,8 +1471,8 @@ const ResponseRow = memo(function ResponseRow({
           // would lose the styling, so we just render a styled <button>.
           <button
             type="button"
-            onClick={(e) => { e.stopPropagation(); openInDoctors("progress"); }}
-            title="Open in Doctors → Progress"
+            onClick={(e) => { e.stopPropagation(); openInDoctors("overview"); }}
+            title="Open in Doctors → Overview"
             className="text-[9px] shrink-0 inline-flex items-center rounded-md border px-1.5 py-0.5 bg-emerald-50 text-emerald-700 border-emerald-200 hover:bg-emerald-100 transition-colors"
           >
             <Sparkles className="h-2.5 w-2.5 mr-0.5" /> in Zoho
