@@ -346,6 +346,7 @@ const FollowUps = () => {
           has_moh:      truthy(lead.Has_MOH),
           license_text: lead.License,
         }).length,
+        note: lead.latest_note,
       }),
     }));
     items.sort((a, b) => b.rank.score - a.rank.score

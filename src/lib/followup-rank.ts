@@ -7,6 +7,7 @@
  * are treated as cold and dropped from the queue (so years-old leads don't show).
  */
 import { rollupSpecialty } from "@/lib/specialty-groups";
+import { noteSignal } from "@/lib/lead-contact";
 
 /** Leads with no activity for this many days are cold → hidden from the queue. */
 export const FOLLOWUP_STALE_CAP_DAYS = 180;
@@ -19,6 +20,7 @@ export interface RankInput {
   specialty:        string | null;
   demandCounts:     Map<string, number>; // OPEN vacancies per rollup-specialty group
   licenseCount:     number;           // Gulf licenses the doctor already holds (DHA/DOH/…)
+  note?:            string | null;    // latest Zoho note — its intent nudges priority
 }
 
 /**
@@ -72,7 +74,13 @@ export function scoreFollowUp(i: RankInput): RankResult {
   const lc = Math.max(0, Math.min(3, Math.round(i.licenseCount)));
   const license = LICENSE_PTS[lc];
 
-  const score = timing + vacancyDemand + license;
+  // 4) Note signal — the latest Zoho note's intent. Warm ("interested" /
+  //    "call back") lifts priority; a logged attempt that didn't connect
+  //    ("phone off" / "no answer") nudges a retry; an explicit cold/declined
+  //    note deprioritises even when the age says "due".
+  const ns = noteSignal(i.note);
+
+  const score = timing + vacancyDemand + license + ns.points;
 
   // Factor breakdown (no day counts — the recency chip already shows the age).
   const timeLabel = days >= 30 && days <= 90 ? "Prime window" : days < 30 ? "Recent" : "Cooling";
@@ -81,10 +89,13 @@ export function scoreFollowUp(i: RankInput): RankResult {
   ];
   if (vacancyDemand > 0) factors.push({ label: vacCount > 1 ? `Open vacancies ×${vacCount}` : "Open vacancy", points: Math.round(vacancyDemand) });
   if (license > 0)       factors.push({ label: i.licenseCount > 1 ? `Gulf-licensed ×${i.licenseCount}` : "Gulf-licensed", points: license });
+  if (ns.points !== 0)   factors.push({ label: ns.label, points: Math.round(ns.points) });
 
   const headline =
-    vacancyDemand > 0 ? (vacCount > 1 ? `${vacCount} open vacancies` : "Open vacancy")
+    ns.points >= 16   ? "Warm note"
+    : vacancyDemand > 0 ? (vacCount > 1 ? `${vacCount} open vacancies` : "Open vacancy")
     : license > 0     ? "Gulf-licensed"
+    : ns.points < 0   ? "Cold note"
     :                   timeLabel;
 
   const tier: RankResult["tier"] = score >= 60 ? "high" : score >= 38 ? "medium" : "normal";
