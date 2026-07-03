@@ -128,7 +128,7 @@ export function EmailPreviewStudioLayout({
   // The rail and the email each sit as their own rounded island on a light
   // canvas, dashboard-style, with a gap between.
   return (
-    <div className="flex h-full min-h-0 gap-2.5 bg-slate-100 p-2.5">
+    <div className="flex h-full min-h-0 gap-2.5">
       {/* LEFT RAIL — sidebar-green island. */}
       <aside className="flex w-[30%] min-w-[300px] max-w-[400px] shrink-0 flex-col overflow-hidden rounded-2xl bg-sidebar text-sidebar-foreground shadow-sm">
         {/* Title + close */}
@@ -213,7 +213,7 @@ export function EmailPreviewStudio({ open, onClose, title, ...layout }: StudioPr
         <DialogPrimitive.Overlay className="fixed inset-0 z-50 bg-slate-950/60 backdrop-blur-sm data-[state=open]:animate-in data-[state=closed]:animate-out data-[state=open]:fade-in-0 data-[state=closed]:fade-out-0" />
         <DialogPrimitive.Content
           aria-describedby={undefined}
-          className="fixed left-1/2 top-1/2 z-50 h-[92vh] w-[93vw] -translate-x-1/2 -translate-y-1/2 overflow-hidden rounded-xl bg-slate-100 shadow-2xl outline-none data-[state=open]:animate-in data-[state=closed]:animate-out data-[state=open]:fade-in-0 data-[state=closed]:fade-out-0 data-[state=open]:zoom-in-95 data-[state=closed]:zoom-out-95 duration-200"
+          className="fixed left-1/2 top-1/2 z-50 h-[92vh] w-[93vw] -translate-x-1/2 -translate-y-1/2 bg-transparent outline-none data-[state=open]:animate-in data-[state=closed]:animate-out data-[state=open]:fade-in-0 data-[state=closed]:fade-out-0 data-[state=open]:zoom-in-95 data-[state=closed]:zoom-out-95 duration-200"
         >
           <DialogPrimitive.Title className="sr-only">{typeof title === "string" ? title : "Email preview"}</DialogPrimitive.Title>
           <EmailPreviewStudioLayout title={title} onClose={onClose} {...layout} />
