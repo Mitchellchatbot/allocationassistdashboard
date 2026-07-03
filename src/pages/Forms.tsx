@@ -54,6 +54,7 @@ import { useWpCandidateByContact, useWpContactSet, normalizePhone } from "@/hook
 import { useNavigate } from "react-router-dom";
 import { useCreateStagedProfile } from "@/hooks/use-wp-candidates";
 import { mapAnswersToWp } from "@/lib/jotform-to-wp";
+import { FormDropoff } from "@/components/forms/FormDropoff";
 
 const supabaseUrl = (import.meta.env.VITE_SUPABASE_URL as string) ?? "";
 
@@ -411,6 +412,10 @@ function FormDetail({ form }: { form: Form }) {
           </>
         )}
       </div>
+
+      {/* Where people drop off — Typeform funnel (per-question) / Jotform count. */}
+      <FormDropoff form={form} />
+
       {/* Paid forms still get the form-response lifecycle tile — it's
           the right outreach signal when there's no Zoho funnel. */}
       {isPaidForm && (
