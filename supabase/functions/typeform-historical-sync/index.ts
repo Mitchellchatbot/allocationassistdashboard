@@ -121,6 +121,34 @@ Deno.serve(async (req: Request) => {
     // Non-fatal — we'll fall back to field IDs in the absence of titles.
   }
 
+  // ── Build the email → doctor_id map ONCE, before paging ────────────
+  // zoho_cache rows 1/2 are multi-MB JSONB blobs. The previous version
+  // re-loaded BOTH on every page; on a large form (18+ pages) that, plus
+  // 1000 raw response payloads held per page, blew the worker's memory
+  // (WORKER_RESOURCE_LIMIT) so the sync died before committing the newest
+  // page and never caught up. Load once, keep only a compact email→id map
+  // (a few MB of strings), and let the big blobs get collected.
+  const emailToDoctorId = new Map<string, string>();
+  {
+    const [{ data: cache1 }, { data: cache2 }] = await Promise.all([
+      supabase.from("zoho_cache").select("data").eq("id", 1).maybeSingle(),
+      supabase.from("zoho_cache").select("data").eq("id", 2).maybeSingle(),
+    ]);
+    const leads = (cache1?.data as { leads?: Array<{ id?: string; Email?: string | null }> } | null)?.leads ?? [];
+    const dob   = (cache2?.data as { doctorsOnBoard?: Array<{ id?: string; Email?: string | null }> } | null)?.doctorsOnBoard ?? [];
+    for (const r of leads) {
+      const e = (r.Email ?? "").trim().toLowerCase();
+      if (e && r.id) emailToDoctorId.set(e, `lead:${r.id}`);
+    }
+    // DoB second so it overwrites any lead match for the same email
+    // (further down the funnel wins).
+    for (const r of dob) {
+      const e = (r.Email ?? "").trim().toLowerCase();
+      if (e && r.id) emailToDoctorId.set(e, `dob:${r.id}`);
+    }
+    console.log(`[typeform-historical-sync] built email→doctor map once: ${emailToDoctorId.size} entries`);
+  }
+
   // Paginate Typeform's Responses API. Their `before` param uses the
   // last item's response_id (oldest in the page) to fetch the next
   // older page. We accumulate until they return a genuinely empty
@@ -132,8 +160,11 @@ Deno.serve(async (req: Request) => {
   let skipped  = 0;
   let totalReported = 0;
   let beforeToken: string | null = null;
-  const PAGE = 1000;
-  const MAX_PAGES = 200;  // sanity: 200 × 1000 = 200k responses
+  // 500 (not Typeform's max 1000) keeps per-page memory — 500 full raw
+  // payloads + the bulk-upsert serialisation — comfortably under the
+  // worker limit. 200 pages × 500 = 100k responses of headroom.
+  const PAGE = 500;
+  const MAX_PAGES = 200;
 
   for (let page = 0; page < MAX_PAGES; page++) {
     const params = new URLSearchParams({ page_size: String(PAGE) });
@@ -168,7 +199,6 @@ Deno.serve(async (req: Request) => {
       doctor_id:             string | null;
     };
     const rows: Row[] = [];
-    const emails: string[] = [];
 
     for (const item of items) {
       const flat: Record<string, string> = {};
@@ -208,7 +238,6 @@ Deno.serve(async (req: Request) => {
 
       const responseId = item.token ?? item.response_id;
       if (!responseId) { skipped++; continue; }
-      if (respondentEmail) emails.push(respondentEmail.toLowerCase());
 
       rows.push({
         form_id:               form.id,
@@ -222,36 +251,8 @@ Deno.serve(async (req: Request) => {
       });
     }
 
-    // ── 2. Batch Zoho lookups via the canonical JSONB cache ──────────
-    // Pull the cache rows once per page, build a Map<email, doctor_id>
-    // by iterating leads + doctorsOnBoard. DoB wins precedence over
-    // Lead (further down the funnel).
-    //
-    // (The previous version of this function read from zoho_cache_dob
-    // and zoho_cache_leads tables that don't exist on this project; the
-    // .in() lookups silently returned nothing and 17k+ rows landed
-    // unlinked. Migration 20260605000004 backfilled the historical
-    // damage; this rewrite ensures future runs are correct.)
-    const emailToDoctorId = new Map<string, string>();
-    if (emails.length > 0) {
-      const uniqueEmails = new Set(emails.map(e => e.toLowerCase()));
-      const [{ data: cache1 }, { data: cache2 }] = await Promise.all([
-        supabase.from("zoho_cache").select("data").eq("id", 1).maybeSingle(),
-        supabase.from("zoho_cache").select("data").eq("id", 2).maybeSingle(),
-      ]);
-      const leads = (cache1?.data as { leads?: Array<{ id?: string; Email?: string | null }> } | null)?.leads ?? [];
-      const dob   = (cache2?.data as { doctorsOnBoard?: Array<{ id?: string; Email?: string | null }> } | null)?.doctorsOnBoard ?? [];
-
-      for (const r of leads) {
-        const e = (r.Email ?? "").trim().toLowerCase();
-        if (e && r.id && uniqueEmails.has(e)) emailToDoctorId.set(e, `lead:${r.id}`);
-      }
-      // DoB second so it overwrites any lead match for the same email.
-      for (const r of dob) {
-        const e = (r.Email ?? "").trim().toLowerCase();
-        if (e && r.id && uniqueEmails.has(e)) emailToDoctorId.set(e, `dob:${r.id}`);
-      }
-    }
+    // ── 2. Link responses to doctors via the pre-built email map ─────
+    // (Map is built once above the loop — see the note there for why.)
     for (const row of rows) {
       if (row.respondent_email) {
         const hit = emailToDoctorId.get(row.respondent_email.toLowerCase());
