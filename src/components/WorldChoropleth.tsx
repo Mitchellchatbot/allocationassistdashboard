@@ -157,7 +157,10 @@ export function WorldChoropleth({
                 const rect = wrapRef.current?.getBoundingClientRect();
                 setTip({ x: e.clientX - (rect?.left ?? 0), y: e.clientY - (rect?.top ?? 0) });
               }}
-              onClick={() => { if (v > 0 && onSelect) onSelect(p.key); }}
+              // Select on pointer-DOWN, not click: the hover-lift transition moves
+              // the path, so a mousedown+mouseup can land on different spots and
+              // the browser swallows the click. pointerdown fires on press.
+              onPointerDown={() => { if (v > 0 && onSelect) onSelect(p.key); }}
             />
           );
         })}
