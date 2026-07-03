@@ -16,12 +16,12 @@
  * + send.
  */
 import { useEffect, useState } from "react";
-import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription, DialogFooter } from "@/components/ui/dialog";
 import { Button } from "@/components/ui/button";
 import { Send, RefreshCw, AlertTriangle } from "lucide-react";
 import { supabase } from "@/lib/supabase";
 import { toast } from "sonner";
 import { EditableEmailPreview } from "@/components/EditableEmailPreview";
+import { EmailPreviewStudio, type StudioEmail } from "@/components/EmailPreviewStudio";
 import { AttachmentsPicker } from "@/components/automations/AttachmentsPicker";
 import type { EmailAttachment } from "@/lib/email-attachments";
 
@@ -129,74 +129,80 @@ export function FlowSendPreviewDialog({
     }
   };
 
+  const ready = !!preview && !loading && !err;
+
+  const headerExtra = (
+    <div className="rounded-md border bg-slate-50/60 p-2.5 text-[11px] text-muted-foreground">
+      {edited
+        ? <span className="font-medium text-teal-700">Edited — your version sends, not the template.</span>
+        : preview
+          ? <>Review before sending{preview.to ? <> · To <span className="text-slate-700">{preview.to}</span></> : null} — edit the subject or body in the preview if needed.</>
+          : "What goes out — review before sending."}
+    </div>
+  );
+
+  const email: StudioEmail = {
+    key: "email",
+    label: title,
+    subLabel: preview?.to ? `To ${preview.to}` : undefined,
+    controls: ready ? (
+      <AttachmentsPicker
+        attachments={attachments}
+        onChange={setAttachments}
+        disabled={sending}
+        hint="CV, logbook, etc. — rides on this email"
+      />
+    ) : null,
+    preview: loading ? (
+      <div className="grid min-h-0 w-full flex-1 place-items-center text-sm text-muted-foreground">
+        <span><RefreshCw className="mr-2 inline h-4 w-4 animate-spin" /> Building preview…</span>
+      </div>
+    ) : err ? (
+      <div className="grid min-h-0 w-full flex-1 place-items-center px-6 text-center text-sm text-rose-600">
+        <div><AlertTriangle className="mx-auto mb-2 h-5 w-5" />{err}</div>
+      </div>
+    ) : preview ? (
+      <EditableEmailPreview
+        subject={editSubject}
+        html={preview.html}
+        onSubjectChange={setEditSubject}
+        onHtmlChange={setEditHtml}
+        resetKey={resetTick}
+        edited={edited}
+        onReset={() => {
+          if (!preview) return;
+          setEditSubject(preview.subject);
+          setEditHtml(preview.html);
+          setResetTick(t => t + 1);
+        }}
+        from={preview.from}
+        to={preview.to}
+        text={preview.text}
+        attachments={attachments}
+        onAttachmentsChange={setAttachments}
+        className="min-h-0 flex-1"
+      />
+    ) : null,
+  };
+
+  const footer = (
+    <>
+      <Button variant="outline" onClick={onClose} disabled={sending}>Cancel</Button>
+      <Button onClick={handleSend} disabled={sending || loading || !preview}>
+        <Send className="h-3.5 w-3.5 mr-1.5" />
+        {sending ? "Sending…" : confirmLabel}
+      </Button>
+    </>
+  );
+
   return (
-    <Dialog open={open} onOpenChange={(v) => !v && !sending && onClose()}>
-      <DialogContent className="w-[95vw] sm:max-w-[1120px] max-h-[92vh] overflow-hidden flex flex-col">
-        <DialogHeader>
-          <DialogTitle className="text-base">{title}</DialogTitle>
-          <DialogDescription className="text-xs">
-            {edited
-              ? <span className="font-medium text-teal-700">Edited — your version sends, not the template.</span>
-              : preview
-                ? <>Review before sending{preview.to ? <> · To {preview.to}</> : null} — edit the subject or body below if needed.</>
-                : "What goes out — review before sending."}
-          </DialogDescription>
-        </DialogHeader>
-
-        {loading && (
-          <div className="flex-1 min-h-[40vh] grid place-items-center text-sm text-muted-foreground">
-            <span><RefreshCw className="h-4 w-4 mr-2 animate-spin inline" /> Building preview…</span>
-          </div>
-        )}
-        {err && !loading && (
-          <div className="flex-1 min-h-[40vh] grid place-items-center text-sm text-rose-600 px-6 text-center">
-            <div><AlertTriangle className="h-5 w-5 mx-auto mb-2" />{err}</div>
-          </div>
-        )}
-        {preview && !loading && !err && (
-          <EditableEmailPreview
-            subject={editSubject}
-            html={preview.html}
-            onSubjectChange={setEditSubject}
-            onHtmlChange={setEditHtml}
-            resetKey={resetTick}
-            edited={edited}
-            onReset={() => {
-              if (!preview) return;
-              setEditSubject(preview.subject);
-              setEditHtml(preview.html);
-              setResetTick(t => t + 1);
-            }}
-            from={preview.from}
-            to={preview.to}
-            text={preview.text}
-            attachments={attachments}
-            onAttachmentsChange={setAttachments}
-            className="flex-1 min-h-[52vh]"
-          />
-        )}
-
-        {preview && !loading && !err && (
-          <div className="shrink-0">
-            <AttachmentsPicker
-              attachments={attachments}
-              onChange={setAttachments}
-              disabled={sending}
-              hint="CV, logbook, etc. — rides on this email"
-            />
-          </div>
-        )}
-
-        <DialogFooter>
-          <div className="flex items-center gap-2">
-            <Button variant="outline" onClick={onClose} disabled={sending}>Cancel</Button>
-            <Button onClick={handleSend} disabled={sending || loading || !preview}>
-              <Send className="h-3.5 w-3.5 mr-1.5" />
-              {sending ? "Sending…" : confirmLabel}
-            </Button>
-          </div>
-        </DialogFooter>
-      </DialogContent>
-    </Dialog>
+    <EmailPreviewStudio
+      open={open}
+      onClose={() => { if (!sending) onClose(); }}
+      title={title}
+      emails={[email]}
+      headerExtra={headerExtra}
+      footer={footer}
+    />
   );
 }
