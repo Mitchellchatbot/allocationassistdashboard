@@ -311,10 +311,8 @@ function SendProfileDialogBody({ onClose }: { onClose: () => void }) {
     const dSubj = renderTemplate(doctorTemplate?.subject ?? "Your profile has been sent to {{hospital_name}}", previewVars);
     const dHtml = wrapBodyForSend(renderTemplate(doctorTemplate?.body_html ?? doctorTemplate?.body_text ?? "", previewVars));
     const pane = (subject: string, html: string) => (
-      <div className="flex min-h-0 w-full flex-1 flex-col overflow-hidden rounded-md">
-        <div className="min-h-0 flex-1 overflow-auto">
-          <EmailPreview subject={subject} html={html} />
-        </div>
+      <div className="min-h-0 w-full flex-1 overflow-auto">
+        <EmailPreview subject={subject} html={html} />
       </div>
     );
     return [
@@ -588,7 +586,7 @@ function SendProfileDialogBody({ onClose }: { onClose: () => void }) {
         <DialogPrimitive.Overlay className="fixed inset-0 z-50 bg-slate-950/60 backdrop-blur-sm data-[state=open]:animate-in data-[state=closed]:animate-out data-[state=open]:fade-in-0 data-[state=closed]:fade-out-0" />
         <DialogPrimitive.Content
           aria-describedby={undefined}
-          className="fixed left-1/2 top-1/2 z-50 h-[92vh] w-[93vw] -translate-x-1/2 -translate-y-1/2 overflow-hidden rounded-xl bg-white shadow-2xl outline-none data-[state=open]:animate-in data-[state=closed]:animate-out data-[state=open]:fade-in-0 data-[state=closed]:fade-out-0 data-[state=open]:zoom-in-95 data-[state=closed]:zoom-out-95 duration-200"
+          className="fixed left-1/2 top-1/2 z-50 h-[92vh] w-[93vw] -translate-x-1/2 -translate-y-1/2 overflow-hidden rounded-xl bg-slate-100 shadow-2xl outline-none data-[state=open]:animate-in data-[state=closed]:animate-out data-[state=open]:fade-in-0 data-[state=closed]:fade-out-0 data-[state=open]:zoom-in-95 data-[state=closed]:zoom-out-95 duration-200"
         >
           <DialogPrimitive.Title className="sr-only">Send Profile to Hospital</DialogPrimitive.Title>
           {step === "preview-confirm" && selectedDoctor ? (
@@ -1639,9 +1637,9 @@ function EditableEmailSection({
     return <PreviewBlock label={label} subject={subject} body={plainBody} />;
   }
 
-  // Fills the studio's right pane (flex column, its own body scrolls).
+  // Fills the studio's right pane as a rounded island (its own body scrolls).
   return (
-    <div className="flex min-h-0 w-full flex-1 flex-col overflow-hidden rounded-md border bg-white">
+    <div className="flex min-h-0 w-full flex-1 flex-col overflow-hidden rounded-2xl border border-slate-200 bg-white shadow-sm">
       <div className="px-3 py-1.5 border-b bg-slate-50/50 text-[10px] uppercase tracking-wider text-muted-foreground flex items-center gap-1.5 shrink-0">
         <Eye className="h-3 w-3 shrink-0" /> <span className="truncate">{label}</span>
       </div>

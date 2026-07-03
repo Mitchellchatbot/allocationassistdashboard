@@ -125,10 +125,12 @@ export function EmailPreviewStudioLayout({
 
   // No top/bottom chrome bars — the green rail carries the title, tabs, controls
   // AND the action buttons, so the right pane is all email, floor-to-ceiling.
+  // The rail and the email each sit as their own rounded island on a light
+  // canvas, dashboard-style, with a gap between.
   return (
-    <div className="flex h-full min-h-0">
-      {/* LEFT RAIL — sidebar-green, self-contained. */}
-      <aside className="flex w-[30%] min-w-[300px] max-w-[400px] shrink-0 flex-col bg-sidebar text-sidebar-foreground">
+    <div className="flex h-full min-h-0 gap-2.5 bg-slate-100 p-2.5">
+      {/* LEFT RAIL — sidebar-green island. */}
+      <aside className="flex w-[30%] min-w-[300px] max-w-[400px] shrink-0 flex-col overflow-hidden rounded-2xl bg-sidebar text-sidebar-foreground shadow-sm">
         {/* Title + close */}
         <div className="flex shrink-0 items-start gap-2 px-4 pt-3.5 pb-2">
           <Mail className="mt-0.5 h-4 w-4 shrink-0 text-sidebar-foreground/70" />
@@ -182,12 +184,12 @@ export function EmailPreviewStudioLayout({
         )}
       </aside>
 
-      {/* RIGHT PANE — the email, maximized (no bars above or below). */}
-      <div className="flex min-h-0 min-w-0 flex-1 bg-slate-100">
+      {/* RIGHT ISLAND — the email preview card floats on the canvas. */}
+      <div className="flex min-h-0 min-w-0 flex-1">
         {emails.length === 0
-          ? (emptyState && <div className="flex min-h-0 min-w-0 flex-1 p-2.5">{emptyState}</div>)
+          ? (emptyState && <div className="flex min-h-0 min-w-0 flex-1">{emptyState}</div>)
           : rendered.map(e => (
-              <div key={e.key} className={cn("min-h-0 min-w-0 flex-1 p-2.5", e.key === active ? "flex" : "hidden")}>
+              <div key={e.key} className={cn("min-h-0 min-w-0 flex-1", e.key === active ? "flex" : "hidden")}>
                 {e.preview}
               </div>
             ))}
@@ -211,7 +213,7 @@ export function EmailPreviewStudio({ open, onClose, title, ...layout }: StudioPr
         <DialogPrimitive.Overlay className="fixed inset-0 z-50 bg-slate-950/60 backdrop-blur-sm data-[state=open]:animate-in data-[state=closed]:animate-out data-[state=open]:fade-in-0 data-[state=closed]:fade-out-0" />
         <DialogPrimitive.Content
           aria-describedby={undefined}
-          className="fixed left-1/2 top-1/2 z-50 h-[92vh] w-[93vw] -translate-x-1/2 -translate-y-1/2 overflow-hidden rounded-xl bg-white shadow-2xl outline-none data-[state=open]:animate-in data-[state=closed]:animate-out data-[state=open]:fade-in-0 data-[state=closed]:fade-out-0 data-[state=open]:zoom-in-95 data-[state=closed]:zoom-out-95 duration-200"
+          className="fixed left-1/2 top-1/2 z-50 h-[92vh] w-[93vw] -translate-x-1/2 -translate-y-1/2 overflow-hidden rounded-xl bg-slate-100 shadow-2xl outline-none data-[state=open]:animate-in data-[state=closed]:animate-out data-[state=open]:fade-in-0 data-[state=closed]:fade-out-0 data-[state=open]:zoom-in-95 data-[state=closed]:zoom-out-95 duration-200"
         >
           <DialogPrimitive.Title className="sr-only">{typeof title === "string" ? title : "Email preview"}</DialogPrimitive.Title>
           <EmailPreviewStudioLayout title={title} onClose={onClose} {...layout} />
