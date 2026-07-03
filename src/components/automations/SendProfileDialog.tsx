@@ -733,18 +733,20 @@ function DoctorPicker({ options, isLoading, onPick }: {
           <button
             key={d.id}
             onClick={() => onPick(d)}
-            className="w-full text-left px-3 py-2 hover:bg-slate-50 transition-colors flex items-center justify-between gap-3"
+            className="group w-full text-left px-3 py-2 hover:bg-teal-50/60 transition-colors flex items-center gap-2.5"
           >
             <div className="min-w-0 flex-1">
-              <div className="flex items-center gap-2">
-                <span className="text-[13px] font-medium truncate">{d.name}</span>
-                <Badge variant="outline" className="text-[9px] uppercase">{d.source === "dob" ? "Doctor on Board" : "Lead"}</Badge>
+              <div className="flex items-center gap-1.5">
+                <span className="min-w-0 flex-1 truncate text-[13px] font-medium text-slate-800">{d.name || "—"}</span>
+                <span className={`shrink-0 rounded px-1.5 py-px text-[8.5px] font-semibold uppercase tracking-wide ${d.source === "dob" ? "bg-emerald-100 text-emerald-700" : "bg-sky-100 text-sky-700"}`}>
+                  {d.source === "dob" ? "DoB" : "Lead"}
+                </span>
               </div>
-              <div className="text-[11px] text-muted-foreground truncate">
-                {d.speciality ?? "—"} · {d.email ?? d.phone ?? "no contact"}
+              <div className="truncate text-[11px] text-muted-foreground">
+                {d.speciality ?? "—"}{(d.email ?? d.phone) ? ` · ${d.email ?? d.phone}` : ""}
               </div>
             </div>
-            <ChevronLeft className="h-4 w-4 text-slate-400 rotate-180" />
+            <ChevronLeft className="h-4 w-4 shrink-0 text-slate-300 rotate-180 group-hover:text-teal-500 transition-colors" />
           </button>
         ))}
       </div>

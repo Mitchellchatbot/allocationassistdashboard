@@ -85,7 +85,11 @@ export const EMAIL_PREVIEW_CSS = `
     line-height:1.55;
     background:#ffffff;
     padding:16px;
-    word-break:break-word;
+    /* overflow-wrap (not word-break:break-word) so long tokens/URLs still wrap
+       when they'd overflow, but white-space:nowrap headers are NOT broken —
+       that legacy value was crushing wide data tables (nowrap headers wrapped),
+       so their overflow-x:auto wrapper never got the chance to scroll. */
+    overflow-wrap:break-word;
   }
   a{color:#1155cc;}
   img{max-width:100%;height:auto;}
