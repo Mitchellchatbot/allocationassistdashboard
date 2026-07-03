@@ -1671,8 +1671,9 @@ function EditableEmailSection({
 
 function PreviewBlock({ label, subject, body }: { label: string; subject: string; body: string }) {
   const isHtml = looksLikeHtml(body);
+  // Flat — fills the studio's white right island (multi-hospital BCC read-only).
   return (
-    <div className="flex min-h-0 w-full flex-1 flex-col overflow-hidden rounded-md border bg-white">
+    <div className="flex min-h-0 w-full flex-1 flex-col overflow-hidden bg-white text-slate-800">
       <div className="px-3 py-1.5 border-b bg-slate-50/50 text-[10px] uppercase tracking-wider text-muted-foreground flex items-center gap-1.5 shrink-0">
         <Eye className="h-3 w-3" /> {label}
       </div>
