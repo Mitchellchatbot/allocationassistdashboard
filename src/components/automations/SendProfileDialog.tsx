@@ -611,6 +611,7 @@ function SendProfileDialogBody({ onClose }: { onClose: () => void }) {
               setBccList={setBccList}
               templates={templates}
               hospitalTemplateKey={hospitalTemplateKey}
+              setHospitalTemplateKey={setHospitalTemplateKey}
               doctorTemplateKey={doctorTemplateKey}
               setDoctorTemplateKey={setDoctorTemplateKey}
               onSaveDefault={saveDefaultTemplate}
@@ -986,7 +987,7 @@ function CardScreenshotControl({
 function PreviewConfirm({
   doctor, hospitals, customMessage, hospitalSubject, hospitalBody, doctorSubject, doctorBody,
   onBack, onClose, onConfirm, submitting, bccList, setBccList,
-  templates, hospitalTemplateKey, doctorTemplateKey, setDoctorTemplateKey, onSaveDefault,
+  templates, hospitalTemplateKey, setHospitalTemplateKey, doctorTemplateKey, setDoctorTemplateKey, onSaveDefault,
   hospitalContacts, recipientOverrides, onOverrideRecipient,
   cardImageUrl, onSetCardImage,
 }: {
@@ -1005,6 +1006,7 @@ function PreviewConfirm({
   setBccList: (next: string[]) => void;
   templates: import("@/hooks/use-email-templates").EmailTemplate[];
   hospitalTemplateKey: string;
+  setHospitalTemplateKey: (k: string) => void;
   doctorTemplateKey: string;
   setDoctorTemplateKey: (k: string) => void;
   onSaveDefault: (which: "hospital" | "doctor", key: string) => void;
@@ -1263,11 +1265,14 @@ function PreviewConfirm({
       subLabel: hospitalRecipient,
       controls: (
         <div className="space-y-2">
-          <div className="flex items-center gap-1.5 px-0.5 text-[11px] text-sidebar-foreground/80">
-            <Mail className="h-3.5 w-3.5 text-sidebar-foreground/70 shrink-0" />
-            <span className="font-medium">Hospital intro email</span>
+          <div className="flex items-start justify-between gap-2">
+            <div className="flex-1 min-w-0">
+              <TemplatePicker templates={templates} value={hospitalTemplateKey} onChange={setHospitalTemplateKey} defaultKey="profile_sent_hospital" renderVars={vars} label="Hospital intro email template" flowFilter="profile_sent" />
+            </div>
+            {hospitalTemplateKey !== "profile_sent_hospital" && (
+              <button type="button" onClick={() => { onSaveDefault("hospital", hospitalTemplateKey); toast.success("Saved as your default hospital template"); }} className="text-[10px] text-sidebar-foreground/60 hover:text-sidebar-foreground hover:underline whitespace-nowrap mt-4">Save as my default</button>
+            )}
           </div>
-          <p className="px-0.5 text-[10.5px] text-sidebar-foreground/55">Uses the standard profile-sent template; edit the wording right in the preview.</p>
           {/* Profile-as-image: render the candidate profile card (View-full-profile
               look, empty fields dropped) to a flat PNG and send it IN PLACE OF the
               data table, so the hospital sees a clean, pixel-perfect card. */}
@@ -1296,6 +1301,18 @@ function PreviewConfirm({
           plainBody={renderedHospitalBody}
           attachments={hospitalAttachments}
           onAttachmentsChange={setHospitalAttachments}
+          templatePicker={
+            <TemplatePicker
+              templates={templates}
+              value={hospitalTemplateKey}
+              onChange={setHospitalTemplateKey}
+              defaultKey="profile_sent_hospital"
+              renderVars={vars}
+              label="Hospital intro email template"
+              flowFilter="profile_sent"
+              contentClassName="z-[200]"
+            />
+          }
         />
       ),
     },

@@ -57,15 +57,27 @@ function HospitalContactsPanel({ hospital, contacts, onUpdate }: {
             </button>
           </div>
         </div>
-        <label className="flex items-center gap-1.5 text-[11px] cursor-pointer" title="Greet the chosen contact by their own name instead of the hospital name">
-          <input
-            type="checkbox"
-            className="h-3.5 w-3.5 accent-teal-600"
-            checked={hospital.greet_with_contact_name}
-            onChange={e => onUpdate({ greet_with_contact_name: e.target.checked })}
-          />
-          Direct addressing <span className="text-muted-foreground">(greet the contact by name)</span>
-        </label>
+        <div className="flex items-center gap-1.5">
+          <span className="text-[11px] text-muted-foreground">Greet with:</span>
+          <div className="inline-flex rounded-md border border-border/60 overflow-hidden">
+            <button
+              type="button"
+              className={seg(!hospital.greet_with_contact_name)}
+              onClick={() => onUpdate({ greet_with_contact_name: false })}
+              title="Open the email with the hospital's name"
+            >
+              Hospital name
+            </button>
+            <button
+              type="button"
+              className={seg(hospital.greet_with_contact_name)}
+              onClick={() => onUpdate({ greet_with_contact_name: true })}
+              title="Open the email with the chosen contact's own name"
+            >
+              Contact name
+            </button>
+          </div>
+        </div>
         {mode === "cycle" && next && (
           <span className="ml-auto text-[10.5px] text-muted-foreground">
             Next up: <span className="font-medium text-foreground">{next.name || next.email}</span>
