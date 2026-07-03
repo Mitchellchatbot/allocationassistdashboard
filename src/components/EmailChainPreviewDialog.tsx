@@ -325,13 +325,13 @@ function ChainStepPreview({
 
   return (
     <div className="flex min-h-0 w-full flex-1 flex-col">
-      <div className="mb-2 flex shrink-0 items-center gap-2">
+      <div className="flex shrink-0 items-center gap-2 border-b border-slate-100 px-4 py-2.5">
         <span className="text-[12.5px] font-medium text-slate-800">{step.label}</span>
         <ArrowRight className="h-3 w-3 text-slate-400" />
         <Badge variant="outline" className={`text-[9.5px] ${RECIPIENT_BADGE[step.recipient]}`}>{step.recipient}</Badge>
         {step.trigger && <span className="ml-auto truncate text-[10.5px] text-muted-foreground">{step.trigger}</span>}
       </div>
-      <div className="min-h-0 flex-1 overflow-auto rounded-md">
+      <div className="min-h-0 flex-1 overflow-auto">
         <EmailPreview
           subject={subject}
           html={html}
@@ -339,6 +339,7 @@ function ChainStepPreview({
           templateKey={step.templateKey}
           attachments={step.attachments}
           onExpand={() => setFs(true)}
+          className="border-0 rounded-none shadow-none"
         />
       </div>
       <FullScreenEmailPreview open={fs} onClose={() => setFs(false)} subject={subject} html={html} text={text} attachments={step.attachments} />

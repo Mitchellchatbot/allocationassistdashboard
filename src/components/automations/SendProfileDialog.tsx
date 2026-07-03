@@ -23,7 +23,6 @@ import { useZohoData, type ZohoDoctorOnBoard, type ZohoLead } from "@/hooks/use-
 import * as DialogPrimitive from "@radix-ui/react-dialog";
 import { EditableEmailPreview } from "@/components/EditableEmailPreview";
 import { EmailPreviewStudioLayout, type StudioEmail } from "@/components/EmailPreviewStudio";
-import { EmailPreview } from "@/components/EmailPreview";
 import { EmailFrame } from "@/components/EmailFrame";
 import { wrapBodyForSend } from "@/lib/email-preview";
 import { type EmailAttachment } from "@/lib/email-attachments";
@@ -311,8 +310,14 @@ function SendProfileDialogBody({ onClose }: { onClose: () => void }) {
     const dSubj = renderTemplate(doctorTemplate?.subject ?? "Your profile has been sent to {{hospital_name}}", previewVars);
     const dHtml = wrapBodyForSend(renderTemplate(doctorTemplate?.body_html ?? doctorTemplate?.body_text ?? "", previewVars));
     const pane = (subject: string, html: string) => (
-      <div className="min-h-0 w-full flex-1 overflow-auto">
-        <EmailPreview subject={subject} html={html} />
+      <div className="flex min-h-0 w-full flex-1 flex-col">
+        <div className="shrink-0 border-b border-slate-100 px-5 py-3">
+          <div className="truncate text-[14px] font-semibold text-slate-900">{subject || <span className="italic text-slate-400">No subject</span>}</div>
+          <div className="mt-0.5 text-[10px] uppercase tracking-wider text-slate-400">Preview · not sent</div>
+        </div>
+        <div className="min-h-0 flex-1 overflow-auto bg-white">
+          <EmailFrame html={html} />
+        </div>
       </div>
     );
     return [
@@ -1637,9 +1642,9 @@ function EditableEmailSection({
     return <PreviewBlock label={label} subject={subject} body={plainBody} />;
   }
 
-  // Fills the studio's right pane as a rounded island (its own body scrolls).
+  // Fills the studio's white right island flat (its own body scrolls).
   return (
-    <div className="flex min-h-0 w-full flex-1 flex-col overflow-hidden rounded-2xl border border-slate-200 bg-white shadow-sm">
+    <div className="flex min-h-0 w-full flex-1 flex-col overflow-hidden bg-white">
       <div className="px-3 py-1.5 border-b bg-slate-50/50 text-[10px] uppercase tracking-wider text-muted-foreground flex items-center gap-1.5 shrink-0">
         <Eye className="h-3 w-3 shrink-0" /> <span className="truncate">{label}</span>
       </div>

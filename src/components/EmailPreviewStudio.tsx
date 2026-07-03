@@ -184,12 +184,12 @@ export function EmailPreviewStudioLayout({
         )}
       </aside>
 
-      {/* RIGHT ISLAND — the email preview card floats on the canvas. */}
+      {/* RIGHT ISLAND — one solid white rounded rectangle; the preview fills it. */}
       <div className="flex min-h-0 min-w-0 flex-1">
         {emails.length === 0
-          ? (emptyState && <div className="flex min-h-0 min-w-0 flex-1">{emptyState}</div>)
+          ? (emptyState && <div className="flex min-h-0 min-w-0 flex-1 overflow-hidden rounded-2xl bg-white shadow-sm">{emptyState}</div>)
           : rendered.map(e => (
-              <div key={e.key} className={cn("min-h-0 min-w-0 flex-1", e.key === active ? "flex" : "hidden")}>
+              <div key={e.key} className={cn("min-h-0 min-w-0 flex-1 overflow-hidden rounded-2xl bg-white shadow-sm", e.key === active ? "flex" : "hidden")}>
                 {e.preview}
               </div>
             ))}

@@ -1554,7 +1554,7 @@ function BatchDialog({ target, onTargetChange, batches, suggestedSpecialty }: {
               setPreviewResetTick(t => t + 1);
             }}
             from="Hospital Intro <hospitalintro@allocationassist.com>"
-            className="min-h-0 flex-1"
+            className="min-h-0 flex-1 border-0 rounded-none shadow-none"
           />
         ),
       }] : []}

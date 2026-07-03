@@ -180,7 +180,7 @@ export function FlowSendPreviewDialog({
         text={preview.text}
         attachments={attachments}
         onAttachmentsChange={setAttachments}
-        className="min-h-0 flex-1"
+        className="min-h-0 flex-1 border-0 rounded-none shadow-none"
       />
     ) : null,
   };
