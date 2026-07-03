@@ -344,7 +344,7 @@ function normaliseSpecialty(raw: string | null | undefined): string {
 }
 
 /** Normalises country names — maps variants to a single canonical name. */
-function normaliseCountry(raw: string | null | undefined): string {
+export function normaliseCountry(raw: string | null | undefined): string {
   if (!raw) return null as unknown as string;
   const s = raw.trim().toLowerCase();
   if (s.includes('egypt') || s === 'eg') return 'Egypt';

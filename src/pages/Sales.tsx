@@ -16,6 +16,7 @@ import { useSalesBoardMembers, useRemoveSalesBoardMember } from "@/hooks/use-sal
 import { AddSalespersonDialog } from "@/components/sales/AddSalespersonDialog";
 import { SectionDateRange } from "@/components/SectionDateRange";
 import { SalesActivity } from "@/components/sales/SalesActivity";
+import { GeographyCard } from "@/components/GeographyCard";
 import { Phone, Mail, Clock, Users, UserCheck, Activity, ArrowRight, PhoneCall, AlertTriangle, Plus, X, ChevronDown } from "lucide-react";
 
 // Days since a lead was last touched (Modified_Time → Created_Time) — the same
@@ -463,6 +464,11 @@ const Sales = () => {
             })}
           </CardContent>
         </Card>
+      </div>
+
+      {/* ── Geography: where qualified leads + Doctors on Board come from ────── */}
+      <div className="mb-5">
+        <GeographyCard />
       </div>
 
       {/* ── Recruiter table ────────────────────────────────────────────────── */}
