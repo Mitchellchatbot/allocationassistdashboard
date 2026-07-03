@@ -37,7 +37,7 @@ import { useQueryClient } from "@tanstack/react-query";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import {
   useForms, useFormResponsesPage, useFormResponsesFilteredCount, fetchAllFormResponses,
-  FORM_RESPONSES_PAGE_SIZE, useFormStats, useCreateForm, useUpdateForm, useDeleteForm,
+  FORM_RESPONSES_PAGE_SIZE, useFormStats, useFormRangeStats, useCreateForm, useUpdateForm, useDeleteForm,
   useUpdateFormResponseOutreach, useBackfillFormCsv, useLinkFormResponseToDoctor,
   useArchiveFormResponse, useRestoreFormResponse, useHardDeleteFormResponse,
   type OutreachStatus,
@@ -264,6 +264,23 @@ function FormDetail({ form }: { form: Form }) {
   const paidPerLead        = (form.lead_value_cents ?? 0) / 100;
   const isPaidForm         = paidPerLead > 0;
 
+  // ── Range-aware KPIs ───────────────────────────────────────────────
+  // When a date filter (preset or custom range) is active, the KPI strip
+  // switches from all-time/relative tiles to counts scoped to that window.
+  const rangeActive = dateFilter !== "all" || !!fromDate || !!toDate;
+  const effFrom = fromDate
+    ? `${fromDate}T00:00:00.000Z`
+    : dateFilter !== "all"
+      ? new Date(Date.now() - (dateFilter === "7d" ? 7 : dateFilter === "30d" ? 30 : 90) * 86_400_000).toISOString()
+      : undefined;
+  const effTo = toDate ? `${toDate}T23:59:59.999Z` : undefined;
+  const { data: rangeStats } = useFormRangeStats(form.id, effFrom, effTo);
+  const rangeCount = rangeStats?.total ?? 0;
+  const fmtDay = (d: string) => new Date(`${d}T00:00:00`).toLocaleDateString(undefined, { day: "numeric", month: "short", year: "numeric" });
+  const rangeLabel = fromDate || toDate
+    ? `${fromDate ? fmtDay(fromDate) : "earliest"} – ${toDate ? fmtDay(toDate) : "now"}`
+    : dateFilter === "7d" ? "Last 7 days" : dateFilter === "30d" ? "Last 30 days" : dateFilter === "90d" ? "Last 90 days" : "";
+
   const isLoading  = pageFeed.isLoading;
   const [exporting, setExporting] = useState(false);
   const isSearching = !!search.trim();
@@ -372,7 +389,28 @@ function FormDetail({ form }: { form: Form }) {
       </Card>
 
       {/* Analytics strip — server-side counts so it stays accurate as
-          the user scrolls / filters / searches. */}
+          the user scrolls / filters / searches. When a date filter (preset
+          or custom range) is active the tiles switch to counts scoped to
+          that window, so the KPIs track the selected period. */}
+      {rangeActive ? (
+        <div className="grid grid-cols-2 sm:grid-cols-3 gap-3">
+          <Kpi label="Submissions in range" value={rangeCount} tone="slate" hint={rangeLabel} />
+          {isPaidForm ? (
+            <Kpi
+              label="Revenue in range"
+              value={paidPerLead * rangeCount}
+              tone="indigo"
+              format="currency"
+              hint={`${rangeCount.toLocaleString()} × $${paidPerLead.toLocaleString()}`}
+            />
+          ) : (
+            <>
+              <Kpi label="Linked to a doctor" value={rangeStats?.linked ?? 0} tone="emerald" hint="matched in Zoho" />
+              <Kpi label="Unqualified"        value={rangeStats?.unqualified ?? 0} tone="amber" hint="never reached Zoho" />
+            </>
+          )}
+        </div>
+      ) : (
       <div className={`grid grid-cols-2 ${isDoctorIntake ? "sm:grid-cols-3" : "sm:grid-cols-4"} gap-3`}>
         <Kpi label="Total submissions" value={total}      tone="slate" />
         <Kpi label="Last 7 days"       value={last7Days}  tone="sky" />
@@ -418,6 +456,7 @@ function FormDetail({ form }: { form: Form }) {
           </>
         )}
       </div>
+      )}
 
       {/* Where people drop off — Typeform funnel (per-question) / Jotform count. */}
       <FormDropoff form={form} />

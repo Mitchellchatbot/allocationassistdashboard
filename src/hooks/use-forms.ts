@@ -10,7 +10,7 @@
  * Pagination uses .range() in 1000-row pages — Supabase's API caps
  * server-side at 1000 regardless of .limit().
  */
-import { useQuery, useMutation, useQueryClient, useInfiniteQuery } from "@tanstack/react-query";
+import { useQuery, useMutation, useQueryClient, useInfiniteQuery, keepPreviousData } from "@tanstack/react-query";
 import { supabase } from "@/lib/supabase";
 import { useCallback } from "react";
 import { useTableSubscription } from "@/lib/realtime-registry";
@@ -469,6 +469,38 @@ export function useFormStats(formId: string | null) {
       };
     },
     staleTime: 60_000,
+  });
+}
+
+/** Stat counters scoped to a submitted_at window — powers the KPI strip
+ *  when a date filter (preset or custom range) is active, so the tiles
+ *  reflect the selected period instead of all-time. `from`/`to` are full
+ *  ISO timestamps (already day-bounded by the caller). Disabled when
+ *  neither is set (the all-time useFormStats covers that case). */
+export function useFormRangeStats(formId: string | null, from?: string, to?: string) {
+  return useQuery({
+    queryKey: ["form-range-stats", formId ?? "_", from ?? "", to ?? ""],
+    enabled:  !!formId && (!!from || !!to),
+    staleTime: 60_000,
+    placeholderData: keepPreviousData,   // don't flash to 0 while re-counting
+    queryFn: async () => {
+      const base = () => {
+        let q = supabase.from("form_responses").select("id", { count: "exact", head: true }).eq("form_id", formId!);
+        if (from) q = q.gte("submitted_at", from);
+        if (to)   q = q.lte("submitted_at", to);
+        return q;
+      };
+      const [totalRes, linkedRes, unqualifiedRes] = await Promise.all([
+        base(),
+        base().not("doctor_id", "is", null),
+        base().is("doctor_id", null),
+      ]);
+      return {
+        total:       totalRes.count       ?? 0,
+        linked:      linkedRes.count       ?? 0,
+        unqualified: unqualifiedRes.count  ?? 0,
+      };
+    },
   });
 }
 
