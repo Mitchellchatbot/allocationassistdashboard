@@ -23,6 +23,7 @@ import { useForms, type FormResponse } from "@/hooks/use-forms";
 import { useDoctorFormResponses, useDoctorCvUploads, useAnalyzeCv, useBooksInvoices } from "@/hooks/use-doctor-dossier";
 import { useUpdateDoctorOnBoard } from "@/hooks/use-update-doctor";
 import { LicensingSpend } from "@/components/LicensingSpend";
+import { LicensingReview } from "@/components/LicensingReview";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -152,6 +153,11 @@ export default function DoctorsOverview() {
 
   return (
     <div className="space-y-3">
+      {/* Imported licensing fees that couldn't be matched to a doctor — assign
+          them here; they drop into each doctor's ledger below. Renders nothing
+          when the queue is empty. */}
+      <LicensingReview />
+
       {/* Filter bar */}
       <div className="flex flex-wrap items-center justify-between gap-2">
         <div className="text-[12px] text-muted-foreground">
