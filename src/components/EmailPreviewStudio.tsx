@@ -47,6 +47,15 @@ interface LayoutProps {
   footer?:           ReactNode;
   /** When set, a close button appears in the header. */
   onClose?:          () => void;
+  /** Hide the built-in header switcher — use when the caller supplies its own
+   *  navigation (e.g. a grouped list) in `headerExtra` and drives activeKey. */
+  hideSwitcher?:     boolean;
+  /** Render only the ACTIVE email (unmount the rest) instead of keeping all
+   *  mounted-but-hidden. Use for read-only browsers with many emails (a chain)
+   *  where there's no edit state to preserve and mounting every iframe is
+   *  wasteful. Default false — editable previews keep everything mounted so
+   *  switching never discards edits. */
+  mountActiveOnly?:  boolean;
 }
 
 function Switcher({ emails, active, onChange }: { emails: StudioEmail[]; active: string; onChange: (k: string) => void }) {
@@ -89,7 +98,7 @@ function Switcher({ emails, active, onChange }: { emails: StudioEmail[]; active:
 }
 
 export function EmailPreviewStudioLayout({
-  emails, activeKey, onActiveKeyChange, title, subtitle, headerExtra, footer, onClose,
+  emails, activeKey, onActiveKeyChange, title, subtitle, headerExtra, footer, onClose, hideSwitcher, mountActiveOnly,
 }: LayoutProps) {
   const [internal, setInternal] = useState(emails[0]?.key ?? "");
   const active = activeKey ?? internal;
@@ -103,6 +112,9 @@ export function EmailPreviewStudioLayout({
 
   const activeEmail = emails.find(e => e.key === active) ?? emails[0];
   const multi = emails.length > 1;
+  // Which emails to actually render: all (mounted, hidden when inactive) so edit
+  // state survives switching, or just the active one for read-only browsers.
+  const rendered = mountActiveOnly ? (activeEmail ? [activeEmail] : []) : emails;
 
   return (
     <div className="flex h-full min-h-0 flex-col bg-slate-50">
@@ -115,7 +127,7 @@ export function EmailPreviewStudioLayout({
             {subtitle && <div className="truncate text-[11px] text-slate-500">{subtitle}</div>}
           </div>
         </div>
-        {multi && <div className="mx-auto"><Switcher emails={emails} active={active} onChange={setActive} /></div>}
+        {multi && !hideSwitcher && <div className="mx-auto"><Switcher emails={emails} active={active} onChange={setActive} /></div>}
         {onClose && (
           <button
             type="button"
@@ -141,7 +153,7 @@ export function EmailPreviewStudioLayout({
             )}
             {/* Per-email controls: all mounted, only the active one shown, so
                 each email's control state (template key, attachments) persists. */}
-            {emails.map(e => (
+            {rendered.map(e => (
               <div key={e.key} className={e.key === active ? "space-y-3" : "hidden"}>
                 {e.controls}
               </div>
@@ -151,7 +163,7 @@ export function EmailPreviewStudioLayout({
 
         {/* Right pane — one email at a time. */}
         <div className="flex min-h-0 min-w-0 flex-1 bg-slate-100">
-          {emails.map(e => (
+          {rendered.map(e => (
             <div key={e.key} className={cn("min-h-0 min-w-0 flex-1 p-3", e.key === active ? "flex" : "hidden")}>
               {e.preview}
             </div>

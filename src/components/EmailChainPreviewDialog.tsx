@@ -1,12 +1,12 @@
 import { useMemo, useState } from "react";
-import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription } from "@/components/ui/dialog";
-import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
-import { Loader2, ChevronDown, ChevronRight, Mail, ArrowRight } from "lucide-react";
+import { Loader2, ArrowRight } from "lucide-react";
 import { EmailPreview } from "@/components/EmailPreview";
 import { FullScreenEmailPreview } from "@/components/FullScreenEmailPreview";
+import { EmailPreviewStudio, type StudioEmail } from "@/components/EmailPreviewStudio";
 import { useEmailTemplates, renderTemplate, type EmailTemplate } from "@/hooks/use-email-templates";
 import type { StagedProfile } from "@/hooks/use-wp-candidates";
+import { cn } from "@/lib/utils";
 
 /**
  * Preview every email in the doctor's flow chain, rendered against
@@ -196,6 +196,12 @@ www.allocationassist.com
   };
 }
 
+const RECIPIENT_BADGE: Record<ChainEntry["recipient"], string> = {
+  hospital: "bg-blue-50 text-blue-700 border-blue-200",
+  doctor:   "bg-emerald-50 text-emerald-700 border-emerald-200",
+  team:     "bg-slate-100 text-slate-600 border-slate-200",
+};
+
 export function EmailChainPreviewDialog({
   profile, open, onOpenChange,
 }: {
@@ -204,7 +210,7 @@ export function EmailChainPreviewDialog({
   onOpenChange: (open: boolean) => void;
 }) {
   const { data: templates = [], isLoading } = useEmailTemplates();
-  const [openFlowKey, setOpenFlowKey] = useState<string>("profile_sent");
+  const [active, setActive] = useState<string>(CHAIN[0].steps[0].templateKey);
 
   const byKey = useMemo(() => {
     const m = new Map<string, EmailTemplate>();
@@ -213,98 +219,102 @@ export function EmailChainPreviewDialog({
   }, [templates]);
 
   const vars = useMemo(() => buildChainVars(profile), [profile]);
-
   const totalEmails = CHAIN.reduce((s, g) => s + g.steps.length, 0);
 
-  return (
-    <Dialog open={open} onOpenChange={onOpenChange}>
-      <DialogContent overlayClassName="bg-slate-900/40 backdrop-blur-[2px]" className="max-w-[1100px] w-[96vw] max-h-[92vh] overflow-y-auto p-0">
-        <DialogHeader className="px-7 pt-5 pb-3 border-b">
-          <DialogTitle className="text-base flex items-center gap-2">
-            <Mail className="h-4 w-4 text-teal-600" />
-            Full email chain for {profile.full_name ?? profile.email ?? "this doctor"}
-          </DialogTitle>
-          <DialogDescription className="text-[11px]">
-            Every email that fires across the lifecycle, rendered with this doctor's data. {totalEmails} emails in {CHAIN.length} flows. Tokens use a placeholder hospital — actual send swaps in the real one.
-          </DialogDescription>
-        </DialogHeader>
-
-        <div className="px-7 py-4 space-y-4">
-          {isLoading ? (
-            <div className="flex items-center gap-2 text-[12px] text-muted-foreground py-8">
-              <Loader2 className="h-4 w-4 animate-spin" /> Loading templates…
-            </div>
-          ) : CHAIN.map((group, gi) => (
-            <ChainGroupSection
-              key={group.flowKey}
-              group={group}
-              index={gi}
-              isOpen={openFlowKey === group.flowKey}
-              onToggle={() => setOpenFlowKey(k => k === group.flowKey ? "" : group.flowKey)}
-              byKey={byKey}
-              vars={vars}
-            />
-          ))}
-        </div>
-      </DialogContent>
-    </Dialog>
+  // Every lifecycle email, flattened → one entry per StudioEmail. The preview is
+  // read-only, so only the ACTIVE one mounts (mountActiveOnly) — no 14 iframes.
+  const emails: StudioEmail[] = useMemo(
+    () => CHAIN.flatMap(group =>
+      group.steps.map(step => ({
+        key:      step.templateKey,
+        label:    step.label,
+        subLabel: `${group.title} · ${step.recipient}`,
+        preview:  <ChainStepPreview step={step} tpl={byKey.get(step.templateKey)} vars={vars} loading={isLoading} />,
+      })),
+    ),
+    [byKey, vars, isLoading],
   );
-}
 
-function ChainGroupSection({
-  group, index, isOpen, onToggle, byKey, vars,
-}: {
-  group:    ChainGroup;
-  index:    number;
-  isOpen:   boolean;
-  onToggle: () => void;
-  byKey:    Map<string, EmailTemplate>;
-  vars:     Record<string, string>;
-}) {
-  return (
-    <div className="rounded-xl border border-slate-200 bg-slate-50/40 overflow-hidden">
-      <button
-        type="button"
-        onClick={onToggle}
-        className="w-full px-4 py-3 flex items-center gap-3 hover:bg-slate-100/60 transition-colors"
-      >
-        {isOpen ? <ChevronDown className="h-4 w-4 text-slate-500" /> : <ChevronRight className="h-4 w-4 text-slate-500" />}
-        <span className="text-[18px]">{group.emoji}</span>
-        <div className="flex-1 text-left">
-          <div className="text-[13px] font-semibold text-slate-800">
-            <span className="text-slate-400 mr-1.5">{index + 1}.</span>
-            {group.title}
+  // Left rail: the chain as a grouped, clickable list (our own nav, so the
+  // studio's built-in switcher is hidden).
+  const nav = (
+    <div className="space-y-3">
+      <p className="px-1 text-[11px] text-muted-foreground">
+        {totalEmails} emails across {CHAIN.length} flows, rendered with this doctor's data. Tokens use a placeholder hospital — the real send swaps in the actual one.
+      </p>
+      {CHAIN.map((group, gi) => (
+        <div key={group.flowKey}>
+          <div className="mb-1 flex items-center gap-1.5 px-1 text-[10.5px] uppercase tracking-wider text-slate-400">
+            <span className="text-[13px]">{group.emoji}</span>
+            <span className="font-semibold">{gi + 1}. {group.title}</span>
+            <span className="ml-auto tabular-nums">{group.steps.length}</span>
           </div>
-          <div className="text-[10.5px] text-muted-foreground">{group.steps.length} email{group.steps.length === 1 ? "" : "s"}</div>
+          <div className="space-y-0.5">
+            {group.steps.map((step, si) => {
+              const isActive = active === step.templateKey;
+              return (
+                <button
+                  key={step.templateKey}
+                  type="button"
+                  onClick={() => setActive(step.templateKey)}
+                  className={cn(
+                    "flex w-full items-center gap-1.5 rounded-md px-2 py-1.5 text-left text-[12px] transition-colors",
+                    isActive ? "bg-teal-50 text-teal-800 ring-1 ring-teal-200" : "text-slate-600 hover:bg-slate-100",
+                  )}
+                >
+                  <span className="font-mono text-[9.5px] text-slate-400">#{si + 1}</span>
+                  <span className="min-w-0 flex-1 truncate">{step.label}</span>
+                  <span className={cn("shrink-0 rounded border px-1 py-px text-[8.5px] font-medium uppercase tracking-wide", RECIPIENT_BADGE[step.recipient])}>{step.recipient}</span>
+                </button>
+              );
+            })}
+          </div>
         </div>
-        <Badge variant="outline" className="text-[10px] bg-white border-slate-200">flow: {group.flowKey}</Badge>
-      </button>
-      {isOpen && (
-        <div className="px-4 pb-4 space-y-3">
-          {group.steps.map((step, si) => (
-            <ChainStep key={step.templateKey} step={step} index={si} byKey={byKey} vars={vars} />
-          ))}
-        </div>
-      )}
+      ))}
     </div>
   );
+
+  return (
+    <EmailPreviewStudio
+      open={open}
+      onClose={() => onOpenChange(false)}
+      title={`Email chain — ${profile.full_name ?? profile.email ?? "this doctor"}`}
+      subtitle={`${totalEmails} emails · ${CHAIN.length} flows`}
+      emails={emails}
+      activeKey={active}
+      onActiveKeyChange={setActive}
+      headerExtra={nav}
+      hideSwitcher
+      mountActiveOnly
+    />
+  );
 }
 
-function ChainStep({
-  step, index, byKey, vars,
+/** One chain email in the studio's right pane — read-only render + full-screen
+ *  expand. Fills the pane; its own body scrolls. */
+function ChainStepPreview({
+  step, tpl, vars, loading,
 }: {
-  step:  ChainEntry;
-  index: number;
-  byKey: Map<string, EmailTemplate>;
-  vars:  Record<string, string>;
+  step:    ChainEntry;
+  tpl?:    EmailTemplate;
+  vars:    Record<string, string>;
+  loading: boolean;
 }) {
-  const tpl = byKey.get(step.templateKey);
   const [fs, setFs] = useState(false);
 
+  if (loading) {
+    return (
+      <div className="flex min-h-0 w-full flex-1 items-center justify-center text-[12px] text-muted-foreground">
+        <Loader2 className="mr-2 h-4 w-4 animate-spin" /> Loading templates…
+      </div>
+    );
+  }
   if (!tpl) {
     return (
-      <div className="rounded-md border border-rose-200 bg-rose-50 px-3 py-2 text-[11px] text-rose-700">
-        Template not found: <code>{step.templateKey}</code>
+      <div className="flex min-h-0 w-full flex-1 items-center justify-center">
+        <div className="rounded-md border border-rose-200 bg-rose-50 px-3 py-2 text-[11px] text-rose-700">
+          Template not found: <code>{step.templateKey}</code>
+        </div>
       </div>
     );
   }
@@ -314,28 +324,23 @@ function ChainStep({
   const text    = renderTemplate(tpl.body_text ?? "", vars);
 
   return (
-    <div>
-      <div className="flex items-center gap-2 mb-1.5">
-        <span className="text-[10.5px] font-mono text-slate-400">#{index + 1}</span>
+    <div className="flex min-h-0 w-full flex-1 flex-col">
+      <div className="mb-2 flex shrink-0 items-center gap-2">
         <span className="text-[12.5px] font-medium text-slate-800">{step.label}</span>
         <ArrowRight className="h-3 w-3 text-slate-400" />
-        <Badge variant="outline" className={`text-[9.5px] ${
-          step.recipient === "hospital" ? "bg-blue-50 text-blue-700 border-blue-200" :
-          step.recipient === "doctor"   ? "bg-emerald-50 text-emerald-700 border-emerald-200" :
-                                          "bg-slate-100 text-slate-600 border-slate-200"
-        }`}>
-          {step.recipient}
-        </Badge>
-        {step.trigger && <span className="text-[10.5px] text-muted-foreground ml-auto">{step.trigger}</span>}
+        <Badge variant="outline" className={`text-[9.5px] ${RECIPIENT_BADGE[step.recipient]}`}>{step.recipient}</Badge>
+        {step.trigger && <span className="ml-auto truncate text-[10.5px] text-muted-foreground">{step.trigger}</span>}
       </div>
-      <EmailPreview
-        subject={subject}
-        html={html}
-        text={text}
-        templateKey={step.templateKey}
-        attachments={step.attachments}
-        onExpand={() => setFs(true)}
-      />
+      <div className="min-h-0 flex-1 overflow-auto rounded-md">
+        <EmailPreview
+          subject={subject}
+          html={html}
+          text={text}
+          templateKey={step.templateKey}
+          attachments={step.attachments}
+          onExpand={() => setFs(true)}
+        />
+      </div>
       <FullScreenEmailPreview open={fs} onClose={() => setFs(false)} subject={subject} html={html} text={text} attachments={step.attachments} />
     </div>
   );
