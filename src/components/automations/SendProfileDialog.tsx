@@ -22,6 +22,7 @@ import { useDoctorProfile, useDoctorProfiles, profileToTokens, calcCompletion, t
 import { useWpCandidateForDoctor, usePublishedWpCandidates, wpCandidateToTokens, normalizePhone, type WpCandidate } from "@/hooks/use-wp-candidates";
 import { useZohoData, type ZohoDoctorOnBoard, type ZohoLead } from "@/hooks/use-zoho-data";
 import { EditableEmailPreview } from "@/components/EditableEmailPreview";
+import { EmailPreviewStudio, type StudioEmail } from "@/components/EmailPreviewStudio";
 import { EmailFrame } from "@/components/EmailFrame";
 import { wrapBodyForSend } from "@/lib/email-preview";
 import { type EmailAttachment } from "@/lib/email-attachments";
@@ -132,13 +133,10 @@ function recipientHint(selected: string[]): string {
  * while closed. Once open, behaviour is identical to before the split.
  */
 export function SendProfileDialog({ open, onClose }: Props) {
-  return (
-    <Dialog open={open} onOpenChange={(v) => !v && onClose()}>
-      <DialogContent className="w-[90vw] max-w-[1100px] sm:max-w-[1100px] max-h-[92vh] overflow-x-hidden overflow-y-auto">
-        {open && <SendProfileDialogBody onClose={onClose} />}
-      </DialogContent>
-    </Dialog>
-  );
+  // The body owns its own modal frame so the preview step can swap the compact
+  // picker dialog for the full 90×90 EmailPreviewStudio. Mounted only while
+  // open (nothing fetches while closed).
+  return open ? <SendProfileDialogBody onClose={onClose} /> : null;
 }
 
 function SendProfileDialogBody({ onClose }: { onClose: () => void }) {
@@ -529,44 +527,13 @@ function SendProfileDialogBody({ onClose }: { onClose: () => void }) {
     }
   };
 
-  return (
-    <>
-      <DialogHeader>
-        <DialogTitle className="flex items-center gap-2">
-          <Send className="h-4 w-4 text-teal-600" /> Send Profile to Hospital
-        </DialogTitle>
-        <DialogDescription className="text-[12px]">
-          Triggers Flow 2. Picks a doctor, selects hospital(s), and queues the introduction emails.
-          Multi-hospital sends BCC every hospital — they don't see each other.
-        </DialogDescription>
-      </DialogHeader>
-
-      <Stepper step={step} />
-
-        {step === "pick-doctor" && (
-          <DoctorPicker
-            options={doctorOptions}
-            isLoading={zohoLoading || !completionReady}
-            onPick={(d) => { setSelectedDoctor(d); setStep("pick-hospitals"); }}
-          />
-        )}
-
-        {step === "pick-hospitals" && selectedDoctor && (
-          <HospitalPicker
-            doctor={selectedDoctor}
-            hospitals={hospitals}
-            selectedIds={selectedIds}
-            onToggle={(id) => setSelectedIds(prev => prev.includes(id) ? prev.filter(x => x !== id) : [...prev, id])}
-            onSetSelected={setSelectedIds}
-            onContinue={() => setStep("preview-confirm")}
-            onBack={() => setStep("pick-doctor")}
-            customMessage={customMessage}
-            setCustomMessage={setCustomMessage}
-          />
-        )}
-
-        {step === "preview-confirm" && selectedDoctor && (
-          <PreviewConfirm
+  // The preview step is its own full-screen studio modal (90×90, controls
+  // left / email right). Render it directly — not inside the compact picker
+  // dialog — so it owns the whole viewport.
+  if (step === "preview-confirm" && selectedDoctor) {
+    return (
+      <PreviewConfirm
+        onClose={onClose}
             doctor={selectedDoctor}
             hospitals={selectedHospitals}
             customMessage={customMessage}
@@ -594,8 +561,48 @@ function SendProfileDialogBody({ onClose }: { onClose: () => void }) {
             cardImageUrl={cardImageUrl}
             onSetCardImage={setCardImageUrl}
           />
+    );
+  }
+
+  // Doctor / hospital picker steps — compact centered dialog.
+  return (
+    <Dialog open onOpenChange={(v) => !v && onClose()}>
+      <DialogContent className="w-[90vw] max-w-[1100px] sm:max-w-[1100px] max-h-[92vh] overflow-x-hidden overflow-y-auto">
+        <DialogHeader>
+          <DialogTitle className="flex items-center gap-2">
+            <Send className="h-4 w-4 text-teal-600" /> Send Profile to Hospital
+          </DialogTitle>
+          <DialogDescription className="text-[12px]">
+            Triggers Flow 2. Picks a doctor, selects hospital(s), and queues the introduction emails.
+            Multi-hospital sends BCC every hospital — they don't see each other.
+          </DialogDescription>
+        </DialogHeader>
+
+        <Stepper step={step} />
+
+        {step === "pick-doctor" && (
+          <DoctorPicker
+            options={doctorOptions}
+            isLoading={zohoLoading || !completionReady}
+            onPick={(d) => { setSelectedDoctor(d); setStep("pick-hospitals"); }}
+          />
         )}
-    </>
+
+        {step === "pick-hospitals" && selectedDoctor && (
+          <HospitalPicker
+            doctor={selectedDoctor}
+            hospitals={hospitals}
+            selectedIds={selectedIds}
+            onToggle={(id) => setSelectedIds(prev => prev.includes(id) ? prev.filter(x => x !== id) : [...prev, id])}
+            onSetSelected={setSelectedIds}
+            onContinue={() => setStep("preview-confirm")}
+            onBack={() => setStep("pick-doctor")}
+            customMessage={customMessage}
+            setCustomMessage={setCustomMessage}
+          />
+        )}
+      </DialogContent>
+    </Dialog>
   );
 }
 
@@ -915,7 +922,7 @@ function CardScreenshotControl({
 
 function PreviewConfirm({
   doctor, hospitals, customMessage, hospitalSubject, hospitalBody, doctorSubject, doctorBody,
-  onBack, onConfirm, submitting, bccList, setBccList,
+  onBack, onClose, onConfirm, submitting, bccList, setBccList,
   templates, hospitalTemplateKey, doctorTemplateKey, setDoctorTemplateKey, onSaveDefault,
   hospitalContacts, recipientOverrides, onOverrideRecipient,
   cardImageUrl, onSetCardImage,
@@ -928,6 +935,7 @@ function PreviewConfirm({
   doctorSubject: string;
   doctorBody: string;
   onBack: () => void;
+  onClose: () => void;
   onConfirm: (stageOverrides?: Record<string, SendOverrides>, attachments?: { hospital?: EmailAttachment[]; doctor?: EmailAttachment[] }, templateKeys?: { hospital: string; doctor: string }, schedule?: { date: string; time: string }) => void;
   submitting: boolean;
   bccList: string[];
@@ -1101,7 +1109,8 @@ function PreviewConfirm({
     ? new Intl.DateTimeFormat(undefined, { weekday: "short", month: "short", day: "numeric", hour: "2-digit", minute: "2-digit", hour12: true }).format(schedWhen)
     : "the selected time";
 
-  return (
+  // ── Left-rail GLOBAL controls (routing, BCC, send-mode, warnings) ──────────
+  const headerExtra = (
     <div className="space-y-3">
       <HospitalRecipientsOverride
         hospitals={hospitals}
@@ -1144,93 +1153,12 @@ function PreviewConfirm({
         </div>
       )}
 
-      <div className="space-y-1.5 rounded-md border bg-white p-2">
-        {/* The hospital intro always uses the standard profile-sent template —
-            only the doctor's "working opportunity" email is template-pickable.
-            The wording is still editable below for one-off tweaks. */}
-        <div className="flex items-center gap-1.5 px-0.5 text-[11px] text-muted-foreground">
-          <Mail className="h-3.5 w-3.5 text-teal-600 shrink-0" />
-          <span className="font-medium text-slate-700">Hospital intro email</span>
-          <span className="min-w-0 truncate">— uses the standard template; edit the wording below if needed.</span>
-        </div>
-        {/* Profile-as-image: render the candidate profile card (View-full-profile
-            look, empty fields dropped) to a flat PNG and send it IN PLACE OF the
-            data table, so the hospital sees a clean, pixel-perfect card. */}
-        <CardScreenshotControl
-          cardHtml={buildProfileCardHtml(vars)}
-          cardImageUrl={cardImageUrl}
-          onSetCardImage={onSetCardImage}
-        />
-        <EditableEmailSection
-          label={`To hospital · ${hospitalRecipient}`}
-          subject={renderedHospitalSubject}
-          html={hospitalHtml}
-          from={senderLine}
-          to={isSingle ? (hospitals[0].primary_recruiter_email ?? undefined) : undefined}
-          editable={isSingle}
-          onChange={setHospitalOv}
-          plainBody={renderedHospitalBody}
-          attachments={hospitalAttachments}
-          onAttachmentsChange={setHospitalAttachments}
-        />
-        <AttachmentsPicker
-          attachments={hospitalAttachments}
-          onChange={setHospitalAttachments}
-          disabled={submitting}
-          hint="ride on THIS hospital email — CV, logbook, etc."
-        />
-      </div>
-
-      <div className="space-y-1.5 rounded-md border bg-white p-2">
-        <div className="flex items-start justify-between gap-2">
-          <div className="flex-1 min-w-0">
-            <TemplatePicker templates={templates} value={doctorTemplateKey} onChange={setDoctorTemplateKey} defaultKey="profile_sent_doctor" renderVars={vars} label="Doctor 'working opportunity' email template" flowFilter="profile_sent" />
-          </div>
-          {doctorTemplateKey !== "profile_sent_doctor" && (
-            <button type="button" onClick={() => { onSaveDefault("doctor", doctorTemplateKey); toast.success("Saved as your default doctor template"); }} className="text-[10px] text-slate-500 hover:underline whitespace-nowrap mt-4">Save as my default</button>
-          )}
-        </div>
-        <EditableEmailSection
-          label={`To doctor · ${doctor.email ?? "(no email)"}`}
-          subject={renderedDoctorSubject}
-          html={doctorHtml}
-          from={senderLine}
-          to={doctor.email ?? undefined}
-          editable={isSingle}
-          onChange={setDoctorOv}
-          plainBody={renderTemplate(doctorBody, vars)}
-          attachments={doctorAttachments}
-          onAttachmentsChange={setDoctorAttachments}
-          // Same picker as above, forwarded into the full-screen editor so the
-          // doctor template can be swapped from full screen too. Popover raised
-          // above the full-screen overlay (z-[101]) via contentClassName.
-          templatePicker={
-            <TemplatePicker
-              templates={templates}
-              value={doctorTemplateKey}
-              onChange={setDoctorTemplateKey}
-              defaultKey="profile_sent_doctor"
-              renderVars={vars}
-              label="Doctor 'working opportunity' email template"
-              flowFilter="profile_sent"
-              contentClassName="z-[200]"
-            />
-          }
-        />
-        <AttachmentsPicker
-          attachments={doctorAttachments}
-          onChange={setDoctorAttachments}
-          disabled={submitting}
-          hint="ride on THIS doctor email — usually none"
-        />
-      </div>
-
       <div className="text-[10.5px] text-muted-foreground px-0.5">
         {!isSingle
           ? "Editing is available when sending to a single hospital (a shared edit can't be reused across a BCC batch)."
           : anyEdited
             ? <span className="text-teal-700 font-medium">You've edited {hospitalOv && doctorOv ? "both emails" : hospitalOv ? "the hospital email" : "the doctor email"} — your version sends instead of the template.</span>
-            : "Click Edit email on either preview to tweak the wording before it sends."}
+            : "Click into either email to tweak the wording before it sends."}
       </div>
 
       {/* Send now vs schedule for later (Amir #5). */}
@@ -1251,19 +1179,7 @@ function PreviewConfirm({
           </div>
         )}
         {sendMode === "later" && (
-          <>
-            <Button
-              onClick={submit}
-              disabled={submitting || anyDraft || !schedValid}
-              className="w-full bg-teal-600 hover:bg-teal-700 text-white"
-              title={anyDraft ? "Pick a finished template or edit the copy first." : !schedValid ? "Enter a valid date and time first." : undefined}
-            >
-              {submitting
-                ? <><Loader2 className="h-4 w-4 mr-1.5 animate-spin" /> Scheduling…</>
-                : <><Clock className="h-4 w-4 mr-1.5" /> Schedule for {schedLocalLabel} ({hospitals.length} send{hospitals.length === 1 ? "" : "s"})</>}
-            </Button>
-            <p className="text-[10px] text-teal-700">Lands in the scheduled queue and sends automatically at the time you picked (your local time, checked every ~5 min). Manage it any time under <strong>Batches → Scheduled profile sends</strong>.</p>
-          </>
+          <p className="text-[10px] text-teal-700">Lands in the scheduled queue and sends automatically at the time you picked (your local time, checked every ~5 min). Manage it any time under <strong>Batches → Scheduled profile sends</strong>.</p>
         )}
       </div>
 
@@ -1277,28 +1193,140 @@ function PreviewConfirm({
         <div className="rounded-md border border-rose-200 bg-rose-50 p-2 text-[11px] text-rose-900 flex items-start gap-2">
           <AlertTriangle className="h-3.5 w-3.5 mt-[2px] shrink-0" />
           <div>
-            The <strong>{hospitalDraft && doctorDraft ? "hospital and doctor templates" : hospitalDraft ? "hospital template" : "doctor template"}</strong> still {hospitalDraft && doctorDraft ? "contain" : "contains"} placeholder copy (<code>PLACEHOLDER…</code>). Pick a finished template above, or click into the email to edit the wording before sending.
+            The <strong>{hospitalDraft && doctorDraft ? "hospital and doctor templates" : hospitalDraft ? "hospital template" : "doctor template"}</strong> still {hospitalDraft && doctorDraft ? "contain" : "contains"} placeholder copy (<code>PLACEHOLDER…</code>). Pick a finished template, or click into the email to edit the wording before sending.
           </div>
         </div>
       )}
-
-      <DialogFooter className="sticky bottom-0 z-20 -mx-6 -mb-6 px-6 py-3 bg-background border-t border-slate-200">
-        <Button variant="outline" onClick={onBack} disabled={submitting}>
-          <ChevronLeft className="h-3.5 w-3.5 mr-1" /> Back
-        </Button>
-        <Button
-          onClick={submit}
-          disabled={submitting || anyDraft || (sendMode === "later" && !schedValid)}
-          title={anyDraft ? "Pick a finished template or edit the copy first — the selected template still has placeholder text." : (sendMode === "later" && !schedValid) ? "Enter a valid date and time first." : undefined}
-        >
-          {submitting
-            ? (sendMode === "later" ? "Scheduling..." : "Queueing...")
-            : sendMode === "later"
-              ? <><Clock className="h-3.5 w-3.5 mr-1.5" /> Schedule {hospitals.length} send{hospitals.length === 1 ? "" : "s"}</>
-              : <><Send className="h-3.5 w-3.5 mr-1.5" /> Queue {hospitals.length} send{hospitals.length === 1 ? "" : "s"}</>}
-        </Button>
-      </DialogFooter>
     </div>
+  );
+
+  // ── The two emails: switcher label + left-rail controls + right-pane preview.
+  const emails: StudioEmail[] = [
+    {
+      key: "hospital",
+      label: "Hospital intro",
+      subLabel: hospitalRecipient,
+      controls: (
+        <div className="space-y-2">
+          <div className="flex items-center gap-1.5 px-0.5 text-[11px] text-muted-foreground">
+            <Mail className="h-3.5 w-3.5 text-teal-600 shrink-0" />
+            <span className="font-medium text-slate-700">Hospital intro email</span>
+          </div>
+          <p className="px-0.5 text-[10.5px] text-muted-foreground">Uses the standard profile-sent template; edit the wording right in the preview.</p>
+          {/* Profile-as-image: render the candidate profile card (View-full-profile
+              look, empty fields dropped) to a flat PNG and send it IN PLACE OF the
+              data table, so the hospital sees a clean, pixel-perfect card. */}
+          <CardScreenshotControl
+            cardHtml={buildProfileCardHtml(vars)}
+            cardImageUrl={cardImageUrl}
+            onSetCardImage={onSetCardImage}
+          />
+          <AttachmentsPicker
+            attachments={hospitalAttachments}
+            onChange={setHospitalAttachments}
+            disabled={submitting}
+            hint="ride on THIS hospital email — CV, logbook, etc."
+          />
+        </div>
+      ),
+      preview: (
+        <EditableEmailSection
+          label={`To hospital · ${hospitalRecipient}`}
+          subject={renderedHospitalSubject}
+          html={hospitalHtml}
+          from={senderLine}
+          to={isSingle ? (hospitals[0].primary_recruiter_email ?? undefined) : undefined}
+          editable={isSingle}
+          onChange={setHospitalOv}
+          plainBody={renderedHospitalBody}
+          attachments={hospitalAttachments}
+          onAttachmentsChange={setHospitalAttachments}
+        />
+      ),
+    },
+    {
+      key: "doctor",
+      label: "Doctor email",
+      subLabel: doctor.email ?? "(no email)",
+      controls: (
+        <div className="space-y-2">
+          <div className="flex items-start justify-between gap-2">
+            <div className="flex-1 min-w-0">
+              <TemplatePicker templates={templates} value={doctorTemplateKey} onChange={setDoctorTemplateKey} defaultKey="profile_sent_doctor" renderVars={vars} label="Doctor 'working opportunity' email template" flowFilter="profile_sent" />
+            </div>
+            {doctorTemplateKey !== "profile_sent_doctor" && (
+              <button type="button" onClick={() => { onSaveDefault("doctor", doctorTemplateKey); toast.success("Saved as your default doctor template"); }} className="text-[10px] text-slate-500 hover:underline whitespace-nowrap mt-4">Save as my default</button>
+            )}
+          </div>
+          <AttachmentsPicker
+            attachments={doctorAttachments}
+            onChange={setDoctorAttachments}
+            disabled={submitting}
+            hint="ride on THIS doctor email — usually none"
+          />
+        </div>
+      ),
+      preview: (
+        <EditableEmailSection
+          label={`To doctor · ${doctor.email ?? "(no email)"}`}
+          subject={renderedDoctorSubject}
+          html={doctorHtml}
+          from={senderLine}
+          to={doctor.email ?? undefined}
+          editable={isSingle}
+          onChange={setDoctorOv}
+          plainBody={renderTemplate(doctorBody, vars)}
+          attachments={doctorAttachments}
+          onAttachmentsChange={setDoctorAttachments}
+          // Same picker as the left rail, forwarded into the full-screen editor
+          // so the doctor template can be swapped from full screen too. Popover
+          // raised above the full-screen overlay via contentClassName.
+          templatePicker={
+            <TemplatePicker
+              templates={templates}
+              value={doctorTemplateKey}
+              onChange={setDoctorTemplateKey}
+              defaultKey="profile_sent_doctor"
+              renderVars={vars}
+              label="Doctor 'working opportunity' email template"
+              flowFilter="profile_sent"
+              contentClassName="z-[200]"
+            />
+          }
+        />
+      ),
+    },
+  ];
+
+  const footer = (
+    <>
+      <Button variant="outline" onClick={onBack} disabled={submitting} className="mr-auto">
+        <ChevronLeft className="h-3.5 w-3.5 mr-1" /> Back
+      </Button>
+      <Button
+        onClick={submit}
+        disabled={submitting || anyDraft || (sendMode === "later" && !schedValid)}
+        title={anyDraft ? "Pick a finished template or edit the copy first — the selected template still has placeholder text." : (sendMode === "later" && !schedValid) ? "Enter a valid date and time first." : undefined}
+      >
+        {submitting
+          ? (sendMode === "later" ? "Scheduling..." : "Queueing...")
+          : sendMode === "later"
+            ? <><Clock className="h-3.5 w-3.5 mr-1.5" /> Schedule {hospitals.length} send{hospitals.length === 1 ? "" : "s"}</>
+            : <><Send className="h-3.5 w-3.5 mr-1.5" /> Queue {hospitals.length} send{hospitals.length === 1 ? "" : "s"}</>}
+      </Button>
+    </>
+  );
+
+  return (
+    <EmailPreviewStudio
+      open
+      onClose={onClose}
+      title="Send Profile to Hospital"
+      subtitle={`${doctor.name} → ${hospitals.length === 1 ? hospitals[0].name : `${hospitals.length} hospitals (BCC)`}`}
+      emails={emails}
+      headerExtra={headerExtra}
+      footer={footer}
+    />
   );
 }
 
@@ -1551,9 +1579,10 @@ function EditableEmailSection({
     return <PreviewBlock label={label} subject={subject} body={plainBody} />;
   }
 
+  // Fills the studio's right pane (flex column, its own body scrolls).
   return (
-    <div className="rounded-md border overflow-hidden">
-      <div className="px-3 py-1.5 border-b bg-slate-50/50 text-[10px] uppercase tracking-wider text-muted-foreground flex items-center gap-1.5">
+    <div className="flex min-h-0 w-full flex-1 flex-col overflow-hidden rounded-md border bg-white">
+      <div className="px-3 py-1.5 border-b bg-slate-50/50 text-[10px] uppercase tracking-wider text-muted-foreground flex items-center gap-1.5 shrink-0">
         <Eye className="h-3 w-3 shrink-0" /> <span className="truncate">{label}</span>
       </div>
       <EditableEmailPreview
@@ -1570,7 +1599,7 @@ function EditableEmailSection({
         attachments={attachments}
         onAttachmentsChange={onAttachmentsChange}
         templatePicker={templatePicker}
-        className="border-0 rounded-none max-h-[60vh]"
+        className="border-0 rounded-none flex-1 min-h-0"
       />
     </div>
   );
@@ -1579,11 +1608,11 @@ function EditableEmailSection({
 function PreviewBlock({ label, subject, body }: { label: string; subject: string; body: string }) {
   const isHtml = looksLikeHtml(body);
   return (
-    <div className="rounded-md border">
-      <div className="px-3 py-1.5 border-b bg-slate-50/50 text-[10px] uppercase tracking-wider text-muted-foreground flex items-center gap-1.5">
+    <div className="flex min-h-0 w-full flex-1 flex-col overflow-hidden rounded-md border bg-white">
+      <div className="px-3 py-1.5 border-b bg-slate-50/50 text-[10px] uppercase tracking-wider text-muted-foreground flex items-center gap-1.5 shrink-0">
         <Eye className="h-3 w-3" /> {label}
       </div>
-      <div className="p-3 space-y-2">
+      <div className="p-3 space-y-2 min-h-0 flex-1 overflow-y-auto">
         <div>
           <div className="text-[10px] uppercase tracking-wider text-muted-foreground">Subject</div>
           <div className="text-[12px] font-medium">{subject}</div>
