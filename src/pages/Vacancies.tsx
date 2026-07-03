@@ -12,7 +12,7 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
 import { Command, CommandEmpty, CommandGroup, CommandInput, CommandItem, CommandList } from "@/components/ui/command";
-import { ClipboardList, Plus, Building2, CheckCircle2, X, AlertTriangle, Search, ChevronDown, ChevronUp, Sparkles, Check, Filter } from "lucide-react";
+import { ClipboardList, Plus, Building2, CheckCircle2, X, AlertTriangle, Search, ChevronDown, ChevronUp, Sparkles, Check, Filter, Pencil } from "lucide-react";
 import { EmptyState } from "@/components/ui/empty-state";
 import { TableSkeleton } from "@/components/ui/data-skeleton";
 import { useDoctorSpecialties } from "@/hooks/use-doctor-specialties";
@@ -47,6 +47,7 @@ export default function Vacancies() {
   const remove = useDeleteVacancy();
 
   const [createOpen, setCreateOpen] = useState(false);
+  const [editVacancy, setEditVacancy] = useState<Vacancy | null>(null);
   const [detailId, setDetailId] = useState<string | null>(null);
   const [search,  setSearch]  = useState("");
   const [filterStatus, setFilterStatus] = useState<VacancyStatus | "all">("open");
@@ -144,7 +145,7 @@ export default function Vacancies() {
             <KpiPill label="High pri"    value={stats.high}     tone="rose"    hint="High-priority vacancies — flagged urgent by the hospital or close to start date." />
             <KpiPill label="Stale > 14d" value={stats.stale}    tone="amber"   hint="Open vacancies with no progress in over 14 days. Triage candidates: nudge the hospital, surface alternatives, or close." />
             <KpiPill label="Filled (30d)" value={stats.filled30} tone="emerald" hint="Vacancies marked 'filled' in the last 30 days. Healthy throughput indicator." />
-            <Button size="sm" onClick={() => setCreateOpen(true)}>
+            <Button size="sm" onClick={() => { setEditVacancy(null); setCreateOpen(true); }}>
               <Plus className="h-3.5 w-3.5 mr-1.5" /> New vacancy
             </Button>
           </div>
@@ -229,6 +230,7 @@ export default function Vacancies() {
                       v={v}
                       onOpen={() => setDetailId(v.id)}
                       onStatusChange={(s) => handleStatusChange(v, s)}
+                      onEdit={() => { setEditVacancy(v); setCreateOpen(true); }}
                       onDelete={async () => {
                         if (!confirm(`Delete vacancy at ${v.hospital_name} for ${v.specialty}? This is permanent.`)) return;
                         try {
@@ -286,15 +288,22 @@ export default function Vacancies() {
 
       <CreateVacancyDialog
         open={createOpen}
-        onClose={() => setCreateOpen(false)}
+        initial={editVacancy}
+        onClose={() => { setCreateOpen(false); setEditVacancy(null); }}
         hospitals={hospitals.map(h => ({ id: h.id, name: h.name }))}
         onSubmit={async (input) => {
           try {
-            await create.mutateAsync({ ...input, opened_by: user?.email ?? null });
-            toast.success("Vacancy logged.");
+            if (editVacancy) {
+              await update.mutateAsync({ id: editVacancy.id, patch: input });
+              toast.success("Vacancy updated.");
+            } else {
+              await create.mutateAsync({ ...input, opened_by: user?.email ?? null });
+              toast.success("Vacancy logged.");
+            }
             setCreateOpen(false);
+            setEditVacancy(null);
           } catch (e) {
-            toast.error(e instanceof Error ? e.message : "Create failed");
+            toast.error(e instanceof Error ? e.message : "Save failed");
           }
         }}
       />
@@ -323,10 +332,11 @@ function KpiPill({ label, value, tone = "teal", hint }: { label: string; value: 
   );
 }
 
-function VacancyRow({ v, onOpen, onStatusChange, onDelete }: {
+function VacancyRow({ v, onOpen, onStatusChange, onEdit, onDelete }: {
   v: Vacancy;
   onOpen: () => void;
   onStatusChange: (s: VacancyStatus) => void;
+  onEdit: () => void;
   onDelete: () => void;
 }) {
   const days = daysOpen(v);
@@ -375,6 +385,9 @@ function VacancyRow({ v, onOpen, onStatusChange, onDelete }: {
               Reopen
             </Button>
           )}
+          <Button size="sm" variant="ghost" className="h-7 text-[10px]" onClick={onEdit} title="Edit this vacancy's hospital, specialty, priority, target and notes.">
+            <Pencil className="h-3 w-3 mr-1" /> Edit
+          </Button>
           <Button size="sm" variant="ghost" className="h-7 text-[10px] text-rose-600 hover:bg-rose-50" onClick={onDelete} title="Permanently delete this vacancy and its links.">
             Delete
           </Button>
@@ -407,11 +420,13 @@ function daysOpen(v: Vacancy): number {
   return Math.floor((end - new Date(v.opened_at).getTime()) / 86_400_000);
 }
 
-function CreateVacancyDialog({ open, onClose, onSubmit, hospitals }: {
+function CreateVacancyDialog({ open, onClose, onSubmit, hospitals, initial }: {
   open: boolean;
   onClose: () => void;
   onSubmit: (input: { hospital_id: string | null; hospital_name: string; specialty: string; priority: VacancyPriority; target_fill_days: number | null; notes: string | null }) => Promise<void>;
   hospitals: { id: string; name: string }[];
+  /** When set, the dialog edits this vacancy instead of creating a new one. */
+  initial?: Vacancy | null;
 }) {
   const [hospitalId, setHospitalId] = useState<string>("");
   const [hospitalName, setHospitalName] = useState<string>("");
@@ -420,6 +435,19 @@ function CreateVacancyDialog({ open, onClose, onSubmit, hospitals }: {
   const [targetDays, setTargetDays] = useState<string>("");
   const [notes, setNotes] = useState<string>("");
   const [submitting, setSubmitting] = useState(false);
+  const editing = !!initial;
+
+  // Seed the form when the dialog opens — from the vacancy being edited, or
+  // blank for a new one.
+  useEffect(() => {
+    if (!open) return;
+    setHospitalId(initial?.hospital_id ?? "");
+    setHospitalName(initial?.hospital_name ?? "");
+    setSpecialty(initial?.specialty ?? "");
+    setPriority(initial?.priority ?? "medium");
+    setTargetDays(initial?.target_fill_days != null ? String(initial.target_fill_days) : "");
+    setNotes(initial?.notes ?? "");
+  }, [open, initial]);
 
   const resetAndClose = () => {
     setHospitalId(""); setHospitalName(""); setSpecialty(""); setPriority("medium");
@@ -454,7 +482,7 @@ function CreateVacancyDialog({ open, onClose, onSubmit, hospitals }: {
         <DialogHeader>
           <DialogTitle className="flex items-center gap-2">
             <ClipboardList className="h-5 w-5 text-teal-600" />
-            Log a new vacancy
+            {editing ? "Edit vacancy" : "Log a new vacancy"}
           </DialogTitle>
           <DialogDescription className="text-[12px]">
             Hospital Introduction Team uses this to track open roles. Sales sees these when matching incoming doctors.
@@ -536,7 +564,7 @@ function CreateVacancyDialog({ open, onClose, onSubmit, hospitals }: {
         <DialogFooter>
           <Button variant="outline" onClick={resetAndClose} disabled={submitting}>Cancel</Button>
           <Button onClick={handleSubmit} disabled={submitting}>
-            {submitting ? "Logging..." : "Log vacancy"}
+            {submitting ? (editing ? "Saving..." : "Logging...") : (editing ? "Save changes" : "Log vacancy")}
           </Button>
         </DialogFooter>
       </DialogContent>
