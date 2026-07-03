@@ -6,6 +6,7 @@ const base = {
   specialty: "Cardiology",
   demandCounts: new Map<string, number>(),
   licenseCount: 0,
+  contactStatus: "reached" as const,          // isolate time/vacancy/license (no contact boost)
 };
 
 describe("scoreFollowUp", () => {
@@ -52,5 +53,16 @@ describe("scoreFollowUp", () => {
     const r = scoreFollowUp({ ...base, daysSinceTouched: null, specialty: null });
     expect(typeof r.score).toBe("number");
     expect(["high", "medium", "normal"]).toContain(r.tier);
+  });
+
+  it("floats un-worked leads to the top; a fresh attempt counts as handled", () => {
+    const reached   = scoreFollowUp({ ...base, contactStatus: "reached" });
+    const never     = scoreFollowUp({ ...base, contactStatus: "none" });
+    const staleTry  = scoreFollowUp({ ...base, contactStatus: "attempted", noteAgeDays: 45 });
+    const freshTry  = scoreFollowUp({ ...base, contactStatus: "attempted", noteAgeDays: 10 });
+    expect(never.score).toBeGreaterThan(reached.score);      // never contacted > reached
+    expect(staleTry.score).toBeGreaterThan(reached.score);   // stale attempt needs retry
+    expect(freshTry.score).toBe(reached.score);              // attempt in last 4 weeks = handled
+    expect(never.headline.toLowerCase()).toContain("never");
   });
 });

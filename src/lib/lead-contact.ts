@@ -17,6 +17,12 @@
 const CONTACT_NOTE_RE =
   /(no\s*answer|did\s*n'?o?t?\s*(answer|pick)|not\s*(answer(ed|ing)?|reachable|available|picking)|no\s*(response|reply|pick\s*up)|voice\s*-?\s*mail|voicemail|\bvm\b|left\s*(a\s*)?(message|voicemail|vm|text)|call(ed|ing|\s*back)?|\brang\b|ringing|\bbusy\b|switch(ed)?\s*off|power(ed)?\s*(off|down)|(phone|cell|mobile|number|line|handset)\s*(is|was|'?s)?\s*off|unavailable|unreachable|couldn'?t?\s*reach|can'?t?\s*reach|unable\s*to\s*reach|out\s*of\s*(service|reach|coverage)|reached(\s*out)?|spoke(n)?|talk(ed|ing)?|answered|contacted|whats?app(ed)?|texted|messaged|emailed|\bsms\b|follow[\s-]*up|interested|declin(e|ed)|hung\s*up|wrong\s*number|number\s*(not|in)valid)/i;
 
+// A logged contact ATTEMPT that didn't connect — tried, but no conversation.
+const ATTEMPT_RE =
+  /(no\s*answer|didn'?t\s*(answer|pick)|not\s*(answer(ed|ing)?|reachable|available|picking)|voice\s*-?\s*mail|voicemail|\bvm\b|\bbusy\b|ringing|unreachable|(phone|cell|mobile|number|line|handset)\s*(is|was|'?s)?\s*off|switch(ed)?\s*off|power(ed)?\s*(off|down)|no\s*(response|reply|pick\s*up)|left\s*(a\s*)?(message|voicemail|text|vm)|couldn'?t?\s*reach|can'?t?\s*reach|unable\s*to\s*reach|out\s*of\s*(service|reach|coverage))/i;
+// A real conversation clearly happened (they engaged / responded).
+const ENGAGED_RE =
+  /(answered|spoke|spoken|talk(ed|ing)?|discuss|call\s*back|callback|will\s*call|get\s*back|interested|keen\b|wants?\b|need(s|ed)?\b|looking\s*(for|to)|not\s*interested|declin|agreed|confirmed|reschedul|schedul|meeting|wait(ing)?\b|hold(ing)?\b|send\s*(the\s*)?(cv|profile|details|jd)|share\s*(cv|profile|details)|explained|mentioned|\bsaid\b|told|advised)/i;
 // Warm intent — the lead wants to move forward / asked for a callback / to be
 // sent details. Lifts follow-up priority.
 const NOTE_WARM_RE =
@@ -30,16 +36,32 @@ export function noteIndicatesContact(note: string | null | undefined): boolean {
   return !!note && CONTACT_NOTE_RE.test(note);
 }
 
-/** Ranking weight from the latest note's intent. Warm (interested / callback)
- *  lifts priority; a logged attempt that didn't connect (phone off, no answer)
- *  gets a smaller nudge to retry; an explicit cold/declined note deprioritises.
- *  Cold is checked before warm so "not interested" isn't read as "interested". */
+export type ContactStatus = "reached" | "attempted" | "none";
+
+/** Where the latest note puts a lead in the contact journey:
+ *   - "reached"   → a real conversation happened (interested, wants to wait, spoke…)
+ *   - "attempted" → tried but didn't connect (phone off, no answer, voicemail…)
+ *   - "none"      → no note, or a note that reads like neither
+ *  ENGAGED is tested before ATTEMPT so "called, no answer, but keen" still reads
+ *  as reached. A substantive-but-unclassifiable note is treated as reached (a
+ *  rep logged something), keeping the "never contacted" top focused. */
+export function contactStatus(note: string | null | undefined): ContactStatus {
+  const t = (note ?? "").trim();
+  if (!t) return "none";
+  if (ENGAGED_RE.test(t)) return "reached";
+  if (ATTEMPT_RE.test(t)) return "attempted";
+  return "reached";
+}
+
+/** Ranking weight from the latest note's INTENT (once reached): warm lifts,
+ *  cold deprioritises. Contact recency (never contacted / stale attempt) is a
+ *  separate axis handled by contactStatus. Cold is checked before warm so
+ *  "not interested" isn't read as "interested". */
 export function noteSignal(note: string | null | undefined): { points: number; label: string } {
   const t = (note ?? "").trim();
-  if (!t)                      return { points: 0,   label: "" };
-  if (NOTE_COLD_RE.test(t))    return { points: -14, label: "Cold note" };
-  if (NOTE_WARM_RE.test(t))    return { points: 16,  label: "Warm note" };
-  if (CONTACT_NOTE_RE.test(t)) return { points: 8,   label: "Retry — no answer" };
+  if (!t)                   return { points: 0,   label: "" };
+  if (NOTE_COLD_RE.test(t)) return { points: -14, label: "Cold note" };
+  if (NOTE_WARM_RE.test(t)) return { points: 16,  label: "Warm note" };
   return { points: 0, label: "" };
 }
 

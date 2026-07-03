@@ -7,7 +7,11 @@
  * are treated as cold and dropped from the queue (so years-old leads don't show).
  */
 import { rollupSpecialty } from "@/lib/specialty-groups";
-import { noteSignal } from "@/lib/lead-contact";
+import { noteSignal, type ContactStatus } from "@/lib/lead-contact";
+
+/** A contact attempt this recent (days) counts as "handled" — same as reached —
+ *  so only genuinely un-worked leads surface at the top. */
+export const ATTEMPT_FRESH_DAYS = 28;
 
 /** Leads with no activity for this many days are cold → hidden from the queue. */
 export const FOLLOWUP_STALE_CAP_DAYS = 180;
@@ -21,6 +25,8 @@ export interface RankInput {
   demandCounts:     Map<string, number>; // OPEN vacancies per rollup-specialty group
   licenseCount:     number;           // Gulf licenses the doctor already holds (DHA/DOH/…)
   note?:            string | null;    // latest Zoho note — its intent nudges priority
+  contactStatus?:   ContactStatus;    // reached / attempted / none (from the note)
+  noteAgeDays?:     number | null;    // days since the latest note (for attempt freshness)
 }
 
 /**
@@ -74,25 +80,36 @@ export function scoreFollowUp(i: RankInput): RankResult {
   const lc = Math.max(0, Math.min(3, Math.round(i.licenseCount)));
   const license = LICENSE_PTS[lc];
 
-  // 4) Note signal — the latest Zoho note's intent. Warm ("interested" /
-  //    "call back") lifts priority; a logged attempt that didn't connect
-  //    ("phone off" / "no answer") nudges a retry; an explicit cold/declined
-  //    note deprioritises even when the age says "due".
+  // 4) Contact recency — the whole point of the merged queue: leads we haven't
+  //    actually worked float to the top. A note logged in the last 4 weeks
+  //    counts as "handled" (same as reached), so only never-contacted leads and
+  //    stale failed attempts surface. Dominant factor by design.
+  const cs = i.contactStatus ?? "none";
+  const attemptFresh = i.noteAgeDays != null && i.noteAgeDays <= ATTEMPT_FRESH_DAYS;
+  let contact = 0, contactLabel = "";
+  if (cs === "none")                         { contact = 40; contactLabel = "Never contacted"; }
+  else if (cs === "attempted" && !attemptFresh) { contact = 30; contactLabel = "Stale attempt — retry"; }
+  // reached, or an attempt within the last 4 weeks → handled, no boost.
+
+  // 5) Note intent (once reached) — warm lifts, cold deprioritises.
   const ns = noteSignal(i.note);
 
-  const score = timing + vacancyDemand + license + ns.points;
+  const score = timing + vacancyDemand + license + contact + ns.points;
 
   // Factor breakdown (no day counts — the recency chip already shows the age).
   const timeLabel = days >= 30 && days <= 90 ? "Prime window" : days < 30 ? "Recent" : "Cooling";
   const factors: RankFactor[] = [
     { label: timeLabel, points: Math.round(timing) },
   ];
+  if (contact > 0)       factors.push({ label: contactLabel, points: contact });
   if (vacancyDemand > 0) factors.push({ label: vacCount > 1 ? `Open vacancies ×${vacCount}` : "Open vacancy", points: Math.round(vacancyDemand) });
   if (license > 0)       factors.push({ label: i.licenseCount > 1 ? `Gulf-licensed ×${i.licenseCount}` : "Gulf-licensed", points: license });
   if (ns.points !== 0)   factors.push({ label: ns.label, points: Math.round(ns.points) });
 
   const headline =
-    ns.points >= 16   ? "Warm note"
+    contact >= 40     ? "Never contacted"
+    : contact >= 30   ? "Retry — stale attempt"
+    : ns.points >= 16 ? "Warm note"
     : vacancyDemand > 0 ? (vacCount > 1 ? `${vacCount} open vacancies` : "Open vacancy")
     : license > 0     ? "Gulf-licensed"
     : ns.points < 0   ? "Cold note"

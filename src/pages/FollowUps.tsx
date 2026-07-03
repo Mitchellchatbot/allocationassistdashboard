@@ -15,8 +15,8 @@ import {
 import { useVacancies } from "@/hooks/use-vacancies";
 import { rollupSpecialty } from "@/lib/specialty-groups";
 import { detectLicenses } from "@/lib/license-info";
-import { scoreFollowUp, FOLLOWUP_STALE_CAP_DAYS } from "@/lib/followup-rank";
-import { noteIndicatesContact } from "@/lib/lead-contact";
+import { scoreFollowUp, FOLLOWUP_STALE_CAP_DAYS, ATTEMPT_FRESH_DAYS } from "@/lib/followup-rank";
+import { contactStatus } from "@/lib/lead-contact";
 import {
   Pagination, PaginationContent, PaginationItem, PaginationLink,
   PaginationPrevious, PaginationNext, PaginationEllipsis,
@@ -63,6 +63,14 @@ function daysSinceTouched(lead: { Modified_Time?: string | null; Created_Time?: 
   const iso = lead.Modified_Time || lead.Created_Time;
   if (!iso) return null;
   const t = new Date(iso).getTime();
+  if (Number.isNaN(t)) return null;
+  return Math.max(0, Math.floor((Date.now() - t) / 86_400_000));
+}
+/** Whole days since the lead's latest Zoho note — drives attempt "freshness"
+ *  (an attempt within 4 weeks counts as handled). null when no note date. */
+function daysSinceNote(lead: { latest_note_at?: string | null }): number | null {
+  if (!lead.latest_note_at) return null;
+  const t = new Date(lead.latest_note_at).getTime();
   if (Number.isNaN(t)) return null;
   return Math.max(0, Math.floor((Date.now() - t) / 86_400_000));
 }
@@ -252,7 +260,6 @@ const FollowUps = () => {
   const [pendingId,  setPendingId]  = useState<string | null>(null);
   const [errorMsg,   setErrorMsg]   = useState<string | null>(null);
   const [recruiterFilter, setRecruiterFilter] = useState("");
-  const [noteFilter, setNoteFilter] = useState<"contacted" | "uncontacted">("contacted");
   const [page, setPage] = useState(1);
 
   const rawLeads = zoho?.rawLeads ?? [];
@@ -302,21 +309,19 @@ const FollowUps = () => {
   );
   const coldHidden = tabLeads.length - ageCapped.length;
 
-  // Split each section by whether the lead's LATEST Zoho note reads like a
-  // contact attempt ("no answer", "spoke", "voicemail"…). Every lead in these
-  // tabs has a status past "Not Contacted", so status can't tell them apart —
-  // the note text can. Lets a rep work the already-reached doctors separately.
-  const contactedCount = useMemo(
-    () => ageCapped.filter(l => noteIndicatesContact(l.latest_note)).length,
+  // One merged queue (contacted + no-note together). Ranking floats the leads we
+  // haven't actually worked — never contacted, or a failed attempt older than 4
+  // weeks — to the top; a note logged in the last 4 weeks counts as handled.
+  const leads = ageCapped;
+  // Count of leads still needing a first/next contact — surfaced in the header.
+  const needsContactCount = useMemo(
+    () => ageCapped.filter(l => {
+      const cs = contactStatus(l.latest_note);
+      if (cs === "none") return true;
+      if (cs === "attempted") { const d = daysSinceNote(l); return d == null || d > ATTEMPT_FRESH_DAYS; }
+      return false;
+    }).length,
     [ageCapped],
-  );
-  const noNoteCount = ageCapped.length - contactedCount;
-
-  const leads = useMemo(
-    () => noteFilter === "contacted"
-      ? ageCapped.filter(l =>  noteIndicatesContact(l.latest_note))
-      : ageCapped.filter(l => !noteIndicatesContact(l.latest_note)),
-    [ageCapped, noteFilter],
   );
 
   // Open vacancies per specialty group → graded demand signal for ranking.
@@ -346,7 +351,9 @@ const FollowUps = () => {
           has_moh:      truthy(lead.Has_MOH),
           license_text: lead.License,
         }).length,
-        note: lead.latest_note,
+        note:          lead.latest_note,
+        contactStatus: contactStatus(lead.latest_note),
+        noteAgeDays:   daysSinceNote(lead),
       }),
     }));
     items.sort((a, b) => b.rank.score - a.rank.score
@@ -354,7 +361,7 @@ const FollowUps = () => {
     return items;
   }, [leads, demandCounts]);
 
-  useEffect(() => { setPage(1); }, [tab, noteFilter, search, recruiterFilter]);
+  useEffect(() => { setPage(1); }, [tab, search, recruiterFilter]);
   useEffect(() => { setExpandedId(null); }, [page]);
 
   const totalPages = Math.max(1, Math.ceil(ranked.length / PAGE_SIZE));
@@ -466,29 +473,14 @@ const FollowUps = () => {
           </button>
         )}
 
-        {/* Contact-note split — works inside whichever section (tab) is active */}
-        <div className="inline-flex h-8 rounded-md border border-border/60 overflow-hidden text-[11px] font-medium ml-auto self-center">
-          {([
-            { v: "contacted",   label: "Contacted", count: contactedCount },
-            { v: "uncontacted", label: "No note",   count: noNoteCount },
-          ] as const).map(opt => {
-            const active = noteFilter === opt.v;
-            return (
-              <button
-                key={opt.v}
-                type="button"
-                onClick={() => { setNoteFilter(opt.v); setExpandedId(null); }}
-                title={opt.v === "contacted"
-                  ? "Doctors whose latest Zoho note reads like a contact attempt (no answer, spoke, voicemail…)"
-                  : "Doctors with no contact-style Zoho note yet"}
-                className={`flex items-center gap-1.5 px-2.5 transition-colors ${active ? "bg-primary text-white" : "bg-card text-muted-foreground hover:bg-muted/40"}`}
-              >
-                {opt.v === "contacted" && <PhoneCall className="h-3 w-3" />}
-                {opt.label}
-                <span className={`rounded-full px-1.5 py-0.5 text-[10px] font-semibold ${active ? "bg-white/20 text-white" : "bg-muted text-muted-foreground"}`}>{opt.count}</span>
-              </button>
-            );
-          })}
+        {/* Merged queue — one summary chip of how many still need working
+            (never contacted, or a failed attempt older than 4 weeks). */}
+        <div
+          className="inline-flex h-8 items-center gap-1.5 rounded-md border border-amber-200 bg-amber-50 px-3 text-[11px] font-medium text-amber-700 ml-auto self-center"
+          title="Leads never contacted, or whose last attempt (phone off / no answer) is older than 4 weeks — these rank at the top."
+        >
+          <PhoneCall className="h-3 w-3" />
+          {needsContactCount} need contact
         </div>
       </div>
 
@@ -500,7 +492,7 @@ const FollowUps = () => {
       <div className="mb-3 flex flex-wrap items-center gap-2 rounded-md bg-muted/40 border border-border/50 px-3 py-2 text-[11px] text-muted-foreground">
         <div className="flex items-center gap-1.5 min-w-0">
           <Flame className="h-3.5 w-3.5 shrink-0 text-amber-500" />
-          <span className="truncate">Ranked by priority — timing (peaks at ~2 months), plus open-vacancy demand &amp; Gulf licenses held.</span>
+          <span className="truncate">Ranked by priority — un-worked leads first (never contacted, or a failed attempt over 4 weeks old), then timing, open-vacancy demand, Gulf licenses &amp; note intent.</span>
           {coldHidden > 0 && (
             <span className="ml-1 shrink-0 text-muted-foreground/70">· {coldHidden} cold hidden (no activity in {Math.round(FOLLOWUP_STALE_CAP_DAYS / 30)} months)</span>
           )}
@@ -517,21 +509,14 @@ const FollowUps = () => {
         <CardHeader className="pb-2 pt-4 px-4">
           <CardTitle className="text-[12px] font-medium text-muted-foreground uppercase tracking-wide">
             {ranked.length}{" "}{searching ? "matches · all sections" : `${TAB_META[tab].label} leads`}
-            {noteFilter === "contacted"   && <span className="text-emerald-600"> · with a contact note</span>}
-            {noteFilter === "uncontacted" && <span className="normal-case"> · no contact note yet</span>}
+            {needsContactCount > 0 && <span className="text-amber-600"> · {needsContactCount} need contact</span>}
           </CardTitle>
         </CardHeader>
         <CardContent className="p-0">
           {ranked.length === 0 ? (
             <div className="flex flex-col items-center justify-center py-12 text-muted-foreground gap-2">
               <CheckCircle className="h-8 w-8 text-success/40" />
-              <p className="text-[13px]">
-                {noteFilter === "contacted"
-                  ? "No doctors in this section have a contact-style Zoho note yet."
-                  : noteFilter === "uncontacted"
-                  ? "Every doctor in this section already has a contact note."
-                  : "All clear — no leads here right now."}
-              </p>
+              <p className="text-[13px]">All clear — no leads here right now.</p>
             </div>
           ) : (
             <div className="divide-y divide-border/40">
@@ -567,14 +552,31 @@ const FollowUps = () => {
                               <Check className="h-2.5 w-2.5" /> Updated
                             </span>
                           )}
-                          {noteIndicatesContact(lead.latest_note) && (
-                            <span
-                              className="inline-flex items-center gap-0.5 rounded-full bg-emerald-50 border border-emerald-200 px-1.5 py-0.5 text-[9px] font-semibold text-emerald-700"
-                              title="Latest Zoho note reads like a contact attempt"
-                            >
-                              <PhoneCall className="h-2.5 w-2.5" /> Contacted
-                            </span>
-                          )}
+                          {(() => {
+                            const cs = contactStatus(lead.latest_note);
+                            const nd = daysSinceNote(lead);
+                            const attemptFresh = nd != null && nd <= ATTEMPT_FRESH_DAYS;
+                            if (cs === "reached") return (
+                              <span className="inline-flex items-center gap-0.5 rounded-full bg-emerald-50 border border-emerald-200 px-1.5 py-0.5 text-[9px] font-semibold text-emerald-700" title="Latest note shows a real conversation">
+                                <PhoneCall className="h-2.5 w-2.5" /> Reached
+                              </span>
+                            );
+                            if (cs === "attempted" && attemptFresh) return (
+                              <span className="inline-flex items-center gap-0.5 rounded-full bg-slate-100 border border-slate-200 px-1.5 py-0.5 text-[9px] font-semibold text-slate-600" title="Contact attempted in the last 4 weeks — counts as handled">
+                                <PhoneCall className="h-2.5 w-2.5" /> Attempted
+                              </span>
+                            );
+                            if (cs === "attempted") return (
+                              <span className="inline-flex items-center gap-0.5 rounded-full bg-amber-50 border border-amber-200 px-1.5 py-0.5 text-[9px] font-semibold text-amber-700" title="Last attempt over 4 weeks ago — retry">
+                                <PhoneCall className="h-2.5 w-2.5" /> Retry
+                              </span>
+                            );
+                            return (
+                              <span className="inline-flex items-center gap-0.5 rounded-full bg-amber-50 border border-amber-200 px-1.5 py-0.5 text-[9px] font-semibold text-amber-700" title="No contact note yet — needs a first call">
+                                Never contacted
+                              </span>
+                            );
+                          })()}
                         </div>
                         <div className="flex flex-wrap items-center gap-x-2 gap-y-0.5 text-[11px] text-muted-foreground mt-0.5">
                           {lead.Owner?.name && <span className="truncate max-w-[140px]">{lead.Owner.name}</span>}
