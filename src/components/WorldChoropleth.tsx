@@ -18,12 +18,21 @@ interface GeoFeature {
     | { type: "MultiPolygon"; coordinates: number[][][][] };
 }
 
-// Equirectangular projection cropped to skip most of Antarctica / far north so
-// the populated world fills the frame.
+// Equirectangular projection cropped to skip most of Antarctica so the
+// populated world fills the frame. Bounds include Greenland's top (~84N) and
+// South America's tip (~-56) so nothing lands flush against the edge.
 const W = 1000;
-const LAT_TOP = 83;
-const LAT_BOTTOM = -56;
-const H = Math.round((W * (LAT_TOP - LAT_BOTTOM)) / 360); // keep aspect
+const LAT_TOP = 84;
+const LAT_BOTTOM = -57;
+const H = Math.round((W * (LAT_TOP - LAT_BOTTOM)) / 360); // keep aspect (~392)
+
+// A hovered country rises by LIFT user-units; the viewBox gets matching top
+// headroom (+ a little margin all round) so lifted northern countries and their
+// drop-shadow aren't clipped — this also fixes the "a bit cropped" edges.
+const LIFT = 11;
+const PAD_X = 6;
+const PAD_TOP = LIFT + 8;
+const PAD_BOTTOM = 6;
 
 const projectX = (lon: number) => ((lon + 180) / 360) * W;
 const projectY = (lat: number) => ((LAT_TOP - lat) / (LAT_TOP - LAT_BOTTOM)) * H;
@@ -64,7 +73,10 @@ export function WorldChoropleth({
   className?: string;
 }) {
   const [features, setFeatures] = useState<GeoFeature[] | null>(null);
-  const [hover, setHover] = useState<{ name: string; value: number; x: number; y: number } | null>(null);
+  // Split so moving the mouse (position only) doesn't re-render all 180 paths —
+  // only `hovered.name` changing (crossing into a new country) reorders/re-fills.
+  const [hovered, setHovered] = useState<{ name: string; value: number } | null>(null);
+  const [tip, setTip] = useState<{ x: number; y: number } | null>(null);
   const wrapRef = useRef<HTMLDivElement>(null);
 
   // Lazy-load the GeoJSON (own chunk). Only once.
@@ -88,6 +100,14 @@ export function WorldChoropleth({
     return m;
   }, [values]);
 
+  // Paint the hovered country LAST so its lift + shadow sit above its neighbours.
+  // Stable keys mean React moves the node (no remount), so the lift transitions.
+  const ordered = useMemo(() => {
+    if (!hovered) return paths;
+    const one = paths.find(p => p.key === hovered.name);
+    return one ? [...paths.filter(p => p.key !== hovered.name), one] : paths;
+  }, [paths, hovered]);
+
   if (features === null) {
     return (
       <div className={className} style={{ aspectRatio: `${W} / ${H}` }}>
@@ -101,44 +121,45 @@ export function WorldChoropleth({
   return (
     <div ref={wrapRef} className={className} style={{ position: "relative" }}>
       <svg
-        viewBox={`0 0 ${W} ${H}`}
+        viewBox={`${-PAD_X} ${-PAD_TOP} ${W + PAD_X * 2} ${H + PAD_TOP + PAD_BOTTOM}`}
         className="w-full h-auto"
         role="img"
         aria-label="World map of counts by country"
-        onMouseLeave={() => setHover(null)}
+        onMouseLeave={() => { setHovered(null); setTip(null); }}
       >
-        <rect x={0} y={0} width={W} height={H} fill="transparent" />
-        {paths.map(p => {
+        {ordered.map(p => {
           const v = values.get(p.key) ?? 0;
+          const isHover = hovered?.name === p.key;
           return (
             <path
               key={p.key}
               d={p.d}
               fill={fillFor(v, max)}
-              stroke="#ffffff"
-              strokeWidth={0.4}
-              className="transition-[fill] duration-300"
-              style={{ cursor: v > 0 ? "pointer" : "default" }}
+              stroke={isHover ? "#0f766e" : "#ffffff"}
+              strokeWidth={isHover ? 0.9 : 0.4}
+              style={{
+                transform: isHover ? `translateY(-${LIFT}px)` : "translateY(0)",
+                transition: "transform 160ms ease, stroke-width 160ms ease",
+                filter: isHover ? "drop-shadow(0 3px 3px rgba(15,23,42,0.38))" : undefined,
+                cursor: v > 0 ? "pointer" : "default",
+              }}
+              onMouseEnter={() => setHovered({ name: p.key, value: v })}
               onMouseMove={e => {
                 const rect = wrapRef.current?.getBoundingClientRect();
-                setHover({ name: p.key, value: v, x: e.clientX - (rect?.left ?? 0), y: e.clientY - (rect?.top ?? 0) });
-              }}
-              onMouseEnter={e => {
-                const rect = wrapRef.current?.getBoundingClientRect();
-                setHover({ name: p.key, value: v, x: e.clientX - (rect?.left ?? 0), y: e.clientY - (rect?.top ?? 0) });
+                setTip({ x: e.clientX - (rect?.left ?? 0), y: e.clientY - (rect?.top ?? 0) });
               }}
             />
           );
         })}
       </svg>
 
-      {hover && (
+      {hovered && tip && (
         <div
           className="pointer-events-none absolute z-10 rounded-md bg-slate-900/95 px-2.5 py-1.5 text-[11px] text-white shadow-lg"
-          style={{ left: Math.min(hover.x + 12, (wrapRef.current?.clientWidth ?? 0) - 130), top: hover.y + 12 }}
+          style={{ left: Math.min(tip.x + 12, (wrapRef.current?.clientWidth ?? 0) - 130), top: tip.y + 12 }}
         >
-          <div className="font-semibold">{hover.name}</div>
-          <div className="text-white/80">{hover.value > 0 ? formatValue(hover.value) : "—"}</div>
+          <div className="font-semibold">{hovered.name}</div>
+          <div className="text-white/80">{hovered.value > 0 ? formatValue(hovered.value) : "—"}</div>
         </div>
       )}
 
