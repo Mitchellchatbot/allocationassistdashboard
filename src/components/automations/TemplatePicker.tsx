@@ -19,7 +19,7 @@ import { EmailFrame } from "@/components/EmailFrame";
  * persist a default, …). Fully testable in npm run dev.
  */
 export function TemplatePicker({
-  templates: allTemplates, value, onChange, defaultKey, renderVars, label, flowFilter,
+  templates: allTemplates, value, onChange, defaultKey, renderVars, label, flowFilter, audience,
   contentClassName,
 }: {
   templates: EmailTemplate[];
@@ -31,6 +31,12 @@ export function TemplatePicker({
   /** Restrict the choosable list to one flow (e.g. "profile_sent"), so the
    *  profile-send pickers don't surface shortlist/interview/etc. templates. */
   flowFilter?: string;
+  /** Restrict further to one audience so the DOCTOR email picker doesn't list
+   *  the hospital-facing templates (and vice-versa) — both live on the same
+   *  profile_sent flow. Matches on the template key: a "doctor" picker hides
+   *  keys that are clearly hospital-only, and vice-versa; ambiguous/custom keys
+   *  stay in both so nothing the team authors goes missing. */
+  audience?: "doctor" | "hospital";
   /** Extra classes for the popover panel — used to raise its z-index when the
    *  picker lives inside the full-screen email preview (z-[101]). */
   contentClassName?: string;
@@ -44,10 +50,22 @@ export function TemplatePicker({
   // The choosable set — scoped to flowFilter when provided. `allTemplates` is
   // still used for resolving the current selection / preview, so a value that's
   // somehow out of scope still renders in the trigger + preview.
-  const templates = useMemo(
-    () => (flowFilter ? allTemplates.filter(t => (t.flow_key ?? "other") === flowFilter) : allTemplates),
-    [allTemplates, flowFilter],
-  );
+  const templates = useMemo(() => {
+    let list = flowFilter ? allTemplates.filter(t => (t.flow_key ?? "other") === flowFilter) : allTemplates;
+    if (audience) {
+      list = list.filter(t => {
+        const k = t.key.toLowerCase();
+        const isDoctor   = k.includes("doctor");
+        const isHospital = k.includes("hospital");
+        // Hide the OPPOSITE audience's dedicated templates; keep anything that
+        // isn't clearly the other side (custom / ambiguous keys show in both).
+        if (audience === "doctor")   return !(isHospital && !isDoctor);
+        if (audience === "hospital") return !(isDoctor && !isHospital);
+        return true;
+      });
+    }
+    return list;
+  }, [allTemplates, flowFilter, audience]);
 
   const selected = allTemplates.find(t => t.key === value);
 

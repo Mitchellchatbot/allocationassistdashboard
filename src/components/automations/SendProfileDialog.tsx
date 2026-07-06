@@ -1336,7 +1336,7 @@ function PreviewConfirm({
         <div className="space-y-2">
           <div className="flex items-start justify-between gap-2">
             <div className="flex-1 min-w-0">
-              <TemplatePicker templates={templates} value={hospitalTemplateKey} onChange={setHospitalTemplateKey} defaultKey="profile_sent_hospital" renderVars={vars} label="Hospital intro email template" flowFilter="profile_sent" />
+              <TemplatePicker templates={templates} value={hospitalTemplateKey} onChange={setHospitalTemplateKey} defaultKey="profile_sent_hospital" renderVars={vars} label="Hospital intro email template" flowFilter="profile_sent" audience="hospital" />
             </div>
             {hospitalTemplateKey !== "profile_sent_hospital" && (
               <button type="button" onClick={() => { onSaveDefault("hospital", hospitalTemplateKey); toast.success("Saved as your default hospital template"); }} className="text-[10px] text-sidebar-foreground/60 hover:text-sidebar-foreground hover:underline whitespace-nowrap mt-4">Save as my default</button>
@@ -1382,6 +1382,7 @@ function PreviewConfirm({
               renderVars={vars}
               label="Hospital intro email template"
               flowFilter="profile_sent"
+              audience="hospital"
               contentClassName="z-[200]"
             />
           }
@@ -1396,7 +1397,7 @@ function PreviewConfirm({
         <div className="space-y-2">
           <div className="flex items-start justify-between gap-2">
             <div className="flex-1 min-w-0">
-              <TemplatePicker templates={templates} value={doctorTemplateKey} onChange={setDoctorTemplateKey} defaultKey="profile_sent_doctor" renderVars={vars} label="Doctor 'working opportunity' email template" flowFilter="profile_sent" />
+              <TemplatePicker templates={templates} value={doctorTemplateKey} onChange={setDoctorTemplateKey} defaultKey="profile_sent_doctor" renderVars={vars} label="Doctor 'working opportunity' email template" flowFilter="profile_sent" audience="doctor" />
             </div>
             {doctorTemplateKey !== "profile_sent_doctor" && (
               <button type="button" onClick={() => { onSaveDefault("doctor", doctorTemplateKey); toast.success("Saved as your default doctor template"); }} className="text-[10px] text-sidebar-foreground/60 hover:text-sidebar-foreground hover:underline whitespace-nowrap mt-4">Save as my default</button>
@@ -1437,6 +1438,7 @@ function PreviewConfirm({
               renderVars={vars}
               label="Doctor 'working opportunity' email template"
               flowFilter="profile_sent"
+              audience="doctor"
               contentClassName="z-[200]"
             />
           }
