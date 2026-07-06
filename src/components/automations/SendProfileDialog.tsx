@@ -170,23 +170,29 @@ function SendProfileDialogBody({ onClose, initial }: { onClose: () => void; init
   const scheduleProfileSend = useScheduleProfileSend();
   const navigate = useNavigate();
 
-  // Reset whenever the dialog re-opens. The body only mounts while open, so
-  // "on open" == "on mount" here; re-run if the current user changes while
-  // open so the BCC default tracks them, exactly as before the split.
+  // Reset the wizard ONCE on open. The body only mounts while open, so
+  // "on open" == "on mount". This must NOT depend on the user — auth resolves a
+  // tick after mount (user?.email goes undefined → real), and re-running this
+  // would reset step/selectedDoctor and wipe out a vacancy pre-fill that already
+  // jumped to the preview (the "flash then back to zero" bug).
   useEffect(() => {
     setStep("pick-doctor");
     setSelectedDoctor(null);
     setSelectedIds([]);
     setCustomMessage("");
-    // Default the BCC list to the current user if they're a known
-    // sender — most common case is "I'm sending, BCC me on my own
-    // outbound". The Preview step exposes the dropdown for changes.
-    const me = findSenderByEmail(user?.email ?? null);
-    setBccList(me ? [me.email] : []);
-    setCcList([]);
     setHospitalTemplateKey(loadDefaultTemplate("hospital"));
     setDoctorTemplateKey(loadDefaultTemplate("doctor"));
     setCardImageUrl(null);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
+  // Default the BCC to the current user (known sender) — "I'm sending, BCC me".
+  // Tracks the user separately so it can settle when auth loads WITHOUT touching
+  // the wizard navigation. The Preview step's picker overrides it.
+  useEffect(() => {
+    const me = findSenderByEmail(user?.email ?? null);
+    setBccList(me ? [me.email] : []);
+    setCcList([]);
   }, [user?.email]);
 
   // Phase 4 — hide signed + unavailable doctors from the send list. Spec:
@@ -291,7 +297,10 @@ function SendProfileDialogBody({ onClose, initial }: { onClose: () => void; init
   useEffect(() => { setInitialApplied(false); }, [initial?.doctorId, initial?.doctorEmail, initial?.hospitalId, initial?.hospitalName]);
   useEffect(() => {
     if (initialApplied || !initial || !(initial.doctorId || initial.doctorEmail)) return;
-    if (doctorOptions.length === 0) return; // wait for the list to load
+    // Wait for BOTH doctor pools (Zoho + WP published) to finish loading before
+    // deciding — otherwise, if Zoho arrives first, a WP-only doctor isn't in the
+    // list yet and we'd wrongly give up (and never retry once initialApplied).
+    if (zohoLoading || wpLoading || doctorOptions.length === 0) return;
     const doc =
       (initial.doctorId    ? doctorOptions.find(d => d.id === initial.doctorId) : undefined) ??
       (initial.doctorEmail ? doctorOptions.find(d => d.email?.toLowerCase() === initial.doctorEmail!.toLowerCase()) : undefined);
@@ -303,7 +312,7 @@ function SendProfileDialogBody({ onClose, initial }: { onClose: () => void; init
     if (h) { setSelectedIds([h.id]); setStep("preview-confirm"); }
     else setStep("pick-hospitals");
     setInitialApplied(true);
-  }, [initial, initialApplied, doctorOptions, hospitals]);
+  }, [initial, initialApplied, doctorOptions, hospitals, zohoLoading, wpLoading]);
 
   // While a vacancy-launched send is still resolving its pre-filled doctor +
   // hospital (doctorOptions load async), show a loading panel instead of the
