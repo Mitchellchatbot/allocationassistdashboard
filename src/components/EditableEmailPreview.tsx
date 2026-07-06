@@ -137,6 +137,60 @@ export function EditableEmailPreview({
 
   const flush = () => { if (bodyRef.current) onHtmlChange(bodyRef.current.innerHTML); };
 
+  // ── Drag-to-resize table columns ────────────────────────────────────────────
+  // Grab a header/cell's right edge and drag to set that column's width. We
+  // switch the table to table-layout:fixed and pin every column's current width
+  // (as inline px), so only the dragged column changes and Gmail — which honours
+  // inline width + table-layout:fixed — renders the exact same widths. The edited
+  // HTML flows up via flush() → html_override, so what you size is what's sent.
+  const GRAB_PX = 6; // distance from a cell's right edge that starts a resize
+  const cellAtBorder = (target: EventTarget | null, clientX: number): HTMLTableCellElement | null => {
+    const el = (target as HTMLElement | null)?.closest?.("th,td") as HTMLTableCellElement | null;
+    if (!el) return null;
+    const r = el.getBoundingClientRect();
+    return clientX >= r.right - GRAB_PX && clientX <= r.right + 2 ? el : null;
+  };
+  const onBodyMouseMove = (e: React.MouseEvent) => {
+    const body = bodyRef.current; if (!body) return;
+    // Show the col-resize affordance when hovering a column boundary.
+    body.style.cursor = cellAtBorder(e.target, e.clientX) ? "col-resize" : "";
+  };
+  const onBodyMouseDown = (e: React.MouseEvent) => {
+    const cell = cellAtBorder(e.target, e.clientX);
+    if (!cell) return;                       // not on a border → normal editing
+    const table = cell.closest("table") as HTMLTableElement | null;
+    const headRow = table?.tHead?.rows[0] ?? table?.rows[0];
+    if (!table || !headRow) return;
+    e.preventDefault();                      // don't start a text selection
+    table.style.tableLayout = "fixed";
+    table.style.width = `${Math.round(table.getBoundingClientRect().width)}px`;
+    // Pin every column's current width (and let headers wrap) so fixed layout
+    // doesn't reflow the untouched columns when we drag one.
+    for (const c of Array.from(headRow.cells)) {
+      if (!c.style.width) c.style.width = `${Math.round(c.getBoundingClientRect().width)}px`;
+      c.style.whiteSpace = "normal";
+    }
+    const col = headRow.cells[cell.cellIndex];
+    if (!col) return;
+    const startX = e.clientX;
+    const startW = col.getBoundingClientRect().width;
+    const move = (ev: MouseEvent) => {
+      const w = Math.max(36, Math.round(startW + ev.clientX - startX));
+      col.style.width = `${w}px`;
+      // Keep the table's own width in step with the columns so it stays scrollable.
+      const total = Array.from(headRow.cells).reduce((s, c) => s + (parseInt(c.style.width) || c.getBoundingClientRect().width), 0);
+      table.style.width = `${Math.round(total)}px`;
+    };
+    const up = () => {
+      document.removeEventListener("mousemove", move);
+      document.removeEventListener("mouseup", up);
+      if (bodyRef.current) bodyRef.current.style.cursor = "";
+      flush();                               // persist the widths into the sent HTML
+    };
+    document.addEventListener("mousemove", move);
+    document.addEventListener("mouseup", up);
+  };
+
   // Rich-text command via the contentEditable's built-in editing. execCommand
   // is deprecated but still the only cross-browser way to format a selection in
   // a contentEditable; the failure mode is a no-op, never a crash.
@@ -241,7 +295,7 @@ export function EditableEmailPreview({
       <div className="px-4 py-1.5 bg-teal-50/70 border-b border-teal-100 text-[11px] text-teal-800 flex items-center justify-between gap-2">
         <span className="flex items-center gap-1.5 min-w-0">
           <Pencil className="h-3 w-3 shrink-0" />
-          <span className="truncate">Editable — click the subject or the email text to change the wording. This exact version is what sends.</span>
+          <span className="truncate">Editable — click text to change the wording, or drag a table column's edge to resize it. This exact version is what sends.</span>
         </span>
         {edited && onReset && (
           <button
@@ -360,6 +414,8 @@ export function EditableEmailPreview({
           suppressContentEditableWarning
           onInput={(e) => onHtmlChange((e.target as HTMLDivElement).innerHTML)}
           onKeyUp={saveSelection}
+          onMouseMove={onBodyMouseMove}
+          onMouseDown={onBodyMouseDown}
           onMouseUp={saveSelection}
           onBlur={saveSelection}
           style={EMAIL_BODY_STYLE}
