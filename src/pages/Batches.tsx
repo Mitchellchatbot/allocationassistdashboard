@@ -979,6 +979,12 @@ function BatchDialog({ target, onTargetChange, batches, suggestedSpecialty }: {
     if (!e) return;
     setExcludedEmails(prev => prev.includes(e) ? prev.filter(x => x !== e) : [...prev, e]);
   };
+  // Click a hospital name to reveal its exact recruiter email (the address that
+  // receives this batch) — click the email to copy it.
+  const [emailShownFor, setEmailShownFor] = useState<Set<string>>(new Set());
+  const toggleEmailShown = (id: string) => setEmailShownFor(prev => {
+    const n = new Set(prev); if (n.has(id)) n.delete(id); else n.add(id); return n;
+  });
   // True once the team has actually changed the subject or body away from the
   // template render — gates the override on send and the "edited" UI hints.
   const batchEdited = !!emailPreview && (editSubject !== emailPreview.subject || editHtml !== emailPreview.html);
@@ -1621,18 +1627,38 @@ function BatchDialog({ target, onTargetChange, batches, suggestedSpecialty }: {
                 <>
                   {eligibleHospitals.map(h => {
                     const excluded = isExcluded(h.primary_recruiter_email);
+                    const shown = emailShownFor.has(h.id);
                     return (
-                      <div key={h.id} className="group flex items-center gap-1.5 px-1 py-0.5 text-[10.5px]">
-                        <span className={`h-1 w-1 shrink-0 rounded-full ${excluded ? "bg-slate-300" : "bg-teal-500"}`} />
-                        <span className={`flex-1 truncate ${excluded ? "text-slate-400 line-through" : "text-slate-700"}`}>{h.name}</span>
-                        <button
-                          type="button"
-                          className={`shrink-0 ${excluded ? "text-teal-600 hover:text-teal-700" : "text-slate-300 hover:text-rose-600"}`}
-                          title={excluded ? `Include ${h.name}` : `Exclude ${h.name} from this send`}
-                          onClick={() => toggleExclude(h.primary_recruiter_email)}
-                        >
-                          {excluded ? <Plus className="h-3 w-3" /> : <X className="h-3 w-3" />}
-                        </button>
+                      <div key={h.id} className="group px-1 py-0.5 text-[10.5px]">
+                        <div className="flex items-center gap-1.5">
+                          <span className={`h-1 w-1 shrink-0 rounded-full ${excluded ? "bg-slate-300" : "bg-teal-500"}`} />
+                          <button
+                            type="button"
+                            onClick={() => toggleEmailShown(h.id)}
+                            title={h.primary_recruiter_email ?? "no recruiter email"}
+                            className={`flex-1 truncate text-left ${excluded ? "text-slate-400 line-through" : "text-slate-700 hover:text-teal-700"}`}
+                          >
+                            {h.name}
+                          </button>
+                          <button
+                            type="button"
+                            className={`shrink-0 ${excluded ? "text-teal-600 hover:text-teal-700" : "text-slate-300 hover:text-rose-600"}`}
+                            title={excluded ? `Include ${h.name}` : `Exclude ${h.name} from this send`}
+                            onClick={() => toggleExclude(h.primary_recruiter_email)}
+                          >
+                            {excluded ? <Plus className="h-3 w-3" /> : <X className="h-3 w-3" />}
+                          </button>
+                        </div>
+                        {shown && (
+                          <button
+                            type="button"
+                            onClick={() => { if (h.primary_recruiter_email) { navigator.clipboard.writeText(h.primary_recruiter_email); toast.success("Email copied."); } }}
+                            title="Click to copy"
+                            className="ml-3 mt-0.5 block max-w-full truncate text-[10px] text-teal-600 hover:underline"
+                          >
+                            {h.primary_recruiter_email ?? "no recruiter email on file"}
+                          </button>
+                        )}
                       </div>
                     );
                   })}
