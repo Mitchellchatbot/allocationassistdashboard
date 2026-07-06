@@ -126,7 +126,10 @@ Deno.serve(async (req: Request) => {
     .from("hospitals")
     .select("id, name, primary_contact_name, primary_recruiter_email, country")
     .not("primary_recruiter_email", "is", null);
-  if (batchCountry) hospitalQuery = hospitalQuery.eq("country", batchCountry);
+  // Case-insensitive so a hand-typed "oman" / "Oman " on the hospital row still
+  // matches the batch's country (mirrors the preview's eligibleHospitals). ilike
+  // with no % is a plain case-insensitive equals.
+  if (batchCountry) hospitalQuery = hospitalQuery.ilike("country", batchCountry);
   const { data: hospitals, error: hospErr } = await hospitalQuery;
   if (hospErr) return json({ ok: false, error: "Hospital fetch failed", detail: hospErr.message }, 500);
   const recipients = (hospitals ?? [])

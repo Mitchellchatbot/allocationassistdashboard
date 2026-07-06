@@ -1099,10 +1099,12 @@ function BatchDialog({ target, onTargetChange, batches, suggestedSpecialty }: {
   // selected on the left … ability to add more hospitals").
   const { data: previewHospitals = [] } = useHospitals();
   const eligibleHospitals = useMemo(() => {
-    const bc = (batch?.country ?? "").trim();
+    // Case-insensitive country match — hospital rows are entered by hand and a
+    // "oman" / "Oman " mismatch would wrongly show 0 recipients for the area.
+    const bc = (batch?.country ?? "").trim().toLowerCase();
     return previewHospitals
       .filter(h => !!h.primary_recruiter_email?.trim())
-      .filter(h => !bc || (h.country ?? "").trim() === bc)
+      .filter(h => !bc || (h.country ?? "").trim().toLowerCase() === bc)
       .sort((a, b) => a.name.localeCompare(b.name));
   }, [previewHospitals, batch?.country]);
   const eligibleEmails = useMemo(

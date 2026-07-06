@@ -287,6 +287,18 @@ function SendProfileDialogBody({ onClose, initial }: { onClose: () => void; init
     setInitialApplied(true);
   }, [initial, initialApplied, doctorOptions, hospitals]);
 
+  // While a vacancy-launched send is still resolving its pre-filled doctor +
+  // hospital (doctorOptions load async), show a loading panel instead of the
+  // step-1 picker — otherwise the picker flashes for a frame before we jump to
+  // the preview (Hasan: "the autofilled emails … flashes before going into the
+  // selector"). Safety timeout forces us out of limbo if the roster never loads.
+  const resolvingInitial = !!initial && !!(initial.doctorId || initial.doctorEmail) && !initialApplied;
+  useEffect(() => {
+    if (!resolvingInitial) return;
+    const t = setTimeout(() => setInitialApplied(true), 5000);
+    return () => clearTimeout(t);
+  }, [resolvingInitial]);
+
   // Per-send template selection (Amir #3). Defaults to the flow's two
   // hardcoded templates; the team can pick ANY template per send. The picked
   // doctor "working opportunity" template is the headline ask.
@@ -617,7 +629,13 @@ function SendProfileDialogBody({ onClose, initial }: { onClose: () => void; init
           className="fixed left-1/2 top-1/2 z-50 h-[92vh] w-[93vw] -translate-x-1/2 -translate-y-1/2 bg-transparent outline-none data-[state=open]:animate-in data-[state=closed]:animate-out data-[state=open]:fade-in-0 data-[state=closed]:fade-out-0 data-[state=open]:zoom-in-95 data-[state=closed]:zoom-out-95 duration-200"
         >
           <DialogPrimitive.Title className="sr-only">Send Profile to Hospital</DialogPrimitive.Title>
-          {step === "preview-confirm" && selectedDoctor ? (
+          {resolvingInitial ? (
+            <div className="flex h-full w-full items-center justify-center rounded-2xl bg-sidebar text-sidebar-foreground shadow-sm">
+              <div className="flex items-center gap-2 text-sm">
+                <Loader2 className="h-4 w-4 animate-spin" /> Preparing the introduction…
+              </div>
+            </div>
+          ) : step === "preview-confirm" && selectedDoctor ? (
             <PreviewConfirm
               onClose={onClose}
               doctor={selectedDoctor}
