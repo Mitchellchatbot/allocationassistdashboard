@@ -885,9 +885,11 @@ Deno.serve(async (req: Request) => {
   const parserReplyTo   = `reply-${run.id}@${MAIL_REPLY_DOMAIN}`;
   const replyToAddress  = personalRouting ? sender.replyHint : parserReplyTo;
 
-  // BCC list — explicit override from the dispatcher wins; otherwise
-  // default to sender's mailbox under personal routing. TEST_OVERRIDE
-  // bypasses BCC entirely so test runs don't double-deliver.
+  // BCC list — an EXPLICIT override the team typed in the CcBccPicker wins,
+  // even under TEST_OVERRIDE, so they can BCC themselves/colleagues to verify a
+  // send while the main recipient is still redirected to the test inbox (Sean:
+  // "have it send to the people we CC and BCC even with the training wheels on").
+  // Only the DEFAULT auto-BCC (sender mailbox) is suppressed in test mode.
   // Body wins over run metadata so the preview's CcBccPicker can add recipients
   // at send time; falls back to whatever was stashed on the run.
   const bccOverrideRaw = (body.bcc_override ?? md.bcc_override) as unknown;
@@ -897,11 +899,13 @@ Deno.serve(async (req: Request) => {
         .filter(v => v.length > 0 && v.includes("@"))
     : null;
   let bccList: string[] | undefined;
-  if (TEST_OVERRIDE) {
-    bccList = undefined;
-  } else if (bccOverride !== null) {
-    // Empty array on the override means 'BCC no-one' — respect it.
-    bccList = bccOverride.length > 0 ? bccOverride : undefined;
+  if (bccOverride !== null) {
+    // Explicit BCC — honoured always. Drop the To (test-redirect target or the
+    // real recipient) and Ammar so nobody's double-listed. Empty = 'BCC no-one'.
+    const cleaned = bccOverride.filter(a => a !== effectiveTo.toLowerCase() && a !== "ammar@allocationassist.com");
+    bccList = cleaned.length > 0 ? cleaned : undefined;
+  } else if (TEST_OVERRIDE) {
+    bccList = undefined;              // test mode + no explicit BCC → no auto-BCC
   } else if (personalRouting) {
     bccList = [sender.replyHint];
   }
