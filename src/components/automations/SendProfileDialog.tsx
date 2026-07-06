@@ -992,11 +992,14 @@ function HospitalRecipientsOverride({ hospitals, contacts, overrides, onOverride
  * Re-capture / Undo. No auto-download (the Save-As dialog was unwanted).
  */
 function CardScreenshotControl({
-  cardHtml, cardImageUrl, onSetCardImage,
+  cardHtml, cardImageUrl, onSetCardImage, autoBusy = false,
 }: {
   cardHtml: string;
   cardImageUrl: string | null;
   onSetCardImage: (url: string | null) => void;
+  /** The parent is auto-attaching the card (single-doctor sends) — show a
+   *  quiet "attaching…" state instead of the manual button. */
+  autoBusy?: boolean;
 }) {
   const [busy, setBusy] = useState(false);
   const capture = async () => {
@@ -1011,6 +1014,16 @@ function CardScreenshotControl({
       setBusy(false);
     }
   };
+
+  // Auto-attaching (single-doctor send) — quiet status, no button to press.
+  if (autoBusy && !cardImageUrl) {
+    return (
+      <div className="inline-flex items-center gap-1.5 rounded-md border border-teal-200 bg-teal-50 px-2.5 py-1.5 text-[11px] font-medium text-teal-700">
+        <Loader2 className="h-3.5 w-3.5 shrink-0 animate-spin" />
+        <span>Attaching the profile card image…</span>
+      </div>
+    );
+  }
 
   if (cardImageUrl) {
     return (
@@ -1191,6 +1204,26 @@ function PreviewConfirm({
     v.doctor_card_image_url = cardImageUrl ?? "";
     return v;
   }, [mergedProfileTokens, doctor, sampleHospital, cardImageUrl]);
+
+  // Auto-attach the profile-card image for SINGLE-doctor sends — the team asked
+  // for it to happen automatically instead of a button press. Fires once, once
+  // the doctor's profile data has loaded (so the card isn't blank). If it fails,
+  // the manual "Use profile card as image" button reappears as a fallback.
+  const autoCardTried = useRef(false);
+  const [autoCardBusy, setAutoCardBusy] = useState(false);
+  const profileLoaded = !!(mergedProfileTokens.doctor_bio || mergedProfileTokens.doctor_title || mergedProfileTokens.doctor_specialty || wpCandidate);
+  useEffect(() => {
+    if (!isSingle || cardImageUrl || autoCardTried.current || !profileLoaded) return;
+    autoCardTried.current = true;
+    setAutoCardBusy(true);
+    captureAndUploadCard(buildProfileCardHtml(vars))
+      .then(url => onSetCardImage(url))
+      .catch(() => {})   // silent — the manual button stays available
+      .finally(() => setAutoCardBusy(false));
+    // vars intentionally omitted from deps — we snapshot it at first-load; adding
+    // it would re-fire on every token change. profileLoaded gates the timing.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [isSingle, cardImageUrl, profileLoaded]);
 
   // The exact emails the team sees. Bodies are wrapped in the same font shell
   // send-flow-email uses, so edits shipped verbatim render like a normal send.
@@ -1416,6 +1449,7 @@ function PreviewConfirm({
             cardHtml={buildProfileCardHtml(vars)}
             cardImageUrl={cardImageUrl}
             onSetCardImage={onSetCardImage}
+            autoBusy={autoCardBusy}
           />
           <AttachmentsPicker
             attachments={hospitalAttachments}
