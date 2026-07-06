@@ -100,7 +100,7 @@ export function buildProfileCardHtml(v: Record<string, string>): string {
 `<div style="width:100%;font-family:'Poppins','Helvetica Neue',Helvetica,Arial,sans-serif;color:#0f172a;background:#ffffff;border:1px solid #e2e8f0;border-radius:16px;overflow:hidden;">
   <div style="background:linear-gradient(135deg,#0d9488 0%,#0f766e 100%);padding:20px 26px;">
     <table role="presentation" cellpadding="0" cellspacing="0" border="0" width="100%"><tr>
-      <td valign="middle">
+      <td valign="middle" width="100%">
         <table role="presentation" cellpadding="0" cellspacing="0" border="0"><tr>
           <td valign="middle" style="padding-right:12px;"><img src="${LOGO_URL}" alt="Allocation Assist" height="32" style="display:block;height:32px;width:auto;" /></td>
           <td valign="middle">
