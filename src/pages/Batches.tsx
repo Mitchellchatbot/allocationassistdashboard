@@ -980,14 +980,13 @@ function BatchDialog({ target, onTargetChange, batches, suggestedSpecialty }: {
     setExcludedEmails(prev => prev.includes(e) ? prev.filter(x => x !== e) : [...prev, e]);
   };
   // Click a hospital name to reveal its exact recruiter email (the address that
-  // receives this batch) — click the email to copy it.
+  // receives this batch) — click the email to copy it — AND preview that
+  // hospital's personalised greeting ("Hello <name> team!" instead of "Team").
   const [emailShownFor, setEmailShownFor] = useState<Set<string>>(new Set());
+  const [previewGreetId, setPreviewGreetId] = useState<string | null>(null);
   const toggleEmailShown = (id: string) => setEmailShownFor(prev => {
     const n = new Set(prev); if (n.has(id)) n.delete(id); else n.add(id); return n;
   });
-  // True once the team has actually changed the subject or body away from the
-  // template render — gates the override on send and the "edited" UI hints.
-  const batchEdited = !!emailPreview && (editSubject !== emailPreview.subject || editHtml !== emailPreview.html);
   const { data: zoho } = useZohoData();
   const lifecycleMap = useDoctorLifecycleMap();
   // Pool = WP PUBLISHED candidates only (the website), augmented from Zoho.
@@ -1161,6 +1160,21 @@ function BatchDialog({ target, onTargetChange, batches, suggestedSpecialty }: {
   };
   const removeHospitalBcc = (email: string) =>
     setBatchBcc(prev => prev.filter(e => e.trim().toLowerCase() !== email.trim().toLowerCase()));
+
+  // Personalised greeting per hospital (mirrors send-batch's greetingFor): the
+  // hospital's contact person when it greets by contact, else "<Name> team".
+  const batchGreeting = (h?: { name: string; primary_contact_name: string | null; greet_with_contact_name: boolean }) =>
+    h ? ((h.greet_with_contact_name && h.primary_contact_name?.trim()) ? h.primary_contact_name.trim() : `${h.name} team`) : "Team";
+  // Which hospital's greeting the preview shows (defaults to the first). Clicking
+  // a hospital swaps the "Hello …!" line so the preview matches the copy that
+  // hospital actually receives now that each gets its own email.
+  const previewGreetHospital = (previewGreetId ? previewHospitals.find(h => h.id === previewGreetId) : null) ?? eligibleHospitals[0];
+  const displayHtml = (emailPreview && previewGreetHospital)
+    ? emailPreview.html.replace(/Hello <strong>[^<]*<\/strong>!/, `Hello <strong>${batchGreeting(previewGreetHospital)}</strong>!`)
+    : (emailPreview?.html ?? "");
+  // True once the team edited away from the (greeting-swapped) preview base —
+  // gates the html_override on send and the "edited" hint.
+  const batchEdited = !!emailPreview && (editSubject !== emailPreview.subject || editHtml !== displayHtml);
   // id → DoctorOption lookup so resolving picked doctor_ids is O(picked)
   // instead of O(picked × allDoctors) on every render.
   const doctorById = useMemo(() => {
@@ -1634,9 +1648,9 @@ function BatchDialog({ target, onTargetChange, batches, suggestedSpecialty }: {
                           <span className={`h-1 w-1 shrink-0 rounded-full ${excluded ? "bg-slate-300" : "bg-teal-500"}`} />
                           <button
                             type="button"
-                            onClick={() => toggleEmailShown(h.id)}
-                            title={h.primary_recruiter_email ?? "no recruiter email"}
-                            className={`flex-1 truncate text-left ${excluded ? "text-slate-400 line-through" : "text-slate-700 hover:text-teal-700"}`}
+                            onClick={() => { toggleEmailShown(h.id); setPreviewGreetId(h.id); }}
+                            title={`Preview ${h.name}'s email · ${h.primary_recruiter_email ?? "no recruiter email"}`}
+                            className={`flex-1 truncate text-left ${excluded ? "text-slate-400 line-through" : previewGreetId === h.id ? "font-medium text-teal-700" : "text-slate-700 hover:text-teal-700"}`}
                           >
                             {h.name}
                           </button>
@@ -1708,15 +1722,15 @@ function BatchDialog({ target, onTargetChange, batches, suggestedSpecialty }: {
         preview: (
           <EditableEmailPreview
             subject={editSubject}
-            html={emailPreview.html}
+            html={displayHtml}
             onSubjectChange={setEditSubject}
             onHtmlChange={setEditHtml}
-            resetKey={previewResetTick}
+            resetKey={`${previewResetTick}:${previewGreetId ?? "first"}`}
             edited={batchEdited}
             onReset={() => {
               if (!emailPreview) return;
               setEditSubject(emailPreview.subject);
-              setEditHtml(emailPreview.html);
+              setEditHtml(displayHtml);
               setPreviewResetTick(t => t + 1);
             }}
             from="Hospital Intro <hospitalintro@allocationassist.com>"

@@ -127,7 +127,7 @@ Deno.serve(async (req: Request) => {
   const batchCountry = (batch.country as string | null) ?? null;
   let hospitalQuery = supabase
     .from("hospitals")
-    .select("id, name, primary_contact_name, primary_recruiter_email, country")
+    .select("id, name, primary_contact_name, primary_recruiter_email, greet_with_contact_name, country")
     .not("primary_recruiter_email", "is", null);
   // Case-insensitive so a hand-typed "oman" / "Oman " on the hospital row still
   // matches the batch's country (mirrors the preview's eligibleHospitals). ilike
@@ -135,9 +135,17 @@ Deno.serve(async (req: Request) => {
   if (batchCountry) hospitalQuery = hospitalQuery.ilike("country", batchCountry);
   const { data: hospitals, error: hospErr } = await hospitalQuery;
   if (hospErr) return json({ ok: false, error: "Hospital fetch failed", detail: hospErr.message }, 500);
-  const recipients = (hospitals ?? [])
-    .map(h => (h.primary_recruiter_email as string)?.trim())
-    .filter(Boolean);
+  // Keep the hospital objects (name + contact + greeting flag) so each hospital
+  // gets its OWN email greeting them by name (Sean: "hello team → hello name").
+  const recipientHospitals = (hospitals ?? [])
+    .map(h => ({
+      name:         String(h.name ?? "").trim(),
+      email:        String(h.primary_recruiter_email ?? "").trim(),
+      contact:      String(h.primary_contact_name ?? "").trim(),
+      greetContact: h.greet_with_contact_name === true,
+    }))
+    .filter(h => h.email);
+  const recipients = recipientHospitals.map(h => h.email);
   if (recipients.length === 0 && TEST_OVERRIDE_LIST.length === 0) {
     const scope = batchCountry ? `in ${batchCountry}` : "on file";
     return json({ ok: false, error: `No hospitals ${scope} with a recruiter email. Add some in the Hospitals tab or change the batch's country.` }, 400);
@@ -322,58 +330,46 @@ Deno.serve(async (req: Request) => {
     .maybeSingle();
   if (tplErr || !tpl) return json({ ok: false, error: "Template profile_sent_hospital_batch not found" }, 500);
 
-  const subject     = renderText(String(tpl.subject ?? ""), { specialty: specialtyLabel, hospital_contact_name: "Team" });
-  const renderedBody = renderText(String(tpl.body_html ?? ""), { specialty: specialtyLabel, hospital_contact_name: "Team", doctors_table_html: doctorsTableHtml, signature: SIGNATURE_HTML });
-  // Match send-flow-email: wrap the rendered body in a sans-serif
-  // <div> so every <p>/<table> inherits the AA dashboard's standard
-  // typeface unless the element overrides explicitly.
-  const html    = `${FONT_IMPORT}<div style="font-family:${FONT_STACK};font-size:17px;color:#1a2332;line-height:1.55;">${renderedBody}</div>`;
-  const text    = renderText(String(tpl.body_text ?? ""), { specialty: specialtyLabel, hospital_contact_name: "Team", doctors_table_html: stripHtml(doctorsTableHtml), signature: SIGNATURE_TEXT });
+  // Render the email for ONE greeting. Each hospital gets its own copy so the
+  // intro reads "Hello <hospital> team!" instead of a generic "Hello Team!".
+  // Body is wrapped in the same Garamond shell send-flow-email uses.
+  const wrapHtml = (bodyHtml: string) =>
+    `${FONT_IMPORT}<div style="font-family:${FONT_STACK};font-size:17px;color:#1a2332;line-height:1.55;">${bodyHtml}</div>`;
+  const renderFor = (contactName: string) => ({
+    subject: renderText(String(tpl.subject ?? ""), { specialty: specialtyLabel, hospital_contact_name: contactName }),
+    html:    wrapHtml(renderText(String(tpl.body_html ?? ""), { specialty: specialtyLabel, hospital_contact_name: contactName, doctors_table_html: doctorsTableHtml, signature: SIGNATURE_HTML })),
+    text:    renderText(String(tpl.body_text ?? ""), { specialty: specialtyLabel, hospital_contact_name: contactName, doctors_table_html: stripHtml(doctorsTableHtml), signature: SIGNATURE_TEXT }),
+  });
+  // A hospital's greeting: its contact person (when it greets by contact), else
+  // "<Hospital name> team".
+  const greetingFor = (h: { name: string; contact: string; greetContact: boolean }) =>
+    (h.greetContact && h.contact) ? h.contact : (h.name ? `${h.name} team` : "Team");
 
-  // ── Dry run? ──────────────────────────────────────────────────────────
+  // ── Dry run? Preview the FIRST hospital's personalised version ─────────
   if (dryRun) {
+    const sample = renderFor(recipientHospitals[0] ? greetingFor(recipientHospitals[0]) : "Team");
     return json({
       ok: true, dry_run: true,
-      preview: { from: MAIL_FROM, bcc_count: recipients.length, subject, html, text },
+      preview: { from: MAIL_FROM, bcc_count: recipients.length, subject: sample.subject, html: sample.html, text: sample.text },
       doctor_count: rows.length,
     }, 200);
   }
 
-  // ── Apply editable-preview overrides ──────────────────────────────────
-  // If the team edited the preview before sending, ship their version verbatim
-  // (subject as typed; the body's edited HTML; a text fallback derived from the
-  // edit if they didn't pass one). Empty/whitespace overrides are ignored so a
-  // blank field can't accidentally send an empty email.
-  const finalSubject = (body.subject_override ?? "").trim() ? String(body.subject_override) : subject;
-  const finalHtml    = (body.html_override ?? "").trim()    ? String(body.html_override)    : html;
-  const finalText    = (body.text_override ?? "").trim()    ? String(body.text_override)
-                     : (body.html_override ?? "").trim()    ? stripHtml(String(body.html_override))
-                     : text;
-
-  // ── Send via Resend (BCC) ─────────────────────────────────────────────
-  // Test override pattern matches send-flow-email: when set, all sends go
-  // to the override address instead of the 95 hospital recipients. Lets us
-  // demo end-to-end on the resend.dev sandbox without leaking emails.
-  const bccListRaw = TEST_OVERRIDE_LIST.length > 0 ? TEST_OVERRIDE_LIST : recipients;
-  const toAddress  = TEST_OVERRIDE_LIST[0] || MAIL_FROM.replace(/.*<|>.*/g, "");
-  // No automatic CC any more. Strip Ammar from the BCC list (he may still be in
-  // the test-override env var) so he never receives a batch send.
-  // Extra CC / BCC from the preview's CcBccPicker (added on top of the hospital
-  // BCC list). Deduped, valid emails only, never the excluded recipient.
+  // ── Editable-preview overrides + extra recipients + exclusions ────────
+  // If the team edited the preview, ship their edited HTML to every hospital
+  // (personalised greeting is lost when they hand-edit — their copy wins). Extra
+  // CC/BCC ride only the FIRST email so the team gets one copy, not one per
+  // hospital. Excluded hospitals + Ammar are dropped.
+  const editedHtml    = (body.html_override ?? "").trim();
+  const editedSubject = (body.subject_override ?? "").trim();
+  const editedText    = (body.text_override ?? "").trim();
   const clean = (arr: unknown): string[] => Array.isArray(arr)
     ? [...new Set((arr as unknown[]).map(v => typeof v === "string" ? v.trim() : "").filter(v => v.includes("@") && v.toLowerCase() !== EXCLUDED_RECIPIENT))]
     : [];
-  const extraBcc = clean(body.bcc_override);
-  const extraCc  = clean(body.cc_override);
-  // Hospitals the team unchecked in the preview → drop their recruiter email.
+  const extraBcc   = clean(body.bcc_override);
+  const extraCc    = clean(body.cc_override);
   const excludeSet = new Set(clean(body.exclude_override).map(e => e.toLowerCase()));
-  const bccList    = [...new Set([...bccListRaw.filter(a => a.toLowerCase() !== EXCLUDED_RECIPIENT), ...extraBcc])]
-    .filter(a => !excludeSet.has(a.toLowerCase()));
-  const testCc: string[] | undefined = extraCc.length ? extraCc : undefined;
 
-  // ── Attachments (CVs / logbooks) ──────────────────────────────────────
-  // Stored on the batch row by the Batches dialog as { filename, path, … };
-  // Resend wants { filename, path } and fetches each public URL server-side.
   const attachRaw = (batch.attachments as unknown);
   const attachments: Array<{ filename: string; path: string }> = Array.isArray(attachRaw)
     ? (attachRaw as Array<Record<string, unknown>>)
@@ -381,24 +377,65 @@ Deno.serve(async (req: Request) => {
         .filter(a => a.path.startsWith("http"))
     : [];
 
-  let resendRes: Response;
+  // Target hospitals — drop excluded + Ammar. In TEST mode every copy is
+  // redirected to the test inbox (personalised copies still go there so the
+  // greetings can be verified safely before real hospitals get them).
+  const targets = recipientHospitals.filter(h =>
+    h.email.toLowerCase() !== EXCLUDED_RECIPIENT && !excludeSet.has(h.email.toLowerCase()));
+  if (targets.length === 0 && TEST_OVERRIDE_LIST.length === 0) {
+    return json({ ok: false, error: "No hospitals left to send to — all excluded or missing a recruiter email." }, 400);
+  }
+
+  // One personalised email per hospital.
+  const emails = targets.map((h, i) => {
+    const rendered = editedHtml
+      ? { subject: editedSubject || renderFor(greetingFor(h)).subject, html: wrapHtml(editedHtml), text: editedText || stripHtml(editedHtml) }
+      : renderFor(greetingFor(h));
+    return {
+      from: MAIL_FROM,
+      to:   [TEST_OVERRIDE_LIST[0] || h.email],
+      ...(i === 0 && extraCc.length  ? { cc:  extraCc }  : {}),
+      ...(i === 0 && extraBcc.length ? { bcc: extraBcc } : {}),
+      subject: rendered.subject,
+      html:    rendered.html,
+      text:    rendered.text,
+      headers: { "X-AA-Batch-Id": String(batch.id), "X-AA-Batch-Kind": String(batch.kind) },
+      ...(attachments.length ? { attachments } : {}),
+    };
+  });
+
+  // ── Send — one email per hospital ─────────────────────────────────────
+  // Resend's /emails/batch sends up to 100 in one call (no per-request rate
+  // limit) but does NOT support attachments, so we fall back to individual
+  // sends when the batch carries a CV/logbook.
+  let sentCount = 0, failedCount = 0, messageId = "", lastError = "";
   try {
-    resendRes = await fetch("https://api.resend.com/emails", {
-      method:  "POST",
-      headers: { "Authorization": `Bearer ${RESEND_API_KEY}`, "Content-Type": "application/json" },
-      body: JSON.stringify({
-        from:    MAIL_FROM,
-        to:      [toAddress],
-        cc:      testCc,
-        bcc:     bccList,
-        subject: finalSubject, html: finalHtml, text: finalText,
-        headers: {
-          "X-AA-Batch-Id":  String(batch.id),
-          "X-AA-Batch-Kind": String(batch.kind),
-        },
-        attachments: attachments.length > 0 ? attachments : undefined,
-      }),
-    });
+    if (attachments.length === 0) {
+      for (let i = 0; i < emails.length; i += 100) {
+        const chunk = emails.slice(i, i + 100);
+        const res = await fetch("https://api.resend.com/emails/batch", {
+          method:  "POST",
+          headers: { "Authorization": `Bearer ${RESEND_API_KEY}`, "Content-Type": "application/json" },
+          body:    JSON.stringify(chunk),
+        });
+        const txt = await res.text();
+        if (!res.ok) { failedCount += chunk.length; lastError = `Resend batch ${res.status}: ${txt.slice(0, 200)}`; continue; }
+        sentCount += chunk.length;
+        if (!messageId) { try { messageId = (JSON.parse(txt) as { data?: Array<{ id?: string }> }).data?.[0]?.id ?? ""; } catch { /* */ } }
+      }
+    } else {
+      for (const payload of emails) {
+        const res = await fetch("https://api.resend.com/emails", {
+          method:  "POST",
+          headers: { "Authorization": `Bearer ${RESEND_API_KEY}`, "Content-Type": "application/json" },
+          body:    JSON.stringify(payload),
+        });
+        const txt = await res.text();
+        if (res.ok) { sentCount++; if (!messageId) { try { messageId = (JSON.parse(txt) as { id?: string }).id ?? ""; } catch { /* */ } } }
+        else { failedCount++; lastError = `Resend ${res.status}: ${txt.slice(0, 200)}`; }
+        await new Promise(r => setTimeout(r, 120));   // stay under Resend's rate limit
+      }
+    }
   } catch (e) {
     await supabase.from("scheduled_batch_sends")
       .update({ status: "failed", error: String(e), updated_at: new Date().toISOString() })
@@ -406,26 +443,19 @@ Deno.serve(async (req: Request) => {
     return json({ ok: false, error: "Network error reaching Resend", detail: String(e) }, 502);
   }
 
-  const resendBody = await resendRes.text();
-  if (!resendRes.ok) {
-    console.error("[send-batch] Resend HTTP", resendRes.status, resendBody.slice(0, 300));
-    await supabase.from("scheduled_batch_sends").update({
-      status: "failed",
-      error:  `Resend ${resendRes.status}: ${resendBody.slice(0, 300)}`,
-      updated_at: new Date().toISOString(),
-    }).eq("id", batch.id);
-    return json({ ok: false, error: `Resend returned ${resendRes.status}`, detail: resendBody.slice(0, 500) }, resendRes.status);
+  if (sentCount === 0) {
+    await supabase.from("scheduled_batch_sends")
+      .update({ status: "failed", error: lastError || "No emails sent", updated_at: new Date().toISOString() })
+      .eq("id", batch.id);
+    return json({ ok: false, error: "Batch failed to send", detail: lastError }, 502);
   }
-
-  let messageId = "";
-  try { messageId = (JSON.parse(resendBody) as { id?: string }).id ?? ""; } catch { /* empty */ }
 
   await supabase.from("scheduled_batch_sends").update({
     status:          "sent",
     sent_at:         new Date().toISOString(),
-    hospital_count:  bccList.length,
+    hospital_count:  sentCount,
     sent_message_id: messageId,
-    error:           null,
+    error:           failedCount > 0 ? `${failedCount} of ${emails.length} failed: ${lastError}` : null,
     updated_at:      new Date().toISOString(),
   }).eq("id", batch.id);
 
@@ -442,7 +472,7 @@ Deno.serve(async (req: Request) => {
     ok: true,
     batch_id: batch.id,
     message_id: messageId,
-    bcc_count: bccList.length,
+    bcc_count: sentCount,           // hospitals actually emailed (one each now)
     doctor_count: rows.length,
     specialty: specialtyLabel,
   }, 200);
