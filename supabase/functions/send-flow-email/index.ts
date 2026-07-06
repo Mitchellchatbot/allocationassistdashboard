@@ -1304,16 +1304,17 @@ ${buttonsHtml}
 </div>`;
 }
 
-/** The full single-row data table the team uses in hospital comms, rendered
- *  UNDER the card. Same columns as the old profile_sent_hospital table MINUS
- *  the Area of Interest column (team request 2026-06-12). Styled token (teal
- *  header) so it survives plainifyBody. Horizontally scrollable since it's wide. */
+/** The single doctor's profile as a VERTICAL field → value table (Hasan
+ *  2026-07-06: for one doctor a 14-column wide table reads awkwardly and scrolls
+ *  sideways — list the fields down the page instead). Name is a teal heading row;
+ *  empty fields are dropped so there are no blank rows. Styled token (inline
+ *  styles) so it survives plainifyBody. The batch email keeps its wide multi-row
+ *  table — that one genuinely compares several doctors. */
 function doctorRowTableHtml(v: Record<string, string>): string {
-  const cols: Array<[string, string]> = [
-    ["#",                                            "1"],
-    ["Name",                                         v.doctor_name || ""],
+  const name = (v.doctor_name || "Candidate").trim();
+  const rows: Array<[string, string]> = [
     ["Title and Specialty as per the UAE license",   v.doctor_title || ""],
-    ["Country Of Training",                          v.doctor_country_training || ""],
+    ["Country of Training",                          v.doctor_country_training || ""],
     ["Years of Experience",                          v.doctor_years_experience || ""],
     ["Nationality",                                  v.doctor_nationality || ""],
     ["Age",                                          v.doctor_age || ""],
@@ -1325,17 +1326,19 @@ function doctorRowTableHtml(v: Record<string, string>): string {
     ["Mobile",                                       v.doctor_phone || ""],
     ["Email",                                        v.doctor_email || ""],
   ];
-  const th = cols.map(([h]) =>
-    `<th style="text-align:left;border:1px solid #cbd5e1;padding:8px 11px;background:#0f766e;color:#ffffff;font-size:13px;font-weight:600;white-space:nowrap;">${escapeHtml(h)}</th>`).join("");
-  const td = cols.map(([, val]) =>
-    `<td style="border:1px solid #cbd5e1;padding:8px 11px;font-size:14px;color:#1a2332;vertical-align:top;">${escapeHtml(val)}</td>`).join("");
+  const body = rows
+    .filter(([, val]) => (val ?? "").trim() && val.trim() !== "—")
+    .map(([label, val]) =>
+      `<tr>` +
+      `<td style="border:1px solid #e2e8f0;padding:8px 12px;font-size:13px;color:#64748b;font-weight:600;vertical-align:top;width:210px;background:#f8fafc;">${escapeHtml(label)}</td>` +
+      `<td style="border:1px solid #e2e8f0;padding:8px 12px;font-size:14px;color:#1a2332;vertical-align:top;">${escapeHtml(val.trim())}</td>` +
+      `</tr>`)
+    .join("");
   return `
-<div style="overflow-x:auto;margin:18px 0;">
-  <table role="presentation" cellspacing="0" cellpadding="0" border="0" style="border-collapse:collapse;border:1px solid #cbd5e1;">
-    <thead><tr>${th}</tr></thead>
-    <tbody><tr>${td}</tr></tbody>
-  </table>
-</div>`;
+<table role="presentation" cellspacing="0" cellpadding="0" border="0" style="border-collapse:collapse;border:1px solid #cbd5e1;margin:18px 0;width:100%;max-width:560px;">
+  <tr><td colspan="2" style="background:#0f766e;color:#ffffff;padding:11px 14px;font-size:16px;font-weight:600;">${escapeHtml(name)}</td></tr>
+  ${body}
+</table>`;
 }
 
 /** If a token value looks like a URL but is missing a protocol (very common
