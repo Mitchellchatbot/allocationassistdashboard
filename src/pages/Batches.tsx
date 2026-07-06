@@ -9,7 +9,7 @@ import { Label } from "@/components/ui/label";
 import { Textarea } from "@/components/ui/textarea";
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription, DialogFooter } from "@/components/ui/dialog";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
-import { Mailbox, Plus, Send, X, CheckCircle2, Calendar, ChevronRight, ChevronDown, RefreshCw, AlertCircle, Sparkles, UserSquare, GripVertical, Wand2, Pencil } from "lucide-react";
+import { Mailbox, Plus, Send, X, CheckCircle2, Calendar, ChevronRight, ChevronDown, RefreshCw, AlertCircle, Sparkles, UserSquare, GripVertical, Wand2, Pencil, Building2 } from "lucide-react";
 import { Checkbox } from "@/components/ui/checkbox";
 import { toast } from "sonner";
 import { useScheduledBatches, useUpsertBatch, useUpdateBatch, useCancelBatch, useSendBatchNow, useBatchPreview,
@@ -1090,6 +1090,56 @@ function BatchDialog({ target, onTargetChange, batches, suggestedSpecialty }: {
 
   // ── Doctor-picker logic (only when editingBatch is set) ─────────────────
   const batch = editingBatch;
+
+  // ── Recipient hospitals (shown in the preview's left rail) ──────────────
+  // Mirrors send-batch's recipient resolution: every hospital with a recruiter
+  // email, scoped to the batch's country when one is set. This is exactly the
+  // BCC list that goes out, so the team can eyeball it before sending — and
+  // add hospitals from OTHER countries on top (Hasan: "see the hospitals
+  // selected on the left … ability to add more hospitals").
+  const { data: previewHospitals = [] } = useHospitals();
+  const eligibleHospitals = useMemo(() => {
+    const bc = (batch?.country ?? "").trim();
+    return previewHospitals
+      .filter(h => !!h.primary_recruiter_email?.trim())
+      .filter(h => !bc || (h.country ?? "").trim() === bc)
+      .sort((a, b) => a.name.localeCompare(b.name));
+  }, [previewHospitals, batch?.country]);
+  const eligibleEmails = useMemo(
+    () => new Set(eligibleHospitals.map(h => h.primary_recruiter_email!.trim().toLowerCase())),
+    [eligibleHospitals],
+  );
+  const bccSet = useMemo(() => new Set(batchBcc.map(e => e.trim().toLowerCase())), [batchBcc]);
+  // Hospitals the user has manually added on top (their recruiter email is in
+  // the extra-BCC list but they aren't already an eligible recipient).
+  const addedHospitals = useMemo(
+    () => previewHospitals.filter(h => {
+      const e = h.primary_recruiter_email?.trim().toLowerCase();
+      return e && bccSet.has(e) && !eligibleEmails.has(e);
+    }),
+    [previewHospitals, bccSet, eligibleEmails],
+  );
+  // The "+ Add another hospital" options — any hospital with a recruiter email
+  // that isn't already receiving (different country) or already added.
+  const addableHospitals = useMemo(
+    () => previewHospitals
+      .filter(h => !!h.primary_recruiter_email?.trim())
+      .filter(h => {
+        const e = h.primary_recruiter_email!.trim().toLowerCase();
+        return !eligibleEmails.has(e) && !bccSet.has(e);
+      })
+      .sort((a, b) => a.name.localeCompare(b.name)),
+    [previewHospitals, eligibleEmails, bccSet],
+  );
+  const addHospitalBcc = (hospitalId: string) => {
+    const h = previewHospitals.find(x => x.id === hospitalId);
+    const email = h?.primary_recruiter_email?.trim();
+    if (!email) return;
+    setBatchBcc(prev => prev.some(e => e.toLowerCase() === email.toLowerCase()) ? prev : [...prev, email]);
+    toast.success(`Added ${h!.name} to this send.`);
+  };
+  const removeHospitalBcc = (email: string) =>
+    setBatchBcc(prev => prev.filter(e => e.trim().toLowerCase() !== email.trim().toLowerCase()));
   // id → DoctorOption lookup so resolving picked doctor_ids is O(picked)
   // instead of O(picked × allDoctors) on every render.
   const doctorById = useMemo(() => {
@@ -1536,11 +1586,64 @@ function BatchDialog({ target, onTargetChange, batches, suggestedSpecialty }: {
                 ? <span className="font-medium text-teal-700">Edited — your version sends, not the template.</span>
                 : "What you see is what goes out — edit the subject or body in the preview before sending."}
             </div>
-            {typeof emailPreview?.bcc_count === "number" && <div>BCC to <span className="text-slate-700">{emailPreview.bcc_count}</span> hospital{emailPreview.bcc_count === 1 ? "" : "s"}.</div>}
             {batch && (batch.attachments?.length ?? 0) > 0 && <div>{batch.attachments.length} attachment{batch.attachments.length === 1 ? "" : "s"} ride this send.</div>}
           </div>
+
+          {/* Recipient hospitals — the exact BCC list, with an add-more picker. */}
           <div className="rounded-lg border border-sidebar-border/40 bg-white/95 p-2 shadow-sm">
-            <div className="mb-1 px-0.5 text-[10px] text-slate-500">Extra recipients (on top of the hospital BCC):</div>
+            <div className="mb-1.5 flex items-center gap-1.5 px-0.5 text-[10px] font-medium text-slate-600">
+              <Building2 className="h-3 w-3 text-teal-600" />
+              Sending to {eligibleHospitals.length + addedHospitals.length} hospital{eligibleHospitals.length + addedHospitals.length === 1 ? "" : "s"}
+              {batch?.country ? <span className="font-normal text-slate-400">· {batch.country}</span> : null}
+            </div>
+            <div className="max-h-36 overflow-y-auto rounded-md border border-slate-100 bg-slate-50/60 p-1">
+              {eligibleHospitals.length === 0 && addedHospitals.length === 0 ? (
+                <div className="px-1 py-2 text-center text-[10px] text-slate-400">
+                  No hospitals with a recruiter email{batch?.country ? ` in ${batch.country}` : ""} yet.
+                </div>
+              ) : (
+                <>
+                  {eligibleHospitals.map(h => (
+                    <div key={h.id} className="flex items-center gap-1.5 px-1 py-0.5 text-[10.5px] text-slate-700">
+                      <span className="h-1 w-1 shrink-0 rounded-full bg-teal-500" />
+                      <span className="truncate">{h.name}</span>
+                    </div>
+                  ))}
+                  {addedHospitals.map(h => (
+                    <div key={h.id} className="flex items-center gap-1.5 px-1 py-0.5 text-[10.5px] text-emerald-700">
+                      <Plus className="h-2.5 w-2.5 shrink-0" />
+                      <span className="flex-1 truncate">{h.name}</span>
+                      <button
+                        type="button"
+                        className="shrink-0 text-slate-400 hover:text-rose-600"
+                        title={`Remove ${h.name}`}
+                        onClick={() => removeHospitalBcc(h.primary_recruiter_email!)}
+                      >
+                        <X className="h-3 w-3" />
+                      </button>
+                    </div>
+                  ))}
+                </>
+              )}
+            </div>
+            {addableHospitals.length > 0 && (
+              <div className="mt-1.5">
+                <Select value="" onValueChange={addHospitalBcc} disabled={sendNow.isPending}>
+                  <SelectTrigger className="h-7 text-[11px] text-slate-700"><SelectValue placeholder="+ Add another hospital…" /></SelectTrigger>
+                  <SelectContent>
+                    {addableHospitals.map(h => (
+                      <SelectItem key={h.id} value={h.id} className="text-[11px]">
+                        {h.name}{h.country ? ` · ${h.country}` : ""}
+                      </SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+              </div>
+            )}
+          </div>
+
+          <div className="rounded-lg border border-sidebar-border/40 bg-white/95 p-2 shadow-sm">
+            <div className="mb-1 px-0.5 text-[10px] text-slate-500">Extra CC / BCC recipients (people, not hospitals):</div>
             <CcBccPicker cc={batchCc} bcc={batchBcc} onCcChange={setBatchCc} onBccChange={setBatchBcc} disabled={sendNow.isPending} />
           </div>
         </div>
