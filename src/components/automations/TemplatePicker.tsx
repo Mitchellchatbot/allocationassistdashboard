@@ -110,19 +110,16 @@ export function TemplatePicker({
           <button
             type="button"
             title="Click to choose a different template"
-            className="group w-full inline-flex items-center justify-between gap-2 rounded-lg border border-teal-300 bg-white px-3 py-2 text-[12px] shadow-sm hover:border-teal-400 hover:bg-teal-50/50 transition-colors"
+            className="group w-full inline-flex items-center gap-2 rounded-lg border border-teal-300 bg-white px-2.5 py-2 text-[12px] shadow-sm hover:border-teal-400 hover:bg-teal-50/50 transition-colors"
           >
-            <span className="flex items-center gap-2 min-w-0">
-              <Mail className="h-4 w-4 text-teal-600 shrink-0" />
-              <span className="flex flex-col items-start min-w-0 leading-tight">
-                <span className="text-[9px] uppercase tracking-wider text-muted-foreground">Template</span>
-                <span className="truncate font-semibold text-slate-800 max-w-[220px]">{selected?.name ?? value}</span>
-              </span>
-              {selected && value === defaultKey && <Badge variant="outline" className="text-[8px] bg-slate-50 text-slate-500 border-slate-200 uppercase">default</Badge>}
-              {selected && selected.body_text.startsWith("PLACEHOLDER") && <Badge variant="outline" className="text-[8px] bg-amber-50 text-amber-700 border-amber-200 uppercase">draft</Badge>}
+            <Mail className="h-4 w-4 text-teal-600 shrink-0" />
+            <span className="flex min-w-0 flex-1 items-center gap-1.5">
+              <span className="truncate font-semibold text-slate-800">{selected?.name ?? value}</span>
+              {selected && value === defaultKey && <Badge variant="outline" className="shrink-0 text-[8px] bg-slate-50 text-slate-500 border-slate-200 uppercase">default</Badge>}
+              {selected && selected.body_text.startsWith("PLACEHOLDER") && <Badge variant="outline" className="shrink-0 text-[8px] bg-amber-50 text-amber-700 border-amber-200 uppercase">draft</Badge>}
             </span>
-            <span className="shrink-0 inline-flex items-center gap-1.5 rounded-full bg-teal-600 text-white px-3 py-1.5 text-[11px] font-semibold shadow-sm group-hover:bg-teal-700 transition-colors">
-              <Repeat className="h-3.5 w-3.5" /> Change template
+            <span className="shrink-0 inline-flex items-center gap-1 rounded-full bg-teal-600 text-white px-2.5 py-1 text-[10.5px] font-semibold shadow-sm group-hover:bg-teal-700 transition-colors">
+              <Repeat className="h-3 w-3" /> Change
             </span>
           </button>
         </PopoverTrigger>
