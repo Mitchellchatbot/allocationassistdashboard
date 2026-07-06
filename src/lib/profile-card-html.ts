@@ -54,8 +54,14 @@ export function buildProfileCardHtml(v: Record<string, string>): string {
   const name    = (v.doctor_name || "Candidate").trim();
   const title   = (v.doctor_title || v.doctor_specialty || "").trim();
   const country = (v.doctor_country_training || "").trim();
+  const photo   = (v.doctor_photo_url || "").trim();
   const bioRaw  = (v.doctor_bio || v.doctor_area_of_interest || "").trim();
   const bio     = bioRaw ? esc(toPlain(bioRaw)) : "";
+
+  // Candidate headshot (WordPress profile photo) — shown in the hero when set.
+  const photoImg = photo
+    ? `<img src="${esc(photo)}" alt="${esc(name)}" width="104" height="104" style="display:block;width:104px;height:104px;border-radius:16px;object-fit:cover;border:1px solid #e2e8f0;box-shadow:0 2px 8px rgba(15,23,42,0.10);" />`
+    : "";
 
   // The exact 8 facts SharedProfile shows, in the same order + icons. Area of
   // Interest is skipped when it's what we already used for the bio (no dupe).
@@ -110,9 +116,14 @@ export function buildProfileCardHtml(v: Record<string, string>): string {
   </div>
   <div style="border:1px solid #e2e8f0;border-top:0;border-radius:0 0 16px 16px;overflow:hidden;">
     <div style="padding:26px 32px;border-bottom:1px solid #f1f5f9;background:linear-gradient(180deg,rgba(248,250,252,0.5) 0%,#ffffff 100%);">
-      <div style="font-size:10px;letter-spacing:0.08em;text-transform:uppercase;color:#64748b;font-weight:600;">Doctor Profile</div>
-      <h1 style="font-size:28px;font-weight:700;letter-spacing:-0.01em;margin:8px 0 0;line-height:1.15;color:#0f172a;">${esc(name)}</h1>
-      ${subline}
+      <table role="presentation" cellpadding="0" cellspacing="0" border="0" width="100%"><tr>
+        ${photoImg ? `<td valign="middle" width="126" style="padding-right:22px;">${photoImg}</td>` : ""}
+        <td valign="middle">
+          <div style="font-size:10px;letter-spacing:0.08em;text-transform:uppercase;color:#64748b;font-weight:600;">Doctor Profile</div>
+          <h1 style="font-size:28px;font-weight:700;letter-spacing:-0.01em;margin:8px 0 0;line-height:1.15;color:#0f172a;">${esc(name)}</h1>
+          ${subline}
+        </td>
+      </tr></table>
     </div>
     ${bio ? `<div style="padding:24px 32px;font-size:14px;line-height:1.65;color:#334155;">${bio}</div>` : ""}
     ${factsGrid}
