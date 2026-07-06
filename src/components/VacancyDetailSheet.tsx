@@ -82,7 +82,9 @@ export function VacancyDetailSheet({ vacancy, open, onClose }: Props) {
       .slice(0, 25);
   }, [wpAll, wpQuery]);
   const onEmailWp = (c: WpCandidate) => setSendInitial({
-    doctorId:     c.doctor_id ?? undefined,
+    // Match the matcher's / SendProfileDialog's WP id scheme so the pre-fill
+    // resolves the doctor and jumps straight to the preview.
+    doctorId:     `wp:${c.id}`,
     doctorEmail:  c.email,
     hospitalId:   vacancy?.hospital_id ?? null,
     hospitalName: vacancy?.hospital_name ?? null,

@@ -79,7 +79,7 @@ interface DoctorOption {
   email:      string | null;
   phone:      string | null;
   speciality: string | null;
-  source:     "dob" | "lead";
+  source:     "dob" | "lead" | "wp";
 }
 
 // ── Profile completion (shared by the picker filter + the preview warning) ──
@@ -240,12 +240,14 @@ function SendProfileDialogBody({ onClose, initial }: { onClose: () => void; init
       if (!lc) return true;
       return lc.eligible_for_sending !== false;
     };
+    const seenEmails = new Set<string>();
     for (const d of z?.rawDoctorsOnBoard ?? []) {
       const name = d.Full_Name || `${d.First_Name ?? ""} ${d.Last_Name ?? ""}`.trim();
       if (!name) continue;
       const id = `dob:${d.id}`;
       if (!eligible(id)) continue;
       opts.push({ id, name, email: d.Email, phone: d.Phone ?? d.Mobile, speciality: d.Specialty_New ?? d.Speciality, source: "dob" });
+      if (d.Email) seenEmails.add(d.Email.trim().toLowerCase());
     }
     for (const l of z?.rawLeads ?? []) {
       const name = l.Full_Name || `${l.First_Name ?? ""} ${l.Last_Name ?? ""}`.trim();
@@ -253,13 +255,29 @@ function SendProfileDialogBody({ onClose, initial }: { onClose: () => void; init
       const id = `lead:${l.id}`;
       if (!eligible(id)) continue;
       opts.push({ id, name, email: l.Email, phone: l.Phone ?? l.Mobile, speciality: l.Specialty ?? l.Specialty_New, source: "lead" });
+      if (l.Email) seenEmails.add(l.Email.trim().toLowerCase());
+    }
+    // WP PUBLISHED candidates (the same spine the vacancy matcher uses) — so a
+    // WP-only doctor sent straight from a vacancy is selectable here too and the
+    // pre-fill can jump to the preview. `wp:<id>` matches the matcher's ids and
+    // completionFor()/PreviewConfirm both already resolve wp: entries. Deduped by
+    // email against Zoho so a doctor on both lists appears once.
+    for (const c of wpPool) {
+      const email = (c.email ?? "").trim().toLowerCase();
+      if (email && seenEmails.has(email)) continue;
+      const name = (c.full_name ?? "").trim();
+      if (!name && !email) continue;
+      const id = `wp:${c.id}`;
+      if (!eligible(id)) continue;
+      opts.push({ id, name: name || email, email: c.email, phone: c.phone, speciality: c.specialty, source: "wp" });
+      if (email) seenEmails.add(email);
     }
     // Drop doctors with a 0%-complete profile — sending them would leak
     // literal {{token}}s to the hospital. Only filter once completion data
     // has loaded, so the list isn't transiently emptied on first paint.
     if (!completionReady) return opts;
     return opts.filter(o => completionFor(o) > 0);
-  }, [zoho, lifecycleMap, completionReady, completionFor]);
+  }, [zoho, wpPool, lifecycleMap, completionReady, completionFor]);
 
   const selectedHospitals = useMemo(
     () => hospitals.filter(h => selectedIds.includes(h.id)),
