@@ -1,5 +1,7 @@
 import { useEffect, useRef, useState } from "react";
-import { Pencil, RotateCcw, Bold, Italic, Underline, List, ListOrdered, Link2, Table2, Maximize2 } from "lucide-react";
+import { Pencil, RotateCcw, Bold, Italic, Underline, List, ListOrdered, Link2, Table2, Maximize2, Image as ImageIcon } from "lucide-react";
+import { toast } from "sonner";
+import { uploadEmailAttachment } from "@/lib/email-attachments";
 import { cn } from "@/lib/utils";
 import { TableInsertDialog } from "@/components/TableInsertDialog";
 import { FullScreenEmailPreview } from "@/components/FullScreenEmailPreview";
@@ -285,6 +287,23 @@ export function EditableEmailPreview({
     flush();
   };
 
+  // ── Insert an image inline ──────────────────────────────────────────────────
+  // Upload the picked/pasted image to the public bucket, then drop a responsive
+  // <img> at the caret — hosted URL so it renders in Gmail (data: URIs get
+  // stripped). Flows into html_override like any other edit.
+  const imgInputRef = useRef<HTMLInputElement>(null);
+  const insertImage = async (file: File) => {
+    if (!file.type.startsWith("image/")) return;
+    const toastId = toast.loading("Uploading image…");
+    try {
+      const att = await uploadEmailAttachment(file);
+      insertHtml(`<img src="${att.path}" alt="${file.name.replace(/["<>]/g, "")}" style="display:block;max-width:100%;height:auto;border-radius:8px;margin:10px 0;border:0;" />`);
+      toast.success("Image inserted.", { id: toastId });
+    } catch (e) {
+      toast.error(e instanceof Error ? e.message : "Image upload failed", { id: toastId });
+    }
+  };
+
   // ── Paste Excel / Sheets data as a table ────────────────────────────────────
   // Copying a range from Excel/Google Sheets puts tab-separated rows on the
   // clipboard. When we see that shape, build a styled email table (green header,
@@ -292,6 +311,13 @@ export function EditableEmailPreview({
   // "copy and paste Excel data directly into email table sections"). Non-tabular
   // pastes fall through to the browser's normal paste.
   const onPaste = (e: React.ClipboardEvent<HTMLDivElement>) => {
+    // Pasted image (e.g. a screenshot) → upload + insert inline.
+    for (const it of Array.from(e.clipboardData.items)) {
+      if (it.type.startsWith("image/")) {
+        const file = it.getAsFile();
+        if (file) { e.preventDefault(); void insertImage(file); return; }
+      }
+    }
     const text = e.clipboardData.getData("text/plain");
     if (!text || !/\t/.test(text)) return;                 // no tabs → normal paste
     const rows = text.replace(/\r/g, "").replace(/\n+$/, "").split("\n").map(r => r.split("\t"));
@@ -409,6 +435,14 @@ export function EditableEmailPreview({
           <ToolBtn onClick={() => exec("insertUnorderedList")} title="Bulleted list"><List className="h-3.5 w-3.5" /></ToolBtn>
           <ToolBtn onClick={() => exec("insertOrderedList")}   title="Numbered list"><ListOrdered className="h-3.5 w-3.5" /></ToolBtn>
           <ToolBtn onClick={makeLink}                    title="Insert link"><Link2 className="h-3.5 w-3.5" /></ToolBtn>
+          <ToolBtn onClick={() => imgInputRef.current?.click()} title="Insert image (or just paste one)"><ImageIcon className="h-3.5 w-3.5" /></ToolBtn>
+          <input
+            ref={imgInputRef}
+            type="file"
+            accept="image/png,image/jpeg,image/gif,image/webp"
+            className="hidden"
+            onChange={(e) => { const f = e.target.files?.[0]; if (f) void insertImage(f); e.currentTarget.value = ""; }}
+          />
           <Divider />
           {/* Font family + size — apply to the selection, or the whole body if
               nothing is selected. onMouseDown must NOT be prevented (the native

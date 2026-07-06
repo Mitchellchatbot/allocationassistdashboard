@@ -14,6 +14,7 @@ import {
   type Hospital, type HospitalInput,
 } from "@/hooks/use-hospitals";
 import { useHospitalContacts, eligibleRecipients, resolveRecipient, type HospitalContact } from "@/hooks/use-hospital-contacts";
+import { uploadEmailAttachment } from "@/lib/email-attachments";
 
 const BLANK: HospitalInput = {
   name: "", city: "", country: "", primary_recruiter_email: "",
@@ -365,9 +366,24 @@ function HospitalDialog({
     primary_contact_name:    initial.primary_contact_name ?? "",
     greet_with_contact_name: initial.greet_with_contact_name ?? false,
     recruiter_phone:         initial.recruiter_phone ?? "",
+    image_url:               initial.image_url ?? "",
     template_key:            initial.template_key ?? "",
     notes:                   initial.notes ?? "",
   }));
+  const [imgUploading, setImgUploading] = useState(false);
+
+  const uploadHospitalImage = async (file: File) => {
+    setImgUploading(true);
+    try {
+      const att = await uploadEmailAttachment(file);
+      setForm(f => ({ ...f, image_url: att.path }));
+      toast.success("Image uploaded.");
+    } catch (e) {
+      toast.error(e instanceof Error ? e.message : "Upload failed");
+    } finally {
+      setImgUploading(false);
+    }
+  };
   const [saving, setSaving] = useState(false);
 
   // Re-seed when the dialog opens with a different initial (edit flow).
@@ -382,6 +398,7 @@ function HospitalDialog({
       primary_contact_name:    initial.primary_contact_name ?? "",
       greet_with_contact_name: initial.greet_with_contact_name ?? false,
       recruiter_phone:         initial.recruiter_phone ?? "",
+      image_url:               initial.image_url ?? "",
       template_key:            initial.template_key ?? "",
       notes:                   initial.notes ?? "",
     });
@@ -426,6 +443,31 @@ function HospitalDialog({
             value={form.primary_contact_name ?? ""} onChange={v => setForm(f => ({ ...f, primary_contact_name: v }))} />
           <Field label="Phone"
             value={form.recruiter_phone ?? ""} onChange={v => setForm(f => ({ ...f, recruiter_phone: v }))} />
+
+          {/* Hospital photo — shown in working-opportunity emails via the
+              {{hospital_image}} slot. Paste a URL or upload an image. */}
+          <div className="col-span-2 space-y-1">
+            <Label className="text-[11px]">Hospital photo (shown in working-opportunity emails)</Label>
+            <div className="flex items-center gap-2">
+              <Input
+                value={form.image_url ?? ""}
+                onChange={e => setForm(f => ({ ...f, image_url: e.target.value }))}
+                placeholder="Paste an image URL, or upload →"
+                className="h-9 text-[12px] flex-1"
+              />
+              <label className={`shrink-0 inline-flex h-9 items-center gap-1.5 rounded-md border px-2.5 text-[12px] cursor-pointer hover:bg-slate-50 ${imgUploading ? "opacity-60 pointer-events-none" : ""}`}>
+                {imgUploading ? "Uploading…" : "Upload"}
+                <input type="file" accept="image/png,image/jpeg" className="hidden"
+                  onChange={e => { const f = e.target.files?.[0]; if (f) uploadHospitalImage(f); e.currentTarget.value = ""; }} />
+              </label>
+            </div>
+            {form.image_url?.trim() && (
+              <div className="flex items-center gap-2 pt-1">
+                <img src={form.image_url} alt="Hospital" className="h-14 w-24 rounded object-cover border border-slate-200" />
+                <button type="button" onClick={() => setForm(f => ({ ...f, image_url: "" }))} className="text-[11px] text-rose-600 hover:underline">Remove</button>
+              </div>
+            )}
+          </div>
           {/* Greeting source — does the hospital email open with the hospital
               name or the named contact person? */}
           <div className="col-span-2 space-y-1">
