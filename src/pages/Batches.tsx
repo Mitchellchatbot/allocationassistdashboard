@@ -966,6 +966,19 @@ function BatchDialog({ target, onTargetChange, batches, suggestedSpecialty }: {
   const [previewResetTick, setPreviewResetTick] = useState(0);
   const [batchCc, setBatchCc] = useState<string[]>([]);
   const [batchBcc, setBatchBcc] = useState<string[]>([]);
+  // Recruiter emails the team has EXCLUDED from this send — unchecked in the
+  // "Sending to N hospitals" list. Passed as exclude_override so send-batch drops
+  // them from the BCC (Sean: "exclusion ability for hospitals in email sends").
+  const [excludedEmails, setExcludedEmails] = useState<string[]>([]);
+  const isExcluded = (email: string | null | undefined) => {
+    const e = (email ?? "").trim().toLowerCase();
+    return !!e && excludedEmails.some(x => x === e);
+  };
+  const toggleExclude = (email: string | null | undefined) => {
+    const e = (email ?? "").trim().toLowerCase();
+    if (!e) return;
+    setExcludedEmails(prev => prev.includes(e) ? prev.filter(x => x !== e) : [...prev, e]);
+  };
   // True once the team has actually changed the subject or body away from the
   // template render — gates the override on send and the "edited" UI hints.
   const batchEdited = !!emailPreview && (editSubject !== emailPreview.subject || editHtml !== emailPreview.html);
@@ -1595,8 +1608,9 @@ function BatchDialog({ target, onTargetChange, batches, suggestedSpecialty }: {
           <div className="rounded-lg border border-sidebar-border/40 bg-white/95 p-2 shadow-sm">
             <div className="mb-1.5 flex items-center gap-1.5 px-0.5 text-[10px] font-medium text-slate-600">
               <Building2 className="h-3 w-3 text-teal-600" />
-              Sending to {eligibleHospitals.length + addedHospitals.length} hospital{eligibleHospitals.length + addedHospitals.length === 1 ? "" : "s"}
+              Sending to {eligibleHospitals.filter(h => !isExcluded(h.primary_recruiter_email)).length + addedHospitals.length} hospital{eligibleHospitals.filter(h => !isExcluded(h.primary_recruiter_email)).length + addedHospitals.length === 1 ? "" : "s"}
               {batch?.country ? <span className="font-normal text-slate-400">· {batch.country}</span> : null}
+              {excludedEmails.length > 0 && <span className="font-normal text-rose-400">· {excludedEmails.length} excluded</span>}
             </div>
             <div className="max-h-36 overflow-y-auto rounded-md border border-slate-100 bg-slate-50/60 p-1">
               {eligibleHospitals.length === 0 && addedHospitals.length === 0 ? (
@@ -1605,12 +1619,23 @@ function BatchDialog({ target, onTargetChange, batches, suggestedSpecialty }: {
                 </div>
               ) : (
                 <>
-                  {eligibleHospitals.map(h => (
-                    <div key={h.id} className="flex items-center gap-1.5 px-1 py-0.5 text-[10.5px] text-slate-700">
-                      <span className="h-1 w-1 shrink-0 rounded-full bg-teal-500" />
-                      <span className="truncate">{h.name}</span>
-                    </div>
-                  ))}
+                  {eligibleHospitals.map(h => {
+                    const excluded = isExcluded(h.primary_recruiter_email);
+                    return (
+                      <div key={h.id} className="group flex items-center gap-1.5 px-1 py-0.5 text-[10.5px]">
+                        <span className={`h-1 w-1 shrink-0 rounded-full ${excluded ? "bg-slate-300" : "bg-teal-500"}`} />
+                        <span className={`flex-1 truncate ${excluded ? "text-slate-400 line-through" : "text-slate-700"}`}>{h.name}</span>
+                        <button
+                          type="button"
+                          className={`shrink-0 ${excluded ? "text-teal-600 hover:text-teal-700" : "text-slate-300 hover:text-rose-600"}`}
+                          title={excluded ? `Include ${h.name}` : `Exclude ${h.name} from this send`}
+                          onClick={() => toggleExclude(h.primary_recruiter_email)}
+                        >
+                          {excluded ? <Plus className="h-3 w-3" /> : <X className="h-3 w-3" />}
+                        </button>
+                      </div>
+                    );
+                  })}
                   {addedHospitals.map(h => (
                     <div key={h.id} className="flex items-center gap-1.5 px-1 py-0.5 text-[10.5px] text-emerald-700">
                       <Plus className="h-2.5 w-2.5 shrink-0" />
@@ -1689,6 +1714,7 @@ function BatchDialog({ target, onTargetChange, batches, suggestedSpecialty }: {
                   ...(batchEdited ? { subjectOverride: editSubject, htmlOverride: editHtml } : {}),
                   ...(batchCc.length  ? { ccOverride:  batchCc }  : {}),
                   ...(batchBcc.length ? { bccOverride: batchBcc } : {}),
+                  ...(excludedEmails.length ? { excludeOverride: excludedEmails } : {}),
                 };
                 const res = await sendNow.mutateAsync(
                   batch.status === "sent"

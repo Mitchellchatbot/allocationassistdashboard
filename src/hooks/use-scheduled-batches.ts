@@ -281,6 +281,8 @@ export function useSendBatchNow() {
         subjectOverride?: string; htmlOverride?: string; textOverride?: string;
         // Extra CC / BCC from the preview, added on top of the hospital BCC list.
         ccOverride?: string[]; bccOverride?: string[];
+        // Recruiter emails to DROP from this send (hospitals unchecked in the preview).
+        excludeOverride?: string[];
       },
     ): Promise<{ ok: boolean; bcc_count?: number; doctor_count?: number; message_id?: string; error?: string }> => {
       // Accept either a bare id (legacy callers) or an object with a force
@@ -293,6 +295,7 @@ export function useSendBatchNow() {
         ...(input.textOverride    ? { text_override:    input.textOverride }    : {}),
         ...(input.ccOverride?.length  ? { cc_override:  input.ccOverride }  : {}),
         ...(input.bccOverride?.length ? { bcc_override: input.bccOverride } : {}),
+        ...(input.excludeOverride?.length ? { exclude_override: input.excludeOverride } : {}),
       };
       const { data, error } = await invokeWithTimeout<{ ok: boolean; bcc_count?: number; doctor_count?: number; message_id?: string; error?: string }>(
         "send-batch", { batch_id: batchId, force, ...overrides }, 90_000);

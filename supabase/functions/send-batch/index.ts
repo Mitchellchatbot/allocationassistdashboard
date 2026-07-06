@@ -93,6 +93,9 @@ Deno.serve(async (req: Request) => {
     // Extra recipients from the preview's CcBccPicker — added ON TOP of the
     // hospital BCC list (bcc) / shown to everyone (cc).
     cc_override?: string[]; bcc_override?: string[];
+    // Recruiter emails to DROP from this send — hospitals the team unchecked in
+    // the preview's "Sending to N hospitals" list.
+    exclude_override?: string[];
   };
   try { body = await req.json(); } catch { return json({ ok: false, error: "Invalid JSON body" }, 400); }
   if (!body.batch_id) return json({ ok: false, error: "batch_id required" }, 400);
@@ -362,7 +365,10 @@ Deno.serve(async (req: Request) => {
     : [];
   const extraBcc = clean(body.bcc_override);
   const extraCc  = clean(body.cc_override);
-  const bccList    = [...new Set([...bccListRaw.filter(a => a.toLowerCase() !== EXCLUDED_RECIPIENT), ...extraBcc])];
+  // Hospitals the team unchecked in the preview → drop their recruiter email.
+  const excludeSet = new Set(clean(body.exclude_override).map(e => e.toLowerCase()));
+  const bccList    = [...new Set([...bccListRaw.filter(a => a.toLowerCase() !== EXCLUDED_RECIPIENT), ...extraBcc])]
+    .filter(a => !excludeSet.has(a.toLowerCase()));
   const testCc: string[] | undefined = extraCc.length ? extraCc : undefined;
 
   // ── Attachments (CVs / logbooks) ──────────────────────────────────────
