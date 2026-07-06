@@ -222,11 +222,11 @@ export function EditableEmailPreview({
         </div>
       )}
 
-      {/* Body — always contentEditable. overflow-auto + min-w-0 keep a wide
-          email (e.g. the ~600px doctor card) scrolling INSIDE this box instead
-          of stretching the dialog. Text still wraps; only over-wide tables
-          scroll. */}
-      <div className="bg-slate-100/60 px-4 py-5 overflow-auto flex-1 min-h-0 min-w-0 w-full">
+      {/* Body — always contentEditable. overflow-x-HIDDEN (only y scrolls) so the
+          email itself never scrolls sideways; a wide data table scrolls INSIDE
+          its own overflow-x:auto box (independently), and max-w-full bounds that
+          box to the visible width so it actually can. */}
+      <div className="bg-slate-100/60 px-4 py-5 overflow-y-auto overflow-x-hidden flex-1 min-h-0 min-w-0 w-full">
         <div
           ref={bodyRef}
           contentEditable
@@ -238,7 +238,7 @@ export function EditableEmailPreview({
           style={EMAIL_BODY_STYLE}
           className={cn(
             BODY_CLASS,
-            "p-4 shadow-sm outline-none ring-1 ring-slate-200/70 focus:ring-2 focus:ring-teal-400 cursor-text",
+            "p-4 max-w-full shadow-sm outline-none ring-1 ring-slate-200/70 focus:ring-2 focus:ring-teal-400 cursor-text",
           )}
         />
       </div>
