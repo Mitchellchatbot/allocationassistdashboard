@@ -360,6 +360,7 @@ function SendProfileDialogBody({ onClose, initial }: { onClose: () => void; init
     v.doctor_card_html      = previewDoctorCardHtml(v);
     v.doctor_row_table_html = previewDoctorRowTableHtml(v);
     v.doctor_card_image_url = "";
+    v.hospital_image        = hospitalImageHtml(h?.image_url, h?.name);
     return v;
   }, [selectedDoctor, selectedHospitals]);
 
@@ -1182,6 +1183,7 @@ function PreviewConfirm({
     // {{doctor_card_html}} / {{doctor_row_table_html}}).
     v.doctor_card_html      = previewDoctorCardHtml(v);
     v.doctor_row_table_html = previewDoctorRowTableHtml(v);
+    v.hospital_image        = hospitalImageHtml(sampleHospital?.image_url, sampleHospital?.name);
     // Captured profile-card image URL. The hospital template swaps its data
     // table for this <img> via {{#/^doctor_card_image_url}} when it's set, so
     // the preview reflects exactly what the hospital receives.
@@ -1688,6 +1690,15 @@ ${buttonsHtml}
 
 /** Preview-side mirror of send-flow-email's doctorRowTableHtml() — the full
  *  data row under the card, minus Area of Interest. Keep in sync. */
+// Hospital photo <img> for the working-opportunity preview — mirrors the
+// {{hospital_image}} token send-flow-email builds from the hospital's image_url.
+function hospitalImageHtml(url: string | null | undefined, name: string | null | undefined): string {
+  const u = (url ?? "").trim();
+  if (!u) return "";
+  const esc = (s: string) => s.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;").replace(/"/g, "&quot;");
+  return `<img src="${esc(u)}" alt="${esc(name ?? "Hospital")}" width="560" style="display:block;width:100%;max-width:560px;height:auto;border-radius:12px;margin:18px 0;border:0;" />`;
+}
+
 // Mirrors send-flow-email's doctorRowTableHtml — the wide "Available Doctor
 // Format" table with the GREEN (teal) header, wrapped in an overflow-x:auto box
 // so it scrolls sideways. Kept 1:1 with the server so the preview matches the

@@ -69,6 +69,7 @@ const SAMPLE_VARS: Record<string, string> = {
   interview_format:   "Microsoft Teams",
   signature:          PREVIEW_SIGNATURE_HTML,
   signature_text:     PREVIEW_SIGNATURE_TEXT,
+  hospital_image:     "",
 };
 
 export function EmailTemplatesTab() {

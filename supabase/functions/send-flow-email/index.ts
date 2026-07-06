@@ -706,6 +706,13 @@ Deno.serve(async (req: Request) => {
     payment_link:       String(md.payment_link ?? ""),
     hospital_profile_url:  String(md.hospital_profile_url ?? ""),
     hospital_description:  String(md.hospital_description ?? ""),
+    // Hospital photo (RAW <img>) for working-opportunity emails — from the
+    // hospital row's image_url; empty when the hospital has no photo on file, so
+    // the {{hospital_image}} block simply disappears.
+    hospital_image: (() => {
+      const u = String((hospital as Record<string, unknown> | null)?.image_url ?? "").trim();
+      return u ? `<img src="${u}" alt="${escapeHtml(String(run.hospital ?? "Hospital"))}" width="560" style="display:block;width:100%;max-width:560px;height:auto;border-radius:12px;margin:18px 0;border:0;" />` : "";
+    })(),
     // Second-payment fee: fixed at AED 10,500 (Ammar 2026-06-11) unless a
     // per-run override is set. invoice_number / payment_link stay blank until
     // we have a source for them.
@@ -1092,7 +1099,7 @@ Deno.serve(async (req: Request) => {
 // Tokens whose values are pre-rendered HTML (signature block, etc) and so
 // must NOT be HTML-escaped during template substitution. Anything not in
 // this set is treated as untrusted text and escaped.
-const RAW_HTML_TOKENS = new Set(["signature", "doctors_table_html", "doctor_card_html", "doctor_row_table_html", "logo_header"]);
+const RAW_HTML_TOKENS = new Set(["signature", "doctors_table_html", "doctor_card_html", "doctor_row_table_html", "logo_header", "hospital_image"]);
 
 /** Age from WP date_of_birth. Accepts "YYYYMMDD", "YYYY-MM-DD", or
  *  human-formatted "4 September 1987". Returns null if unparseable. */

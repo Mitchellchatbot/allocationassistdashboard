@@ -18,6 +18,8 @@ export interface Hospital {
   /** Contact emails to skip in the primary/cycle rotation. */
   excluded_contact_emails: string[];
   recruiter_phone:         string | null;
+  /** Hospital photo shown in working-opportunity emails (public storage URL). */
+  image_url:               string | null;
   template_key:            string | null;
   notes:                   string | null;
   health_score:            number | null;
