@@ -70,6 +70,13 @@ const SAMPLE_VARS: Record<string, string> = {
   signature:          PREVIEW_SIGNATURE_HTML,
   signature_text:     PREVIEW_SIGNATURE_TEXT,
   hospital_image:     "",
+  // RAW HTML tokens the send functions fill at send time — sample stand-ins so
+  // the editor preview doesn't show a literal {{token}} for hospital/batch
+  // templates that reference them.
+  logo_header:        "",
+  doctor_card_html:   `<p style="color:#94a3b8;font-style:italic;">[the doctor profile card renders here at send time]</p>`,
+  doctor_row_table_html:  `<p style="color:#94a3b8;font-style:italic;">[the doctor details table renders here at send time]</p>`,
+  doctors_table_html: `<p style="color:#94a3b8;font-style:italic;">[the multi-doctor table renders here at send time]</p>`,
 };
 
 export function EmailTemplatesTab() {

@@ -125,6 +125,7 @@ export function BulkProfileSendDialog({ open, onClose }: { open: boolean; onClos
       country:            previewHosp?.country ?? "",
       hospital_profile_url: "",
       hospital_description: "",
+      logo_header:        "",
       custom_message:     customMessage,
       hospital_image:     previewHosp?.image_url
         ? `<img src="${previewHosp.image_url}" alt="${(previewHosp.name ?? "Hospital").replace(/"/g, "&quot;")}" width="560" style="display:block;width:100%;max-width:560px;height:auto;border-radius:12px;margin:18px 0;border:0;" />`
