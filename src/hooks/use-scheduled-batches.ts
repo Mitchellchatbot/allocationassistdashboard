@@ -63,6 +63,9 @@ export interface ScheduledBatch {
   // row so the scheduler (which sends server-side, no UI) carries them too.
   // send-batch forwards { filename, path } to Resend. Defaults to [].
   attachments:      EmailAttachment[];
+  /** Recruiter emails EXCLUDED from this batch (unchecked in the preview).
+   *  Persisted so a scheduled fire drops them too; send-batch reads it. []=none. */
+  excluded_emails:  string[];
   hospital_count:   number | null;
   sent_at:          string | null;
   sent_message_id:  string | null;
@@ -165,6 +168,7 @@ export interface UpsertBatchInput {
   country?:       string | null;
   doctor_ids?:    string[];
   notes?:         string | null;
+  excluded_emails?: string[];
 }
 
 export function useUpsertBatch() {
@@ -184,6 +188,7 @@ export function useUpsertBatch() {
         country:       input.country   ?? null,
         doctor_ids:    input.doctor_ids ?? [],
         notes:         input.notes ?? null,
+        ...(input.excluded_emails !== undefined ? { excluded_emails: input.excluded_emails } : {}),
         created_by:    createdBy,
         updated_at:    new Date().toISOString(),
       };

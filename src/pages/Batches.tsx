@@ -977,7 +977,10 @@ function BatchDialog({ target, onTargetChange, batches, suggestedSpecialty }: {
   const toggleExclude = (email: string | null | undefined) => {
     const e = (email ?? "").trim().toLowerCase();
     if (!e) return;
-    setExcludedEmails(prev => prev.includes(e) ? prev.filter(x => x !== e) : [...prev, e]);
+    const next = excludedEmails.includes(e) ? excludedEmails.filter(x => x !== e) : [...excludedEmails, e];
+    setExcludedEmails(next);
+    // Persist to the batch row so a SCHEDULED fire drops the same hospitals.
+    if (editingBatch) update.mutate({ id: editingBatch.id, patch: { excluded_emails: next } });
   };
   // Click a hospital name to reveal its exact recruiter email (the address that
   // receives this batch) — click the email to copy it — AND preview that
@@ -1584,6 +1587,10 @@ function BatchDialog({ target, onTargetChange, batches, suggestedSpecialty }: {
                   try {
                     const p = await previewMut.mutateAsync(batch.status === "sent" ? { batchId: batch.id, force: true } : batch.id);
                     setEmailPreview({ subject: p.subject, html: p.html, text: p.text, bcc_count: p.bcc_count });
+                    // Seed the exclusion list from the batch so a previously-saved
+                    // (e.g. scheduled) exclusion shows pre-unchecked.
+                    setExcludedEmails(batch.excluded_emails ?? []);
+                    setPreviewGreetId(null);
                     setBatchCc([]); setBatchBcc([]);
                     setEditSubject(p.subject);
                     setEditHtml(p.html);
@@ -1615,11 +1622,11 @@ function BatchDialog({ target, onTargetChange, batches, suggestedSpecialty }: {
       subtitle={typeof emailPreview?.bcc_count === "number" ? `BCC to ${emailPreview.bcc_count} hospital${emailPreview.bcc_count === 1 ? "" : "s"}` : undefined}
       headerExtra={
         <div className="space-y-2">
-          <div className="rounded-lg border border-sidebar-border/40 bg-white/95 p-2.5 text-[11px] text-slate-500 space-y-1 shadow-sm">
+          <div className={`rounded-lg border p-2.5 text-[11px] space-y-1 shadow-sm ${batchEdited ? "border-amber-300 bg-amber-50 text-amber-900" : "border-sidebar-border/40 bg-white/95 text-slate-500"}`}>
             <div>
               {batchEdited
-                ? <span className="font-medium text-teal-700">Edited — your version sends, not the template.</span>
-                : "What you see is what goes out — edit the subject or body in the preview before sending."}
+                ? <span className="inline-flex items-start gap-1.5"><Pencil className="h-3 w-3 mt-[2px] shrink-0" /><span><strong>Edited</strong> — this exact version goes to <strong>every</strong> hospital. Your edit replaces the per-hospital greeting, so all get the same "Hello …" line instead of their own name. Reset to send personalised greetings again.</span></span>
+                : <>What you see is what goes out — click a hospital name to preview <em>its</em> greeting, or edit the subject/body before sending.</>}
             </div>
             {batch && (batch.attachments?.length ?? 0) > 0 && <div>{batch.attachments.length} attachment{batch.attachments.length === 1 ? "" : "s"} ride this send.</div>}
           </div>

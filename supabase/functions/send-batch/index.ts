@@ -368,7 +368,12 @@ Deno.serve(async (req: Request) => {
     : [];
   const extraBcc   = clean(body.bcc_override);
   const extraCc    = clean(body.cc_override);
-  const excludeSet = new Set(clean(body.exclude_override).map(e => e.toLowerCase()));
+  // Exclusions: those saved on the batch row (so a SCHEDULED fire honours them)
+  // merged with any passed on this send (the send-now preview).
+  const savedExcludes = Array.isArray((batch as Record<string, unknown>).excluded_emails)
+    ? ((batch as Record<string, unknown>).excluded_emails as unknown[]).map(v => String(v).trim().toLowerCase()).filter(v => v.includes("@"))
+    : [];
+  const excludeSet = new Set([...clean(body.exclude_override).map(e => e.toLowerCase()), ...savedExcludes]);
 
   const attachRaw = (batch.attachments as unknown);
   const attachments: Array<{ filename: string; path: string }> = Array.isArray(attachRaw)
