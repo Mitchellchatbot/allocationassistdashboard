@@ -1459,7 +1459,12 @@ function PreviewConfirm({
           />
         </div>
       ),
-      preview: (
+      preview: autoCardBusy ? (
+        <div className="flex min-h-0 w-full flex-1 flex-col items-center justify-center gap-2 bg-white text-slate-500">
+          <Loader2 className="h-6 w-6 animate-spin text-teal-500" />
+          <span className="text-[12px]">Preparing the profile card image…</span>
+        </div>
+      ) : (
         <EditableEmailSection
           label={`To hospital · ${hospitalRecipient}`}
           subject={renderedHospitalSubject}
