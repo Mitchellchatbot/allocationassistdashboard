@@ -5,16 +5,21 @@ import { Input } from "@/components/ui/input";
 import { Textarea } from "@/components/ui/textarea";
 import { Checkbox } from "@/components/ui/checkbox";
 import { Badge } from "@/components/ui/badge";
-import { Search, Send, Users, Building2, Loader2, AlertTriangle } from "lucide-react";
+import { Search, Send, Users, Building2, Loader2, AlertTriangle, Eye } from "lucide-react";
 import { toast } from "sonner";
 import { useQueryClient } from "@tanstack/react-query";
 import { supabase } from "@/lib/supabase";
 import { useAuth } from "@/hooks/use-auth";
 import { useHospitals } from "@/hooks/use-hospitals";
 import { usePublishedWpCandidates } from "@/hooks/use-wp-candidates";
-import { useEmailTemplates } from "@/hooks/use-email-templates";
+import { useEmailTemplates, renderTemplate } from "@/hooks/use-email-templates";
 import { TemplatePicker } from "@/components/automations/TemplatePicker";
+import { EmailFrame } from "@/components/EmailFrame";
 import { findSenderByEmail } from "@/lib/hi-team";
+
+// Branded sign-off shown where {{signature}} sits in the preview (send-flow-email
+// mints the real per-sender block with the logo at send time).
+const PREVIEW_SIG = `<p style="margin:22px 0 2px;color:#14b8a6;font-weight:700;font-family:Garamond,'EB Garamond',Georgia,serif;">Warmest Regards,</p><p style="margin:0;color:#14b8a6;font-weight:700;font-family:Garamond,'EB Garamond',Georgia,serif;">The Allocation Assist team</p><p style="margin:6px 0 0;color:#475569;font-size:13px;font-family:Garamond,'EB Garamond',Georgia,serif;">Jumeirah Lakes Towers, Dubai, UAE · www.allocationassist.com</p>`;
 
 const HOSPITAL_DEFAULT_KEY = "profile_sent_hospital";
 const DOCTOR_DEFAULT_KEY   = "profile_sent_doctor";
@@ -99,6 +104,39 @@ export function BulkProfileSendDialog({ open, onClose }: { open: boolean; onClos
   const sampleVars = (d: typeof docPool[number]): Record<string, string> => ({
     doctor_name: d.name, doctor_speciality: d.speciality ?? "", hospital_name: selectedHosps[0]?.name ?? "the hospital",
   });
+
+  // Read-only preview of the doctor "working opportunity" email for a SAMPLE
+  // pair (first selected doctor × first selected hospital) so the team sees what
+  // each doctor receives before firing the bulk send (Sean: "preview section for
+  // working opportunity bulk sends"). It's template-only, so this renders the
+  // chosen template with that pair's tokens — the same render send-flow-email does.
+  const [showPreview, setShowPreview] = useState(false);
+  const doctorTpl = useMemo(() => templates.find(t => t.key === doctorTemplateKey), [templates, doctorTemplateKey]);
+  const previewDoc  = selectedDocs[0] ?? null;
+  const previewHosp = selectedHosps[0] ?? null;
+  const previewHtml = useMemo(() => {
+    if (!doctorTpl || !previewDoc) return "";
+    const vars: Record<string, string> = {
+      doctor_name:        previewDoc.name.replace(/^\s*Dr\.?\s+/i, ""),
+      doctor_specialty:   previewDoc.speciality ?? "",
+      doctor_speciality:  previewDoc.speciality ?? "",
+      hospital_name:      previewHosp?.name ?? "the hospital",
+      city:               previewHosp?.city ?? "",
+      country:            previewHosp?.country ?? "",
+      hospital_profile_url: "",
+      hospital_description: "",
+      custom_message:     customMessage,
+      signature:          PREVIEW_SIG,
+    };
+    const body = renderTemplate(doctorTpl.body_html || doctorTpl.body_text || "", vars, { html: true });
+    return `<div style="font-family:Garamond,'EB Garamond',Georgia,'Times New Roman',serif;font-size:17px;color:#1a2332;line-height:1.55;padding:4px 2px;">${body}</div>`;
+  }, [doctorTpl, previewDoc, previewHosp, customMessage]);
+  const previewSubject = useMemo(
+    () => doctorTpl && previewDoc
+      ? renderTemplate(doctorTpl.subject || "", { doctor_name: previewDoc.name, hospital_name: previewHosp?.name ?? "", city: previewHosp?.city ?? "", doctor_specialty: previewDoc.speciality ?? "" })
+      : "",
+    [doctorTpl, previewDoc, previewHosp],
+  );
 
   const send = async () => {
     if (selectedDocs.length === 0 || selectedHosps.length === 0) {
@@ -237,6 +275,43 @@ export function BulkProfileSendDialog({ open, onClose }: { open: boolean; onClos
             That's <strong>{pairCount} individual emails</strong>. Double-check the doctor and hospital selections before sending.
           </div>
         )}
+
+        {/* Preview of the working-opportunity email each doctor receives (sample
+            pair = first selected doctor × first selected hospital). */}
+        <div className="rounded-md border bg-white">
+          <button
+            type="button"
+            onClick={() => setShowPreview(s => !s)}
+            className="w-full flex items-center gap-1.5 px-2.5 py-1.5 text-[11px] font-medium text-slate-700 hover:bg-slate-50"
+          >
+            <Eye className="h-3.5 w-3.5 text-teal-600" />
+            {showPreview ? "Hide" : "Preview"} the working-opportunity email
+            {previewDoc && previewHosp && (
+              <span className="ml-1 font-normal text-slate-400 truncate">· {previewDoc.name} → {previewHosp.name}</span>
+            )}
+          </button>
+          {showPreview && (
+            <div className="border-t p-2 bg-slate-50/60">
+              {!previewDoc || !previewHosp ? (
+                <div className="py-6 text-center text-[11px] text-muted-foreground italic">
+                  Pick at least one doctor and one hospital to preview.
+                </div>
+              ) : (
+                <>
+                  <div className="mb-1.5 px-0.5 text-[11px]">
+                    <span className="text-slate-400">Subject:</span> <span className="font-medium text-slate-700">{previewSubject || "—"}</span>
+                  </div>
+                  <div className="rounded border border-slate-200 bg-white overflow-hidden">
+                    <EmailFrame html={previewHtml} minHeight={180} maxHeight={420} />
+                  </div>
+                  <p className="mt-1.5 px-0.5 text-[10px] text-muted-foreground">
+                    Sample render — every selected doctor gets their own copy with their name. The real send mints the branded signature per sender.
+                  </p>
+                </>
+              )}
+            </div>
+          )}
+        </div>
 
         <DialogFooter>
           <Button variant="outline" onClick={onClose} disabled={sending}>Cancel</Button>
