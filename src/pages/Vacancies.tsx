@@ -18,7 +18,7 @@ import { TableSkeleton } from "@/components/ui/data-skeleton";
 import { useDoctorSpecialties } from "@/hooks/use-doctor-specialties";
 import { toast } from "sonner";
 import { useAuth } from "@/hooks/use-auth";
-import { useHospitals } from "@/hooks/use-hospitals";
+import { useHospitals, useCreateHospital } from "@/hooks/use-hospitals";
 import {
   useVacancies, useCreateVacancy, useUpdateVacancy, useDeleteVacancy,
   type Vacancy, type VacancyPriority, type VacancyStatus,
@@ -435,7 +435,25 @@ function CreateVacancyDialog({ open, onClose, onSubmit, hospitals, initial }: {
   const [targetDays, setTargetDays] = useState<string>("");
   const [notes, setNotes] = useState<string>("");
   const [submitting, setSubmitting] = useState(false);
+  // New-hospital details — captured when the typed hospital isn't on file yet,
+  // so we create a real hospital record (city/country drive the license-region
+  // match; recruiter email lets us actually send to them).
+  const [hCity, setHCity] = useState<string>("");
+  const [hCountry, setHCountry] = useState<string>("");
+  const [hRecruiterEmail, setHRecruiterEmail] = useState<string>("");
+  const [hContactName, setHContactName] = useState<string>("");
+  const createHospital = useCreateHospital();
   const editing = !!initial;
+
+  // Auto-map: a typed hospital name that matches one on file (case-insensitive)
+  // links to that record — so the matcher gets its city/country even when the
+  // team types instead of picking. Only when nothing was picked from the list.
+  const trimmedName = hospitalName.trim();
+  const mappedHospital = (!hospitalId && trimmedName)
+    ? hospitals.find(h => h.name.trim().toLowerCase() === trimmedName.toLowerCase())
+    : undefined;
+  // Genuinely new hospital → show the detail fields + create a record on save.
+  const isNewHospital = !!trimmedName && !hospitalId && !mappedHospital;
 
   // Seed the form when the dialog opens — from the vacancy being edited, or
   // blank for a new one.
@@ -447,11 +465,13 @@ function CreateVacancyDialog({ open, onClose, onSubmit, hospitals, initial }: {
     setPriority(initial?.priority ?? "medium");
     setTargetDays(initial?.target_fill_days != null ? String(initial.target_fill_days) : "");
     setNotes(initial?.notes ?? "");
+    setHCity(""); setHCountry(""); setHRecruiterEmail(""); setHContactName("");
   }, [open, initial]);
 
   const resetAndClose = () => {
     setHospitalId(""); setHospitalName(""); setSpecialty(""); setPriority("medium");
     setTargetDays(""); setNotes("");
+    setHCity(""); setHCountry(""); setHRecruiterEmail(""); setHContactName("");
     onClose();
   };
 
@@ -462,15 +482,33 @@ function CreateVacancyDialog({ open, onClose, onSubmit, hospitals, initial }: {
     }
     setSubmitting(true);
     try {
+      // Resolve the hospital, in order: picked from the list → auto-mapped by
+      // name → create a brand-new record from the entered details. Either way
+      // the vacancy ends up with a real hospital_id so the matcher can rank
+      // doctors by license/region and the team can email the hospital.
+      let resolvedId: string | null = hospitalId || mappedHospital?.id || null;
+      const resolvedName = mappedHospital?.name ?? hospitalName.trim();
+      if (!resolvedId && isNewHospital) {
+        resolvedId = await createHospital.mutateAsync({
+          name:                    hospitalName.trim(),
+          city:                    hCity.trim() || null,
+          country:                 hCountry.trim() || null,
+          primary_recruiter_email: hRecruiterEmail.trim() || null,
+          primary_contact_name:    hContactName.trim() || null,
+        });
+        toast.success(`Added ${hospitalName.trim()} to Hospitals.`);
+      }
       await onSubmit({
-        hospital_id:      hospitalId || null,
-        hospital_name:    hospitalName.trim(),
+        hospital_id:      resolvedId,
+        hospital_name:    resolvedName,
         specialty:        specialty.trim(),
         priority,
         target_fill_days: targetDays.trim() ? Number(targetDays) : null,
         notes:            notes.trim() || null,
       });
       resetAndClose();
+    } catch (e) {
+      toast.error(e instanceof Error ? e.message : "Could not save the vacancy.");
     } finally {
       setSubmitting(false);
     }
@@ -511,10 +549,43 @@ function CreateVacancyDialog({ open, onClose, onSubmit, hospitals, initial }: {
             </Select>
             <Input
               value={hospitalName}
-              onChange={(e) => setHospitalName(e.target.value)}
+              onChange={(e) => { setHospitalName(e.target.value); setHospitalId(""); }}
               placeholder="…or type a hospital name (if not in the list yet)"
               className="h-9 text-[12px] mt-1"
             />
+            {mappedHospital && (
+              <p className="text-[10.5px] text-emerald-700 inline-flex items-center gap-1">
+                <Check className="h-3 w-3" /> Auto-mapped to <strong>{mappedHospital.name}</strong> on file — the matcher will use its city / license region.
+              </p>
+            )}
+            {isNewHospital && (
+              <div className="mt-1.5 rounded-md border border-teal-200 bg-teal-50/40 p-2.5 space-y-2">
+                <div className="text-[10px] uppercase tracking-wider text-teal-700 font-semibold">
+                  New hospital — add its details
+                </div>
+                <p className="text-[10px] text-muted-foreground">
+                  "{trimmedName}" isn't on file yet. These get saved as a new hospital so the matcher can rank doctors by license / region, and so you can email them.
+                </p>
+                <div className="grid grid-cols-2 gap-2">
+                  <div className="space-y-1">
+                    <Label className="text-[10px]">City</Label>
+                    <Input value={hCity} onChange={(e) => setHCity(e.target.value)} placeholder="e.g. Dubai" className="h-8 text-[12px]" />
+                  </div>
+                  <div className="space-y-1">
+                    <Label className="text-[10px]">Country</Label>
+                    <Input value={hCountry} onChange={(e) => setHCountry(e.target.value)} placeholder="e.g. UAE" className="h-8 text-[12px]" />
+                  </div>
+                </div>
+                <div className="space-y-1">
+                  <Label className="text-[10px]">Recruiter email</Label>
+                  <Input value={hRecruiterEmail} onChange={(e) => setHRecruiterEmail(e.target.value)} placeholder="recruiter@hospital.com" className="h-8 text-[12px]" />
+                </div>
+                <div className="space-y-1">
+                  <Label className="text-[10px]">Contact name</Label>
+                  <Input value={hContactName} onChange={(e) => setHContactName(e.target.value)} placeholder="e.g. Dr. Sarah / HR Manager" className="h-8 text-[12px]" />
+                </div>
+              </div>
+            )}
           </div>
 
           <div className="space-y-1">

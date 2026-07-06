@@ -48,9 +48,12 @@ export function useHospitals() {
 export function useCreateHospital() {
   const qc = useQueryClient();
   return useMutation({
-    mutationFn: async (input: HospitalInput) => {
-      const { error } = await supabase.from("hospitals").insert(input);
+    // Returns the new row's id so callers (e.g. logging a vacancy for a brand-new
+    // hospital) can immediately link to it.
+    mutationFn: async (input: HospitalInput): Promise<string> => {
+      const { data, error } = await supabase.from("hospitals").insert(input).select("id").single();
       if (error) throw error;
+      return (data as { id: string }).id;
     },
     onSuccess: () => { qc.invalidateQueries({ queryKey: KEY }); },
   });
