@@ -482,9 +482,27 @@ interface RowData {
  *    │ ✉  john@example.com   ☎ +44 7xx xxx      │  ← contact strip
  *    └──────────────────────────────────────────┘
  */
+// Plain multi-row table — the same "Available Doctor Format" columns as the
+// single-doctor hospital email, one row per queued doctor. Header cells nowrap +
+// the whole table in an overflow-x:auto box, so a wide table scrolls (like
+// Gmail) instead of crushing its columns — the reason it was cards before.
 function renderDoctorsTable(rows: RowData[]): string {
   if (rows.length === 0) return `<p style="color:#6c757d;font-size:14px;">No doctors queued.</p>`;
-  return rows.map(renderDoctorCard).join("");
+  const th = (label: string) =>
+    `<th style="text-align:left;border:1px solid #cbd5e1;padding:6px 10px;white-space:nowrap;background:#f1f5f9;">${esc(label)}</th>`;
+  const td = (val: string) =>
+    `<td style="border:1px solid #cbd5e1;padding:6px 10px;">${esc(val)}</td>`;
+  const head =
+    `<tr>${th("#")}${th("Name")}${th("Title and Specialty as per the UAE license")}${th("Country Of Training")}` +
+    `${th("Years of Experience")}${th("Nationality")}${th("Age")}${th("Marital Status")}${th("Family Status")}` +
+    `${th("UAE license type / Status")}${th("Salary Expectation")}${th("Notice Period")}${th("Mobile")}${th("Email")}</tr>`;
+  const body = rows.map(r =>
+    `<tr>${td(String(r.idx))}${td(r.name)}${td(r.title || r.specialty)}${td(r.training)}${td(r.years)}${td(r.nationality)}` +
+    `${td(r.age)}${td(r.marital)}${td(r.family)}${td(r.license)}${td(r.salary)}${td(r.notice)}${td(r.mobile)}${td(r.email)}</tr>`,
+  ).join("");
+  return `<div style="overflow-x:auto;max-width:100%;margin:18px 0;">` +
+    `<table border="1" cellspacing="0" cellpadding="6" style="border-collapse:collapse;font-family:Arial,Helvetica,sans-serif;font-size:13px;color:#1a2332;border:1px solid #cbd5e1;">` +
+    `<thead>${head}</thead><tbody>${body}</tbody></table></div>`;
 }
 
 function renderDoctorCard(r: RowData): string {
