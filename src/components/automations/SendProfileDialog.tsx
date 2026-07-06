@@ -28,7 +28,7 @@ import { wrapBodyForSend } from "@/lib/email-preview";
 import { type EmailAttachment } from "@/lib/email-attachments";
 import { AttachmentsPicker } from "@/components/automations/AttachmentsPicker";
 import { TemplatePicker } from "@/components/automations/TemplatePicker";
-import { CcBccPicker } from "@/components/automations/CcBccPicker";
+import { CcBccPicker, isEmail } from "@/components/automations/CcBccPicker";
 import { useScheduleProfileSend } from "@/hooks/use-scheduled-profile-sends";
 import { GulfClock, composeLocalDateTime, localToGulfParts, localDateInDays } from "@/components/GulfClock";
 import { Clock, Loader2 } from "lucide-react";
@@ -351,10 +351,15 @@ function SendProfileDialogBody({ onClose, initial }: { onClose: () => void; init
     attachments?: { hospital?: EmailAttachment[]; doctor?: EmailAttachment[] },
     templateKeys?: { hospital: string; doctor: string },
     schedule?: { date: string; time: string },
+    recipients?: { doctorEmail?: string },
   ) => {
     const hospitalAttach = attachments?.hospital ?? [];
     const doctorAttach   = attachments?.doctor ?? [];
     if (!selectedDoctor || selectedHospitals.length === 0) return;
+    // Retyped doctor recipient (single-hospital only) wins over the doctor's own
+    // email for the "working opportunity" heads-up. Falls back to their profile
+    // email when not overridden.
+    const doctorEmailToUse = (recipients?.doctorEmail ?? "").trim() || selectedDoctor.email;
     // Edits only apply to a single-hospital send — the preview (and so the
     // edited HTML) is rendered for one hospital, and the override would bake
     // that hospital's tokens into every BCC run. The preview UI already
@@ -392,7 +397,7 @@ function SendProfileDialogBody({ onClose, initial }: { onClose: () => void; init
         await scheduleProfileSend.mutateAsync({
           doctor_id:         selectedDoctor.id,
           doctor_name:       selectedDoctor.name,
-          doctor_email:      selectedDoctor.email,
+          doctor_email:      doctorEmailToUse,
           doctor_phone:      selectedDoctor.phone,
           doctor_speciality: selectedDoctor.speciality,
           hospital_ids:      selectedHospitals.map(h => h.id),
@@ -451,7 +456,7 @@ function SendProfileDialogBody({ onClose, initial }: { onClose: () => void; init
             flow_key:      "profile_sent",
             doctor_id:     selectedDoctor.id,
             doctor_name:   selectedDoctor.name,
-            doctor_email:  selectedDoctor.email,
+            doctor_email:  doctorEmailToUse,
             doctor_phone:  selectedDoctor.phone,
             hospital:      h.name,
             current_stage: "email_hospital",
@@ -1020,7 +1025,7 @@ function PreviewConfirm({
   doctorBody: string;
   onBack: () => void;
   onClose: () => void;
-  onConfirm: (stageOverrides?: Record<string, SendOverrides>, attachments?: { hospital?: EmailAttachment[]; doctor?: EmailAttachment[] }, templateKeys?: { hospital: string; doctor: string }, schedule?: { date: string; time: string }) => void;
+  onConfirm: (stageOverrides?: Record<string, SendOverrides>, attachments?: { hospital?: EmailAttachment[]; doctor?: EmailAttachment[] }, templateKeys?: { hospital: string; doctor: string }, schedule?: { date: string; time: string }, recipients?: { doctorEmail?: string }) => void;
   submitting: boolean;
   ccList: string[];
   setCcList: (next: string[]) => void;
@@ -1045,6 +1050,10 @@ function PreviewConfirm({
   // Per-stage overrides captured from the editable previews (null = unedited).
   const [hospitalOv, setHospitalOv] = useState<SendOverrides | null>(null);
   const [doctorOv,   setDoctorOv]   = useState<SendOverrides | null>(null);
+  // Editable recipient for the doctor "working opportunity" email — empty means
+  // "send to the doctor's own email" (Mitchell: a field to change where the
+  // doctor email is sent). Only editable on single-hospital sends.
+  const [doctorEmailOv, setDoctorEmailOv] = useState("");
   // CVs / logbooks to attach — PER EMAIL, so the dispatcher controls exactly
   // which file rides which email. Uploaded to the public email-attachments
   // bucket on pick; the URLs ride along in run metadata (attachments =
@@ -1162,6 +1171,20 @@ function PreviewConfirm({
   // "Schedule" button inside the schedule card — so the schedule action is
   // reachable right where the team picks the time, not only at the far bottom.
   const submit = () => {
+    // Guard the editable recipient fields — a typo'd address would send into the
+    // void. Empty doctor override = keep the doctor's own email.
+    const doctorEmailTrimmed = doctorEmailOv.trim();
+    if (doctorEmailTrimmed && !isEmail(doctorEmailTrimmed)) {
+      toast.error("The doctor's email (To) doesn't look like a valid address.");
+      return;
+    }
+    if (isSingle) {
+      const hospTo = (recipientOverrides[hospitals[0].id] ?? "").trim();
+      if (hospTo && !isEmail(hospTo)) {
+        toast.error("The hospital's email (To) doesn't look like a valid address.");
+        return;
+      }
+    }
     // A non-default template pick ships as a stage override too (the rendered
     // template), so single-hospital sends honour the pick with no deploy.
     // Manual edits (hospitalOv/doctorOv) take precedence. Multi-hospital relies
@@ -1184,6 +1207,7 @@ function PreviewConfirm({
       },
       { hospital: hospitalTemplateKey, doctor: doctorTemplateKey },
       sendMode === "later" ? { date: schedDate, time: schedTime } : undefined,
+      doctorEmailTrimmed ? { doctorEmail: doctorEmailTrimmed } : undefined,
     );
   };
   // Human-readable local label of the chosen slot, for the schedule button.
@@ -1322,7 +1346,10 @@ function PreviewConfirm({
           subject={renderedHospitalSubject}
           html={hospitalHtml}
           from={senderLine}
-          to={isSingle ? (hospitals[0].primary_recruiter_email ?? undefined) : undefined}
+          to={isSingle ? (recipientOverrides[hospitals[0].id] ?? hospitals[0].primary_recruiter_email ?? "") : undefined}
+          onToChange={isSingle ? (v) => onOverrideRecipient(hospitals[0].id, v.trim() ? v.trim() : null) : undefined}
+          cc={ccList}
+          bcc={bccList}
           editable={isSingle}
           onChange={setHospitalOv}
           plainBody={renderedHospitalBody}
@@ -1367,11 +1394,14 @@ function PreviewConfirm({
       ),
       preview: (
         <EditableEmailSection
-          label={`To doctor · ${doctor.email ?? "(no email)"}`}
+          label={`To doctor · ${doctorEmailOv || doctor.email || "(no email)"}`}
           subject={renderedDoctorSubject}
           html={doctorHtml}
           from={senderLine}
-          to={doctor.email ?? undefined}
+          to={isSingle ? (doctorEmailOv || doctor.email || "") : (doctor.email ?? undefined)}
+          onToChange={isSingle ? setDoctorEmailOv : undefined}
+          cc={ccList}
+          bcc={bccList}
           editable={isSingle}
           onChange={setDoctorOv}
           plainBody={renderTemplate(doctorBody, vars)}
@@ -1652,7 +1682,7 @@ function looksLikeHtml(s: string): boolean {
  *  the compact read-only PreviewBlock. Used for both the hospital and the
  *  doctor email so either can be edited before sending. */
 function EditableEmailSection({
-  label, subject, html, plainBody, from, to, editable, onChange,
+  label, subject, html, plainBody, from, to, onToChange, cc, bcc, editable, onChange,
   attachments, onAttachmentsChange, templatePicker,
 }: {
   label:     string;
@@ -1661,6 +1691,13 @@ function EditableEmailSection({
   plainBody: string;   // pristine body for the read-only fallback
   from?:     string;
   to?:       string;
+  /** When set (and editable), the To becomes an editable field — retype the
+   *  recipient address before sending. */
+  onToChange?: (v: string) => void;
+  /** Extra recipients echoed in the preview header so they're visibly
+   *  confirmed (the BCC-not-reflected fix). */
+  cc?:       string[];
+  bcc?:      string[];
   editable:  boolean;
   onChange:  (ov: SendOverrides | null) => void;
   attachments?:        EmailAttachment[];
@@ -1708,6 +1745,9 @@ function EditableEmailSection({
         onReset={() => { setSubj(subject); setBody(html); setTick(t => t + 1); onChange(null); }}
         from={from}
         to={to}
+        onToChange={onToChange}
+        cc={cc}
+        bcc={bcc}
         text={plainBody}
         attachments={attachments}
         onAttachmentsChange={onAttachmentsChange}

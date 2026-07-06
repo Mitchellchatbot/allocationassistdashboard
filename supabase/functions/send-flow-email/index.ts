@@ -266,6 +266,12 @@ Deno.serve(async (req: Request) => {
     // over the run's metadata.cc_override / bcc_override, so any flow email can
     // loop in extra recipients at send time.
     cc_override?: string[]; bcc_override?: string[];
+    // Per-send recipient override from the preview's editable To field. When a
+    // valid email, it REPLACES the stage's resolved recipient for this one send
+    // (Mitchell: "a dedicated field for the doctors' email address … change the
+    // address of where it's sent"). Ignored on dry runs and never forwarded to
+    // auto-continue sends. TEST_OVERRIDE still wins over it.
+    to_override?: string;
     // One-shot attachments for THIS send (already uploaded to the public
     // email-attachments bucket — entries are { filename, path:<https URL> }).
     // Used by FlowSendPreviewDialog so any flow email can carry a CV/doc. Only
@@ -783,8 +789,13 @@ Deno.serve(async (req: Request) => {
       ? (hospital?.primary_recruiter_email as string | undefined)
       : (run.doctor_email as string | undefined);
 
+  // A valid To override from the preview replaces the resolved recipient for
+  // this send (dry runs always preview the resolved recipient, so this only
+  // bites on a real send). TEST_OVERRIDE still trumps everything.
+  const toOverrideRaw = typeof body.to_override === "string" ? body.to_override.trim() : "";
+  const toOverride    = !dryRun && toOverrideRaw.includes("@") ? toOverrideRaw : "";
   const actualRecipient = stageRecipient ?? "";
-  const effectiveTo = TEST_OVERRIDE || actualRecipient;
+  const effectiveTo = TEST_OVERRIDE || toOverride || actualRecipient;
   if (!effectiveTo) {
     return json({
       ok: false,

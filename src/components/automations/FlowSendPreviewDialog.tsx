@@ -23,7 +23,7 @@ import { toast } from "sonner";
 import { EditableEmailPreview } from "@/components/EditableEmailPreview";
 import { EmailPreviewStudio, type StudioEmail } from "@/components/EmailPreviewStudio";
 import { AttachmentsPicker } from "@/components/automations/AttachmentsPicker";
-import { CcBccPicker } from "@/components/automations/CcBccPicker";
+import { CcBccPicker, isEmail } from "@/components/automations/CcBccPicker";
 import type { EmailAttachment } from "@/lib/email-attachments";
 
 interface FlowPreview { from: string; to: string; subject: string; html: string; text?: string }
@@ -39,6 +39,9 @@ export interface EmailOverrides {
   /** Extra recipients for THIS send — send-flow-email reads these from the body. */
   cc_override?: string[];
   bcc_override?: string[];
+  /** Override the To recipient for THIS send (Mitchell: change the address the
+   *  email goes to). send-flow-email uses it verbatim as the To. */
+  to_override?: string;
 }
 
 /** dry-run preview with a hard timeout — supabase.functions.invoke can hang on
@@ -91,12 +94,15 @@ export function FlowSendPreviewDialog({
   // the live (possibly edited) values; `preview` keeps the pristine render.
   const [editSubject, setEditSubject] = useState("");
   const [editHtml,    setEditHtml]    = useState("");
+  const [editTo,      setEditTo]      = useState("");
   const [resetTick,   setResetTick]   = useState(0);
   const [attachments, setAttachments] = useState<EmailAttachment[]>([]);
   const [cc,  setCc]  = useState<string[]>([]);
   const [bcc, setBcc] = useState<string[]>([]);
 
   const edited = !!preview && (editSubject !== preview.subject || editHtml !== preview.html);
+  // The recipient was retyped to a different, valid address → send there instead.
+  const toChanged = !!preview && editTo.trim().toLowerCase() !== (preview.to ?? "").trim().toLowerCase();
 
   // (Re)build the preview whenever the dialog opens for a run/stage.
   useEffect(() => {
@@ -109,6 +115,7 @@ export function FlowSendPreviewDialog({
         setPreview(p);
         setEditSubject(p.subject);
         setEditHtml(p.html);
+        setEditTo(p.to ?? "");
         setResetTick(t => t + 1);
       })
       .catch(e => { if (!cancelled) setErr(e instanceof Error ? e.message : "Couldn't build the preview."); })
@@ -120,6 +127,11 @@ export function FlowSendPreviewDialog({
   }, [open, runId, previewStage, JSON.stringify(previewMetadata ?? null)]);
 
   const handleSend = async () => {
+    const trimmedTo = editTo.trim();
+    if (toChanged && !isEmail(trimmedTo)) {
+      toast.error("The recipient (To) doesn't look like a valid email address.");
+      return;
+    }
     setSending(true);
     try {
       const overrides: EmailOverrides = {
@@ -127,6 +139,7 @@ export function FlowSendPreviewDialog({
         ...(attachments.length ? { attachments: attachments.map(a => ({ filename: a.filename, path: a.path })) } : {}),
         ...(cc.length  ? { cc_override:  cc }  : {}),
         ...(bcc.length ? { bcc_override: bcc } : {}),
+        ...(toChanged ? { to_override: trimmedTo } : {}),
       };
       await onConfirm(Object.keys(overrides).length ? overrides : undefined);
       onClose();
@@ -145,7 +158,7 @@ export function FlowSendPreviewDialog({
         {edited
           ? <span className="font-medium text-teal-700">Edited — your version sends, not the template.</span>
           : preview
-            ? <>Review before sending{preview.to ? <> · To <span className="text-slate-700">{preview.to}</span></> : null} — edit the subject or body in the preview if needed.</>
+            ? <>Review before sending — edit the subject, body, recipient, CC/BCC or font in the preview if needed.{toChanged ? <span className="font-medium text-teal-700"> Sending to your typed address.</span> : null}</>
             : "What goes out — review before sending."}
       </div>
       {ready && (
@@ -159,7 +172,7 @@ export function FlowSendPreviewDialog({
   const email: StudioEmail = {
     key: "email",
     label: title,
-    subLabel: preview?.to ? `To ${preview.to}` : undefined,
+    subLabel: editTo ? `To ${editTo}` : undefined,
     controls: ready ? (
       <AttachmentsPicker
         attachments={attachments}
@@ -188,10 +201,14 @@ export function FlowSendPreviewDialog({
           if (!preview) return;
           setEditSubject(preview.subject);
           setEditHtml(preview.html);
+          setEditTo(preview.to ?? "");
           setResetTick(t => t + 1);
         }}
         from={preview.from}
-        to={preview.to}
+        to={editTo}
+        onToChange={setEditTo}
+        cc={cc}
+        bcc={bcc}
         text={preview.text}
         attachments={attachments}
         onAttachmentsChange={setAttachments}

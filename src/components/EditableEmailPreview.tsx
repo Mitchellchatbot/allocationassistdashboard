@@ -43,6 +43,15 @@ interface EditableEmailPreviewProps {
   onReset?:        () => void;
   from?:           string;
   to?:             string;
+  /** When provided, the To field becomes an editable input — retype the
+   *  recipient before sending (Mitchell: "a dedicated field for the doctors'
+   *  email address"). The caller forwards it as a `to_override`. */
+  onToChange?:     (to: string) => void;
+  /** Extra recipients to echo in the header so the team can SEE they're
+   *  included (Mitchell: BCC "added several but they don't seem to be
+   *  reflected"). Display-only — the caller still owns the actual send. */
+  cc?:             string[];
+  bcc?:            string[];
   className?:      string;
   /** Show the formatting toolbar (table insert, rich text, full-screen). Default on. */
   tools?:          boolean;
@@ -62,8 +71,30 @@ interface EditableEmailPreviewProps {
 // containment for wide tables/images live in EMAIL_EDITOR_CHILD_CLASS.
 const BODY_CLASS = "bg-white rounded-md " + EMAIL_EDITOR_CHILD_CLASS;
 
+// Font-family + size choices offered in the toolbar (Mitchell 2026-07-06:
+// "options to select the font style and font size in the email editor"). The
+// first family is the AA brand default so "Default" restores the on-brand look.
+const FONT_FAMILIES: Array<{ label: string; value: string }> = [
+  { label: "Default (Garamond)", value: "Garamond, 'EB Garamond', Georgia, 'Times New Roman', serif" },
+  { label: "Georgia",            value: "Georgia, 'Times New Roman', serif" },
+  { label: "Times New Roman",    value: "'Times New Roman', Times, serif" },
+  { label: "Arial",              value: "Arial, Helvetica, sans-serif" },
+  { label: "Helvetica",          value: "'Helvetica Neue', Helvetica, Arial, sans-serif" },
+  { label: "Verdana",            value: "Verdana, Geneva, sans-serif" },
+  { label: "Poppins",            value: "'Poppins', 'Helvetica Neue', Helvetica, Arial, sans-serif" },
+  { label: "Courier New",        value: "'Courier New', Courier, monospace" },
+];
+const FONT_SIZES: Array<{ label: string; value: string }> = [
+  { label: "Small",   value: "13px" },
+  { label: "Normal",  value: "15px" },
+  { label: "Medium",  value: "17px" },
+  { label: "Large",   value: "20px" },
+  { label: "X-Large", value: "24px" },
+  { label: "Huge",    value: "30px" },
+];
+
 export function EditableEmailPreview({
-  subject, html, onSubjectChange, onHtmlChange, resetKey, edited, onReset, from, to, className,
+  subject, html, onSubjectChange, onHtmlChange, resetKey, edited, onReset, from, to, onToChange, cc, bcc, className,
   tools = true, text, attachments, onAttachmentsChange, templatePicker,
 }: EditableEmailPreviewProps) {
   const bodyRef = useRef<HTMLDivElement>(null);
@@ -125,6 +156,57 @@ export function EditableEmailPreview({
     if (url) exec("createLink", url);
   };
 
+  // Restore the caret to the last place the user was editing; if that's gone or
+  // collapsed (nothing selected), select the WHOLE body so the font change
+  // applies to everything (Mitchell wanted it to affect the selection "or the
+  // whole body if nothing is selected"). Returns the live selection.
+  const restoreOrSelectAll = (): Selection | null => {
+    const body = bodyRef.current; if (!body) return null;
+    body.focus();
+    const sel = window.getSelection();
+    if (savedRange.current && body.contains(savedRange.current.commonAncestorContainer)) {
+      sel?.removeAllRanges(); sel?.addRange(savedRange.current);
+    }
+    if (!sel || sel.rangeCount === 0 || sel.getRangeAt(0).collapsed) {
+      const r = document.createRange();
+      r.selectNodeContents(body);
+      sel?.removeAllRanges(); sel?.addRange(r);
+    }
+    return sel ?? null;
+  };
+
+  // Font family via execCommand with CSS output (produces inline
+  // `<span style="font-family:…">`, which survives in the sent HTML).
+  const applyFontFamily = (family: string) => {
+    if (!family || !bodyRef.current) return;
+    restoreOrSelectAll();
+    try {
+      document.execCommand("styleWithCSS", false, "true");
+      document.execCommand("fontName", false, family);
+    } catch { /* unsupported — no-op */ }
+    flush();
+  };
+
+  // Font size in real px. execCommand("fontSize") only takes the legacy 1–7
+  // scale, so we tag the selection with size 7, then swap those <font size="7">
+  // wrappers for spans carrying the exact px — the standard contentEditable
+  // work-around for arbitrary sizes.
+  const applyFontSize = (px: string) => {
+    const body = bodyRef.current; if (!px || !body) return;
+    restoreOrSelectAll();
+    try {
+      document.execCommand("styleWithCSS", false, "false");
+      document.execCommand("fontSize", false, "7");
+      body.querySelectorAll('font[size="7"]').forEach((f) => {
+        const span = document.createElement("span");
+        span.style.fontSize = px;
+        while (f.firstChild) span.appendChild(f.firstChild);
+        f.replaceWith(span);
+      });
+    } catch { /* unsupported — no-op */ }
+    flush();
+  };
+
   // Insert arbitrary HTML (a built table) at the saved caret, or append to the
   // end if the caret was never placed inside the body.
   const insertHtml = (snippet: string) => {
@@ -184,18 +266,40 @@ export function EditableEmailPreview({
             className="mt-0.5 w-full rounded-md border border-slate-200 bg-white px-2.5 py-1.5 text-[14px] font-semibold text-slate-900 outline-none focus:border-teal-400 focus:ring-1 focus:ring-teal-200"
           />
         </label>
-        {(from || to) && (
-          <div className="space-y-0.5 text-[11px] text-slate-500">
+        {(from || to || onToChange || (cc?.length ?? 0) > 0 || (bcc?.length ?? 0) > 0) && (
+          <div className="space-y-1 text-[11px] text-slate-500">
             {from && (
               <div className="flex gap-3">
                 <span className="font-medium text-slate-600 uppercase tracking-wider text-[9px] w-9 pt-[2px]">From</span>
                 <span className="text-slate-700">{from}</span>
               </div>
             )}
-            {to && (
+            {onToChange ? (
+              <label className="flex items-center gap-3">
+                <span className="font-medium text-slate-600 uppercase tracking-wider text-[9px] w-9 shrink-0">To</span>
+                <input
+                  value={to ?? ""}
+                  onChange={(e) => onToChange(e.target.value)}
+                  placeholder="recipient@email.com"
+                  className="min-w-0 flex-1 rounded-md border border-slate-200 bg-white px-2 py-1 text-[12px] text-slate-800 outline-none focus:border-teal-400 focus:ring-1 focus:ring-teal-200"
+                />
+              </label>
+            ) : to ? (
               <div className="flex gap-3">
                 <span className="font-medium text-slate-600 uppercase tracking-wider text-[9px] w-9 pt-[2px]">To</span>
                 <span className="text-slate-700">{to}</span>
+              </div>
+            ) : null}
+            {(cc?.length ?? 0) > 0 && (
+              <div className="flex gap-3">
+                <span className="font-medium text-slate-600 uppercase tracking-wider text-[9px] w-9 pt-[2px] shrink-0">CC</span>
+                <span className="min-w-0 break-words text-slate-700">{cc!.join(", ")}</span>
+              </div>
+            )}
+            {(bcc?.length ?? 0) > 0 && (
+              <div className="flex gap-3">
+                <span className="font-medium text-slate-600 uppercase tracking-wider text-[9px] w-9 pt-[2px] shrink-0">BCC</span>
+                <span className="min-w-0 break-words text-slate-700">{bcc!.join(", ")}</span>
               </div>
             )}
           </div>
@@ -215,6 +319,29 @@ export function EditableEmailPreview({
           <ToolBtn onClick={() => exec("insertUnorderedList")} title="Bulleted list"><List className="h-3.5 w-3.5" /></ToolBtn>
           <ToolBtn onClick={() => exec("insertOrderedList")}   title="Numbered list"><ListOrdered className="h-3.5 w-3.5" /></ToolBtn>
           <ToolBtn onClick={makeLink}                    title="Insert link"><Link2 className="h-3.5 w-3.5" /></ToolBtn>
+          <Divider />
+          {/* Font family + size — apply to the selection, or the whole body if
+              nothing is selected. onMouseDown must NOT be prevented (the native
+              select needs the click); the editor's onBlur saves the caret so
+              restoreOrSelectAll re-targets the right text. */}
+          <select
+            title="Font style"
+            defaultValue=""
+            onChange={(e) => { applyFontFamily(e.target.value); e.currentTarget.selectedIndex = 0; }}
+            className="rounded-md border border-slate-200 bg-white px-1.5 py-1 text-[11px] text-slate-600 outline-none hover:bg-slate-50 focus:border-teal-400 cursor-pointer max-w-[130px]"
+          >
+            <option value="" disabled>Font</option>
+            {FONT_FAMILIES.map(f => <option key={f.label} value={f.value}>{f.label}</option>)}
+          </select>
+          <select
+            title="Font size"
+            defaultValue=""
+            onChange={(e) => { applyFontSize(e.target.value); e.currentTarget.selectedIndex = 0; }}
+            className="rounded-md border border-slate-200 bg-white px-1.5 py-1 text-[11px] text-slate-600 outline-none hover:bg-slate-50 focus:border-teal-400 cursor-pointer"
+          >
+            <option value="" disabled>Size</option>
+            {FONT_SIZES.map(s => <option key={s.value} value={s.value}>{s.label}</option>)}
+          </select>
           <Divider />
           <ToolBtn onClick={() => { const snap = bodyRef.current?.innerHTML; setFsHtml(snap && snap.trim() ? snap : html); setFullOpen(true); }} title="Full-screen editor" primary>
             <Maximize2 className="h-3.5 w-3.5" /> <span className="text-[11px] font-medium">Full screen</span>
