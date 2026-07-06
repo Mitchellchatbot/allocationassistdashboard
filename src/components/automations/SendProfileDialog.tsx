@@ -29,6 +29,7 @@ import { type EmailAttachment } from "@/lib/email-attachments";
 import { AttachmentsPicker } from "@/components/automations/AttachmentsPicker";
 import { TemplatePicker } from "@/components/automations/TemplatePicker";
 import { CcBccPicker, isEmail } from "@/components/automations/CcBccPicker";
+import { detectUnfilledVars, describeUnfilled } from "@/lib/email-validation";
 import { useScheduleProfileSend } from "@/hooks/use-scheduled-profile-sends";
 import { GulfClock, composeLocalDateTime, localToGulfParts, localDateInDays } from "@/components/GulfClock";
 import { Clock, Loader2 } from "lucide-react";
@@ -1214,10 +1215,28 @@ function PreviewConfirm({
   const doctorDraft   = !doctorOv   && isPlaceholder(doctorTemplateKey);
   const anyDraft = hospitalDraft || doctorDraft;
 
+  // Unfilled-variable guard: any {{token}} that would render BLANK (e.g. {{city}}
+  // when the hospital has no city on file) blocks the send and is explained
+  // below — unless the team edited that email inline (override), in which case
+  // they've taken control of the copy. Skipped for multi-hospital BCC (per-
+  // hospital tokens vary; the render happens server-side per hospital).
+  const unfilledIssues = useMemo(() => {
+    if (!isSingle) return [];
+    const tokens = new Set<string>();
+    if (!hospitalOv) for (const t of detectUnfilledVars(`${hospitalSubject}\n${hospitalBody}`, vars)) tokens.add(t);
+    if (!doctorOv)   for (const t of detectUnfilledVars(`${doctorSubject}\n${doctorBody}`, vars)) tokens.add(t);
+    return describeUnfilled([...tokens]);
+  }, [isSingle, hospitalOv, doctorOv, hospitalSubject, hospitalBody, doctorSubject, doctorBody, vars]);
+  const hasUnfilled = unfilledIssues.length > 0;
+
   // Single submit path shared by the footer button and the contextual
   // "Schedule" button inside the schedule card — so the schedule action is
   // reachable right where the team picks the time, not only at the far bottom.
   const submit = () => {
+    if (hasUnfilled) {
+      toast.error("Some variables are still empty — fill them (or edit the email) before sending.");
+      return;
+    }
     // Guard the editable recipient fields — a typo'd address would send into the
     // void. Empty doctor override = keep the doctor's own email.
     const doctorEmailTrimmed = doctorEmailOv.trim();
@@ -1350,6 +1369,25 @@ function PreviewConfirm({
           <div>
             The <strong>{hospitalDraft && doctorDraft ? "hospital and doctor templates" : hospitalDraft ? "hospital template" : "doctor template"}</strong> still {hospitalDraft && doctorDraft ? "contain" : "contains"} placeholder copy (<code>PLACEHOLDER…</code>). Pick a finished template, or click into the email to edit the wording before sending.
           </div>
+        </div>
+      )}
+
+      {hasUnfilled && (
+        <div className="rounded-md border border-amber-300 bg-amber-50 p-2.5 text-[11px] text-amber-900 space-y-1.5">
+          <div className="flex items-start gap-2">
+            <AlertTriangle className="h-3.5 w-3.5 mt-[2px] shrink-0" />
+            <div>
+              <strong>Can't send yet — {unfilledIssues.length} variable{unfilledIssues.length === 1 ? "" : "s"} {unfilledIssues.length === 1 ? "is" : "are"} empty</strong> and would leave a blank in the email. Fill {unfilledIssues.length === 1 ? "it" : "them"} on the record (or edit the email copy), then it sends.
+            </div>
+          </div>
+          <ul className="space-y-1 pl-1">
+            {unfilledIssues.map(i => (
+              <li key={i.token} className="flex flex-wrap items-baseline gap-x-1.5">
+                <code className="rounded bg-amber-100 px-1 text-[10px] text-amber-800">{`{{${i.token}}}`}</code>
+                <span>— {i.reason}{i.where ? <> · <span className="text-amber-700">fix in {i.where}</span></> : null}</span>
+              </li>
+            ))}
+          </ul>
         </div>
       )}
     </div>
@@ -1490,8 +1528,8 @@ function PreviewConfirm({
       <Button variant="ghost" size="icon" onClick={() => setSendMode("now")} disabled={submitting} className="text-slate-600 hover:text-slate-800" title={`Send now instead · ${sendCount}`}>
         <Send className="h-4 w-4" />
       </Button>
-      <Button size="icon" onClick={submit} disabled={submitting || anyDraft || !schedValid}
-        title={anyDraft ? "Pick a finished template or edit the copy first." : !schedValid ? "Enter a valid date and time first." : `Schedule ${sendCount}`}>
+      <Button size="icon" onClick={submit} disabled={submitting || anyDraft || hasUnfilled || !schedValid}
+        title={anyDraft ? "Pick a finished template or edit the copy first." : hasUnfilled ? "Fill the blank variables below (or edit the email) before scheduling." : !schedValid ? "Enter a valid date and time first." : `Schedule ${sendCount}`}>
         {submitting ? <Loader2 className="h-4 w-4 animate-spin" /> : <Clock className="h-4 w-4" />}
       </Button>
     </>
@@ -1503,8 +1541,8 @@ function PreviewConfirm({
       <Button variant="outline" size="icon" onClick={() => setSendMode("later")} disabled={submitting} title="Schedule for later">
         <Clock className="h-4 w-4" />
       </Button>
-      <Button size="icon" onClick={submit} disabled={submitting || anyDraft}
-        title={anyDraft ? "Pick a finished template or edit the copy first — the selected template still has placeholder text." : `Send now · ${sendCount}`}>
+      <Button size="icon" onClick={submit} disabled={submitting || anyDraft || hasUnfilled}
+        title={anyDraft ? "Pick a finished template or edit the copy first — the selected template still has placeholder text." : hasUnfilled ? "Fill the blank variables below (or edit the email) before sending." : `Send now · ${sendCount}`}>
         {submitting ? <Loader2 className="h-4 w-4 animate-spin" /> : <Send className="h-4 w-4" />}
       </Button>
     </>
