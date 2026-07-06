@@ -96,6 +96,9 @@ export interface ScoreOpts {
   hospital?:        MatchCandidateHospital | null;
   /** Vacancy priority — drives the notice-period urgency factor. */
   vacancyPriority?: Vacancy["priority"] | null;
+  /** Free-text vacancy notes (e.g. "Prefer Turkish doctors"). Boosts a doctor
+   *  whose nationality / training country / language is named in the note. */
+  notes?:           string | null;
 }
 
 /**
@@ -115,7 +118,7 @@ export function scoreCandidate(
   targetSpecialty: string,
   opts: ScoreOpts = {},
 ): MatchScore {
-  const { hospital: h = null, vacancyPriority = null } = opts;
+  const { hospital: h = null, vacancyPriority = null, notes = null } = opts;
   const factors: MatchFactor[] = [];
 
   // ── 1. Specialty (0-50) — gates everything.
@@ -191,6 +194,12 @@ export function scoreCandidate(
     if (urg.points > 0) factors.push(urg);
   }
 
+  // ── 6. Vacancy notes preference (0-12) — a doctor whose nationality /
+  //    training country / language is named in the note (e.g. "Prefer Turkish
+  //    doctors") is bumped up.
+  const notesPts = scoreNotes(d, notes);
+  if (notesPts) factors.push(notesPts);
+
   const total = factors.reduce((s, f) => s + f.points, 0);
   const clamped = Math.max(0, Math.min(MAX_SCORE, total));
   const pct = Math.round((clamped / MAX_SCORE) * 100);
@@ -209,7 +218,45 @@ export function scoreCandidate(
  *  vacancy-specific entry point. New code should call scoreCandidate
  *  directly. */
 export function scoreMatch(d: MatchCandidateDoctor, v: Vacancy, h: MatchCandidateHospital | null): MatchScore {
-  return scoreCandidate(d, v.specialty, { hospital: h, vacancyPriority: v.priority });
+  return scoreCandidate(d, v.specialty, { hospital: h, vacancyPriority: v.priority, notes: v.notes });
+}
+
+// A few common English-nationality ↔ country forms so a note that says
+// "Turkish" still matches a doctor whose nationality reads "Turkey" (and v.v.).
+const NATIONALITY_ALIASES: Record<string, string[]> = {
+  turkey: ["turkish"], turkish: ["turkey"],
+  india: ["indian"], indian: ["india"],
+  egypt: ["egyptian"], egyptian: ["egypt"],
+  pakistan: ["pakistani"], pakistani: ["pakistan"],
+  philippines: ["filipino", "philippine"], filipino: ["philippines"], philippine: ["philippines"],
+  jordan: ["jordanian"], jordanian: ["jordan"],
+  lebanon: ["lebanese"], lebanese: ["lebanon"],
+  syria: ["syrian"], syrian: ["syria"],
+  britain: ["british"], british: ["britain"],
+  germany: ["german"], german: ["germany"],
+  france: ["french"], french: ["france"],
+};
+
+/** Boost a doctor whose nationality / training country is named in the vacancy's
+ *  free-text note (e.g. "Prefer Turkish doctors" → +8 for a Turkish national).
+ *  Positive-preference only; we don't parse negations. 0–12. */
+function scoreNotes(d: MatchCandidateDoctor, notes: string | null): MatchFactor | null {
+  const n = (notes ?? "").toLowerCase();
+  if (!n.trim()) return null;
+  const named = (val: string | null | undefined): string | null => {
+    const v = (val ?? "").trim();
+    if (!v) return null;
+    for (const w of v.toLowerCase().split(/[\s,/()-]+/).filter(x => x.length >= 4)) {
+      if (n.includes(w)) return v;
+      for (const alias of NATIONALITY_ALIASES[w] ?? []) if (n.includes(alias)) return v;
+    }
+    return null;
+  };
+  const hits: string[] = [];
+  const nat  = named(d.nationality);       if (nat)  hits.push(`${nat} national`);
+  const ctry = named(d.country_training);  if (ctry && ctry !== nat) hits.push(`${ctry}-trained`);
+  if (hits.length === 0) return null;
+  return { label: `Matches vacancy note — ${hits.join(", ")}`, points: Math.min(12, hits.length * 8) };
 }
 
 /** Per-factor specialty scorer, exported so other surfaces (Batches
