@@ -696,6 +696,7 @@ function SendProfileDialogBody({ onClose, initial }: { onClose: () => void; init
               })}
               cardImageUrl={cardImageUrl}
               onSetCardImage={setCardImageUrl}
+              onRemoveHospital={(id) => setSelectedIds(prev => prev.filter(x => x !== id))}
             />
           ) : (
             <EmailPreviewStudioLayout
@@ -1074,7 +1075,7 @@ function PreviewConfirm({
   onBack, onClose, onConfirm, submitting, ccList, setCcList, bccList, setBccList,
   templates, hospitalTemplateKey, setHospitalTemplateKey, doctorTemplateKey, setDoctorTemplateKey, onSaveDefault,
   hospitalContacts, recipientOverrides, onOverrideRecipient,
-  cardImageUrl, onSetCardImage,
+  cardImageUrl, onSetCardImage, onRemoveHospital,
 }: {
   doctor: DoctorOption;
   hospitals: Hospital[];
@@ -1102,6 +1103,7 @@ function PreviewConfirm({
   onOverrideRecipient: (hospitalId: string, email: string | null) => void;
   cardImageUrl: string | null;
   onSetCardImage: (url: string | null) => void;
+  onRemoveHospital: (id: string) => void;
 }) {
   // Editing is offered for single-hospital sends only — the preview (and the
   // edited HTML) is rendered for one hospital, so reusing it across a BCC
@@ -1156,7 +1158,14 @@ function PreviewConfirm({
   const profileCompletion = wpCandidate
     ? wpCandidateCompletion(wpCandidate)
     : profile ? calcCompletion(profile) : 0;
-  const sampleHospital = hospitals[0];
+  // Which hospital's version of the email to preview (multi-hospital sends give
+  // each hospital its own greeting/recipient). Defaults to the first; follows
+  // removals so it never points at a dropped hospital.
+  const [previewHospitalId, setPreviewHospitalId] = useState<string | null>(hospitals[0]?.id ?? null);
+  useEffect(() => {
+    if (!hospitals.some(h => h.id === previewHospitalId)) setPreviewHospitalId(hospitals[0]?.id ?? null);
+  }, [hospitals, previewHospitalId]);
+  const sampleHospital = hospitals.find(h => h.id === previewHospitalId) ?? hospitals[0];
 
   const vars: Record<string, string> = useMemo(() => {
     // Strip any redundant "Dr." prefix so templates that hard-code "Hi Dr.
@@ -1230,7 +1239,7 @@ function PreviewConfirm({
   const renderedHospitalSubject = useMemo(() => renderTemplate(hospitalSubject, vars), [hospitalSubject, vars]);
   const renderedHospitalBody    = useMemo(() => renderTemplate(hospitalBody, vars) + (customMessage ? `\n\n--- Custom note ---\n${customMessage}` : ""), [hospitalBody, vars, customMessage]);
   const hospitalHtml            = useMemo(() => wrapBodyForSend(renderedHospitalBody), [renderedHospitalBody]);
-  const hospitalRecipient       = isSingle ? (hospitals[0].primary_recruiter_email ?? "(no recruiter email)") : `${hospitals.length} recipients (BCC)`;
+  const hospitalRecipient       = isSingle ? (hospitals[0].primary_recruiter_email ?? "(no recruiter email)") : `preview: ${sampleHospital?.name ?? "hospital"} · ${hospitals.length} hospitals`;
 
   const renderedDoctorSubject   = useMemo(() => renderTemplate(doctorSubject, vars), [doctorSubject, vars]);
   const doctorHtml              = useMemo(() => wrapBodyForSend(renderTemplate(doctorBody, vars)), [doctorBody, vars]);
@@ -1322,6 +1331,34 @@ function PreviewConfirm({
   // ── Left-rail GLOBAL controls (routing, BCC, send-mode, warnings) ──────────
   const headerExtra = (
     <div className="space-y-3">
+      {hospitals.length > 1 && (
+        <div className="rounded-lg border border-sidebar-border/40 bg-white/95 p-2.5 shadow-sm space-y-1.5">
+          <div className="flex items-center gap-1.5 text-[11px] font-medium text-teal-700">
+            <Mail className="h-3.5 w-3.5" /> {hospitals.length} hospitals — click one to preview, ✕ to remove
+          </div>
+          <div className="max-h-40 overflow-y-auto space-y-0.5">
+            {hospitals.map(h => (
+              <div
+                key={h.id}
+                onClick={() => setPreviewHospitalId(h.id)}
+                className={`group flex cursor-pointer items-center gap-1.5 rounded px-1.5 py-1 text-[11px] ${previewHospitalId === h.id ? "bg-teal-50 text-teal-800" : "text-slate-700 hover:bg-slate-50"}`}
+              >
+                <span className={`h-1.5 w-1.5 shrink-0 rounded-full ${previewHospitalId === h.id ? "bg-teal-500" : "bg-slate-300"}`} />
+                <span className="flex-1 truncate" title={h.name}>{h.name}</span>
+                {previewHospitalId === h.id && <Eye className="h-3 w-3 shrink-0 text-teal-600" />}
+                <button
+                  type="button"
+                  title={`Remove ${h.name} from this send`}
+                  className="shrink-0 text-slate-300 hover:text-rose-600"
+                  onClick={(e) => { e.stopPropagation(); onRemoveHospital(h.id); }}
+                >
+                  <X className="h-3 w-3" />
+                </button>
+              </div>
+            ))}
+          </div>
+        </div>
+      )}
       <HospitalRecipientsOverride
         hospitals={hospitals}
         contacts={hospitalContacts}
