@@ -285,6 +285,42 @@ export function EditableEmailPreview({
     flush();
   };
 
+  // ── Paste Excel / Sheets data as a table ────────────────────────────────────
+  // Copying a range from Excel/Google Sheets puts tab-separated rows on the
+  // clipboard. When we see that shape, build a styled email table (green header,
+  // first row = header) at the caret instead of pasting raw tab text (Sean:
+  // "copy and paste Excel data directly into email table sections"). Non-tabular
+  // pastes fall through to the browser's normal paste.
+  const onPaste = (e: React.ClipboardEvent<HTMLDivElement>) => {
+    const text = e.clipboardData.getData("text/plain");
+    if (!text || !/\t/.test(text)) return;                 // no tabs → normal paste
+    const rows = text.replace(/\r/g, "").replace(/\n+$/, "").split("\n").map(r => r.split("\t"));
+    if (rows.length === 0 || Math.max(...rows.map(r => r.length)) < 2) return; // 1 col → normal
+    e.preventDefault();
+    const escCell = (s: string) => s.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
+    const cols = Math.max(...rows.map(r => r.length));
+    const [head, ...bodyRows] = rows;
+    const th = Array.from({ length: cols }, (_, i) =>
+      `<th style="text-align:left;border:1px solid #cbd5e1;padding:8px 11px;background:#0f766e;color:#ffffff;font-size:13px;font-weight:600;white-space:nowrap;">${escCell(head[i] ?? "")}</th>`).join("");
+    const tb = bodyRows.map(r =>
+      `<tr>${Array.from({ length: cols }, (_, i) => `<td style="border:1px solid #cbd5e1;padding:8px 11px;font-size:14px;color:#1a2332;vertical-align:top;">${escCell(r[i] ?? "")}</td>`).join("")}</tr>`).join("");
+    const html = `<div style="overflow-x:auto;margin:18px 0;"><table role="presentation" cellspacing="0" cellpadding="0" border="0" style="border-collapse:collapse;border:1px solid #cbd5e1;"><thead><tr>${th}</tr></thead><tbody>${tb}</tbody></table></div>`;
+    const sel = window.getSelection();
+    if (sel && sel.rangeCount) {
+      const holder = document.createElement("div");
+      holder.innerHTML = html;
+      const frag = document.createDocumentFragment();
+      while (holder.firstChild) frag.appendChild(holder.firstChild);
+      const range = sel.getRangeAt(0);
+      range.deleteContents();
+      range.insertNode(frag);
+      range.collapse(false);
+    } else if (bodyRef.current) {
+      bodyRef.current.insertAdjacentHTML("beforeend", html);
+    }
+    flush();
+  };
+
   return (
     <div className={cn(
       "rounded-xl border border-slate-200 bg-white overflow-hidden flex flex-col min-h-0 w-full min-w-0 max-w-full",
@@ -413,6 +449,7 @@ export function EditableEmailPreview({
           contentEditable
           suppressContentEditableWarning
           onInput={(e) => onHtmlChange((e.target as HTMLDivElement).innerHTML)}
+          onPaste={onPaste}
           onKeyUp={saveSelection}
           onMouseMove={onBodyMouseMove}
           onMouseDown={onBodyMouseDown}
