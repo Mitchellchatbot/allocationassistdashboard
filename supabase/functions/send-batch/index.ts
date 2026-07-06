@@ -488,10 +488,15 @@ interface RowData {
 // Gmail) instead of crushing its columns — the reason it was cards before.
 function renderDoctorsTable(rows: RowData[]): string {
   if (rows.length === 0) return `<p style="color:#6c757d;font-size:14px;">No doctors queued.</p>`;
+  // Styled 1:1 with the single-doctor "Available Doctor Format" table in
+  // send-flow-email — teal header row, no font-family override so the whole
+  // table inherits the email's Garamond stack (Hasan 2026-07-06: "same font as
+  // the rest of the emails, exact same styling"). The <div style> that wraps
+  // the rendered body sets font-family:${FONT_STACK}, which cascades in here.
   const th = (label: string) =>
-    `<th style="text-align:left;border:1px solid #cbd5e1;padding:6px 10px;white-space:nowrap;background:#f1f5f9;">${esc(label)}</th>`;
+    `<th style="text-align:left;border:1px solid #cbd5e1;padding:8px 11px;background:#0f766e;color:#ffffff;font-size:13px;font-weight:600;white-space:nowrap;">${esc(label)}</th>`;
   const td = (val: string) =>
-    `<td style="border:1px solid #cbd5e1;padding:6px 10px;">${esc(val)}</td>`;
+    `<td style="border:1px solid #cbd5e1;padding:8px 11px;font-size:14px;color:#1a2332;vertical-align:top;">${esc(val)}</td>`;
   const head =
     `<tr>${th("#")}${th("Name")}${th("Title and Specialty as per the UAE license")}${th("Country Of Training")}` +
     `${th("Years of Experience")}${th("Nationality")}${th("Age")}${th("Marital Status")}${th("Family Status")}` +
@@ -500,8 +505,8 @@ function renderDoctorsTable(rows: RowData[]): string {
     `<tr>${td(String(r.idx))}${td(r.name)}${td(r.title || r.specialty)}${td(r.training)}${td(r.years)}${td(r.nationality)}` +
     `${td(r.age)}${td(r.marital)}${td(r.family)}${td(r.license)}${td(r.salary)}${td(r.notice)}${td(r.mobile)}${td(r.email)}</tr>`,
   ).join("");
-  return `<div style="overflow-x:auto;max-width:100%;margin:18px 0;">` +
-    `<table border="1" cellspacing="0" cellpadding="6" style="border-collapse:collapse;font-family:Arial,Helvetica,sans-serif;font-size:13px;color:#1a2332;border:1px solid #cbd5e1;">` +
+  return `<div style="overflow-x:auto;margin:18px 0;">` +
+    `<table role="presentation" cellspacing="0" cellpadding="0" border="0" style="border-collapse:collapse;border:1px solid #cbd5e1;">` +
     `<thead>${head}</thead><tbody>${body}</tbody></table></div>`;
 }
 
