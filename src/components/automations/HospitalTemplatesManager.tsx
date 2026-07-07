@@ -7,7 +7,7 @@ import { Textarea } from "@/components/ui/textarea";
 import { Badge } from "@/components/ui/badge";
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription, DialogFooter } from "@/components/ui/dialog";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
-import { Hospital as HospitalIcon, Image as ImageIcon, Search, Save, Eye, RotateCcw, Pencil, Wand2, Plus } from "lucide-react";
+import { Hospital as HospitalIcon, Image as ImageIcon, Search, Save, Eye, RotateCcw, Pencil, Wand2, Plus, Sparkles } from "lucide-react";
 import { toast } from "sonner";
 import { useHospitals, useUpdateHospital, type Hospital } from "@/hooks/use-hospitals";
 import {
@@ -65,6 +65,33 @@ const INSERT_TOKENS: Array<{ token: string; label: string }> = [
 ];
 const stub = (label: string) => `<p style="color:#94a3b8;font-style:italic;">[${label} renders here at send time]</p>`;
 const escapeRegExp = (s: string) => s.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+
+// Dictionaries for "Auto-detect" — recognise obvious values in a draft and
+// suggest them as variables (the team still reviews before replacing).
+const CITY_LIST = ["Abu Dhabi", "Al Ain", "Al Dhafra", "Dubai", "Sharjah", "Ras Al Khaimah", "Ajman", "Fujairah", "Umm Al Quwain", "Doha", "Riyadh", "Jeddah", "Dammam", "Al Ahsa", "Dhahran", "Khobar", "Mecca", "Medina", "Manama", "Kuwait City", "Muscat"];
+const COUNTRY_LIST = ["United Arab Emirates", "Saudi Arabia", "UAE", "KSA", "Qatar", "Oman", "Bahrain", "Kuwait"];
+const SPECIALTY_LIST = ["Emergency Medicine", "Family Medicine", "Internal Medicine", "General Surgery", "Plastic Surgery", "Intensive Care", "Neonatology", "Neurosurgery", "Paediatrics", "Pediatrics", "Cardiology", "Neurology", "Orthopaedics", "Orthopedics", "Radiology", "Anaesthesiology", "Anesthesiology", "Dermatology", "Oncology", "Psychiatry", "Obstetrics", "Gynaecology", "Gynecology", "Ophthalmology", "Otolaryngology", "Urology", "Nephrology", "Gastroenterology", "Endocrinology", "Pulmonology", "Pathology", "Haematology", "Hematology", "Rheumatology", "ENT"];
+
+/** Best-effort scan of a draft for obvious concrete values → the token they map
+ *  to. Only patterns we can recognise safely: "Dr. <Name>", a known hospital
+ *  name, and dictionary GCC city / country / specialty. */
+function detectValues(text: string, hospitalNames: string[]): Partial<Record<string, string>> {
+  const out: Record<string, string> = {};
+  const dr = text.match(/\bDr\.?\s+[A-Z][A-Za-z'’-]+(?:\s+[A-Z][A-Za-z'’-]+){0,2}/);
+  if (dr) out.doctor_name = dr[0].replace(/\s+/g, " ").trim();
+  const lc = text.toLowerCase();
+  let bestHospital = "";
+  for (const n of hospitalNames) {
+    if (n && n.length > 4 && lc.includes(n.toLowerCase()) && n.length > bestHospital.length) bestHospital = n;
+  }
+  if (bestHospital) out.hospital_name = bestHospital;
+  const firstMatch = (list: string[]) =>
+    [...list].sort((a, b) => b.length - a.length).find(x => new RegExp(`\\b${escapeRegExp(x)}\\b`, "i").test(text));
+  const city = firstMatch(CITY_LIST);       if (city) out.city = city;
+  const country = firstMatch(COUNTRY_LIST);  if (country) out.country = country;
+  const spec = firstMatch(SPECIALTY_LIST);   if (spec) out.doctor_speciality = spec;
+  return out;
+}
 const slugify = (s: string) => s.toLowerCase().replace(/[^a-z0-9]+/g, "_").replace(/^_+|_+$/g, "").slice(0, 48) || "template";
 
 /** Profile Sent → per-hospital Working-Opportunity editor + a spacious template
@@ -94,6 +121,7 @@ export function HospitalTemplatesManager() {
 
   const withPhoto = hospitals.filter(h => h.image_url).length;
   const withCopy  = hospitals.filter(h => h.doctor_template_key).length;
+  const hospitalNames = useMemo(() => hospitals.map(h => h.name).filter(Boolean), [hospitals]);
 
   return (
     <Card>
@@ -173,19 +201,20 @@ export function HospitalTemplatesManager() {
       </CardContent>
 
       {editing && (
-        <TemplateStudio mode="hospital" hospital={editing} templates={templates} onClose={() => setEditing(null)} />
+        <TemplateStudio mode="hospital" hospital={editing} templates={templates} allHospitalNames={hospitalNames} onClose={() => setEditing(null)} />
       )}
       {creating && (
-        <TemplateStudio mode="new" templates={templates} onClose={() => setCreating(false)} />
+        <TemplateStudio mode="new" templates={templates} allHospitalNames={hospitalNames} onClose={() => setCreating(false)} />
       )}
     </Card>
   );
 }
 
-function TemplateStudio({ mode, hospital, templates, onClose }: {
+function TemplateStudio({ mode, hospital, templates, allHospitalNames, onClose }: {
   mode: "hospital" | "new";
   hospital?: Hospital;
   templates: EmailTemplate[];
+  allHospitalNames: string[];
   onClose: () => void;
 }) {
   const updateH   = useUpdateHospital();
@@ -238,6 +267,25 @@ function TemplateStudio({ mode, hospital, templates, onClose }: {
     const next  = bodyHtml.slice(0, start) + wrapped + bodyHtml.slice(end);
     setBodyHtml(next);
     requestAnimationFrame(() => { el.focus(); const p = start + wrapped.length; el.setSelectionRange(p, p); });
+  };
+
+  const autoDetect = () => {
+    const fullText = `${subject}\n${bodyHtml}\n${bodyText}`;
+    const found = detectValues(fullText, allHospitalNames);
+    const keys = Object.keys(found);
+    if (!keys.length) { toast.info("Couldn't auto-detect anything — type the values in the boxes."); return; }
+    setValues(v => {
+      const next = { ...v };
+      for (const [k, val] of Object.entries(found)) {
+        const cur = next[k]?.trim();
+        // Fill empty boxes, or replace a prefilled value that isn't actually in
+        // the draft (so the swap below will find a real match).
+        const curInText = !!cur && new RegExp(escapeRegExp(cur), "i").test(fullText);
+        if (!cur || !curInText) next[k] = val!;
+      }
+      return next;
+    });
+    toast.success(`Detected ${keys.length}: ${keys.map(k => found[k]).join(", ")}. Review, then Replace.`);
   };
 
   const makeTemplate = () => {
@@ -455,12 +503,18 @@ function TemplateStudio({ mode, hospital, templates, onClose }: {
                 <div className="text-[11px] font-medium text-teal-900 flex items-center gap-1.5">
                   <Wand2 className="h-3.5 w-3.5" /> Make template
                 </div>
-                <Button size="sm" variant="outline" className="h-7 text-[11px] border-teal-300 text-teal-800 hover:bg-teal-100" onClick={makeTemplate}>
-                  Replace values with variables
-                </Button>
+                <div className="flex items-center gap-1.5">
+                  <Button size="sm" variant="ghost" className="h-7 text-[11px] text-teal-800 hover:bg-teal-100" onClick={autoDetect} title="Scan the draft and fill the boxes automatically">
+                    <Sparkles className="h-3.5 w-3.5 mr-1" /> Auto-detect
+                  </Button>
+                  <Button size="sm" variant="outline" className="h-7 text-[11px] border-teal-300 text-teal-800 hover:bg-teal-100" onClick={makeTemplate}>
+                    Replace with variables
+                  </Button>
+                </div>
               </div>
               <p className="text-[10.5px] text-teal-900/70">
-                Type the exact words from your draft; pressing the button swaps every match for its variable (e.g.
+                <strong>Auto-detect</strong> finds obvious values (Dr. names, known hospitals, GCC cities/specialties) — or type the
+                exact words yourself. Then <strong>Replace</strong> swaps every match for its variable (e.g.
                 <code className="bg-white/70 px-1 rounded mx-0.5">Heena Sharma</code>→<code className="bg-white/70 px-1 rounded mx-0.5">{`{{doctor_name}}`}</code>).
               </p>
               <div className="grid grid-cols-2 gap-x-3 gap-y-1.5">
