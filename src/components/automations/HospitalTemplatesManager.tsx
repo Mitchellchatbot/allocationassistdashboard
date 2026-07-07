@@ -14,7 +14,6 @@ import {
   useEmailTemplates, useCreateEmailTemplate, useUpdateEmailTemplate, useDeleteEmailTemplate,
   renderTemplate, type EmailTemplate,
 } from "@/hooks/use-email-templates";
-import { FLOW_DEFINITIONS, FLOW_ORDER } from "@/lib/automation-flows";
 import { uploadEmailAttachment } from "@/lib/email-attachments";
 import { EmailPreview } from "@/components/EmailPreview";
 
@@ -65,6 +64,21 @@ const INSERT_TOKENS: Array<{ token: string; label: string }> = [
 ];
 const stub = (label: string) => `<p style="color:#94a3b8;font-style:italic;">[${label} renders here at send time]</p>`;
 const escapeRegExp = (s: string) => s.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+
+// "Type" options for a NEW template. Profile Sent covers TWO audiences (hospital
+// + doctor) that share flow_key "profile_sent" — split here so the team can make
+// either. `keyBase` seeds the template key so the audience picker routes it right
+// (keys with "doctor"/"hospital" are shown only to the matching send picker). No
+// onboarding — that flow is retired (see automation-flows FLOW_ORDER).
+const TYPE_OPTIONS: Array<{ value: string; label: string; flowKey: string; keyBase: string; from: string }> = [
+  { value: "profile_sent_doctor",   label: "Profile Sent to Doctor (Working Opportunity)", flowKey: "profile_sent",     keyBase: "profile_sent_doctor",   from: "Opportunities <opportunities@allocationassist.com>" },
+  { value: "profile_sent_hospital", label: "Profile Sent to Hospital",                     flowKey: "profile_sent",     keyBase: "profile_sent_hospital", from: "Hospital Intro <hospitalintro@allocationassist.com>" },
+  { value: "shortlist",             label: "Shortlist Confirmation",                       flowKey: "shortlist",        keyBase: "shortlist",             from: "Allocation Assist <hello@allocationassist.com>" },
+  { value: "interview",             label: "Interview Tips + Confirmation",                flowKey: "interview",        keyBase: "interview",             from: "Allocation Assist <hello@allocationassist.com>" },
+  { value: "contract_signing",      label: "Contract Check-in",                            flowKey: "contract_signing", keyBase: "contract",              from: "Allocation Assist <hello@allocationassist.com>" },
+  { value: "relocation",            label: "Relocation Guide + Attestation",               flowKey: "relocation",       keyBase: "relocation",            from: "Allocation Assist <hello@allocationassist.com>" },
+  { value: "second_payment",        label: "Second Payment Invoice",                       flowKey: "second_payment",   keyBase: "second_payment",        from: "Accounts <accounts@allocationassist.com>" },
+];
 
 // Dictionaries for "Auto-detect" — recognise obvious values in a draft and
 // suggest them as variables (the team still reviews before replacing).
@@ -236,7 +250,7 @@ function TemplateStudio({ mode, hospital, templates, allHospitalNames, onClose }
 
   // ── State ────────────────────────────────────────────────────────────────
   const [name, setName]         = useState("");
-  const [flowKey, setFlowKey]   = useState<string>("profile_sent");
+  const [typeValue, setTypeValue] = useState<string>(TYPE_OPTIONS[0].value);
   const [imageUrl, setImageUrl] = useState(hospital?.image_url ?? "");
   const [subject, setSubject]   = useState(base?.subject ?? "");
   const [bodyHtml, setBodyHtml] = useState(seedHtml);
@@ -342,10 +356,11 @@ function TemplateStudio({ mode, hospital, templates, allHospitalNames, onClose }
     try {
       const bodyToSave = withImageSlot(bodyHtml);
       if (mode === "new") {
-        let key = `custom_${slugify(name)}`;
-        for (let n = 2; templates.some(t => t.key === key); n++) key = `custom_${slugify(name)}_${n}`;
+        const opt = TYPE_OPTIONS.find(o => o.value === typeValue) ?? TYPE_OPTIONS[0];
+        let key = `${opt.keyBase}_${slugify(name)}`;
+        for (let n = 2; templates.some(t => t.key === key); n++) key = `${opt.keyBase}_${slugify(name)}_${n}`;
         await createTpl.mutateAsync({
-          key, name: name.trim(), flow_key: flowKey,
+          key, name: name.trim(), flow_key: opt.flowKey,
           subject, body_text: bodyText, body_html: bodyToSave,
           variables: KNOWN_FIELDS.map(f => f.token),
         });
@@ -434,13 +449,12 @@ function TemplateStudio({ mode, hospital, templates, allHospitalNames, onClose }
                 </div>
                 <div>
                   <Label className="text-[11px] uppercase tracking-wider text-muted-foreground">Type</Label>
-                  <Select value={flowKey} onValueChange={setFlowKey}>
+                  <Select value={typeValue} onValueChange={setTypeValue}>
                     <SelectTrigger className="mt-1 h-9 text-[12px]"><SelectValue /></SelectTrigger>
                     <SelectContent>
-                      {FLOW_ORDER.map(fk => (
-                        <SelectItem key={fk} value={fk} className="text-[12px]">{FLOW_DEFINITIONS[fk].name}</SelectItem>
+                      {TYPE_OPTIONS.map(o => (
+                        <SelectItem key={o.value} value={o.value} className="text-[12px]">{o.label}</SelectItem>
                       ))}
-                      <SelectItem value="onboarding" className="text-[12px]">{FLOW_DEFINITIONS.onboarding?.name ?? "Onboarding"}</SelectItem>
                     </SelectContent>
                   </Select>
                 </div>
@@ -547,7 +561,7 @@ function TemplateStudio({ mode, hospital, templates, allHospitalNames, onClose }
               subject={previewSubject}
               html={previewHtml}
               text={previewText}
-              from={mode === "hospital" ? "Opportunities <opportunities@allocationassist.com>" : "Allocation Assist <hello@allocationassist.com>"}
+              from={mode === "hospital" ? "Opportunities <opportunities@allocationassist.com>" : (TYPE_OPTIONS.find(o => o.value === typeValue)?.from ?? "Allocation Assist <hello@allocationassist.com>")}
               to={mode === "hospital" ? "[doctor]" : "[recipient]"}
               templateKey={editTpl?.key ?? (mode === "hospital" ? DEFAULT_DOCTOR_KEY : "new template")}
               banner={<>Preview with sample values — real sends use live data.</>}
