@@ -423,80 +423,91 @@ export function HospitalDialog({
 
   return (
     <Dialog open={open} onOpenChange={(v) => !v && onClose()}>
-      <DialogContent className="sm:max-w-[560px]">
+      <DialogContent className="sm:max-w-[900px] max-h-[90vh] overflow-y-auto">
         <DialogHeader>
           <DialogTitle>{title}</DialogTitle>
           <DialogDescription className="text-[12px]">
             Used by Flow 2 (profile sends) and Flow 5 (relocation guide selection). Email becomes the BCC recipient when sending profiles.
           </DialogDescription>
         </DialogHeader>
-        <div className="grid grid-cols-2 gap-3">
-          <Field label="Name *" className="col-span-2"
-            value={form.name ?? ""} onChange={v => setForm(f => ({ ...f, name: v }))} />
-          <Field label="City"
-            value={form.city ?? ""} onChange={v => setForm(f => ({ ...f, city: v }))} />
-          <Field label="Country"
-            value={form.country ?? ""} onChange={v => setForm(f => ({ ...f, country: v }))} />
-          <Field label="Recruiter email" type="email" className="col-span-2"
-            value={form.primary_recruiter_email ?? ""} onChange={v => setForm(f => ({ ...f, primary_recruiter_email: v }))} />
-          <Field label="Contact name"
-            value={form.primary_contact_name ?? ""} onChange={v => setForm(f => ({ ...f, primary_contact_name: v }))} />
-          <Field label="Phone"
-            value={form.recruiter_phone ?? ""} onChange={v => setForm(f => ({ ...f, recruiter_phone: v }))} />
-
-          {/* Hospital photo — shown in working-opportunity emails via the
-              {{hospital_image}} slot. Paste a URL or upload an image. */}
-          <div className="col-span-2 space-y-1">
-            <Label className="text-[11px]">Hospital photo (shown in working-opportunity emails)</Label>
-            <div className="flex items-center gap-2">
-              <Input
-                value={form.image_url ?? ""}
-                onChange={e => setForm(f => ({ ...f, image_url: e.target.value }))}
-                placeholder="Paste an image URL, or upload →"
-                className="h-9 text-[12px] flex-1"
-              />
-              <label className={`shrink-0 inline-flex h-9 items-center gap-1.5 rounded-md border px-2.5 text-[12px] cursor-pointer hover:bg-slate-50 ${imgUploading ? "opacity-60 pointer-events-none" : ""}`}>
-                {imgUploading ? "Uploading…" : "Upload"}
-                <input type="file" accept="image/png,image/jpeg" className="hidden"
-                  onChange={e => { const f = e.target.files?.[0]; if (f) uploadHospitalImage(f); e.currentTarget.value = ""; }} />
-              </label>
+        {/* Wide, two-column layout so the form reads landscape instead of one tall
+            scroll that clips (Hasan). Left = identity/contact/greeting, right =
+            photo + template + notes. */}
+        <div className="grid grid-cols-1 md:grid-cols-2 gap-x-6 gap-y-4">
+          {/* Left — identity, contact, greeting */}
+          <div className="space-y-3">
+            <Field label="Name *"
+              value={form.name ?? ""} onChange={v => setForm(f => ({ ...f, name: v }))} />
+            <div className="grid grid-cols-2 gap-3">
+              <Field label="City"
+                value={form.city ?? ""} onChange={v => setForm(f => ({ ...f, city: v }))} />
+              <Field label="Country"
+                value={form.country ?? ""} onChange={v => setForm(f => ({ ...f, country: v }))} />
             </div>
-            {form.image_url?.trim() && (
-              <div className="flex items-center gap-2 pt-1">
-                <img src={form.image_url} alt="Hospital" className="h-14 w-24 rounded object-cover border border-slate-200" />
-                <button type="button" onClick={() => setForm(f => ({ ...f, image_url: "" }))} className="text-[11px] text-rose-600 hover:underline">Remove</button>
+            <Field label="Recruiter email" type="email"
+              value={form.primary_recruiter_email ?? ""} onChange={v => setForm(f => ({ ...f, primary_recruiter_email: v }))} />
+            <div className="grid grid-cols-2 gap-3">
+              <Field label="Contact name"
+                value={form.primary_contact_name ?? ""} onChange={v => setForm(f => ({ ...f, primary_contact_name: v }))} />
+              <Field label="Phone"
+                value={form.recruiter_phone ?? ""} onChange={v => setForm(f => ({ ...f, recruiter_phone: v }))} />
+            </div>
+            {/* Greeting source — hospital name vs the named contact person. */}
+            <div className="space-y-1">
+              <Label className="text-[11px] uppercase tracking-wider text-muted-foreground">Email greeting uses</Label>
+              <div className="flex items-center gap-1 rounded-lg bg-slate-100 p-0.5 text-[12px] w-fit">
+                <button type="button" onClick={() => setForm(f => ({ ...f, greet_with_contact_name: false }))}
+                  className={`rounded-md px-3 py-1 font-medium transition-colors ${!form.greet_with_contact_name ? "bg-white shadow-sm text-teal-700" : "text-slate-500"}`}>
+                  Hospital name
+                </button>
+                <button type="button" onClick={() => setForm(f => ({ ...f, greet_with_contact_name: true }))}
+                  className={`rounded-md px-3 py-1 font-medium transition-colors ${form.greet_with_contact_name ? "bg-white shadow-sm text-teal-700" : "text-slate-500"}`}>
+                  Contact name
+                </button>
               </div>
-            )}
-          </div>
-          {/* Greeting source — does the hospital email open with the hospital
-              name or the named contact person? */}
-          <div className="col-span-2 space-y-1">
-            <Label className="text-[11px] uppercase tracking-wider text-muted-foreground">Email greeting uses</Label>
-            <div className="flex items-center gap-1 rounded-lg bg-slate-100 p-0.5 text-[12px] w-fit">
-              <button type="button" onClick={() => setForm(f => ({ ...f, greet_with_contact_name: false }))}
-                className={`rounded-md px-3 py-1 font-medium transition-colors ${!form.greet_with_contact_name ? "bg-white shadow-sm text-teal-700" : "text-slate-500"}`}>
-                Hospital name
-              </button>
-              <button type="button" onClick={() => setForm(f => ({ ...f, greet_with_contact_name: true }))}
-                className={`rounded-md px-3 py-1 font-medium transition-colors ${form.greet_with_contact_name ? "bg-white shadow-sm text-teal-700" : "text-slate-500"}`}>
-                Contact name
-              </button>
+              <p className="text-[10px] text-muted-foreground">
+                Preview: <span className="font-medium text-slate-600">Hello {(form.greet_with_contact_name ? (form.primary_contact_name?.trim() || form.name?.trim()) : form.name?.trim()) || "the team"}!</span>
+                {form.greet_with_contact_name && !form.primary_contact_name?.trim() && <span className="text-amber-600"> — no contact name set, falls back to the hospital name.</span>}
+              </p>
             </div>
-            <p className="text-[10px] text-muted-foreground">
-              Preview: <span className="font-medium text-slate-600">Hello {(form.greet_with_contact_name ? (form.primary_contact_name?.trim() || form.name?.trim()) : form.name?.trim()) || "the team"}!</span>
-              {form.greet_with_contact_name && !form.primary_contact_name?.trim() && <span className="text-amber-600"> — no contact name set, falls back to the hospital name.</span>}
-            </p>
           </div>
-          <Field label="Template key (override)" placeholder="e.g. profile_sent_american_hospital" className="col-span-2"
-            value={form.template_key ?? ""} onChange={v => setForm(f => ({ ...f, template_key: v }))} />
-          <div className="col-span-2">
-            <Label className="text-[11px] uppercase tracking-wider text-muted-foreground">Notes</Label>
-            <Textarea
-              value={form.notes ?? ""}
-              onChange={e => setForm(f => ({ ...f, notes: e.target.value }))}
-              className="mt-1 text-[12px] min-h-[60px]"
-              placeholder="Relationship history, preferred contact times, etc."
-            />
+
+          {/* Right — photo, template override, notes */}
+          <div className="space-y-3">
+            <div className="space-y-1">
+              <Label className="text-[11px]">Hospital photo (shown in working-opportunity emails)</Label>
+              <div className="flex items-center gap-2">
+                <Input
+                  value={form.image_url ?? ""}
+                  onChange={e => setForm(f => ({ ...f, image_url: e.target.value }))}
+                  placeholder="Paste an image URL, or upload →"
+                  className="h-9 text-[12px] flex-1"
+                />
+                <label className={`shrink-0 inline-flex h-9 items-center gap-1.5 rounded-md border px-2.5 text-[12px] cursor-pointer hover:bg-slate-50 ${imgUploading ? "opacity-60 pointer-events-none" : ""}`}>
+                  {imgUploading ? "Uploading…" : "Upload"}
+                  <input type="file" accept="image/png,image/jpeg" className="hidden"
+                    onChange={e => { const f = e.target.files?.[0]; if (f) uploadHospitalImage(f); e.currentTarget.value = ""; }} />
+                </label>
+              </div>
+              {form.image_url?.trim() && (
+                <div className="relative pt-1">
+                  <img src={form.image_url} alt="Hospital" className="w-full aspect-[16/9] rounded-md object-cover border border-slate-200" />
+                  <button type="button" onClick={() => setForm(f => ({ ...f, image_url: "" }))}
+                    className="absolute top-2 right-2 rounded-full bg-white/90 px-2 py-0.5 text-[11px] text-rose-600 hover:bg-white shadow-sm">Remove</button>
+                </div>
+              )}
+            </div>
+            <Field label="Template key (override)" placeholder="e.g. profile_sent_american_hospital"
+              value={form.template_key ?? ""} onChange={v => setForm(f => ({ ...f, template_key: v }))} />
+            <div>
+              <Label className="text-[11px] uppercase tracking-wider text-muted-foreground">Notes</Label>
+              <Textarea
+                value={form.notes ?? ""}
+                onChange={e => setForm(f => ({ ...f, notes: e.target.value }))}
+                className="mt-1 text-[12px] min-h-[120px]"
+                placeholder="Relationship history, preferred contact times, etc."
+              />
+            </div>
           </div>
         </div>
         <DialogFooter>
