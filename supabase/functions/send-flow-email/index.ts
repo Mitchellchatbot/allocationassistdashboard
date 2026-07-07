@@ -369,6 +369,14 @@ Deno.serve(async (req: Request) => {
       console.log("[send-flow-email] using hospital override template:", hRow.template_key);
       templateKey = String(hRow.template_key);
     }
+    // The doctor "working opportunity" email likewise defers to the hospital's
+    // own template (its profile_sent_doctor_<hospital> variant) — that's where
+    // the {{hospital_image}} slot + per-hospital blurb live. Set in the Profile
+    // Sent hospital-templates editor; a per-send pick below still wins.
+    if (run.current_stage === "email_doctor" && hRow?.doctor_template_key) {
+      console.log("[send-flow-email] using hospital doctor template:", hRow.doctor_template_key);
+      templateKey = String(hRow.doctor_template_key);
+    }
   }
 
   // Per-send template pick (Amir #3). The Send Profile dialog can choose which

@@ -16,28 +16,34 @@ import {
 import { uploadEmailAttachment } from "@/lib/email-attachments";
 import { EmailPreview } from "@/components/EmailPreview";
 
-// The stage-default hospital working-opportunity template every hospital falls
-// back to (mirrors send-flow-email's route.template_key for `email_hospital`).
-const DEFAULT_HOSPITAL_KEY = "profile_sent_hospital";
-// A hospital's OWN copy lives at this key and is referenced by hospitals.template_key.
-// Keyed by id so two same-named hospitals never collide.
-const ownKeyFor = (h: Hospital) => `${DEFAULT_HOSPITAL_KEY}__${h.id}`;
+// The doctor "working opportunity" email — the one that carries the hospital
+// photo ({{hospital_image}}). send-flow-email's email_doctor stage defaults to
+// this and falls back to the hospital's own variant (hospitals.doctor_template_key).
+const DEFAULT_DOCTOR_KEY = "profile_sent_doctor";
+// A hospital's OWN working-opportunity copy (created only when it had no
+// pre-built profile_sent_doctor_<hospital> template to start from). Keyed by id.
+const ownKeyFor = (h: Hospital) => `${DEFAULT_DOCTOR_KEY}__${h.id}`;
 
-// Sample values so the preview reads like a real send instead of {{tokens}}.
-// The RAW-HTML tokens (card/table/signature) get italic stand-ins — the real
-// ones are minted by send-flow-email at send time.
+// Put the photo just after the greeting when a template doesn't already have the
+// slot — so a freshly-cloned generic template still shows the hospital photo.
+function withImageSlot(html: string): string {
+  if (!html || html.includes("{{hospital_image}}")) return html;
+  const i = html.indexOf("</p>");
+  return i === -1 ? `{{hospital_image}}\n${html}` : `${html.slice(0, i + 4)}\n{{hospital_image}}${html.slice(i + 4)}`;
+}
+
 const PREVIEW_SANS = `-apple-system, BlinkMacSystemFont, 'Segoe UI', Helvetica, Arial, sans-serif`;
 const PREVIEW_SIGNATURE_HTML = `
 <p style="color:#14b8a6;font-weight:700;font-size:14px;margin:20px 0 2px;line-height:1.45;font-family:${PREVIEW_SANS};">Warmest Regards,</p>
 <p style="color:#14b8a6;font-weight:700;font-size:14px;margin:0 0 2px;line-height:1.45;font-family:${PREVIEW_SANS};">The Allocation Assist team</p>
 <p style="color:#475569;font-size:13px;margin:6px 0 2px;line-height:1.45;font-family:${PREVIEW_SANS};"><span style="color:#14b8a6;">&#x1F4CD;</span> Jumeirah Lakes Towers, Dubai, UAE</p>`;
-const stub = (label: string) => `<p style="color:#94a3b8;font-style:italic;">[${label} renders here at send time]</p>`;
+const PREVIEW_SIGNATURE_TEXT = `\n\nWarmest Regards,\nThe Allocation Assist team\n\nJumeirah Lakes Towers, Dubai, UAE\nwww.allocationassist.com\n`;
 
-/** Manager surfaced on the Profile Sent page: give any hospital its own
- *  Working-Opportunity photo + email copy. Editing clones the shared default
- *  into a per-hospital template (keyed by id) and points the hospital at it, so
- *  every profile send to that hospital uses its own version — the shared
- *  default and other hospitals are untouched. */
+/** Profile Sent → per-hospital Working-Opportunity editor. Each hospital's photo
+ *  and doctor "we have an opportunity" copy live here; send-flow-email uses them
+ *  automatically (hospitals.image_url → {{hospital_image}}, hospitals
+ *  .doctor_template_key → the email_doctor template) so edits reach real sends
+ *  without anyone hand-picking a template. */
 export function HospitalTemplatesManager() {
   const { data: hospitals = [], isLoading } = useHospitals();
   const { data: templates = [] } = useEmailTemplates();
@@ -52,17 +58,15 @@ export function HospitalTemplatesManager() {
           h.city?.toLowerCase().includes(q) ||
           h.country?.toLowerCase().includes(q))
       : hospitals;
-    // Photos first, then custom-copy, then the rest — so the hospitals the team
-    // has already themed float to the top.
     return [...base].sort((a, b) => rank(b) - rank(a));
   }, [hospitals, search]);
 
   function rank(h: Hospital) {
-    return (h.image_url ? 2 : 0) + (h.template_key === ownKeyFor(h) ? 1 : 0);
+    return (h.image_url ? 2 : 0) + (h.doctor_template_key ? 1 : 0);
   }
 
   const withPhoto = hospitals.filter(h => h.image_url).length;
-  const withCopy  = hospitals.filter(h => h.template_key === ownKeyFor(h)).length;
+  const withCopy  = hospitals.filter(h => h.doctor_template_key).length;
 
   return (
     <Card>
@@ -70,16 +74,17 @@ export function HospitalTemplatesManager() {
         <div className="flex items-start justify-between gap-3">
           <div>
             <CardTitle className="text-base flex items-center gap-2">
-              <ImageIcon className="h-4 w-4 text-teal-600" /> Hospital email templates
+              <ImageIcon className="h-4 w-4 text-teal-600" /> Hospital Working-Opportunity templates
             </CardTitle>
-            <CardDescription className="mt-1 max-w-[680px]">
-              Give any hospital its own Working-Opportunity photo and email copy. Edits here become that hospital's
-              own template — every profile send to it uses this version, and the shared default is left untouched.
+            <CardDescription className="mt-1 max-w-[720px]">
+              Each hospital's photo and doctor "we have an opportunity" email copy. Whatever you set here is used
+              automatically whenever a working-opportunity email goes out about that hospital — the photo appears in the
+              email and the wording is that hospital's own. No template-picking needed.
             </CardDescription>
           </div>
           <div className="flex gap-1.5 shrink-0">
             <Badge variant="outline" className="text-[10px]">{withPhoto} with photo</Badge>
-            <Badge variant="outline" className="text-[10px]">{withCopy} custom copy</Badge>
+            <Badge variant="outline" className="text-[10px]">{withCopy} with copy</Badge>
           </div>
         </div>
       </CardHeader>
@@ -100,42 +105,39 @@ export function HospitalTemplatesManager() {
           <div className="py-8 text-center text-[12px] text-muted-foreground">No hospitals match.</div>
         ) : (
           <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 gap-3 max-h-[520px] overflow-y-auto pr-1">
-            {filtered.map(h => {
-              const custom = h.template_key === ownKeyFor(h);
-              return (
-                <button
-                  key={h.id}
-                  onClick={() => setEditing(h)}
-                  className="group text-left rounded-lg border border-slate-200 bg-white overflow-hidden hover:border-teal-300 hover:shadow-sm transition-all"
-                >
-                  <div className="relative aspect-[16/10] bg-slate-100">
-                    {h.image_url ? (
-                      <img src={h.image_url} alt={h.name} loading="lazy" className="h-full w-full object-cover" />
-                    ) : (
-                      <div className="h-full w-full flex items-center justify-center text-slate-300">
-                        <HospitalIcon className="h-7 w-7" />
-                      </div>
-                    )}
-                    <div className="absolute inset-0 bg-black/0 group-hover:bg-black/10 transition-colors flex items-center justify-center">
-                      <span className="opacity-0 group-hover:opacity-100 transition-opacity inline-flex items-center gap-1 rounded-full bg-white/95 px-2.5 py-1 text-[10px] font-medium text-slate-700 shadow">
-                        <Pencil className="h-3 w-3" /> Edit
-                      </span>
+            {filtered.map(h => (
+              <button
+                key={h.id}
+                onClick={() => setEditing(h)}
+                className="group text-left rounded-lg border border-slate-200 bg-white overflow-hidden hover:border-teal-300 hover:shadow-sm transition-all"
+              >
+                <div className="relative aspect-[16/10] bg-slate-100">
+                  {h.image_url ? (
+                    <img src={h.image_url} alt={h.name} loading="lazy" className="h-full w-full object-cover" />
+                  ) : (
+                    <div className="h-full w-full flex items-center justify-center text-slate-300">
+                      <HospitalIcon className="h-7 w-7" />
                     </div>
-                    {custom && (
-                      <span className="absolute top-1.5 left-1.5 rounded-full bg-teal-600 text-white text-[8.5px] font-medium px-1.5 py-0.5 shadow-sm">
-                        Custom copy
-                      </span>
-                    )}
+                  )}
+                  <div className="absolute inset-0 group-hover:bg-black/10 transition-colors flex items-center justify-center">
+                    <span className="opacity-0 group-hover:opacity-100 transition-opacity inline-flex items-center gap-1 rounded-full bg-white/95 px-2.5 py-1 text-[10px] font-medium text-slate-700 shadow">
+                      <Pencil className="h-3 w-3" /> Edit
+                    </span>
                   </div>
-                  <div className="px-2.5 py-1.5">
-                    <div className="text-[11.5px] font-medium text-slate-800 truncate">{h.name}</div>
-                    <div className="text-[10px] text-muted-foreground truncate">
-                      {[h.city, h.country].filter(Boolean).join(" · ") || "No location"}
-                    </div>
+                  {h.doctor_template_key && (
+                    <span className="absolute top-1.5 left-1.5 rounded-full bg-teal-600 text-white text-[8.5px] font-medium px-1.5 py-0.5 shadow-sm">
+                      Custom copy
+                    </span>
+                  )}
+                </div>
+                <div className="px-2.5 py-1.5">
+                  <div className="text-[11.5px] font-medium text-slate-800 truncate">{h.name}</div>
+                  <div className="text-[10px] text-muted-foreground truncate">
+                    {[h.city, h.country].filter(Boolean).join(" · ") || "No location"}
                   </div>
-                </button>
-              );
-            })}
+                </div>
+              </button>
+            ))}
           </div>
         )}
       </CardContent>
@@ -162,39 +164,40 @@ function HospitalTemplateEditor({ hospital, templates, onClose }: {
   const deleteTpl = useDeleteEmailTemplate();
 
   const ownKey = ownKeyFor(hospital);
-  const ownTpl = templates.find(t => t.key === ownKey) ?? null;
-  // Seed from the hospital's own copy if it exists, else whatever it currently
-  // sends (its template_key override, if any), else the shared default.
+  const ownTpl    = templates.find(t => t.key === ownKey) ?? null;
+  const linkedTpl = hospital.doctor_template_key ? templates.find(t => t.key === hospital.doctor_template_key) ?? null : null;
+  // Seed from the hospital's own copy, else its linked WO template, else generic.
   const base =
     ownTpl ??
-    (hospital.template_key ? templates.find(t => t.key === hospital.template_key) : null) ??
-    templates.find(t => t.key === DEFAULT_HOSPITAL_KEY) ??
+    linkedTpl ??
+    templates.find(t => t.key === DEFAULT_DOCTOR_KEY) ??
     null;
+  // Editing an existing dedicated/linked template in place (vs the shared generic).
+  const editTpl = ownTpl ?? (linkedTpl && linkedTpl.key !== DEFAULT_DOCTOR_KEY ? linkedTpl : null);
+  const linked = !!editTpl;
 
+  const seedHtml = withImageSlot(base?.body_html ?? "");
   const [imageUrl, setImageUrl] = useState(hospital.image_url ?? "");
   const [subject,  setSubject]  = useState(base?.subject ?? "");
   const [bodyText, setBodyText] = useState(base?.body_text ?? "");
-  const [bodyHtml, setBodyHtml] = useState(base?.body_html ?? "");
+  const [bodyHtml, setBodyHtml] = useState(seedHtml);
   const [mode, setMode] = useState<"edit" | "preview">("edit");
   const [imgBusy, setImgBusy] = useState(false);
   const [saving, setSaving] = useState(false);
 
-  // Re-seed if the base template arrives after mount (templates still loading).
+  // Re-seed once the base template resolves (templates still loading on open).
   useEffect(() => {
-    if (ownTpl || (!subject && !bodyText && !bodyHtml)) {
-      setSubject(base?.subject ?? "");
-      setBodyText(base?.body_text ?? "");
-      setBodyHtml(base?.body_html ?? "");
-    }
+    setSubject(base?.subject ?? "");
+    setBodyText(base?.body_text ?? "");
+    setBodyHtml(withImageSlot(base?.body_html ?? ""));
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [base?.id]);
 
-  const hasOwn = !!ownTpl;
   const dirty =
     imageUrl !== (hospital.image_url ?? "") ||
     subject  !== (base?.subject ?? "") ||
     bodyText !== (base?.body_text ?? "") ||
-    bodyHtml !== (base?.body_html ?? "");
+    bodyHtml !== seedHtml;
 
   const uploadImg = async (file: File) => {
     setImgBusy(true);
@@ -210,28 +213,21 @@ function HospitalTemplateEditor({ hospital, templates, onClose }: {
   };
 
   const previewVars: Record<string, string> = {
-    doctor_name:          "Dr. Heena Sharma",
-    doctor_speciality:    "Pediatrics",
-    doctor_specialty:     "Pediatrics",
-    hospital_name:        hospital.name,
-    hospital:             hospital.name,
-    hospital_contact_name: hospital.primary_contact_name || "",
-    city:                 hospital.city || "Dubai",
-    country:              hospital.country || "UAE",
-    profile_link:         "https://allocationassist.com/shared-profile/heena-sharma",
-    signature:            PREVIEW_SIGNATURE_HTML,
-    hospital_image:       imageUrl
+    doctor_name:    "Dr. Heena Sharma",
+    hospital_name:  hospital.name,
+    hospital:       hospital.name,
+    city:           hospital.city || "Dubai",
+    country:        hospital.country || "UAE",
+    signature:      PREVIEW_SIGNATURE_HTML,
+    signature_text: PREVIEW_SIGNATURE_TEXT,
+    hospital_image: imageUrl
       ? `<img src="${imageUrl}" alt="${hospital.name}" width="560" style="display:block;width:100%;max-width:560px;height:auto;border-radius:12px;margin:18px 0;border:0;" />`
       : "",
-    logo_header:          "",
-    doctor_card_html:     stub("the doctor profile card"),
-    doctor_row_table_html: stub("the doctor details table"),
-    doctors_table_html:   stub("the multi-doctor table"),
   };
   const previewSubject = renderTemplate(subject, previewVars);
   const previewText    = renderTemplate(bodyText, previewVars);
   const previewHtml    = renderTemplate(
-    bodyHtml || `<pre style="font-family:inherit;white-space:pre-wrap;">${bodyText}</pre>`,
+    withImageSlot(bodyHtml || `<pre style="font-family:inherit;white-space:pre-wrap;">${bodyText}</pre>`),
     previewVars, { html: true },
   );
 
@@ -239,27 +235,29 @@ function HospitalTemplateEditor({ hospital, templates, onClose }: {
     if (!subject.trim()) { toast.error("Subject is required."); return; }
     setSaving(true);
     try {
-      // 1) Photo → the hospital row (drives {{hospital_image}} everywhere).
+      // Photo → the hospital row (drives {{hospital_image}}).
       if (imageUrl !== (hospital.image_url ?? "")) {
         await updateH.mutateAsync({ id: hospital.id, name: hospital.name, image_url: imageUrl || null });
       }
-      // 2) Copy → this hospital's OWN template (create-on-first-edit), then
-      //    point the hospital at it so sends pick it up.
-      if (hasOwn) {
-        await updateTpl.mutateAsync({ id: ownTpl!.id, subject, body_text: bodyText, body_html: bodyHtml });
+      // Copy → the hospital's WO template. Edit its own/linked one in place, else
+      // clone the generic into a dedicated per-hospital template.
+      const bodyToSave = withImageSlot(bodyHtml);
+      let key = editTpl?.key ?? "";
+      if (editTpl) {
+        await updateTpl.mutateAsync({ id: editTpl.id, subject, body_text: bodyText, body_html: bodyToSave });
       } else {
+        key = ownKey;
         await createTpl.mutateAsync({
-          key: ownKey,
-          name: `Working Opportunity — ${hospital.name}`,
+          key, name: `Working Opportunity — ${hospital.name}`,
           flow_key: "profile_sent",
-          subject, body_text: bodyText, body_html: bodyHtml,
+          subject, body_text: bodyText, body_html: bodyToSave,
           variables: base?.variables ?? [],
         });
       }
-      if (hospital.template_key !== ownKey) {
-        await updateH.mutateAsync({ id: hospital.id, name: hospital.name, template_key: ownKey });
+      if (hospital.doctor_template_key !== key) {
+        await updateH.mutateAsync({ id: hospital.id, name: hospital.name, doctor_template_key: key });
       }
-      toast.success(`Saved ${hospital.name}'s template.`);
+      toast.success(`Saved ${hospital.name}'s working-opportunity template.`);
       onClose();
     } catch (e) {
       toast.error(e instanceof Error ? e.message : "Save failed");
@@ -269,12 +267,13 @@ function HospitalTemplateEditor({ hospital, templates, onClose }: {
   };
 
   const revertToDefault = async () => {
-    if (!confirm(`Revert ${hospital.name} to the shared default copy? Its custom photo stays; its custom wording is removed.`)) return;
+    if (!confirm(`Revert ${hospital.name} to the generic working-opportunity copy? Its custom photo stays; its custom wording is unlinked.`)) return;
     setSaving(true);
     try {
-      await updateH.mutateAsync({ id: hospital.id, name: hospital.name, template_key: null });
+      await updateH.mutateAsync({ id: hospital.id, name: hospital.name, doctor_template_key: null });
+      // Only delete a dedicated clone — never the shared pre-built templates.
       if (ownTpl) await deleteTpl.mutateAsync(ownTpl.id);
-      toast.success(`${hospital.name} now uses the shared default copy.`);
+      toast.success(`${hospital.name} now uses the generic working-opportunity copy.`);
       onClose();
     } catch (e) {
       toast.error(e instanceof Error ? e.message : "Revert failed");
@@ -289,20 +288,20 @@ function HospitalTemplateEditor({ hospital, templates, onClose }: {
         <DialogHeader>
           <DialogTitle className="flex items-center gap-2">
             <HospitalIcon className="h-4 w-4 text-teal-600" /> {hospital.name}
+            <span className="text-[11px] font-normal text-muted-foreground">· Working-Opportunity email</span>
           </DialogTitle>
           <DialogDescription className="text-[12px]">
-            {hasOwn
-              ? "Editing this hospital's own Working-Opportunity template."
-              : "This hospital uses the shared default. Saving creates a dedicated copy just for it — other hospitals are unaffected."}
+            {linked
+              ? "Editing this hospital's own working-opportunity template — used automatically on every send about this hospital."
+              : "This hospital uses the generic working-opportunity email. Saving creates a dedicated copy just for it (other hospitals unaffected)."}
           </DialogDescription>
         </DialogHeader>
 
         <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
           {/* Left: editor */}
           <div className="space-y-3">
-            {/* Photo */}
             <div className="space-y-1">
-              <Label className="text-[11px] uppercase tracking-wider text-muted-foreground">Working-opportunity photo</Label>
+              <Label className="text-[11px] uppercase tracking-wider text-muted-foreground">Hospital photo</Label>
               <div className="flex items-center gap-2">
                 <Input
                   value={imageUrl}
@@ -339,13 +338,13 @@ function HospitalTemplateEditor({ hospital, templates, onClose }: {
               <Textarea
                 value={bodyHtml}
                 onChange={e => setBodyHtml(e.target.value)}
-                className="mt-1 text-[12px] min-h-[220px] font-mono"
-                placeholder="<p>Hello {{hospital_name}} team,</p> {{hospital_image}} ..."
+                className="mt-1 text-[12px] min-h-[240px] font-mono"
+                placeholder="<p>Hi {{doctor_name}}!</p> {{hospital_image}} <p>We have an opportunity with ...</p>"
               />
               <div className="text-[10px] text-muted-foreground mt-1">
-                Use <code className="bg-slate-100 px-1 rounded">{`{{hospital_image}}`}</code> where the photo should appear,
-                and tokens like <code className="bg-slate-100 px-1 rounded">{`{{doctor_name}}`}</code>,
-                <code className="bg-slate-100 px-1 rounded ml-1">{`{{hospital_name}}`}</code>. Leave blank to fall back to the plain-text body.
+                <code className="bg-slate-100 px-1 rounded">{`{{hospital_image}}`}</code> is where the photo appears
+                (added automatically if you remove it), plus tokens like
+                <code className="bg-slate-100 px-1 rounded ml-1">{`{{doctor_name}}`}</code>.
               </div>
             </div>
 
@@ -355,7 +354,7 @@ function HospitalTemplateEditor({ hospital, templates, onClose }: {
                 value={bodyText}
                 onChange={e => setBodyText(e.target.value)}
                 className="mt-1 text-[12px] min-h-[120px] font-mono"
-                placeholder="Hello {{hospital_name}} team, ..."
+                placeholder="Hi {{doctor_name}}! We have an opportunity with ..."
               />
             </div>
           </div>
@@ -376,10 +375,10 @@ function HospitalTemplateEditor({ hospital, templates, onClose }: {
                 subject={previewSubject}
                 html={previewHtml}
                 text={previewText}
-                from="Hospital Intro <hospitalintro@allocationassist.com>"
-                to={hospital.primary_recruiter_email || "[hospital recruiter]"}
-                templateKey={hasOwn ? ownKey : DEFAULT_HOSPITAL_KEY}
-                banner={<>Preview for <strong>{hospital.name}</strong> with sample doctor data — real sends use live data.</>}
+                from="Opportunities <opportunities@allocationassist.com>"
+                to="[doctor]"
+                templateKey={editTpl?.key ?? DEFAULT_DOCTOR_KEY}
+                banner={<>Preview for <strong>{hospital.name}</strong> with a sample doctor — real sends use live data.</>}
               />
             </div>
           </div>
@@ -387,9 +386,9 @@ function HospitalTemplateEditor({ hospital, templates, onClose }: {
 
         <DialogFooter className="gap-2 sm:justify-between">
           <div>
-            {hasOwn && (
+            {linked && (
               <Button variant="ghost" onClick={revertToDefault} disabled={saving} className="text-rose-600 hover:text-rose-700">
-                <RotateCcw className="h-3.5 w-3.5 mr-1.5" /> Revert to default copy
+                <RotateCcw className="h-3.5 w-3.5 mr-1.5" /> Revert to generic copy
               </Button>
             )}
           </div>

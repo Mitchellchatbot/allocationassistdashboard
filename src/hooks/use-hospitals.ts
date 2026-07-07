@@ -20,7 +20,11 @@ export interface Hospital {
   recruiter_phone:         string | null;
   /** Hospital photo shown in working-opportunity emails (public storage URL). */
   image_url:               string | null;
+  /** Template used for the to-hospital "profile sent" email (email_hospital stage). */
   template_key:            string | null;
+  /** Template used for the doctor "working opportunity" email about THIS hospital
+   *  (email_doctor stage) — carries the {{hospital_image}} slot. */
+  doctor_template_key:     string | null;
   notes:                   string | null;
   health_score:            number | null;
   created_at:              string;
