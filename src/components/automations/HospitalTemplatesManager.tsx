@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -6,49 +6,76 @@ import { Label } from "@/components/ui/label";
 import { Textarea } from "@/components/ui/textarea";
 import { Badge } from "@/components/ui/badge";
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription, DialogFooter } from "@/components/ui/dialog";
-import { Hospital as HospitalIcon, Image as ImageIcon, Search, Save, Eye, RotateCcw, Pencil } from "lucide-react";
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
+import { Hospital as HospitalIcon, Image as ImageIcon, Search, Save, Eye, RotateCcw, Pencil, Wand2, Plus } from "lucide-react";
 import { toast } from "sonner";
 import { useHospitals, useUpdateHospital, type Hospital } from "@/hooks/use-hospitals";
 import {
   useEmailTemplates, useCreateEmailTemplate, useUpdateEmailTemplate, useDeleteEmailTemplate,
   renderTemplate, type EmailTemplate,
 } from "@/hooks/use-email-templates";
+import { FLOW_DEFINITIONS, FLOW_ORDER } from "@/lib/automation-flows";
 import { uploadEmailAttachment } from "@/lib/email-attachments";
 import { EmailPreview } from "@/components/EmailPreview";
 
-// The doctor "working opportunity" email — the one that carries the hospital
-// photo ({{hospital_image}}). send-flow-email's email_doctor stage defaults to
-// this and falls back to the hospital's own variant (hospitals.doctor_template_key).
+// The doctor "working opportunity" email — the one carrying the hospital photo
+// ({{hospital_image}}). send-flow-email's email_doctor stage defaults to this and
+// falls back to the hospital's own variant (hospitals.doctor_template_key).
 const DEFAULT_DOCTOR_KEY = "profile_sent_doctor";
-// A hospital's OWN working-opportunity copy (created only when it had no
-// pre-built profile_sent_doctor_<hospital> template to start from). Keyed by id.
 const ownKeyFor = (h: Hospital) => `${DEFAULT_DOCTOR_KEY}__${h.id}`;
 
-// Put the photo just after the greeting when a template doesn't already have the
-// slot — so a freshly-cloned generic template still shows the hospital photo.
+// Put the photo just after the greeting when a template lacks the slot.
 function withImageSlot(html: string): string {
   if (!html || html.includes("{{hospital_image}}")) return html;
   const i = html.indexOf("</p>");
   return i === -1 ? `{{hospital_image}}\n${html}` : `${html.slice(0, i + 4)}\n{{hospital_image}}${html.slice(i + 4)}`;
 }
 
+// Full send signature (logo + website) so the preview matches the real email —
+// mirrors send-flow-email's signatureHtml() / EmailTemplatesTab's stand-in.
+const PREVIEW_LOGO_URL = `${import.meta.env.VITE_SUPABASE_URL}/storage/v1/object/public/email-assets/logo.png`;
 const PREVIEW_SANS = `-apple-system, BlinkMacSystemFont, 'Segoe UI', Helvetica, Arial, sans-serif`;
-const PREVIEW_SIGNATURE_HTML = `
-<p style="color:#14b8a6;font-weight:700;font-size:14px;margin:20px 0 2px;line-height:1.45;font-family:${PREVIEW_SANS};">Warmest Regards,</p>
+const FULL_SIGNATURE_HTML = `
+<p style="margin:24px 0 0;font-family:${PREVIEW_SANS};font-size:14px;color:#1a2332;line-height:1.5;">&nbsp;</p>
+<p style="color:#14b8a6;font-weight:700;font-size:14px;margin:0 0 2px;line-height:1.45;font-family:${PREVIEW_SANS};">Warmest Regards,</p>
 <p style="color:#14b8a6;font-weight:700;font-size:14px;margin:0 0 2px;line-height:1.45;font-family:${PREVIEW_SANS};">The Allocation Assist team</p>
-<p style="color:#475569;font-size:13px;margin:6px 0 2px;line-height:1.45;font-family:${PREVIEW_SANS};"><span style="color:#14b8a6;">&#x1F4CD;</span> Jumeirah Lakes Towers, Dubai, UAE</p>`;
-const PREVIEW_SIGNATURE_TEXT = `\n\nWarmest Regards,\nThe Allocation Assist team\n\nJumeirah Lakes Towers, Dubai, UAE\nwww.allocationassist.com\n`;
+<p style="color:#475569;font-size:13px;margin:6px 0 2px;line-height:1.45;font-family:${PREVIEW_SANS};"><span style="color:#14b8a6;">&#x1F4CD;</span> Jumeirah Lakes Towers, Dubai, UAE</p>
+<p style="font-size:13px;margin:2px 0 16px;line-height:1.45;font-family:${PREVIEW_SANS};"><a href="https://www.allocationassist.com" style="color:#1d4ed8;text-decoration:underline;">www.allocationassist.com</a></p>
+<table role="presentation" cellpadding="0" cellspacing="0" style="border-collapse:collapse;margin:8px 0 0;">
+  <tr><td style="padding:0;"><img src="${PREVIEW_LOGO_URL}" alt="Allocation Assist" width="180" height="119" style="display:block;border:0;outline:none;max-width:180px;width:180px;height:auto;" /></td></tr>
+</table>`;
+const FULL_SIGNATURE_TEXT = `\n\nWarmest Regards,\nThe Allocation Assist team\n\nJumeirah Lakes Towers, Dubai, UAE\nwww.allocationassist.com\n`;
 
-/** Profile Sent → per-hospital Working-Opportunity editor. Each hospital's photo
- *  and doctor "we have an opportunity" copy live here; send-flow-email uses them
- *  automatically (hospitals.image_url → {{hospital_image}}, hospitals
- *  .doctor_template_key → the email_doctor template) so edits reach real sends
- *  without anyone hand-picking a template. */
+// Concrete values people type in a draft → the token they become when you press
+// "Make template". Sample is used to render the live preview naturally.
+const KNOWN_FIELDS: Array<{ token: string; label: string; sample: string }> = [
+  { token: "doctor_name",           label: "Doctor name",     sample: "Dr. Heena Sharma" },
+  { token: "doctor_speciality",     label: "Specialty",       sample: "Pediatrics" },
+  { token: "hospital_name",         label: "Hospital",        sample: "Mediclinic" },
+  { token: "hospital_contact_name", label: "Hospital contact", sample: "Hassan" },
+  { token: "city",                  label: "City",            sample: "Dubai" },
+  { token: "country",               label: "Country",         sample: "UAE" },
+];
+// Structural tokens inserted at the cursor (not typed as literal text).
+const INSERT_TOKENS: Array<{ token: string; label: string }> = [
+  { token: "hospital_image",        label: "Hospital photo" },
+  { token: "signature",             label: "Signature" },
+  { token: "doctor_card_html",      label: "Doctor card" },
+  { token: "doctor_row_table_html", label: "Doctor details table" },
+];
+const stub = (label: string) => `<p style="color:#94a3b8;font-style:italic;">[${label} renders here at send time]</p>`;
+const escapeRegExp = (s: string) => s.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+const slugify = (s: string) => s.toLowerCase().replace(/[^a-z0-9]+/g, "_").replace(/^_+|_+$/g, "").slice(0, 48) || "template";
+
+/** Profile Sent → per-hospital Working-Opportunity editor + a spacious template
+ *  maker. Photo → hospitals.image_url; copy → the hospital's doctor template
+ *  (hospitals.doctor_template_key), both used automatically by send-flow-email. */
 export function HospitalTemplatesManager() {
   const { data: hospitals = [], isLoading } = useHospitals();
   const { data: templates = [] } = useEmailTemplates();
   const [search, setSearch] = useState("");
   const [editing, setEditing] = useState<Hospital | null>(null);
+  const [creating, setCreating] = useState(false);
 
   const filtered = useMemo(() => {
     const q = search.trim().toLowerCase();
@@ -77,14 +104,17 @@ export function HospitalTemplatesManager() {
               <ImageIcon className="h-4 w-4 text-teal-600" /> Hospital Working-Opportunity templates
             </CardTitle>
             <CardDescription className="mt-1 max-w-[720px]">
-              Each hospital's photo and doctor "we have an opportunity" email copy. Whatever you set here is used
-              automatically whenever a working-opportunity email goes out about that hospital — the photo appears in the
-              email and the wording is that hospital's own. No template-picking needed.
+              Each hospital's photo and "we have an opportunity" email copy — used automatically whenever a
+              working-opportunity email goes out about that hospital. Or start a brand-new template: write it normally,
+              then let <em>Make template</em> turn the names into variables.
             </CardDescription>
           </div>
-          <div className="flex gap-1.5 shrink-0">
-            <Badge variant="outline" className="text-[10px]">{withPhoto} with photo</Badge>
-            <Badge variant="outline" className="text-[10px]">{withCopy} with copy</Badge>
+          <div className="flex items-center gap-2 shrink-0">
+            <Badge variant="outline" className="text-[10px]">{withPhoto} photo</Badge>
+            <Badge variant="outline" className="text-[10px]">{withCopy} copy</Badge>
+            <Button size="sm" onClick={() => setCreating(true)}>
+              <Plus className="h-3.5 w-3.5 mr-1" /> New template
+            </Button>
           </div>
         </div>
       </CardHeader>
@@ -143,18 +173,18 @@ export function HospitalTemplatesManager() {
       </CardContent>
 
       {editing && (
-        <HospitalTemplateEditor
-          hospital={editing}
-          templates={templates}
-          onClose={() => setEditing(null)}
-        />
+        <TemplateStudio mode="hospital" hospital={editing} templates={templates} onClose={() => setEditing(null)} />
+      )}
+      {creating && (
+        <TemplateStudio mode="new" templates={templates} onClose={() => setCreating(false)} />
       )}
     </Card>
   );
 }
 
-function HospitalTemplateEditor({ hospital, templates, onClose }: {
-  hospital: Hospital;
+function TemplateStudio({ mode, hospital, templates, onClose }: {
+  mode: "hospital" | "new";
+  hospital?: Hospital;
   templates: EmailTemplate[];
   onClose: () => void;
 }) {
@@ -163,66 +193,87 @@ function HospitalTemplateEditor({ hospital, templates, onClose }: {
   const updateTpl = useUpdateEmailTemplate();
   const deleteTpl = useDeleteEmailTemplate();
 
-  const ownKey = ownKeyFor(hospital);
-  const ownTpl    = templates.find(t => t.key === ownKey) ?? null;
-  const linkedTpl = hospital.doctor_template_key ? templates.find(t => t.key === hospital.doctor_template_key) ?? null : null;
-  // Seed from the hospital's own copy, else its linked WO template, else generic.
-  const base =
-    ownTpl ??
-    linkedTpl ??
-    templates.find(t => t.key === DEFAULT_DOCTOR_KEY) ??
-    null;
-  // Editing an existing dedicated/linked template in place (vs the shared generic).
-  const editTpl = ownTpl ?? (linkedTpl && linkedTpl.key !== DEFAULT_DOCTOR_KEY ? linkedTpl : null);
+  // ── Resolve the base template we're editing ──────────────────────────────
+  const ownKey    = hospital ? ownKeyFor(hospital) : "";
+  const ownTpl    = hospital ? templates.find(t => t.key === ownKey) ?? null : null;
+  const linkedTpl = hospital?.doctor_template_key ? templates.find(t => t.key === hospital.doctor_template_key) ?? null : null;
+  const base = mode === "hospital"
+    ? (ownTpl ?? linkedTpl ?? templates.find(t => t.key === DEFAULT_DOCTOR_KEY) ?? null)
+    : null;
+  const editTpl = mode === "hospital" ? (ownTpl ?? (linkedTpl && linkedTpl.key !== DEFAULT_DOCTOR_KEY ? linkedTpl : null)) : null;
   const linked = !!editTpl;
 
-  const seedHtml = withImageSlot(base?.body_html ?? "");
-  const [imageUrl, setImageUrl] = useState(hospital.image_url ?? "");
-  const [subject,  setSubject]  = useState(base?.subject ?? "");
-  const [bodyText, setBodyText] = useState(base?.body_text ?? "");
-  const [bodyHtml, setBodyHtml] = useState(seedHtml);
-  const [mode, setMode] = useState<"edit" | "preview">("edit");
-  const [imgBusy, setImgBusy] = useState(false);
-  const [saving, setSaving] = useState(false);
+  const seedHtml = mode === "hospital" ? withImageSlot(base?.body_html ?? "") : "";
 
-  // Re-seed once the base template resolves (templates still loading on open).
+  // ── State ────────────────────────────────────────────────────────────────
+  const [name, setName]         = useState("");
+  const [flowKey, setFlowKey]   = useState<string>("profile_sent");
+  const [imageUrl, setImageUrl] = useState(hospital?.image_url ?? "");
+  const [subject, setSubject]   = useState(base?.subject ?? "");
+  const [bodyHtml, setBodyHtml] = useState(seedHtml);
+  const [bodyText, setBodyText] = useState(base?.body_text ?? "");
+  const [values, setValues]     = useState<Record<string, string>>(
+    hospital ? { hospital_name: hospital.name, city: hospital.city ?? "", country: hospital.country ?? "" } : {},
+  );
+  const [mobileTab, setMobileTab] = useState<"edit" | "preview">("edit");
+  const [imgBusy, setImgBusy] = useState(false);
+  const [saving, setSaving]   = useState(false);
+  const bodyRef = useRef<HTMLTextAreaElement>(null);
+
   useEffect(() => {
+    if (mode !== "hospital") return;
     setSubject(base?.subject ?? "");
     setBodyText(base?.body_text ?? "");
     setBodyHtml(withImageSlot(base?.body_html ?? ""));
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [base?.id]);
 
-  const dirty =
-    imageUrl !== (hospital.image_url ?? "") ||
-    subject  !== (base?.subject ?? "") ||
-    bodyText !== (base?.body_text ?? "") ||
-    bodyHtml !== seedHtml;
+  // ── Helpers ────────────────────────────────────────────────────────────
+  const insertToken = (tok: string) => {
+    const el = bodyRef.current;
+    const wrapped = `{{${tok}}}`;
+    if (!el) { setBodyHtml(h => h + wrapped); return; }
+    const start = el.selectionStart ?? bodyHtml.length;
+    const end   = el.selectionEnd ?? bodyHtml.length;
+    const next  = bodyHtml.slice(0, start) + wrapped + bodyHtml.slice(end);
+    setBodyHtml(next);
+    requestAnimationFrame(() => { el.focus(); const p = start + wrapped.length; el.setSelectionRange(p, p); });
+  };
+
+  const makeTemplate = () => {
+    let s = subject, h = bodyHtml, t = bodyText, count = 0;
+    for (const f of KNOWN_FIELDS) {
+      const val = (values[f.token] ?? "").trim();
+      if (val.length < 2) continue; // ignore blanks / single chars
+      const re = new RegExp(escapeRegExp(val), "gi");
+      const tok = `{{${f.token}}}`;
+      const rep = (str: string) => str.replace(re, () => { count++; return tok; });
+      s = rep(s); h = rep(h); t = rep(t);
+    }
+    setSubject(s); setBodyHtml(h); setBodyText(t);
+    if (count) toast.success(`Replaced ${count} value${count === 1 ? "" : "s"} with variables.`);
+    else toast.info("Fill the boxes with the exact words from your draft first.");
+  };
 
   const uploadImg = async (file: File) => {
     setImgBusy(true);
-    try {
-      const att = await uploadEmailAttachment(file);
-      setImageUrl(att.path);
-      toast.success("Photo uploaded.");
-    } catch (e) {
-      toast.error(e instanceof Error ? e.message : "Upload failed");
-    } finally {
-      setImgBusy(false);
-    }
+    try { const att = await uploadEmailAttachment(file); setImageUrl(att.path); toast.success("Photo uploaded."); }
+    catch (e) { toast.error(e instanceof Error ? e.message : "Upload failed"); }
+    finally { setImgBusy(false); }
   };
 
+  // ── Preview ────────────────────────────────────────────────────────────
   const previewVars: Record<string, string> = {
-    doctor_name:    "Dr. Heena Sharma",
-    hospital_name:  hospital.name,
-    hospital:       hospital.name,
-    city:           hospital.city || "Dubai",
-    country:        hospital.country || "UAE",
-    signature:      PREVIEW_SIGNATURE_HTML,
-    signature_text: PREVIEW_SIGNATURE_TEXT,
+    ...Object.fromEntries(KNOWN_FIELDS.map(f => [f.token, (values[f.token]?.trim() || f.sample)])),
+    signature: FULL_SIGNATURE_HTML,
+    signature_text: FULL_SIGNATURE_TEXT,
     hospital_image: imageUrl
-      ? `<img src="${imageUrl}" alt="${hospital.name}" width="560" style="display:block;width:100%;max-width:560px;height:auto;border-radius:12px;margin:18px 0;border:0;" />`
+      ? `<img src="${imageUrl}" alt="${hospital?.name ?? "Hospital"}" width="560" style="display:block;width:100%;max-width:560px;height:auto;border-radius:12px;margin:18px 0;border:0;" />`
       : "",
+    doctor_card_html: stub("the doctor profile card"),
+    doctor_row_table_html: stub("the doctor details table"),
+    doctors_table_html: stub("the multi-doctor table"),
+    logo_header: "",
   };
   const previewSubject = renderTemplate(subject, previewVars);
   const previewText    = renderTemplate(bodyText, previewVars);
@@ -231,33 +282,45 @@ function HospitalTemplateEditor({ hospital, templates, onClose }: {
     previewVars, { html: true },
   );
 
+  const dirty = mode === "new"
+    ? !!(name.trim() && (subject.trim() || bodyHtml.trim()))
+    : imageUrl !== (hospital?.image_url ?? "") || subject !== (base?.subject ?? "") || bodyText !== (base?.body_text ?? "") || bodyHtml !== seedHtml;
+
+  // ── Save ─────────────────────────────────────────────────────────────────
   const handleSave = async () => {
+    if (mode === "new" && !name.trim()) { toast.error("Give the template a name."); return; }
     if (!subject.trim()) { toast.error("Subject is required."); return; }
     setSaving(true);
     try {
-      // Photo → the hospital row (drives {{hospital_image}}).
-      if (imageUrl !== (hospital.image_url ?? "")) {
-        await updateH.mutateAsync({ id: hospital.id, name: hospital.name, image_url: imageUrl || null });
-      }
-      // Copy → the hospital's WO template. Edit its own/linked one in place, else
-      // clone the generic into a dedicated per-hospital template.
       const bodyToSave = withImageSlot(bodyHtml);
-      let key = editTpl?.key ?? "";
-      if (editTpl) {
-        await updateTpl.mutateAsync({ id: editTpl.id, subject, body_text: bodyText, body_html: bodyToSave });
-      } else {
-        key = ownKey;
+      if (mode === "new") {
+        let key = `custom_${slugify(name)}`;
+        for (let n = 2; templates.some(t => t.key === key); n++) key = `custom_${slugify(name)}_${n}`;
         await createTpl.mutateAsync({
-          key, name: `Working Opportunity — ${hospital.name}`,
-          flow_key: "profile_sent",
+          key, name: name.trim(), flow_key: flowKey,
           subject, body_text: bodyText, body_html: bodyToSave,
-          variables: base?.variables ?? [],
+          variables: KNOWN_FIELDS.map(f => f.token),
         });
+        toast.success(`Created template "${name.trim()}".`);
+      } else if (hospital) {
+        if (imageUrl !== (hospital.image_url ?? "")) {
+          await updateH.mutateAsync({ id: hospital.id, name: hospital.name, image_url: imageUrl || null });
+        }
+        let key = editTpl?.key ?? "";
+        if (editTpl) {
+          await updateTpl.mutateAsync({ id: editTpl.id, subject, body_text: bodyText, body_html: bodyToSave });
+        } else {
+          key = ownKey;
+          await createTpl.mutateAsync({
+            key, name: `Working Opportunity — ${hospital.name}`, flow_key: "profile_sent",
+            subject, body_text: bodyText, body_html: bodyToSave, variables: base?.variables ?? [],
+          });
+        }
+        if (hospital.doctor_template_key !== key) {
+          await updateH.mutateAsync({ id: hospital.id, name: hospital.name, doctor_template_key: key });
+        }
+        toast.success(`Saved ${hospital.name}'s working-opportunity template.`);
       }
-      if (hospital.doctor_template_key !== key) {
-        await updateH.mutateAsync({ id: hospital.id, name: hospital.name, doctor_template_key: key });
-      }
-      toast.success(`Saved ${hospital.name}'s working-opportunity template.`);
       onClose();
     } catch (e) {
       toast.error(e instanceof Error ? e.message : "Save failed");
@@ -267,13 +330,13 @@ function HospitalTemplateEditor({ hospital, templates, onClose }: {
   };
 
   const revertToDefault = async () => {
+    if (!hospital) return;
     if (!confirm(`Revert ${hospital.name} to the generic working-opportunity copy? Its custom photo stays; its custom wording is unlinked.`)) return;
     setSaving(true);
     try {
       await updateH.mutateAsync({ id: hospital.id, name: hospital.name, doctor_template_key: null });
-      // Only delete a dedicated clone — never the shared pre-built templates.
       if (ownTpl) await deleteTpl.mutateAsync(ownTpl.id);
-      toast.success(`${hospital.name} now uses the generic working-opportunity copy.`);
+      toast.success(`${hospital.name} now uses the generic copy.`);
       onClose();
     } catch (e) {
       toast.error(e instanceof Error ? e.message : "Revert failed");
@@ -282,111 +345,165 @@ function HospitalTemplateEditor({ hospital, templates, onClose }: {
     }
   };
 
+  const title = mode === "new" ? "New template" : hospital!.name;
+
   return (
     <Dialog open onOpenChange={v => !v && onClose()}>
-      <DialogContent className="sm:max-w-[920px] max-h-[92vh] overflow-y-auto">
-        <DialogHeader>
+      <DialogContent className="sm:max-w-[1120px] max-h-[94vh] overflow-y-auto p-0 gap-0">
+        <DialogHeader className="px-6 pt-6 pb-3 border-b">
           <DialogTitle className="flex items-center gap-2">
-            <HospitalIcon className="h-4 w-4 text-teal-600" /> {hospital.name}
+            {mode === "new" ? <Wand2 className="h-4 w-4 text-teal-600" /> : <HospitalIcon className="h-4 w-4 text-teal-600" />}
+            {title}
             <span className="text-[11px] font-normal text-muted-foreground">· Working-Opportunity email</span>
           </DialogTitle>
           <DialogDescription className="text-[12px]">
-            {linked
-              ? "Editing this hospital's own working-opportunity template — used automatically on every send about this hospital."
-              : "This hospital uses the generic working-opportunity email. Saving creates a dedicated copy just for it (other hospitals unaffected)."}
+            {mode === "new"
+              ? "Write the email with real names, fill the boxes below with the exact words you used, then press Make template to turn them into reusable variables."
+              : linked
+                ? "Editing this hospital's own template — used automatically on every working-opportunity send about it."
+                : "This hospital uses the generic email. Saving creates a dedicated copy just for it."}
           </DialogDescription>
         </DialogHeader>
 
-        <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
-          {/* Left: editor */}
-          <div className="space-y-3">
-            <div className="space-y-1">
-              <Label className="text-[11px] uppercase tracking-wider text-muted-foreground">Hospital photo</Label>
-              <div className="flex items-center gap-2">
-                <Input
-                  value={imageUrl}
-                  onChange={e => setImageUrl(e.target.value)}
-                  placeholder="Paste an image URL, or upload →"
-                  className="h-9 text-[12px] flex-1"
-                />
-                <label className={`shrink-0 inline-flex h-9 items-center gap-1.5 rounded-md border px-2.5 text-[12px] cursor-pointer hover:bg-slate-50 ${imgBusy ? "opacity-60 pointer-events-none" : ""}`}>
-                  {imgBusy ? "Uploading…" : "Upload"}
-                  <input type="file" accept="image/png,image/jpeg" className="hidden"
-                    onChange={e => { const f = e.target.files?.[0]; if (f) uploadImg(f); e.currentTarget.value = ""; }} />
-                </label>
-              </div>
-              {imageUrl.trim() && (
-                <div className="flex items-center gap-2 pt-1">
-                  <img src={imageUrl} alt={hospital.name} className="h-16 w-28 rounded object-cover border border-slate-200" />
-                  <button type="button" onClick={() => setImageUrl("")} className="text-[11px] text-rose-600 hover:underline">Remove photo</button>
+        {/* Mobile tab switch */}
+        <div className="flex lg:hidden gap-1 px-6 pt-3">
+          {(["edit", "preview"] as const).map(t => (
+            <button key={t} onClick={() => setMobileTab(t)}
+              className={`px-3 py-1 text-[11px] rounded-md border ${mobileTab === t ? "bg-slate-900 text-white" : "bg-white text-slate-600"}`}>
+              {t === "edit" ? "Write" : "Preview"}
+            </button>
+          ))}
+        </div>
+
+        <div className="grid grid-cols-1 lg:grid-cols-2 gap-0">
+          {/* ── Left: write ──────────────────────────────────────────── */}
+          <div className={`${mobileTab === "preview" ? "hidden lg:block" : ""} p-6 space-y-4 lg:border-r`}>
+            {mode === "new" && (
+              <div className="grid grid-cols-[1fr_180px] gap-3">
+                <div>
+                  <Label className="text-[11px] uppercase tracking-wider text-muted-foreground">Template name</Label>
+                  <Input value={name} onChange={e => setName(e.target.value)} placeholder="e.g. Working Opportunity — Cleveland Clinic" className="mt-1 text-[12px]" />
                 </div>
-              )}
-            </div>
+                <div>
+                  <Label className="text-[11px] uppercase tracking-wider text-muted-foreground">Type</Label>
+                  <Select value={flowKey} onValueChange={setFlowKey}>
+                    <SelectTrigger className="mt-1 h-9 text-[12px]"><SelectValue /></SelectTrigger>
+                    <SelectContent>
+                      {FLOW_ORDER.map(fk => (
+                        <SelectItem key={fk} value={fk} className="text-[12px]">{FLOW_DEFINITIONS[fk].name}</SelectItem>
+                      ))}
+                      <SelectItem value="onboarding" className="text-[12px]">{FLOW_DEFINITIONS.onboarding?.name ?? "Onboarding"}</SelectItem>
+                    </SelectContent>
+                  </Select>
+                </div>
+              </div>
+            )}
+
+            {mode === "hospital" && (
+              <div className="space-y-1">
+                <Label className="text-[11px] uppercase tracking-wider text-muted-foreground">Hospital photo</Label>
+                <div className="flex items-center gap-2">
+                  <Input value={imageUrl} onChange={e => setImageUrl(e.target.value)} placeholder="Paste an image URL, or upload →" className="h-9 text-[12px] flex-1" />
+                  <label className={`shrink-0 inline-flex h-9 items-center gap-1.5 rounded-md border px-2.5 text-[12px] cursor-pointer hover:bg-slate-50 ${imgBusy ? "opacity-60 pointer-events-none" : ""}`}>
+                    {imgBusy ? "Uploading…" : "Upload"}
+                    <input type="file" accept="image/png,image/jpeg" className="hidden"
+                      onChange={e => { const f = e.target.files?.[0]; if (f) uploadImg(f); e.currentTarget.value = ""; }} />
+                  </label>
+                </div>
+                {imageUrl.trim() && (
+                  <div className="flex items-center gap-2 pt-1">
+                    <img src={imageUrl} alt={hospital?.name} className="h-16 w-28 rounded object-cover border border-slate-200" />
+                    <button type="button" onClick={() => setImageUrl("")} className="text-[11px] text-rose-600 hover:underline">Remove photo</button>
+                  </div>
+                )}
+              </div>
+            )}
 
             <div>
               <div className="flex items-center justify-between">
                 <Label className="text-[11px] uppercase tracking-wider text-muted-foreground">Subject</Label>
-                <span className={`text-[10px] ${subject.length > 70 ? "text-rose-600 font-medium" : subject.length > 55 ? "text-amber-600" : "text-muted-foreground"}`}>
-                  {subject.length} chars
-                </span>
+                <span className={`text-[10px] ${subject.length > 70 ? "text-rose-600 font-medium" : subject.length > 55 ? "text-amber-600" : "text-muted-foreground"}`}>{subject.length} chars</span>
               </div>
-              <Input value={subject} onChange={e => setSubject(e.target.value)} className="mt-1 text-[12px]" />
+              <Input value={subject} onChange={e => setSubject(e.target.value)} className="mt-1 text-[12px]" placeholder="We have an opportunity for you" />
             </div>
 
             <div>
-              <Label className="text-[11px] uppercase tracking-wider text-muted-foreground">Email body (HTML)</Label>
+              <div className="flex items-center justify-between mb-1">
+                <Label className="text-[11px] uppercase tracking-wider text-muted-foreground">Email body</Label>
+                <div className="flex flex-wrap gap-1 justify-end">
+                  {INSERT_TOKENS.map(t => (
+                    <button key={t.token} type="button" onClick={() => insertToken(t.token)}
+                      title={`Insert {{${t.token}}}`}
+                      className="text-[10px] rounded border border-slate-200 bg-slate-50 px-1.5 py-0.5 text-slate-600 hover:border-teal-300 hover:text-teal-700">
+                      + {t.label}
+                    </button>
+                  ))}
+                </div>
+              </div>
               <Textarea
+                ref={bodyRef}
                 value={bodyHtml}
                 onChange={e => setBodyHtml(e.target.value)}
-                className="mt-1 text-[12px] min-h-[240px] font-mono"
-                placeholder="<p>Hi {{doctor_name}}!</p> {{hospital_image}} <p>We have an opportunity with ...</p>"
+                className="text-[12.5px] min-h-[360px] font-mono leading-relaxed"
+                placeholder={"Hi Dr. Heena Sharma!\n\nWe have an opportunity with Mediclinic in Dubai and we highly recommend your profile.\n\n(Write it naturally with real names — Make template turns them into variables.)"}
               />
-              <div className="text-[10px] text-muted-foreground mt-1">
-                <code className="bg-slate-100 px-1 rounded">{`{{hospital_image}}`}</code> is where the photo appears
-                (added automatically if you remove it), plus tokens like
-                <code className="bg-slate-100 px-1 rounded ml-1">{`{{doctor_name}}`}</code>.
+            </div>
+
+            {/* Make template — values → variables */}
+            <div className="rounded-lg border border-teal-200 bg-teal-50/40 p-3 space-y-2">
+              <div className="flex items-center justify-between gap-2">
+                <div className="text-[11px] font-medium text-teal-900 flex items-center gap-1.5">
+                  <Wand2 className="h-3.5 w-3.5" /> Make template
+                </div>
+                <Button size="sm" variant="outline" className="h-7 text-[11px] border-teal-300 text-teal-800 hover:bg-teal-100" onClick={makeTemplate}>
+                  Replace values with variables
+                </Button>
+              </div>
+              <p className="text-[10.5px] text-teal-900/70">
+                Type the exact words from your draft; pressing the button swaps every match for its variable (e.g.
+                <code className="bg-white/70 px-1 rounded mx-0.5">Heena Sharma</code>→<code className="bg-white/70 px-1 rounded mx-0.5">{`{{doctor_name}}`}</code>).
+              </p>
+              <div className="grid grid-cols-2 gap-x-3 gap-y-1.5">
+                {KNOWN_FIELDS.map(f => (
+                  <div key={f.token} className="flex items-center gap-1.5">
+                    <span className="text-[10px] text-slate-500 w-20 shrink-0">{f.label}</span>
+                    <Input
+                      value={values[f.token] ?? ""}
+                      onChange={e => setValues(v => ({ ...v, [f.token]: e.target.value }))}
+                      placeholder={f.sample}
+                      className="h-7 text-[11px]"
+                    />
+                  </div>
+                ))}
               </div>
             </div>
 
             <div>
-              <Label className="text-[11px] uppercase tracking-wider text-muted-foreground">Plain-text fallback</Label>
-              <Textarea
-                value={bodyText}
-                onChange={e => setBodyText(e.target.value)}
-                className="mt-1 text-[12px] min-h-[120px] font-mono"
-                placeholder="Hi {{doctor_name}}! We have an opportunity with ..."
-              />
+              <Label className="text-[11px] uppercase tracking-wider text-muted-foreground">Plain-text fallback (optional)</Label>
+              <Textarea value={bodyText} onChange={e => setBodyText(e.target.value)} className="mt-1 text-[12px] min-h-[100px] font-mono" placeholder="Same message without formatting…" />
             </div>
           </div>
 
-          {/* Right: live preview */}
-          <div className="space-y-2">
-            <div className="flex items-center justify-between">
-              <Label className="text-[11px] uppercase tracking-wider text-muted-foreground flex items-center gap-1.5">
-                <Eye className="h-3.5 w-3.5" /> Live preview
-              </Label>
-              <div className="flex rounded-md border overflow-hidden lg:hidden">
-                <button onClick={() => setMode("edit")} className={`px-2.5 py-1 text-[11px] ${mode === "edit" ? "bg-slate-900 text-white" : "bg-white text-slate-600"}`}>Edit</button>
-                <button onClick={() => setMode("preview")} className={`px-2.5 py-1 text-[11px] ${mode === "preview" ? "bg-slate-900 text-white" : "bg-white text-slate-600"}`}>Preview</button>
-              </div>
-            </div>
-            <div className={`${mode === "edit" ? "hidden lg:block" : ""} rounded-lg border overflow-hidden`}>
-              <EmailPreview
-                subject={previewSubject}
-                html={previewHtml}
-                text={previewText}
-                from="Opportunities <opportunities@allocationassist.com>"
-                to="[doctor]"
-                templateKey={editTpl?.key ?? DEFAULT_DOCTOR_KEY}
-                banner={<>Preview for <strong>{hospital.name}</strong> with a sample doctor — real sends use live data.</>}
-              />
-            </div>
+          {/* ── Right: live preview ─────────────────────────────────── */}
+          <div className={`${mobileTab === "edit" ? "hidden lg:block" : ""} p-6 bg-slate-50/50`}>
+            <Label className="text-[11px] uppercase tracking-wider text-muted-foreground flex items-center gap-1.5 mb-2">
+              <Eye className="h-3.5 w-3.5" /> Live preview
+            </Label>
+            <EmailPreview
+              subject={previewSubject}
+              html={previewHtml}
+              text={previewText}
+              from={mode === "hospital" ? "Opportunities <opportunities@allocationassist.com>" : "Allocation Assist <hello@allocationassist.com>"}
+              to={mode === "hospital" ? "[doctor]" : "[recipient]"}
+              templateKey={editTpl?.key ?? (mode === "hospital" ? DEFAULT_DOCTOR_KEY : "new template")}
+              banner={<>Preview with sample values — real sends use live data.</>}
+            />
           </div>
         </div>
 
-        <DialogFooter className="gap-2 sm:justify-between">
+        <DialogFooter className="gap-2 sm:justify-between px-6 py-4 border-t">
           <div>
-            {linked && (
+            {mode === "hospital" && linked && (
               <Button variant="ghost" onClick={revertToDefault} disabled={saving} className="text-rose-600 hover:text-rose-700">
                 <RotateCcw className="h-3.5 w-3.5 mr-1.5" /> Revert to generic copy
               </Button>
@@ -395,7 +512,7 @@ function HospitalTemplateEditor({ hospital, templates, onClose }: {
           <div className="flex gap-2">
             <Button variant="outline" onClick={onClose} disabled={saving}>Cancel</Button>
             <Button onClick={handleSave} disabled={saving || !dirty}>
-              <Save className="h-3.5 w-3.5 mr-1.5" /> {saving ? "Saving…" : "Save template"}
+              <Save className="h-3.5 w-3.5 mr-1.5" /> {saving ? "Saving…" : mode === "new" ? "Create template" : "Save template"}
             </Button>
           </div>
         </DialogFooter>
