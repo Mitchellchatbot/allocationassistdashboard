@@ -63,6 +63,46 @@ const stub = (label: string) => `<p style="color:#94a3b8;font-style:italic;">[${
 const escapeRegExp = (s: string) => s.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
 const slugify = (s: string) => s.toLowerCase().replace(/[^a-z0-9]+/g, "_").replace(/^_+|_+$/g, "").slice(0, 48) || "template";
 
+// ── Simple mode: friendly [placeholders] instead of {{tokens}}, no HTML ──────
+// Laymen write plain words and click chips; we convert to/from the stored
+// {{token}} + HTML shape behind the scenes. Photo + signature are automatic.
+const FRIENDLY: Array<{ label: string; token: string; bracket: string }> = [
+  { label: "Doctor's name",  token: "doctor_name",           bracket: "[Doctor's name]" },
+  { label: "Hospital name",  token: "hospital_name",         bracket: "[Hospital name]" },
+  { label: "City",           token: "city",                  bracket: "[City]" },
+  { label: "Country",        token: "country",               bracket: "[Country]" },
+  { label: "Contact person", token: "hospital_contact_name", bracket: "[Contact person]" },
+];
+const friendlyToTokens = (s: string) => FRIENDLY.reduce((a, f) => a.split(f.bracket).join(`{{${f.token}}}`), s);
+const tokensToFriendly = (s: string) => FRIENDLY.reduce((a, f) => a.split(`{{${f.token}}}`).join(f.bracket), s);
+const escHtml = (s: string) => s.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
+const linkify = (s: string) => s.replace(/(https?:\/\/[^\s<]+)/g, '<a href="$1" style="color:#1d4ed8;text-decoration:underline;">$1</a>');
+
+/** Simple friendly-text → stored HTML body: escape words, [placeholders] →
+ *  {{tokens}}, wrap blank-line blocks in <p>, drop the photo slot in, append
+ *  the signature. */
+function buildHtmlFromSimple(friendly: string, wantSlot: boolean): string {
+  const tokenText = friendlyToTokens(friendly);
+  const paras = tokenText.split(/\n{2,}/).map(b => b.trim()).filter(Boolean)
+    .map(b => `<p>${linkify(escHtml(b)).replace(/\n/g, "<br>")}</p>`).join("\n");
+  const withPhoto = wantSlot ? withImageSlot(paras) : paras;
+  return `${withPhoto}\n{{signature}}`;
+}
+const buildTextFromSimple = (friendly: string) => `${friendlyToTokens(friendly).trim()}\n\n{{signature_text}}`;
+
+/** Stored HTML body → friendly editable text (strip photo/signature, unwrap
+ *  tags, {{tokens}} → [placeholders]) so laymen can edit existing templates. */
+function htmlToFriendly(html: string): string {
+  let s = html || "";
+  s = s.replace(/\{\{hospital_image\}\}/g, "").replace(/\{\{signature(_text)?\}\}/g, "");
+  s = s.replace(/<a\b[^>]*>(.*?)<\/a>/gis, "$1");
+  s = s.replace(/<\/(p|div|h[1-6]|li|tr)>/gi, "\n\n").replace(/<br\s*\/?>/gi, "\n");
+  s = s.replace(/<[^>]+>/g, "");
+  s = s.replace(/&nbsp;/gi, " ").replace(/&amp;/gi, "&").replace(/&lt;/gi, "<").replace(/&gt;/gi, ">").replace(/&#39;/gi, "'").replace(/&quot;/gi, '"');
+  s = s.replace(/[ \t]+\n/g, "\n").replace(/\n{3,}/g, "\n\n").trim();
+  return tokensToFriendly(s);
+}
+
 // Dictionaries for "Auto-detect".
 const CITY_LIST = ["Abu Dhabi", "Al Ain", "Al Dhafra", "Dubai", "Sharjah", "Ras Al Khaimah", "Ajman", "Fujairah", "Umm Al Quwain", "Doha", "Riyadh", "Jeddah", "Dammam", "Al Ahsa", "Dhahran", "Khobar", "Mecca", "Medina", "Manama", "Kuwait City", "Muscat"];
 const COUNTRY_LIST = ["United Arab Emirates", "Saudi Arabia", "UAE", "KSA", "Qatar", "Oman", "Bahrain", "Kuwait"];
@@ -276,12 +316,34 @@ function TemplateStudio({ mode, hospital, templates, hospitals, onClose }: {
   const [saving, setSaving]   = useState(false);
   const bodyRef = useRef<HTMLTextAreaElement>(null);
 
+  // Simple mode (default): plain-language message + [placeholders], no HTML.
+  const simpleAvailable = mode === "hospital" || isProfileSent;
+  const [advanced, setAdvanced] = useState(false);
+  const simple = simpleAvailable && !advanced;
+  const [simpleBody, setSimpleBody] = useState<string>(() => mode === "hospital" ? htmlToFriendly(base?.body_html ?? "") : "");
+  const simpleRef = useRef<HTMLTextAreaElement>(null);
+  const insertFriendly = (bracket: string) => {
+    const el = simpleRef.current;
+    if (!el) { setSimpleBody(s => s + bracket); return; }
+    const start = el.selectionStart ?? simpleBody.length;
+    const end   = el.selectionEnd ?? simpleBody.length;
+    setSimpleBody(simpleBody.slice(0, start) + bracket + simpleBody.slice(end));
+    requestAnimationFrame(() => { el.focus(); const p = start + bracket.length; el.setSelectionRange(p, p); });
+  };
+  // Keep the two modes in sync when the user flips the switch.
+  const toggleAdvanced = (adv: boolean) => {
+    if (adv) { setBodyHtml(buildHtmlFromSimple(simpleBody, wantSlot)); setBodyText(buildTextFromSimple(simpleBody)); }
+    else { setSimpleBody(htmlToFriendly(bodyHtml)); }
+    setAdvanced(adv);
+  };
+
   // Hospital mode: re-seed when the base template resolves.
   useEffect(() => {
     if (mode !== "hospital") return;
     setSubject(base?.subject ?? "");
     setBodyText(base?.body_text ?? "");
     setBodyHtml(withImageSlot(base?.body_html ?? ""));
+    setSimpleBody(htmlToFriendly(base?.body_html ?? ""));
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [base?.id]);
 
@@ -293,6 +355,7 @@ function TemplateStudio({ mode, hospital, templates, hospitals, onClose }: {
     setSubject(s => s || gen?.subject || "");
     setBodyText(t => t || gen?.body_text || "");
     setBodyHtml(b => b.trim() ? b : (audience === "doctor" ? withImageSlot(gen?.body_html ?? "") : (gen?.body_html ?? "")));
+    setSimpleBody(s => s.trim() ? s : htmlToFriendly(gen?.body_html ?? ""));
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [audience]);
 
@@ -320,6 +383,7 @@ function TemplateStudio({ mode, hospital, templates, hospitals, onClose }: {
     setSubject(tpl?.subject ?? "");
     setBodyText(tpl?.body_text ?? "");
     setBodyHtml(audience === "doctor" ? withImageSlot(tpl?.body_html ?? "") : (tpl?.body_html ?? ""));
+    setSimpleBody(htmlToFriendly(tpl?.body_html ?? ""));
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [selectedHospitalId]);
 
@@ -386,18 +450,25 @@ function TemplateStudio({ mode, hospital, templates, hospitals, onClose }: {
     doctors_table_html: stub("the multi-doctor table"),
     logo_header: "",
   };
-  const previewSubject = renderTemplate(subject, previewVars);
-  const previewText    = renderTemplate(bodyText, previewVars);
+  // Effective bodies: advanced uses the raw HTML/text; simple builds them from
+  // the friendly message. Both the preview and the save use these.
+  const effSubject = advanced ? subject : friendlyToTokens(subject);
+  const effHtml    = advanced ? (wantSlot ? withImageSlot(bodyHtml) : bodyHtml) : buildHtmlFromSimple(simpleBody, wantSlot);
+  const effText    = advanced ? bodyText : buildTextFromSimple(simpleBody);
+  const previewSubject = renderTemplate(effSubject, previewVars);
+  const previewText    = renderTemplate(effText, previewVars);
   const previewHtml    = renderTemplate(
-    (wantSlot ? withImageSlot : (x: string) => x)(bodyHtml || `<pre style="font-family:inherit;white-space:pre-wrap;">${bodyText}</pre>`),
+    effHtml || `<pre style="font-family:inherit;white-space:pre-wrap;">${effText}</pre>`,
     previewVars, { html: true },
   );
 
   const showHospitalFields = mode === "hospital" || isProfileSent;
+  const simpleBaseline = mode === "hospital" ? htmlToFriendly(base?.body_html ?? "") : "";
   const dirty = mode === "hospital"
-    ? imageUrl !== (hospital?.image_url ?? "") || subject !== (base?.subject ?? "") || bodyText !== (base?.body_text ?? "") || bodyHtml !== seedHtml
+    ? imageUrl !== (hospital?.image_url ?? "") || subject !== (base?.subject ?? "")
+      || (advanced ? (bodyText !== (base?.body_text ?? "") || bodyHtml !== seedHtml) : simpleBody !== simpleBaseline)
     : isProfileSent
-      ? !!((linkMode === "new" ? hName.trim() : selectedHospitalId) && (subject.trim() || bodyHtml.trim()))
+      ? !!((linkMode === "new" ? hName.trim() : selectedHospitalId) && (subject.trim() || bodyHtml.trim() || simpleBody.trim()))
       : !!(name.trim() && (subject.trim() || bodyHtml.trim()));
 
   // ── Save ─────────────────────────────────────────────────────────────────
@@ -405,17 +476,17 @@ function TemplateStudio({ mode, hospital, templates, hospitals, onClose }: {
     if (!subject.trim()) { toast.error("Subject is required."); return; }
     setSaving(true);
     try {
-      const bodyToSave = (wantSlot ? withImageSlot : (x: string) => x)(bodyHtml);
+      const bodyToSave = effHtml;
 
       if (mode === "hospital" && hospital) {
         if (imageUrl !== (hospital.image_url ?? "")) {
           await updateH.mutateAsync({ id: hospital.id, name: hospital.name, image_url: imageUrl || null });
         }
         let key = editTpl?.key ?? "";
-        if (editTpl) await updateTpl.mutateAsync({ id: editTpl.id, subject, body_text: bodyText, body_html: bodyToSave });
+        if (editTpl) await updateTpl.mutateAsync({ id: editTpl.id, subject: effSubject, body_text: effText, body_html: bodyToSave });
         else {
           key = ownKey;
-          await createTpl.mutateAsync({ key, name: `Working Opportunity — ${hospital.name}`, flow_key: "profile_sent", subject, body_text: bodyText, body_html: bodyToSave, variables: base?.variables ?? [] });
+          await createTpl.mutateAsync({ key, name: `Working Opportunity — ${hospital.name}`, flow_key: "profile_sent", subject: effSubject, body_text: effText, body_html: bodyToSave, variables: base?.variables ?? [] });
         }
         if (hospital.doctor_template_key !== key) await updateH.mutateAsync({ id: hospital.id, name: hospital.name, doctor_template_key: key });
         toast.success(`Saved ${hospital.name}'s working-opportunity template.`);
@@ -439,8 +510,8 @@ function TemplateStudio({ mode, hospital, templates, hospitals, onClose }: {
         const key = `${opt.keyBase}__${hospId}`;
         const existing = templates.find(t => t.key === key);
         const tplName = `${audience === "doctor" ? "Working Opportunity" : "Profile Intro"} — ${hospName}`;
-        if (existing) await updateTpl.mutateAsync({ id: existing.id, subject, body_text: bodyText, body_html: bodyToSave });
-        else await createTpl.mutateAsync({ key, name: tplName, flow_key: "profile_sent", subject, body_text: bodyText, body_html: bodyToSave, variables: KNOWN_FIELDS.map(f => f.token) });
+        if (existing) await updateTpl.mutateAsync({ id: existing.id, subject: effSubject, body_text: effText, body_html: bodyToSave });
+        else await createTpl.mutateAsync({ key, name: tplName, flow_key: "profile_sent", subject: effSubject, body_text: effText, body_html: bodyToSave, variables: KNOWN_FIELDS.map(f => f.token) });
         if (audience === "doctor") await updateH.mutateAsync({ id: hospId, name: hospName, doctor_template_key: key });
         else await updateH.mutateAsync({ id: hospId, name: hospName, template_key: key });
         toast.success(linkMode === "new" ? `Added ${hospName} with its email + photo.` : `Saved ${hospName}'s template.`);
@@ -449,7 +520,7 @@ function TemplateStudio({ mode, hospital, templates, hospitals, onClose }: {
         if (!name.trim()) { toast.error("Give the template a name."); setSaving(false); return; }
         let key = `${opt.keyBase}_${slugify(name)}`;
         for (let n = 2; templates.some(t => t.key === key); n++) key = `${opt.keyBase}_${slugify(name)}_${n}`;
-        await createTpl.mutateAsync({ key, name: name.trim(), flow_key: opt.flowKey, subject, body_text: bodyText, body_html: bodyToSave, variables: KNOWN_FIELDS.map(f => f.token) });
+        await createTpl.mutateAsync({ key, name: name.trim(), flow_key: opt.flowKey, subject: effSubject, body_text: effText, body_html: bodyToSave, variables: KNOWN_FIELDS.map(f => f.token) });
         toast.success(`Created template "${name.trim()}".`);
       }
       onClose();
@@ -487,17 +558,31 @@ function TemplateStudio({ mode, hospital, templates, hospitals, onClose }: {
     <Dialog open onOpenChange={v => !v && onClose()}>
       <DialogContent className="sm:max-w-[1120px] max-h-[94vh] overflow-y-auto p-0 gap-0">
         <DialogHeader className="px-6 pt-6 pb-3 border-b">
-          <DialogTitle className="flex items-center gap-2">
-            {mode === "new" ? <Wand2 className="h-4 w-4 text-teal-600" /> : <HospitalIcon className="h-4 w-4 text-teal-600" />}
-            {title}
-          </DialogTitle>
-          <DialogDescription className="text-[12px]">
-            {mode === "new"
-              ? "Fill in the hospital's details, add a photo, and write the email — pressing Create makes the hospital, its email, and its photo, all linked so sends use them automatically."
-              : linked
-                ? "Editing this hospital's own template — used automatically on every working-opportunity send about it."
-                : "This hospital uses the generic email. Saving creates a dedicated copy just for it."}
-          </DialogDescription>
+          <div className="flex items-start justify-between gap-3">
+            <div className="min-w-0">
+              <DialogTitle className="flex items-center gap-2">
+                {mode === "new" ? <Wand2 className="h-4 w-4 text-teal-600" /> : <HospitalIcon className="h-4 w-4 text-teal-600" />}
+                {title}
+              </DialogTitle>
+              <DialogDescription className="text-[12px] mt-1">
+                {simple
+                  ? (mode === "new"
+                      ? "Add the hospital's details and a photo, then write the email in plain words. The photo and signature are added for you."
+                      : "Edit the photo and the email wording. The photo and signature are handled for you.")
+                  : (mode === "new"
+                      ? "Advanced: full control over template type, HTML, and variables."
+                      : "Advanced: edit the raw HTML and variables directly.")}
+              </DialogDescription>
+            </div>
+            {simpleAvailable && (
+              <div className="flex items-center gap-0.5 rounded-lg bg-slate-100 p-0.5 text-[11px] shrink-0">
+                <button type="button" onClick={() => toggleAdvanced(false)}
+                  className={`rounded-md px-2.5 py-1 font-medium transition-colors ${!advanced ? "bg-white shadow-sm text-teal-700" : "text-slate-500 hover:text-slate-700"}`}>Simple</button>
+                <button type="button" onClick={() => toggleAdvanced(true)}
+                  className={`rounded-md px-2.5 py-1 font-medium transition-colors ${advanced ? "bg-white shadow-sm text-teal-700" : "text-slate-500 hover:text-slate-700"}`}>Advanced</button>
+              </div>
+            )}
+          </div>
         </DialogHeader>
 
         <div className="flex lg:hidden gap-1 px-6 pt-3">
@@ -512,7 +597,7 @@ function TemplateStudio({ mode, hospital, templates, hospitals, onClose }: {
         <div className="grid grid-cols-1 lg:grid-cols-2 gap-0">
           {/* ── Left: write ──────────────────────────────────────────── */}
           <div className={`${mobileTab === "preview" ? "hidden lg:block" : ""} p-6 space-y-4 lg:border-r`}>
-            {mode === "new" && (
+            {mode === "new" && advanced && (
               <div>
                 <Label className="text-[11px] uppercase tracking-wider text-muted-foreground">Type</Label>
                 <Select value={typeValue} onValueChange={setTypeValue}>
@@ -602,6 +687,7 @@ function TemplateStudio({ mode, hospital, templates, hospitals, onClose }: {
               <Input value={subject} onChange={e => setSubject(e.target.value)} className="mt-1 text-[12px]" placeholder="We have an opportunity for you" />
             </div>
 
+            {!simple ? (<>
             <div>
               <div className="flex items-center justify-between mb-1">
                 <Label className="text-[11px] uppercase tracking-wider text-muted-foreground">Email body</Label>
@@ -654,6 +740,28 @@ function TemplateStudio({ mode, hospital, templates, hospitals, onClose }: {
               <Label className="text-[11px] uppercase tracking-wider text-muted-foreground">Plain-text fallback (optional)</Label>
               <Textarea value={bodyText} onChange={e => setBodyText(e.target.value)} className="mt-1 text-[12px] min-h-[100px] font-mono" placeholder="Same message without formatting…" />
             </div>
+            </>) : (
+            <div>
+              <div className="flex items-center justify-between mb-1">
+                <Label className="text-[11px] uppercase tracking-wider text-muted-foreground">Your message</Label>
+              </div>
+              <div className="flex flex-wrap gap-1 mb-1.5">
+                {FRIENDLY.map(f => (
+                  <button key={f.token} type="button" onClick={() => insertFriendly(f.bracket)}
+                    title={`Insert the ${f.label.toLowerCase()}`}
+                    className="text-[10.5px] rounded-full border border-teal-200 bg-teal-50 px-2 py-0.5 text-teal-800 hover:bg-teal-100">
+                    + {f.label}
+                  </button>
+                ))}
+              </div>
+              <Textarea ref={simpleRef} value={simpleBody} onChange={e => setSimpleBody(e.target.value)}
+                className="text-[13px] min-h-[340px] leading-relaxed"
+                placeholder={"Hi [Doctor's name]!\n\nWe have an opportunity with [Hospital name] in [City] and we'd love to recommend your profile.\n\nClick a chip above to drop in a name — you'll see it fill in on the right."} />
+              <p className="text-[10.5px] text-muted-foreground mt-1.5">
+                Write it like a normal email. The <strong>hospital photo</strong> and your <strong>signature</strong> are added automatically — no need to touch them. The chips (e.g. <span className="text-teal-700">[Doctor's name]</span>) fill in per doctor when the email is sent.
+              </p>
+            </div>
+            )}
           </div>
 
           {/* ── Right: live preview ─────────────────────────────────── */}
