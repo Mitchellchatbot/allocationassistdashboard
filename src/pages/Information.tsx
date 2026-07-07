@@ -4,7 +4,6 @@ import { DashboardLayout } from "@/components/layout/DashboardLayout";
 import { AnimatedTabsList, AnimatedTabContent, AnimatedTabPanel, type AnimatedTabItem } from "@/components/AnimatedTabs";
 import { Library, Mail, Hospital as HospitalIcon } from "lucide-react";
 import { EmailTemplatesTab } from "@/components/automations/EmailTemplatesTab";
-import { HospitalsTab } from "@/components/automations/HospitalsTab";
 import { HospitalTemplatesManager } from "@/components/automations/HospitalTemplatesManager";
 
 /**
@@ -51,12 +50,9 @@ export default function Information() {
             <EmailTemplatesTab />
           </AnimatedTabPanel>
           <AnimatedTabPanel value="hospitals" active={tab}>
-            <div className="space-y-5">
-              {/* Photos + per-hospital working-opportunity emails (+ Add hospital) */}
-              <HospitalTemplatesManager />
-              {/* Full registry: contacts, recruiter routing, notes */}
-              <HospitalsTab />
-            </div>
+            {/* One unified view: photos + per-hospital emails + registry
+                (details, recruiter, contacts, routing) + Add hospital. */}
+            <HospitalTemplatesManager />
           </AnimatedTabPanel>
         </AnimatedTabContent>
       </div>

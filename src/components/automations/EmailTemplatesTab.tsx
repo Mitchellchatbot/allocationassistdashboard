@@ -9,8 +9,8 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@
 import { Mail, Save, Eye, AlertTriangle, Search } from "lucide-react";
 import { toast } from "sonner";
 import {
-  useEmailTemplates, useUpdateEmailTemplate, renderTemplate,
-  type EmailTemplate,
+  useEmailTemplateList, useEmailTemplate, useUpdateEmailTemplate, renderTemplate,
+  type EmailTemplateListItem,
 } from "@/hooks/use-email-templates";
 import { FLOW_DEFINITIONS, FLOW_ORDER } from "@/lib/automation-flows";
 import { EmailPreview } from "@/components/EmailPreview";
@@ -79,10 +79,13 @@ const SAMPLE_VARS: Record<string, string> = {
   doctors_table_html: `<p style="color:#94a3b8;font-style:italic;">[the multi-doctor table renders here at send time]</p>`,
 };
 
+const GROUP_CAP = 12; // collapse long flow groups (e.g. 70 best-match) until expanded
+
 export function EmailTemplatesTab() {
-  const { data: templates = [], isLoading } = useEmailTemplates();
+  const { data: templates = [], isLoading } = useEmailTemplateList();
   const [search,     setSearch]     = useState("");
   const [selectedId, setSelectedId] = useState<string | null>(null);
+  const [expanded,   setExpanded]   = useState<Set<string>>(new Set());
 
   useEffect(() => {
     // Default-select the first template once data loads.
@@ -101,13 +104,14 @@ export function EmailTemplatesTab() {
   }, [templates, search]);
 
   const grouped = useMemo(() => {
-    const m = new Map<string, EmailTemplate[]>();
+    const m = new Map<string, EmailTemplateListItem[]>();
     for (const t of filtered) {
       const k = t.flow_key ?? "other";
       (m.get(k) ?? m.set(k, []).get(k))!.push(t);
     }
     return m;
   }, [filtered]);
+  const searching = search.trim().length > 0;
 
   const selected = templates.find(t => t.id === selectedId) ?? null;
 
@@ -153,12 +157,14 @@ export function EmailTemplatesTab() {
                 const items = grouped.get(flowKey);
                 if (!items || items.length === 0) return null;
                 const flowName = flowKey === "other" ? "Other" : FLOW_DEFINITIONS[flowKey as keyof typeof FLOW_DEFINITIONS].name;
+                const isExpanded = searching || expanded.has(flowKey);
+                const shown = isExpanded ? items : items.slice(0, GROUP_CAP);
                 return (
                   <div key={flowKey}>
                     <div className="px-3 pt-3 pb-1 text-[9px] uppercase tracking-[0.12em] text-slate-400 font-medium">
-                      {flowName}
+                      {flowName} <span className="text-slate-300">· {items.length}</span>
                     </div>
-                    {items.map(t => {
+                    {shown.map(t => {
                       const isPlaceholder = t.body_text.startsWith("PLACEHOLDER");
                       const isSelected    = selectedId === t.id;
                       return (
@@ -183,6 +189,14 @@ export function EmailTemplatesTab() {
                         </button>
                       );
                     })}
+                    {!isExpanded && items.length > GROUP_CAP && (
+                      <button
+                        onClick={() => setExpanded(p => new Set(p).add(flowKey))}
+                        className="w-full text-left px-3 py-1.5 text-[11px] text-teal-700 hover:bg-teal-50/50"
+                      >
+                        Show all {items.length} →
+                      </button>
+                    )}
                   </div>
                 );
               })}
@@ -190,7 +204,7 @@ export function EmailTemplatesTab() {
           </CardContent>
         </Card>
 
-        {selected && <TemplateEditor key={selected.id} template={selected} />}
+        {selected && <TemplateEditor key={selected.id} meta={selected} />}
         {!selected && (
           <Card>
             <CardContent className="py-12 text-center text-[12px] text-muted-foreground">
@@ -203,38 +217,40 @@ export function EmailTemplatesTab() {
   );
 }
 
-function TemplateEditor({ template }: { template: EmailTemplate }) {
-  const [subject,  setSubject]  = useState(template.subject);
-  const [bodyText, setBodyText] = useState(template.body_text);
-  const [bodyHtml, setBodyHtml] = useState(template.body_html);
-  const [flowKey,  setFlowKey]  = useState(template.flow_key ?? "other");
+function TemplateEditor({ meta }: { meta: EmailTemplateListItem }) {
+  // Body_html isn't in the list payload — fetch the full row only now, on click.
+  const { data: full, isLoading } = useEmailTemplate(meta.id);
+  const [subject,  setSubject]  = useState(meta.subject);
+  const [bodyText, setBodyText] = useState(meta.body_text);
+  const [bodyHtml, setBodyHtml] = useState<string | null>(null);
+  const [flowKey,  setFlowKey]  = useState(meta.flow_key ?? "other");
   const [mode,     setMode]     = useState<"edit" | "preview">("edit");
   const [fs,       setFs]       = useState(false);
   const update = useUpdateEmailTemplate();
 
-  // Reset local state when a different template is selected. The `key` prop
-  // on the parent component handles full unmount/remount, so this only fires
-  // if the same selected template is updated externally (e.g. realtime).
+  // Seed once the full body arrives (and re-seed if it changes externally).
   useEffect(() => {
-    setSubject(template.subject);
-    setBodyText(template.body_text);
-    setBodyHtml(template.body_html);
-    setFlowKey(template.flow_key ?? "other");
-  }, [template.id, template.subject, template.body_text, template.body_html, template.flow_key]);
+    if (!full) return;
+    setSubject(full.subject);
+    setBodyText(full.body_text);
+    setBodyHtml(full.body_html);
+    setFlowKey(full.flow_key ?? "other");
+  }, [full?.id, full?.updated_at]);
 
-  const dirty =
-    subject  !== template.subject  ||
-    bodyText !== template.body_text ||
-    bodyHtml !== template.body_html ||
-    flowKey  !== (template.flow_key ?? "other");
+  const loaded = bodyHtml !== null;
+  const dirty = !!full && (
+    subject  !== full.subject  ||
+    bodyText !== full.body_text ||
+    (bodyHtml ?? "") !== full.body_html ||
+    flowKey  !== (full.flow_key ?? "other"));
 
   const handleSave = async () => {
     await update.mutateAsync({
-      id: template.id, subject, body_text: bodyText, body_html: bodyHtml,
+      id: meta.id, subject, body_text: bodyText, body_html: bodyHtml ?? "",
       // "other" means ungrouped — store NULL so it falls under the Other bucket.
       flow_key: flowKey === "other" ? null : flowKey,
     });
-    toast.success(`Saved ${template.name}`);
+    toast.success(`Saved ${meta.name}`);
   };
 
   const previewSubject = renderTemplate(subject,  SAMPLE_VARS);
@@ -250,9 +266,9 @@ function TemplateEditor({ template }: { template: EmailTemplate }) {
       <CardHeader className="pb-3">
         <div className="flex items-start justify-between gap-3">
           <div className="min-w-0">
-            <CardTitle className="text-base">{template.name}</CardTitle>
+            <CardTitle className="text-base">{meta.name}</CardTitle>
             <CardDescription className="text-[11px] mt-0.5 flex items-center gap-1.5 flex-wrap">
-              <code className="bg-slate-100 px-1 py-0.5 rounded">{template.key}</code>
+              <code className="bg-slate-100 px-1 py-0.5 rounded">{meta.key}</code>
               <span>· type:</span>
               <Select value={flowKey} onValueChange={setFlowKey}>
                 <SelectTrigger className="h-6 text-[11px] w-auto gap-1 px-2 py-0">
@@ -266,7 +282,7 @@ function TemplateEditor({ template }: { template: EmailTemplate }) {
                   <SelectItem value="other" className="text-[12px]">Other / ungrouped</SelectItem>
                 </SelectContent>
               </Select>
-              {flowKey !== (template.flow_key ?? "other") && <span className="text-amber-600">· unsaved</span>}
+              {flowKey !== (meta.flow_key ?? "other") && <span className="text-amber-600">· unsaved</span>}
             </CardDescription>
           </div>
           <div className="flex items-center gap-2">
@@ -291,11 +307,11 @@ function TemplateEditor({ template }: { template: EmailTemplate }) {
         </div>
       </CardHeader>
       <CardContent className="space-y-3">
-        {template.variables.length > 0 && (
+        {meta.variables.length > 0 && (
           <div>
             <div className="text-[10px] uppercase tracking-wider text-muted-foreground mb-1.5">Available tokens</div>
             <div className="flex flex-wrap gap-1">
-              {template.variables.map(v => (
+              {meta.variables.map(v => (
                 <Badge key={v} variant="outline" className="text-[10px] font-mono cursor-pointer hover:bg-slate-100"
                   onClick={() => {
                     navigator.clipboard.writeText(`{{${v}}}`);
@@ -311,7 +327,11 @@ function TemplateEditor({ template }: { template: EmailTemplate }) {
           </div>
         )}
 
-        {mode === "edit" ? (
+        {!loaded ? (
+          <div className="py-16 text-center text-[12px] text-muted-foreground">
+            {isLoading ? "Loading template…" : "…"}
+          </div>
+        ) : mode === "edit" ? (
           <>
             <div>
               <div className="flex items-center justify-between">
@@ -341,7 +361,7 @@ function TemplateEditor({ template }: { template: EmailTemplate }) {
             <div>
               <Label className="text-[11px] uppercase tracking-wider text-muted-foreground">HTML body (optional)</Label>
               <Textarea
-                value={bodyHtml}
+                value={bodyHtml ?? ""}
                 onChange={e => setBodyHtml(e.target.value)}
                 className="mt-1 text-[12px] min-h-[160px] font-mono"
                 placeholder="<p>Hello {{doctor_name}},</p>"
@@ -358,7 +378,7 @@ function TemplateEditor({ template }: { template: EmailTemplate }) {
             text={previewText}
             from="Hospital Intro <hospitalintro@allocationassist.com>"
             to="[Recipient]"
-            templateKey={template.key}
+            templateKey={meta.key}
             banner={<>Rendered with <strong>sample values</strong> — real sends use the live doctor/hospital data.</>}
             onExpand={() => setFs(true)}
           />

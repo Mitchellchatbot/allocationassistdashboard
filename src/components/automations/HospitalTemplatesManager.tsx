@@ -7,9 +7,12 @@ import { Textarea } from "@/components/ui/textarea";
 import { Badge } from "@/components/ui/badge";
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription, DialogFooter } from "@/components/ui/dialog";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
-import { Hospital as HospitalIcon, Image as ImageIcon, Search, Save, Eye, RotateCcw, Pencil, Wand2, Plus, Sparkles } from "lucide-react";
+import { Hospital as HospitalIcon, Image as ImageIcon, Search, Save, Eye, RotateCcw, Pencil, Wand2, Plus, Sparkles, Trash2, Users, Mail } from "lucide-react";
 import { toast } from "sonner";
-import { useHospitals, useCreateHospital, useUpdateHospital, type Hospital } from "@/hooks/use-hospitals";
+import { useHospitals, useCreateHospital, useUpdateHospital, useDeleteHospital, type Hospital, type HospitalInput } from "@/hooks/use-hospitals";
+import { useHospitalContacts } from "@/hooks/use-hospital-contacts";
+import { HospitalDialog, HospitalContactsPanel } from "@/components/automations/HospitalsTab";
+import { Dialog as UiDialog, DialogContent as UiDialogContent, DialogHeader as UiDialogHeader, DialogTitle as UiDialogTitle } from "@/components/ui/dialog";
 import {
   useEmailTemplates, useCreateEmailTemplate, useUpdateEmailTemplate, useDeleteEmailTemplate,
   renderTemplate, type EmailTemplate,
@@ -139,32 +142,57 @@ const TYPE_OPTIONS: Array<{ value: string; label: string; flowKey: string; keyBa
   { value: "second_payment",        label: "Second Payment Invoice",                       flowKey: "second_payment",   keyBase: "second_payment",        from: "Accounts <accounts@allocationassist.com>" },
 ];
 
-/** Profile Sent → per-hospital Working-Opportunity editor + a spacious template
- *  maker that can also ADD a whole hospital (record + photo + copy, all linked). */
+/** The single hospitals view: a photo gallery where every card also carries the
+ *  registry (recruiter, contacts) and every action — edit the email + photo,
+ *  edit details, manage contacts/routing, delete — plus Add hospital. Nothing
+ *  from the old registry table is lost; it's just all in one consistent place. */
 export function HospitalTemplatesManager() {
   const { data: hospitals = [], isLoading } = useHospitals();
-  const { data: templates = [] } = useEmailTemplates();
+  const contactsIdx = useHospitalContacts();
+  const updateH = useUpdateHospital();
+  const deleteH = useDeleteHospital();
   const [search, setSearch] = useState("");
-  const [editing, setEditing] = useState<Hospital | null>(null);
+  const [editingEmail,   setEditingEmail]   = useState<Hospital | null>(null); // photo + WO email
+  const [editingDetails, setEditingDetails] = useState<Hospital | null>(null); // name/city/recruiter/…
+  const [contactsFor,    setContactsFor]    = useState<Hospital | null>(null); // Zoho contacts + routing
   const [creating, setCreating] = useState(false);
-
-  const filtered = useMemo(() => {
-    const q = search.trim().toLowerCase();
-    const base = q
-      ? hospitals.filter(h =>
-          h.name.toLowerCase().includes(q) ||
-          h.city?.toLowerCase().includes(q) ||
-          h.country?.toLowerCase().includes(q))
-      : hospitals;
-    return [...base].sort((a, b) => rank(b) - rank(a));
-  }, [hospitals, search]);
 
   function rank(h: Hospital) {
     return (h.image_url ? 2 : 0) + (h.doctor_template_key ? 1 : 0);
   }
+  const filtered = useMemo(() => {
+    const q = search.trim().toLowerCase();
+    // A literal em-dash search shows rows missing a country (matches HospitalsTab).
+    const base = q === "—"
+      ? hospitals.filter(h => !h.country)
+      : q
+        ? hospitals.filter(h =>
+            h.name.toLowerCase().includes(q) ||
+            h.city?.toLowerCase().includes(q) ||
+            h.country?.toLowerCase().includes(q) ||
+            h.primary_recruiter_email?.toLowerCase().includes(q))
+        : hospitals;
+    return [...base].sort((a, b) => rank(b) - rank(a));
+  }, [hospitals, search]);
 
+  const byCountry = useMemo(() => {
+    const m: Record<string, number> = {};
+    for (const h of hospitals) { const k = h.country ?? "—"; m[k] = (m[k] ?? 0) + 1; }
+    return Object.entries(m).sort((a, b) => b[1] - a[1]);
+  }, [hospitals]);
+  const needsCountry = hospitals.filter(h => !h.country).length;
   const withPhoto = hospitals.filter(h => h.image_url).length;
   const withCopy  = hospitals.filter(h => h.doctor_template_key).length;
+
+  // Live copies so open dialogs reflect edits (their state holds a stale row ref).
+  const liveDetails  = editingDetails ? hospitals.find(h => h.id === editingDetails.id) ?? editingDetails : null;
+  const liveContacts = contactsFor    ? hospitals.find(h => h.id === contactsFor.id)    ?? contactsFor    : null;
+
+  const handleDelete = async (h: Hospital) => {
+    if (!confirm(`Delete ${h.name}? This can't be undone.`)) return;
+    await deleteH.mutateAsync(h.id);
+    toast.success(`Deleted ${h.name}`);
+  };
 
   return (
     <Card>
@@ -172,12 +200,12 @@ export function HospitalTemplatesManager() {
         <div className="flex items-start justify-between gap-3">
           <div>
             <CardTitle className="text-base flex items-center gap-2">
-              <ImageIcon className="h-4 w-4 text-teal-600" /> Hospital Working-Opportunity templates
+              <HospitalIcon className="h-4 w-4 text-teal-600" /> Hospitals
             </CardTitle>
-            <CardDescription className="mt-1 max-w-[720px]">
-              Each hospital's photo and "we have an opportunity" email copy — used automatically whenever a
-              working-opportunity email goes out about that hospital. Adding a new one creates the hospital record,
-              its email, and its photo together.
+            <CardDescription className="mt-1 max-w-[760px]">
+              Every hospital in one place — its photo, its "we have an opportunity" email, its recruiter + contacts, and
+              routing. Click a card to edit the email &amp; photo; use the buttons for details, contacts, or delete.
+              Adding one creates the record, its email, and its photo together.
             </CardDescription>
           </div>
           <div className="flex items-center gap-2 shrink-0">
@@ -190,61 +218,80 @@ export function HospitalTemplatesManager() {
         </div>
       </CardHeader>
       <CardContent className="space-y-3">
-        <div className="relative max-w-md">
-          <Search className="absolute left-2 top-1/2 -translate-y-1/2 h-3.5 w-3.5 text-muted-foreground" />
-          <Input
-            value={search}
-            onChange={e => setSearch(e.target.value)}
-            placeholder="Search hospitals by name, city, country..."
-            className="pl-7 text-[12px] h-8"
-          />
+        {needsCountry > 0 && (
+          <div className="rounded-md border border-amber-200 bg-amber-50/50 px-3 py-2 flex items-center gap-2">
+            <span className="text-[11px] text-amber-900 flex-1">
+              <strong>{needsCountry}</strong> hospital{needsCountry === 1 ? "" : "s"} missing a country — country-scoped batch sends skip these. Click "Show them", then edit each.
+            </span>
+            <button onClick={() => setSearch("—")} className="text-[11px] font-medium text-amber-900 hover:underline">Show them</button>
+          </div>
+        )}
+        <div className="flex items-center gap-3 flex-wrap">
+          <div className="relative flex-1 min-w-[220px] max-w-md">
+            <Search className="absolute left-2 top-1/2 -translate-y-1/2 h-3.5 w-3.5 text-muted-foreground" />
+            <Input value={search} onChange={e => setSearch(e.target.value)} placeholder="Search by name, city, country, or recruiter email..." className="pl-7 text-[12px] h-8" />
+          </div>
+          <div className="text-[11px] text-muted-foreground">{filtered.length} of {hospitals.length}</div>
+          <div className="flex gap-1.5 flex-wrap">
+            {byCountry.map(([c, n]) => <Badge key={c} variant="outline" className="text-[10px]">{c}: {n}</Badge>)}
+          </div>
         </div>
 
         {isLoading ? (
           <div className="py-8 text-center text-[12px] text-muted-foreground">Loading hospitals…</div>
         ) : (
-          <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 gap-3 max-h-[520px] overflow-y-auto pr-1">
+          <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 gap-3 max-h-[560px] overflow-y-auto pr-1">
             {/* Add-hospital tile */}
             <button
               onClick={() => setCreating(true)}
-              className="rounded-lg border-2 border-dashed border-slate-200 hover:border-teal-300 hover:bg-teal-50/30 transition-colors flex flex-col items-center justify-center gap-1 aspect-[16/13] text-slate-400 hover:text-teal-600"
+              className="rounded-lg border-2 border-dashed border-slate-200 hover:border-teal-300 hover:bg-teal-50/30 transition-colors flex flex-col items-center justify-center gap-1 min-h-[150px] text-slate-400 hover:text-teal-600"
             >
               <Plus className="h-6 w-6" />
               <span className="text-[11px] font-medium">Add hospital</span>
             </button>
-            {filtered.map(h => (
-              <button
-                key={h.id}
-                onClick={() => setEditing(h)}
-                className="group text-left rounded-lg border border-slate-200 bg-white overflow-hidden hover:border-teal-300 hover:shadow-sm transition-all"
-              >
-                <div className="relative aspect-[16/10] bg-slate-100">
-                  {h.image_url ? (
-                    <img src={h.image_url} alt={h.name} loading="lazy" className="h-full w-full object-cover" />
-                  ) : (
-                    <div className="h-full w-full flex items-center justify-center text-slate-300">
-                      <HospitalIcon className="h-7 w-7" />
+            {filtered.map(h => {
+              const contactCount = contactsIdx.forHospital(h.name).length;
+              return (
+                <div key={h.id} className="group rounded-lg border border-slate-200 bg-white overflow-hidden hover:border-teal-300 hover:shadow-sm transition-all flex flex-col">
+                  <button onClick={() => setEditingEmail(h)} className="text-left" title="Edit email & photo">
+                    <div className="relative aspect-[16/10] bg-slate-100">
+                      {h.image_url ? (
+                        <img src={h.image_url} alt={h.name} loading="lazy" className="h-full w-full object-cover" />
+                      ) : (
+                        <div className="h-full w-full flex items-center justify-center text-slate-300"><HospitalIcon className="h-7 w-7" /></div>
+                      )}
+                      <div className="absolute inset-0 group-hover:bg-black/10 transition-colors flex items-center justify-center">
+                        <span className="opacity-0 group-hover:opacity-100 transition-opacity inline-flex items-center gap-1 rounded-full bg-white/95 px-2.5 py-1 text-[10px] font-medium text-slate-700 shadow">
+                          <Mail className="h-3 w-3" /> Email &amp; photo
+                        </span>
+                      </div>
+                      {h.doctor_template_key && (
+                        <span className="absolute top-1.5 left-1.5 rounded-full bg-teal-600 text-white text-[8.5px] font-medium px-1.5 py-0.5 shadow-sm">Custom copy</span>
+                      )}
+                      {h.contact_mode === "cycle" && (
+                        <span className="absolute top-1.5 right-1.5 rounded-full bg-violet-600 text-white text-[8.5px] font-medium px-1.5 py-0.5 shadow-sm">cycle</span>
+                      )}
                     </div>
-                  )}
-                  <div className="absolute inset-0 group-hover:bg-black/10 transition-colors flex items-center justify-center">
-                    <span className="opacity-0 group-hover:opacity-100 transition-opacity inline-flex items-center gap-1 rounded-full bg-white/95 px-2.5 py-1 text-[10px] font-medium text-slate-700 shadow">
-                      <Pencil className="h-3 w-3" /> Edit
-                    </span>
+                    <div className="px-2.5 py-1.5">
+                      <div className="text-[11.5px] font-medium text-slate-800 truncate">{h.name}</div>
+                      <div className="text-[10px] text-muted-foreground truncate">{[h.city, h.country].filter(Boolean).join(" · ") || "No location"}</div>
+                      <div className="text-[10px] text-muted-foreground truncate mt-0.5">{h.primary_recruiter_email || <span className="italic text-slate-300">no recruiter email</span>}</div>
+                    </div>
+                  </button>
+                  <div className="mt-auto flex border-t border-slate-100 divide-x divide-slate-100 text-[10px] text-slate-500">
+                    <button onClick={() => setEditingDetails(h)} className="flex-1 py-1.5 inline-flex items-center justify-center gap-1 hover:bg-slate-50 hover:text-slate-700" title="Edit details">
+                      <Pencil className="h-3 w-3" /> Details
+                    </button>
+                    <button onClick={() => setContactsFor(h)} className="flex-1 py-1.5 inline-flex items-center justify-center gap-1 hover:bg-slate-50 hover:text-slate-700" title="Contacts & routing">
+                      <Users className="h-3 w-3" /> {contactCount || "Contacts"}
+                    </button>
+                    <button onClick={() => handleDelete(h)} className="flex-1 py-1.5 inline-flex items-center justify-center gap-1 hover:bg-rose-50 hover:text-rose-600" title="Delete hospital">
+                      <Trash2 className="h-3 w-3" />
+                    </button>
                   </div>
-                  {h.doctor_template_key && (
-                    <span className="absolute top-1.5 left-1.5 rounded-full bg-teal-600 text-white text-[8.5px] font-medium px-1.5 py-0.5 shadow-sm">
-                      Custom copy
-                    </span>
-                  )}
                 </div>
-                <div className="px-2.5 py-1.5">
-                  <div className="text-[11.5px] font-medium text-slate-800 truncate">{h.name}</div>
-                  <div className="text-[10px] text-muted-foreground truncate">
-                    {[h.city, h.country].filter(Boolean).join(" · ") || "No location"}
-                  </div>
-                </div>
-              </button>
-            ))}
+              );
+            })}
             {filtered.length === 0 && search.trim() && (
               <div className="col-span-full py-6 text-center text-[12px] text-muted-foreground">No hospitals match "{search}".</div>
             )}
@@ -252,23 +299,48 @@ export function HospitalTemplatesManager() {
         )}
       </CardContent>
 
-      {editing && (
-        <TemplateStudio mode="hospital" hospital={editing} templates={templates} hospitals={hospitals} onClose={() => setEditing(null)} />
+      {editingEmail && (
+        <TemplateStudio mode="hospital" hospital={editingEmail} hospitals={hospitals} onClose={() => setEditingEmail(null)} />
       )}
       {creating && (
-        <TemplateStudio mode="new" templates={templates} hospitals={hospitals} onClose={() => setCreating(false)} />
+        <TemplateStudio mode="new" hospitals={hospitals} onClose={() => setCreating(false)} />
+      )}
+      {liveDetails && (
+        <HospitalDialog
+          open
+          onClose={() => setEditingDetails(null)}
+          title={`Edit ${liveDetails.name}`}
+          initial={liveDetails}
+          onSubmit={async (input: HospitalInput) => { await updateH.mutateAsync({ id: liveDetails.id, ...input }); toast.success(`Updated ${input.name}`); }}
+        />
+      )}
+      {liveContacts && (
+        <UiDialog open onOpenChange={v => !v && setContactsFor(null)}>
+          <UiDialogContent className="sm:max-w-[720px] max-h-[88vh] overflow-y-auto">
+            <UiDialogHeader>
+              <UiDialogTitle className="flex items-center gap-2"><Users className="h-4 w-4 text-teal-600" /> {liveContacts.name} — contacts &amp; routing</UiDialogTitle>
+            </UiDialogHeader>
+            <HospitalContactsPanel
+              hospital={liveContacts}
+              contacts={contactsIdx.forHospital(liveContacts.name)}
+              onUpdate={patch => updateH.mutateAsync({ id: liveContacts.id, name: liveContacts.name, ...patch })}
+            />
+          </UiDialogContent>
+        </UiDialog>
       )}
     </Card>
   );
 }
 
-function TemplateStudio({ mode, hospital, templates, hospitals, onClose }: {
+function TemplateStudio({ mode, hospital, hospitals, onClose }: {
   mode: "hospital" | "new";
   hospital?: Hospital;
-  templates: EmailTemplate[];
   hospitals: Hospital[];
   onClose: () => void;
 }) {
+  // Full template bodies load only now (when a hospital's editor opens), not on
+  // the Hospitals gallery — so browsing hospitals stays fast.
+  const { data: templates = [] } = useEmailTemplates();
   const createH   = useCreateHospital();
   const updateH   = useUpdateHospital();
   const createTpl = useCreateEmailTemplate();

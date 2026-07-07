@@ -32,6 +32,43 @@ export function useEmailTemplates() {
   });
 }
 
+// Lightweight list — everything EXCEPT the big body_html, so the Templates
+// screen loads fast even with 150+ templates. The full body is fetched per
+// template on click (useEmailTemplate). Its key is a prefix of ["email-templates"]
+// so the existing mutation invalidations refresh it automatically.
+export type EmailTemplateListItem = Omit<EmailTemplate, "body_html">;
+
+export function useEmailTemplateList() {
+  return useQuery({
+    queryKey: ["email-templates", "list"] as const,
+    queryFn: async (): Promise<EmailTemplateListItem[]> => {
+      const { data, error } = await supabase
+        .from("email_templates")
+        .select("id,key,name,flow_key,subject,body_text,variables,updated_at,updated_by")
+        .order("flow_key", { ascending: true })
+        .order("name",     { ascending: true });
+      if (error) throw error;
+      return (data ?? []) as EmailTemplateListItem[];
+    },
+    staleTime: 60_000,
+  });
+}
+
+/** Full single template (incl. body_html) — fetched only when a template is
+ *  opened in the editor. Disabled until an id is selected. */
+export function useEmailTemplate(id: string | null) {
+  return useQuery({
+    queryKey: ["email-templates", "one", id] as const,
+    enabled: !!id,
+    queryFn: async (): Promise<EmailTemplate> => {
+      const { data, error } = await supabase.from("email_templates").select("*").eq("id", id!).single();
+      if (error) throw error;
+      return data as EmailTemplate;
+    },
+    staleTime: 60_000,
+  });
+}
+
 export function useUpdateEmailTemplate() {
   const qc = useQueryClient();
   return useMutation({

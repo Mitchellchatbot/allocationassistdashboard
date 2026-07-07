@@ -23,7 +23,7 @@ const BLANK: HospitalInput = {
 
 /** Expanded panel under a hospital row: its Zoho contacts + the per-hospital
  *  send-routing settings (who to email + direct addressing). */
-function HospitalContactsPanel({ hospital, contacts, onUpdate }: {
+export function HospitalContactsPanel({ hospital, contacts, onUpdate }: {
   hospital: Hospital;
   contacts: HospitalContact[];
   onUpdate: (patch: Partial<HospitalInput>) => Promise<unknown>;
@@ -349,7 +349,7 @@ export function HospitalsTab() {
   );
 }
 
-function HospitalDialog({
+export function HospitalDialog({
   open, onClose, title, initial, onSubmit,
 }: {
   open: boolean;
