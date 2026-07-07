@@ -9,7 +9,7 @@ import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription, Di
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Hospital as HospitalIcon, Image as ImageIcon, Search, Save, Eye, RotateCcw, Pencil, Wand2, Plus, Sparkles } from "lucide-react";
 import { toast } from "sonner";
-import { useHospitals, useUpdateHospital, type Hospital } from "@/hooks/use-hospitals";
+import { useHospitals, useCreateHospital, useUpdateHospital, type Hospital } from "@/hooks/use-hospitals";
 import {
   useEmailTemplates, useCreateEmailTemplate, useUpdateEmailTemplate, useDeleteEmailTemplate,
   renderTemplate, type EmailTemplate,
@@ -30,8 +30,7 @@ function withImageSlot(html: string): string {
   return i === -1 ? `{{hospital_image}}\n${html}` : `${html.slice(0, i + 4)}\n{{hospital_image}}${html.slice(i + 4)}`;
 }
 
-// Full send signature (logo + website) so the preview matches the real email —
-// mirrors send-flow-email's signatureHtml() / EmailTemplatesTab's stand-in.
+// Full send signature (logo + website) so the preview matches the real email.
 const PREVIEW_LOGO_URL = `${import.meta.env.VITE_SUPABASE_URL}/storage/v1/object/public/email-assets/logo.png`;
 const PREVIEW_SANS = `-apple-system, BlinkMacSystemFont, 'Segoe UI', Helvetica, Arial, sans-serif`;
 const FULL_SIGNATURE_HTML = `
@@ -45,8 +44,7 @@ const FULL_SIGNATURE_HTML = `
 </table>`;
 const FULL_SIGNATURE_TEXT = `\n\nWarmest Regards,\nThe Allocation Assist team\n\nJumeirah Lakes Towers, Dubai, UAE\nwww.allocationassist.com\n`;
 
-// Concrete values people type in a draft → the token they become when you press
-// "Make template". Sample is used to render the live preview naturally.
+// Concrete values people type in a draft → the token they become.
 const KNOWN_FIELDS: Array<{ token: string; label: string; sample: string }> = [
   { token: "doctor_name",           label: "Doctor name",     sample: "Dr. Heena Sharma" },
   { token: "doctor_speciality",     label: "Specialty",       sample: "Pediatrics" },
@@ -55,7 +53,6 @@ const KNOWN_FIELDS: Array<{ token: string; label: string; sample: string }> = [
   { token: "city",                  label: "City",            sample: "Dubai" },
   { token: "country",               label: "Country",         sample: "UAE" },
 ];
-// Structural tokens inserted at the cursor (not typed as literal text).
 const INSERT_TOKENS: Array<{ token: string; label: string }> = [
   { token: "hospital_image",        label: "Hospital photo" },
   { token: "signature",             label: "Signature" },
@@ -64,31 +61,13 @@ const INSERT_TOKENS: Array<{ token: string; label: string }> = [
 ];
 const stub = (label: string) => `<p style="color:#94a3b8;font-style:italic;">[${label} renders here at send time]</p>`;
 const escapeRegExp = (s: string) => s.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+const slugify = (s: string) => s.toLowerCase().replace(/[^a-z0-9]+/g, "_").replace(/^_+|_+$/g, "").slice(0, 48) || "template";
 
-// "Type" options for a NEW template. Profile Sent covers TWO audiences (hospital
-// + doctor) that share flow_key "profile_sent" — split here so the team can make
-// either. `keyBase` seeds the template key so the audience picker routes it right
-// (keys with "doctor"/"hospital" are shown only to the matching send picker). No
-// onboarding — that flow is retired (see automation-flows FLOW_ORDER).
-const TYPE_OPTIONS: Array<{ value: string; label: string; flowKey: string; keyBase: string; from: string }> = [
-  { value: "profile_sent_doctor",   label: "Profile Sent to Doctor (Working Opportunity)", flowKey: "profile_sent",     keyBase: "profile_sent_doctor",   from: "Opportunities <opportunities@allocationassist.com>" },
-  { value: "profile_sent_hospital", label: "Profile Sent to Hospital",                     flowKey: "profile_sent",     keyBase: "profile_sent_hospital", from: "Hospital Intro <hospitalintro@allocationassist.com>" },
-  { value: "shortlist",             label: "Shortlist Confirmation",                       flowKey: "shortlist",        keyBase: "shortlist",             from: "Allocation Assist <hello@allocationassist.com>" },
-  { value: "interview",             label: "Interview Tips + Confirmation",                flowKey: "interview",        keyBase: "interview",             from: "Allocation Assist <hello@allocationassist.com>" },
-  { value: "contract_signing",      label: "Contract Check-in",                            flowKey: "contract_signing", keyBase: "contract",              from: "Allocation Assist <hello@allocationassist.com>" },
-  { value: "relocation",            label: "Relocation Guide + Attestation",               flowKey: "relocation",       keyBase: "relocation",            from: "Allocation Assist <hello@allocationassist.com>" },
-  { value: "second_payment",        label: "Second Payment Invoice",                       flowKey: "second_payment",   keyBase: "second_payment",        from: "Accounts <accounts@allocationassist.com>" },
-];
-
-// Dictionaries for "Auto-detect" — recognise obvious values in a draft and
-// suggest them as variables (the team still reviews before replacing).
+// Dictionaries for "Auto-detect".
 const CITY_LIST = ["Abu Dhabi", "Al Ain", "Al Dhafra", "Dubai", "Sharjah", "Ras Al Khaimah", "Ajman", "Fujairah", "Umm Al Quwain", "Doha", "Riyadh", "Jeddah", "Dammam", "Al Ahsa", "Dhahran", "Khobar", "Mecca", "Medina", "Manama", "Kuwait City", "Muscat"];
 const COUNTRY_LIST = ["United Arab Emirates", "Saudi Arabia", "UAE", "KSA", "Qatar", "Oman", "Bahrain", "Kuwait"];
 const SPECIALTY_LIST = ["Emergency Medicine", "Family Medicine", "Internal Medicine", "General Surgery", "Plastic Surgery", "Intensive Care", "Neonatology", "Neurosurgery", "Paediatrics", "Pediatrics", "Cardiology", "Neurology", "Orthopaedics", "Orthopedics", "Radiology", "Anaesthesiology", "Anesthesiology", "Dermatology", "Oncology", "Psychiatry", "Obstetrics", "Gynaecology", "Gynecology", "Ophthalmology", "Otolaryngology", "Urology", "Nephrology", "Gastroenterology", "Endocrinology", "Pulmonology", "Pathology", "Haematology", "Hematology", "Rheumatology", "ENT"];
 
-/** Best-effort scan of a draft for obvious concrete values → the token they map
- *  to. Only patterns we can recognise safely: "Dr. <Name>", a known hospital
- *  name, and dictionary GCC city / country / specialty. */
 function detectValues(text: string, hospitalNames: string[]): Partial<Record<string, string>> {
   const out: Record<string, string> = {};
   const dr = text.match(/\bDr\.?\s+[A-Z][A-Za-z'’-]+(?:\s+[A-Z][A-Za-z'’-]+){0,2}/);
@@ -106,11 +85,22 @@ function detectValues(text: string, hospitalNames: string[]): Partial<Record<str
   const spec = firstMatch(SPECIALTY_LIST);   if (spec) out.doctor_speciality = spec;
   return out;
 }
-const slugify = (s: string) => s.toLowerCase().replace(/[^a-z0-9]+/g, "_").replace(/^_+|_+$/g, "").slice(0, 48) || "template";
+
+// "Type" of a NEW template. Profile Sent covers two audiences (hospital + doctor)
+// on one flow_key — split here. `keyBase` seeds the template key so the audience
+// picker routes it right. Onboarding is retired (see automation-flows FLOW_ORDER).
+const TYPE_OPTIONS: Array<{ value: string; label: string; flowKey: string; keyBase: string; from: string }> = [
+  { value: "profile_sent_doctor",   label: "Profile Sent to Doctor (Working Opportunity)", flowKey: "profile_sent",     keyBase: "profile_sent_doctor",   from: "Opportunities <opportunities@allocationassist.com>" },
+  { value: "profile_sent_hospital", label: "Profile Sent to Hospital",                     flowKey: "profile_sent",     keyBase: "profile_sent_hospital", from: "Hospital Intro <hospitalintro@allocationassist.com>" },
+  { value: "shortlist",             label: "Shortlist Confirmation",                       flowKey: "shortlist",        keyBase: "shortlist",             from: "Allocation Assist <hello@allocationassist.com>" },
+  { value: "interview",             label: "Interview Tips + Confirmation",                flowKey: "interview",        keyBase: "interview",             from: "Allocation Assist <hello@allocationassist.com>" },
+  { value: "contract_signing",      label: "Contract Check-in",                            flowKey: "contract_signing", keyBase: "contract",              from: "Allocation Assist <hello@allocationassist.com>" },
+  { value: "relocation",            label: "Relocation Guide + Attestation",               flowKey: "relocation",       keyBase: "relocation",            from: "Allocation Assist <hello@allocationassist.com>" },
+  { value: "second_payment",        label: "Second Payment Invoice",                       flowKey: "second_payment",   keyBase: "second_payment",        from: "Accounts <accounts@allocationassist.com>" },
+];
 
 /** Profile Sent → per-hospital Working-Opportunity editor + a spacious template
- *  maker. Photo → hospitals.image_url; copy → the hospital's doctor template
- *  (hospitals.doctor_template_key), both used automatically by send-flow-email. */
+ *  maker that can also ADD a whole hospital (record + photo + copy, all linked). */
 export function HospitalTemplatesManager() {
   const { data: hospitals = [], isLoading } = useHospitals();
   const { data: templates = [] } = useEmailTemplates();
@@ -135,7 +125,6 @@ export function HospitalTemplatesManager() {
 
   const withPhoto = hospitals.filter(h => h.image_url).length;
   const withCopy  = hospitals.filter(h => h.doctor_template_key).length;
-  const hospitalNames = useMemo(() => hospitals.map(h => h.name).filter(Boolean), [hospitals]);
 
   return (
     <Card>
@@ -147,15 +136,15 @@ export function HospitalTemplatesManager() {
             </CardTitle>
             <CardDescription className="mt-1 max-w-[720px]">
               Each hospital's photo and "we have an opportunity" email copy — used automatically whenever a
-              working-opportunity email goes out about that hospital. Or start a brand-new template: write it normally,
-              then let <em>Make template</em> turn the names into variables.
+              working-opportunity email goes out about that hospital. Adding a new one creates the hospital record,
+              its email, and its photo together.
             </CardDescription>
           </div>
           <div className="flex items-center gap-2 shrink-0">
             <Badge variant="outline" className="text-[10px]">{withPhoto} photo</Badge>
             <Badge variant="outline" className="text-[10px]">{withCopy} copy</Badge>
             <Button size="sm" onClick={() => setCreating(true)}>
-              <Plus className="h-3.5 w-3.5 mr-1" /> New template
+              <Plus className="h-3.5 w-3.5 mr-1" /> Add hospital
             </Button>
           </div>
         </div>
@@ -173,10 +162,16 @@ export function HospitalTemplatesManager() {
 
         {isLoading ? (
           <div className="py-8 text-center text-[12px] text-muted-foreground">Loading hospitals…</div>
-        ) : filtered.length === 0 ? (
-          <div className="py-8 text-center text-[12px] text-muted-foreground">No hospitals match.</div>
         ) : (
           <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 gap-3 max-h-[520px] overflow-y-auto pr-1">
+            {/* Add-hospital tile */}
+            <button
+              onClick={() => setCreating(true)}
+              className="rounded-lg border-2 border-dashed border-slate-200 hover:border-teal-300 hover:bg-teal-50/30 transition-colors flex flex-col items-center justify-center gap-1 aspect-[16/13] text-slate-400 hover:text-teal-600"
+            >
+              <Plus className="h-6 w-6" />
+              <span className="text-[11px] font-medium">Add hospital</span>
+            </button>
             {filtered.map(h => (
               <button
                 key={h.id}
@@ -210,33 +205,38 @@ export function HospitalTemplatesManager() {
                 </div>
               </button>
             ))}
+            {filtered.length === 0 && search.trim() && (
+              <div className="col-span-full py-6 text-center text-[12px] text-muted-foreground">No hospitals match "{search}".</div>
+            )}
           </div>
         )}
       </CardContent>
 
       {editing && (
-        <TemplateStudio mode="hospital" hospital={editing} templates={templates} allHospitalNames={hospitalNames} onClose={() => setEditing(null)} />
+        <TemplateStudio mode="hospital" hospital={editing} templates={templates} hospitals={hospitals} onClose={() => setEditing(null)} />
       )}
       {creating && (
-        <TemplateStudio mode="new" templates={templates} allHospitalNames={hospitalNames} onClose={() => setCreating(false)} />
+        <TemplateStudio mode="new" templates={templates} hospitals={hospitals} onClose={() => setCreating(false)} />
       )}
     </Card>
   );
 }
 
-function TemplateStudio({ mode, hospital, templates, allHospitalNames, onClose }: {
+function TemplateStudio({ mode, hospital, templates, hospitals, onClose }: {
   mode: "hospital" | "new";
   hospital?: Hospital;
   templates: EmailTemplate[];
-  allHospitalNames: string[];
+  hospitals: Hospital[];
   onClose: () => void;
 }) {
+  const createH   = useCreateHospital();
   const updateH   = useUpdateHospital();
   const createTpl = useCreateEmailTemplate();
   const updateTpl = useUpdateEmailTemplate();
   const deleteTpl = useDeleteEmailTemplate();
+  const hospitalNames = useMemo(() => hospitals.map(h => h.name).filter(Boolean), [hospitals]);
 
-  // ── Resolve the base template we're editing ──────────────────────────────
+  // ── Resolve the base template (hospital mode edits an existing one) ───────
   const ownKey    = hospital ? ownKeyFor(hospital) : "";
   const ownTpl    = hospital ? templates.find(t => t.key === ownKey) ?? null : null;
   const linkedTpl = hospital?.doctor_template_key ? templates.find(t => t.key === hospital.doctor_template_key) ?? null : null;
@@ -245,12 +245,25 @@ function TemplateStudio({ mode, hospital, templates, allHospitalNames, onClose }
     : null;
   const editTpl = mode === "hospital" ? (ownTpl ?? (linkedTpl && linkedTpl.key !== DEFAULT_DOCTOR_KEY ? linkedTpl : null)) : null;
   const linked = !!editTpl;
-
   const seedHtml = mode === "hospital" ? withImageSlot(base?.body_html ?? "") : "";
 
   // ── State ────────────────────────────────────────────────────────────────
-  const [name, setName]         = useState("");
   const [typeValue, setTypeValue] = useState<string>(TYPE_OPTIONS[0].value);
+  const opt = TYPE_OPTIONS.find(o => o.value === typeValue) ?? TYPE_OPTIONS[0];
+  const isProfileSent = mode === "new" && opt.flowKey === "profile_sent";
+  const audience: "doctor" | "hospital" | null =
+    opt.keyBase.includes("doctor") ? "doctor" : opt.keyBase.includes("hospital") ? "hospital" : null;
+  const wantSlot = mode === "hospital" || audience === "doctor";
+
+  const [linkMode, setLinkMode] = useState<"new" | "existing">("new");
+  const [selectedHospitalId, setSelectedHospitalId] = useState<string>("");
+  const [hName, setHName] = useState("");
+  const [hCity, setHCity] = useState("");
+  const [hCountry, setHCountry] = useState("");
+  const [hRecruiter, setHRecruiter] = useState("");
+  const [hContact, setHContact] = useState("");
+  const [name, setName] = useState(""); // generic (non-hospital) template name
+
   const [imageUrl, setImageUrl] = useState(hospital?.image_url ?? "");
   const [subject, setSubject]   = useState(base?.subject ?? "");
   const [bodyHtml, setBodyHtml] = useState(seedHtml);
@@ -263,6 +276,7 @@ function TemplateStudio({ mode, hospital, templates, allHospitalNames, onClose }
   const [saving, setSaving]   = useState(false);
   const bodyRef = useRef<HTMLTextAreaElement>(null);
 
+  // Hospital mode: re-seed when the base template resolves.
   useEffect(() => {
     if (mode !== "hospital") return;
     setSubject(base?.subject ?? "");
@@ -271,6 +285,44 @@ function TemplateStudio({ mode, hospital, templates, allHospitalNames, onClose }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [base?.id]);
 
+  // New + profile-sent: seed the copy from the generic template for that audience
+  // (only while the body is still empty, so we never trample edits).
+  useEffect(() => {
+    if (mode !== "new" || !isProfileSent || !audience) return;
+    const gen = templates.find(t => t.key === (audience === "doctor" ? "profile_sent_doctor" : "profile_sent_hospital"));
+    setSubject(s => s || gen?.subject || "");
+    setBodyText(t => t || gen?.body_text || "");
+    setBodyHtml(b => b.trim() ? b : (audience === "doctor" ? withImageSlot(gen?.body_html ?? "") : (gen?.body_html ?? "")));
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [audience]);
+
+  // Keep the tokenise boxes + preview in sync with the hospital being made/picked.
+  const pickedHospital = linkMode === "existing" ? hospitals.find(h => h.id === selectedHospitalId) ?? null : null;
+  useEffect(() => {
+    if (mode !== "new" || !isProfileSent) return;
+    const nm = linkMode === "new" ? hName : (pickedHospital?.name ?? "");
+    const cy = linkMode === "new" ? hCity : (pickedHospital?.city ?? "");
+    const co = linkMode === "new" ? hCountry : (pickedHospital?.country ?? "");
+    setValues(v => ({ ...v, hospital_name: nm, city: cy, country: co }));
+    if (linkMode === "existing" && pickedHospital) setImageUrl(pickedHospital.image_url ?? "");
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [hName, hCity, hCountry, selectedHospitalId, linkMode, isProfileSent]);
+
+  // Picking an EXISTING hospital re-seeds the editor from that hospital's own
+  // template (not the generic) so saving never clobbers its current copy.
+  useEffect(() => {
+    if (mode !== "new" || linkMode !== "existing" || !selectedHospitalId || !audience) return;
+    const h = hospitals.find(x => x.id === selectedHospitalId);
+    if (!h) return;
+    const key = audience === "doctor" ? h.doctor_template_key : h.template_key;
+    const tpl = (key ? templates.find(t => t.key === key) : null)
+      ?? templates.find(t => t.key === (audience === "doctor" ? "profile_sent_doctor" : "profile_sent_hospital"));
+    setSubject(tpl?.subject ?? "");
+    setBodyText(tpl?.body_text ?? "");
+    setBodyHtml(audience === "doctor" ? withImageSlot(tpl?.body_html ?? "") : (tpl?.body_html ?? ""));
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [selectedHospitalId]);
+
   // ── Helpers ────────────────────────────────────────────────────────────
   const insertToken = (tok: string) => {
     const el = bodyRef.current;
@@ -278,22 +330,19 @@ function TemplateStudio({ mode, hospital, templates, allHospitalNames, onClose }
     if (!el) { setBodyHtml(h => h + wrapped); return; }
     const start = el.selectionStart ?? bodyHtml.length;
     const end   = el.selectionEnd ?? bodyHtml.length;
-    const next  = bodyHtml.slice(0, start) + wrapped + bodyHtml.slice(end);
-    setBodyHtml(next);
+    setBodyHtml(bodyHtml.slice(0, start) + wrapped + bodyHtml.slice(end));
     requestAnimationFrame(() => { el.focus(); const p = start + wrapped.length; el.setSelectionRange(p, p); });
   };
 
   const autoDetect = () => {
     const fullText = `${subject}\n${bodyHtml}\n${bodyText}`;
-    const found = detectValues(fullText, allHospitalNames);
+    const found = detectValues(fullText, hospitalNames);
     const keys = Object.keys(found);
     if (!keys.length) { toast.info("Couldn't auto-detect anything — type the values in the boxes."); return; }
     setValues(v => {
       const next = { ...v };
       for (const [k, val] of Object.entries(found)) {
         const cur = next[k]?.trim();
-        // Fill empty boxes, or replace a prefilled value that isn't actually in
-        // the draft (so the swap below will find a real match).
         const curInText = !!cur && new RegExp(escapeRegExp(cur), "i").test(fullText);
         if (!cur || !curInText) next[k] = val!;
       }
@@ -306,7 +355,7 @@ function TemplateStudio({ mode, hospital, templates, allHospitalNames, onClose }
     let s = subject, h = bodyHtml, t = bodyText, count = 0;
     for (const f of KNOWN_FIELDS) {
       const val = (values[f.token] ?? "").trim();
-      if (val.length < 2) continue; // ignore blanks / single chars
+      if (val.length < 2) continue;
       const re = new RegExp(escapeRegExp(val), "gi");
       const tok = `{{${f.token}}}`;
       const rep = (str: string) => str.replace(re, () => { count++; return tok; });
@@ -330,7 +379,7 @@ function TemplateStudio({ mode, hospital, templates, allHospitalNames, onClose }
     signature: FULL_SIGNATURE_HTML,
     signature_text: FULL_SIGNATURE_TEXT,
     hospital_image: imageUrl
-      ? `<img src="${imageUrl}" alt="${hospital?.name ?? "Hospital"}" width="560" style="display:block;width:100%;max-width:560px;height:auto;border-radius:12px;margin:18px 0;border:0;" />`
+      ? `<img src="${imageUrl}" alt="${values.hospital_name || "Hospital"}" width="560" style="display:block;width:100%;max-width:560px;height:auto;border-radius:12px;margin:18px 0;border:0;" />`
       : "",
     doctor_card_html: stub("the doctor profile card"),
     doctor_row_table_html: stub("the doctor details table"),
@@ -340,49 +389,68 @@ function TemplateStudio({ mode, hospital, templates, allHospitalNames, onClose }
   const previewSubject = renderTemplate(subject, previewVars);
   const previewText    = renderTemplate(bodyText, previewVars);
   const previewHtml    = renderTemplate(
-    withImageSlot(bodyHtml || `<pre style="font-family:inherit;white-space:pre-wrap;">${bodyText}</pre>`),
+    (wantSlot ? withImageSlot : (x: string) => x)(bodyHtml || `<pre style="font-family:inherit;white-space:pre-wrap;">${bodyText}</pre>`),
     previewVars, { html: true },
   );
 
-  const dirty = mode === "new"
-    ? !!(name.trim() && (subject.trim() || bodyHtml.trim()))
-    : imageUrl !== (hospital?.image_url ?? "") || subject !== (base?.subject ?? "") || bodyText !== (base?.body_text ?? "") || bodyHtml !== seedHtml;
+  const showHospitalFields = mode === "hospital" || isProfileSent;
+  const dirty = mode === "hospital"
+    ? imageUrl !== (hospital?.image_url ?? "") || subject !== (base?.subject ?? "") || bodyText !== (base?.body_text ?? "") || bodyHtml !== seedHtml
+    : isProfileSent
+      ? !!((linkMode === "new" ? hName.trim() : selectedHospitalId) && (subject.trim() || bodyHtml.trim()))
+      : !!(name.trim() && (subject.trim() || bodyHtml.trim()));
 
   // ── Save ─────────────────────────────────────────────────────────────────
   const handleSave = async () => {
-    if (mode === "new" && !name.trim()) { toast.error("Give the template a name."); return; }
     if (!subject.trim()) { toast.error("Subject is required."); return; }
     setSaving(true);
     try {
-      const bodyToSave = withImageSlot(bodyHtml);
-      if (mode === "new") {
-        const opt = TYPE_OPTIONS.find(o => o.value === typeValue) ?? TYPE_OPTIONS[0];
-        let key = `${opt.keyBase}_${slugify(name)}`;
-        for (let n = 2; templates.some(t => t.key === key); n++) key = `${opt.keyBase}_${slugify(name)}_${n}`;
-        await createTpl.mutateAsync({
-          key, name: name.trim(), flow_key: opt.flowKey,
-          subject, body_text: bodyText, body_html: bodyToSave,
-          variables: KNOWN_FIELDS.map(f => f.token),
-        });
-        toast.success(`Created template "${name.trim()}".`);
-      } else if (hospital) {
+      const bodyToSave = (wantSlot ? withImageSlot : (x: string) => x)(bodyHtml);
+
+      if (mode === "hospital" && hospital) {
         if (imageUrl !== (hospital.image_url ?? "")) {
           await updateH.mutateAsync({ id: hospital.id, name: hospital.name, image_url: imageUrl || null });
         }
         let key = editTpl?.key ?? "";
-        if (editTpl) {
-          await updateTpl.mutateAsync({ id: editTpl.id, subject, body_text: bodyText, body_html: bodyToSave });
-        } else {
+        if (editTpl) await updateTpl.mutateAsync({ id: editTpl.id, subject, body_text: bodyText, body_html: bodyToSave });
+        else {
           key = ownKey;
-          await createTpl.mutateAsync({
-            key, name: `Working Opportunity — ${hospital.name}`, flow_key: "profile_sent",
-            subject, body_text: bodyText, body_html: bodyToSave, variables: base?.variables ?? [],
-          });
+          await createTpl.mutateAsync({ key, name: `Working Opportunity — ${hospital.name}`, flow_key: "profile_sent", subject, body_text: bodyText, body_html: bodyToSave, variables: base?.variables ?? [] });
         }
-        if (hospital.doctor_template_key !== key) {
-          await updateH.mutateAsync({ id: hospital.id, name: hospital.name, doctor_template_key: key });
-        }
+        if (hospital.doctor_template_key !== key) await updateH.mutateAsync({ id: hospital.id, name: hospital.name, doctor_template_key: key });
         toast.success(`Saved ${hospital.name}'s working-opportunity template.`);
+      } else if (isProfileSent) {
+        // Add/attach a hospital + its per-hospital template, all linked.
+        let hospId: string, hospName: string;
+        if (linkMode === "new") {
+          if (!hName.trim()) { toast.error("Hospital name is required."); setSaving(false); return; }
+          hospId = await createH.mutateAsync({
+            name: hName.trim(), city: hCity.trim() || null, country: hCountry.trim() || null,
+            primary_recruiter_email: hRecruiter.trim() || null, primary_contact_name: hContact.trim() || null,
+            image_url: imageUrl || null,
+          });
+          hospName = hName.trim();
+        } else {
+          const h = hospitals.find(x => x.id === selectedHospitalId);
+          if (!h) { toast.error("Pick a hospital to attach this to."); setSaving(false); return; }
+          hospId = h.id; hospName = h.name;
+          if (imageUrl !== (h.image_url ?? "")) await updateH.mutateAsync({ id: h.id, name: h.name, image_url: imageUrl || null });
+        }
+        const key = `${opt.keyBase}__${hospId}`;
+        const existing = templates.find(t => t.key === key);
+        const tplName = `${audience === "doctor" ? "Working Opportunity" : "Profile Intro"} — ${hospName}`;
+        if (existing) await updateTpl.mutateAsync({ id: existing.id, subject, body_text: bodyText, body_html: bodyToSave });
+        else await createTpl.mutateAsync({ key, name: tplName, flow_key: "profile_sent", subject, body_text: bodyText, body_html: bodyToSave, variables: KNOWN_FIELDS.map(f => f.token) });
+        if (audience === "doctor") await updateH.mutateAsync({ id: hospId, name: hospName, doctor_template_key: key });
+        else await updateH.mutateAsync({ id: hospId, name: hospName, template_key: key });
+        toast.success(linkMode === "new" ? `Added ${hospName} with its email + photo.` : `Saved ${hospName}'s template.`);
+      } else {
+        // Generic template (shortlist / interview / …), no hospital.
+        if (!name.trim()) { toast.error("Give the template a name."); setSaving(false); return; }
+        let key = `${opt.keyBase}_${slugify(name)}`;
+        for (let n = 2; templates.some(t => t.key === key); n++) key = `${opt.keyBase}_${slugify(name)}_${n}`;
+        await createTpl.mutateAsync({ key, name: name.trim(), flow_key: opt.flowKey, subject, body_text: bodyText, body_html: bodyToSave, variables: KNOWN_FIELDS.map(f => f.token) });
+        toast.success(`Created template "${name.trim()}".`);
       }
       onClose();
     } catch (e) {
@@ -408,7 +476,12 @@ function TemplateStudio({ mode, hospital, templates, allHospitalNames, onClose }
     }
   };
 
-  const title = mode === "new" ? "New template" : hospital!.name;
+  const title = mode === "new" ? "Add hospital" : hospital!.name;
+  const saveLabel = saving ? "Saving…"
+    : mode === "hospital" ? "Save template"
+    : isProfileSent && linkMode === "new" ? "Create hospital + email"
+    : isProfileSent ? "Save template"
+    : "Create template";
 
   return (
     <Dialog open onOpenChange={v => !v && onClose()}>
@@ -417,18 +490,16 @@ function TemplateStudio({ mode, hospital, templates, allHospitalNames, onClose }
           <DialogTitle className="flex items-center gap-2">
             {mode === "new" ? <Wand2 className="h-4 w-4 text-teal-600" /> : <HospitalIcon className="h-4 w-4 text-teal-600" />}
             {title}
-            <span className="text-[11px] font-normal text-muted-foreground">· Working-Opportunity email</span>
           </DialogTitle>
           <DialogDescription className="text-[12px]">
             {mode === "new"
-              ? "Write the email with real names, fill the boxes below with the exact words you used, then press Make template to turn them into reusable variables."
+              ? "Fill in the hospital's details, add a photo, and write the email — pressing Create makes the hospital, its email, and its photo, all linked so sends use them automatically."
               : linked
                 ? "Editing this hospital's own template — used automatically on every working-opportunity send about it."
                 : "This hospital uses the generic email. Saving creates a dedicated copy just for it."}
           </DialogDescription>
         </DialogHeader>
 
-        {/* Mobile tab switch */}
         <div className="flex lg:hidden gap-1 px-6 pt-3">
           {(["edit", "preview"] as const).map(t => (
             <button key={t} onClick={() => setMobileTab(t)}
@@ -442,26 +513,68 @@ function TemplateStudio({ mode, hospital, templates, allHospitalNames, onClose }
           {/* ── Left: write ──────────────────────────────────────────── */}
           <div className={`${mobileTab === "preview" ? "hidden lg:block" : ""} p-6 space-y-4 lg:border-r`}>
             {mode === "new" && (
-              <div className="grid grid-cols-[1fr_180px] gap-3">
-                <div>
-                  <Label className="text-[11px] uppercase tracking-wider text-muted-foreground">Template name</Label>
-                  <Input value={name} onChange={e => setName(e.target.value)} placeholder="e.g. Working Opportunity — Cleveland Clinic" className="mt-1 text-[12px]" />
-                </div>
-                <div>
-                  <Label className="text-[11px] uppercase tracking-wider text-muted-foreground">Type</Label>
-                  <Select value={typeValue} onValueChange={setTypeValue}>
-                    <SelectTrigger className="mt-1 h-9 text-[12px]"><SelectValue /></SelectTrigger>
-                    <SelectContent>
-                      {TYPE_OPTIONS.map(o => (
-                        <SelectItem key={o.value} value={o.value} className="text-[12px]">{o.label}</SelectItem>
-                      ))}
-                    </SelectContent>
-                  </Select>
-                </div>
+              <div>
+                <Label className="text-[11px] uppercase tracking-wider text-muted-foreground">Type</Label>
+                <Select value={typeValue} onValueChange={setTypeValue}>
+                  <SelectTrigger className="mt-1 h-9 text-[12px]"><SelectValue /></SelectTrigger>
+                  <SelectContent>
+                    {TYPE_OPTIONS.map(o => (
+                      <SelectItem key={o.value} value={o.value} className="text-[12px]">{o.label}</SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
               </div>
             )}
 
-            {mode === "hospital" && (
+            {/* New + profile-sent: attach to a new or existing hospital */}
+            {mode === "new" && isProfileSent && (
+              <div className="rounded-lg border border-slate-200 p-3 space-y-3 bg-slate-50/50">
+                <div className="flex items-center gap-1 rounded-lg bg-white border p-0.5 text-[12px] w-fit">
+                  {(["new", "existing"] as const).map(m => (
+                    <button key={m} type="button" onClick={() => setLinkMode(m)}
+                      className={`rounded-md px-3 py-1 font-medium transition-colors ${linkMode === m ? "bg-teal-600 text-white" : "text-slate-500 hover:text-slate-700"}`}>
+                      {m === "new" ? "New hospital" : "Existing hospital"}
+                    </button>
+                  ))}
+                </div>
+                {linkMode === "new" ? (
+                  <div className="grid grid-cols-2 gap-2">
+                    <div className="col-span-2">
+                      <Label className="text-[10px] uppercase tracking-wider text-muted-foreground">Hospital name *</Label>
+                      <Input value={hName} onChange={e => setHName(e.target.value)} placeholder="e.g. Cleveland Clinic Abu Dhabi" className="mt-1 h-8 text-[12px]" />
+                    </div>
+                    <div><Label className="text-[10px] uppercase tracking-wider text-muted-foreground">City</Label>
+                      <Input value={hCity} onChange={e => setHCity(e.target.value)} placeholder="Dubai" className="mt-1 h-8 text-[12px]" /></div>
+                    <div><Label className="text-[10px] uppercase tracking-wider text-muted-foreground">Country</Label>
+                      <Input value={hCountry} onChange={e => setHCountry(e.target.value)} placeholder="UAE" className="mt-1 h-8 text-[12px]" /></div>
+                    <div><Label className="text-[10px] uppercase tracking-wider text-muted-foreground">Recruiter email</Label>
+                      <Input value={hRecruiter} onChange={e => setHRecruiter(e.target.value)} placeholder="recruiter@hospital.com" className="mt-1 h-8 text-[12px]" /></div>
+                    <div><Label className="text-[10px] uppercase tracking-wider text-muted-foreground">Contact name</Label>
+                      <Input value={hContact} onChange={e => setHContact(e.target.value)} placeholder="Hassan" className="mt-1 h-8 text-[12px]" /></div>
+                  </div>
+                ) : (
+                  <Select value={selectedHospitalId} onValueChange={setSelectedHospitalId}>
+                    <SelectTrigger className="h-8 text-[12px]"><SelectValue placeholder="Choose a hospital…" /></SelectTrigger>
+                    <SelectContent className="max-h-[280px]">
+                      {[...hospitals].sort((a, b) => a.name.localeCompare(b.name)).map(h => (
+                        <SelectItem key={h.id} value={h.id} className="text-[12px]">{h.name}{h.city ? ` · ${h.city}` : ""}</SelectItem>
+                      ))}
+                    </SelectContent>
+                  </Select>
+                )}
+              </div>
+            )}
+
+            {/* Generic template name (non-profile-sent types) */}
+            {mode === "new" && !isProfileSent && (
+              <div>
+                <Label className="text-[11px] uppercase tracking-wider text-muted-foreground">Template name</Label>
+                <Input value={name} onChange={e => setName(e.target.value)} placeholder="e.g. Shortlist congrats — Riyadh" className="mt-1 text-[12px]" />
+              </div>
+            )}
+
+            {/* Photo (hospital mode + profile-sent new mode) */}
+            {showHospitalFields && (
               <div className="space-y-1">
                 <Label className="text-[11px] uppercase tracking-wider text-muted-foreground">Hospital photo</Label>
                 <div className="flex items-center gap-2">
@@ -474,7 +587,7 @@ function TemplateStudio({ mode, hospital, templates, allHospitalNames, onClose }
                 </div>
                 {imageUrl.trim() && (
                   <div className="flex items-center gap-2 pt-1">
-                    <img src={imageUrl} alt={hospital?.name} className="h-16 w-28 rounded object-cover border border-slate-200" />
+                    <img src={imageUrl} alt="" className="h-16 w-28 rounded object-cover border border-slate-200" />
                     <button type="button" onClick={() => setImageUrl("")} className="text-[11px] text-rose-600 hover:underline">Remove photo</button>
                   </div>
                 )}
@@ -494,8 +607,7 @@ function TemplateStudio({ mode, hospital, templates, allHospitalNames, onClose }
                 <Label className="text-[11px] uppercase tracking-wider text-muted-foreground">Email body</Label>
                 <div className="flex flex-wrap gap-1 justify-end">
                   {INSERT_TOKENS.map(t => (
-                    <button key={t.token} type="button" onClick={() => insertToken(t.token)}
-                      title={`Insert {{${t.token}}}`}
+                    <button key={t.token} type="button" onClick={() => insertToken(t.token)} title={`Insert {{${t.token}}}`}
                       className="text-[10px] rounded border border-slate-200 bg-slate-50 px-1.5 py-0.5 text-slate-600 hover:border-teal-300 hover:text-teal-700">
                       + {t.label}
                     </button>
@@ -506,17 +618,14 @@ function TemplateStudio({ mode, hospital, templates, allHospitalNames, onClose }
                 ref={bodyRef}
                 value={bodyHtml}
                 onChange={e => setBodyHtml(e.target.value)}
-                className="text-[12.5px] min-h-[360px] font-mono leading-relaxed"
-                placeholder={"Hi Dr. Heena Sharma!\n\nWe have an opportunity with Mediclinic in Dubai and we highly recommend your profile.\n\n(Write it naturally with real names — Make template turns them into variables.)"}
+                className="text-[12.5px] min-h-[300px] font-mono leading-relaxed"
+                placeholder={"Hi Dr. Heena Sharma!\n\nWe have an opportunity with Mediclinic in Dubai and we highly recommend your profile.\n\n(Write naturally — Make template turns the names into variables.)"}
               />
             </div>
 
-            {/* Make template — values → variables */}
             <div className="rounded-lg border border-teal-200 bg-teal-50/40 p-3 space-y-2">
               <div className="flex items-center justify-between gap-2">
-                <div className="text-[11px] font-medium text-teal-900 flex items-center gap-1.5">
-                  <Wand2 className="h-3.5 w-3.5" /> Make template
-                </div>
+                <div className="text-[11px] font-medium text-teal-900 flex items-center gap-1.5"><Wand2 className="h-3.5 w-3.5" /> Make template</div>
                 <div className="flex items-center gap-1.5">
                   <Button size="sm" variant="ghost" className="h-7 text-[11px] text-teal-800 hover:bg-teal-100" onClick={autoDetect} title="Scan the draft and fill the boxes automatically">
                     <Sparkles className="h-3.5 w-3.5 mr-1" /> Auto-detect
@@ -535,12 +644,7 @@ function TemplateStudio({ mode, hospital, templates, allHospitalNames, onClose }
                 {KNOWN_FIELDS.map(f => (
                   <div key={f.token} className="flex items-center gap-1.5">
                     <span className="text-[10px] text-slate-500 w-20 shrink-0">{f.label}</span>
-                    <Input
-                      value={values[f.token] ?? ""}
-                      onChange={e => setValues(v => ({ ...v, [f.token]: e.target.value }))}
-                      placeholder={f.sample}
-                      className="h-7 text-[11px]"
-                    />
+                    <Input value={values[f.token] ?? ""} onChange={e => setValues(v => ({ ...v, [f.token]: e.target.value }))} placeholder={f.sample} className="h-7 text-[11px]" />
                   </div>
                 ))}
               </div>
@@ -561,9 +665,9 @@ function TemplateStudio({ mode, hospital, templates, allHospitalNames, onClose }
               subject={previewSubject}
               html={previewHtml}
               text={previewText}
-              from={mode === "hospital" ? "Opportunities <opportunities@allocationassist.com>" : (TYPE_OPTIONS.find(o => o.value === typeValue)?.from ?? "Allocation Assist <hello@allocationassist.com>")}
-              to={mode === "hospital" ? "[doctor]" : "[recipient]"}
-              templateKey={editTpl?.key ?? (mode === "hospital" ? DEFAULT_DOCTOR_KEY : "new template")}
+              from={mode === "hospital" ? "Opportunities <opportunities@allocationassist.com>" : opt.from}
+              to={audience === "hospital" ? "[hospital recruiter]" : "[doctor]"}
+              templateKey={editTpl?.key ?? (mode === "hospital" ? DEFAULT_DOCTOR_KEY : opt.value)}
               banner={<>Preview with sample values — real sends use live data.</>}
             />
           </div>
@@ -580,7 +684,7 @@ function TemplateStudio({ mode, hospital, templates, allHospitalNames, onClose }
           <div className="flex gap-2">
             <Button variant="outline" onClick={onClose} disabled={saving}>Cancel</Button>
             <Button onClick={handleSave} disabled={saving || !dirty}>
-              <Save className="h-3.5 w-3.5 mr-1.5" /> {saving ? "Saving…" : mode === "new" ? "Create template" : "Save template"}
+              <Save className="h-3.5 w-3.5 mr-1.5" /> {saveLabel}
             </Button>
           </div>
         </DialogFooter>
