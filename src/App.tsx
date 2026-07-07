@@ -69,6 +69,7 @@ const FollowUps       = lazy(() => import("./pages/FollowUps"));
 const Calls           = lazy(() => import("./pages/Calls"));
 const Chatbot         = lazy(() => import("./pages/Chatbot"));
 const Automations     = lazy(() => import("./pages/Automations"));
+const Information      = lazy(() => import("./pages/Information"));
 const Vacancies       = lazy(() => import("./pages/Vacancies"));
 const Reports         = lazy(() => import("./pages/Reports"));
 const Batches         = lazy(() => import("./pages/Batches"));
@@ -249,6 +250,7 @@ const App = () => {
                 <Route path="/chatbot"        element={<Chatbot />} />
                 <Route path="/my-workspace"   element={<MyWorkspace />} />
                 <Route path="/automations"    element={<Automations />} />
+                <Route path="/information"    element={<Information />} />
                 <Route path="/doctors"        element={<Doctors />} />
                 {/* Legacy routes — keep bookmarks working by redirecting
                     into the unified /doctors shell with the right tab pre-selected. */}

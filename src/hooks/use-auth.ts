@@ -28,7 +28,7 @@ export const WORKER_EMAIL_TO_NAME: Record<string, string> = {
 // /doctors is the unified shell — the old /leads-pipeline, /doctor-profiles
 // and /wp-candidates URLs redirect into it, so they don't need their own
 // entry in the access list. Anyone who can see "doctors" sees all three tabs.
-export const ALL_PAGES = ["/", "/my-workspace", "/sales", "/marketing", "/doctors", "/team", "/finance", "/meta-ads", "/settings", "/worker", "/calls", "/chatbot", "/follow-ups", "/automations", "/vacancies", "/reports", "/batches", "/profile-sent", "/import-bulk", "/connections", "/forms", "/feedback"];
+export const ALL_PAGES = ["/", "/my-workspace", "/sales", "/marketing", "/doctors", "/team", "/finance", "/meta-ads", "/settings", "/worker", "/calls", "/chatbot", "/follow-ups", "/automations", "/information", "/vacancies", "/reports", "/batches", "/profile-sent", "/import-bulk", "/connections", "/forms", "/feedback"];
 
 // Hospital Introduction team page set. They land on /my-workspace and
 // only see the surfaces that matter for moving doctors through the
@@ -37,6 +37,7 @@ export const HI_MEMBER_PAGES = [
   "/",
   "/my-workspace",
   "/automations",
+  "/information",
   "/doctors",
   "/vacancies",
   "/profile-sent",

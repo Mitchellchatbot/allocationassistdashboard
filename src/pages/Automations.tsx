@@ -23,15 +23,13 @@ import {
   type FlowRun, type StageOverride,
 } from "@/hooks/use-automation-flows";
 import {
-  Workflow, Mail, AlertTriangle, Clock, ChevronRight, Settings, Save, StickyNote,
-  Hospital as HospitalIcon, Send, Zap, FileSignature, RefreshCw, Inbox, CalendarCheck,
+  Workflow, AlertTriangle, Clock, ChevronRight, Settings, Save, StickyNote,
+  Send, Zap, FileSignature, RefreshCw, Inbox, CalendarCheck,
   Sparkles, X as XIcon, CheckCircle2, Briefcase, MapPin, FileText,
 } from "lucide-react";
 import { toast } from "sonner";
 import { useQueryClient } from "@tanstack/react-query";
 import { supabase } from "@/lib/supabase";
-import { HospitalsTab } from "@/components/automations/HospitalsTab";
-import { EmailTemplatesTab } from "@/components/automations/EmailTemplatesTab";
 import { ApprovalQueues } from "@/components/automations/ApprovalQueues";
 import { ReassignButton } from "@/components/automations/ReassignButton";
 import { SendProfileDialog } from "@/components/automations/SendProfileDialog";
@@ -72,15 +70,14 @@ function statusBadge(status: FlowRun["status"]) {
   return <Badge variant="outline" title={hint[status]} className={`${map[status]} text-[10px] uppercase tracking-wider`}>{status}</Badge>;
 }
 
-type TabKey = FlowKey | "settings" | "hospitals" | "templates" | "queues";
+type TabKey = FlowKey | "settings" | "queues";
 
 // Static admin tab items — reference no props/state, so hoisting to a module
-// constant keeps them referentially stable across renders.
+// constant keeps them referentially stable across renders. Hospitals + Templates
+// moved to the dedicated /information page (single home for content).
 const ADMIN_TAB_ITEMS: AnimatedTabItem[] = [
-  { value: "queues",    label: <><Inbox        className="h-3.5 w-3.5" /> Queues</> },
-  { value: "hospitals", label: <><HospitalIcon className="h-3.5 w-3.5" /> Hospitals</> },
-  { value: "templates", label: <><Mail         className="h-3.5 w-3.5" /> Templates</> },
-  { value: "settings",  label: <><Settings     className="h-3.5 w-3.5" /> Default Flow Editor</> },
+  { value: "queues",    label: <><Inbox    className="h-3.5 w-3.5" /> Queues</> },
+  { value: "settings",  label: <><Settings className="h-3.5 w-3.5" /> Default Flow Editor</> },
 ];
 
 export default function Automations() {
@@ -88,7 +85,9 @@ export default function Automations() {
   // Default tab is profile_sent now that Onboarding is hidden (Ammar
   // 2026-06-03: Sales already sends the intake form from Zoho when a
   // lead converts to Doctor on Board; our duplicate is removed).
-  const initialFlow = (searchParams.get("flow") as TabKey | null) ?? "profile_sent";
+  // Guard old deep-links: hospitals/templates tabs moved to /information.
+  const rawFlow = searchParams.get("flow");
+  const initialFlow = ((rawFlow === "hospitals" || rawFlow === "templates" ? null : rawFlow) as TabKey | null) ?? "profile_sent";
   const initialRunId = searchParams.get("run");
   const [activeFlow, setActiveFlow] = useState<TabKey>(initialFlow);
   const [selectedRunId, setSelectedRunId] = useState<string | null>(initialRunId);
@@ -290,12 +289,6 @@ export default function Automations() {
                 ))}
                 <AnimatedTabPanel value="queues" active={activeFlow}>
                   <ApprovalQueues onSelectRun={setSelectedRunId} />
-                </AnimatedTabPanel>
-                <AnimatedTabPanel value="hospitals" active={activeFlow}>
-                  <HospitalsTab />
-                </AnimatedTabPanel>
-                <AnimatedTabPanel value="templates" active={activeFlow}>
-                  <EmailTemplatesTab />
                 </AnimatedTabPanel>
                 <AnimatedTabPanel value="settings" active={activeFlow}>
                   <DefaultFlowEditor

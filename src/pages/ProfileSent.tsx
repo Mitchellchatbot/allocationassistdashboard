@@ -7,7 +7,6 @@ import { Badge } from "@/components/ui/badge";
 import { Send, Users, UserSquare2, History, ExternalLink } from "lucide-react";
 import { SendProfileDialog } from "@/components/automations/SendProfileDialog";
 import { BulkProfileSendDialog } from "@/components/automations/BulkProfileSendDialog";
-import { HospitalTemplatesManager } from "@/components/automations/HospitalTemplatesManager";
 import { ScheduledProfileSendsCard } from "@/pages/Batches";
 import { useSentHistory } from "@/hooks/use-sent-history";
 import { GulfClock } from "@/components/GulfClock";
@@ -64,9 +63,6 @@ export default function ProfileSent() {
         </div>
 
         <ScheduledProfileSendsCard />
-
-        {/* Per-hospital Working-Opportunity photo + copy */}
-        <HospitalTemplatesManager />
 
         {/* Recent profile sends */}
         <Card>
