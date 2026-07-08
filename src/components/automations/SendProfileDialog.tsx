@@ -374,11 +374,13 @@ function SendProfileDialogBody({ onClose, initial }: { onClose: () => void; init
     const pane = (subject: string, html: string) => (
       <div className="flex min-h-0 w-full flex-1 flex-col">
         <div className="shrink-0 border-b border-slate-100 px-5 py-3">
-          <div className="truncate text-[14px] font-semibold text-slate-900">{subject || <span className="italic text-slate-400">No subject</span>}</div>
+          <div className="truncate text-[14px] font-semibold text-slate-900">
+            {subject ? <span dangerouslySetInnerHTML={{ __html: humanizePlaceholders(subject) }} /> : <span className="italic text-slate-400">No subject</span>}
+          </div>
           <div className="mt-0.5 text-[10px] uppercase tracking-wider text-slate-400">Preview · not sent</div>
         </div>
         <div className="min-h-0 flex-1 overflow-auto bg-white">
-          <EmailFrame html={html} />
+          <EmailFrame html={humanizePlaceholders(html)} />
         </div>
       </div>
     );
@@ -1992,7 +1994,7 @@ function PreviewBlock({ label, subject, body }: { label: string; subject: string
 function HtmlPreview({ html }: { html: string }) {
   return (
     <EmailFrame
-      html={html}
+      html={humanizePlaceholders(html)}
       minHeight={140}
       maxHeight={480}
       style={{ border: "1px solid hsl(var(--border))", borderRadius: 6 }}
