@@ -263,17 +263,39 @@ export function EditableEmailPreview({
     flush();
   };
 
-  // Table text alignment — Amir asked to control this themselves (we default to
-  // centred now). Targets only the DATA tables: their cells carry the #cbd5e1
-  // border, so the signature + layout tables (logo, wrappers) are left alone.
-  // Applies to every data-table cell in the body; the edit is saved into the
-  // sent HTML like any other edit.
+  // Table text alignment — the team controls this themselves (default is centred).
+  // Works on ANY table, not just ones we insert: the existing doctor/details
+  // table, a pasted table, a template's table. If the caret is inside a table,
+  // that table is aligned; otherwise EVERY data table (cells with a visible
+  // border, any colour) is aligned — leaving the borderless signature/layout
+  // tables alone. The edit is saved into the sent HTML like any other edit.
+  const tableFromCaret = (): HTMLTableElement | null => {
+    const body = bodyRef.current;
+    let node: Node | null = savedRange.current?.commonAncestorContainer ?? null;
+    while (node && node !== body) {
+      if (node instanceof HTMLTableElement) return node;
+      node = node.parentNode;
+    }
+    return null;
+  };
+  const cellHasBorder = (c: HTMLElement): boolean => {
+    const s = (c.getAttribute("style") || "").toLowerCase();
+    if (/border\s*:\s*(none|0(px)?)\b/.test(s)) return false;
+    if (/border[a-z-]*\s*:[^;]*\d*\.?\d+\s*px/.test(s)) return true; // inline border width
+    try {
+      const cs = getComputedStyle(c) as unknown as Record<string, string>;
+      return ["borderTopWidth", "borderRightWidth", "borderBottomWidth", "borderLeftWidth"]
+        .some(p => parseFloat(cs[p] || "0") > 0);
+    } catch { return false; }
+  };
   const applyTableAlign = (align: "left" | "center" | "right" | "justify") => {
     const body = bodyRef.current; if (!body) return;
+    const table = tableFromCaret();
+    const cells = table
+      ? Array.from(table.querySelectorAll<HTMLTableCellElement>("td, th"))
+      : Array.from(body.querySelectorAll<HTMLTableCellElement>("td, th")).filter(cellHasBorder);
     let n = 0;
-    body.querySelectorAll<HTMLTableCellElement>("td, th").forEach((c) => {
-      if ((c.getAttribute("style") || "").includes("cbd5e1")) { c.style.textAlign = align; n++; }
-    });
+    cells.forEach((c) => { c.style.textAlign = align; n++; });
     if (n > 0) flush();
   };
 
