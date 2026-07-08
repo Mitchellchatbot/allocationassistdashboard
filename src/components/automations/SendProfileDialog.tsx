@@ -81,6 +81,9 @@ interface DoctorOption {
   email:      string | null;
   phone:      string | null;
   speciality: string | null;
+  /** Country of specialty training — Zoho has it on the DOB/lead record, so we
+   *  can fill {{doctor_country_training}} even when the WP profile doesn't. */
+  country_training?: string | null;
   source:     "dob" | "lead" | "wp";
 }
 
@@ -254,7 +257,7 @@ function SendProfileDialogBody({ onClose, initial }: { onClose: () => void; init
       if (!name) continue;
       const id = `dob:${d.id}`;
       if (!eligible(id)) continue;
-      opts.push({ id, name, email: d.Email, phone: d.Phone ?? d.Mobile, speciality: d.Specialty_New ?? d.Speciality, source: "dob" });
+      opts.push({ id, name, email: d.Email, phone: d.Phone ?? d.Mobile, speciality: d.Specialty_New ?? d.Speciality, country_training: d.Country_of_Specialty_training, source: "dob" });
       if (d.Email) seenEmails.add(d.Email.trim().toLowerCase());
     }
     for (const l of z?.rawLeads ?? []) {
@@ -262,7 +265,7 @@ function SendProfileDialogBody({ onClose, initial }: { onClose: () => void; init
       if (!name) continue;
       const id = `lead:${l.id}`;
       if (!eligible(id)) continue;
-      opts.push({ id, name, email: l.Email, phone: l.Phone ?? l.Mobile, speciality: l.Specialty ?? l.Specialty_New, source: "lead" });
+      opts.push({ id, name, email: l.Email, phone: l.Phone ?? l.Mobile, speciality: l.Specialty ?? l.Specialty_New, country_training: l.Country_of_Specialty_training, source: "lead" });
       if (l.Email) seenEmails.add(l.Email.trim().toLowerCase());
     }
     // WP PUBLISHED candidates (the same spine the vacancy matcher uses) — so a
@@ -1201,6 +1204,9 @@ function PreviewConfirm({
       doctor_email:       doctor.email ?? "",
       doctor_phone:       doctor.phone ?? "",
       doctor_speciality:  doctor.speciality ?? "",
+      // Country of training: WP/legacy profile wins; else fall back to Zoho's
+      // Country_of_Specialty_training so this field still fills for DOB-only doctors.
+      doctor_country_training: (mergedProfileTokens.doctor_country_training || doctor.country_training || ""),
       hospital_name:      sampleHospital?.name ?? "",
       // Greeting name honours the per-hospital toggle so the preview matches what
       // send-flow-email will render (contact person when ON + on file, else name).
