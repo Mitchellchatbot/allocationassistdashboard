@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from "react";
-import { Pencil, RotateCcw, Bold, Italic, Underline, List, ListOrdered, Link2, Table2, Maximize2, Image as ImageIcon, AlignLeft, AlignCenter, AlignRight, AlignJustify } from "lucide-react";
+import { Pencil, RotateCcw, Bold, Italic, Underline, List, ListOrdered, Link2, Table2, Maximize2, Image as ImageIcon, AlignLeft, AlignCenter, AlignRight, AlignJustify, AlignVerticalJustifyStart, AlignVerticalJustifyCenter, AlignVerticalJustifyEnd } from "lucide-react";
 import { toast } from "sonner";
 import { uploadEmailAttachment } from "@/lib/email-attachments";
 import { cn } from "@/lib/utils";
@@ -288,15 +288,22 @@ export function EditableEmailPreview({
         .some(p => parseFloat(cs[p] || "0") > 0);
     } catch { return false; }
   };
-  const applyTableAlign = (align: "left" | "center" | "right" | "justify") => {
-    const body = bodyRef.current; if (!body) return;
+  const targetTableCells = (): HTMLTableCellElement[] => {
+    const body = bodyRef.current; if (!body) return [];
     const table = tableFromCaret();
-    const cells = table
+    return table
       ? Array.from(table.querySelectorAll<HTMLTableCellElement>("td, th"))
       : Array.from(body.querySelectorAll<HTMLTableCellElement>("td, th")).filter(cellHasBorder);
-    let n = 0;
-    cells.forEach((c) => { c.style.textAlign = align; n++; });
-    if (n > 0) flush();
+  };
+  const applyTableAlign = (align: "left" | "center" | "right" | "justify") => {
+    const cells = targetTableCells();
+    cells.forEach((c) => { c.style.textAlign = align; });
+    if (cells.length) flush();
+  };
+  const applyTableVAlign = (valign: "top" | "middle" | "bottom") => {
+    const cells = targetTableCells();
+    cells.forEach((c) => { c.style.verticalAlign = valign; });
+    if (cells.length) flush();
   };
 
   // Insert arbitrary HTML (a built table) at the saved caret, or append to the
@@ -508,6 +515,9 @@ export function EditableEmailPreview({
           <ToolBtn onClick={() => applyTableAlign("center")}  title="Table: center text"><AlignCenter className="h-3.5 w-3.5" /></ToolBtn>
           <ToolBtn onClick={() => applyTableAlign("justify")} title="Table: justify text"><AlignJustify className="h-3.5 w-3.5" /></ToolBtn>
           <ToolBtn onClick={() => applyTableAlign("right")}   title="Table: align text right"><AlignRight className="h-3.5 w-3.5" /></ToolBtn>
+          <ToolBtn onClick={() => applyTableVAlign("top")}    title="Table: align text top"><AlignVerticalJustifyStart className="h-3.5 w-3.5" /></ToolBtn>
+          <ToolBtn onClick={() => applyTableVAlign("middle")} title="Table: align text middle"><AlignVerticalJustifyCenter className="h-3.5 w-3.5" /></ToolBtn>
+          <ToolBtn onClick={() => applyTableVAlign("bottom")} title="Table: align text bottom"><AlignVerticalJustifyEnd className="h-3.5 w-3.5" /></ToolBtn>
           <Divider />
           <ToolBtn onClick={() => { const snap = bodyRef.current?.innerHTML; setFsHtml(snap && snap.trim() ? snap : html); setFullOpen(true); }} title="Full-screen editor" primary>
             <Maximize2 className="h-3.5 w-3.5" /> <span className="text-[11px] font-medium">Full screen</span>
