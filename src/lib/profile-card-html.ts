@@ -110,7 +110,7 @@ export function buildProfileCardHtml(v: Record<string, string>): string {
         </tr></table>
       </td>
       <td valign="middle" align="right" style="white-space:nowrap;">
-        <span style="display:inline-block;font-size:11px;line-height:24px;height:24px;color:#ffffff;border:1px solid rgba(255,255,255,0.4);border-radius:999px;padding:0 16px;">allocationassist.com</span>
+        <span style="display:inline-block;font-size:11px;line-height:1;color:#ffffff;border:1px solid rgba(255,255,255,0.4);border-radius:999px;padding:7px 16px 6px;">allocationassist.com</span>
       </td>
     </tr></table>
   </div>

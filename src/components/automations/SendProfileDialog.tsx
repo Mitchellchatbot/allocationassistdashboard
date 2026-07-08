@@ -341,12 +341,23 @@ function SendProfileDialogBody({ onClose, initial }: { onClose: () => void; init
     ?? templates.find(t => t.key === "profile_sent_doctor");
 
   // ── Live-placeholder preview for the doctor/hospital picker steps ──────────
-  // The right pane always shows the two templates; unknown tokens stay as
-  // {{placeholders}} and fill in as a doctor / hospital is chosen. Lightweight
-  // (no WP-candidate merge — that richer render happens at the preview step).
+  // The right pane always shows the two templates; unfilled tokens render as
+  // placeholder pills and fill in as a doctor / hospital is chosen. We pull the
+  // selected doctor's profile (WP draft-or-published + legacy) here too, so the
+  // picker steps show the SAME filled-in details as the final preview — not just
+  // pills until step 3 (Amir: "the info is there, it doesn't show up in steps 1/2").
   const [wizardTab, setWizardTab] = useState<string>("hospital");
+  const wizardWp = useWpCandidateForDoctor(selectedDoctor, { includeDrafts: true });
+  const { data: wizardProfile } = useDoctorProfile(selectedDoctor?.id ?? null);
+  const wizardProfileTokens = useMemo(() => {
+    const wpTokens = wpCandidateToTokens(wizardWp);
+    const merged: Record<string, string> = { ...profileToTokens(wizardProfile) };
+    for (const [k, v] of Object.entries(wpTokens)) { if (v) merged[k] = v; else if (!(k in merged)) merged[k] = ""; }
+    return merged;
+  }, [wizardWp, wizardProfile]);
   const previewVars = useMemo(() => {
     const v: Record<string, string> = {
+      ...wizardProfileTokens,
       signature: PREVIEW_SIGNATURE_HTML, signature_text: PREVIEW_SIGNATURE_TEXT, logo_header: "",
     };
     if (selectedDoctor) {
@@ -354,6 +365,7 @@ function SendProfileDialogBody({ onClose, initial }: { onClose: () => void; init
       v.doctor_email      = selectedDoctor.email ?? "";
       v.doctor_phone      = selectedDoctor.phone ?? "";
       v.doctor_speciality = selectedDoctor.speciality ?? "";
+      v.doctor_country_training = wizardProfileTokens.doctor_country_training || selectedDoctor.country_training || "";
       v.profile_link      = `https://allocationassist.com/shared-profile/${selectedDoctor.id}`;
     }
     const h = selectedHospitals[0];
@@ -368,7 +380,7 @@ function SendProfileDialogBody({ onClose, initial }: { onClose: () => void; init
     v.doctor_card_image_url = "";
     v.hospital_image        = hospitalImageHtml(h?.image_url, h?.name);
     return v;
-  }, [selectedDoctor, selectedHospitals]);
+  }, [selectedDoctor, selectedHospitals, wizardProfileTokens]);
 
   const wizardEmails: StudioEmail[] = useMemo(() => {
     const hSubj = renderTemplate(hospitalTemplate?.subject ?? "Candidate introduction — {{doctor_name}}", previewVars);
