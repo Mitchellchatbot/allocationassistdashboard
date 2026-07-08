@@ -12,7 +12,7 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
 import { Command, CommandEmpty, CommandGroup, CommandInput, CommandItem, CommandList } from "@/components/ui/command";
-import { ClipboardList, Plus, Building2, CheckCircle2, X, AlertTriangle, Search, ChevronDown, ChevronUp, Sparkles, Check, Filter, Pencil } from "lucide-react";
+import { ClipboardList, Plus, Building2, CheckCircle2, X, AlertTriangle, Search, ChevronDown, ChevronUp, Sparkles, Check, Filter, Pencil, Send } from "lucide-react";
 import { EmptyState } from "@/components/ui/empty-state";
 import { TableSkeleton } from "@/components/ui/data-skeleton";
 import { useDoctorSpecialties } from "@/hooks/use-doctor-specialties";
@@ -24,6 +24,8 @@ import {
   type Vacancy, type VacancyPriority, type VacancyStatus,
 } from "@/hooks/use-vacancies";
 import { VacancyDetailSheet } from "@/components/VacancyDetailSheet";
+import { VacancyOfferHistory } from "@/components/VacancyOfferHistory";
+import { useAutomationFlowRuns } from "@/hooks/use-automation-flows";
 import {
   Pagination, PaginationContent, PaginationItem, PaginationLink,
   PaginationPrevious, PaginationNext, PaginationEllipsis,
@@ -46,6 +48,10 @@ export default function Vacancies() {
   const update = useUpdateVacancy();
   const remove = useDeleteVacancy();
 
+  const { data: runs = [] } = useAutomationFlowRuns();
+  const offerCount = useMemo(() => runs.filter(r => r.flow_key === "profile_sent").length, [runs]);
+
+  const [tab, setTab] = useState<"vacancies" | "history">("vacancies");
   const [createOpen, setCreateOpen] = useState(false);
   const [editVacancy, setEditVacancy] = useState<Vacancy | null>(null);
   const [detailId, setDetailId] = useState<string | null>(null);
@@ -159,6 +165,36 @@ export default function Vacancies() {
           </div>
         </div>
 
+        {/* Tabs — the live vacancy board vs. a record of the doctors we've
+            offered these hospital opportunities to (auto-logged from every
+            "Send" on a match). */}
+        <div className="inline-flex rounded-lg border bg-muted/40 p-0.5 text-[12px]">
+          <button
+            onClick={() => setTab("vacancies")}
+            className={`inline-flex items-center gap-1.5 rounded-[7px] px-3 py-1.5 font-medium transition-colors ${
+              tab === "vacancies" ? "bg-white text-slate-900 shadow-sm" : "text-muted-foreground hover:text-slate-700"
+            }`}
+          >
+            <ClipboardList className="h-3.5 w-3.5" /> Open vacancies
+          </button>
+          <button
+            onClick={() => setTab("history")}
+            className={`inline-flex items-center gap-1.5 rounded-[7px] px-3 py-1.5 font-medium transition-colors ${
+              tab === "history" ? "bg-white text-slate-900 shadow-sm" : "text-muted-foreground hover:text-slate-700"
+            }`}
+          >
+            <Send className="h-3.5 w-3.5" /> Offer history
+            {offerCount > 0 && (
+              <span className={`rounded-full px-1.5 text-[10px] tabular-nums ${tab === "history" ? "bg-teal-100 text-teal-700" : "bg-slate-200 text-slate-600"}`}>
+                {offerCount}
+              </span>
+            )}
+          </button>
+        </div>
+
+        {tab === "history" && <VacancyOfferHistory />}
+
+        {tab === "vacancies" && (
         <Card>
           <CardHeader className="pb-3">
             <div className="flex flex-wrap items-center gap-3">
@@ -299,6 +335,7 @@ export default function Vacancies() {
             )}
           </CardContent>
         </Card>
+        )}
       </div>
 
       <CreateVacancyDialog
