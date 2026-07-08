@@ -39,12 +39,20 @@ interface OfferRecord {
   status:      RunStatus;
 }
 
-const STATUS_META: Record<RunStatus, { label: string; cls: string }> = {
+const STATUS_META: Record<string, { label: string; cls: string }> = {
   active:    { label: "Emailed",   cls: "bg-teal-50 text-teal-700 border-teal-200" },
   completed: { label: "Completed", cls: "bg-emerald-50 text-emerald-700 border-emerald-200" },
   paused:    { label: "Paused",    cls: "bg-amber-50 text-amber-700 border-amber-200" },
   failed:    { label: "Failed",    cls: "bg-rose-50 text-rose-700 border-rose-200" },
 };
+
+// Real rows can carry a status outside the four typed ones (legacy / other
+// flows), so never index STATUS_META blindly — fall back to a neutral chip
+// that echoes whatever the raw status string is.
+function statusMeta(status: string | null | undefined): { label: string; cls: string } {
+  if (status && STATUS_META[status]) return STATUS_META[status];
+  return { label: status || "—", cls: "bg-slate-100 text-slate-600 border-slate-200" };
+}
 
 export function VacancyOfferHistory() {
   const { data: runs = [], isLoading } = useAutomationFlowRuns();
@@ -125,7 +133,7 @@ export function VacancyOfferHistory() {
     const header = ["Doctor", "Email", "Specialty", "Hospital", "Offered at", "By", "Status"];
     const rows = filtered.map(o => [
       o.doctorName, o.doctorEmail ?? "", o.specialty ?? "", o.hospital ?? "",
-      o.offeredAt ?? "", o.by ?? "", STATUS_META[o.status].label,
+      o.offeredAt ?? "", o.by ?? "", statusMeta(o.status).label,
     ]);
     const csv = [header, ...rows].map(row => row.map(csvCell).join(",")).join("\n");
     const blob = new Blob([csv], { type: "text/csv;charset=utf-8" });
@@ -252,8 +260,8 @@ export function VacancyOfferHistory() {
                     <td className="py-2 px-3 tabular-nums text-muted-foreground">{fmtDate(o.offeredAt)}</td>
                     <td className="py-2 px-3 text-[11px] text-muted-foreground">{o.by ?? "—"}</td>
                     <td className="py-2 px-3">
-                      <Badge variant="outline" className={`text-[9px] uppercase tracking-wider ${STATUS_META[o.status].cls}`}>
-                        {STATUS_META[o.status].label}
+                      <Badge variant="outline" className={`text-[9px] uppercase tracking-wider ${statusMeta(o.status).cls}`}>
+                        {statusMeta(o.status).label}
                       </Badge>
                     </td>
                     <td className="py-2 px-3 text-right">
