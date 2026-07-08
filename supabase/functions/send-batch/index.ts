@@ -382,6 +382,28 @@ Deno.serve(async (req: Request) => {
         .filter(a => a.path.startsWith("http"))
     : [];
 
+  // Base64-inline the attachments ONCE (same files for every hospital) so a bad
+  // URL / oversized file is skipped rather than failing the batch. Bulletproof —
+  // the email always goes out even if an attachment can't be fetched.
+  const MAX_TOTAL_ATTACH_BYTES = 25 * 1024 * 1024;
+  const toBase64 = (bytes: Uint8Array): string => {
+    let bin = ""; const CHUNK = 0x8000;
+    for (let i = 0; i < bytes.length; i += CHUNK) bin += String.fromCharCode(...bytes.subarray(i, i + CHUNK));
+    return btoa(bin);
+  };
+  const builtAttachments: Array<{ filename: string; content: string }> = [];
+  let attachTotal = 0;
+  for (const a of attachments) {
+    try {
+      const res = await fetch(a.path);
+      if (!res.ok) { console.warn(`[send-batch] attachment "${a.filename}" HTTP ${res.status} — skipping`); continue; }
+      const bytes = new Uint8Array(await res.arrayBuffer());
+      if (bytes.byteLength === 0 || attachTotal + bytes.byteLength > MAX_TOTAL_ATTACH_BYTES) { console.warn(`[send-batch] attachment "${a.filename}" empty/oversized — skipping`); continue; }
+      attachTotal += bytes.byteLength;
+      builtAttachments.push({ filename: a.filename, content: toBase64(bytes) });
+    } catch (e) { console.warn(`[send-batch] attachment "${a.filename}" fetch failed — skipping`, e); }
+  }
+
   // Target hospitals — drop excluded + Ammar. In TEST mode every copy is
   // redirected to the test inbox (personalised copies still go there so the
   // greetings can be verified safely before real hospitals get them).
@@ -405,7 +427,7 @@ Deno.serve(async (req: Request) => {
       html:    rendered.html,
       text:    rendered.text,
       headers: { "X-AA-Batch-Id": String(batch.id), "X-AA-Batch-Kind": String(batch.kind) },
-      ...(attachments.length ? { attachments } : {}),
+      ...(builtAttachments.length ? { attachments: builtAttachments } : {}),
     };
   });
 
@@ -415,7 +437,7 @@ Deno.serve(async (req: Request) => {
   // sends when the batch carries a CV/logbook.
   let sentCount = 0, failedCount = 0, messageId = "", lastError = "";
   try {
-    if (attachments.length === 0) {
+    if (builtAttachments.length === 0) {
       for (let i = 0; i < emails.length; i += 100) {
         const chunk = emails.slice(i, i + 100);
         const res = await fetch("https://api.resend.com/emails/batch", {

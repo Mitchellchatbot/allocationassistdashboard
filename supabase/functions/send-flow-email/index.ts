@@ -973,6 +973,39 @@ Deno.serve(async (req: Request) => {
     console.log(`[send-flow-email] ${userAttachments.length} user attachment(s) on ${run.current_stage}`);
   }
 
+  // ── Build attachments as base64 content (bulletproof) ──────────────────────
+  // Fetch each file ourselves and inline it as base64 instead of handing Resend
+  // a URL to fetch. A bad/unreachable URL or an oversized file is SKIPPED — it
+  // can NEVER fail the whole email. Getting the email to the hospital matters
+  // more than any single attachment. Total capped under Resend's request limit.
+  const MAX_TOTAL_ATTACH_BYTES = 25 * 1024 * 1024;
+  const toBase64 = (bytes: Uint8Array): string => {
+    let bin = "";
+    const CHUNK = 0x8000;
+    for (let i = 0; i < bytes.length; i += CHUNK) bin += String.fromCharCode(...bytes.subarray(i, i + CHUNK));
+    return btoa(bin);
+  };
+  const builtAttachments: Array<{ filename: string; content: string }> = [];
+  const droppedAttachments: string[] = [];
+  let attachTotal = 0;
+  for (const a of outgoingAttachments) {
+    try {
+      const res = await fetch(a.path);
+      if (!res.ok) { droppedAttachments.push(a.filename); console.warn(`[send-flow-email] attachment "${a.filename}" fetch HTTP ${res.status} — skipping`); continue; }
+      const bytes = new Uint8Array(await res.arrayBuffer());
+      if (bytes.byteLength === 0) { droppedAttachments.push(a.filename); console.warn(`[send-flow-email] attachment "${a.filename}" is empty — skipping`); continue; }
+      if (attachTotal + bytes.byteLength > MAX_TOTAL_ATTACH_BYTES) { droppedAttachments.push(a.filename); console.warn(`[send-flow-email] attachment "${a.filename}" exceeds size budget — skipping`); continue; }
+      attachTotal += bytes.byteLength;
+      builtAttachments.push({ filename: a.filename, content: toBase64(bytes) });
+    } catch (e) {
+      droppedAttachments.push(a.filename);
+      console.warn(`[send-flow-email] attachment "${a.filename}" fetch failed — skipping`, e);
+    }
+  }
+  if (droppedAttachments.length) {
+    console.warn(`[send-flow-email] ${droppedAttachments.length} attachment(s) skipped, email still sending: ${droppedAttachments.join(", ")}`);
+  }
+
   let resendRes: Response;
   try {
     resendRes = await fetch("https://api.resend.com/emails", {
@@ -991,10 +1024,10 @@ Deno.serve(async (req: Request) => {
         html:    finalHtml,
         text:    finalText,
         headers,
-        // Resend fetches each `path` URL and attaches it. Combines the
-        // relocation-guide PDFs (relocation stage) with any CV/logbook the team
-        // attached in the Send Profile dialog (hospital stage).
-        attachments: outgoingAttachments.length > 0 ? outgoingAttachments : undefined,
+        // Base64-inlined (built above) — never a remote URL, so a bad file can't
+        // fail the send. Combines relocation-guide PDFs + any CV/logbook attached
+        // in the Send Profile dialog.
+        attachments: builtAttachments.length > 0 ? builtAttachments : undefined,
       }),
     });
   } catch (e) {
@@ -1035,7 +1068,7 @@ Deno.serve(async (req: Request) => {
     run_id:     run.id,
     stage_key:  run.current_stage,
     event_type: "email_sent",
-    message:    `Sent "${finalSubject}" from ${sender.fromHeader} to ${effectiveTo}${personalRouting ? ` · replies land in ${sender.replyHint}` : ""}${TEST_OVERRIDE && actualRecipient !== TEST_OVERRIDE ? ` (test override; would have gone to ${actualRecipient})` : ""}.`,
+    message:    `Sent "${finalSubject}" from ${sender.fromHeader} to ${effectiveTo}${personalRouting ? ` · replies land in ${sender.replyHint}` : ""}${TEST_OVERRIDE && actualRecipient !== TEST_OVERRIDE ? ` (test override; would have gone to ${actualRecipient})` : ""}${builtAttachments.length ? ` · ${builtAttachments.length} attachment(s)` : ""}${droppedAttachments.length ? ` · ⚠ ${droppedAttachments.length} attachment(s) skipped (too large/unreachable): ${droppedAttachments.join(", ")}` : ""}.`,
     payload:    {
       resend_message_id:   messageId,
       template_key:        templateKey,
@@ -1047,6 +1080,8 @@ Deno.serve(async (req: Request) => {
       cc:                  ccList ?? null,
       bcc:                 bccList ?? null,
       personal_routing:    personalRouting,
+      attachments_sent:    builtAttachments.map(a => a.filename),
+      attachments_skipped: droppedAttachments,
     },
   });
 
