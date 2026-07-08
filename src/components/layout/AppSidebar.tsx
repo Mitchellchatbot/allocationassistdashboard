@@ -93,7 +93,7 @@ const NAV_SECTIONS: NavSection[] = [
       { title: "My Workspace",    url: "/my-workspace",    icon: Inbox },
       { title: "Doctors",         url: "/doctors",         icon: UserSquare },
       { title: "Automations",     url: "/automations",     icon: Workflow },
-      { title: "Information",      url: "/information",     icon: Library },
+      { title: "Templates & Hospitals", url: "/information", icon: Library },
       { title: "Vacancies",       url: "/vacancies",       icon: ClipboardList },
       { title: "Profile Sent",    url: "/profile-sent",    icon: Send },
       { title: "Batch Sends",     url: "/batches",         icon: Mailbox },

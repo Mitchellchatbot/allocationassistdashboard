@@ -35,7 +35,7 @@ export default function Information() {
         <div>
           <h1 className="text-2xl font-semibold tracking-tight flex items-center gap-2">
             <Library className="h-6 w-6 text-teal-600" />
-            Information
+            Templates &amp; Hospitals
           </h1>
           <p className="text-sm text-muted-foreground mt-1 max-w-[760px]">
             One home for the content your emails run on — every template across all flows, and every hospital with its
