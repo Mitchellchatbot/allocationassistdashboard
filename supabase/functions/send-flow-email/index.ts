@@ -1347,9 +1347,9 @@ function doctorRowTableHtml(v: Record<string, string>): string {
     ["Email",                                        v.doctor_email || ""],
   ];
   const th = cols.map(([h]) =>
-    `<th style="text-align:left;border:1px solid #cbd5e1;padding:8px 11px;background:#0f766e;color:#ffffff;font-size:13px;font-weight:600;white-space:nowrap;">${escapeHtml(h)}</th>`).join("");
+    `<th style="text-align:center;border:1px solid #cbd5e1;padding:8px 11px;background:#0f766e;color:#ffffff;font-size:13px;font-weight:600;white-space:nowrap;">${escapeHtml(h)}</th>`).join("");
   const td = cols.map(([, val]) =>
-    `<td style="border:1px solid #cbd5e1;padding:8px 11px;font-size:14px;color:#1a2332;vertical-align:top;">${escapeHtml(val)}</td>`).join("");
+    `<td style="text-align:center;border:1px solid #cbd5e1;padding:8px 11px;font-size:14px;color:#1a2332;vertical-align:top;">${escapeHtml(val)}</td>`).join("");
   return `
 <div style="overflow-x:auto;margin:18px 0;">
   <table role="presentation" cellspacing="0" cellpadding="0" border="0" style="border-collapse:collapse;border:1px solid #cbd5e1;">

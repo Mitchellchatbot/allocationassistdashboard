@@ -538,9 +538,9 @@ function renderDoctorsTable(rows: RowData[]): string {
   // the rest of the emails, exact same styling"). The <div style> that wraps
   // the rendered body sets font-family:${FONT_STACK}, which cascades in here.
   const th = (label: string) =>
-    `<th style="text-align:left;border:1px solid #cbd5e1;padding:8px 11px;background:#0f766e;color:#ffffff;font-size:13px;font-weight:600;white-space:nowrap;">${esc(label)}</th>`;
+    `<th style="text-align:center;border:1px solid #cbd5e1;padding:8px 11px;background:#0f766e;color:#ffffff;font-size:13px;font-weight:600;white-space:nowrap;">${esc(label)}</th>`;
   const td = (val: string) =>
-    `<td style="border:1px solid #cbd5e1;padding:8px 11px;font-size:14px;color:#1a2332;vertical-align:top;">${esc(val)}</td>`;
+    `<td style="text-align:center;border:1px solid #cbd5e1;padding:8px 11px;font-size:14px;color:#1a2332;vertical-align:top;">${esc(val)}</td>`;
   const head =
     `<tr>${th("#")}${th("Name")}${th("Title and Specialty as per the UAE license")}${th("Country Of Training")}` +
     `${th("Years of Experience")}${th("Nationality")}${th("Age")}${th("Marital Status")}${th("Family Status")}` +
