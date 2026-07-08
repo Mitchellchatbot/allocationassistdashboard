@@ -739,8 +739,17 @@ export function useWpCandidateByDoctorId(doctorId: string | null) {
  *  unique name. Returns null when the doctor genuinely isn't on the website. */
 export function useWpCandidateForDoctor(
   doctor: { id: string; email?: string | null; phone?: string | null; name?: string | null } | null,
+  opts?: { includeDrafts?: boolean },
 ): WpCandidate | null {
-  const { data: pool = [] } = usePublishedWpCandidates();
+  // Default: published only. With includeDrafts, also match unpublished/draft
+  // profiles — so the send preview fills a doctor's details even when their
+  // WordPress profile isn't published yet (the team reviews before sending).
+  const { data: all = [] } = useWpCandidates();
+  const includeDrafts = !!opts?.includeDrafts;
+  const pool = useMemo(
+    () => includeDrafts ? all : all.filter(c => c.status === "publish"),
+    [all, includeDrafts],
+  );
   return useMemo<WpCandidate | null>(() => {
     if (!doctor) return null;
     const norm = (n: string | null | undefined) =>

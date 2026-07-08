@@ -18,7 +18,7 @@ import { useHospitals, useUpdateHospital, type Hospital } from "@/hooks/use-hosp
 import { useHospitalContacts, resolveRecipient, type HospitalContact } from "@/hooks/use-hospital-contacts";
 import { useEmailTemplates, renderTemplate } from "@/hooks/use-email-templates";
 import { useDoctorProfile, useDoctorProfiles, profileToTokens, calcCompletion, type DoctorProfile } from "@/hooks/use-doctor-profiles";
-import { useWpCandidateForDoctor, usePublishedWpCandidates, wpCandidateToTokens, normalizePhone, type WpCandidate } from "@/hooks/use-wp-candidates";
+import { useWpCandidateForDoctor, usePublishedWpCandidates, useWpCandidates, wpCandidateToTokens, normalizePhone, type WpCandidate } from "@/hooks/use-wp-candidates";
 import { useZohoData, type ZohoDoctorOnBoard, type ZohoLead } from "@/hooks/use-zoho-data";
 import * as DialogPrimitive from "@radix-ui/react-dialog";
 import { EditableEmailPreview } from "@/components/EditableEmailPreview";
@@ -206,7 +206,8 @@ function SendProfileDialogBody({ onClose, initial }: { onClose: () => void; init
   const lifecycleMap = useDoctorLifecycleMap();
   // Completion sources — used to drop 0%-complete doctors from the picker
   // (a blank profile would render literal {{token}}s to the hospital).
-  const { data: wpPool = [], isLoading: wpLoading } = usePublishedWpCandidates();
+  const { data: wpPool = [], isLoading: wpLoading } = usePublishedWpCandidates();     // published — the selectable WP-candidate list
+  const { data: allWpPool = [] } = useWpCandidates();                                 // full — so drafts count for completion + fill
   const { data: allProfiles = [], isLoading: profilesLoading } = useDoctorProfiles();
   const completionReady = !wpLoading && !profilesLoading;
 
@@ -218,7 +219,7 @@ function SendProfileDialogBody({ onClose, initial }: { onClose: () => void; init
     const byPhone    = new Map<string, WpCandidate>();
     const byEmail    = new Map<string, WpCandidate>();
     const byName     = new Map<string, WpCandidate[]>();
-    for (const c of wpPool) {
+    for (const c of allWpPool) {
       if (c.doctor_id) byDoctorId.set(c.doctor_id, c);
       byWpId.set(c.id, c);
       const ph = normalizePhone(c.phone); if (ph && !byPhone.has(ph)) byPhone.set(ph, c);
@@ -228,7 +229,7 @@ function SendProfileDialogBody({ onClose, initial }: { onClose: () => void; init
     const profileById = new Map<string, DoctorProfile>();
     for (const p of allProfiles) profileById.set(p.doctor_id, p);
     return { byDoctorId, byWpId, byPhone, byEmail, byName, profileById };
-  }, [wpPool, allProfiles]);
+  }, [allWpPool, allProfiles]);
 
   // Same resolution priority as useWpCandidateForDoctor: id → wp:id → phone
   // → email → unique name. Returns 0 when nothing's on file.
@@ -1164,7 +1165,7 @@ function PreviewConfirm({
   // now the source of truth — if the doctor is linked to a WP record
   // we use that; for any field WP doesn't have set, we fall back to
   // the legacy doctor_profiles row so historical data still renders.
-  const wpCandidate           = useWpCandidateForDoctor(doctor);
+  const wpCandidate           = useWpCandidateForDoctor(doctor, { includeDrafts: true });
   const { data: profile }     = useDoctorProfile(doctor.id);
   const mergedProfileTokens: Record<string, string> = useMemo(() => {
     const wpTokens     = wpCandidateToTokens(wpCandidate);
