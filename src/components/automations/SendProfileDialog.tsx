@@ -849,15 +849,22 @@ function HospitalPicker({
   setCustomMessage: (s: string) => void;
 }) {
   const [q, setQ] = useState("");
+  const [country, setCountry] = useState("all");
+  const countries = useMemo(() => {
+    const s = new Set<string>();
+    for (const h of hospitals) { const c = h.country?.trim(); if (c) s.add(c); }
+    return Array.from(s).sort((a, b) => a.localeCompare(b));
+  }, [hospitals]);
   const filtered = useMemo(() => {
     const term = q.trim().toLowerCase();
-    if (!term) return hospitals;
-    return hospitals.filter(h =>
-      h.name.toLowerCase().includes(term) ||
-      h.city?.toLowerCase().includes(term) ||
-      h.country?.toLowerCase().includes(term),
-    );
-  }, [hospitals, q]);
+    return hospitals.filter(h => {
+      if (country !== "all" && (h.country ?? "").trim().toLowerCase() !== country.toLowerCase()) return false;
+      if (!term) return true;
+      return h.name.toLowerCase().includes(term) ||
+        h.city?.toLowerCase().includes(term) ||
+        h.country?.toLowerCase().includes(term);
+    });
+  }, [hospitals, q, country]);
 
   // "Select all" acts on whatever's currently filtered (so a search narrows it).
   const allFilteredSelected = filtered.length > 0 && filtered.every(h => selectedIds.includes(h.id));
@@ -877,9 +884,20 @@ function HospitalPicker({
         <div className="text-[13px] font-medium text-slate-800">{doctor.name}</div>
         <div className="text-[11px] text-muted-foreground">{doctor.speciality ?? "—"} · {doctor.email ?? doctor.phone ?? "no contact"}</div>
       </div>
-      <div className="relative shrink-0">
-        <Search className="absolute left-2 top-1/2 -translate-y-1/2 h-3.5 w-3.5 text-muted-foreground" />
-        <Input value={q} onChange={e => setQ(e.target.value)} placeholder="Filter hospitals..." className="pl-7 text-[12px] bg-white text-slate-800" />
+      <div className="flex shrink-0 gap-2">
+        <div className="relative flex-1">
+          <Search className="absolute left-2 top-1/2 -translate-y-1/2 h-3.5 w-3.5 text-muted-foreground" />
+          <Input value={q} onChange={e => setQ(e.target.value)} placeholder="Filter hospitals..." className="pl-7 text-[12px] bg-white text-slate-800" />
+        </div>
+        <select
+          value={country}
+          onChange={e => setCountry(e.target.value)}
+          title="Show only hospitals in this country"
+          className="shrink-0 rounded-md border border-input bg-white text-slate-800 text-[12px] px-2 h-9 max-w-[140px]"
+        >
+          <option value="all">All countries</option>
+          {countries.map(c => <option key={c} value={c}>{c}</option>)}
+        </select>
       </div>
       <div className="flex shrink-0 items-center justify-between text-[11px]">
         <div className="flex items-center gap-2">

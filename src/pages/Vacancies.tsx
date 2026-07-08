@@ -52,14 +52,22 @@ export default function Vacancies() {
   const [search,  setSearch]  = useState("");
   const [filterStatus, setFilterStatus] = useState<VacancyStatus | "all">("open");
   const [filterPriority, setFilterPriority] = useState<VacancyPriority | "all">("all");
+  const [filterHospital, setFilterHospital] = useState<string>("all");
   const [sortBy, setSortBy] = useState<"opened_at" | "priority" | "days_open">("opened_at");
   const [sortDir, setSortDir] = useState<"asc" | "desc">("desc");
+
+  // Hospitals that actually have vacancies — so the filter only lists relevant ones.
+  const hospitalNames = useMemo(
+    () => Array.from(new Set(vacancies.map(v => v.hospital_name).filter(Boolean))).sort((a, b) => a.localeCompare(b)),
+    [vacancies],
+  );
 
   const filtered = useMemo(() => {
     const q = search.trim().toLowerCase();
     let list = vacancies.slice();
     if (filterStatus !== "all")    list = list.filter(v => v.status   === filterStatus);
     if (filterPriority !== "all")  list = list.filter(v => v.priority === filterPriority);
+    if (filterHospital !== "all")  list = list.filter(v => v.hospital_name === filterHospital);
     if (q) {
       list = list.filter(v =>
         v.hospital_name.toLowerCase().includes(q) ||
@@ -80,10 +88,10 @@ export default function Vacancies() {
       return sortDir === "asc" ? cmp : -cmp;
     });
     return list;
-  }, [vacancies, search, filterStatus, filterPriority, sortBy, sortDir]);
+  }, [vacancies, search, filterStatus, filterPriority, filterHospital, sortBy, sortDir]);
 
   const [page, setPage] = useState(1);
-  useEffect(() => { setPage(1); }, [search, filterStatus, filterPriority, sortBy, sortDir]);
+  useEffect(() => { setPage(1); }, [search, filterStatus, filterPriority, filterHospital, sortBy, sortDir]);
 
   const totalPages = Math.max(1, Math.ceil(filtered.length / PAGE_SIZE));
   const safePage = Math.min(page, totalPages);
@@ -179,6 +187,13 @@ export default function Vacancies() {
                   <SelectItem value="high">High</SelectItem>
                   <SelectItem value="medium">Medium</SelectItem>
                   <SelectItem value="low">Low</SelectItem>
+                </SelectContent>
+              </Select>
+              <Select value={filterHospital} onValueChange={setFilterHospital}>
+                <SelectTrigger className="h-9 w-[190px] text-[12px]"><SelectValue placeholder="All hospitals" /></SelectTrigger>
+                <SelectContent className="max-h-[320px]">
+                  <SelectItem value="all">All hospitals</SelectItem>
+                  {hospitalNames.map(n => <SelectItem key={n} value={n} className="text-[12px]">{n}</SelectItem>)}
                 </SelectContent>
               </Select>
             </div>

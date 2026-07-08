@@ -45,6 +45,7 @@ export function BulkProfileSendDialog({ open, onClose }: { open: boolean; onClos
   const [hospIds, setHospIds] = useState<Set<string>>(new Set());
   const [docQuery,  setDocQuery]  = useState("");
   const [hospQuery, setHospQuery] = useState("");
+  const [hospCountry, setHospCountry] = useState("all");
   const [hospitalTemplateKey, setHospitalTemplateKey] = useState(HOSPITAL_DEFAULT_KEY);
   const [doctorTemplateKey,   setDoctorTemplateKey]   = useState(DOCTOR_DEFAULT_KEY);
   const [customMessage, setCustomMessage] = useState("");
@@ -84,12 +85,18 @@ export function BulkProfileSendDialog({ open, onClose }: { open: boolean; onClos
   }, [docPool, docQuery]);
 
   // Only hospitals with a recruiter email can actually receive a send.
+  const hospCountries = useMemo(() => {
+    const s = new Set<string>();
+    for (const h of hospitals) { const c = h.country?.trim(); if (c) s.add(c); }
+    return Array.from(s).sort((a, b) => a.localeCompare(b));
+  }, [hospitals]);
   const hospPool = useMemo(() => {
     const q = hospQuery.trim().toLowerCase();
     return hospitals
       .filter(h => h.primary_recruiter_email)
-      .filter(h => !q || h.name.toLowerCase().includes(q) || (h.city ?? "").toLowerCase().includes(q));
-  }, [hospitals, hospQuery]);
+      .filter(h => hospCountry === "all" || (h.country ?? "").trim().toLowerCase() === hospCountry.toLowerCase())
+      .filter(h => !q || h.name.toLowerCase().includes(q) || (h.city ?? "").toLowerCase().includes(q) || (h.country ?? "").toLowerCase().includes(q));
+  }, [hospitals, hospQuery, hospCountry]);
 
   const selectedDocs  = useMemo(() => docPool.filter(d => docIds.has(d.key)), [docPool, docIds]);
   const selectedHosps = useMemo(() => hospitals.filter(h => hospIds.has(h.id)), [hospitals, hospIds]);
@@ -245,6 +252,13 @@ export function BulkProfileSendDialog({ open, onClose }: { open: boolean; onClos
             count={selectedHosps.length}
             query={hospQuery}
             onQuery={setHospQuery}
+            headerExtra={
+              <select value={hospCountry} onChange={e => setHospCountry(e.target.value)} title="Filter by country"
+                className="shrink-0 rounded-md border border-input bg-white text-slate-800 text-[11px] px-1.5 h-8 max-w-[120px]">
+                <option value="all">All countries</option>
+                {hospCountries.map(c => <option key={c} value={c}>{c}</option>)}
+              </select>
+            }
             emptyText="No hospitals with a recruiter email."
             onSelectAll={() => setHospIds(new Set(hospPool.map(h => h.id)))}
             onClear={() => setHospIds(new Set())}
@@ -331,9 +345,10 @@ export function BulkProfileSendDialog({ open, onClose }: { open: boolean; onClos
 }
 
 interface PicklistItem { id: string; checked: boolean; onToggle: () => void; primary: string; secondary: string }
-function Picklist({ icon, title, count, query, onQuery, loading, emptyText, items, onSelectAll, onClear }: {
+function Picklist({ icon, title, count, query, onQuery, loading, emptyText, items, onSelectAll, onClear, headerExtra }: {
   icon: React.ReactNode; title: string; count: number; query: string; onQuery: (v: string) => void;
   loading?: boolean; emptyText: string; items: PicklistItem[]; onSelectAll: () => void; onClear: () => void;
+  headerExtra?: React.ReactNode;
 }) {
   return (
     <div className="rounded-md border bg-white flex flex-col min-h-0">
@@ -347,11 +362,12 @@ function Picklist({ icon, title, count, query, onQuery, loading, emptyText, item
           <button type="button" onClick={onClear} className="text-slate-500 hover:underline">Clear</button>
         </div>
       </div>
-      <div className="p-1.5 border-b">
-        <div className="relative">
+      <div className="p-1.5 border-b flex gap-1.5">
+        <div className="relative flex-1">
           <Search className="absolute left-2 top-1/2 -translate-y-1/2 h-3.5 w-3.5 text-slate-400" />
           <Input value={query} onChange={(e) => onQuery(e.target.value)} placeholder={`Search ${title.toLowerCase()}…`} className="h-8 pl-7 text-[12px]" />
         </div>
+        {headerExtra}
       </div>
       <div className="max-h-[260px] overflow-y-auto">
         {loading ? (

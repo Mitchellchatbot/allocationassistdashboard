@@ -22,6 +22,19 @@ const BUCKET = "email-attachments";
 const MAX_BYTES = 25 * 1024 * 1024;
 const ALLOWED_EXT = ["pdf", "doc", "docx", "png", "jpg", "jpeg"];
 
+// Content-type by extension. Some browsers/OSes hand us a File with an empty
+// `type` (e.g. files dragged from certain apps, or renamed downloads); storing
+// those without a content-type makes the object serve as octet-stream/text, so
+// the recipient "can't open" the PDF/Word doc. Fall back to the extension.
+const EXT_MIME: Record<string, string> = {
+  pdf:  "application/pdf",
+  doc:  "application/msword",
+  docx: "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+  png:  "image/png",
+  jpg:  "image/jpeg",
+  jpeg: "image/jpeg",
+};
+
 /**
  * Upload one file to the public email-attachments bucket and return the
  * attachment descriptor. Throws on oversize / disallowed type / upload error
@@ -39,8 +52,9 @@ export async function uploadEmailAttachment(file: File): Promise<EmailAttachment
   // as the last segment so Resend names the attachment sensibly.
   const safeName = file.name.replace(/[^a-zA-Z0-9._-]/g, "_");
   const storagePath = `${crypto.randomUUID()}/${safeName}`;
+  const contentType = file.type || EXT_MIME[ext] || "application/octet-stream";
   const { error } = await supabase.storage.from(BUCKET).upload(storagePath, file, {
-    contentType: file.type || undefined,
+    contentType,
     upsert: false,
   });
   if (error) throw error;
