@@ -81,8 +81,6 @@ const SAMPLE_VARS: Record<string, string> = {
   doctors_table_html: `<p style="color:#94a3b8;font-style:italic;">[the multi-doctor table renders here at send time]</p>`,
 };
 
-const GROUP_CAP = 12; // collapse long groups (e.g. 70 best-match) until expanded
-
 // Category = a finer grouping than flow_key. The "profile_sent" flow alone holds
 // several distinct KINDS that are otherwise dumped in one giant list — the 70
 // best-matched-by-specialty, the 43 per-hospital working-opportunity emails, the
@@ -104,12 +102,29 @@ function categoryOf(t: { key: string; flow_key: string | null }): { id: string; 
 }
 const CAT_ORDER = ["ps_core", "ps_wo", "ps_bmh", "ps_hosp", "shortlist", "interview", "contract_signing", "relocation", "second_payment", "onboarding", "other"];
 
+// Short labels for the tab chips — the full category labels are too long to sit
+// in a pill, so each category id gets a compact name. Anything not listed falls
+// back to the group's full label.
+const CAT_SHORT: Record<string, string> = {
+  ps_core:          "Core",
+  ps_wo:            "Working Opp.",
+  ps_bmh:           "Best matched",
+  ps_hosp:          "Hospital email",
+  shortlist:        "Shortlist",
+  interview:        "Interview",
+  contract_signing: "Contract",
+  relocation:       "Relocation",
+  second_payment:   "Payment",
+  onboarding:       "Onboarding",
+  other:            "Other",
+};
+
 export function EmailTemplatesTab() {
   const { data: templates = [], isLoading } = useEmailTemplateList();
   const { data: hospitals = [] } = useHospitals();
   const [search,     setSearch]     = useState("");
   const [selectedId, setSelectedId] = useState<string | null>(null);
-  const [expanded,   setExpanded]   = useState<Set<string>>(new Set());
+  const [activeCat,  setActiveCat]  = useState<string | null>(null);
   const [creating,   setCreating]   = useState(false);
 
   useEffect(() => {
@@ -117,6 +132,10 @@ export function EmailTemplatesTab() {
     if (!selectedId && templates.length > 0) setSelectedId(templates[0].id);
   }, [templates, selectedId]);
 
+  const searching = search.trim().length > 0;
+
+  // Search matches across ALL types (flat results), so a writer who doesn't know
+  // which tab a template lives in can still find it by name/subject.
   const filtered = useMemo(() => {
     const q = search.trim().toLowerCase();
     if (!q) return templates;
@@ -128,22 +147,33 @@ export function EmailTemplatesTab() {
     );
   }, [templates, search]);
 
+  // Group ALL templates by category — drives the tab chips (labels + stable
+  // counts) and the per-tab list. Search is a separate, global overlay.
   const grouped = useMemo(() => {
     const m = new Map<string, { label: string; items: EmailTemplateListItem[] }>();
-    for (const t of filtered) {
+    for (const t of templates) {
       const c = categoryOf(t);
       const g = m.get(c.id) ?? m.set(c.id, { label: c.label, items: [] }).get(c.id)!;
       g.items.push(t);
     }
     return m;
-  }, [filtered]);
+  }, [templates]);
   const orderedCats = useMemo(() => {
     return [...grouped.keys()].sort((a, b) => {
       const ia = CAT_ORDER.indexOf(a), ib = CAT_ORDER.indexOf(b);
       return (ia === -1 ? 99 : ia) - (ib === -1 ? 99 : ib);
     });
   }, [grouped]);
-  const searching = search.trim().length > 0;
+
+  // The tab that's actually shown: the chosen one if it still exists, else the
+  // first category once data has loaded.
+  const effectiveCat = (activeCat && grouped.has(activeCat)) ? activeCat : (orderedCats[0] ?? null);
+  const catShort = (id: string) => CAT_SHORT[id] ?? grouped.get(id)?.label ?? id;
+
+  // The list body: global search results when searching, else the active tab.
+  const listItems: EmailTemplateListItem[] = searching
+    ? filtered
+    : (effectiveCat ? grouped.get(effectiveCat)?.items ?? [] : []);
 
   const selected = templates.find(t => t.id === selectedId) ?? null;
 
@@ -186,55 +216,74 @@ export function EmailTemplatesTab() {
             </div>
           </CardHeader>
           <CardContent className="p-0">
-            <div className="max-h-[640px] overflow-y-auto">
+            {/* Type tabs — pick a category to see just those templates instead of
+                scrolling one long combined list. Hidden while searching, since a
+                search runs across every type. */}
+            {!searching && orderedCats.length > 0 && (
+              <div className="flex flex-wrap gap-1 px-3 pb-2.5 border-b border-slate-100">
+                {orderedCats.map(catId => {
+                  const isActive = effectiveCat === catId;
+                  const count = grouped.get(catId)?.items.length ?? 0;
+                  return (
+                    <button
+                      key={catId}
+                      onClick={() => setActiveCat(catId)}
+                      title={grouped.get(catId)?.label}
+                      className={`inline-flex items-center gap-1 rounded-full px-2.5 py-1 text-[10.5px] font-medium border transition-colors ${
+                        isActive
+                          ? "bg-teal-600 text-white border-teal-600"
+                          : "bg-white text-slate-600 border-slate-200 hover:border-teal-300 hover:text-teal-700"
+                      }`}
+                    >
+                      {catShort(catId)}
+                      <span className={isActive ? "text-teal-100" : "text-slate-400"}>{count}</span>
+                    </button>
+                  );
+                })}
+              </div>
+            )}
+            {searching && (
+              <div className="px-3 py-1.5 text-[10px] text-muted-foreground border-b border-slate-100">
+                {listItems.length} match{listItems.length === 1 ? "" : "es"} across all types
+              </div>
+            )}
+            <div className="max-h-[560px] overflow-y-auto">
               {isLoading && <div className="px-3 py-4 text-[11px] text-muted-foreground">Loading...</div>}
-              {isLoading && orderedCats.length === 0 && <div className="px-3 py-4 text-[11px] text-muted-foreground">Loading...</div>}
-              {orderedCats.map(catId => {
-                const group = grouped.get(catId);
-                if (!group || group.items.length === 0) return null;
-                const items = group.items;
-                const flowName = group.label;
-                const isExpanded = searching || expanded.has(catId);
-                const shown = isExpanded ? items : items.slice(0, GROUP_CAP);
+              {!isLoading && listItems.length === 0 && (
+                <div className="px-3 py-6 text-[11px] text-muted-foreground text-center">
+                  {searching ? "No templates match your search." : "No templates in this type."}
+                </div>
+              )}
+              {listItems.map(t => {
+                const isPlaceholder = t.body_text.startsWith("PLACEHOLDER");
+                const isSelected    = selectedId === t.id;
                 return (
-                  <div key={catId}>
-                    <div className="px-3 pt-3 pb-1 text-[9px] uppercase tracking-[0.12em] text-slate-400 font-medium sticky top-0 bg-white/95 backdrop-blur z-[1]">
-                      {flowName} <span className="text-slate-300">· {items.length}</span>
+                  <button
+                    key={t.id}
+                    onClick={() => setSelectedId(t.id)}
+                    className={`w-full text-left px-3 py-1.5 hover:bg-slate-50 transition-colors border-l-2 ${
+                      isSelected ? "border-teal-500 bg-teal-50/40" : "border-transparent"
+                    }`}
+                  >
+                    <div className="flex items-center justify-between gap-2">
+                      <div className="text-[12px] font-medium truncate text-slate-800">{t.name}</div>
+                      <div className="flex items-center gap-1 shrink-0">
+                        {/* While searching, tag each hit with its type so the flat
+                            result list stays legible. */}
+                        {searching && (
+                          <span className="text-[9px] uppercase tracking-wider text-slate-400">{catShort(categoryOf(t).id)}</span>
+                        )}
+                        {isPlaceholder && (
+                          <span className="text-[9px] uppercase tracking-wider bg-amber-100 text-amber-700 px-1.5 py-0 rounded-sm">
+                            draft
+                          </span>
+                        )}
+                      </div>
                     </div>
-                    {shown.map(t => {
-                      const isPlaceholder = t.body_text.startsWith("PLACEHOLDER");
-                      const isSelected    = selectedId === t.id;
-                      return (
-                        <button
-                          key={t.id}
-                          onClick={() => setSelectedId(t.id)}
-                          className={`w-full text-left px-3 py-1.5 hover:bg-slate-50 transition-colors border-l-2 ${
-                            isSelected ? "border-teal-500 bg-teal-50/40" : "border-transparent"
-                          }`}
-                        >
-                          <div className="flex items-center justify-between gap-2">
-                            <div className="text-[12px] font-medium truncate text-slate-800">{t.name}</div>
-                            {isPlaceholder && (
-                              <span className="text-[9px] uppercase tracking-wider bg-amber-100 text-amber-700 px-1.5 py-0 rounded-sm shrink-0">
-                                draft
-                              </span>
-                            )}
-                          </div>
-                          <div className="text-[11px] text-muted-foreground truncate mt-0.5">
-                            {t.subject || "No subject"}
-                          </div>
-                        </button>
-                      );
-                    })}
-                    {!isExpanded && items.length > GROUP_CAP && (
-                      <button
-                        onClick={() => setExpanded(p => new Set(p).add(catId))}
-                        className="w-full text-left px-3 py-1.5 text-[11px] text-teal-700 hover:bg-teal-50/50"
-                      >
-                        Show all {items.length} →
-                      </button>
-                    )}
-                  </div>
+                    <div className="text-[11px] text-muted-foreground truncate mt-0.5">
+                      {t.subject || "No subject"}
+                    </div>
+                  </button>
                 );
               })}
             </div>
