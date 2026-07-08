@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from "react";
-import { Pencil, RotateCcw, Bold, Italic, Underline, List, ListOrdered, Link2, Table2, Maximize2, Image as ImageIcon } from "lucide-react";
+import { Pencil, RotateCcw, Bold, Italic, Underline, List, ListOrdered, Link2, Table2, Maximize2, Image as ImageIcon, AlignLeft, AlignCenter, AlignRight, AlignJustify } from "lucide-react";
 import { toast } from "sonner";
 import { uploadEmailAttachment } from "@/lib/email-attachments";
 import { cn } from "@/lib/utils";
@@ -263,6 +263,20 @@ export function EditableEmailPreview({
     flush();
   };
 
+  // Table text alignment — Amir asked to control this themselves (we default to
+  // centred now). Targets only the DATA tables: their cells carry the #cbd5e1
+  // border, so the signature + layout tables (logo, wrappers) are left alone.
+  // Applies to every data-table cell in the body; the edit is saved into the
+  // sent HTML like any other edit.
+  const applyTableAlign = (align: "left" | "center" | "right" | "justify") => {
+    const body = bodyRef.current; if (!body) return;
+    let n = 0;
+    body.querySelectorAll<HTMLTableCellElement>("td, th").forEach((c) => {
+      if ((c.getAttribute("style") || "").includes("cbd5e1")) { c.style.textAlign = align; n++; }
+    });
+    if (n > 0) flush();
+  };
+
   // Insert arbitrary HTML (a built table) at the saved caret, or append to the
   // end if the caret was never placed inside the body.
   const insertHtml = (snippet: string) => {
@@ -327,9 +341,9 @@ export function EditableEmailPreview({
     const cols = Math.max(...rows.map(r => r.length));
     const [head, ...bodyRows] = rows;
     const th = Array.from({ length: cols }, (_, i) =>
-      `<th style="text-align:left;border:1px solid #cbd5e1;padding:8px 11px;background:#0f766e;color:#ffffff;font-size:13px;font-weight:600;white-space:nowrap;">${escCell(head[i] ?? "")}</th>`).join("");
+      `<th style="text-align:center;border:1px solid #cbd5e1;padding:8px 11px;background:#0f766e;color:#ffffff;font-size:13px;font-weight:600;white-space:nowrap;">${escCell(head[i] ?? "")}</th>`).join("");
     const tb = bodyRows.map(r =>
-      `<tr>${Array.from({ length: cols }, (_, i) => `<td style="border:1px solid #cbd5e1;padding:8px 11px;font-size:14px;color:#1a2332;vertical-align:top;">${escCell(r[i] ?? "")}</td>`).join("")}</tr>`).join("");
+      `<tr>${Array.from({ length: cols }, (_, i) => `<td style="text-align:center;border:1px solid #cbd5e1;padding:8px 11px;font-size:14px;color:#1a2332;vertical-align:top;">${escCell(r[i] ?? "")}</td>`).join("")}</tr>`).join("");
     const html = `<div style="overflow-x:auto;margin:18px 0;"><table role="presentation" cellspacing="0" cellpadding="0" border="0" style="border-collapse:collapse;border:1px solid #cbd5e1;"><thead><tr>${th}</tr></thead><tbody>${tb}</tbody></table></div>`;
     const sel = window.getSelection();
     if (sel && sel.rangeCount) {
@@ -466,6 +480,12 @@ export function EditableEmailPreview({
             <option value="" disabled>Size</option>
             {FONT_SIZES.map(s => <option key={s.value} value={s.value}>{s.label}</option>)}
           </select>
+          <Divider />
+          {/* Table text alignment (data tables only) */}
+          <ToolBtn onClick={() => applyTableAlign("left")}    title="Table: align text left"><AlignLeft className="h-3.5 w-3.5" /></ToolBtn>
+          <ToolBtn onClick={() => applyTableAlign("center")}  title="Table: center text"><AlignCenter className="h-3.5 w-3.5" /></ToolBtn>
+          <ToolBtn onClick={() => applyTableAlign("justify")} title="Table: justify text"><AlignJustify className="h-3.5 w-3.5" /></ToolBtn>
+          <ToolBtn onClick={() => applyTableAlign("right")}   title="Table: align text right"><AlignRight className="h-3.5 w-3.5" /></ToolBtn>
           <Divider />
           <ToolBtn onClick={() => { const snap = bodyRef.current?.innerHTML; setFsHtml(snap && snap.trim() ? snap : html); setFullOpen(true); }} title="Full-screen editor" primary>
             <Maximize2 className="h-3.5 w-3.5" /> <span className="text-[11px] font-medium">Full screen</span>
