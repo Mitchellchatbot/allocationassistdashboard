@@ -110,7 +110,13 @@ export function buildProfileCardHtml(v: Record<string, string>): string {
         </tr></table>
       </td>
       <td valign="middle" align="right" style="white-space:nowrap;">
-        <span style="display:inline-block;font-size:11px;line-height:1;color:#ffffff;border:1px solid rgba(255,255,255,0.4);border-radius:999px;padding:7px 16px 6px;">allocationassist.com</span>
+        <!-- Pill as a single-cell table: html2canvas centres text vertically via
+             a table cell's valign=middle far more reliably than it does an
+             inline-block's line-height/padding (which it top-aligns, throwing
+             the text high). Fixed height + valign is the robust recipe. -->
+        <table role="presentation" cellpadding="0" cellspacing="0" border="0" style="display:inline-table;border-collapse:separate;"><tr>
+          <td valign="middle" height="24" style="height:24px;padding:0 16px;border:1px solid rgba(255,255,255,0.4);border-radius:999px;font-size:11px;line-height:1;color:#ffffff;white-space:nowrap;text-align:center;vertical-align:middle;">allocationassist.com</td>
+        </tr></table>
       </td>
     </tr></table>
   </div>
