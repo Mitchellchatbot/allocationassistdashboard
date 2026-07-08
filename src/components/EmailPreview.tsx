@@ -2,6 +2,7 @@ import { useState, type ReactNode } from "react";
 import { ChevronDown, ChevronRight, Mail, Paperclip, Maximize2 } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { EmailFrame } from "@/components/EmailFrame";
+import { humanizePlaceholders } from "@/lib/humanize-placeholders";
 
 interface EmailPreviewProps {
   /** Pre-rendered subject (tokens already substituted). */
@@ -123,7 +124,7 @@ export function EmailPreview({
           of being repainted by the dashboard's own CSS. */}
       <div className="bg-slate-100/60 px-4 py-5">
         <div className="bg-white rounded-md shadow-sm overflow-hidden">
-          <EmailFrame html={html} minHeight={160} />
+          <EmailFrame html={humanizePlaceholders(html)} minHeight={160} />
         </div>
       </div>
 

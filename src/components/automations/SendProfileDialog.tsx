@@ -22,6 +22,7 @@ import { useWpCandidateForDoctor, usePublishedWpCandidates, wpCandidateToTokens,
 import { useZohoData, type ZohoDoctorOnBoard, type ZohoLead } from "@/hooks/use-zoho-data";
 import * as DialogPrimitive from "@radix-ui/react-dialog";
 import { EditableEmailPreview } from "@/components/EditableEmailPreview";
+import { humanizePlaceholders, stripPlaceholderPills } from "@/lib/humanize-placeholders";
 import { EmailPreviewStudioLayout, type StudioEmail } from "@/components/EmailPreviewStudio";
 import { EmailFrame } from "@/components/EmailFrame";
 import { wrapBodyForSend } from "@/lib/email-preview";
@@ -1900,8 +1901,12 @@ function EditableEmailSection({
    *  email only) so the template can be swapped from full screen too. */
   templatePicker?:     React.ReactNode;
 }) {
+  // Show unfilled {{tokens}} as friendly placeholder pills in the preview, but
+  // report clean {{tokens}} back up so the SENT email is byte-identical — the
+  // pills never leave the display (stripPlaceholderPills is the exact reverse).
+  const displayHtml = useMemo(() => humanizePlaceholders(html), [html]);
   const [subj, setSubj] = useState(subject);
-  const [body, setBody] = useState(html);
+  const [body, setBody] = useState(displayHtml);
   const [tick, setTick] = useState(0);
 
   // Re-seed from the pristine render when it changes (profile data finished
@@ -1909,15 +1914,17 @@ function EditableEmailSection({
   // clobber a real edit. Runs only when the actual string changes.
   useEffect(() => {
     setSubj(subject);
-    setBody(html);
+    setBody(displayHtml);
     setTick(t => t + 1);
     onChange(null);
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [subject, html]);
+  }, [subject, displayHtml]);
 
-  const report = (s: string, b: string) =>
-    onChange((s !== subject || b !== html) ? { subject_override: s, html_override: b } : null);
-  const edited = subj !== subject || body !== html;
+  const report = (s: string, b: string) => {
+    const cleanB = stripPlaceholderPills(b);
+    onChange((s !== subject || cleanB !== html) ? { subject_override: s, html_override: cleanB } : null);
+  };
+  const edited = subj !== subject || body !== displayHtml;
 
   if (!editable) {
     return <PreviewBlock label={label} subject={subject} body={plainBody} />;
@@ -1931,12 +1938,12 @@ function EditableEmailSection({
       </div>
       <EditableEmailPreview
         subject={subj}
-        html={html}
+        html={displayHtml}
         onSubjectChange={(v) => { setSubj(v); report(v, body); }}
         onHtmlChange={(v) => { setBody(v); report(subj, v); }}
         resetKey={tick}
         edited={edited}
-        onReset={() => { setSubj(subject); setBody(html); setTick(t => t + 1); onChange(null); }}
+        onReset={() => { setSubj(subject); setBody(displayHtml); setTick(t => t + 1); onChange(null); }}
         from={from}
         to={to}
         onToChange={onToChange}
