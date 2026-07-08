@@ -6,7 +6,7 @@ import { Label } from "@/components/ui/label";
 import { Textarea } from "@/components/ui/textarea";
 import { Badge } from "@/components/ui/badge";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
-import { Mail, Save, Eye, AlertTriangle, Search } from "lucide-react";
+import { Mail, Save, Eye, AlertTriangle, Search, Plus } from "lucide-react";
 import { toast } from "sonner";
 import {
   useEmailTemplateList, useEmailTemplate, useUpdateEmailTemplate, renderTemplate,
@@ -15,6 +15,8 @@ import {
 import { FLOW_DEFINITIONS, FLOW_ORDER } from "@/lib/automation-flows";
 import { EmailPreview } from "@/components/EmailPreview";
 import { FullScreenEmailPreview } from "@/components/FullScreenEmailPreview";
+import { useHospitals } from "@/hooks/use-hospitals";
+import { TemplateStudio } from "@/components/automations/HospitalTemplatesManager";
 
 // Preview tokens used to render templates in the editor. Use the
 // production app origin so previews read like the real thing — not
@@ -79,13 +81,36 @@ const SAMPLE_VARS: Record<string, string> = {
   doctors_table_html: `<p style="color:#94a3b8;font-style:italic;">[the multi-doctor table renders here at send time]</p>`,
 };
 
-const GROUP_CAP = 12; // collapse long flow groups (e.g. 70 best-match) until expanded
+const GROUP_CAP = 12; // collapse long groups (e.g. 70 best-match) until expanded
+
+// Category = a finer grouping than flow_key. The "profile_sent" flow alone holds
+// several distinct KINDS that are otherwise dumped in one giant list — the 70
+// best-matched-by-specialty, the 43 per-hospital working-opportunity emails, the
+// per-hospital hospital emails, and the core few. Split them so the list reads
+// neatly while still showing every individual template.
+function categoryOf(t: { key: string; flow_key: string | null }): { id: string; label: string } {
+  const k = t.key;
+  if ((t.flow_key ?? "") === "profile_sent") {
+    if (k.startsWith("doctor_bmh_"))            return { id: "ps_bmh",  label: "Profile Sent · Best-matched hospitals (by specialty)" };
+    if (/^profile_sent_hospital_.+/.test(k))    return { id: "ps_hosp", label: "Profile Sent · Hospital email (per hospital)" };
+    if (/^profile_sent_doctor_.+/.test(k))      return { id: "ps_wo",   label: "Profile Sent · Working Opportunity (per hospital)" };
+    return { id: "ps_core", label: "Profile Sent · Core templates" };
+  }
+  const flow = t.flow_key ?? "other";
+  const label = flow === "other"
+    ? "Other / uncategorised"
+    : (FLOW_DEFINITIONS[flow as keyof typeof FLOW_DEFINITIONS]?.name ?? flow);
+  return { id: flow, label };
+}
+const CAT_ORDER = ["ps_core", "ps_wo", "ps_bmh", "ps_hosp", "shortlist", "interview", "contract_signing", "relocation", "second_payment", "onboarding", "other"];
 
 export function EmailTemplatesTab() {
   const { data: templates = [], isLoading } = useEmailTemplateList();
+  const { data: hospitals = [] } = useHospitals();
   const [search,     setSearch]     = useState("");
   const [selectedId, setSelectedId] = useState<string | null>(null);
   const [expanded,   setExpanded]   = useState<Set<string>>(new Set());
+  const [creating,   setCreating]   = useState(false);
 
   useEffect(() => {
     // Default-select the first template once data loads.
@@ -104,13 +129,20 @@ export function EmailTemplatesTab() {
   }, [templates, search]);
 
   const grouped = useMemo(() => {
-    const m = new Map<string, EmailTemplateListItem[]>();
+    const m = new Map<string, { label: string; items: EmailTemplateListItem[] }>();
     for (const t of filtered) {
-      const k = t.flow_key ?? "other";
-      (m.get(k) ?? m.set(k, []).get(k))!.push(t);
+      const c = categoryOf(t);
+      const g = m.get(c.id) ?? m.set(c.id, { label: c.label, items: [] }).get(c.id)!;
+      g.items.push(t);
     }
     return m;
   }, [filtered]);
+  const orderedCats = useMemo(() => {
+    return [...grouped.keys()].sort((a, b) => {
+      const ia = CAT_ORDER.indexOf(a), ib = CAT_ORDER.indexOf(b);
+      return (ia === -1 ? 99 : ia) - (ib === -1 ? 99 : ib);
+    });
+  }, [grouped]);
   const searching = search.trim().length > 0;
 
   const selected = templates.find(t => t.id === selectedId) ?? null;
@@ -139,6 +171,9 @@ export function EmailTemplatesTab() {
                 Templates
                 <span className="text-muted-foreground font-normal text-[11px]">· {templates.length}</span>
               </CardTitle>
+              <Button size="sm" variant="outline" className="h-7 text-[11px]" onClick={() => setCreating(true)} title="Write a new template, categorise it, and turn the names into variables">
+                <Plus className="h-3.5 w-3.5 mr-1" /> New
+              </Button>
             </div>
             <div className="relative mt-1.5">
               <Search className="absolute left-2 top-1/2 -translate-y-1/2 h-3 w-3 text-muted-foreground" />
@@ -153,15 +188,17 @@ export function EmailTemplatesTab() {
           <CardContent className="p-0">
             <div className="max-h-[640px] overflow-y-auto">
               {isLoading && <div className="px-3 py-4 text-[11px] text-muted-foreground">Loading...</div>}
-              {!isLoading && [...FLOW_ORDER, "other"].map(flowKey => {
-                const items = grouped.get(flowKey);
-                if (!items || items.length === 0) return null;
-                const flowName = flowKey === "other" ? "Other" : FLOW_DEFINITIONS[flowKey as keyof typeof FLOW_DEFINITIONS].name;
-                const isExpanded = searching || expanded.has(flowKey);
+              {isLoading && orderedCats.length === 0 && <div className="px-3 py-4 text-[11px] text-muted-foreground">Loading...</div>}
+              {orderedCats.map(catId => {
+                const group = grouped.get(catId);
+                if (!group || group.items.length === 0) return null;
+                const items = group.items;
+                const flowName = group.label;
+                const isExpanded = searching || expanded.has(catId);
                 const shown = isExpanded ? items : items.slice(0, GROUP_CAP);
                 return (
-                  <div key={flowKey}>
-                    <div className="px-3 pt-3 pb-1 text-[9px] uppercase tracking-[0.12em] text-slate-400 font-medium">
+                  <div key={catId}>
+                    <div className="px-3 pt-3 pb-1 text-[9px] uppercase tracking-[0.12em] text-slate-400 font-medium sticky top-0 bg-white/95 backdrop-blur z-[1]">
                       {flowName} <span className="text-slate-300">· {items.length}</span>
                     </div>
                     {shown.map(t => {
@@ -191,7 +228,7 @@ export function EmailTemplatesTab() {
                     })}
                     {!isExpanded && items.length > GROUP_CAP && (
                       <button
-                        onClick={() => setExpanded(p => new Set(p).add(flowKey))}
+                        onClick={() => setExpanded(p => new Set(p).add(catId))}
                         className="w-full text-left px-3 py-1.5 text-[11px] text-teal-700 hover:bg-teal-50/50"
                       >
                         Show all {items.length} →
@@ -213,6 +250,10 @@ export function EmailTemplatesTab() {
           </Card>
         )}
       </div>
+
+      {creating && (
+        <TemplateStudio mode="new" hospitals={hospitals} initialAdvanced onClose={() => setCreating(false)} />
+      )}
     </div>
   );
 }

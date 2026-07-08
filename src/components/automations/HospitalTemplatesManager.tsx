@@ -332,11 +332,14 @@ export function HospitalTemplatesManager() {
   );
 }
 
-function TemplateStudio({ mode, hospital, hospitals, onClose }: {
+export function TemplateStudio({ mode, hospital, hospitals, onClose, initialAdvanced }: {
   mode: "hospital" | "new";
   hospital?: Hospital;
   hospitals: Hospital[];
   onClose: () => void;
+  /** Open straight into Advanced (Type dropdown + HTML + tokenizer) — used by the
+   *  general "New template" maker in the All-templates list. */
+  initialAdvanced?: boolean;
 }) {
   // Full template bodies load only now (when a hospital's editor opens), not on
   // the Hospitals gallery — so browsing hospitals stays fast.
@@ -390,7 +393,7 @@ function TemplateStudio({ mode, hospital, hospitals, onClose }: {
 
   // Simple mode (default): plain-language message + [placeholders], no HTML.
   const simpleAvailable = mode === "hospital" || isProfileSent;
-  const [advanced, setAdvanced] = useState(false);
+  const [advanced, setAdvanced] = useState(!!initialAdvanced);
   const simple = simpleAvailable && !advanced;
   const [simpleBody, setSimpleBody] = useState<string>(() => mode === "hospital" ? htmlToFriendly(base?.body_html ?? "") : "");
   const simpleRef = useRef<HTMLTextAreaElement>(null);
