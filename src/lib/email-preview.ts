@@ -97,6 +97,17 @@ export const EMAIL_PREVIEW_CSS = `
      width inside their own overflow-x:auto wrapper (nowrap headers), so they
      scroll horizontally exactly like Gmail instead of being crushed to fit. */
   table{border-collapse:collapse;}
+  /* Placeholder pills (humanizePlaceholders → span[data-ph]) softly fade in and
+     "breathe" so an unfilled variable reads as a live chip that's waiting to
+     resolve — then, once the step supplies the value, the pill is simply gone
+     and the real text stands in its place. Display only: these spans are
+     stripped back to {{tokens}} before anything is ever sent, so the animation
+     can never touch delivered mail. The transform only runs during the entrance
+     and settles to none, so the pill's resting baseline/alignment is untouched. */
+  @keyframes aa-ph-in{from{opacity:0;transform:translateY(1px) scale(.96);}to{opacity:1;transform:none;}}
+  @keyframes aa-ph-breathe{0%,100%{opacity:1;}50%{opacity:.6;}}
+  span[data-ph]{animation:aa-ph-in .3s ease-out both, aa-ph-breathe 2.4s ease-in-out .3s infinite;}
+  @media (prefers-reduced-motion:reduce){span[data-ph]{animation:aa-ph-in .3s ease-out both;}}
 `;
 
 /**
