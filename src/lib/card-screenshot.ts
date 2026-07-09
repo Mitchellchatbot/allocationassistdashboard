@@ -59,10 +59,11 @@ function waitForImages(root: HTMLElement): Promise<void> {
  * A photo hosted somewhere without CORS may come out blank; that's the only
  * fidelity caveat and it's rare (photos live in our own storage).
  */
-export async function captureCardPng(cardHtml: string): Promise<Blob> {
+export async function captureCardPng(cardHtml: string, opts: { width?: number } = {}): Promise<Blob> {
+  const width = opts.width ?? CARD_IMAGE_WIDTH;
   const holder = document.createElement("div");
   holder.style.cssText =
-    `position:fixed;left:-99999px;top:0;width:${CARD_IMAGE_WIDTH}px;` +
+    `position:fixed;left:-99999px;top:0;width:${width}px;` +
     `background:#ffffff;padding:0;margin:0;z-index:-1;pointer-events:none;` +
     // Poppins so the capture matches the card's intended typeface.
     `font-family:'Poppins','Helvetica Neue',Helvetica,Arial,sans-serif;`;
@@ -79,8 +80,8 @@ export async function captureCardPng(cardHtml: string): Promise<Blob> {
       useCORS: true,            // draw cross-origin (Supabase) images
       allowTaint: false,        // keep the canvas exportable
       backgroundColor: "#ffffff",
-      width: CARD_IMAGE_WIDTH,
-      windowWidth: CARD_IMAGE_WIDTH,
+      width,
+      windowWidth: width,
       logging: false,
     });
     return await new Promise<Blob>((resolve, reject) =>

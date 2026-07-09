@@ -1,0 +1,352 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Poppins:wght@400;500;600;700&display=swap" rel="stylesheet">
+<title>Doctor Profile Mockup</title>
+<style>
+  :root{
+    --teal-dark:#0f8a76;
+    --teal:#1aa88f;
+    --teal-2:#12a08a;
+    --teal-icon:#1aa88f;
+    --text-dark:#333333;
+    --text-gray:#7a7a7a;
+    --tan:#8a6d47;
+    --border:#e5e7eb;
+    --icon-bg:#eef0f1;
+  }
+  *{box-sizing:border-box;}
+  body{
+    margin:0;
+    font-family:"Poppins",-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,Helvetica,Arial,sans-serif;
+    background:#ffffff;
+    padding:32px;
+    color:var(--text-dark);
+  }
+  .wrap{
+    max-width:1040px;
+    margin:0 auto;
+    display:flex;
+    gap:40px;
+    align-items:flex-start;
+  }
+
+  /* ---------- Sidebar column ---------- */
+  .side-col{width:274px;flex-shrink:0;}
+
+  /* teal profile card (photo -> email only) */
+  .profile-card{
+    background:linear-gradient(180deg,#189F8A 0%,#1AC2A8 100%);
+    border-radius:20px;
+    padding:28px 26px 26px;
+    color:#fff;
+    text-align:center;
+  }
+  .avatar{
+    width:170px;
+    height:170px;
+    border-radius:50%;
+    overflow:hidden;
+    margin:0 auto 16px;
+    border:3px solid #ffffff;
+  }
+  .avatar img{width:100%;height:100%;object-fit:cover;display:block;}
+  .profile-card h2{
+    font-size:17px;
+    margin:0 0 5px;
+    font-weight:600;
+    line-height:1.3;
+    white-space:nowrap;
+  }
+  .profile-card .role{
+    font-size:13px;
+    opacity:0.95;
+    margin:0 0 12px;
+    font-weight:600;
+  }
+  .member-badge{
+    display:inline-block;
+    background:#0e7d6b;
+    border-radius:16px;
+    padding:5px 16px;
+    font-size:11.5px;
+    font-weight:600;
+  }
+  .profile-card hr{
+    border:none;
+    border-top:1px dashed rgba(255,255,255,0.4);
+    margin:18px 0 16px;
+  }
+  .profile-card .age{
+    font-size:14px;
+    font-weight:600;
+    margin-bottom:14px;
+  }
+  .contact-row{
+    display:flex;
+    align-items:center;
+    justify-content:center;
+    gap:9px;
+    font-size:12.5px;
+    margin-bottom:11px;
+  }
+  .contact-icon{
+    width:24px;height:24px;border-radius:50%;
+    background:#fff;
+    display:flex;align-items:center;justify-content:center;
+    flex-shrink:0;
+  }
+  .contact-icon svg{width:13px;height:13px;stroke:var(--teal);}
+
+  /* buttons OUTSIDE the teal card */
+  .btn{
+    display:block;
+    width:100%;
+    text-align:center;
+    padding:15px 0;
+    border-radius:10px;
+    font-size:14px;
+    font-weight:600;
+    margin-top:14px;
+    border:none;
+    cursor:default;
+    text-decoration:none;
+  }
+  .btn-gray{background:linear-gradient(180deg,#f2f2f2,#e3e3e3);color:#333;}
+  .btn-outline{background:#fff;color:var(--teal);border:1.5px solid var(--teal);}
+  .btn-black{background:#111111;color:#fff;}
+
+  /* ---------- Main ---------- */
+  .main{flex:1;min-width:0;padding-top:6px;}
+  .main h1{
+    font-size:25px;
+    line-height:1.3;
+    margin:0 0 16px;
+    font-weight:600;
+    color:#3a3a3a;
+  }
+  .section-label{
+    font-size:17px;
+    font-weight:600;
+    margin:0 0 10px;
+    color:#3a3a3a;
+  }
+  .bio{
+    font-size:13.5px;
+    line-height:1.7;
+    color:var(--tan);
+    margin:0 0 20px;
+  }
+  .divider{
+    border:none;
+    border-top:1px solid #b9e5dd;
+    margin:22px 0;
+  }
+
+  .fact-grid{
+    display:grid;
+    grid-template-columns:repeat(3,1fr);
+    row-gap:26px;
+    column-gap:20px;
+    margin-bottom:20px;
+  }
+  .fact{
+    display:flex;
+    align-items:flex-start;
+    gap:12px;
+  }
+  .fact .icon{
+    width:44px;
+    height:44px;
+    border-radius:50%;
+    background:var(--icon-bg);
+    display:flex;
+    align-items:center;
+    justify-content:center;
+    flex-shrink:0;
+  }
+  .fact .icon svg{width:21px;height:21px;stroke:var(--teal-icon);}
+  .fact .label{
+    font-size:12.5px;
+    color:var(--text-gray);
+    margin-bottom:3px;
+  }
+  .fact .value{
+    font-size:14px;
+    font-weight:600;
+    color:#3a3a3a;
+  }
+
+  .tabs{
+    display:flex;
+    margin-top:10px;
+  }
+  .tab{
+    flex:1;
+    text-align:center;
+    padding:14px 0;
+    font-size:14px;
+    font-weight:700;
+    letter-spacing:.3px;
+  }
+  .tab-active{background:#0e9e86;color:#fff;}
+  .tab-inactive{background:#eeeeee;color:#555;}
+
+  .edu-block{padding-top:20px;}
+  .edu-title{font-size:19px;margin:0 0 10px;color:#3a3a3a;font-weight:400;}
+  .edu-title b{font-weight:700;}
+  .edu-org{font-size:16px;color:var(--teal);font-weight:600;margin:0 0 10px;}
+  .edu-meta{font-size:13px;color:var(--tan);margin:0 0 5px;}
+</style>
+</head>
+<body>
+
+<div class="wrap">
+
+  <!-- SIDEBAR COLUMN -->
+  <div class="side-col">
+    <div class="profile-card">
+      <div class="avatar"><img src="doctor-photo.jpg" alt="Doctor photo"></div>
+      <h2>Dr. Mohammed Elkassaby</h2>
+      <p class="role">Consultant Vascular Surgeon</p>
+      <span class="member-badge">Member Since: 9 July 2026</span>
+      <hr>
+      <div class="age">Age: 43 Years Old</div>
+      <div class="contact-row">
+        <span class="contact-icon"><svg viewBox="0 0 24 24" fill="none" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M22 16.92v3a2 2 0 0 1-2.18 2 19.79 19.79 0 0 1-8.63-3.07 19.5 19.5 0 0 1-6-6 19.79 19.79 0 0 1-3.07-8.67A2 2 0 0 1 4.11 2h3a2 2 0 0 1 2 1.72c.127.96.361 1.902.7 2.81a2 2 0 0 1-.45 2.11L8.09 9.91a16 16 0 0 0 6 6l1.27-1.27a2 2 0 0 1 2.11-.45c.908.339 1.85.573 2.81.7A2 2 0 0 1 22 16.92z"/></svg></span>
+        +353 876384769
+      </div>
+      <div class="contact-row">
+        <span class="contact-icon"><svg viewBox="0 0 24 24" fill="none" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M22 6c0-1.1-.9-2-2-2H4a2 2 0 0 0-2 2v12c0 1.1.9 2 2 2h16a2 2 0 0 0 2-2V6z"/><path d="m22 6-10 7L2 6"/></svg></span>
+        mohammed.elkassaby@gmail.com
+      </div>
+    </div>
+    <a class="btn btn-gray">View Resume</a>
+    <a class="btn btn-outline">Add To My Favorites</a>
+    <a class="btn btn-black">Contact Us</a>
+  </div>
+
+  <!-- MAIN -->
+  <div class="main">
+    <h1>Dr. Mohammed Elkassaby – Consultant Vascular Surgeon – Ireland</h1>
+    <p class="section-label">Specific areas of interests within the specialization</p>
+    <p class="bio">Minimally invasive complex endovascular interventions for Aortic aneurysms, arterial diseases, diabetic foot, varicose veins. Carotid artery surgery and stroke prevention. Complex dialysis access creation and maintenance and vascular trauma. An experienced vascular surgeon and associate professor, with over 15 years of work experience within university hospitals in Ireland and Egypt. Completed training schemes in both countries. Certified with exit exams from three medical training systems (Irish/UK, European and Egyptian). Experienced in complex and advanced endovascular interventions with an accredited fellowship from the Royal College of Surgeons in Ireland. A published author and reviewer in numerous peer-reviewed journals and book publishing organizations, and a lecturer in multiple international conferences in the field of vascular surgery. Specialist Editor for &ldquo;The Surgeon&rdquo;, official journal of the Royal College of Surgeons in Edinburgh and Ireland. An examiner for the European Board of Vascular surgery. .</p>
+    <hr class="divider">
+
+    <div class="fact-grid">
+
+      <div class="fact">
+        <div class="icon">
+          <svg viewBox="0 0 24 24" fill="none" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="8" r="4"/><path d="M6 21v-2a6 6 0 0 1 12 0v2"/></svg>
+        </div>
+        <div><div class="label">Age:</div><div class="value">43 years old</div></div>
+      </div>
+
+      <div class="fact">
+        <div class="icon">
+          <svg viewBox="0 0 24 24" fill="none" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"/><path d="M2 12h20"/><path d="M12 2a15.3 15.3 0 0 1 4 10 15.3 15.3 0 0 1-4 10 15.3 15.3 0 0 1-4-10 15.3 15.3 0 0 1 4-10z"/></svg>
+        </div>
+        <div><div class="label">Nationality:</div><div class="value">Irish</div></div>
+      </div>
+
+      <div class="fact">
+        <div class="icon">
+          <svg viewBox="0 0 24 24" fill="none" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="4" width="18" height="18" rx="2"/><path d="M16 2v4M8 2v4M3 10h18"/></svg>
+        </div>
+        <div><div class="label">Date of Birth:</div><div class="value">21 August 1982</div></div>
+      </div>
+
+      <div class="fact">
+        <div class="icon">
+          <svg viewBox="0 0 24 24" fill="none" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M6 3h4v4H6zM6 7a4 4 0 0 0 4 4M14 3h4v4h-4zM18 7a4 4 0 0 1-4 4"/><path d="M10 11v2a4 4 0 0 0 4 0v-2"/><path d="M12 15v3M9 21h6"/></svg>
+        </div>
+        <div><div class="label">Specialty:</div><div class="value">Vascular Surgery</div></div>
+      </div>
+
+      <div class="fact">
+        <div class="icon">
+          <svg viewBox="0 0 24 24" fill="none" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="8" r="4"/><path d="M6 21v-2a6 6 0 0 1 12 0v2"/><path d="m16 11 2 2 3-3"/></svg>
+        </div>
+        <div><div class="label">Specialist / Consultant:</div><div class="value">Consultant</div></div>
+      </div>
+
+      <div class="fact">
+        <div class="icon">
+          <svg viewBox="0 0 24 24" fill="none" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="7" width="18" height="13" rx="2"/><path d="M8 7V5a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"/><path d="M3 13h18"/></svg>
+        </div>
+        <div><div class="label">Years of Experience:</div><div class="value">5 Years</div></div>
+      </div>
+
+      <div class="fact">
+        <div class="icon">
+          <svg viewBox="0 0 24 24" fill="none" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="2" y="4" width="20" height="16" rx="2"/><circle cx="9" cy="10" r="2"/><path d="M15 8h4M15 12h4M6 16h12"/></svg>
+        </div>
+        <div><div class="label">DHA / DOH / MOH / SCFHS / QCHP Licenses?</div><div class="value">DHA, DOH &amp; MOH in process</div></div>
+      </div>
+
+      <div class="fact">
+        <div class="icon">
+          <svg viewBox="0 0 24 24" fill="none" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="4" width="18" height="18" rx="2"/><path d="M16 2v4M8 2v4M3 10h18M9 16h1M14 16h1"/></svg>
+        </div>
+        <div><div class="label">Notice Period:</div><div class="value">4 months</div></div>
+      </div>
+
+      <div class="fact">
+        <div class="icon">
+          <svg viewBox="0 0 24 24" fill="none" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M20 10c0 6-8 12-8 12s-8-6-8-12a8 8 0 0 1 16 0z"/><circle cx="12" cy="10" r="3"/></svg>
+        </div>
+        <div><div class="label">Targeted Location:</div><div class="value">Qatar, Dubai, Abu Dhabi, Al Ain, All KSA</div></div>
+      </div>
+
+      <div class="fact">
+        <div class="icon" style="font-weight:700;font-size:12px;color:var(--teal-icon);">A文</div>
+        <div><div class="label">Languages:</div><div class="value">English</div></div>
+      </div>
+
+      <div class="fact">
+        <div class="icon">
+          <svg viewBox="0 0 24 24" fill="none" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"/><path d="M7 9h10M7 13h6"/></svg>
+        </div>
+        <div><div class="label">English Level:</div><div class="value">Very Good</div></div>
+      </div>
+
+      <div class="fact">
+        <div class="icon">
+          <svg viewBox="0 0 24 24" fill="none" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2"/><circle cx="9" cy="7" r="4"/><path d="M23 21v-2a4 4 0 0 0-3-3.87M16 3.13a4 4 0 0 1 0 7.75"/></svg>
+        </div>
+        <div><div class="label">Family Status:</div><div class="value">Married</div></div>
+      </div>
+
+      <div class="fact">
+        <div class="icon">
+          <svg viewBox="0 0 24 24" fill="none" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2"/><circle cx="9" cy="7" r="4"/><path d="M23 21v-2a4 4 0 0 0-3-3.87M16 3.13a4 4 0 0 1 0 7.75"/></svg>
+        </div>
+        <div><div class="label">Have Children / Dependent:</div><div class="value">0</div></div>
+      </div>
+
+    </div>
+
+    <hr class="divider" style="margin-top:2px;">
+
+    <div class="tabs">
+      <div class="tab tab-active">EDUCATION</div>
+      <div class="tab tab-inactive">EXPERIENCE</div>
+    </div>
+
+    <div class="edu-block">
+      <p class="edu-title"><b>Specialty Training:</b> Certificate of Specialist Doctor and Completion of Surgical Training</p>
+      <p class="edu-org">Medical Council of Ireland</p>
+      <p class="edu-meta">Certificate Issue: 1 July 2021</p>
+      <p class="edu-meta">Description: Medical Council of Ireland</p>
+      <hr class="divider">
+    </div>
+
+  </div>
+
+</div>
+
+</body>
+</html>
