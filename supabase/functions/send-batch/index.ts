@@ -117,27 +117,43 @@ Deno.serve(async (req: Request) => {
   if (batch.status === "sent" && !force) return json({ ok: false, error: "Batch already sent (use force to resend)", sent_at: batch.sent_at }, 409);
   if (batch.status === "cancelled") return json({ ok: false, error: "Batch is cancelled" }, 409);
 
+  // Mark the batch failed with a HUMAN reason (skipped on a dry-run preview, so
+  // previewing never mutates status) — a failed card then shows WHY it failed
+  // ("No hospitals in Saudi Arabia with a recruiter email") instead of the vague
+  // "No emails sent" the empty-recipient path used to leave behind.
+  const failAndReturn = async (reason: string, code = 400) => {
+    if (!dryRun) {
+      await supabase.from("scheduled_batch_sends")
+        .update({ status: "failed", error: reason, updated_at: new Date().toISOString() })
+        .eq("id", batch.id);
+    }
+    return json({ ok: false, error: reason }, code);
+  };
+
   const doctorIds: string[] = batch.doctor_ids ?? [];
-  if (doctorIds.length === 0) return json({ ok: false, error: "No doctors queued for this batch" }, 400);
+  if (doctorIds.length === 0) return await failAndReturn("No doctors queued for this batch.");
 
   // ── Load hospitals (recipients) ────────────────────────────────────────
   // batch.country (added 2026-06-03) scopes the send to one country.
   // Ammar's spec: 'two profiles to UAE, two to KSA, two to Qatar' — one
   // batch row per country per day. Null country = legacy/broadcast.
   const batchCountry = (batch.country as string | null) ?? null;
-  let hospitalQuery = supabase
+  // Fetch every hospital with a recruiter email, then match the batch's country
+  // IN CODE with alias tolerance (KSA ≡ Saudi Arabia, UAE ≡ United Arab Emirates,
+  // …). The old `.ilike("country", batchCountry)` was an EXACT match, so a Saudi
+  // hospital saved as "KSA" (the Hospitals UI still offers both labels) was
+  // silently dropped from a "Saudi Arabia" batch → zero recipients → a failed
+  // send. Normalising both sides makes label drift harmless.
+  const { data: hospitals, error: hospErr } = await supabase
     .from("hospitals")
     .select("id, name, primary_contact_name, primary_recruiter_email, greet_with_contact_name, country")
     .not("primary_recruiter_email", "is", null);
-  // Case-insensitive so a hand-typed "oman" / "Oman " on the hospital row still
-  // matches the batch's country (mirrors the preview's eligibleHospitals). ilike
-  // with no % is a plain case-insensitive equals.
-  if (batchCountry) hospitalQuery = hospitalQuery.ilike("country", batchCountry);
-  const { data: hospitals, error: hospErr } = await hospitalQuery;
   if (hospErr) return json({ ok: false, error: "Hospital fetch failed", detail: hospErr.message }, 500);
+  const wantCountry = batchCountry ? normCountry(batchCountry) : null;
   // Keep the hospital objects (name + contact + greeting flag) so each hospital
   // gets its OWN email greeting them by name (Sean: "hello team → hello name").
   const recipientHospitals = (hospitals ?? [])
+    .filter(h => !wantCountry || normCountry(String(h.country ?? "")) === wantCountry)
     .map(h => ({
       name:         String(h.name ?? "").trim(),
       email:        String(h.primary_recruiter_email ?? "").trim(),
@@ -146,9 +162,12 @@ Deno.serve(async (req: Request) => {
     }))
     .filter(h => h.email);
   const recipients = recipientHospitals.map(h => h.email);
-  if (recipients.length === 0 && TEST_OVERRIDE_LIST.length === 0) {
+  // Fire even in TEST mode: a test send still needs at least one real recipient
+  // to build (redirected) copies from — zero recipients means nothing to send,
+  // so surface the clear reason rather than proceeding to "No emails sent".
+  if (recipients.length === 0) {
     const scope = batchCountry ? `in ${batchCountry}` : "on file";
-    return json({ ok: false, error: `No hospitals ${scope} with a recruiter email. Add some in the Hospitals tab or change the batch's country.` }, 400);
+    return await failAndReturn(`No hospitals ${scope} with a recruiter email. Add them (or fill in their recruiter email) in the Hospitals tab, or change the batch's country.`);
   }
 
   // ── Load doctor profiles + Zoho cache for the picked doctors ───────────
@@ -419,8 +438,8 @@ Deno.serve(async (req: Request) => {
   // greetings can be verified safely before real hospitals get them).
   const targets = recipientHospitals.filter(h =>
     h.email.toLowerCase() !== EXCLUDED_RECIPIENT && !excludeSet.has(h.email.toLowerCase()));
-  if (targets.length === 0 && TEST_OVERRIDE_LIST.length === 0) {
-    return json({ ok: false, error: "No hospitals left to send to — all excluded or missing a recruiter email." }, 400);
+  if (targets.length === 0) {
+    return await failAndReturn("No hospitals left to send to — every recipient was excluded for this send.");
   }
 
   // One personalised email per hospital.
@@ -692,6 +711,23 @@ function renderDoctorCard(r: RowData): string {
 function esc(s: string | undefined | null): string {
   if (s == null) return "";
   return String(s).replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;").replace(/"/g, "&quot;").replace(/'/g, "&#39;");
+}
+
+// Canonicalise a country label so alias variants collapse to one value — a batch
+// set to "Saudi Arabia" then matches hospitals saved as "KSA" / "K.S.A." /
+// "Kingdom of Saudi Arabia", "UAE" matches "United Arab Emirates", etc. Mirrors
+// the hospital-normalise migration + the Zoho country normaliser, so batch
+// country-matching survives the label drift the Hospitals UI still allows.
+function normCountry(c: string): string {
+  const s = (c || "").toLowerCase().replace(/[._]/g, " ").replace(/\s+/g, " ").trim();
+  if (!s) return "";
+  if (s.includes("saudi")   || s === "ksa" || s === "sa") return "saudi arabia";
+  if (s.includes("emirat")  || s === "uae")               return "uae";
+  if (s.includes("qatar")   || s === "qa")                return "qatar";
+  if (s.includes("oman")    || s === "om")                return "oman";
+  if (s.includes("kuwait")  || s === "kw")                return "kuwait";
+  if (s.includes("bahrain") || s === "bh")                return "bahrain";
+  return s;
 }
 
 function stripHtml(s: string): string {
