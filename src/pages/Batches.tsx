@@ -1205,20 +1205,27 @@ function BatchDialog({ target, onTargetChange, batches, suggestedSpecialty }: {
   const effectiveSpecialty = batch?.specialty
     ?? (batch && batch.kind !== "specialty_of_day" ? suggestedSpecialty : null);
 
-  // Eligible + website-only pool, scored and sorted by readiness. This is the
-  // exact base pool the ranked candidate list starts from and the one
-  // Auto-pick draws its top-N from — factored out here so a click doesn't
-  // re-filter + re-score the whole roster. Search/specialty toggles do NOT
-  // enter here (they shape the list downstream), so this stays keyed only on
-  // its real inputs. Order matches the inline sort it replaces exactly.
+  // Score EVERY doctor once, keyed only on the roster + the target specialty —
+  // the score doesn't depend on which doctors are already picked, so caching it
+  // here means adding/removing a doctor no longer re-scores the whole roster
+  // (that per-add re-score was the lag when selecting). The pools below just
+  // read from this map + do cheap filtering.
+  const scoreById = useMemo(() => {
+    const m = new Map<string, MatchScore>();
+    const spec = effectiveSpecialty ?? "";
+    for (const d of allDoctors) m.set(d.id, scoreDoctorForSpecialty(d, spec));
+    return m;
+  }, [allDoctors, effectiveSpecialty]);
+
+  // Eligible + website-only pool, scored and sorted by readiness. Sorted ONCE
+  // (no doctor_ids here) — the already-picked ones are excluded where consumed
+  // (Auto-pick), so a click doesn't re-score/re-sort the whole roster.
   const rankedEligiblePool = useMemo(() => {
-    if (!batch) return [] as { d: DoctorOption; score: number }[];
     return allDoctors
-      .filter(d => d.eligible && !batch.doctor_ids.includes(d.id))
-      .filter(d => !websiteOnly || d.onWebsite)
-      .map(d => ({ d, score: scoreDoctor(d, batch, effectiveSpecialty).score }))
+      .filter(d => d.eligible && (!websiteOnly || d.onWebsite))
+      .map(d => ({ d, score: scoreById.get(d.id)?.score ?? 0 }))
       .sort((a, b) => b.score - a.score);
-  }, [batch, allDoctors, websiteOnly, effectiveSpecialty]);
+  }, [allDoctors, websiteOnly, scoreById]);
 
   // NOTE: derived from the DEBOUNCED search so the expensive candidatePool
   // scan only runs once typing settles. Every consumer of `q` (the memo dep,
@@ -1264,7 +1271,7 @@ function BatchDialog({ target, onTargetChange, batches, suggestedSpecialty }: {
           !batch.doctor_ids.includes(d.id) &&
           (d.profileText.includes(q) || (d.email ?? "").toLowerCase().includes(q)),
         );
-    const scored = filtered.map(d => ({ ...d, _score: scoreDoctor(d, batch, effectiveSpecialty) }));
+    const scored = filtered.map(d => ({ ...d, _score: scoreById.get(d.id) ?? scoreDoctorForSpecialty(d, effectiveSpecialty ?? "") }));
     // When the user is searching, rank by WHERE the keyword hit first
     // (sub-specialty > area of interest > headline specialty > anywhere in
     // the profile), then by readiness score — so the doctor who genuinely
@@ -1277,7 +1284,7 @@ function BatchDialog({ target, onTargetChange, batches, suggestedSpecialty }: {
     // Show more when searching — an explicit lookup shouldn't get truncated
     // at the same shortlist length as the ranked default view.
     return scored.slice(0, q ? 100 : 30);
-  }, [batch, allDoctors, websiteOnly, specialtyOnly, effectiveSpecialty, q]);
+  }, [batch, allDoctors, websiteOnly, specialtyOnly, effectiveSpecialty, q, scoreById]);
 
   // Daily Duo only — cache generated card image URLs per doctor id so reorders
   // and re-adds reuse the capture instead of re-rasterising. Lives for the
@@ -1346,8 +1353,11 @@ function BatchDialog({ target, onTargetChange, batches, suggestedSpecialty }: {
     const need = Math.max(0, expectedCount - batch.doctor_ids.length);
     if (need === 0) { toast.info("Already at the target count."); return; }
     // Match what the list shows — website-only when that toggle is on. Reuses
-    // the shared, already-scored/sorted eligible pool instead of rebuilding it.
+    // the shared, already-scored/sorted eligible pool (which now includes
+    // picked doctors, so drop the already-queued ones here).
+    const pickedSet = new Set(batch.doctor_ids);
     const pool = rankedEligiblePool
+      .filter(x => !pickedSet.has(x.d.id))
       .slice(0, need)
       .map(x => x.d.id);
     if (pool.length === 0) { toast.error("No eligible candidates to auto-pick."); return; }
@@ -1880,9 +1890,14 @@ function SourceBadge({ source }: { source: "lead" | "dob" | "wp" }) {
  *  Doctor → Vacancies rank, everything. Picker UIs feed this straight
  *  into MatchScoreChip so every number reads X/100 with the same
  *  strong / decent / weak tier colours. */
-function scoreDoctor(d: DoctorOption, batch: ScheduledBatch, effectiveSpecialty?: string | null): MatchScore {
-  const targetSpecialty = batch.specialty ?? effectiveSpecialty ?? "";
-  const ms = scoreCandidate(
+// The score depends ONLY on the doctor + the target specialty — nothing that
+// changes while picking doctors — so it can be cached per doctor (see scoreById
+// in BatchDialog) instead of re-scored on every add.
+function scoreDoctorForSpecialty(d: DoctorOption, targetSpecialty: string): MatchScore {
+  // One algorithm, one number across every surface: the picker shows the exact
+  // same score as the Today's-Pick / Top-Ranked rotation preview and the vacancy
+  // matcher (all go through scoreCandidate).
+  return scoreCandidate(
     {
       id:               d.id,
       name:             d.name,
@@ -1902,12 +1917,9 @@ function scoreDoctor(d: DoctorOption, batch: ScheduledBatch, effectiveSpecialty?
     targetSpecialty,
     {},
   );
-  // One algorithm, one number across every surface: the picker now shows
-  // the exact same score as the Today's-Pick / Top-Ranked rotation preview
-  // and the vacancy matcher (all go through scoreCandidate). We used to
-  // halve the specialty factor here for open-ended batches, which made the
-  // same doctor score differently in the picker vs the preview — confusing.
-  return ms;
+}
+function scoreDoctor(d: DoctorOption, batch: ScheduledBatch, effectiveSpecialty?: string | null): MatchScore {
+  return scoreDoctorForSpecialty(d, batch.specialty ?? effectiveSpecialty ?? "");
 }
 
 function normaliseSpec(s: string): string {

@@ -77,7 +77,24 @@ export function useUpdateHospital() {
         .eq("id", id);
       if (error) throw error;
     },
-    onSuccess: () => { qc.invalidateQueries({ queryKey: KEY }); },
+    // Optimistic: patch the cached hospital row IMMEDIATELY so routing toggles
+    // (contact_mode / greet-with / excluded contacts) and inline edits flip
+    // instantly instead of waiting a DB round-trip + refetch. Roll back on
+    // error; reconcile on settle. Mirrors useUpdateBatch.
+    onMutate: async (input: { id: string } & HospitalInput) => {
+      const { id, ...patch } = input;
+      await qc.cancelQueries({ queryKey: KEY });
+      const prev = qc.getQueryData<Hospital[]>(KEY);
+      if (prev) {
+        qc.setQueryData<Hospital[]>(KEY, prev.map(h => h.id === id ? { ...h, ...patch } as Hospital : h));
+      }
+      return { prev };
+    },
+    onError: (_e, _vars, ctx) => {
+      const c = ctx as { prev?: Hospital[] } | undefined;
+      if (c?.prev) qc.setQueryData(KEY, c.prev);
+    },
+    onSettled: () => { qc.invalidateQueries({ queryKey: KEY }); },
   });
 }
 
