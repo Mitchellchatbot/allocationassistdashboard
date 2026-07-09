@@ -23,6 +23,7 @@ import { groupSpecialty } from "@/lib/specialty-groups";
 import { scoreCandidate, type MatchScore } from "@/lib/match-score";
 import { useWpCandidates, usePublishedWpCandidates, wpCandidateProfileText, wpCandidateToTokens, type WpCandidate } from "@/hooks/use-wp-candidates";
 import { buildProfileCardHtml } from "@/lib/profile-card-html";
+import { buildDoctorProfileHtml, PROFILE_IMAGE_WIDTH } from "@/lib/doctor-profile-image";
 import { captureAndUploadCard } from "@/lib/card-screenshot";
 import { useDebounce } from "@/hooks/use-zoho-leads";
 import { MatchScoreChip, MatchReasons } from "@/components/DoctorVacancyMatches";
@@ -2099,22 +2100,24 @@ function useMemoDoctors(
 }
 
 /** Build + upload the Profile-Sent card image for a queued doctor, returning its
- *  public PNG URL. Uses the SAME pipeline as the single Profile-Sent send
- *  (wpCandidateToTokens → buildProfileCardHtml → captureAndUploadCard), so a
- *  Daily Duo profile looks identical to an individual send. The WP candidate
- *  supplies the photo / title / age / etc. the flat option doesn't carry; the
- *  option fields are fallbacks when WP is missing one. */
+ *  public PNG URL. Uses the SAME image as the single Profile-Sent send: the rich
+ *  3:2 WordPress profile card when the doctor has a WP record (opt.wp), falling
+ *  back to the legacy compact card (from tokens) when they don't. So a Daily Duo
+ *  profile looks identical to an individual send. */
 async function cardImageForOption(opt: DoctorOption): Promise<string> {
-  const t = wpCandidateToTokens(opt.wp ?? null);
+  if (opt.wp) {
+    return captureAndUploadCard(buildDoctorProfileHtml(opt.wp), { width: PROFILE_IMAGE_WIDTH });
+  }
+  const t = wpCandidateToTokens(null);
   const vars: Record<string, string> = {
     ...t,
-    doctor_name: (opt.name || t.doctor_name || "").replace(/^\s*Dr\.?\s+/i, "").trim() || (opt.name || "Candidate"),
-    doctor_specialty:        t.doctor_specialty        || opt.speciality       || "",
-    doctor_speciality:       t.doctor_specialty        || opt.speciality       || "",
-    doctor_country_training: t.doctor_country_training || opt.country_training || "",
-    doctor_nationality:      t.doctor_nationality      || opt.nationality      || "",
-    doctor_license:          t.doctor_license          || opt.license          || "",
-    doctor_years_experience: t.doctor_years_experience || (opt.years_experience != null ? String(opt.years_experience) : ""),
+    doctor_name: (opt.name || "").replace(/^\s*Dr\.?\s+/i, "").trim() || (opt.name || "Candidate"),
+    doctor_specialty:        opt.speciality       || "",
+    doctor_speciality:       opt.speciality       || "",
+    doctor_country_training: opt.country_training || "",
+    doctor_nationality:      opt.nationality      || "",
+    doctor_license:          opt.license          || "",
+    doctor_years_experience: opt.years_experience != null ? String(opt.years_experience) : "",
   };
   return captureAndUploadCard(buildProfileCardHtml(vars));
 }

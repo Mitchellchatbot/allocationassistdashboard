@@ -1,19 +1,20 @@
-// Build the "doctor profile" card HTML (the WordPress-style profile) from a WP
-// candidate, for rasterising to an image via html2canvas (see GenerateProfileImage).
+// Build the "doctor profile" card as a LANDSCAPE 3:2 image (1200×800) from a WP
+// candidate, for rasterising via html2canvas. This is the image that goes into
+// the hospital "profile sent" emails (replacing the old teal card) and shows in
+// Doctors → Generate image.
 //
-// Ported 1:1 from doctor-profile-mockup-final.html (root of the repo) — same
-// layout, teal card, fact grid, education block — but:
-//   • every value comes from the WP candidate record, and
-//   • EMPTY values are dropped entirely (no blank facts / rows / sections),
-// so a sparse profile stays clean instead of showing "—" or empty labels.
+// Layout: teal photo card on the left, then title + areas-of-interest + the fact
+// grid + one education entry on the right — everything inside a fixed 1200×800
+// (3:2) frame with overflow hidden, so the output is always exactly 3:2 and
+// nothing spills. EMPTY values are dropped (no blank facts / rows / sections).
 //
 // CSS is scoped under `.dpm` (not bare `body`/`*`) so injecting it into an
 // off-screen capture holder can't repaint the dashboard.
 import type { WpCandidate } from "@/hooks/use-wp-candidates";
 
-/** Width the profile is authored + captured at (matches the mockup's 1040px
- *  wrap + 32px body padding). */
-export const PROFILE_IMAGE_WIDTH = 1104;
+/** The 3:2 frame the profile is authored + captured at. */
+export const PROFILE_IMAGE_WIDTH = 1200;
+export const PROFILE_IMAGE_HEIGHT = 800;
 
 function esc(s: string): string {
   return s
@@ -52,7 +53,7 @@ function joinList(v: string[] | null | undefined): string {
   return (v ?? []).map(x => val(x)).filter(Boolean).join(", ");
 }
 
-// Fact-row icons, kept identical to the mockup.
+// Fact-row icons, kept from the mockup.
 const ICON = {
   person:   `<svg viewBox="0 0 24 24" fill="none" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="8" r="4"/><path d="M6 21v-2a6 6 0 0 1 12 0v2"/></svg>`,
   globe:    `<svg viewBox="0 0 24 24" fill="none" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"/><path d="M2 12h20"/><path d="M12 2a15.3 15.3 0 0 1 4 10 15.3 15.3 0 0 1-4 10 15.3 15.3 0 0 1-4-10 15.3 15.3 0 0 1 4-10z"/></svg>`,
@@ -73,48 +74,39 @@ const STYLE = `
 <style>
 .dpm{
   --teal:#1aa88f;--text-dark:#333333;--text-gray:#7a7a7a;--tan:#475569;--icon-bg:#eef0f1;
-  margin:0;font-family:"Poppins",-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,Helvetica,Arial,sans-serif;
-  background:#ffffff;padding:32px;color:var(--text-dark);width:100%;
+  box-sizing:border-box;width:${PROFILE_IMAGE_WIDTH}px;height:${PROFILE_IMAGE_HEIGHT}px;overflow:hidden;
+  font-family:"Poppins",-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,Helvetica,Arial,sans-serif;
+  background:#ffffff;color:var(--text-dark);padding:26px;display:flex;gap:26px;align-items:stretch;
 }
 .dpm *{box-sizing:border-box;}
-.dpm .wrap{max-width:1040px;margin:0 auto;display:flex;gap:40px;align-items:flex-start;}
-.dpm .side-col{width:274px;flex-shrink:0;}
-.dpm .profile-card{background:linear-gradient(180deg,#189F8A 0%,#1AC2A8 100%);border-radius:20px;padding:28px 26px 26px;color:#fff;text-align:center;}
-.dpm .avatar{width:170px;height:170px;border-radius:50%;overflow:hidden;margin:0 auto 16px;border:3px solid #ffffff;background:#0e7d6b;display:flex;align-items:center;justify-content:center;}
+.dpm .side-col{width:328px;flex-shrink:0;display:flex;}
+.dpm .profile-card{background:linear-gradient(180deg,#189F8A 0%,#1AC2A8 100%);border-radius:20px;padding:26px 22px;color:#fff;text-align:center;width:100%;display:flex;flex-direction:column;align-items:center;}
+.dpm .avatar{width:150px;height:150px;border-radius:50%;overflow:hidden;margin:0 auto 14px;border:3px solid #ffffff;background:#0e7d6b;display:flex;align-items:center;justify-content:center;flex-shrink:0;}
 .dpm .avatar img{width:100%;height:100%;object-fit:cover;display:block;}
-.dpm .avatar .initials{font-size:56px;font-weight:600;color:#ffffff;}
-.dpm .profile-card h2{font-size:17px;margin:0 0 5px;font-weight:600;line-height:1.3;}
+.dpm .avatar .initials{font-size:50px;font-weight:600;color:#ffffff;}
+.dpm .profile-card h2{font-size:18px;margin:0 0 4px;font-weight:600;line-height:1.3;}
 .dpm .profile-card .role{font-size:13px;opacity:0.95;margin:0 0 12px;font-weight:600;}
 .dpm .member-badge{display:inline-flex;align-items:center;justify-content:center;height:28px;background:#0e7d6b;border-radius:16px;padding:0 16px 8px;font-size:11.5px;font-weight:600;}
-.dpm .profile-card hr{border:none;border-top:1px dashed rgba(255,255,255,0.4);margin:18px 0 16px;}
+.dpm .profile-card hr{border:none;border-top:1px dashed rgba(255,255,255,0.4);margin:16px 0;width:100%;}
 .dpm .profile-card .age{font-size:14px;font-weight:600;margin-bottom:14px;}
-.dpm .contact-row{display:flex;align-items:center;justify-content:center;gap:9px;font-size:12.5px;margin-bottom:11px;word-break:break-word;}
+.dpm .contact-row{display:flex;align-items:center;justify-content:center;gap:9px;font-size:12.5px;margin-bottom:10px;word-break:break-word;}
 .dpm .contact-icon{width:24px;height:24px;border-radius:50%;background:#fff;display:flex;align-items:center;justify-content:center;flex-shrink:0;}
 .dpm .contact-icon svg{width:13px;height:13px;stroke:var(--teal);}
-.dpm .btn{display:flex;align-items:center;justify-content:center;height:54px;width:100%;padding:0 0 16px;border-radius:10px;font-size:14px;font-weight:600;margin-top:14px;border:none;text-decoration:none;}
-.dpm .btn-gray{background:linear-gradient(180deg,#f2f2f2,#e3e3e3);color:#333;}
-.dpm .btn-outline{background:#fff;color:var(--teal);border:1.5px solid var(--teal);}
-.dpm .btn-black{background:#111111;color:#fff;}
-.dpm .main{flex:1;min-width:0;padding-top:6px;}
-.dpm .main h1{font-size:25px;line-height:1.3;margin:0 0 16px;font-weight:600;color:#3a3a3a;}
-.dpm .section-label{font-size:17px;font-weight:600;margin:0 0 10px;color:#3a3a3a;}
-.dpm .bio{font-size:13.5px;line-height:1.7;color:var(--tan);margin:0 0 20px;}
-.dpm .divider{border:none;border-top:1px solid #b9e5dd;margin:22px 0;}
-.dpm .fact-grid{display:grid;grid-template-columns:repeat(3,1fr);row-gap:26px;column-gap:20px;margin-bottom:20px;}
-.dpm .fact{display:flex;align-items:flex-start;gap:12px;}
-.dpm .fact .icon{width:44px;height:44px;border-radius:50%;background:var(--icon-bg);display:flex;align-items:center;justify-content:center;flex-shrink:0;}
-.dpm .fact .icon svg{width:21px;height:21px;stroke:var(--teal);}
-.dpm .fact .label{font-size:12.5px;color:var(--text-gray);margin-bottom:3px;}
-.dpm .fact .value{font-size:14px;font-weight:600;color:#3a3a3a;}
-.dpm .tabs{display:flex;margin-top:10px;}
-.dpm .tab{flex:1;display:flex;align-items:center;justify-content:center;height:52px;padding:0 0 16px;font-size:14px;font-weight:700;letter-spacing:.3px;}
-.dpm .tab-active{background:#0e9e86;color:#fff;}
-.dpm .tab-inactive{background:#eeeeee;color:#555;}
-.dpm .edu-block{padding-top:20px;}
-.dpm .edu-title{font-size:19px;margin:0 0 10px;color:#3a3a3a;font-weight:400;}
-.dpm .edu-title b{font-weight:700;}
-.dpm .edu-org{font-size:16px;color:var(--teal);font-weight:600;margin:0 0 10px;}
-.dpm .edu-meta{font-size:13px;color:var(--tan);margin:0 0 5px;}
+.dpm .main{flex:1;min-width:0;display:flex;flex-direction:column;}
+.dpm .main h1{font-size:21px;line-height:1.3;margin:0 0 8px;font-weight:600;color:#3a3a3a;}
+.dpm .section-label{font-size:13.5px;font-weight:600;margin:0 0 5px;color:#3a3a3a;}
+.dpm .bio{font-size:12.5px;line-height:1.6;color:var(--tan);margin:0 0 10px;max-height:82px;overflow:hidden;}
+.dpm .divider{border:none;border-top:1px solid #b9e5dd;margin:12px 0;}
+.dpm .fact-grid{display:grid;grid-template-columns:repeat(3,1fr);row-gap:15px;column-gap:16px;}
+.dpm .fact{display:flex;align-items:flex-start;gap:10px;}
+.dpm .fact .icon{width:38px;height:38px;border-radius:50%;background:var(--icon-bg);display:flex;align-items:center;justify-content:center;flex-shrink:0;}
+.dpm .fact .icon svg{width:18px;height:18px;stroke:var(--teal);}
+.dpm .fact .label{font-size:11px;color:var(--text-gray);margin-bottom:2px;line-height:1.2;}
+.dpm .fact .value{font-size:13px;font-weight:600;color:#3a3a3a;line-height:1.25;}
+.dpm .edu-head{font-size:12px;font-weight:700;color:#0e9e86;letter-spacing:.4px;margin:0 0 5px;text-transform:uppercase;}
+.dpm .edu-title{font-size:14.5px;margin:0 0 3px;color:#3a3a3a;font-weight:700;line-height:1.3;}
+.dpm .edu-org{font-size:13px;color:var(--teal);font-weight:600;margin:0 0 2px;}
+.dpm .edu-meta{font-size:12px;color:var(--tan);margin:0;}
 </style>`;
 
 function factHtml(icon: string, label: string, value: string): string {
@@ -126,18 +118,9 @@ function contactHtml(icon: string, value: string): string {
   return `<div class="contact-row"><span class="contact-icon">${icon}</span>${esc(value)}</div>`;
 }
 
-function eduExpBlock(title: string, org: string, dateMeta: string, desc: string): string {
-  if (!title && !org) return "";
-  return `<div class="edu-block">` +
-    (title ? `<p class="edu-title"><b>${esc(title)}</b></p>` : "") +
-    (org ? `<p class="edu-org">${esc(org)}</p>` : "") +
-    (dateMeta ? `<p class="edu-meta">${esc(dateMeta)}</p>` : "") +
-    (desc ? `<p class="edu-meta">Description: ${esc(desc)}</p>` : "") +
-    `<hr class="divider"></div>`;
-}
-
-/** Build the full profile HTML for `c`, empties dropped. Returns `<style>…</style>
- *  <div class="dpm">…</div>` — inject as innerHTML into a capture holder. */
+/** Build the 3:2 landscape profile HTML for `c`, empties dropped. Returns
+ *  `<style>…</style><div class="dpm">…</div>` — inject as innerHTML into a
+ *  capture holder captured at PROFILE_IMAGE_WIDTH×PROFILE_IMAGE_HEIGHT. */
 export function buildDoctorProfileHtml(c: WpCandidate): string {
   const name    = drName(val(c.full_name) || val(c.title));
   const role    = val(c.job_title);
@@ -152,7 +135,6 @@ export function buildDoctorProfileHtml(c: WpCandidate): string {
     ? `<img src="${esc(photo)}" alt="${esc(name)}" crossorigin="anonymous">`
     : `<span class="initials">${esc(initials || "Dr")}</span>`;
 
-  // Sidebar teal card.
   const memberSince = fmtDate(c.wp_date);
   const sideCard =
     `<div class="profile-card">` +
@@ -166,49 +148,48 @@ export function buildDoctorProfileHtml(c: WpCandidate): string {
       contactHtml(ICON.mail, val(c.email)) +
     `</div>`;
 
-  // Main: title + bio + fact grid + education/experience.
   const h1 = [name, role, location].filter(Boolean).join(" – ");
   const bio = val(c.area_of_interest);
 
   const facts = [
-    factHtml(ICON.person,    "Age:",                            age ? `${age} years old` : ""),
-    factHtml(ICON.globe,     "Nationality:",                    val(c.nationality)),
-    factHtml(ICON.calendar,  "Date of Birth:",                  fmtDate(c.date_of_birth)),
-    factHtml(ICON.steth,     "Specialty:",                      val(c.specialty)),
-    factHtml(ICON.personChk, "Specialist / Consultant:",        val(c.rank)),
-    factHtml(ICON.briefcase, "Years of Experience:",            c.years_experience != null ? `${c.years_experience} Years` : ""),
-    factHtml(ICON.idcard,    "DHA / DOH / MOH / SCFHS / QCHP Licenses?", licenses),
-    factHtml(ICON.calNote,   "Notice Period:",                  val(c.notice_period)),
-    factHtml(ICON.pin,       "Targeted Location:",              joinList(c.targeted_locations)),
-    // "A文" language glyph icon (matches the mockup's non-SVG language icon).
-    (val(c.languages) ? `<div class="fact"><div class="icon" style="font-weight:700;font-size:12px;color:var(--teal);">A文</div><div><div class="label">Languages:</div><div class="value">${esc(val(c.languages))}</div></div></div>` : ""),
-    factHtml(ICON.chat,      "English Level:",                  val(c.english_level)),
-    factHtml(ICON.users,     "Family Status:",                  val(c.family_status)),
-    factHtml(ICON.users,     "Have Children / Dependent:",      dependents),
+    factHtml(ICON.person,    "Age",                             age ? `${age} years old` : ""),
+    factHtml(ICON.globe,     "Nationality",                     val(c.nationality)),
+    factHtml(ICON.calendar,  "Date of Birth",                   fmtDate(c.date_of_birth)),
+    factHtml(ICON.steth,     "Specialty",                       val(c.specialty)),
+    factHtml(ICON.personChk, "Specialist / Consultant",         val(c.rank)),
+    factHtml(ICON.briefcase, "Years of Experience",             c.years_experience != null ? `${c.years_experience} Years` : ""),
+    factHtml(ICON.idcard,    "DHA / DOH / MOH / SCFHS / QCHP",   licenses),
+    factHtml(ICON.calNote,   "Notice Period",                   val(c.notice_period)),
+    factHtml(ICON.pin,       "Targeted Location",               joinList(c.targeted_locations)),
+    (val(c.languages) ? `<div class="fact"><div class="icon" style="font-weight:700;font-size:11px;color:var(--teal);">A文</div><div><div class="label">Languages</div><div class="value">${esc(val(c.languages))}</div></div></div>` : ""),
+    factHtml(ICON.chat,      "English Level",                   val(c.english_level)),
+    factHtml(ICON.users,     "Family Status",                   val(c.family_status)),
+    factHtml(ICON.users,     "Have Children / Dependent",       dependents),
   ].filter(Boolean).join("");
 
-  // Education preferred (mockup's active tab); fall back to experience.
+  // One education entry (preferred), else one experience entry — compact.
   const eduDate = [fmtDate(c.education_start), c.education_present ? "Present" : fmtDate(c.education_end)].filter(Boolean).join(" – ");
-  const eduHtml = eduExpBlock(val(c.education_title), val(c.education_academy), eduDate ? `Date: ${eduDate}` : "", val(c.education_description));
   const expDate = [fmtDate(c.experience_start), c.experience_present ? "Present" : fmtDate(c.experience_end)].filter(Boolean).join(" – ");
-  const expHtml = eduExpBlock(val(c.experience_title), val(c.experience_company), expDate ? `Date: ${expDate}` : "", val(c.experience_description));
-
-  let tabsBlock = "";
-  if (eduHtml) {
-    tabsBlock = `<hr class="divider" style="margin-top:2px;"><div class="tabs"><div class="tab tab-active">EDUCATION</div>${expHtml ? `<div class="tab tab-inactive">EXPERIENCE</div>` : ""}</div>${eduHtml}`;
-  } else if (expHtml) {
-    tabsBlock = `<hr class="divider" style="margin-top:2px;"><div class="tabs"><div class="tab tab-active">EXPERIENCE</div></div>${expHtml}`;
+  let eduBlock = "";
+  if (val(c.education_title) || val(c.education_academy)) {
+    eduBlock = `<div class="edu-head">Education</div>` +
+      (val(c.education_title) ? `<p class="edu-title">${esc(val(c.education_title))}</p>` : "") +
+      (val(c.education_academy) ? `<p class="edu-org">${esc(val(c.education_academy))}</p>` : "") +
+      (eduDate ? `<p class="edu-meta">${esc(eduDate)}</p>` : "");
+  } else if (val(c.experience_title) || val(c.experience_company)) {
+    eduBlock = `<div class="edu-head">Experience</div>` +
+      (val(c.experience_title) ? `<p class="edu-title">${esc(val(c.experience_title))}</p>` : "") +
+      (val(c.experience_company) ? `<p class="edu-org">${esc(val(c.experience_company))}</p>` : "") +
+      (expDate ? `<p class="edu-meta">${esc(expDate)}</p>` : "");
   }
 
   const main =
     `<div class="main">` +
       (h1 ? `<h1>${esc(h1)}</h1>` : "") +
       (bio ? `<p class="section-label">Specific areas of interests within the specialization</p><p class="bio">${esc(bio)}</p>` : "") +
-      (facts ? `<hr class="divider"><div class="fact-grid">${facts}</div>` : "") +
-      tabsBlock +
+      (facts ? `${(h1 || bio) ? `<hr class="divider">` : ""}<div class="fact-grid">${facts}</div>` : "") +
+      (eduBlock ? `<hr class="divider">${eduBlock}` : "") +
     `</div>`;
 
-  return `${STYLE}<div class="dpm"><div class="wrap"><div class="side-col">${sideCard}` +
-    `<a class="btn btn-gray">View Resume</a><a class="btn btn-outline">Add To My Favorites</a><a class="btn btn-black">Contact Us</a>` +
-    `</div>${main}</div></div>`;
+  return `${STYLE}<div class="dpm"><div class="side-col">${sideCard}</div>${main}</div>`;
 }

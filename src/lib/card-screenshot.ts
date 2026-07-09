@@ -123,7 +123,7 @@ export function downloadBlob(blob: Blob, filename: string): void {
  *  No auto-download (the browser's Save-As dialog was unwanted friction); use
  *  `downloadBlob` separately if a local copy is ever needed. Throws on
  *  capture/upload failure so the caller can toast. */
-export async function captureAndUploadCard(cardHtml: string): Promise<string> {
-  const blob = await captureCardPng(cardHtml);
+export async function captureAndUploadCard(cardHtml: string, opts: { width?: number } = {}): Promise<string> {
+  const blob = await captureCardPng(cardHtml, opts);
   return uploadCardImage(blob);
 }

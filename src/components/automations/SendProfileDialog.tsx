@@ -8,6 +8,7 @@ import { Checkbox } from "@/components/ui/checkbox";
 import { Search, Send, X, Eye, ChevronLeft, AlertTriangle, Mail, ChevronDown, Camera, Image as ImageIcon } from "lucide-react";
 import { captureAndUploadCard } from "@/lib/card-screenshot";
 import { buildProfileCardHtml } from "@/lib/profile-card-html";
+import { buildDoctorProfileHtml, PROFILE_IMAGE_WIDTH } from "@/lib/doctor-profile-image";
 import { toast } from "sonner";
 import { useDoctorLifecycleMap } from "@/hooks/use-doctor-lifecycle";
 import { useAuth } from "@/hooks/use-auth";
@@ -1043,7 +1044,7 @@ function HospitalRecipientsOverride({ hospitals, contacts, overrides, onOverride
  * Re-capture / Undo. No auto-download (the Save-As dialog was unwanted).
  */
 function CardScreenshotControl({
-  cardHtml, cardImageUrl, onSetCardImage, autoBusy = false,
+  cardHtml, cardImageUrl, onSetCardImage, autoBusy = false, captureWidth,
 }: {
   cardHtml: string;
   cardImageUrl: string | null;
@@ -1051,12 +1052,14 @@ function CardScreenshotControl({
   /** The parent is auto-attaching the card (single-doctor sends) — show a
    *  quiet "attaching…" state instead of the manual button. */
   autoBusy?: boolean;
+  /** Capture width — the 3:2 profile card is wider than the legacy card. */
+  captureWidth?: number;
 }) {
   const [busy, setBusy] = useState(false);
   const capture = async () => {
     setBusy(true);
     try {
-      const url = await captureAndUploadCard(cardHtml);
+      const url = await captureAndUploadCard(cardHtml, { width: captureWidth });
       onSetCardImage(url);
       toast.success("Profile card attached — it'll replace the data table as a clean image.");
     } catch (e) {
@@ -1274,11 +1277,16 @@ function PreviewConfirm({
   const autoCardTried = useRef(false);
   const [autoCardBusy, setAutoCardBusy] = useState(false);
   const profileLoaded = !!(mergedProfileTokens.doctor_bio || mergedProfileTokens.doctor_title || mergedProfileTokens.doctor_specialty || wpCandidate);
+  // The doctor profile IMAGE that ships in the to-hospital email. When the
+  // doctor has a WordPress record, use the rich 3:2 landscape profile card;
+  // fall back to the old compact card for doctors with no WP profile.
+  const profileCardHtml  = wpCandidate ? buildDoctorProfileHtml(wpCandidate) : buildProfileCardHtml(vars);
+  const profileCardWidth = wpCandidate ? PROFILE_IMAGE_WIDTH : undefined;
   useEffect(() => {
     if (!isSingle || cardImageUrl || autoCardTried.current || !profileLoaded) return;
     autoCardTried.current = true;
     setAutoCardBusy(true);
-    captureAndUploadCard(buildProfileCardHtml(vars))
+    captureAndUploadCard(profileCardHtml, { width: profileCardWidth })
       .then(url => onSetCardImage(url))
       .catch(() => {})   // silent — the manual button stays available
       .finally(() => setAutoCardBusy(false));
@@ -1536,7 +1544,8 @@ function PreviewConfirm({
               look, empty fields dropped) to a flat PNG and send it IN PLACE OF the
               data table, so the hospital sees a clean, pixel-perfect card. */}
           <CardScreenshotControl
-            cardHtml={buildProfileCardHtml(vars)}
+            cardHtml={profileCardHtml}
+            captureWidth={profileCardWidth}
             cardImageUrl={cardImageUrl}
             onSetCardImage={onSetCardImage}
             autoBusy={autoCardBusy}
