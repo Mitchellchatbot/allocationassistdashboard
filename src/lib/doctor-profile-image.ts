@@ -72,7 +72,7 @@ const ICON = {
 const STYLE = `
 <style>
 .dpm{
-  --teal:#1aa88f;--text-dark:#333333;--text-gray:#7a7a7a;--tan:#8a6d47;--icon-bg:#eef0f1;
+  --teal:#1aa88f;--text-dark:#333333;--text-gray:#7a7a7a;--tan:#475569;--icon-bg:#eef0f1;
   margin:0;font-family:"Poppins",-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,Helvetica,Arial,sans-serif;
   background:#ffffff;padding:32px;color:var(--text-dark);width:100%;
 }
@@ -85,13 +85,13 @@ const STYLE = `
 .dpm .avatar .initials{font-size:56px;font-weight:600;color:#ffffff;}
 .dpm .profile-card h2{font-size:17px;margin:0 0 5px;font-weight:600;line-height:1.3;}
 .dpm .profile-card .role{font-size:13px;opacity:0.95;margin:0 0 12px;font-weight:600;}
-.dpm .member-badge{display:inline-block;background:#0e7d6b;border-radius:16px;padding:5px 16px;font-size:11.5px;font-weight:600;}
+.dpm .member-badge{display:inline-flex;align-items:center;justify-content:center;height:26px;background:#0e7d6b;border-radius:16px;padding:0 16px;font-size:11.5px;font-weight:600;}
 .dpm .profile-card hr{border:none;border-top:1px dashed rgba(255,255,255,0.4);margin:18px 0 16px;}
 .dpm .profile-card .age{font-size:14px;font-weight:600;margin-bottom:14px;}
 .dpm .contact-row{display:flex;align-items:center;justify-content:center;gap:9px;font-size:12.5px;margin-bottom:11px;word-break:break-word;}
 .dpm .contact-icon{width:24px;height:24px;border-radius:50%;background:#fff;display:flex;align-items:center;justify-content:center;flex-shrink:0;}
 .dpm .contact-icon svg{width:13px;height:13px;stroke:var(--teal);}
-.dpm .btn{display:block;width:100%;text-align:center;padding:15px 0;border-radius:10px;font-size:14px;font-weight:600;margin-top:14px;border:none;text-decoration:none;}
+.dpm .btn{display:flex;align-items:center;justify-content:center;height:50px;width:100%;border-radius:10px;font-size:14px;font-weight:600;margin-top:14px;border:none;text-decoration:none;}
 .dpm .btn-gray{background:linear-gradient(180deg,#f2f2f2,#e3e3e3);color:#333;}
 .dpm .btn-outline{background:#fff;color:var(--teal);border:1.5px solid var(--teal);}
 .dpm .btn-black{background:#111111;color:#fff;}
@@ -107,7 +107,7 @@ const STYLE = `
 .dpm .fact .label{font-size:12.5px;color:var(--text-gray);margin-bottom:3px;}
 .dpm .fact .value{font-size:14px;font-weight:600;color:#3a3a3a;}
 .dpm .tabs{display:flex;margin-top:10px;}
-.dpm .tab{flex:1;text-align:center;padding:14px 0;font-size:14px;font-weight:700;letter-spacing:.3px;}
+.dpm .tab{flex:1;display:flex;align-items:center;justify-content:center;height:48px;font-size:14px;font-weight:700;letter-spacing:.3px;}
 .dpm .tab-active{background:#0e9e86;color:#fff;}
 .dpm .tab-inactive{background:#eeeeee;color:#555;}
 .dpm .edu-block{padding-top:20px;}
