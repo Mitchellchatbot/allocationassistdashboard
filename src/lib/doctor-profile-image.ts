@@ -74,7 +74,7 @@ const STYLE = `
 <style>
 .dpm{
   --teal:#1aa88f;--text-dark:#333333;--text-gray:#7a7a7a;--tan:#475569;--icon-bg:#eef0f1;
-  box-sizing:border-box;width:${PROFILE_IMAGE_WIDTH}px;height:${PROFILE_IMAGE_HEIGHT}px;overflow:hidden;
+  box-sizing:border-box;width:${PROFILE_IMAGE_WIDTH}px;
   font-family:"Poppins",-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,Helvetica,Arial,sans-serif;
   background:#ffffff;color:var(--text-dark);padding:26px;display:flex;gap:26px;align-items:stretch;
 }
@@ -103,10 +103,14 @@ const STYLE = `
 .dpm .fact .icon svg{width:18px;height:18px;stroke:var(--teal);}
 .dpm .fact .label{font-size:11px;color:var(--text-gray);margin-bottom:2px;line-height:1.2;}
 .dpm .fact .value{font-size:13px;font-weight:600;color:#3a3a3a;line-height:1.25;}
-.dpm .edu-head{font-size:12px;font-weight:700;color:#0e9e86;letter-spacing:.4px;margin:0 0 5px;text-transform:uppercase;}
-.dpm .edu-title{font-size:14.5px;margin:0 0 3px;color:#3a3a3a;font-weight:700;line-height:1.3;}
-.dpm .edu-org{font-size:13px;color:var(--teal);font-weight:600;margin:0 0 2px;}
-.dpm .edu-meta{font-size:12px;color:var(--tan);margin:0;}
+.dpm .tabs{display:flex;margin:8px 0 0;}
+.dpm .tab{flex:1;display:flex;align-items:center;justify-content:center;height:46px;padding:0 0 14px;font-size:13px;font-weight:700;letter-spacing:.3px;}
+.dpm .tab-active{background:#0e9e86;color:#fff;}
+.dpm .tab-inactive{background:#eeeeee;color:#555;}
+.dpm .edu-block{padding-top:16px;}
+.dpm .edu-title{font-size:15px;margin:0 0 6px;color:#3a3a3a;font-weight:700;line-height:1.3;}
+.dpm .edu-org{font-size:14px;color:var(--teal);font-weight:600;margin:0 0 5px;}
+.dpm .edu-meta{font-size:12.5px;color:var(--tan);margin:0 0 4px;}
 </style>`;
 
 function factHtml(icon: string, label: string, value: string): string {
@@ -167,20 +171,25 @@ export function buildDoctorProfileHtml(c: WpCandidate): string {
     factHtml(ICON.users,     "Have Children / Dependent",       dependents),
   ].filter(Boolean).join("");
 
-  // One education entry (preferred), else one experience entry — compact.
+  // EDUCATION / EXPERIENCE tab bar + one entry, matching the mockup exactly (the
+  // tabs are non-functional in a static image but kept for the look). Active tab
+  // = whichever we have data for (education preferred).
   const eduDate = [fmtDate(c.education_start), c.education_present ? "Present" : fmtDate(c.education_end)].filter(Boolean).join(" – ");
   const expDate = [fmtDate(c.experience_start), c.experience_present ? "Present" : fmtDate(c.experience_end)].filter(Boolean).join(" – ");
+  const entry = (title: string, org: string, date: string) =>
+    (title ? `<p class="edu-title">${esc(title)}</p>` : "") +
+    (org ? `<p class="edu-org">${esc(org)}</p>` : "") +
+    (date ? `<p class="edu-meta">${esc(date)}</p>` : "");
+  const eduContent = entry(val(c.education_title), val(c.education_academy), eduDate);
+  const expContent = entry(val(c.experience_title), val(c.experience_company), expDate);
+  const tabBar = (active: "edu" | "exp") =>
+    `<div class="tabs"><div class="tab ${active === "edu" ? "tab-active" : "tab-inactive"}">EDUCATION</div>` +
+    `<div class="tab ${active === "exp" ? "tab-active" : "tab-inactive"}">EXPERIENCE</div></div>`;
   let eduBlock = "";
-  if (val(c.education_title) || val(c.education_academy)) {
-    eduBlock = `<div class="edu-head">Education</div>` +
-      (val(c.education_title) ? `<p class="edu-title">${esc(val(c.education_title))}</p>` : "") +
-      (val(c.education_academy) ? `<p class="edu-org">${esc(val(c.education_academy))}</p>` : "") +
-      (eduDate ? `<p class="edu-meta">${esc(eduDate)}</p>` : "");
-  } else if (val(c.experience_title) || val(c.experience_company)) {
-    eduBlock = `<div class="edu-head">Experience</div>` +
-      (val(c.experience_title) ? `<p class="edu-title">${esc(val(c.experience_title))}</p>` : "") +
-      (val(c.experience_company) ? `<p class="edu-org">${esc(val(c.experience_company))}</p>` : "") +
-      (expDate ? `<p class="edu-meta">${esc(expDate)}</p>` : "");
+  if (eduContent) {
+    eduBlock = tabBar("edu") + `<div class="edu-block">${eduContent}</div>`;
+  } else if (expContent) {
+    eduBlock = tabBar("exp") + `<div class="edu-block">${expContent}</div>`;
   }
 
   const main =
