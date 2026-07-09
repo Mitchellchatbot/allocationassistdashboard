@@ -15,7 +15,7 @@ import { AA_SENDERS, findSenderByEmail } from "@/lib/hi-team";
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
 import { supabase } from "@/lib/supabase";
 import { useHospitals, useUpdateHospital, type Hospital } from "@/hooks/use-hospitals";
-import { useHospitalContacts, resolveRecipient, type HospitalContact } from "@/hooks/use-hospital-contacts";
+import { useHospitalContacts, resolveRecipient, resolveAllRecipients, type HospitalContact } from "@/hooks/use-hospital-contacts";
 import { useEmailTemplates, renderTemplate } from "@/hooks/use-email-templates";
 import { useDoctorProfile, useDoctorProfiles, profileToTokens, calcCompletion, type DoctorProfile } from "@/hooks/use-doctor-profiles";
 import { useWpCandidateForDoctor, usePublishedWpCandidates, useWpCandidates, wpCandidateToTokens, normalizePhone, type WpCandidate } from "@/hooks/use-wp-candidates";
@@ -498,13 +498,24 @@ function SendProfileDialogBody({ onClose, initial }: { onClose: () => void; init
         // Resolve THIS send's recipient from the hospital's Zoho contacts +
         // routing mode (primary vs cycle), honouring a manual override. Falls
         // back to the hospital row's primary_recruiter_email if nothing matched.
-        const resolved = resolveRecipient(hospitalContacts.forHospital(h.name), h);
+        const contactsForH = hospitalContacts.forHospital(h.name);
+        const resolved = resolveRecipient(contactsForH, h);
         const overrideEmail = recipientOverrides[h.id];
         const overrideContact = overrideEmail
-          ? hospitalContacts.forHospital(h.name).find(c => c.email?.toLowerCase() === overrideEmail.toLowerCase())
+          ? contactsForH.find(c => c.email?.toLowerCase() === overrideEmail.toLowerCase())
           : undefined;
-        const recipientEmail = overrideEmail ?? resolved.contact?.email ?? h.primary_recruiter_email ?? null;
-        const recipientName  = (overrideContact?.name ?? resolved.contact?.name ?? h.primary_contact_name ?? "").trim();
+        // 'all' mode (no manual override) → every eligible contact in the To
+        // field, comma-joined; send-flow-email splits it into the To array.
+        const isAllMode = !overrideEmail && (h.contact_mode ?? "primary") === "all";
+        const allEmails = isAllMode ? resolveAllRecipients(contactsForH, h) : [];
+        const recipientEmail = isAllMode
+          ? (allEmails.join(", ") || h.primary_recruiter_email || null)
+          : (overrideEmail ?? resolved.contact?.email ?? h.primary_recruiter_email ?? null);
+        // Going to everyone → greet with the hospital name (leave contact name
+        // blank), since no single contact owns the email.
+        const recipientName  = isAllMode
+          ? ""
+          : (overrideContact?.name ?? resolved.contact?.name ?? h.primary_contact_name ?? "").trim();
         // Only advance the cursor when we actually used the cycle rotation
         // (no override, cycle mode, real matched contacts).
         if (!overrideEmail && (h.contact_mode ?? "primary") === "cycle" && !resolved.fromHospitalRow && resolved.nextCursor !== (h.cycle_cursor ?? 0)) {
@@ -1003,7 +1014,9 @@ function HospitalRecipientsOverride({ hospitals, contacts, overrides, onOverride
                   className="h-7 min-w-0 flex-1 rounded-md border border-border/60 bg-white px-1.5 text-[11px] text-slate-800"
                 >
                   <option value="__auto__">
-                    Auto ({h.contact_mode === "cycle" ? "cycle" : "primary"}) → {resolved?.name || resolved?.email || "—"}
+                    {h.contact_mode === "all"
+                      ? `Auto (all ${resolveAllRecipients(hc, h).length}) → ${resolveAllRecipients(hc, h).join(", ") || "—"}`
+                      : `Auto (${h.contact_mode === "cycle" ? "cycle" : "primary"}) → ${resolved?.name || resolved?.email || "—"}`}
                   </option>
                   {hc.filter(c => c.email).map(c => (
                     <option key={c.id} value={c.email!}>

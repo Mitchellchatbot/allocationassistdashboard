@@ -83,6 +83,29 @@ export function eligibleRecipients(contacts: HospitalContact[], hospital: Pick<H
 }
 
 /**
+ * 'all' mode — EVERY eligible (checked) contact email for the hospital, deduped,
+ * for the TO field. Falls back to the hospital row's primary_recruiter_email
+ * when no Zoho contacts matched, so a hospital without synced contacts still
+ * gets its one address (nothing regresses).
+ */
+export function resolveAllRecipients(
+  contacts: HospitalContact[],
+  hospital: Pick<Hospital, "excluded_contact_emails" | "primary_recruiter_email">,
+): string[] {
+  const seen = new Set<string>();
+  const out: string[] = [];
+  for (const c of eligibleRecipients(contacts, hospital)) {
+    const e = (c.email ?? "").trim();
+    const k = e.toLowerCase();
+    if (e && !seen.has(k)) { seen.add(k); out.push(e); }
+  }
+  if (out.length === 0 && hospital.primary_recruiter_email?.trim()) {
+    out.push(hospital.primary_recruiter_email.trim());
+  }
+  return out;
+}
+
+/**
  * The ONE contact a send goes to, per the hospital's mode:
  *   primary → the Primary contact (first eligible if none flagged Primary)
  *   cycle   → the contact at cycle_cursor; nextCursor is where the rotation

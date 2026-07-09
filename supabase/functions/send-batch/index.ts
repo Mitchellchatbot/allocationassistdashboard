@@ -146,20 +146,57 @@ Deno.serve(async (req: Request) => {
   // send. Normalising both sides makes label drift harmless.
   const { data: hospitals, error: hospErr } = await supabase
     .from("hospitals")
-    .select("id, name, primary_contact_name, primary_recruiter_email, greet_with_contact_name, country")
+    .select("id, name, primary_contact_name, primary_recruiter_email, greet_with_contact_name, country, contact_mode, excluded_contact_emails")
     .not("primary_recruiter_email", "is", null);
   if (hospErr) return json({ ok: false, error: "Hospital fetch failed", detail: hospErr.message }, 500);
   const wantCountry = batchCountry ? normCountry(batchCountry) : null;
+  const matchedHospitals = (hospitals ?? [])
+    .filter(h => !wantCountry || normCountry(String(h.country ?? "")) === wantCountry);
+
+  // 'all' contact_mode → this hospital's email lists EVERY eligible (checked)
+  // contact in the To field. Those contacts live in Zoho (zoho_cache row 2 →
+  // data->hospitalContacts), matched to the hospital by fuzzy name. Only load +
+  // index them when at least one target hospital is in 'all' mode.
+  const contactsByCore = new Map<string, string[]>();
+  if (matchedHospitals.some(h => String(h.contact_mode ?? "primary") === "all")) {
+    const { data: cRow } = await supabase.from("zoho_cache").select("contacts:data->hospitalContacts").eq("id", 2).maybeSingle();
+    for (const c of ((cRow?.contacts ?? []) as Array<Record<string, unknown>>)) {
+      const email = String(c.Email ?? "").trim();
+      if (!email) continue;
+      const hosp = c.Hospital as unknown;
+      const hospName = typeof hosp === "string" ? hosp : String((hosp as Record<string, unknown>)?.name ?? "");
+      const key = coreHospitalName(hospName);
+      if (!key) continue;
+      (contactsByCore.get(key) ?? contactsByCore.set(key, []).get(key)!).push(email);
+    }
+  }
+
   // Keep the hospital objects (name + contact + greeting flag) so each hospital
-  // gets its OWN email greeting them by name (Sean: "hello team → hello name").
-  const recipientHospitals = (hospitals ?? [])
-    .filter(h => !wantCountry || normCountry(String(h.country ?? "")) === wantCountry)
-    .map(h => ({
-      name:         String(h.name ?? "").trim(),
-      email:        String(h.primary_recruiter_email ?? "").trim(),
-      contact:      String(h.primary_contact_name ?? "").trim(),
-      greetContact: h.greet_with_contact_name === true,
-    }))
+  // gets its OWN email greeting them by name (Sean: "hello team → hello name"),
+  // plus toEmails — the actual To list for this hospital ('all' → every eligible
+  // contact, deduped, falling back to the recruiter email if none matched).
+  const recipientHospitals = matchedHospitals
+    .map(h => {
+      const email = String(h.primary_recruiter_email ?? "").trim();
+      let toEmails = email ? [email] : [];
+      if (String(h.contact_mode ?? "primary") === "all") {
+        const excluded = new Set((Array.isArray(h.excluded_contact_emails) ? h.excluded_contact_emails as string[] : []).map(e => e.toLowerCase()));
+        const seen = new Set<string>();
+        const list: string[] = [];
+        for (const e of (contactsByCore.get(coreHospitalName(String(h.name ?? ""))) ?? [])) {
+          const k = e.toLowerCase();
+          if (!seen.has(k) && !excluded.has(k)) { seen.add(k); list.push(e); }
+        }
+        if (list.length) toEmails = list;   // else keep the recruiter-email fallback
+      }
+      return {
+        name:         String(h.name ?? "").trim(),
+        email,
+        contact:      String(h.primary_contact_name ?? "").trim(),
+        greetContact: h.greet_with_contact_name === true,
+        toEmails,
+      };
+    })
     .filter(h => h.email);
   const recipients = recipientHospitals.map(h => h.email);
   // Fire even in TEST mode: a test send still needs at least one real recipient
@@ -447,9 +484,13 @@ Deno.serve(async (req: Request) => {
     const rendered = editedHtml
       ? { subject: editedSubject || renderFor(greetingFor(h)).subject, html: wrapHtml(editedHtml), text: editedText || stripHtml(editedHtml) }
       : renderFor(greetingFor(h));
+    // Live To = this hospital's resolved list (one recruiter email, or EVERY
+    // eligible contact for an 'all'-mode hospital), minus any batch-excluded /
+    // Ammar addresses. Test mode still funnels every copy to the test inbox.
+    const liveTo = h.toEmails.filter(e => !excludeSet.has(e.toLowerCase()) && e.toLowerCase() !== EXCLUDED_RECIPIENT);
     return {
       from: MAIL_FROM,
-      to:   [TEST_OVERRIDE_LIST[0] || h.email],
+      to:   TEST_OVERRIDE_LIST.length ? [TEST_OVERRIDE_LIST[0]] : (liveTo.length ? liveTo : [h.email]),
       ...(i === 0 && extraCc.length  ? { cc:  extraCc }  : {}),
       ...(i === 0 && extraBcc.length ? { bcc: extraBcc } : {}),
       subject: rendered.subject,
@@ -728,6 +769,18 @@ function normCountry(c: string): string {
   if (s.includes("kuwait")  || s === "kw")                return "kuwait";
   if (s.includes("bahrain") || s === "bh")                return "bahrain";
   return s;
+}
+
+// Fuzzy hospital-name key for matching Zoho contacts to a hospital — mirrors
+// `core()` in src/hooks/use-hospital-contacts.ts, dropping generic words so
+// "NMC Healthcare" ≈ "NMC". Keep in sync with the client so 'all'-mode batches
+// resolve the same contacts the Hospitals UI shows.
+function coreHospitalName(s: string): string {
+  const norm = (s || "").toLowerCase().replace(/&/g, "and").replace(/[^a-z0-9]+/g, " ").trim();
+  return norm
+    .replace(/\b(hospital|hospitals|clinic|clinics|medical|centre|center|group|the|healthcare|health|university|llc|company)\b/g, "")
+    .replace(/\s+/g, " ")
+    .trim();
 }
 
 function stripHtml(s: string): string {

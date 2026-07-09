@@ -13,7 +13,7 @@ import {
   useHospitals, useCreateHospital, useUpdateHospital, useDeleteHospital,
   type Hospital, type HospitalInput,
 } from "@/hooks/use-hospitals";
-import { useHospitalContacts, eligibleRecipients, resolveRecipient, type HospitalContact } from "@/hooks/use-hospital-contacts";
+import { useHospitalContacts, eligibleRecipients, resolveRecipient, resolveAllRecipients, type HospitalContact } from "@/hooks/use-hospital-contacts";
 import { uploadEmailAttachment } from "@/lib/email-attachments";
 
 const BLANK: HospitalInput = {
@@ -56,6 +56,9 @@ export function HospitalContactsPanel({ hospital, contacts, onUpdate }: {
             <button type="button" className={seg(mode === "cycle")} onClick={() => onUpdate({ contact_mode: "cycle" })} title="Rotate through all contacts — each send goes to the next one">
               Cycle through all
             </button>
+            <button type="button" className={seg(mode === "all")} onClick={() => onUpdate({ contact_mode: "all" })} title="Email EVERY checked contact at once — all their addresses in the To field of one email">
+              All at once
+            </button>
           </div>
         </div>
         <div className="flex items-center gap-1.5">
@@ -87,6 +90,11 @@ export function HospitalContactsPanel({ hospital, contacts, onUpdate }: {
         {eligible.length > 0 && mode === "primary" && next && (
           <span className="ml-auto text-[10.5px] text-muted-foreground">
             Emails: <span className="font-medium text-foreground">{next.name || next.email}</span>
+          </span>
+        )}
+        {mode === "all" && (
+          <span className="ml-auto text-[10.5px] text-muted-foreground">
+            To all ({resolveAllRecipients(contacts, hospital).length}): <span className="font-medium text-foreground">{resolveAllRecipients(contacts, hospital).join(", ") || "— no emails"}</span>
           </span>
         )}
       </div>

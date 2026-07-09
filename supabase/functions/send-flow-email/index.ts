@@ -799,9 +799,14 @@ Deno.serve(async (req: Request) => {
   // ── Pick recipient ────────────────────────────────────────────────────────
   // For Flow 2's hospital-stage, the recipient is the hospital's recruiter
   // email (not the doctor). For every other stage, the doctor.
+  // For a hospital send, honour the routed recipient stored on the run
+  // (metadata.hospital_email) — the Send Profile flow writes the hospital's
+  // chosen contact there, or, for 'all' mode, a COMMA-JOINED list of every
+  // eligible contact. Falls back to the hospital row's primary_recruiter_email.
+  const routedHospitalEmail = String((run.metadata as Record<string, unknown> | null)?.hospital_email ?? "").trim();
   const stageRecipient =
     run.current_stage === "email_hospital"
-      ? (hospital?.primary_recruiter_email as string | undefined)
+      ? (routedHospitalEmail || (hospital?.primary_recruiter_email as string | undefined))
       : (run.doctor_email as string | undefined);
 
   // A valid To override from the preview replaces the resolved recipient for
@@ -811,6 +816,10 @@ Deno.serve(async (req: Request) => {
   const toOverride    = !dryRun && toOverrideRaw.includes("@") ? toOverrideRaw : "";
   const actualRecipient = stageRecipient ?? "";
   const effectiveTo = TEST_OVERRIDE || toOverride || actualRecipient;
+  // effectiveTo may carry several comma/semicolon-separated addresses ('all'
+  // mode) — split into the real To array. toSet dedups CC/BCC against every To.
+  const toList = effectiveTo.split(/[,;]+/).map(s => s.trim()).filter(s => s.includes("@"));
+  const toSet  = new Set(toList.map(s => s.toLowerCase()));
   if (!effectiveTo) {
     return json({
       ok: false,
@@ -910,7 +919,7 @@ Deno.serve(async (req: Request) => {
   if (bccOverride !== null) {
     // Explicit BCC — honoured always. Drop the To (test-redirect target or the
     // real recipient) and Ammar so nobody's double-listed. Empty = 'BCC no-one'.
-    const cleaned = bccOverride.filter(a => a !== effectiveTo.toLowerCase() && a !== "ammar@allocationassist.com");
+    const cleaned = bccOverride.filter(a => !toSet.has(a) && a !== "ammar@allocationassist.com");
     bccList = cleaned.length > 0 ? cleaned : undefined;
   } else if (TEST_OVERRIDE) {
     bccList = undefined;              // test mode + no explicit BCC → no auto-BCC
@@ -925,7 +934,7 @@ Deno.serve(async (req: Request) => {
   const testCc: string[] = TEST_OVERRIDE
     ? [...new Set(TEST_OVERRIDE_LIST.slice(1))]
         .filter(a => a
-          && a.toLowerCase() !== effectiveTo.toLowerCase()
+          && !toSet.has(a.toLowerCase())
           && a.toLowerCase() !== EXCLUDED_RECIPIENT)
     : [];
 
@@ -940,7 +949,7 @@ Deno.serve(async (req: Request) => {
   const ccSet = new Set<string>();
   for (const a of [...testCc, ...ccOverride]) {
     const lc = a.toLowerCase();
-    if (lc && lc !== effectiveTo.toLowerCase() && lc !== EXCLUDED_RECIPIENT) ccSet.add(a);
+    if (lc && !toSet.has(lc) && lc !== EXCLUDED_RECIPIENT) ccSet.add(a);
   }
   const ccList: string[] | undefined = ccSet.size ? [...ccSet] : undefined;
 
@@ -1016,7 +1025,7 @@ Deno.serve(async (req: Request) => {
       },
       body: JSON.stringify({
         from:     sender.fromHeader,
-        to:       [effectiveTo],
+        to:       toList.length ? toList : [effectiveTo],
         cc:       ccList,
         bcc:      bccList,
         reply_to: replyToAddress,

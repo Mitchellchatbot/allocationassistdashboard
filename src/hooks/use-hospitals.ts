@@ -10,9 +10,10 @@ export interface Hospital {
   primary_contact_name:    string | null;
   /** false → greet with the hospital name; true → greet with the chosen contact's name. */
   greet_with_contact_name: boolean;
-  /** How a send picks its ONE recipient from the hospital's Zoho contacts.
-   *  'primary' → always the Primary contact; 'cycle' → round-robin. */
-  contact_mode:            "primary" | "cycle";
+  /** How a send picks its recipient(s) from the hospital's Zoho contacts.
+   *  'primary' → always the Primary contact; 'cycle' → round-robin; 'all' →
+   *  every eligible (checked) contact, all in the TO field at once. */
+  contact_mode:            "primary" | "cycle" | "all";
   /** Next index in the cycle rotation (advances on each send). */
   cycle_cursor:            number;
   /** Contact emails to skip in the primary/cycle rotation. */
