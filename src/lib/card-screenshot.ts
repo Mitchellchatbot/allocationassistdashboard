@@ -34,16 +34,21 @@ export function cardImageTag(url: string): string {
 
 /** Wait until every <img> under `root` has finished loading (or errored) so the
  *  element has its true height before html2canvas measures it. Never rejects —
- *  a broken image resolves too, so one bad URL can't hang the capture. */
-function waitForImages(root: HTMLElement): Promise<void> {
+ *  a broken image resolves too, so one bad URL can't hang the capture. Each
+ *  image also has a hard timeout: a photo whose request HANGS (slow host, a
+ *  CORS request that never returns) must not block the capture forever — after
+ *  `timeoutMs` we give up on it and rasterise without it. */
+function waitForImages(root: HTMLElement, timeoutMs = 6000): Promise<void> {
   const imgs = Array.from(root.querySelectorAll("img"));
   return Promise.all(
     imgs.map(img =>
       img.complete && img.naturalWidth > 0
         ? Promise.resolve()
         : new Promise<void>(res => {
-            img.addEventListener("load", () => res(), { once: true });
-            img.addEventListener("error", () => res(), { once: true });
+            const done = () => res();
+            img.addEventListener("load", done, { once: true });
+            img.addEventListener("error", done, { once: true });
+            setTimeout(done, timeoutMs);
           }),
     ),
   ).then(() => undefined);
@@ -123,7 +128,19 @@ export function downloadBlob(blob: Blob, filename: string): void {
  *  No auto-download (the browser's Save-As dialog was unwanted friction); use
  *  `downloadBlob` separately if a local copy is ever needed. Throws on
  *  capture/upload failure so the caller can toast. */
-export async function captureAndUploadCard(cardHtml: string, opts: { width?: number } = {}): Promise<string> {
-  const blob = await captureCardPng(cardHtml, opts);
-  return uploadCardImage(blob);
+export async function captureAndUploadCard(cardHtml: string, opts: { width?: number; timeoutMs?: number } = {}): Promise<string> {
+  const timeoutMs = opts.timeoutMs ?? 25_000;
+  // Hard cap the whole capture+upload so a hung image OR a stalled storage
+  // upload can never leave the UI spinning "Preparing…" forever. On timeout the
+  // caller falls back (data table) and the manual button stays available.
+  const run = (async () => {
+    const blob = await captureCardPng(cardHtml, opts);
+    return uploadCardImage(blob);
+  })();
+  return Promise.race([
+    run,
+    new Promise<string>((_, reject) =>
+      setTimeout(() => reject(new Error(`Profile card capture/upload timed out after ${timeoutMs}ms`)), timeoutMs),
+    ),
+  ]);
 }

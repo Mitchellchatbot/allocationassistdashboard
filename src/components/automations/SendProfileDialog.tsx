@@ -1288,7 +1288,7 @@ function PreviewConfirm({
     setAutoCardBusy(true);
     captureAndUploadCard(profileCardHtml, { width: profileCardWidth })
       .then(url => onSetCardImage(url))
-      .catch(() => {})   // silent — the manual button stays available
+      .catch(e => console.warn("[SendProfile] profile card image failed:", e))   // manual button stays available
       .finally(() => setAutoCardBusy(false));
     // vars intentionally omitted from deps — we snapshot it at first-load; adding
     // it would re-fire on every token change. profileLoaded gates the timing.
