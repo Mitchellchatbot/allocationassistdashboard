@@ -59,6 +59,12 @@ export interface ScheduledBatch {
   country:          string | null;
   status:           BatchStatus;
   doctor_ids:       string[];
+  /** Daily Duo only — one profile-card image URL per queued doctor, aligned to
+   *  doctor_ids order. Generated client-side (html2canvas) when the duo is
+   *  built, so the scheduled send can embed two individual profile images (like
+   *  Profile Sent) instead of the combined table. [] = not prepared → send-batch
+   *  falls back to the card/table render. */
+  doctor_card_image_urls: string[];
   // CVs / logbooks attached to this batch's hospital email. Persisted on the
   // row so the scheduler (which sends server-side, no UI) carries them too.
   // send-batch forwards { filename, path } to Resend. Defaults to [].

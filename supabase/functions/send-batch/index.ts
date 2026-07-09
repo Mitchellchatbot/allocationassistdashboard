@@ -319,8 +319,18 @@ Deno.serve(async (req: Request) => {
     : (distinctSpecs.length === 1 ? (rows.find(r => (r.specialty || "").trim())?.specialty ?? "").trim() : "");
   const specialtyLabel: string = sharedSpecialty ? practitionerNoun(sharedSpecialty) : "Mixed Specialty Doctors";
 
-  // ── Render the table HTML (mirrors Ammar's "Available Doctor Format") ─
-  const doctorsTableHtml = renderDoctorsTable(rows);
+  // ── Render the doctor block ──────────────────────────────────────────
+  // Daily Duo (Hasan 2026-07-09): ship the two doctors as INDIVIDUAL profile
+  // images — the exact Profile-Sent card, generated client-side when the duo
+  // was built and stored on the row — stacked, instead of the wide combined
+  // table. Any missing/empty image slot falls back to that doctor's server-
+  // rendered card; every other kind keeps the table.
+  const cardImageUrls: string[] =
+    ((batch as Record<string, unknown>).doctor_card_image_urls as string[] | null) ?? [];
+  const useCardImages = batch.kind === "daily_duo" && cardImageUrls.some(u => u && String(u).trim());
+  const doctorsTableHtml = renderDoctorsTable(rows); // table (+ its text strip fallback)
+  const doctorsHtmlBlock = useCardImages ? renderDoctorProfiles(rows, cardImageUrls) : doctorsTableHtml;
+  const doctorsTextBlock = useCardImages ? renderDoctorsPlain(rows)                  : stripHtml(doctorsTableHtml);
 
   // ── Load the template ────────────────────────────────────────────────
   const { data: tpl, error: tplErr } = await supabase
@@ -337,8 +347,8 @@ Deno.serve(async (req: Request) => {
     `${FONT_IMPORT}<div style="font-family:${FONT_STACK};font-size:17px;color:#1a2332;line-height:1.55;">${bodyHtml}</div>`;
   const renderFor = (contactName: string) => ({
     subject: renderText(String(tpl.subject ?? ""), { specialty: specialtyLabel, hospital_contact_name: contactName }),
-    html:    wrapHtml(renderText(String(tpl.body_html ?? ""), { specialty: specialtyLabel, hospital_contact_name: contactName, doctors_table_html: doctorsTableHtml, signature: SIGNATURE_HTML })),
-    text:    renderText(String(tpl.body_text ?? ""), { specialty: specialtyLabel, hospital_contact_name: contactName, doctors_table_html: stripHtml(doctorsTableHtml), signature: SIGNATURE_TEXT }),
+    html:    wrapHtml(renderText(String(tpl.body_html ?? ""), { specialty: specialtyLabel, hospital_contact_name: contactName, doctors_table_html: doctorsHtmlBlock, signature: SIGNATURE_HTML })),
+    text:    renderText(String(tpl.body_text ?? ""), { specialty: specialtyLabel, hospital_contact_name: contactName, doctors_table_html: doctorsTextBlock, signature: SIGNATURE_TEXT }),
   });
   // A hospital's greeting: its contact person (when it greets by contact), else
   // "<Hospital name> team".
@@ -574,6 +584,37 @@ function renderDoctorsTable(rows: RowData[]): string {
   return `<div style="overflow-x:auto;margin:18px 0;">` +
     `<table role="presentation" cellspacing="0" cellpadding="0" border="0" style="border-collapse:collapse;border:1px solid #cbd5e1;">` +
     `<thead>${head}</thead><tbody>${body}</tbody></table></div>`;
+}
+
+// Daily Duo: each doctor as their OWN profile-card image (the exact Profile-Sent
+// card, pre-rendered client-side to a PNG in `urls`, aligned to `rows` by index),
+// stacked. A row with no image URL falls back to the server-rendered card so a
+// single failed capture never blanks a profile. Styled like send-flow-email's
+// {{doctor_card_image_url}} <img> swap so the duo matches the single send.
+function renderDoctorProfiles(rows: RowData[], urls: string[]): string {
+  return rows.map((r, i) => {
+    const url = (urls[i] ?? "").trim();
+    if (url) {
+      return `<div style="margin:0 0 22px;">` +
+        `<img src="${esc(url)}" alt="${esc(r.name)} — profile" ` +
+        `style="display:block;width:100%;max-width:700px;height:auto;border:0;border-radius:14px;margin:0 auto;" />` +
+        `</div>`;
+    }
+    return renderDoctorCard(r); // no image for this doctor → server-rendered card
+  }).join("");
+}
+
+// Plain-text counterpart for the image block — a readable list of the queued
+// doctors (stripHtml on an <img> block would yield nothing).
+function renderDoctorsPlain(rows: RowData[]): string {
+  return rows.map(r => {
+    const parts: string[] = [`Profile #${r.idx}: ${r.name}`];
+    if (r.title || r.specialty) parts.push(r.title || r.specialty);
+    if (r.email)   parts.push(`Email: ${r.email}`);
+    if (r.mobile)  parts.push(`Mobile: ${r.mobile}`);
+    if (r.website) parts.push(`Profile: ${r.website}`);
+    return parts.join("\n");
+  }).join("\n\n");
 }
 
 function renderDoctorCard(r: RowData): string {

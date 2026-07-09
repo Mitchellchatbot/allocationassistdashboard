@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useState, useMemo as useMemoReact, memo } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState, useMemo as useMemoReact, memo } from "react";
 import { DashboardLayout } from "@/components/layout/DashboardLayout";
 import { DocLink } from "@/components/DocLink";
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "@/components/ui/card";
@@ -21,7 +21,9 @@ import { useZohoData, type ZohoLead, type ZohoDoctorOnBoard } from "@/hooks/use-
 import { useDoctorLifecycleMap } from "@/hooks/use-doctor-lifecycle";
 import { groupSpecialty } from "@/lib/specialty-groups";
 import { scoreCandidate, type MatchScore } from "@/lib/match-score";
-import { useWpCandidates, usePublishedWpCandidates, wpCandidateProfileText, type WpCandidate } from "@/hooks/use-wp-candidates";
+import { useWpCandidates, usePublishedWpCandidates, wpCandidateProfileText, wpCandidateToTokens, type WpCandidate } from "@/hooks/use-wp-candidates";
+import { buildProfileCardHtml } from "@/lib/profile-card-html";
+import { captureAndUploadCard } from "@/lib/card-screenshot";
 import { useDebounce } from "@/hooks/use-zoho-leads";
 import { MatchScoreChip, MatchReasons } from "@/components/DoctorVacancyMatches";
 import { EditableEmailPreview } from "@/components/EditableEmailPreview";
@@ -1277,10 +1279,45 @@ function BatchDialog({ target, onTargetChange, batches, suggestedSpecialty }: {
     return scored.slice(0, q ? 100 : 30);
   }, [batch, allDoctors, websiteOnly, specialtyOnly, effectiveSpecialty, q]);
 
+  // Daily Duo only — cache generated card image URLs per doctor id so reorders
+  // and re-adds reuse the capture instead of re-rasterising. Lives for the
+  // dialog session.
+  const cardUrlCacheRef = useRef<Map<string, string>>(new Map());
+  const [preparingCards, setPreparingCards] = useState(false);
+
   const setDoctors = async (next: string[]) => {
     if (!batch) return;
     try { await update.mutateAsync({ id: batch.id, patch: { doctor_ids: next } }); }
-    catch (e) { toast.error(e instanceof Error ? e.message : "Update failed"); }
+    catch (e) { toast.error(e instanceof Error ? e.message : "Update failed"); return; }
+
+    // For a Daily Duo, each doctor sends as their OWN Profile-Sent card image.
+    // The scheduled send runs server-side (no browser), so we rasterise the two
+    // cards here and store their URLs (aligned to doctor_ids) for send-batch to
+    // embed. Non-fatal: a failed capture leaves an empty slot and send-batch
+    // falls back to that doctor's card, so the send never breaks.
+    if (batch.kind !== "daily_duo") return;
+    setPreparingCards(true);
+    try {
+      const urls: string[] = [];
+      for (const id of next) {
+        let url = cardUrlCacheRef.current.get(id);
+        if (!url) {
+          const opt = doctorById.get(id);
+          if (opt) {
+            try { url = await cardImageForOption(opt); cardUrlCacheRef.current.set(id, url); }
+            catch { url = ""; }
+          } else {
+            url = "";  // not resolvable yet (roster still loading) → server falls back
+          }
+        }
+        urls.push(url ?? "");
+      }
+      await update.mutateAsync({ id: batch.id, patch: { doctor_card_image_urls: urls } });
+    } catch {
+      /* non-fatal — send-batch renders the card fallback for any empty slot */
+    } finally {
+      setPreparingCards(false);
+    }
   };
   const setAttachments = async (next: EmailAttachment[]) => {
     if (!batch) return;
@@ -1441,6 +1478,25 @@ function BatchDialog({ target, onTargetChange, batches, suggestedSpecialty }: {
 
             <section className="space-y-2">
               <div className="text-[10px] uppercase tracking-wider text-muted-foreground">Queued · {picked.length}</div>
+              {batch.kind === "daily_duo" && (
+                <div className="flex items-center justify-between gap-2 rounded-md border border-teal-200 bg-teal-50/50 px-2.5 py-1.5">
+                  <div className="text-[10.5px] text-teal-800 leading-snug">
+                    Each profile sends as its own image — same look as an individual Profile Sent.
+                    {preparingCards
+                      ? <span className="ml-1 inline-flex items-center gap-1 text-teal-700"><RefreshCw className="h-3 w-3 animate-spin" /> preparing…</span>
+                      : picked.length > 0 && (
+                          <span className="ml-1 text-teal-700">
+                            {(batch.doctor_card_image_urls ?? []).filter(Boolean).length}/{picked.length} image{picked.length === 1 ? "" : "s"} ready.
+                          </span>
+                        )}
+                  </div>
+                  {batch.status === "draft" && picked.length > 0 && (
+                    <Button size="sm" variant="ghost" className="h-6 text-[10px] shrink-0" disabled={preparingCards} onClick={() => setDoctors(batch.doctor_ids)}>
+                      <RefreshCw className={`h-3 w-3 mr-1 ${preparingCards ? "animate-spin" : ""}`} /> Refresh images
+                    </Button>
+                  )}
+                </div>
+              )}
               {picked.length === 0 && (
                 <div className="text-[11px] text-muted-foreground italic">Nothing queued yet. Search below, or use Auto-pick top {expectedCount} above.</div>
               )}
@@ -1922,6 +1978,10 @@ interface DoctorOption {
   highPriority:         boolean;
   primeClassification:  string | null;
   createdAt:            number | null;   // ms epoch
+  // ── The underlying published WP candidate (the pool spine). Kept so the
+  //    Daily Duo can build each doctor's Profile-Sent card image client-side
+  //    (needs photo/title/age/etc. that the flat option above doesn't carry).
+  wp:                   WpCandidate | null;
 }
 
 function useMemoDoctors(
@@ -2019,10 +2079,32 @@ function useMemoDoctors(
         highPriority:        false,
         primeClassification: null,
         createdAt:           toMs(zStr("Modified_Time") ?? zStr("Created_Time")),
+        wp:                  c,
       });
     }
     return out;
   }, [zoho, lifecycleMap, wpCandidates]);
+}
+
+/** Build + upload the Profile-Sent card image for a queued doctor, returning its
+ *  public PNG URL. Uses the SAME pipeline as the single Profile-Sent send
+ *  (wpCandidateToTokens → buildProfileCardHtml → captureAndUploadCard), so a
+ *  Daily Duo profile looks identical to an individual send. The WP candidate
+ *  supplies the photo / title / age / etc. the flat option doesn't carry; the
+ *  option fields are fallbacks when WP is missing one. */
+async function cardImageForOption(opt: DoctorOption): Promise<string> {
+  const t = wpCandidateToTokens(opt.wp ?? null);
+  const vars: Record<string, string> = {
+    ...t,
+    doctor_name: (opt.name || t.doctor_name || "").replace(/^\s*Dr\.?\s+/i, "").trim() || (opt.name || "Candidate"),
+    doctor_specialty:        t.doctor_specialty        || opt.speciality       || "",
+    doctor_speciality:       t.doctor_specialty        || opt.speciality       || "",
+    doctor_country_training: t.doctor_country_training || opt.country_training || "",
+    doctor_nationality:      t.doctor_nationality      || opt.nationality      || "",
+    doctor_license:          t.doctor_license          || opt.license          || "",
+    doctor_years_experience: t.doctor_years_experience || (opt.years_experience != null ? String(opt.years_experience) : ""),
+  };
+  return captureAndUploadCard(buildProfileCardHtml(vars));
 }
 
 function todayISO(): string {
