@@ -2094,7 +2094,7 @@ function AnswerValue({ k, v, highlight, formId }: { k: string; v: string; highli
         {urls.map((u, i) => {
           const filename = filenameFromUrl(u);
           const isImage = /\.(jpe?g|png|gif|webp|svg)(\?|$)/i.test(u);
-          const proxied = jotformImageUrl(u, formId);
+          const proxied = jotformImageUrl(u, formId, filename);
           return isImage ? (
             <a key={i} href={proxied} target="_blank" rel="noreferrer" className="inline-flex flex-col gap-0.5">
               <img src={proxied} alt={filename} className="h-20 w-20 object-cover rounded border border-slate-200" />
@@ -2119,12 +2119,15 @@ function AnswerValue({ k, v, highlight, formId }: { k: string; v: string; highli
  *  function fetches them with the form's API key and streams the bytes
  *  back. For any non-widget URL we just return it as-is (still
  *  absolutising relative paths defensively). */
-function jotformImageUrl(url: string, formId: string | undefined): string {
+function jotformImageUrl(url: string, formId: string | undefined, filename?: string): string {
   // Typeform file uploads (api.typeform.com/.../files/…) need the Bearer
   // token — route through our typeform-file-proxy so the <img>/download works.
+  // Pass the real filename along: Typeform URLs end in a UUID, so the proxy
+  // needs it to name the downloaded file (Content-Disposition).
   if (formId && /^https?:\/\/api\.typeform\.com\//i.test(url)) {
     const base = (import.meta.env.VITE_SUPABASE_URL as string)?.replace(/\/$/, "") ?? "";
-    return `${base}/functions/v1/typeform-file-proxy?form_id=${encodeURIComponent(formId)}&url=${encodeURIComponent(url)}`;
+    const fn = filename ? `&filename=${encodeURIComponent(filename)}` : "";
+    return `${base}/functions/v1/typeform-file-proxy?form_id=${encodeURIComponent(formId)}&url=${encodeURIComponent(url)}${fn}`;
   }
   // Full https URLs pointing at jotform.com — extract the path part and
   // route through the proxy. Otherwise the dashboard would link directly

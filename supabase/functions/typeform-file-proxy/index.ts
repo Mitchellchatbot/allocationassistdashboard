@@ -53,7 +53,9 @@ Deno.serve(async (req) => {
 
   // Infer image/pdf type from the path extension so browsers render an <img>
   // (Typeform serves a generic content-type for downloads).
-  const ext = (() => { try { return new URL(fileUrl).pathname.split(".").pop()?.toLowerCase() ?? ""; } catch { return ""; } })();
+  const pathname = (() => { try { return new URL(fileUrl).pathname; } catch { return ""; } })();
+  const ext = pathname.split(".").pop()?.toLowerCase() ?? "";
+  const isImage = ext === "jpg" || ext === "jpeg" || ext === "png" || ext === "gif" || ext === "webp";
   const mime =
     ext === "jpg" || ext === "jpeg" ? "image/jpeg" :
     ext === "png"                   ? "image/png"  :
@@ -62,11 +64,18 @@ Deno.serve(async (req) => {
     ext === "pdf"                   ? "application/pdf" :
     res.headers.get("content-type") ?? "application/octet-stream";
 
+  // A CV (PDF/doc) should DOWNLOAD as a file with its name, not open in a tab;
+  // images stay inline so previews render. Prefer the ?filename the client
+  // passes (Typeform URLs often end in a UUID), else the URL's last segment.
+  const rawName = reqUrl.searchParams.get("filename") || decodeURIComponent(pathname.split("/").pop() || "download");
+  const filename = (rawName || "download").replace(/[/"\\\r\n]/g, "");
+
   return new Response(res.body, {
     headers: {
       ...corsHeaders,
       "Content-Type":  mime,
       "Cache-Control": "public, max-age=86400",
+      ...(isImage ? {} : { "Content-Disposition": `attachment; filename="${filename}"` }),
     },
   });
 });

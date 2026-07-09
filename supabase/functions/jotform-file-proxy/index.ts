@@ -54,6 +54,7 @@ Deno.serve(async (req) => {
   // JotForm returns application/octet-stream; infer the right image type
   // from the path extension so browsers render <img> instead of downloading.
   const ext = path.split(".").pop()?.toLowerCase() ?? "";
+  const isImage = ext === "jpg" || ext === "jpeg" || ext === "png" || ext === "gif" || ext === "webp";
   const mime =
     ext === "jpg" || ext === "jpeg" ? "image/jpeg" :
     ext === "png"                   ? "image/png"  :
@@ -62,11 +63,16 @@ Deno.serve(async (req) => {
     ext === "pdf"                   ? "application/pdf" :
     jfRes.headers.get("content-type") ?? "application/octet-stream";
 
+  // A CV (PDF/doc) should DOWNLOAD as a file with its real name, not open in a
+  // browser tab; images stay inline so the <img> previews render.
+  const filename = decodeURIComponent(path.split("/").pop() || "download").replace(/[/"\\\r\n]/g, "");
+
   return new Response(jfRes.body, {
     headers: {
       ...corsHeaders,
       "Content-Type":  mime,
       "Cache-Control": "public, max-age=86400",
+      ...(isImage ? {} : { "Content-Disposition": `attachment; filename="${filename}"` }),
     },
   });
 });
