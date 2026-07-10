@@ -24,6 +24,10 @@ export interface ScheduledProfileSend {
   template_overrides: Record<string, string> | null;
   attachments:        Array<{ filename: string; path: string }>;
   attachments_doctor: Array<{ filename: string; path: string }>;
+  /** Explicit sender override chosen in the dialog. When set, the scheduler
+   *  stamps it onto the run's assigned_to so the From line matches what the
+   *  dispatcher picked; null → the hospital-owner default applies. */
+  assigned_to:        string | null;
   scheduled_for:      string;
   scheduled_at_time:  string | null;
   timezone:           string | null;
@@ -48,6 +52,7 @@ export interface ScheduleProfileSendInput {
   template_overrides?: Record<string, string> | null;
   attachments?:       Array<{ filename: string; path: string }>;
   attachments_doctor?: Array<{ filename: string; path: string }>;
+  assigned_to?:       string | null;
   scheduled_for:      string;
   scheduled_at_time?: string | null;
   timezone?:          string | null;
@@ -89,6 +94,7 @@ export function useScheduleProfileSend() {
           ...input,
           attachments:        input.attachments ?? [],
           attachments_doctor: input.attachments_doctor ?? [],
+          assigned_to:        input.assigned_to ?? null,
           recurrence:  input.recurrence ?? { freq: "none" },
           timezone:    input.timezone ?? "Asia/Dubai",
           status:      "draft",

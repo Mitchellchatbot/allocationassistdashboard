@@ -8,6 +8,10 @@ export interface Hospital {
   country:                 string | null;
   primary_recruiter_email: string | null;
   primary_contact_name:    string | null;
+  /** HI team member who owns this hospital. Becomes the From/sender on its
+   *  profile-sent emails: the assign_run_from_hospital_owner trigger stamps a
+   *  new run's assigned_to from this (falling back to the run's created_by). */
+  owner_email:             string | null;
   /** false → greet with the hospital name; true → greet with the chosen contact's name. */
   greet_with_contact_name: boolean;
   /** How a send picks its recipient(s) from the hospital's Zoho contacts.

@@ -947,6 +947,7 @@ interface ProfileSendRow {
   custom_message: string | null; bcc_override: string[] | null; cc_override: string[] | null;
   stage_overrides: Record<string, unknown> | null; template_overrides: Record<string, string> | null;
   attachments: unknown; attachments_doctor: unknown; scheduled_for: string; scheduled_at_time: string | null; created_by: string | null;
+  assigned_to: string | null;
 }
 
 /** Fire scheduled Send-Profile campaigns (Amir #5). Replays exactly what
@@ -991,6 +992,9 @@ async function runScheduledProfileSweep(
           flow_key: "profile_sent", doctor_id: s.doctor_id, doctor_name: s.doctor_name,
           doctor_email: s.doctor_email, doctor_phone: s.doctor_phone, hospital: h.name,
           current_stage: "email_hospital", status: "active", created_by: s.created_by,
+          // Explicit sender pick from the dialog → stamp assigned_to so the From
+          // line matches; omit when null so the hospital-owner trigger decides.
+          ...(s.assigned_to ? { assigned_to: s.assigned_to } : {}),
           metadata: {
             batch_id: batchId, hospital_id: h.id, hospital_email: h.primary_recruiter_email,
             bcc: ids.length > 1, total_in_batch: ids.length,

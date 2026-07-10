@@ -413,7 +413,12 @@ function SendProfileDialogBody({ onClose, initial }: { onClose: () => void; init
     templateKeys?: { hospital: string; doctor: string },
     schedule?: { date: string; time: string },
     recipients?: { doctorEmail?: string },
+    sender?: { assignedTo: string | null },
   ) => {
+    // Explicit sender pick from the dialog. When set it's written to each run's
+    // assigned_to so send-flow-email's pickSender uses it as the From line;
+    // null → leave assigned_to unset so the hospital-owner trigger decides.
+    const senderAssignedTo = sender?.assignedTo ?? null;
     const hospitalAttach = attachments?.hospital ?? [];
     const doctorAttach   = attachments?.doctor ?? [];
     if (!selectedDoctor || selectedHospitals.length === 0) return;
@@ -465,6 +470,7 @@ function SendProfileDialogBody({ onClose, initial }: { onClose: () => void; init
           custom_message:    customMessage || null,
           bcc_override:      bccList,
           cc_override:       ccList.length ? ccList : null,
+          assigned_to:       senderAssignedTo,
           stage_overrides:   effectiveStageOverrides ?? null,
           template_overrides: templateOverridesPayload,
           attachments:        hospitalAttach.map(a => ({ filename: a.filename, path: a.path })),
@@ -534,6 +540,10 @@ function SendProfileDialogBody({ onClose, initial }: { onClose: () => void; init
             current_stage: "email_hospital",
             status:        "active",
             created_by:    user?.email ?? null,
+            // Explicit sender pick → stamp assigned_to so pickSender uses it as
+            // the From line. Omit when "auto" so the assign_run_from_hospital_owner
+            // trigger stamps each hospital's own owner (unchanged behaviour).
+            ...(senderAssignedTo ? { assigned_to: senderAssignedTo } : {}),
             metadata: {
               batch_id:           batchId,
               hospital_id:        h.id,
@@ -1139,7 +1149,7 @@ function PreviewConfirm({
   doctorBody: string;
   onBack: () => void;
   onClose: () => void;
-  onConfirm: (stageOverrides?: Record<string, SendOverrides>, attachments?: { hospital?: EmailAttachment[]; doctor?: EmailAttachment[] }, templateKeys?: { hospital: string; doctor: string }, schedule?: { date: string; time: string }, recipients?: { doctorEmail?: string }) => void;
+  onConfirm: (stageOverrides?: Record<string, SendOverrides>, attachments?: { hospital?: EmailAttachment[]; doctor?: EmailAttachment[] }, templateKeys?: { hospital: string; doctor: string }, schedule?: { date: string; time: string }, recipients?: { doctorEmail?: string }, sender?: { assignedTo: string | null }) => void;
   submitting: boolean;
   ccList: string[];
   setCcList: (next: string[]) => void;
@@ -1179,15 +1189,45 @@ function PreviewConfirm({
   const [sendMode, setSendMode] = useState<"now" | "later">("now");
   const [schedDate, setSchedDate] = useState<string>(() => localDateInDays(1));
   const [schedTime, setSchedTime] = useState<string>("09:00");
-  // Who'll be on the From line — derived from the current user, which
-  // matches what send-flow-email does at send time (looks up
-  // assigned_to in its SENDERS registry). Falls back to the generic
-  // team address when the current user isn't in the verified roster.
+  // Who'll be on the From line. send-flow-email resolves the sender from the
+  // run's assigned_to, which the assign_run_from_hospital_owner trigger stamps
+  // from the HOSPITAL'S owner_email (falling back to created_by = the current
+  // user). The old code derived the label from the current user, so it showed
+  // "Allocation Assist Team" while the mail actually shipped as the hospital's
+  // owner — the mismatch Hasan hit. Mirror the trigger here so the label +
+  // preview From tell the truth, and offer a dropdown to override it.
   const { user } = useAuth();
-  const sender   = findSenderByEmail(user?.email ?? null);
-  const senderLine = sender
-    ? `${sender.name} <${sender.email}>`
-    : "Allocation Assist Team <hello@allocationassist.com>";
+  const [senderOverride, setSenderOverride] = useState<string>("auto"); // "auto" | <sender email>
+  // The address(es) the server would actually send from. "auto" resolves each
+  // hospital's owner (→ current user fallback); an explicit pick applies to all.
+  const resolvedSenderEmails = useMemo(() => {
+    if (senderOverride !== "auto") return [senderOverride.toLowerCase()];
+    const out: string[] = [];
+    for (const h of hospitals) {
+      const e = (h.owner_email?.trim() || user?.email || "").toLowerCase();
+      if (e && !out.includes(e)) out.push(e);
+    }
+    return out;
+  }, [senderOverride, hospitals, user?.email]);
+  // pickSender shows a verified roster member by name and everyone else as the
+  // generic team address — describe each the same way so the label can't lie.
+  const describeSender = (email: string): string => {
+    const s = findSenderByEmail(email);
+    return s ? `${s.name} <${s.email}>` : "Allocation Assist Team <hello@allocationassist.com>";
+  };
+  const senderLabels = [...new Set(resolvedSenderEmails.map(describeSender))];
+  const senderLine = senderLabels.length === 1
+    ? (senderLabels[0] ?? "Allocation Assist Team <hello@allocationassist.com>")
+    : "Each hospital's assigned owner";
+  // The resolved member when there's exactly one and it's on the roster (drives
+  // the "replies land in X" note). Null → generic team address / mixed owners.
+  const sender = resolvedSenderEmails.length === 1
+    ? findSenderByEmail(resolvedSenderEmails[0])
+    : null;
+  // What to write to the run's assigned_to on send: an explicit pick applies to
+  // every hospital; "auto" leaves it null so the trigger stamps each hospital's
+  // own owner (unchanged behaviour, now correctly reflected in the label).
+  const senderAssignedTo = senderOverride !== "auto" ? senderOverride : null;
 
   // Pull the doctor's profile data for the preview. WP candidates are
   // now the source of truth — if the doctor is linked to a WP record
@@ -1377,6 +1417,7 @@ function PreviewConfirm({
       { hospital: hospitalTemplateKey, doctor: doctorTemplateKey },
       sendMode === "later" ? { date: schedDate, time: schedTime } : undefined,
       doctorEmailTrimmed ? { doctorEmail: doctorEmailTrimmed } : undefined,
+      { assignedTo: senderAssignedTo },
     );
   };
   // Human-readable local label of the chosen slot, for the schedule button.
@@ -1432,7 +1473,25 @@ function PreviewConfirm({
           One run per hospital will be created in Flow 2. Hospital + doctor emails fire automatically on confirm.
         </div>
         <div className="text-[11px] text-muted-foreground pt-1 border-t border-slate-200/70 mt-1.5 space-y-1.5">
-          <div>Sending as: <span className="font-medium text-slate-700">{senderLine}</span></div>
+          {/* Sender picker — the From line the recipient sees. "Auto" mirrors the
+              server (each hospital's owner → you); pick a name to send as them. */}
+          <div className="flex items-center gap-1.5 flex-wrap">
+            <span>Sending as:</span>
+            <select
+              value={senderOverride}
+              onChange={(e) => setSenderOverride(e.target.value)}
+              className="rounded border border-slate-300 bg-white px-1.5 py-0.5 text-[11px] font-medium text-slate-700 max-w-full"
+            >
+              <option value="auto">Auto — {hospitals.length === 1 ? "hospital's owner" : "each hospital's owner"}</option>
+              {AA_SENDERS.map(s => (
+                <option key={s.email} value={s.email}>{s.name} &lt;{s.email}&gt;</option>
+              ))}
+            </select>
+          </div>
+          <div className="text-[10.5px] text-slate-500">
+            Goes out as <span className="font-medium text-slate-700">{senderLine}</span>
+            {senderOverride === "auto" && <> — set per hospital owner</>}
+          </div>
 
           {/* CC + BCC — free-form on every send; AA team offered as BCC quick-adds
               and Amir as a CC quick-add. Defaults to BCC'ing the sender. */}
@@ -1449,9 +1508,13 @@ function PreviewConfirm({
             <div className="text-[10.5px] text-emerald-700">
               Hospital replies land in <span className="font-mono">{sender.email}</span>.
             </div>
+          ) : resolvedSenderEmails.length > 1 ? (
+            <div className="text-[10.5px] text-slate-500">
+              Each hospital sends from its own owner — pick a name above to send them all as one person.
+            </div>
           ) : (
             <div className="text-[10.5px] text-amber-700">
-              Current user isn't in the verified sender roster, so the generic team address is used and replies route through the dashboard parser.
+              This sender isn't in the verified roster, so the generic team address is used and replies route through the dashboard parser. Pick a roster member above to send as a real person.
             </div>
           )}
         </div>
