@@ -643,7 +643,7 @@ function relativeShort(iso: string | null | undefined): string {
 }
 
 function TeamTable({ rows, loading }: { rows: ReturnType<typeof useReportingMetrics>["team"]; loading: boolean }) {
-  if (loading) return <TableSkeleton rows={4} cols={6} />;
+  if (loading) return <TableSkeleton rows={4} cols={7} />;
   if (rows.length === 0) {
     return (
       <div className="px-4 py-12 text-center text-[12px] text-muted-foreground">
@@ -660,17 +660,19 @@ function TeamTable({ rows, loading }: { rows: ReturnType<typeof useReportingMetr
           <TableHead className="text-[11px] text-right">Shortlisted</TableHead>
           <TableHead className="text-[11px] text-right">Interviews</TableHead>
           <TableHead className="text-[11px] text-right">Offered</TableHead>
+          <TableHead className="text-[11px] text-right">Signed</TableHead>
           <TableHead className="text-[11px] text-right">Total</TableHead>
         </TableRow>
       </TableHeader>
       <TableBody>
         {rows.map(r => (
           <TableRow key={r.email}>
-            <TableCell className="text-[12px] font-medium">{r.email}</TableCell>
+            <TableCell className="text-[12px] font-medium">{findHiMemberByEmail(r.email)?.name ?? r.email}</TableCell>
             <TableCell className="text-[12px] text-right tabular-nums">{r.profilesSent}</TableCell>
             <TableCell className="text-[12px] text-right tabular-nums">{r.shortlisted}</TableCell>
             <TableCell className="text-[12px] text-right tabular-nums">{r.interviews}</TableCell>
             <TableCell className="text-[12px] text-right tabular-nums">{r.offered}</TableCell>
+            <TableCell className="text-[12px] text-right tabular-nums text-emerald-700 font-medium">{r.signed}</TableCell>
             <TableCell className="text-[12px] text-right tabular-nums font-medium">{r.total}</TableCell>
           </TableRow>
         ))}

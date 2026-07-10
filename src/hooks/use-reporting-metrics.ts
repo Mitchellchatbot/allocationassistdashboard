@@ -108,7 +108,7 @@ export function useReportingMetrics(filters: ReportingFilters): ReportingBundle 
     return {
       isLoading: runsLoading || lifeLoading || vacLoading,
       kpis:      computeKpis(runs, lifecycles, filters),
-      team:      computeTeamRows(runs, filters),
+      team:      computeTeamRows(runs, lifecycles, filters),
       hospitals: computeHospitalRows(runs, lifecycles, vacancies, filters),
       trend:     computeTrendBuckets(runs, lifecycles, filters),
       doctorsOnTheWay: computeDoctorsOnTheWay(lifecycles),

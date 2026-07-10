@@ -96,7 +96,8 @@ const KIND_RULES: Record<string, KindRule> = {
   // ── Bell-only (no Slack) ────────────────────────────────────────────────
   //  Reminders / chases — useful in the dashboard, but not Slack pings.
   hospital_reply_overdue: { severity: "action",   slack: false, cta_label: "Chase hospital",    cta_kind: "open_run" },
-  interview_followup:     { severity: "action",   slack: false, cta_label: "Log follow-up",     cta_kind: "open_run" },
+  // Team wants the 72h post-interview chase on Slack too (2026-07-10, Hasan).
+  interview_followup:     { severity: "action",   slack: true,  cta_label: "Log follow-up",     cta_kind: "open_run" },
   signed_not_joined:      { severity: "action",   slack: false, cta_label: "Set joining date",  cta_kind: "open_doctor" },
   availability_checkin:   { severity: "action",   slack: false, cta_label: "Confirm available", cta_kind: "open_doctor" },
   cv_uploaded:            { severity: "action",   slack: false, cta_label: "Review CV",         cta_kind: "open_doctor" },

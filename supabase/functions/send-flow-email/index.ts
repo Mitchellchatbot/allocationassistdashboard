@@ -780,7 +780,7 @@ Deno.serve(async (req: Request) => {
   // (buttons / cards / coloured pills) BEFORE we splice in the signature.
   // The signature itself has to keep its own inline styles (teal sign-off,
   // logo block) so plainify runs only on the body source.
-  const rawBody       = tpl.body_html || wrapHtml(tpl.body_text);
+  const rawBody       = positionHospitalImage(tpl.body_html || wrapHtml(tpl.body_text));
   const plainBody     = plainifyBody(rawBody);
   const renderedBody  = collapseDoubledDr(render(plainBody, vars, true));
   // Wrap the rendered body in a serif container so every <p>/<table>
@@ -1260,6 +1260,26 @@ function render(body: string, vars: Record<string, string>, html = false): strin
  *  whole subject/body. */
 function collapseDoubledDr(s: string): string {
   return s.replace(/\bDr\.?\s*((?:<[^>]+>\s*)*)Dr\.?\s+/gi, (_m, tags = "") => `Dr. ${tags}`);
+}
+
+/** Move the {{hospital_image}} token to sit right BEFORE the first link in the
+ *  doctor "working opportunity" email (the "More about <hospital>" hospital
+ *  link), instead of right after the greeting (team 2026-07-10: "image right
+ *  before the first link"). Anchors on the link's wrapping conditional/paragraph
+ *  so the photo still renders even when that link's section is empty; falls back
+ *  to after the first paragraph, then the top. No-op when the body has no token. */
+function positionHospitalImage(html: string): string {
+  if (!html.includes("{{hospital_image}}")) return html;
+  const stripped = html.replace(/[ \t]*\{\{hospital_image\}\}[ \t]*\r?\n?/g, "");
+  const anchors = [/\{\{#hospital_profile_url\}\}/i, /<p[^>]*>\s*<a\b/i, /<a\b/i];
+  for (const re of anchors) {
+    const m = stripped.match(re);
+    if (m && m.index !== undefined) {
+      return `${stripped.slice(0, m.index)}{{hospital_image}}\n${stripped.slice(m.index)}`;
+    }
+  }
+  const pEnd = stripped.indexOf("</p>");
+  return pEnd === -1 ? `{{hospital_image}}\n${stripped}` : `${stripped.slice(0, pEnd + 4)}\n{{hospital_image}}${stripped.slice(pEnd + 4)}`;
 }
 
 /** WordPress-style profile card for the individual profile_sent_hospital email

@@ -156,17 +156,25 @@ export function computeKpis(
 }
 
 // ── Per-team-member roll-up ─────────────────────────────────────────────────
-export function computeTeamRows(runs: FlowRun[], filters: ReportingFilters): TeamMemberRow[] {
+export function computeTeamRows(runs: FlowRun[], lifecycles: DoctorLifecycle[], filters: ReportingFilters): TeamMemberRow[] {
   const map = new Map<string, TeamMemberRow>();
+  const blank = (email: string): TeamMemberRow => ({
+    email, shortlisted: 0, interviews: 0, offered: 0, signed: 0, profilesSent: 0, total: 0,
+  });
+  // doctor_id → owning member (the profile-send sender). Built from every
+  // filtered run regardless of range, so a signing dated outside the run's
+  // range still credits the right person.
+  const doctorOwner = new Map<string, string>();
+
   for (const r of runs) {
     if (!r.created_by) continue;
     if (!passesFilters(r, filters)) continue;
+    if (r.doctor_id && (isProfileSendRun(r) || !doctorOwner.has(r.doctor_id))) {
+      doctorOwner.set(r.doctor_id, r.created_by);
+    }
     if (!inRange(r.started_at, filters.range)) continue;
 
-    const row = map.get(r.created_by) ?? {
-      email: r.created_by, shortlisted: 0, interviews: 0, offered: 0, signed: 0,
-      profilesSent: 0, total: 0,
-    };
+    const row = map.get(r.created_by) ?? blank(r.created_by);
     if (isShortlistRun(r))   row.shortlisted++;
     if (isInterviewRun(r))   row.interviews++;
     if (isOfferRun(r))       row.offered++;
@@ -174,9 +182,16 @@ export function computeTeamRows(runs: FlowRun[], filters: ReportingFilters): Tea
     row.total++;
     map.set(r.created_by, row);
   }
-  // We can't attribute lifecycle signed_at to a specific team member without
-  // the data — leave row.signed at 0 for now and surface a note in the UI.
-  void Map;
+
+  // Attribute each in-range signing to the doctor's owning member.
+  for (const l of lifecycles) {
+    if (!inRange(l.signed_at, filters.range)) continue;
+    const owner = doctorOwner.get(l.doctor_id);
+    if (!owner) continue;
+    const row = map.get(owner) ?? blank(owner);
+    row.signed++;
+    map.set(owner, row);
+  }
 
   return [...map.values()].sort((a, b) => b.total - a.total);
 }
