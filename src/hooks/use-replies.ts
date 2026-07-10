@@ -38,6 +38,7 @@ export interface HospitalReply {
   ai_summary:       string | null;
   action_taken:     string | null;
   source:           string;
+  direction:        "inbound" | "outbound" | string;
   is_read:          boolean;
   handled_at:       string | null;
   forwarded_at:     string | null;
@@ -63,6 +64,7 @@ export function useRepliesPage(params: { page: number; pageSize: number; search:
       let query = supabase
         .from("hospital_replies")
         .select("*", { count: "exact" })
+        .eq("direction", "inbound")   // list = incoming only; our sent replies live in the thread
         .order("created_at", { ascending: false })
         .range(from, from + pageSize - 1);
       if (filter === "unread")  query = query.eq("is_read", false);
@@ -78,6 +80,25 @@ export function useRepliesPage(params: { page: number; pageSize: number; search:
     },
     staleTime: 15_000,
     placeholderData: keepPreviousData,   // keep the current page visible while the next loads
+  });
+}
+
+/** The full conversation for a run — inbound replies + our outbound sends,
+ *  oldest first. Used by the detail pane to render the back-and-forth. */
+export function useReplyThread(runId: string | null) {
+  return useQuery({
+    queryKey: [...KEY, "thread", runId] as const,
+    enabled: !!runId,
+    queryFn: async (): Promise<HospitalReply[]> => {
+      const { data, error } = await supabase
+        .from("hospital_replies")
+        .select("*")
+        .eq("run_id", runId!)
+        .order("created_at", { ascending: true });
+      if (error) throw error;
+      return (data ?? []) as HospitalReply[];
+    },
+    staleTime: 10_000,
   });
 }
 

@@ -31,6 +31,15 @@ function json(payload: unknown, status: number): Response {
   return new Response(JSON.stringify(payload), { status, headers: { ...CORS, "Content-Type": "application/json" } });
 }
 
+/** Best-effort email of the signed-in caller from the JWT (for created_by). */
+function jwtEmail(authHeader: string | null): string {
+  try {
+    const token = (authHeader ?? "").replace(/^Bearer\s+/i, "");
+    const payload = JSON.parse(atob(token.split(".")[1] ?? ""));
+    return typeof payload?.email === "string" ? payload.email : "";
+  } catch { return ""; }
+}
+
 /** Accept a comma/semicolon string or an array → deduped list of valid emails. */
 function addrs(v: unknown): string[] {
   const raw = Array.isArray(v) ? v : String(v ?? "").split(/[,;]/);
@@ -137,6 +146,26 @@ Deno.serve(async (req) => {
   });
   const respText = await res.text();
   if (!res.ok) return json({ ok: false, error: `Resend ${res.status}: ${respText.slice(0, 300)}` }, 502);
+  let sentId = "";
+  try { sentId = JSON.parse(respText)?.id ?? ""; } catch { /* non-fatal */ }
+
+  const sentBy = jwtEmail(req.headers.get("Authorization"));
+
+  // Log our outbound message so the inbox thread shows the full back-and-forth.
+  // direction='outbound' keeps it out of the incoming list but visible in the
+  // per-run conversation. Grouped by run_id (present for matched replies).
+  await sb.from("hospital_replies").insert({
+    run_id:           runId,
+    direction:        "outbound",
+    reply_from:       MAIL_FROM,
+    reply_subject:    subject,
+    reply_text:       text || html || subject,
+    reply_message_id: sentId || null,
+    classification:   "unclear",   // n/a for our own sends
+    source:           action === "forward" ? "portal_forward" : "portal_reply",
+    is_read:          true,
+    created_by:       sentBy || null,
+  });
 
   // Stamp the source reply so the inbox reflects what happened.
   if (replyId) {

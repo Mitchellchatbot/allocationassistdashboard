@@ -11,7 +11,7 @@ import { cn } from "@/lib/utils";
 import { supabase } from "@/lib/supabase";
 import { splitQuotedText } from "@/lib/email-quote";
 import {
-  useRepliesPage, useUnreadReplyCount, useRepliesRealtime, useMarkReplyRead, useMarkReplyHandled,
+  useRepliesPage, useUnreadReplyCount, useRepliesRealtime, useReplyThread, useMarkReplyRead, useMarkReplyHandled,
   type HospitalReply, type ReplyClassification, type ReplyFilter,
 } from "@/hooks/use-replies";
 
@@ -209,9 +209,10 @@ function ReplyDetail({ r, onReply, onForward, onToggleHandled, handledBusy }: {
   r: HospitalReply; onReply: () => void; onForward: () => void; onToggleHandled: () => void; handledBusy: boolean;
 }) {
   const m = classMeta(r.classification);
-  const { main, quoted } = useMemo(() => splitQuotedText(r.reply_text), [r.reply_text]);
-  const [showQuoted, setShowQuoted] = useState(false);
-  useEffect(() => setShowQuoted(false), [r.id]);   // collapse again when switching replies
+  const { data: thread } = useReplyThread(r.run_id);
+  // Full conversation for the run (inbound + our outbound), oldest first. Falls
+  // back to just the selected reply for unmatched replies (no run_id).
+  const messages = thread && thread.length ? thread : [r];
 
   return (
     <div className="flex flex-col">
@@ -236,20 +237,11 @@ function ReplyDetail({ r, onReply, onForward, onToggleHandled, handledBusy }: {
         )}
       </div>
 
-      {/* Body — quoted original collapsed by default */}
-      <div className="px-5 py-4">
-        <pre className="whitespace-pre-wrap break-words font-sans text-[13px] leading-relaxed text-slate-700 m-0">{main}</pre>
-        {quoted && (
-          <div className="mt-2">
-            <button onClick={() => setShowQuoted(v => !v)} className="inline-flex items-center gap-1 text-[11.5px] text-slate-400 hover:text-slate-600 border border-slate-200 rounded px-2 py-0.5 bg-slate-50">
-              {showQuoted ? <ChevronUp className="h-3 w-3" /> : <ChevronDown className="h-3 w-3" />}
-              {showQuoted ? "Hide quoted text" : "Show quoted text"}
-            </button>
-            {showQuoted && (
-              <pre className="whitespace-pre-wrap break-words font-sans text-[12px] leading-relaxed text-slate-400 border-l-2 border-slate-200 pl-3 mt-2 m-0">{quoted}</pre>
-            )}
-          </div>
-        )}
+      {/* Conversation — inbound + our sent replies, quoted text collapsed */}
+      <div className="px-5 py-4 space-y-3">
+        {messages.map(msg => (
+          <MessageBlock key={msg.id} msg={msg} highlight={messages.length > 1 && msg.id === r.id} />
+        ))}
       </div>
 
       {/* Actions */}
@@ -260,6 +252,41 @@ function ReplyDetail({ r, onReply, onForward, onToggleHandled, handledBusy }: {
           <CheckCircle2 className="h-3.5 w-3.5 mr-1.5" />{r.handled_at ? "Handled — undo" : "Mark handled"}
         </Button>
       </div>
+    </div>
+  );
+}
+
+/** One message in the conversation — inbound reply or our outbound send — with
+ *  the quoted original collapsed behind a toggle. */
+function MessageBlock({ msg, highlight }: { msg: HospitalReply; highlight: boolean }) {
+  const outbound = msg.direction === "outbound";
+  const { main, quoted } = useMemo(() => splitQuotedText(msg.reply_text), [msg.reply_text]);
+  const [showQuoted, setShowQuoted] = useState(false);
+  useEffect(() => setShowQuoted(false), [msg.id]);
+
+  return (
+    <div className={cn(
+      "rounded-lg border p-3",
+      outbound ? "bg-teal-50/40 border-teal-100" : "bg-white border-slate-100",
+      highlight && "ring-1 ring-teal-300",
+    )}>
+      <div className="flex items-center justify-between gap-2 mb-1.5">
+        <div className="flex items-center gap-1.5 text-[12px] min-w-0">
+          {outbound && <Badge variant="outline" className="text-[9.5px] px-1.5 py-0 bg-teal-600 text-white border-teal-600">Sent</Badge>}
+          <span className="font-medium text-slate-700 truncate">{outbound ? "Allocation Assist Team" : fromName(msg.reply_from)}</span>
+        </div>
+        <span className="text-[10.5px] text-muted-foreground shrink-0">{fmtWhen(msg.created_at)}</span>
+      </div>
+      <pre className="whitespace-pre-wrap break-words font-sans text-[13px] leading-relaxed text-slate-700 m-0">{main}</pre>
+      {quoted && (
+        <div className="mt-2">
+          <button onClick={() => setShowQuoted(v => !v)} className="inline-flex items-center gap-1 text-[11px] text-slate-400 hover:text-slate-600 border border-slate-200 rounded px-2 py-0.5 bg-slate-50">
+            {showQuoted ? <ChevronUp className="h-3 w-3" /> : <ChevronDown className="h-3 w-3" />}
+            {showQuoted ? "Hide quoted text" : "Show quoted text"}
+          </button>
+          {showQuoted && <pre className="whitespace-pre-wrap break-words font-sans text-[12px] leading-relaxed text-slate-400 border-l-2 border-slate-200 pl-3 mt-2 m-0">{quoted}</pre>}
+        </div>
+      )}
     </div>
   );
 }

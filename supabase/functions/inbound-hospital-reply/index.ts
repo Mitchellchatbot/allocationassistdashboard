@@ -128,6 +128,18 @@ Deno.serve(async (req: Request) => {
   const replySubject = email.subject ?? "";
   const replyText    = email.text ?? "";
   const replyHtml    = email.html ?? "";
+  // Threading: capture this reply's own Message-ID (so reply-from-portal can set
+  // In-Reply-To and land in the same thread) + its References/In-Reply-To chain.
+  const headerVal = (name: string): string => {
+    const h = email.headers;
+    if (!h) return "";
+    const lname = name.toLowerCase();
+    if (Array.isArray(h)) return h.find(x => (x?.name ?? "").toLowerCase() === lname)?.value ?? "";
+    for (const [k, v] of Object.entries(h)) if (k.toLowerCase() === lname) return String(v ?? "");
+    return "";
+  };
+  const replyMessageId = email.message_id || headerVal("Message-ID") || "";
+  const replyInReplyTo = headerVal("References") || headerVal("In-Reply-To") || "";
   // The `to` field is an array of recipient addresses. For replies to our
   // Profile Sent emails, this includes `reply-<run_id>@reply.allocationassist.com`
   // — the unique address we set as Reply-To on the outbound. Parsing that
@@ -264,6 +276,9 @@ Deno.serve(async (req: Request) => {
       reply_from:    replyFrom,
       reply_subject: replySubject,
       reply_text:    replyText || stripHtml(replyHtml),
+      reply_html:    replyHtml || null,
+      reply_message_id: replyMessageId || null,
+      in_reply_to:   replyInReplyTo || null,
       classification: "unclear",
       ai_summary:    "Inbound reply could not be matched to any active Profile Sent run",
       action_taken:  "Logged as unmatched — team should review manually",
@@ -284,6 +299,9 @@ Deno.serve(async (req: Request) => {
     body: JSON.stringify({
       run_id:        runId,
       reply_text:    replyText || stripHtml(replyHtml),
+      reply_html:    replyHtml || undefined,
+      reply_message_id: replyMessageId || undefined,
+      in_reply_to:   replyInReplyTo || undefined,
       reply_subject: replySubject,
       reply_from:    replyFrom,
       source:        "resend_inbound",

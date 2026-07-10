@@ -62,11 +62,11 @@ Deno.serve(async (req: Request) => {
   if (req.method !== "POST")    return json({ ok: false, error: "Method not allowed" }, 405);
   if (!ANTHROPIC_API_KEY)        return json({ ok: false, error: "ANTHROPIC_API_KEY not set" }, 500);
 
-  let body: { run_id?: string; reply_text?: string; reply_subject?: string; reply_from?: string; source?: string };
+  let body: { run_id?: string; reply_text?: string; reply_subject?: string; reply_from?: string; source?: string; reply_html?: string; reply_message_id?: string; in_reply_to?: string };
   try { body = await req.json(); }
   catch { return json({ ok: false, error: "Invalid JSON body" }, 400); }
 
-  const { run_id, reply_text, reply_subject, reply_from, source = "manual_paste" } = body;
+  const { run_id, reply_text, reply_subject, reply_from, source = "manual_paste", reply_html, reply_message_id, in_reply_to } = body;
   if (!run_id)               return json({ ok: false, error: "run_id required" }, 400);
   if (!reply_text?.trim())   return json({ ok: false, error: "reply_text required" }, 400);
 
@@ -162,6 +162,9 @@ Output ONLY the JSON object. No markdown fences, no commentary, no preamble.`;
     reply_from:      reply_from ?? null,
     reply_subject:   reply_subject ?? null,
     reply_text,
+    reply_html:      reply_html ?? null,
+    reply_message_id: reply_message_id ?? null,
+    in_reply_to:     in_reply_to ?? null,
     classification:  parsedResult.classification,
     confidence:      parsedResult.confidence,
     ai_summary:      parsedResult.summary,
