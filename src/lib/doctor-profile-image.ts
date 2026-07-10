@@ -98,7 +98,7 @@ const STYLE = `
 /* padding is bottom-biased (2px top / 8px bottom) to counter html2canvas
    rendering single-line text LOW in the user's Chromium — pushes it back to
    visual centre. Same trick on .btn below. */
-.dpm .member-badge{display:inline-block;background:#0e7d6b;border-radius:16px;padding:2px 16px 8px;font-size:11.5px;font-weight:600;line-height:1.4;}
+.dpm .member-badge{display:inline-block;background:#0e7d6b;border-radius:16px;padding:1px 16px 10px;font-size:11.5px;font-weight:600;line-height:1.4;}
 .dpm .profile-card hr{border:none;border-top:1px dashed rgba(255,255,255,0.4);margin:18px 0 16px;}
 .dpm .profile-card .age{font-size:14px;font-weight:600;margin-bottom:14px;}
 .dpm .contact-row{display:flex;align-items:center;justify-content:center;gap:9px;font-size:12.5px;margin-bottom:11px;word-break:break-word;}
