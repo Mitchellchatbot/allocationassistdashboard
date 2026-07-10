@@ -1,22 +1,28 @@
-// Build the "doctor profile" card as a LANDSCAPE 3:2 image (1200×800) from a WP
-// candidate, for rasterising via html2canvas. This is the image that goes into
-// the hospital "profile sent" emails (replacing the old teal card) and shows in
-// Doctors → Generate image.
+// Build the "doctor profile" card image from a WP candidate, for rasterising via
+// html2canvas. This is the image that goes into the hospital "profile sent"
+// emails (replacing the old teal card) and shows in Doctors → Generate image.
 //
-// Layout: teal photo card on the left (photo, name, role, member-since, age,
-// contact, then the View Resume / Add To My Favorites / Contact Us buttons), and
-// title + areas-of-interest + the fact grid on the right. EMPTY values are
-// dropped (no blank facts / rows). The three buttons are decorative — they don't
-// work in a flat image, but they're kept to match the website card Amir sent as
-// the reference. (Education / Experience was removed per that same feedback.)
+// This is a FAITHFUL REPLICA of the real allocationassist.com candidate card —
+// the exact CSS/structure lives in the repo-root `doctor-profile-mockup-final.html`
+// (hand-authored from a real live candidate page). Layout: teal photo card on the
+// left (photo, name, role, member-since, age, phone, email) with the three action
+// buttons — View Resume / Add To My Favorites / Contact Us — as rounded rectangles
+// BELOW the card; and title + areas-of-interest + the fact grid on the right.
+//
+// Deviations from a literal copy of the mockup (intentional):
+//   • Education / Experience section omitted (per team feedback).
+//   • EMPTY values are dropped (real WpCandidate data has gaps; the mockup
+//     hard-codes all facts).
+//   • An initials fallback is kept for doctors with no photo.
+//   • The three buttons are decorative (non-functional in a flat image).
 //
 // CSS is scoped under `.dpm` (not bare `body`/`*`) so injecting it into an
 // off-screen capture holder can't repaint the dashboard.
 import type { WpCandidate } from "@/hooks/use-wp-candidates";
 
-/** The 3:2 frame the profile is authored + captured at. */
-export const PROFILE_IMAGE_WIDTH = 1200;
-export const PROFILE_IMAGE_HEIGHT = 800;
+/** Width the card is authored + captured at. Matches the mockup's natural size
+ *  (32px page padding + 1040px `.wrap` = 1104) so the proportions are exact. */
+export const PROFILE_IMAGE_WIDTH = 1104;
 
 function esc(s: string): string {
   return s
@@ -55,7 +61,7 @@ function joinList(v: string[] | null | undefined): string {
   return (v ?? []).map(x => val(x)).filter(Boolean).join(", ");
 }
 
-// Fact-row icons, kept from the mockup.
+// Fact-row icons, from the mockup (feather-style inline SVGs).
 const ICON = {
   person:   `<svg viewBox="0 0 24 24" fill="none" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="8" r="4"/><path d="M6 21v-2a6 6 0 0 1 12 0v2"/></svg>`,
   globe:    `<svg viewBox="0 0 24 24" fill="none" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"/><path d="M2 12h20"/><path d="M12 2a15.3 15.3 0 0 1 4 10 15.3 15.3 0 0 1-4 10 15.3 15.3 0 0 1-4-10 15.3 15.3 0 0 1 4-10z"/></svg>`,
@@ -72,52 +78,44 @@ const ICON = {
   mail:     `<svg viewBox="0 0 24 24" fill="none" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M22 6c0-1.1-.9-2-2-2H4a2 2 0 0 0-2 2v12c0 1.1.9 2 2 2h16a2 2 0 0 0 2-2V6z"/><path d="m22 6-10 7L2 6"/></svg>`,
 };
 
+// Faithful port of doctor-profile-mockup-final.html, scoped under `.dpm`.
 const STYLE = `
 <style>
 .dpm{
-  --teal:#1aa88f;--text-dark:#333333;--text-gray:#7a7a7a;--tan:#475569;--icon-bg:#eef0f1;
+  --teal:#1aa88f;--teal-icon:#1aa88f;--text-dark:#333333;--text-gray:#7a7a7a;--tan:#8a6d47;--icon-bg:#eef0f1;
   box-sizing:border-box;width:${PROFILE_IMAGE_WIDTH}px;
   font-family:"Poppins",-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,Helvetica,Arial,sans-serif;
-  background:#ffffff;color:var(--text-dark);padding:26px;display:flex;gap:26px;align-items:flex-start;
+  background:#ffffff;color:var(--text-dark);padding:32px;display:flex;gap:40px;align-items:flex-start;
 }
 .dpm *{box-sizing:border-box;}
-/* Content-height columns (align-items:flex-start on .dpm), NOT stretch — a
-   stretched nested flex card rasterises inconsistently in some html2canvas
-   builds (the teal background stopped short so the buttons spilled onto white).
-   Letting the teal card hug its own content keeps the buttons inside it. */
-.dpm .side-col{width:328px;flex-shrink:0;}
-.dpm .profile-card{background:linear-gradient(180deg,#189F8A 0%,#1AC2A8 100%);border-radius:20px;padding:26px 22px;color:#fff;text-align:center;width:100%;display:flex;flex-direction:column;align-items:center;}
-.dpm .avatar{width:150px;height:150px;border-radius:50%;overflow:hidden;margin:0 auto 14px;border:3px solid #ffffff;background:#0e7d6b;display:flex;align-items:center;justify-content:center;flex-shrink:0;}
+.dpm .side-col{width:274px;flex-shrink:0;}
+.dpm .profile-card{background:linear-gradient(180deg,#189F8A 0%,#1AC2A8 100%);border-radius:20px;padding:28px 26px 26px;color:#fff;text-align:center;}
+.dpm .avatar{width:170px;height:170px;border-radius:50%;overflow:hidden;margin:0 auto 16px;border:3px solid #ffffff;background:#0e7d6b;display:flex;align-items:center;justify-content:center;}
 .dpm .avatar img{width:100%;height:100%;object-fit:cover;display:block;}
-.dpm .avatar .initials{font-size:50px;font-weight:600;color:#ffffff;}
-.dpm .profile-card h2{font-size:18px;margin:0 0 4px;font-weight:600;line-height:1.3;}
+.dpm .avatar .initials{font-size:60px;font-weight:600;color:#ffffff;}
+.dpm .profile-card h2{font-size:17px;margin:0 0 5px;font-weight:600;line-height:1.3;white-space:nowrap;}
 .dpm .profile-card .role{font-size:13px;opacity:0.95;margin:0 0 12px;font-weight:600;}
-.dpm .member-badge{display:inline-flex;align-items:center;justify-content:center;height:28px;background:#0e7d6b;border-radius:16px;padding:0 16px 8px;font-size:11.5px;font-weight:600;}
-.dpm .profile-card hr{border:none;border-top:1px dashed rgba(255,255,255,0.4);margin:16px 0;width:100%;}
+.dpm .member-badge{display:inline-block;background:#0e7d6b;border-radius:16px;padding:5px 16px;font-size:11.5px;font-weight:600;}
+.dpm .profile-card hr{border:none;border-top:1px dashed rgba(255,255,255,0.4);margin:18px 0 16px;}
 .dpm .profile-card .age{font-size:14px;font-weight:600;margin-bottom:14px;}
-.dpm .contact-row{display:flex;align-items:center;justify-content:center;gap:9px;font-size:12.5px;margin-bottom:10px;word-break:break-word;}
+.dpm .contact-row{display:flex;align-items:center;justify-content:center;gap:9px;font-size:12.5px;margin-bottom:11px;word-break:break-word;}
 .dpm .contact-icon{width:24px;height:24px;border-radius:50%;background:#fff;display:flex;align-items:center;justify-content:center;flex-shrink:0;}
 .dpm .contact-icon svg{width:13px;height:13px;stroke:var(--teal);}
-.dpm .main{flex:1;min-width:0;display:flex;flex-direction:column;}
-.dpm .main h1{font-size:17px;line-height:1.3;margin:0 0 7px;font-weight:600;color:#3a3a3a;}
-.dpm .section-label{font-size:11.5px;font-weight:600;margin:0 0 5px;color:#3a3a3a;}
-.dpm .bio{font-size:11px;line-height:1.6;color:var(--tan);margin:0 0 10px;max-height:76px;overflow:hidden;}
-.dpm .divider{border:none;border-top:1px solid #b9e5dd;margin:12px 0;}
-.dpm .fact-grid{display:grid;grid-template-columns:repeat(3,1fr);row-gap:16px;column-gap:16px;}
-.dpm .fact{display:flex;align-items:flex-start;gap:9px;}
-.dpm .fact .icon{width:29px;height:29px;border-radius:50%;background:var(--icon-bg);display:flex;align-items:center;justify-content:center;flex-shrink:0;}
-.dpm .fact .icon svg{width:14px;height:14px;stroke:var(--teal);}
-.dpm .fact .label{font-size:10px;color:var(--text-gray);margin-bottom:2px;line-height:1.2;}
-.dpm .fact .value{font-size:11.5px;font-weight:600;color:#3a3a3a;line-height:1.25;}
-/* Decorative action buttons on the teal card. Full-width pills, stacked. The
-   bottom padding is the same html2canvas nudge the member-badge uses — in the
-   user's Chromium, flex-centred text in a fixed-height box rasterises LOW, so we
-   pad the bottom to push it back to visual centre. */
-.dpm .btn-col{width:100%;margin-top:20px;display:flex;flex-direction:column;gap:11px;}
-.dpm .btn{height:44px;border-radius:23px;display:flex;align-items:center;justify-content:center;font-size:13px;font-weight:600;line-height:1;padding:0 0 12px;}
-.dpm .btn-resume{background:#ffffff;color:var(--teal);}
-.dpm .btn-fav{background:#ffffff;color:#4a4a4a;}
-.dpm .btn-dark{background:#111827;color:#ffffff;}
+.dpm .btn{display:block;width:100%;text-align:center;padding:15px 0;border-radius:10px;font-size:14px;font-weight:600;margin-top:14px;border:none;}
+.dpm .btn-gray{background:linear-gradient(180deg,#f2f2f2,#e3e3e3);color:#333;}
+.dpm .btn-outline{background:#fff;color:var(--teal);border:1.5px solid var(--teal);}
+.dpm .btn-black{background:#111111;color:#fff;}
+.dpm .main{flex:1;min-width:0;padding-top:6px;}
+.dpm .main h1{font-size:25px;line-height:1.3;margin:0 0 16px;font-weight:600;color:#3a3a3a;}
+.dpm .section-label{font-size:17px;font-weight:600;margin:0 0 10px;color:#3a3a3a;}
+.dpm .bio{font-size:13.5px;line-height:1.7;color:var(--tan);margin:0 0 20px;}
+.dpm .divider{border:none;border-top:1px solid #b9e5dd;margin:22px 0;}
+.dpm .fact-grid{display:grid;grid-template-columns:repeat(3,1fr);row-gap:26px;column-gap:20px;margin-bottom:20px;}
+.dpm .fact{display:flex;align-items:flex-start;gap:12px;}
+.dpm .fact .icon{width:44px;height:44px;border-radius:50%;background:var(--icon-bg);display:flex;align-items:center;justify-content:center;flex-shrink:0;}
+.dpm .fact .icon svg{width:21px;height:21px;stroke:var(--teal-icon);}
+.dpm .fact .label{font-size:12.5px;color:var(--text-gray);margin-bottom:3px;}
+.dpm .fact .value{font-size:14px;font-weight:600;color:#3a3a3a;}
 </style>`;
 
 function factHtml(icon: string, label: string, value: string): string {
@@ -129,9 +127,9 @@ function contactHtml(icon: string, value: string): string {
   return `<div class="contact-row"><span class="contact-icon">${icon}</span>${esc(value)}</div>`;
 }
 
-/** Build the 3:2 landscape profile HTML for `c`, empties dropped. Returns
+/** Build the profile card HTML for `c`, empties dropped. Returns
  *  `<style>…</style><div class="dpm">…</div>` — inject as innerHTML into a
- *  capture holder captured at PROFILE_IMAGE_WIDTH×PROFILE_IMAGE_HEIGHT. */
+ *  capture holder captured at PROFILE_IMAGE_WIDTH. */
 export function buildDoctorProfileHtml(c: WpCandidate): string {
   const name    = drName(val(c.full_name) || val(c.title));
   const role    = val(c.job_title);
@@ -147,42 +145,44 @@ export function buildDoctorProfileHtml(c: WpCandidate): string {
     : `<span class="initials">${esc(initials || "Dr")}</span>`;
 
   const memberSince = fmtDate(c.wp_date);
+  // Teal card = photo → name → role → badge → hr → age → phone → email. The three
+  // action buttons live OUTSIDE the card (siblings below it), as in the mockup.
   const sideCard =
-    `<div class="profile-card">` +
-      `<div class="avatar">${avatar}</div>` +
-      (name ? `<h2>${esc(name)}</h2>` : "") +
-      (role ? `<p class="role">${esc(role)}</p>` : "") +
-      (memberSince ? `<span class="member-badge">Member Since: ${esc(memberSince)}</span>` : "") +
-      ((age || val(c.phone) || val(c.email)) ? `<hr>` : "") +
-      (age ? `<div class="age">Age: ${esc(age)} Years Old</div>` : "") +
-      contactHtml(ICON.phone, val(c.phone)) +
-      contactHtml(ICON.mail, val(c.email)) +
-      // Decorative buttons (match the website card Amir referenced) — always
-      // shown, non-functional in a flat image.
-      `<div class="btn-col">` +
-        `<div class="btn btn-resume">View Resume</div>` +
-        `<div class="btn btn-fav">Add To My Favorites</div>` +
-        `<div class="btn btn-dark">Contact Us</div>` +
+    `<div class="side-col">` +
+      `<div class="profile-card">` +
+        `<div class="avatar">${avatar}</div>` +
+        (name ? `<h2>${esc(name)}</h2>` : "") +
+        (role ? `<p class="role">${esc(role)}</p>` : "") +
+        (memberSince ? `<span class="member-badge">Member Since: ${esc(memberSince)}</span>` : "") +
+        ((age || val(c.phone) || val(c.email)) ? `<hr>` : "") +
+        (age ? `<div class="age">Age: ${esc(age)} Years Old</div>` : "") +
+        contactHtml(ICON.phone, val(c.phone)) +
+        contactHtml(ICON.mail, val(c.email)) +
       `</div>` +
+      // Decorative buttons — non-functional in a flat image, kept to match the
+      // real card exactly (gray / teal-outline / black rounded rects).
+      `<div class="btn btn-gray">View Resume</div>` +
+      `<div class="btn btn-outline">Add To My Favorites</div>` +
+      `<div class="btn btn-black">Contact Us</div>` +
     `</div>`;
 
   const h1 = [name, role, location].filter(Boolean).join(" – ");
   const bio = val(c.area_of_interest);
 
   const facts = [
-    factHtml(ICON.person,    "Age",                             age ? `${age} years old` : ""),
-    factHtml(ICON.globe,     "Nationality",                     val(c.nationality)),
-    factHtml(ICON.calendar,  "Date of Birth",                   fmtDate(c.date_of_birth)),
-    factHtml(ICON.steth,     "Specialty",                       val(c.specialty)),
-    factHtml(ICON.personChk, "Specialist / Consultant",         val(c.rank)),
-    factHtml(ICON.briefcase, "Years of Experience",             c.years_experience != null ? `${c.years_experience} Years` : ""),
-    factHtml(ICON.idcard,    "DHA / DOH / MOH / SCFHS / QCHP",   licenses),
-    factHtml(ICON.calNote,   "Notice Period",                   val(c.notice_period)),
-    factHtml(ICON.pin,       "Targeted Location",               joinList(c.targeted_locations)),
-    (val(c.languages) ? `<div class="fact"><div class="icon" style="font-weight:700;font-size:11px;color:var(--teal);">A文</div><div><div class="label">Languages</div><div class="value">${esc(val(c.languages))}</div></div></div>` : ""),
-    factHtml(ICON.chat,      "English Level",                   val(c.english_level)),
-    factHtml(ICON.users,     "Family Status",                   val(c.family_status)),
-    factHtml(ICON.users,     "Have Children / Dependent",       dependents),
+    factHtml(ICON.person,    "Age:",                                    age ? `${age} years old` : ""),
+    factHtml(ICON.globe,     "Nationality:",                            val(c.nationality)),
+    factHtml(ICON.calendar,  "Date of Birth:",                          fmtDate(c.date_of_birth)),
+    factHtml(ICON.steth,     "Specialty:",                              val(c.specialty)),
+    factHtml(ICON.personChk, "Specialist / Consultant:",                val(c.rank)),
+    factHtml(ICON.briefcase, "Years of Experience:",                    c.years_experience != null ? `${c.years_experience} Years` : ""),
+    factHtml(ICON.idcard,    "DHA / DOH / MOH / SCFHS / QCHP Licenses?", licenses),
+    factHtml(ICON.calNote,   "Notice Period:",                          val(c.notice_period)),
+    factHtml(ICON.pin,       "Targeted Location:",                      joinList(c.targeted_locations)),
+    (val(c.languages) ? `<div class="fact"><div class="icon" style="font-weight:700;font-size:12px;color:var(--teal-icon);">A文</div><div><div class="label">Languages:</div><div class="value">${esc(val(c.languages))}</div></div></div>` : ""),
+    factHtml(ICON.chat,      "English Level:",                          val(c.english_level)),
+    factHtml(ICON.users,     "Family Status:",                          val(c.family_status)),
+    factHtml(ICON.users,     "Have Children / Dependent:",              dependents),
   ].filter(Boolean).join("");
 
   const main =
@@ -192,5 +192,5 @@ export function buildDoctorProfileHtml(c: WpCandidate): string {
       (facts ? `${(h1 || bio) ? `<hr class="divider">` : ""}<div class="fact-grid">${facts}</div>` : "") +
     `</div>`;
 
-  return `${STYLE}<div class="dpm"><div class="side-col">${sideCard}</div>${main}</div>`;
+  return `${STYLE}<div class="dpm">${sideCard}${main}</div>`;
 }
