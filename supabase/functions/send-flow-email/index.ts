@@ -134,7 +134,11 @@ function pickSender(assignedTo: string | null | undefined): { fromHeader: string
   if (s) {
     return {
       fromHeader: `${s.displayName} <${s.email}>`,
-      replyHint:  s.email,
+      // hello@ is the generic company From but has no real mailbox — route its
+      // replies through the parser address (reply-<run_id>@) so the dashboard
+      // Replies inbox captures them, instead of the dead hello@ box. Real people
+      // keep personal routing (replies land in their Gmail).
+      replyHint:  key === "hello@allocationassist.com" ? "" : s.email,
       first:      s.firstName,
       last:       s.lastName,
       title:      s.title,

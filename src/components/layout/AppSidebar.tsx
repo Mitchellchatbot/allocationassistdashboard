@@ -27,6 +27,7 @@ import {
   Send,
   Bug,
   Library,
+  MessageSquareReply,
   type LucideIcon,
 } from "lucide-react";
 import { useCallback, useEffect, useMemo, useState } from "react";
@@ -50,6 +51,7 @@ import {
   useSidebar,
 } from "@/components/ui/sidebar";
 import { useNotifications } from "@/hooks/use-notifications";
+import { useReplies } from "@/hooks/use-replies";
 import { useUniversalSearch } from "@/lib/universal-search-context";
 import { useTour } from "@/components/OnboardingTour";
 
@@ -71,6 +73,7 @@ interface NavSection {
 
 interface BadgeContext {
   unreadNotifications: number;
+  unreadReplies: number;
 }
 
 // Sections (top → bottom). Sidebar used to be 18 flat items — now grouped so
@@ -96,6 +99,7 @@ const NAV_SECTIONS: NavSection[] = [
       { title: "Templates & Hospitals", url: "/information", icon: Library },
       { title: "Vacancies",       url: "/vacancies",       icon: ClipboardList },
       { title: "Profile Sent",    url: "/profile-sent",    icon: Send },
+      { title: "Replies",         url: "/replies",         icon: MessageSquareReply, badge: (c) => c.unreadReplies },
       { title: "Batch Sends",     url: "/batches",         icon: Mailbox },
       { title: "Past Sent",       url: "/past-sent",       icon: History },
       { title: "Feature Lab",     url: "/feature-lab",     icon: FlaskConical },
@@ -174,7 +178,8 @@ export function AppSidebar() {
   const { user, signOut, role, allowedPages } = useAuth();
   const navigate = useNavigate();
   const { unreadCount } = useNotifications();
-  const badgeCtx: BadgeContext = { unreadNotifications: unreadCount };
+  const { unreadCount: unreadReplies } = useReplies();
+  const badgeCtx: BadgeContext = { unreadNotifications: unreadCount, unreadReplies };
   const search = useUniversalSearch();
   // While a guided tour runs, force every section open so the tour's
   // sidebar-<slug> spotlights always have a mounted target — otherwise a
