@@ -78,10 +78,14 @@ const STYLE = `
   --teal:#1aa88f;--text-dark:#333333;--text-gray:#7a7a7a;--tan:#475569;--icon-bg:#eef0f1;
   box-sizing:border-box;width:${PROFILE_IMAGE_WIDTH}px;
   font-family:"Poppins",-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,Helvetica,Arial,sans-serif;
-  background:#ffffff;color:var(--text-dark);padding:26px;display:flex;gap:26px;align-items:stretch;
+  background:#ffffff;color:var(--text-dark);padding:26px;display:flex;gap:26px;align-items:flex-start;
 }
 .dpm *{box-sizing:border-box;}
-.dpm .side-col{width:328px;flex-shrink:0;display:flex;}
+/* Content-height columns (align-items:flex-start on .dpm), NOT stretch — a
+   stretched nested flex card rasterises inconsistently in some html2canvas
+   builds (the teal background stopped short so the buttons spilled onto white).
+   Letting the teal card hug its own content keeps the buttons inside it. */
+.dpm .side-col{width:328px;flex-shrink:0;}
 .dpm .profile-card{background:linear-gradient(180deg,#189F8A 0%,#1AC2A8 100%);border-radius:20px;padding:26px 22px;color:#fff;text-align:center;width:100%;display:flex;flex-direction:column;align-items:center;}
 .dpm .avatar{width:150px;height:150px;border-radius:50%;overflow:hidden;margin:0 auto 14px;border:3px solid #ffffff;background:#0e7d6b;display:flex;align-items:center;justify-content:center;flex-shrink:0;}
 .dpm .avatar img{width:100%;height:100%;object-fit:cover;display:block;}
@@ -99,10 +103,10 @@ const STYLE = `
 .dpm .section-label{font-size:13.5px;font-weight:600;margin:0 0 5px;color:#3a3a3a;}
 .dpm .bio{font-size:12.5px;line-height:1.6;color:var(--tan);margin:0 0 10px;max-height:82px;overflow:hidden;}
 .dpm .divider{border:none;border-top:1px solid #b9e5dd;margin:12px 0;}
-.dpm .fact-grid{display:grid;grid-template-columns:repeat(3,1fr);row-gap:15px;column-gap:16px;}
+.dpm .fact-grid{display:grid;grid-template-columns:repeat(3,1fr);row-gap:19px;column-gap:18px;}
 .dpm .fact{display:flex;align-items:flex-start;gap:10px;}
-.dpm .fact .icon{width:38px;height:38px;border-radius:50%;background:var(--icon-bg);display:flex;align-items:center;justify-content:center;flex-shrink:0;}
-.dpm .fact .icon svg{width:18px;height:18px;stroke:var(--teal);}
+.dpm .fact .icon{width:34px;height:34px;border-radius:50%;background:var(--icon-bg);display:flex;align-items:center;justify-content:center;flex-shrink:0;}
+.dpm .fact .icon svg{width:16px;height:16px;stroke:var(--teal);}
 .dpm .fact .label{font-size:11px;color:var(--text-gray);margin-bottom:2px;line-height:1.2;}
 .dpm .fact .value{font-size:13px;font-weight:600;color:#3a3a3a;line-height:1.25;}
 /* Decorative action buttons on the teal card. Full-width pills, stacked. The
