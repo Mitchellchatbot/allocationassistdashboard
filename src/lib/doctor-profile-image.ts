@@ -3,10 +3,12 @@
 // the hospital "profile sent" emails (replacing the old teal card) and shows in
 // Doctors → Generate image.
 //
-// Layout: teal photo card on the left, then title + areas-of-interest + the fact
-// grid + one education entry on the right — everything inside a fixed 1200×800
-// (3:2) frame with overflow hidden, so the output is always exactly 3:2 and
-// nothing spills. EMPTY values are dropped (no blank facts / rows / sections).
+// Layout: teal photo card on the left (photo, name, role, member-since, age,
+// contact, then the View Resume / Add To My Favorites / Contact Us buttons), and
+// title + areas-of-interest + the fact grid on the right. EMPTY values are
+// dropped (no blank facts / rows). The three buttons are decorative — they don't
+// work in a flat image, but they're kept to match the website card Amir sent as
+// the reference. (Education / Experience was removed per that same feedback.)
 //
 // CSS is scoped under `.dpm` (not bare `body`/`*`) so injecting it into an
 // off-screen capture holder can't repaint the dashboard.
@@ -103,14 +105,15 @@ const STYLE = `
 .dpm .fact .icon svg{width:18px;height:18px;stroke:var(--teal);}
 .dpm .fact .label{font-size:11px;color:var(--text-gray);margin-bottom:2px;line-height:1.2;}
 .dpm .fact .value{font-size:13px;font-weight:600;color:#3a3a3a;line-height:1.25;}
-.dpm .tabs{display:flex;margin:8px 0 0;}
-.dpm .tab{flex:1;display:flex;align-items:center;justify-content:center;height:46px;padding:0 0 14px;font-size:13px;font-weight:700;letter-spacing:.3px;}
-.dpm .tab-active{background:#0e9e86;color:#fff;}
-.dpm .tab-inactive{background:#eeeeee;color:#555;}
-.dpm .edu-block{padding-top:16px;}
-.dpm .edu-title{font-size:15px;margin:0 0 6px;color:#3a3a3a;font-weight:700;line-height:1.3;}
-.dpm .edu-org{font-size:14px;color:var(--teal);font-weight:600;margin:0 0 5px;}
-.dpm .edu-meta{font-size:12.5px;color:var(--tan);margin:0 0 4px;}
+/* Decorative action buttons on the teal card. Full-width pills, stacked. The
+   bottom padding is the same html2canvas nudge the member-badge uses — in the
+   user's Chromium, flex-centred text in a fixed-height box rasterises LOW, so we
+   pad the bottom to push it back to visual centre. */
+.dpm .btn-col{width:100%;margin-top:20px;display:flex;flex-direction:column;gap:11px;}
+.dpm .btn{height:44px;border-radius:23px;display:flex;align-items:center;justify-content:center;font-size:13px;font-weight:600;line-height:1;padding:0 0 12px;}
+.dpm .btn-resume{background:#ffffff;color:var(--teal);}
+.dpm .btn-fav{background:#ffffff;color:#4a4a4a;}
+.dpm .btn-dark{background:#111827;color:#ffffff;}
 </style>`;
 
 function factHtml(icon: string, label: string, value: string): string {
@@ -150,6 +153,13 @@ export function buildDoctorProfileHtml(c: WpCandidate): string {
       (age ? `<div class="age">Age: ${esc(age)} Years Old</div>` : "") +
       contactHtml(ICON.phone, val(c.phone)) +
       contactHtml(ICON.mail, val(c.email)) +
+      // Decorative buttons (match the website card Amir referenced) — always
+      // shown, non-functional in a flat image.
+      `<div class="btn-col">` +
+        `<div class="btn btn-resume">View Resume</div>` +
+        `<div class="btn btn-fav">Add To My Favorites</div>` +
+        `<div class="btn btn-dark">Contact Us</div>` +
+      `</div>` +
     `</div>`;
 
   const h1 = [name, role, location].filter(Boolean).join(" – ");
@@ -171,33 +181,11 @@ export function buildDoctorProfileHtml(c: WpCandidate): string {
     factHtml(ICON.users,     "Have Children / Dependent",       dependents),
   ].filter(Boolean).join("");
 
-  // EDUCATION / EXPERIENCE tab bar + one entry, matching the mockup exactly (the
-  // tabs are non-functional in a static image but kept for the look). Active tab
-  // = whichever we have data for (education preferred).
-  const eduDate = [fmtDate(c.education_start), c.education_present ? "Present" : fmtDate(c.education_end)].filter(Boolean).join(" – ");
-  const expDate = [fmtDate(c.experience_start), c.experience_present ? "Present" : fmtDate(c.experience_end)].filter(Boolean).join(" – ");
-  const entry = (title: string, org: string, date: string) =>
-    (title ? `<p class="edu-title">${esc(title)}</p>` : "") +
-    (org ? `<p class="edu-org">${esc(org)}</p>` : "") +
-    (date ? `<p class="edu-meta">${esc(date)}</p>` : "");
-  const eduContent = entry(val(c.education_title), val(c.education_academy), eduDate);
-  const expContent = entry(val(c.experience_title), val(c.experience_company), expDate);
-  const tabBar = (active: "edu" | "exp") =>
-    `<div class="tabs"><div class="tab ${active === "edu" ? "tab-active" : "tab-inactive"}">EDUCATION</div>` +
-    `<div class="tab ${active === "exp" ? "tab-active" : "tab-inactive"}">EXPERIENCE</div></div>`;
-  let eduBlock = "";
-  if (eduContent) {
-    eduBlock = tabBar("edu") + `<div class="edu-block">${eduContent}</div>`;
-  } else if (expContent) {
-    eduBlock = tabBar("exp") + `<div class="edu-block">${expContent}</div>`;
-  }
-
   const main =
     `<div class="main">` +
       (h1 ? `<h1>${esc(h1)}</h1>` : "") +
       (bio ? `<p class="section-label">Specific areas of interests within the specialization</p><p class="bio">${esc(bio)}</p>` : "") +
       (facts ? `${(h1 || bio) ? `<hr class="divider">` : ""}<div class="fact-grid">${facts}</div>` : "") +
-      (eduBlock ? `<hr class="divider">${eduBlock}` : "") +
     `</div>`;
 
   return `${STYLE}<div class="dpm"><div class="side-col">${sideCard}</div>${main}</div>`;
