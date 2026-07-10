@@ -99,16 +99,16 @@ const STYLE = `
 .dpm .contact-icon{width:24px;height:24px;border-radius:50%;background:#fff;display:flex;align-items:center;justify-content:center;flex-shrink:0;}
 .dpm .contact-icon svg{width:13px;height:13px;stroke:var(--teal);}
 .dpm .main{flex:1;min-width:0;display:flex;flex-direction:column;}
-.dpm .main h1{font-size:21px;line-height:1.3;margin:0 0 8px;font-weight:600;color:#3a3a3a;}
-.dpm .section-label{font-size:13.5px;font-weight:600;margin:0 0 5px;color:#3a3a3a;}
-.dpm .bio{font-size:12.5px;line-height:1.6;color:var(--tan);margin:0 0 10px;max-height:82px;overflow:hidden;}
+.dpm .main h1{font-size:17px;line-height:1.3;margin:0 0 7px;font-weight:600;color:#3a3a3a;}
+.dpm .section-label{font-size:11.5px;font-weight:600;margin:0 0 5px;color:#3a3a3a;}
+.dpm .bio{font-size:11px;line-height:1.6;color:var(--tan);margin:0 0 10px;max-height:76px;overflow:hidden;}
 .dpm .divider{border:none;border-top:1px solid #b9e5dd;margin:12px 0;}
-.dpm .fact-grid{display:grid;grid-template-columns:repeat(3,1fr);row-gap:19px;column-gap:18px;}
-.dpm .fact{display:flex;align-items:flex-start;gap:10px;}
-.dpm .fact .icon{width:34px;height:34px;border-radius:50%;background:var(--icon-bg);display:flex;align-items:center;justify-content:center;flex-shrink:0;}
-.dpm .fact .icon svg{width:16px;height:16px;stroke:var(--teal);}
-.dpm .fact .label{font-size:11px;color:var(--text-gray);margin-bottom:2px;line-height:1.2;}
-.dpm .fact .value{font-size:13px;font-weight:600;color:#3a3a3a;line-height:1.25;}
+.dpm .fact-grid{display:grid;grid-template-columns:repeat(3,1fr);row-gap:16px;column-gap:16px;}
+.dpm .fact{display:flex;align-items:flex-start;gap:9px;}
+.dpm .fact .icon{width:29px;height:29px;border-radius:50%;background:var(--icon-bg);display:flex;align-items:center;justify-content:center;flex-shrink:0;}
+.dpm .fact .icon svg{width:14px;height:14px;stroke:var(--teal);}
+.dpm .fact .label{font-size:10px;color:var(--text-gray);margin-bottom:2px;line-height:1.2;}
+.dpm .fact .value{font-size:11.5px;font-weight:600;color:#3a3a3a;line-height:1.25;}
 /* Decorative action buttons on the teal card. Full-width pills, stacked. The
    bottom padding is the same html2canvas nudge the member-badge uses — in the
    user's Chromium, flex-centred text in a fixed-height box rasterises LOW, so we
