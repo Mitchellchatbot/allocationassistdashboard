@@ -179,6 +179,11 @@ export function BulkProfileSendDialog({ open, onClose }: { open: boolean; onClos
               current_stage: "email_hospital",
               status:        "active",
               created_by:    user?.email ?? null,
+              // Send from the generic Allocation Assist Team address (AA is a
+              // referral agency, not tied to the hospital) — same default as the
+              // Send Profile dialog. Set explicitly so the hospital-owner trigger
+              // doesn't stamp a per-hospital "owner" instead.
+              assigned_to:   "hello@allocationassist.com",
               metadata: {
                 batch_id:          batchId,
                 hospital_id:       h.id,

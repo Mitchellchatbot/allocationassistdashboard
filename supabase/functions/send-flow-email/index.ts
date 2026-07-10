@@ -122,6 +122,9 @@ const SENDERS: Record<string, SenderProfile> = {
   "sohaila@allocationassist.com":        { displayName: "Sohaila Mohamed", firstName: "Sohaila", lastName: "Mohamed", email: "sohaila@allocationassist.com",        title: "Hospital Introduction Officer", phone: "" },
   "ishak@allocationassist.com":          { displayName: "Ishak Boulaat",   firstName: "Ishak",   lastName: "Boulaat", email: "ishak@allocationassist.com",          title: "Hospital Introduction Officer", phone: "" },
   "ammar@allocationassist.com":          { displayName: "Ammar",            firstName: "Ammar",   lastName: "",        email: "ammar@allocationassist.com",          title: "Founder",                       phone: "" },
+  // Generic company sender — Allocation Assist is a referral agency, so profile
+  // sends default to this rather than a specific person. Signs off as the team.
+  "hello@allocationassist.com":          { displayName: "Allocation Assist Team", firstName: "The Allocation Assist", lastName: "team", email: "hello@allocationassist.com", title: "", phone: "" },
 };
 
 /** Resolve the From line + signature variant from a run's assigned_to. */
