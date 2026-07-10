@@ -51,7 +51,7 @@ import {
   useSidebar,
 } from "@/components/ui/sidebar";
 import { useNotifications } from "@/hooks/use-notifications";
-import { useReplies } from "@/hooks/use-replies";
+import { useUnreadReplyCount } from "@/hooks/use-replies";
 import { useUniversalSearch } from "@/lib/universal-search-context";
 import { useTour } from "@/components/OnboardingTour";
 
@@ -178,7 +178,7 @@ export function AppSidebar() {
   const { user, signOut, role, allowedPages } = useAuth();
   const navigate = useNavigate();
   const { unreadCount } = useNotifications();
-  const { unreadCount: unreadReplies } = useReplies();
+  const unreadReplies = useUnreadReplyCount();
   const badgeCtx: BadgeContext = { unreadNotifications: unreadCount, unreadReplies };
   const search = useUniversalSearch();
   // While a guided tour runs, force every section open so the tour's
