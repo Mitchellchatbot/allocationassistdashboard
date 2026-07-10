@@ -3,10 +3,10 @@ import { supabase } from "@/lib/supabase";
 /**
  * A file the team attaches to an outgoing email (CV, logbook, …).
  *
- * `path` is the PUBLIC URL of the uploaded file — send-flow-email forwards it
- * to Resend as an attachment `path`, and Resend fetches it server-side. The
- * shape matches what Resend's attachments array expects ({ filename, path }),
- * so the metadata travels straight through.
+ * `path` is the PUBLIC URL of the uploaded file. send-flow-email / send-batch
+ * FETCH this URL server-side and base64-inline the bytes into Resend's
+ * `attachments[].content` (a bad/oversized file is skipped, never failing the
+ * whole send). The bucket is public so that server-side fetch doesn't 401.
  */
 export interface EmailAttachment {
   filename: string;
@@ -52,7 +52,12 @@ export async function uploadEmailAttachment(file: File): Promise<EmailAttachment
   // as the last segment so Resend names the attachment sensibly.
   const safeName = file.name.replace(/[^a-zA-Z0-9._-]/g, "_");
   const storagePath = `${crypto.randomUUID()}/${safeName}`;
-  const contentType = file.type || EXT_MIME[ext] || "application/octet-stream";
+  // Prefer the extension-derived MIME over file.type. Browsers frequently hand
+  // us `application/octet-stream` (or empty) for .doc/.docx — and the bucket's
+  // allowed_mime_types don't include octet-stream, so that upload gets REJECTED
+  // and the attachment silently never attaches. `ext` is already validated
+  // against ALLOWED_EXT, so EXT_MIME[ext] is always a valid allowed type.
+  const contentType = EXT_MIME[ext] || file.type || "application/octet-stream";
   const { error } = await supabase.storage.from(BUCKET).upload(storagePath, file, {
     contentType,
     upsert: false,
