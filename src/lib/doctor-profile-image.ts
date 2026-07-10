@@ -95,20 +95,23 @@ const STYLE = `
 .dpm .avatar .initials{font-size:60px;font-weight:600;color:#ffffff;}
 .dpm .profile-card h2{font-size:17px;margin:0 0 5px;font-weight:600;line-height:1.3;white-space:nowrap;}
 .dpm .profile-card .role{font-size:13px;opacity:0.95;margin:0 0 12px;font-weight:600;}
-.dpm .member-badge{display:inline-block;background:#0e7d6b;border-radius:16px;padding:5px 16px;font-size:11.5px;font-weight:600;}
+/* padding is bottom-biased (2px top / 8px bottom) to counter html2canvas
+   rendering single-line text LOW in the user's Chromium — pushes it back to
+   visual centre. Same trick on .btn below. */
+.dpm .member-badge{display:inline-block;background:#0e7d6b;border-radius:16px;padding:2px 16px 8px;font-size:11.5px;font-weight:600;line-height:1.4;}
 .dpm .profile-card hr{border:none;border-top:1px dashed rgba(255,255,255,0.4);margin:18px 0 16px;}
 .dpm .profile-card .age{font-size:14px;font-weight:600;margin-bottom:14px;}
 .dpm .contact-row{display:flex;align-items:center;justify-content:center;gap:9px;font-size:12.5px;margin-bottom:11px;word-break:break-word;}
 .dpm .contact-icon{width:24px;height:24px;border-radius:50%;background:#fff;display:flex;align-items:center;justify-content:center;flex-shrink:0;}
 .dpm .contact-icon svg{width:13px;height:13px;stroke:var(--teal);}
-.dpm .btn{display:block;width:100%;text-align:center;padding:15px 0;border-radius:10px;font-size:14px;font-weight:600;margin-top:14px;border:none;}
+.dpm .btn{display:block;width:100%;text-align:center;padding:11px 0 19px;border-radius:10px;font-size:14px;font-weight:600;margin-top:14px;border:none;line-height:1.4;}
 .dpm .btn-gray{background:linear-gradient(180deg,#f2f2f2,#e3e3e3);color:#333;}
 .dpm .btn-outline{background:#fff;color:var(--teal);border:1.5px solid var(--teal);}
 .dpm .btn-black{background:#111111;color:#fff;}
 .dpm .main{flex:1;min-width:0;padding-top:6px;}
 .dpm .main h1{font-size:25px;line-height:1.3;margin:0 0 16px;font-weight:600;color:#3a3a3a;}
 .dpm .section-label{font-size:17px;font-weight:600;margin:0 0 10px;color:#3a3a3a;}
-.dpm .bio{font-size:13.5px;line-height:1.7;color:var(--tan);margin:0 0 20px;}
+.dpm .bio{font-size:13.5px;line-height:1.7;color:#555555;margin:0 0 20px;}
 .dpm .divider{border:none;border-top:1px solid #b9e5dd;margin:22px 0;}
 .dpm .fact-grid{display:grid;grid-template-columns:repeat(3,1fr);row-gap:26px;column-gap:20px;margin-bottom:20px;}
 .dpm .fact{display:flex;align-items:flex-start;gap:12px;}
