@@ -763,7 +763,7 @@ Deno.serve(async (req: Request) => {
   // plainifyBody and keeps its coloured header.
   vars.doctor_row_table_html = doctorRowTableHtml(vars);
 
-  const subject = render(tpl.subject ?? "", vars);
+  const subject = collapseDoubledDr(render(tpl.subject ?? "", vars));
   // HTML gets escaped token values (so a doctor name like "Dr. <Smith>" or
   // a Claude-extracted field with stray HTML doesn't break the layout or
   // become an XSS vector in a hospital recipient's inbox). Plain text gets
@@ -775,13 +775,13 @@ Deno.serve(async (req: Request) => {
   // logo block) so plainify runs only on the body source.
   const rawBody       = tpl.body_html || wrapHtml(tpl.body_text);
   const plainBody     = plainifyBody(rawBody);
-  const renderedBody  = render(plainBody, vars, true);
+  const renderedBody  = collapseDoubledDr(render(plainBody, vars, true));
   // Wrap the rendered body in a serif container so every <p>/<table>
   // inherits the sans-serif look from the user's reference email.
   // Inline styles on individual elements still win (signature keeps
   // its teal-bold weight, link colour, etc.).
   const html          = `${FONT_IMPORT}<div style="font-family:${FONT_STACK};font-size:17px;color:#1a2332;line-height:1.55;">${renderedBody}</div>`;
-  const text          = render(tpl.body_text ?? "", vars);
+  const text          = collapseDoubledDr(render(tpl.body_text ?? "", vars));
 
   // Refuse to send templates that still carry the PLACEHOLDER stub copy
   // from the seed migrations. The template editor warns the team, but
@@ -1230,10 +1230,29 @@ function render(body: string, vars: Record<string, string>, html = false): strin
   // Pass 2: variable substitution
   return body.replace(/\{\{\s*([a-zA-Z0-9_]+)\s*\}\}/g, (_m, key: string) => {
     const v = vars[key];
-    if (v === undefined || v === null || v === "") return `{{${key}}}`;
+    if (v === undefined || v === null || v === "") {
+      // Structural HTML tokens (hospital photo, profile card, tables, signature,
+      // logo) are layout blocks, not debug placeholders — when empty they MUST
+      // disappear, never leak as a literal "{{token}}" into a doctor's inbox.
+      // This is what put a raw "{{hospital_image}}" in the Working-Opportunity
+      // emails whenever a hospital had no photo on file. Not-yet-wired URL
+      // placeholders (form_link, profile_link, …) still render literal so a test
+      // recipient can see what still needs resolving.
+      return RAW_HTML_TOKENS.has(key) ? "" : `{{${key}}}`;
+    }
     if (!html) return v;
     return RAW_HTML_TOKENS.has(key) ? v : escapeHtml(v);
   });
+}
+
+/** Collapse a doubled honorific. Every current doctor template hard-codes
+ *  "Hello Dr. {{doctor_name}}", but a stored name like "Dr. Manuel Hevia"
+ *  already carries the title — which rendered "Hello Dr. Dr. Manuel Hevia!".
+ *  Tolerates an inline tag between the two "Dr."s (the HTML greeting wraps the
+ *  name in <strong>). No real person is "Dr. Dr.", so this is safe to run on the
+ *  whole subject/body. */
+function collapseDoubledDr(s: string): string {
+  return s.replace(/\bDr\.?\s*((?:<[^>]+>\s*)*)Dr\.?\s+/gi, (_m, tags = "") => `Dr. ${tags}`);
 }
 
 /** WordPress-style profile card for the individual profile_sent_hospital email
