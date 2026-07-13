@@ -18,7 +18,7 @@ import { useSearchParams } from "react-router-dom";
 import { useZohoData, type ZohoDoctorOnBoard } from "@/hooks/use-zoho-data";
 import { useDebounce } from "@/hooks/use-zoho-leads";
 import { useDoctorProfile, calcCompletion } from "@/hooks/use-doctor-profiles";
-import { useWpCandidateForDoctor } from "@/hooks/use-wp-candidates";
+import { useWpCandidateForDoctor, useUpsertWpCandidate, type WpCandidateUpsertPayload } from "@/hooks/use-wp-candidates";
 import { useForms, type FormResponse } from "@/hooks/use-forms";
 import { useDoctorFormResponses, useDoctorCvUploads, useAnalyzeCv, useBooksInvoices } from "@/hooks/use-doctor-dossier";
 import { useUpdateDoctorOnBoard } from "@/hooks/use-update-doctor";
@@ -32,7 +32,7 @@ import { toast } from "sonner";
 import {
   ChevronDown, ChevronRight, Mail, Phone, MapPin, Building2, UserCog,
   FileText, IdCard, Calendar, ExternalLink, Loader2, FileSearch, CircleUser,
-  Pencil, ScanLine, Check, X, Banknote, Receipt,
+  Pencil, ScanLine, Check, X, Banknote, Receipt, Globe,
 } from "lucide-react";
 import {
   Pagination, PaginationContent, PaginationEllipsis,
@@ -397,7 +397,43 @@ function DoctorDetail({
   const { data: cvs = [], isLoading: cvLoading } = useDoctorCvUploads(doctorId);
   const { data: forms = [] } = useForms();
   const analyze = useAnalyzeCv();
+  const upsertWp = useUpsertWpCandidate();
   const cvUrl = wp?.cv_url || profile?.cv_url || null;
+
+  // #4 — push a board doctor who has no WordPress record INTO WordPress, as a
+  // draft prefilled from their dashboard profile. The team then finishes +
+  // publishes it in Doctors → Profiles. Requires the explicit `manual_create`
+  // intent (the upsert edge fn rejects unattributed creates).
+  const createWpProfile = async () => {
+    const num = (v: unknown) => (v == null || v === "" ? undefined : String(v));
+    const acf: WpCandidateUpsertPayload["acf"] = {
+      full_name:      profile?.doctor_name || name || undefined,
+      job_title:      profile?.title || undefined,
+      phone_number:   phone || undefined,
+      email:          email || undefined,
+      nationality:    profile?.nationality || undefined,
+      specific_areas_of_interests_within_the_specialization: profile?.area_of_interest || undefined,
+      years_of_experience_post_specialization: num(profile?.years_experience),
+      country_of_training: profile?.country_training || undefined,
+      languages:      profile?.languages || undefined,
+      notice_period:  profile?.notice_period || undefined,
+      family_status:  profile?.family_status || profile?.marital_status || undefined,
+      expected_salary: profile?.salary_expectation || undefined,
+      dha__haad__moh_license: profile?.license || undefined,
+    };
+    try {
+      await upsertWp.mutateAsync({ intent: "manual_create", status: "draft", title: name, doctor_id: doctorId, acf });
+      toast.success(`Created a WordPress draft for ${name}. Finish & publish it in Doctors → Profiles.`);
+    } catch (e) {
+      toast.error(e instanceof Error ? e.message : "Couldn't create the WordPress profile.");
+    }
+  };
+  const CreateWpButton = () => (
+    <Button size="sm" variant="outline" onClick={createWpProfile} disabled={upsertWp.isPending} className="h-7 text-[11.5px] gap-1.5">
+      {upsertWp.isPending ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Globe className="h-3.5 w-3.5" />}
+      Create website profile
+    </Button>
+  );
   const formName = useMemo(() => {
     const m = new Map<string, string>();
     for (const f of forms) m.set(f.id, f.name);
@@ -441,11 +477,10 @@ function DoctorDetail({
       <Section
         icon={<CircleUser className="h-3.5 w-3.5" />}
         title="Doctor profile"
-        meta={hasProfile ? (wp ? "Website profile" : `${completion}% complete`) : "Not created yet"}
+        meta={wp ? "Website profile" : hasProfile ? `${completion}% complete · not on website` : "Not created yet"}
         defaultOpen={false}
-        empty={!hasProfile}
       >
-        {hasProfile && (
+        {hasProfile ? (
           <div className="space-y-3">
             <KeyValueGrid pairs={profileFields} />
             {profile?.bio && (
@@ -454,11 +489,17 @@ function DoctorDetail({
                 <p className="text-[12px] text-slate-700 whitespace-pre-wrap leading-relaxed">{profile.bio}</p>
               </div>
             )}
-            <div className="flex flex-wrap gap-2 pt-0.5">
+            <div className="flex flex-wrap gap-2 pt-0.5 items-center">
               {wp?.wp_link && <LinkChip href={wp.wp_link} label="View on website" />}
               {(wp?.cv_url || profile?.cv_url) && <LinkChip href={(wp?.cv_url || profile?.cv_url)!} label="Open CV file" />}
               {profile && <Badge variant="outline" className="text-[10px]">{completion}% profile complete</Badge>}
+              {!wp && <CreateWpButton />}
             </div>
+          </div>
+        ) : (
+          <div className="space-y-2">
+            <p className="text-[11.5px] text-muted-foreground">No profile on file yet — push {name} to WordPress as a draft to start one.</p>
+            <CreateWpButton />
           </div>
         )}
       </Section>
