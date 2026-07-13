@@ -18,7 +18,8 @@ import { useSearchParams } from "react-router-dom";
 import { useZohoData, type ZohoDoctorOnBoard } from "@/hooks/use-zoho-data";
 import { useDebounce } from "@/hooks/use-zoho-leads";
 import { useDoctorProfile, calcCompletion } from "@/hooks/use-doctor-profiles";
-import { useWpCandidateForDoctor, useUpsertWpCandidate, type WpCandidateUpsertPayload } from "@/hooks/use-wp-candidates";
+import { useWpCandidateForDoctor, useUpsertWpCandidate, useUploadWpCv, type WpCandidateUpsertPayload } from "@/hooks/use-wp-candidates";
+import { generateCvPdfFile } from "@/lib/generate-cv-pdf";
 import { useForms, type FormResponse } from "@/hooks/use-forms";
 import { useDoctorFormResponses, useDoctorCvUploads, useAnalyzeCv, useBooksInvoices } from "@/hooks/use-doctor-dossier";
 import { useUpdateDoctorOnBoard } from "@/hooks/use-update-doctor";
@@ -434,6 +435,31 @@ function DoctorDetail({
       Create website profile
     </Button>
   );
+
+  // #5 — generate a clean, AA-branded CV/PDF straight from the doctor's profile
+  // data and save it to their file (uploads to the WP candidate's cv_resume, so
+  // "View on website" / "Open CV file" then point at it).
+  const uploadWpCv = useUploadWpCv();
+  const [genCvBusy, setGenCvBusy] = useState(false);
+  const generateCv = async () => {
+    if (!wp) return;
+    setGenCvBusy(true);
+    try {
+      const file = await generateCvPdfFile(wp);
+      await uploadWpCv.mutateAsync({ file, candidateId: wp.id });
+      toast.success(`Generated a branded CV for ${name} and saved it to their file.`);
+    } catch (e) {
+      toast.error(e instanceof Error ? e.message : "Couldn't generate the CV.");
+    } finally {
+      setGenCvBusy(false);
+    }
+  };
+  const GenerateCvButton = () => (
+    <Button size="sm" variant="outline" onClick={generateCv} disabled={genCvBusy} className="h-7 text-[11.5px] gap-1.5">
+      {genCvBusy ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <FileText className="h-3.5 w-3.5" />}
+      {genCvBusy ? "Generating…" : "Generate CV"}
+    </Button>
+  );
   const formName = useMemo(() => {
     const m = new Map<string, string>();
     for (const f of forms) m.set(f.id, f.name);
@@ -494,6 +520,7 @@ function DoctorDetail({
               {(wp?.cv_url || profile?.cv_url) && <LinkChip href={(wp?.cv_url || profile?.cv_url)!} label="Open CV file" />}
               {profile && <Badge variant="outline" className="text-[10px]">{completion}% profile complete</Badge>}
               {!wp && <CreateWpButton />}
+              {wp && <GenerateCvButton />}
             </div>
           </div>
         ) : (
