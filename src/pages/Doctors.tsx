@@ -22,14 +22,15 @@ import { lazy, Suspense, useMemo } from "react";
 import { useSearchParams } from "react-router-dom";
 import { DashboardLayout } from "@/components/layout/DashboardLayout";
 import { Input } from "@/components/ui/input";
-import { Search, UserSquare, Inbox, LayoutGrid, ImageIcon } from "lucide-react";
+import { Search, UserSquare, Inbox, LayoutGrid, ImageIcon, Wand2 } from "lucide-react";
 
 const DoctorsOverview = lazy(() => import("./DoctorsOverview"));
 const WpCandidates   = lazy(() => import("./WpCandidates"));
 const Forms          = lazy(() => import("./Forms"));
 const GenerateProfileImage = lazy(() => import("./GenerateProfileImage"));
+const ConvertCv      = lazy(() => import("./ConvertCv"));
 
-type Tab = "overview" | "responses" | "profiles" | "generate";
+type Tab = "overview" | "responses" | "profiles" | "generate" | "convert";
 
 const TAB_META: Record<Tab, { label: string; icon: typeof UserSquare; subtitle: string; placeholder: string }> = {
   overview: {
@@ -55,6 +56,12 @@ const TAB_META: Record<Tab, { label: string; icon: typeof UserSquare; subtitle: 
     icon:        ImageIcon,
     subtitle:    "Pick any doctor and generate a shareable image of their profile, built from their WordPress record. Empty fields are left out.",
     placeholder: "Search doctors by name, specialty, or email…",
+  },
+  convert: {
+    label:       "Convert CV",
+    icon:        Wand2,
+    subtitle:    "Upload any incoming doctor CV (PDF or Word) or paste its text — it's reformatted into the Allocation Assist branded template, ready to download as a PDF.",
+    placeholder: "",
   },
 };
 
@@ -140,6 +147,7 @@ export default function Doctors() {
           {tab === "responses" && <Forms         embedded />}
           {tab === "profiles"  && <WpCandidates  embedded />}
           {tab === "generate"  && <GenerateProfileImage />}
+          {tab === "convert"   && <ConvertCv />}
         </div>
       </Suspense>
     </DashboardLayout>
@@ -147,7 +155,7 @@ export default function Doctors() {
 }
 
 function parseTab(raw: string | null): Tab {
-  if (raw === "overview" || raw === "responses" || raw === "profiles" || raw === "generate") return raw;
+  if (raw === "overview" || raw === "responses" || raw === "profiles" || raw === "generate" || raw === "convert") return raw;
   // Legacy `?tab=wp` (the old WP Candidates tab name) lands on Profiles.
   if (raw === "wp") return "profiles";
   // Legacy `?tab=progress` — the deprecated Doctor Progress pipeline, now folded
