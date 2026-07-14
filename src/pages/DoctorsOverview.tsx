@@ -13,12 +13,12 @@
  * Doctor key: a DoB row maps to the AA id `dob:<zohoId>` — the same key that
  * doctor_profiles / form_responses / cv_uploads carry, so the join is exact.
  */
-import { memo, useEffect, useMemo, useState, type ReactNode } from "react";
+import { memo, useCallback, useEffect, useMemo, useState, type ReactNode } from "react";
 import { useSearchParams } from "react-router-dom";
 import { useZohoData, type ZohoDoctorOnBoard } from "@/hooks/use-zoho-data";
 import { useDebounce } from "@/hooks/use-zoho-leads";
 import { useDoctorProfile, calcCompletion } from "@/hooks/use-doctor-profiles";
-import { useWpCandidateForDoctor, useUpsertWpCandidate, useUploadWpCv, type WpCandidateUpsertPayload } from "@/hooks/use-wp-candidates";
+import { useWpCandidateForDoctor, useUpsertWpCandidate, useUploadWpCv, useWpCandidates, normalizePhone, type WpCandidateUpsertPayload } from "@/hooks/use-wp-candidates";
 import { generateCvPdfFile } from "@/lib/generate-cv-pdf";
 import { useForms, type FormResponse } from "@/hooks/use-forms";
 import { useDoctorFormResponses, useDoctorCvUploads, useAnalyzeCv, useBooksInvoices } from "@/hooks/use-doctor-dossier";
@@ -81,6 +81,11 @@ const BILL_FILTER_LABELS: Record<BillFilter, string> = {
   all: "All billing", invoiced: "Has invoices", outstanding: "Has outstanding",
 };
 
+type WpFilter = "all" | "on" | "off";
+const WP_FILTER_LABELS: Record<WpFilter, string> = {
+  all: "All doctors", on: "On WordPress", off: "Not on WordPress",
+};
+
 export default function DoctorsOverview() {
   const [params] = useSearchParams();
   const q = (params.get("q") ?? "").trim().toLowerCase();
@@ -90,10 +95,39 @@ export default function DoctorsOverview() {
   const [range, setRange] = useState<RangeKey>("all");
 
   const [billFilter, setBillFilter] = useState<BillFilter>("all");
+  const [wpFilter, setWpFilter] = useState<WpFilter>("all");
   const [page, setPage] = useState(1);
 
   const { data: zoho, isLoading } = useZohoData();
   const { data: allInvoices = [] } = useBooksInvoices();
+  const { data: allWp = [] } = useWpCandidates();
+
+  // Index the WP candidate pool so the "On WordPress" filter can decide each
+  // doctor's linkage at the LIST level (the row's own lookup only runs when
+  // expanded). Mirrors useWpCandidateForDoctor: doctor_id → phone → email →
+  // unique name. Any WP record counts (drafts included) — "on WordPress" = has
+  // a WP entry, even one just pushed via "Create website profile".
+  const wpIndex = useMemo(() => {
+    const norm = (n: string | null | undefined) =>
+      (n ?? "").toLowerCase().replace(/^(dr|doctor|prof|mr|mrs|ms|miss)\.?\s+/i, "").replace(/\s+/g, " ").trim();
+    const byDoctorId = new Set<string>(), byPhone = new Set<string>(), byEmail = new Set<string>();
+    const nameCount = new Map<string, number>();
+    for (const c of allWp) {
+      if (c.doctor_id) byDoctorId.add(c.doctor_id);
+      const p = normalizePhone(c.phone); if (p) byPhone.add(p);
+      const e = (c.email ?? "").toLowerCase().trim(); if (e) byEmail.add(e);
+      const nm = norm(c.full_name); if (nm) nameCount.set(nm, (nameCount.get(nm) ?? 0) + 1);
+    }
+    return { byDoctorId, byPhone, byEmail, nameCount, norm };
+  }, [allWp]);
+
+  const hasWp = useCallback((d: ZohoDoctorOnBoard): boolean => {
+    if (wpIndex.byDoctorId.has(`dob:${d.id}`)) return true;
+    const p = normalizePhone(d.Phone || d.Mobile); if (p && wpIndex.byPhone.has(p)) return true;
+    const e = (d.Email ?? "").toLowerCase().trim(); if (e && wpIndex.byEmail.has(e)) return true;
+    const nm = wpIndex.norm(doctorDisplayName(d)); if (nm && wpIndex.nameCount.get(nm) === 1) return true;
+    return false;
+  }, [wpIndex]);
   const dob = useMemo(
     () => ((zoho as { rawDoctorsOnBoard?: ZohoDoctorOnBoard[] } | undefined)?.rawDoctorsOnBoard ?? []),
     [zoho],
@@ -132,12 +166,17 @@ export default function DoctorsOverview() {
           if (billFilter === "invoiced"    && (!b || b.count === 0))     return false;
           if (billFilter === "outstanding" && (!b || b.outstanding <= 0)) return false;
         }
+        if (wpFilter !== "all") {
+          const on = hasWp(d);
+          if (wpFilter === "on" && !on) return false;
+          if (wpFilter === "off" && on) return false;
+        }
         return true;
       })
       .sort((a, b) => b.t - a.t);
-  }, [dob, range, qDebounced, billFilter, billingByName]);
+  }, [dob, range, qDebounced, billFilter, billingByName, wpFilter, hasWp]);
 
-  useEffect(() => { setPage(1); }, [qDebounced, range, billFilter]);
+  useEffect(() => { setPage(1); }, [qDebounced, range, billFilter, wpFilter]);
 
   const totalPages = Math.max(1, Math.ceil(filtered.length / PAGE_SIZE));
   const safePage = Math.min(page, totalPages);
@@ -169,7 +208,16 @@ export default function DoctorsOverview() {
           )}
         </div>
         <div className="flex items-center gap-1.5">
-          <Receipt className="h-3.5 w-3.5 text-muted-foreground" />
+          <Globe className="h-3.5 w-3.5 text-muted-foreground" />
+          <Select value={wpFilter} onValueChange={(v) => setWpFilter(v as WpFilter)}>
+            <SelectTrigger className="h-8 w-[160px] text-[12px]"><SelectValue /></SelectTrigger>
+            <SelectContent>
+              {(Object.keys(WP_FILTER_LABELS) as WpFilter[]).map(k => (
+                <SelectItem key={k} value={k} className="text-[12px]">{WP_FILTER_LABELS[k]}</SelectItem>
+              ))}
+            </SelectContent>
+          </Select>
+          <Receipt className="h-3.5 w-3.5 text-muted-foreground ml-1" />
           <Select value={billFilter} onValueChange={(v) => setBillFilter(v as BillFilter)}>
             <SelectTrigger className="h-8 w-[150px] text-[12px]"><SelectValue /></SelectTrigger>
             <SelectContent>
