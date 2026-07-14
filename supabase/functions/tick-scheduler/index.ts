@@ -399,6 +399,24 @@ async function runVacancyMatchSweep(
     ]);
     if (!vacancies || vacancies.length === 0) return acts;
 
+    // Pairs that already have a vacancy_match notification. Pre-loaded so the
+    // sweep doesn't re-attempt an insert for every already-notified pair on
+    // every tick — the partial unique index rejects those. notify() swallows
+    // the error, but Postgres still logs each one as "duplicate key", spamming
+    // the DB error log. Skipping them up front keeps the log clean.
+    const notifiedPairs = new Set<string>();
+    {
+      const { data: existingNotifs } = await supabase
+        .from("notifications")
+        .select("related_vacancy_id, related_doctor_id")
+        .eq("kind", "vacancy_match")
+        .not("related_vacancy_id", "is", null)
+        .not("related_doctor_id", "is", null);
+      for (const n of (existingNotifs ?? []) as Array<{ related_vacancy_id: string; related_doctor_id: string }>) {
+        notifiedPairs.add(`${n.related_vacancy_id}|${n.related_doctor_id}`);
+      }
+    }
+
     const hospMap = new Map<string, { city: string | null; country: string | null }>();
     for (const h of (hospitals ?? []) as Array<{ id: string; city: string | null; country: string | null }>) {
       hospMap.set(h.id, { city: h.city, country: h.country });
@@ -448,6 +466,10 @@ async function runVacancyMatchSweep(
 
       for (const c of candidates) {
         if (!c.specialty) continue;
+        // Already notified for this (vacancy, doctor) pair? Skip — avoids a
+        // guaranteed duplicate-key insert (and its Postgres error-log entry).
+        const pairKey = `${v.id}|${c.prefixedId}`;
+        if (notifiedPairs.has(pairKey)) continue;
         // Specialty gate — exact or partial.
         const score = lightScore(c.specialty, v.specialty, c.hasDha, c.hasDoh, c.hasMoh, c.licenseText, hosp);
         if (score < 50) continue;  // skip weak matches — UI still shows them on demand
@@ -468,6 +490,7 @@ async function runVacancyMatchSweep(
           for_user:            v.opened_by,
         });
         if (result.id) {
+          notifiedPairs.add(pairKey);
           console.log(`[tick-scheduler] vacancy_match · ${v.hospital_name} ↔ ${c.name} (${score})`);
           acts.push({
             run_id: v.id, doctor: c.name || c.prefixedId,
