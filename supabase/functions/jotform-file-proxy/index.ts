@@ -46,23 +46,33 @@ Deno.serve(async (req) => {
   const apiKey = (form as { api_token?: string } | null)?.api_token;
   if (!apiKey) return new Response("form has no api_token", { status: 404, headers: corsHeaders });
 
-  // JotForm /uploads/ file downloads authenticate via the ?apiKey= QUERY PARAM,
-  // not the APIKEY header (the header only works for api.jotform.com REST
-  // endpoints) — the header-only version served JotForm's 404/login page
-  // instead of the file. Key stays server-side, so it's not leaked. Send both
-  // to be safe.
+  // JotForm /uploads/ + /widget-uploads/ file downloads authenticate via the
+  // ?apiKey= QUERY PARAM. The APIKEY *header* is only for api.jotform.com REST
+  // endpoints — on the www.jotform.com file host, sending it makes JotForm route
+  // the request as an API call and 404 the file path. So the primary request is
+  // query-param-only (redirects followed for JotForm's CDN hand-off); we only
+  // fall back to the header form if the clean request fails. Key stays
+  // server-side (never sent to the browser).
   const sep = path.includes("?") ? "&" : "?";
-  const jfRes = await fetch(`https://www.jotform.com${path}${sep}apiKey=${encodeURIComponent(apiKey)}`, {
-    headers: { APIKEY: apiKey },
-  });
-  if (!jfRes.ok) {
-    return new Response(`upstream ${jfRes.status}`, { status: jfRes.status, headers: corsHeaders });
-  }
-  // Guard: if JotForm still returned its HTML login/404 page (200 OK but
-  // text/html) rather than the file, don't serve that as a broken PDF.
-  const upstreamType = jfRes.headers.get("content-type") ?? "";
-  if (/text\/html/i.test(upstreamType)) {
-    return new Response("upstream returned an HTML page (auth failed?) instead of the file", { status: 502, headers: corsHeaders });
+  const fileUrl = `https://www.jotform.com${path}${sep}apiKey=${encodeURIComponent(apiKey)}`;
+  const isHtml = (r: Response) => /text\/html/i.test(r.headers.get("content-type") ?? "");
+
+  let jfRes = await fetch(fileUrl, { redirect: "follow" });
+  if (!jfRes.ok || isHtml(jfRes)) {
+    // Some accounts/files only serve with the APIKEY header present — retry.
+    const retry = await fetch(fileUrl, { headers: { APIKEY: apiKey }, redirect: "follow" }).catch(() => null);
+    if (retry && retry.ok && !isHtml(retry)) {
+      jfRes = retry;
+    } else {
+      // Surface JotForm's actual response so a failure is diagnosable (the
+      // upstream URL is logged WITHOUT the apiKey; the body snippet often names
+      // the real cause — expired file, wrong key scope, moved upload).
+      const snippet = (await jfRes.text().catch(() => "")).replace(/\s+/g, " ").trim().slice(0, 300);
+      return new Response(
+        `upstream ${jfRes.status} for https://www.jotform.com${path} — ${snippet || "(empty body)"}`,
+        { status: 502, headers: corsHeaders },
+      );
+    }
   }
 
   // JotForm returns application/octet-stream; infer the right image type

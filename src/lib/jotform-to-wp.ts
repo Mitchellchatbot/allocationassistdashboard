@@ -155,11 +155,15 @@ export function mapAnswersToWp(flat: Record<string, string>): MappedProfile {
   // by VALUE shape too — keeps client-side stage prefill in lockstep
   // with what the webhook would have inserted.
 
-  // CV URL: any jotform.com /uploads/ URL ending in pdf/doc/docx.
+  // CV URL: any jotform.com /uploads/ (or /widget-uploads/) URL ending in
+  // pdf/doc/docx. Allow UNENCODED spaces in the filename (JotForm stores them
+  // raw, e.g. ".../Europass- CV Ashraf.pdf") — a `[^\s]+` match would miss the
+  // extension entirely and drop the CV. Guard against running into a second
+  // URL on the same line so we don't stitch two files together.
   for (const v of Object.values(flat ?? {})) {
-    const m = /(https?:\/\/[^\s,;]+\.(?:pdf|doc|docx))/i.exec(v ?? "");
-    if (m && /jotform\.com\/uploads\//i.test(m[1])) {
-      acf.cv_resume = m[1];
+    const m = /(https?:\/\/(?:www\.)?jotform\.com\/(?:widget-)?uploads\/(?:(?!https?:\/\/)[^\n\r])+\.(?:pdf|docx?))(?![a-z0-9])/i.exec(v ?? "");
+    if (m) {
+      acf.cv_resume = m[1].trim();
       break;
     }
   }

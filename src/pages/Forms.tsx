@@ -2236,8 +2236,22 @@ function scanWidgetMetadataApiShape(rawAnswers: Record<string, unknown>, formId:
 }
 
 function extractUrls(s: string): string[] {
-  const matches = s.match(/https?:\/\/[^\s,;]+/g);
-  return matches ?? [];
+  // Tokenise on whitespace/commas, then STITCH: a token that doesn't itself
+  // start a new `http(s)://` URL belongs to the previous one. JotForm/Typeform
+  // embed the uploaded filename in the path and store its spaces UNENCODED
+  // (e.g. ".../Europass- CV Ashraf.pdf"), so a naive `\S+` match truncates the
+  // URL at the first space and the file proxy then 404s on the half-path.
+  // Stitching keeps such filenames whole while still splitting genuinely
+  // separate, space/newline/comma-delimited URLs. (`new URL()` downstream
+  // percent-encodes the spaces, so the proxy receives a valid path.)
+  const out: string[] = [];
+  for (const tok of s.split(/[\s,;]+/)) {
+    if (!tok) continue;
+    if (/^https?:\/\//i.test(tok)) out.push(tok);
+    else if (out.length) out[out.length - 1] += " " + tok; // filename continuation
+    // else: leading prose before any URL — ignore (only surface http(s) URLs).
+  }
+  return out;
 }
 
 function filenameFromUrl(u: string): string {
