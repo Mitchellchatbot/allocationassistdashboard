@@ -9,65 +9,23 @@ import { uploadEmailAttachment } from "@/lib/email-attachments";
 import { downloadBlob } from "@/lib/card-screenshot";
 import { htmlToPdfFile } from "@/lib/generate-cv-pdf";
 import { buildAaCvHtml, type AaCvData } from "@/lib/aa-cv-template";
+import { EditableCvSurface, type EditableCvHandle } from "@/components/cv/EditableCvSurface";
 import { useWpCandidates, useUploadWpCv, type WpCandidate } from "@/hooks/use-wp-candidates";
+import { drOff, cvInitials, mergeDoctorData, cvSafeName } from "@/lib/aa-cv-data";
 
 /**
  * Convert CV — take any incoming doctor CV (PDF / .docx / pasted text) and
  * reformat it into Allocation Assist's branded house template.
  *
- * Beyond the raw reformat:
- *   - Pick the doctor (from the WordPress roster) to auto-pull their headshot
- *     and become the "link" target.
- *   - Backfill any field the incoming CV is missing (title, email, phone, DOB,
- *     nationality, languages, photo) from the doctor's canonical record — the
- *     CV's own content always wins; we only fill the gaps.
- *   - The rendered CV is directly editable (contentEditable) — the team can
- *     tweak wording before download/link. "Reset edits" restores the generated
- *     version.
- *   - "Link CV to doctor" uploads the PDF to their WP cv_resume (useUploadWpCv),
- *     so "View Resume" points at the branded doc.
+ *   - Pick the doctor (WordPress roster) → auto-pull their headshot + link target.
+ *   - Backfill gaps (title, email, phone, DOB, nationality, photo) from their
+ *     canonical record; the CV's own content always wins.
+ *   - The rendered CV is directly editable (EditableCvSurface).
+ *   - Download the PDF or link it to the doctor's WP cv_resume.
  *
- * cv-reformat parses the CV with Claude into AaCvData; buildAaCvHtml renders it;
- * html2pdf produces the PDF. (Old CVs stay as-is — this only makes NEW ones.)
+ * The in-send version of this lives in components/cv/CvStudioDialog — both share
+ * aa-cv-data + EditableCvSurface so they behave identically.
  */
-const drOff = (s: string | null | undefined) => (s ?? "").replace(/^\s*dr\.?\s+/i, "").trim();
-
-const initials = (n?: string | null) =>
-  drOff(n).split(/\s+/).filter(Boolean).slice(0, 2).map(w => w[0]?.toUpperCase()).join("") || "Dr";
-
-function fmtDob(iso: string | null): string {
-  if (!iso) return "";
-  const d = new Date(/T/.test(iso) ? iso : `${iso}T00:00:00`);
-  return isNaN(d.valueOf()) ? iso : d.toLocaleDateString("en-US", { year: "numeric", month: "long", day: "numeric" });
-}
-
-/** Fill any EMPTY AaCvData field from the doctor's canonical record. The CV's
- *  own content always wins; this only backfills gaps ("data points from other
- *  sources"). An explicit headshot upload (photoOverride) beats the doctor photo. */
-function mergeDoctorData(cv: AaCvData, c: WpCandidate | null, photoOverride?: string): AaCvData {
-  const personal: Record<string, string> = { ...(cv.personal ?? {}) };
-  if (c) {
-    const put = (k: string, val: string | null | undefined) => {
-      const t = (val ?? "").trim();
-      if (t && !(personal[k] ?? "").trim()) personal[k] = t;
-    };
-    put("Name", drOff(c.full_name));
-    put("Date of Birth", fmtDob(c.date_of_birth));
-    put("Nationality", c.nationality);
-    put("Languages Spoken", c.languages);
-    put("Current Location", c.current_location);
-  }
-  return {
-    ...cv,
-    name:      (cv.name ?? "").trim() || drOff(c?.full_name),
-    title:     (cv.title ?? "").trim() || c?.job_title || c?.specialty || "",
-    email:     (cv.email ?? "").trim() || c?.email || undefined,
-    phone:     (cv.phone ?? "").trim() || c?.phone || undefined,
-    photo_url: photoOverride || cv.photo_url || c?.photo_url || undefined,
-    personal:  Object.keys(personal).length ? personal : cv.personal,
-  };
-}
-
 export default function ConvertCv() {
   const { data: candidates = [] } = useWpCandidates();
   const uploadCv = useUploadWpCv();
@@ -81,14 +39,10 @@ export default function ConvertCv() {
   const [text, setText]     = useState("");
   const [busy, setBusy]     = useState<"" | "convert" | "download" | "link">("");
   const [data, setData]     = useState<AaCvData | null>(null);
-  const [ver, setVer]       = useState(0); // bumps to remount (reset) the editable DOM
 
   const cvInput    = useRef<HTMLInputElement>(null);
   const photoInput = useRef<HTMLInputElement>(null);
-  const previewRef = useRef<HTMLDivElement>(null);
-
-  /** Replace the CV data and reset the editable surface to the fresh render. */
-  const setCv = (d: AaCvData) => { setData(d); setVer(v => v + 1); };
+  const surfaceRef = useRef<EditableCvHandle>(null);
 
   const docMatches = useMemo(() => {
     const q = docQuery.trim().toLowerCase();
@@ -103,24 +57,12 @@ export default function ConvertCv() {
       .slice(0, 12);
   }, [candidates, docQuery]);
 
-  // Split the generated HTML so the <style> stays OUT of the editable region
-  // (users can't accidentally delete it) while the visible CV is editable.
-  const [styleBlock, bodyBlock] = useMemo(() => {
-    if (!data) return ["", ""];
-    const html = buildAaCvHtml(data);
-    const i = html.indexOf("</style>");
-    return i >= 0 ? [html.slice(0, i + 8), html.slice(i + 8)] : ["", html];
-  }, [data]);
-
-  /** The CV HTML as it stands now — the user's inline edits if present. */
-  const currentHtml = () => styleBlock + (previewRef.current?.innerHTML || bodyBlock);
-
   const pick = (c: WpCandidate) => {
     setDoctor(c);
     setDocQuery("");
     setPickerOpen(false);
     // Already converted? Re-backfill so their photo + details appear now.
-    if (data) setCv(mergeDoctorData(data, c, photo ? data.photo_url ?? undefined : c.photo_url ?? undefined));
+    if (data) setData(mergeDoctorData(data, c, photo ? data.photo_url ?? undefined : c.photo_url ?? undefined));
   };
 
   const convert = async () => {
@@ -136,7 +78,7 @@ export default function ConvertCv() {
       if (error) throw error;
       const r = resp as { ok?: boolean; data?: AaCvData; error?: string };
       if (!r?.ok || !r.data) throw new Error(r?.error ?? "Conversion failed");
-      setCv(mergeDoctorData(r.data, doctor, photoUrl ?? doctor?.photo_url ?? undefined));
+      setData(mergeDoctorData(r.data, doctor, photoUrl ?? doctor?.photo_url ?? undefined));
       toast.success("CV converted — edit inline, then download or link it to the doctor.");
     } catch (e) {
       toast.error(e instanceof Error ? e.message : "Couldn't convert the CV.");
@@ -144,8 +86,8 @@ export default function ConvertCv() {
   };
 
   const buildPdf = async () => {
-    const safe = (drOff(data?.name) || drOff(doctor?.full_name) || "Doctor").replace(/[^a-zA-Z0-9 ._-]/g, "").trim();
-    return htmlToPdfFile(currentHtml(), `Dr ${safe} - CV.pdf`, 780);
+    const html = surfaceRef.current?.getHtml() ?? (data ? buildAaCvHtml(data) : "");
+    return htmlToPdfFile(html, `Dr ${cvSafeName(data?.name || doctor?.full_name)} - CV.pdf`, 780);
   };
 
   const download = async () => {
@@ -160,8 +102,7 @@ export default function ConvertCv() {
     if (!data || !doctor) return;
     setBusy("link");
     try {
-      const f = await buildPdf();
-      await uploadCv.mutateAsync({ file: f, candidateId: doctor.id });
+      await uploadCv.mutateAsync({ file: await buildPdf(), candidateId: doctor.id });
       toast.success(`CV linked to ${drOff(doctor.full_name) || "the doctor"}'s profile.`);
     } catch (e) {
       toast.error(e instanceof Error ? e.message : "Couldn't link the CV to the doctor.");
@@ -186,7 +127,7 @@ export default function ConvertCv() {
             <div className="flex items-center gap-2 rounded-md border border-teal-200 bg-teal-50/50 px-2.5 py-1.5">
               {doctor.photo_url
                 ? <img src={doctor.photo_url} alt="" className="h-7 w-7 rounded-full object-cover shrink-0" />
-                : <div className="h-7 w-7 rounded-full bg-teal-100 flex items-center justify-center text-[10px] font-semibold text-teal-700 shrink-0">{initials(doctor.full_name)}</div>}
+                : <div className="h-7 w-7 rounded-full bg-teal-100 flex items-center justify-center text-[10px] font-semibold text-teal-700 shrink-0">{cvInitials(doctor.full_name)}</div>}
               <div className="min-w-0 flex-1">
                 <div className="text-[12px] font-medium text-slate-800 truncate">{drOff(doctor.full_name) || doctor.title}</div>
                 <div className="text-[10.5px] text-muted-foreground truncate">{[doctor.job_title, doctor.specialty].filter(Boolean).join(" · ") || "—"}</div>
@@ -209,13 +150,13 @@ export default function ConvertCv() {
                   {docMatches.map(c => (
                     <button
                       key={c.id}
-                      onMouseDown={e => e.preventDefault() /* keep focus so onBlur doesn't fire first */}
+                      onMouseDown={e => e.preventDefault()}
                       onClick={() => pick(c)}
                       className="w-full text-left px-2.5 py-1.5 hover:bg-slate-50 flex items-center gap-2"
                     >
                       {c.photo_url
                         ? <img src={c.photo_url} alt="" className="h-6 w-6 rounded-full object-cover shrink-0" />
-                        : <div className="h-6 w-6 rounded-full bg-slate-100 flex items-center justify-center text-[9px] text-slate-500 shrink-0">{initials(c.full_name)}</div>}
+                        : <div className="h-6 w-6 rounded-full bg-slate-100 flex items-center justify-center text-[9px] text-slate-500 shrink-0">{cvInitials(c.full_name)}</div>}
                       <span className="min-w-0">
                         <span className="block text-[12px] text-slate-800 truncate">{drOff(c.full_name) || c.title}</span>
                         <span className="block text-[10px] text-muted-foreground truncate">{[c.job_title, c.specialty].filter(Boolean).join(" · ") || "—"}</span>
@@ -291,22 +232,13 @@ export default function ConvertCv() {
           <div className="flex flex-col h-full">
             <div className="flex items-center justify-between px-3 py-1.5 border-b border-slate-200 bg-white/70">
               <span className="text-[11px] text-muted-foreground inline-flex items-center gap-1"><Pencil className="h-3 w-3" /> Click any text to edit it</span>
-              <Button variant="ghost" size="sm" onClick={() => setVer(v => v + 1)} className="h-7 text-[11px] gap-1 text-slate-500">
+              <Button variant="ghost" size="sm" onClick={() => surfaceRef.current?.reset()} className="h-7 text-[11px] gap-1 text-slate-500">
                 <RotateCcw className="h-3 w-3" /> Reset edits
               </Button>
             </div>
             <div className="overflow-auto p-4">
-              {/* styles applied once, kept outside the editable node */}
-              <div dangerouslySetInnerHTML={{ __html: styleBlock }} />
               <div className="mx-auto bg-white shadow-sm" style={{ width: 760 }}>
-                <div
-                  key={ver}
-                  ref={previewRef}
-                  contentEditable
-                  suppressContentEditableWarning
-                  className="outline-none"
-                  dangerouslySetInnerHTML={{ __html: bodyBlock }}
-                />
+                <EditableCvSurface ref={surfaceRef} data={data} />
               </div>
             </div>
           </div>

@@ -5,7 +5,7 @@ import { Label } from "@/components/ui/label";
 import { Textarea } from "@/components/ui/textarea";
 import { Badge } from "@/components/ui/badge";
 import { Checkbox } from "@/components/ui/checkbox";
-import { Search, Send, X, Eye, ChevronLeft, AlertTriangle, Mail, ChevronDown, Camera, Image as ImageIcon } from "lucide-react";
+import { Search, Send, X, Eye, ChevronLeft, AlertTriangle, Mail, ChevronDown, Camera, Image as ImageIcon, FileText } from "lucide-react";
 import { captureAndUploadCard } from "@/lib/card-screenshot";
 import { buildProfileCardHtml } from "@/lib/profile-card-html";
 import { buildDoctorProfileHtml, PROFILE_IMAGE_WIDTH } from "@/lib/doctor-profile-image";
@@ -29,6 +29,7 @@ import { EmailFrame } from "@/components/EmailFrame";
 import { wrapBodyForSend } from "@/lib/email-preview";
 import { type EmailAttachment } from "@/lib/email-attachments";
 import { AttachmentsPicker } from "@/components/automations/AttachmentsPicker";
+import { CvStudioDialog } from "@/components/cv/CvStudioDialog";
 import { TemplatePicker } from "@/components/automations/TemplatePicker";
 import { CcBccPicker, isEmail } from "@/components/automations/CcBccPicker";
 import { detectUnfilledVars, describeUnfilled } from "@/lib/email-validation";
@@ -1137,6 +1138,36 @@ function CardScreenshotControl({
   );
 }
 
+/**
+ * "Generate branded CV" — build the doctor's Allocation-Assist-branded CV from
+ * their CV on file (form-response upload), view + edit it, and attach the PDF to
+ * this email. Falls back to manual upload inside the dialog when there's no CV
+ * on file. Reuses the same studio as the Doctors → Convert CV tab.
+ */
+function CvStudioControl({ doctor, onAttach }: { doctor: WpCandidate | null; onAttach: (att: EmailAttachment) => void }) {
+  const [open, setOpen] = useState(false);
+  return (
+    <>
+      <button
+        type="button"
+        onClick={() => setOpen(true)}
+        className="inline-flex max-w-full items-center gap-1.5 rounded-md border border-teal-200 bg-teal-50 px-2.5 py-1.5 text-[11px] font-medium text-teal-700 transition-colors hover:bg-teal-100"
+        title="Build the doctor's branded CV from their CV on file, edit it, and attach it to this email"
+      >
+        <FileText className="h-3.5 w-3.5 shrink-0" />
+        <span className="truncate">Generate &amp; attach branded CV</span>
+      </button>
+      <CvStudioDialog
+        open={open}
+        onOpenChange={setOpen}
+        doctor={doctor}
+        cvSourceUrl={doctor?.cv_url}
+        onAttach={onAttach}
+      />
+    </>
+  );
+}
+
 function PreviewConfirm({
   doctor, hospitals, customMessage, hospitalSubject, hospitalBody, doctorSubject, doctorBody,
   onBack, onClose, onConfirm, submitting, ccList, setCcList, bccList, setBccList,
@@ -1591,6 +1622,10 @@ function PreviewConfirm({
             cardImageUrl={cardImageUrl}
             onSetCardImage={onSetCardImage}
             autoBusy={autoCardBusy}
+          />
+          <CvStudioControl
+            doctor={wpCandidate}
+            onAttach={(att) => setHospitalAttachments(prev => [...prev, att])}
           />
           <AttachmentsPicker
             attachments={hospitalAttachments}
