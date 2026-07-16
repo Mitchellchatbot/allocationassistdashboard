@@ -36,6 +36,18 @@ export interface ZohoBooksData {
   marketingTxns?: { date: string; amount: number; text: string }[];
   /** Suspect non-retainer Scaled AI billing removed from `expenses`. */
   scaledAiCorrection?: number;
+  /** ISO time the shared server cache for this range was last computed — drives
+   *  the "Synced Xm ago" freshness chip. Present on every ok:true response. */
+  synced_at?: string;
+  /** True when the response is the SHARED cached result (served without hitting
+   *  Zoho), false/undefined when freshly computed. */
+  cached?: boolean;
+  /** True when Zoho was unreachable/throttled and we served the last-known-good
+   *  cached numbers instead — the UI shows an "as of" label, never wrong zeros. */
+  stale?: boolean;
+  /** True when a compute completed but some Zoho report page/month was throttled
+   *  and no prior good cache existed — numbers may be incomplete. */
+  partial?: boolean;
 }
 
 /** A single general-ledger leg posted to an expense account. */
@@ -50,6 +62,21 @@ export interface ZohoAccountTxnsData {
 
 const ymd = (d: Date) =>
   `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`;
+
+/** Force the shared server cache to recompute this range NOW (the "Refresh now"
+ *  button), bypassing the 15-min cache-serve. After it resolves the caller
+ *  should invalidate ["zoho-books"] so every consumer repaints from the freshly
+ *  written cache — so everyone converges on the same up-to-the-second numbers. */
+export async function forceRefreshZohoBooks(dateRange: { from: Date; to: Date }): Promise<void> {
+  const from = ymd(dateRange.from);
+  const to   = ymd(dateRange.to);
+  const token = (await supabase.auth.getSession()).data.session?.access_token ?? SUPABASE_ANON_KEY;
+  await fetch(`${SUPABASE_URL}/functions/v1/zoho-books`, {
+    method: "POST",
+    headers: { apikey: SUPABASE_ANON_KEY, Authorization: `Bearer ${token}`, "content-type": "application/json" },
+    body: JSON.stringify({ from, to, force: true }),
+  });
+}
 
 /**
  * Pulls actual revenue + expenses from Zoho Books for the given date range.
@@ -83,7 +110,7 @@ export function useZohoBooks(dateRange: { from: Date; to: Date }) {
     },
     staleTime: 10 * 60_000,
     refetchOnWindowFocus: false,
-    retry: 0,
+    retry: 1,          // one retry rides out a transient Zoho token-throttle blip
   });
 }
 

@@ -22,6 +22,7 @@
  *              expenseBreakdown[] (per-category, with drill-down txns) }
  */
 import { serve } from "https://deno.land/std@0.168.0/http/server.ts";
+import { createClient } from "https://esm.sh/@supabase/supabase-js@2";
 
 const CID     = Deno.env.get("ZOHO_BOOKS_CLIENT_ID")     ?? "";
 const SECRET  = Deno.env.get("ZOHO_BOOKS_CLIENT_SECRET") ?? "";
@@ -32,6 +33,28 @@ const CONFIGURED = !!(CID && SECRET && REFRESH && ORG);
 
 const ACCOUNTS_BASE = `https://accounts.zoho.${DC}`;
 const API_BASE      = `https://www.zohoapis.${DC}/books/v3`;
+
+// Shared server-side result cache (zoho_books_cache table). Every browser reads
+// ONE cached P&L per date range instead of recomputing live — so users never
+// diverge and Zoho's token throttle isn't tripped by concurrent viewers. Rows
+// are written here by this function (service role) and refreshed by pg_cron.
+const sb = createClient(
+  Deno.env.get("SUPABASE_URL")              ?? "",
+  Deno.env.get("SUPABASE_SERVICE_ROLE_KEY") ?? "",
+);
+const CACHE_FRESH_MS = 15 * 60_000; // serve a cached range without recomputing for 15 min
+
+async function readCache(rangeKey: string): Promise<{ data: Record<string, unknown>; synced_at: string } | null> {
+  const { data } = await sb.from("zoho_books_cache").select("data, synced_at").eq("range_key", rangeKey).maybeSingle();
+  if (!data) return null;
+  const row = data as { data: Record<string, unknown>; synced_at: string };
+  return { data: row.data, synced_at: row.synced_at };
+}
+async function writeCache(rangeKey: string, payload: Record<string, unknown>): Promise<string> {
+  const synced_at = new Date().toISOString();
+  await sb.from("zoho_books_cache").upsert({ range_key: rangeKey, data: payload, synced_at });
+  return synced_at;
+}
 
 const CORS = {
   "Access-Control-Allow-Origin":  "*",
@@ -156,7 +179,7 @@ serve(async (req) => {
 
   if (!CONFIGURED) return json({ configured: false, ok: false });
 
-  let body: { from?: string; to?: string; action?: string };
+  let body: { from?: string; to?: string; action?: string; force?: boolean };
   try { body = await req.json(); } catch { body = {}; }
 
   const token = await getAccessToken();
@@ -269,6 +292,20 @@ serve(async (req) => {
   const to   = ymd(body.to ?? "");
   if (!from || !to) return json({ configured: true, ok: false, error: "from/to (YYYY-MM-DD) required" }, 400);
 
+  const force    = body.force === true;
+  const rangeKey = `${from}_${to}`;
+
+  // Serve the shared cache if it's fresh (< 15 min) — this is what makes every
+  // user see the SAME number and keeps us off Zoho's rate limit. `force` (the
+  // manual Refresh button / the cron) bypasses it and recomputes.
+  if (!force) {
+    const cached = await readCache(rangeKey);
+    if (cached && Date.now() - new Date(cached.synced_at).getTime() < CACHE_FRESH_MS) {
+      return json({ ...cached.data, configured: true, ok: true, synced_at: cached.synced_at, cached: true });
+    }
+  }
+
+  let partial = false; // set if any Zoho report page/month failed — don't cache a degraded result
   try {
     const dateParams = { date_start: from, date_end: to };
     const [invoices, expenses, bills, pnl, allInvoices] = await Promise.all([
@@ -286,6 +323,7 @@ serve(async (req) => {
       // not be date-scoped; this matches Zoho's "Total Receivables" widget.
       fetchAll(token, "invoices", "invoices", {}),
     ]);
+    if (!pnl) partial = true; // P&L report failed — headline would fall back to record-sums (misses bills/journals)
 
     const byMonth: Record<string, { month: string; revenue: number; expenses: number }> = {};
     const bump = (m: string) => (byMonth[m] ??= { month: m, revenue: 0, expenses: 0 });
@@ -452,6 +490,7 @@ serve(async (req) => {
       const worker = async () => { while (next < monthList.length) { const i = next++; res[i] = await fetchPnL(token, monthList[i].start, monthList[i].end); } };
       await Promise.all(Array.from({ length: Math.min(3, monthList.length) }, worker));
       for (let i = 0; i < monthList.length; i++) if (!res[i]) res[i] = await fetchPnL(token, monthList[i].start, monthList[i].end);
+      if (res.some(r => !r)) partial = true; // a month's report stayed throttled — don't cache an incomplete trend
       byMonthArr = monthList.map((mo, i) => ({ month: mo.key, revenue: res[i]?.revenue ?? 0, expenses: res[i]?.expenses ?? 0 }));
       // Strip the suspect Scaled-AI excess from each month too, so the Digest
       // trend + the per-day scaling below match the corrected period total.
@@ -481,7 +520,7 @@ serve(async (req) => {
       byMonthArr = Object.values(byMonth).sort((a, b) => a.month.localeCompare(b.month));
     }
 
-    return json({
+    const payload = {
       configured:   true,
       ok:           true,
       currency,
@@ -497,9 +536,24 @@ serve(async (req) => {
       expenseBreakdown,
       marketingTxns,
       scaledAiCorrection: scaledCut, // suspect Scaled-AI excess removed from expenses
-    });
+    };
+
+    // Complete result → write it to the shared cache so every other viewer (and
+    // the next 15 min) reads this exact number. A PARTIAL/throttled result is
+    // NEVER cached — instead we serve the last-good cache if we have one, so a
+    // transient Zoho blip can't replace good numbers with silent zeros.
+    if (!partial) {
+      const synced_at = await writeCache(rangeKey, payload);
+      return json({ ...payload, synced_at });
+    }
+    const lastGood = await readCache(rangeKey);
+    if (lastGood) return json({ ...lastGood.data, configured: true, ok: true, synced_at: lastGood.synced_at, stale: true });
+    return json({ ...payload, partial: true, synced_at: new Date().toISOString() });
   } catch (e) {
     console.error("[zoho-books] fetch failed:", (e as Error).message);
+    // Serve last-known good numbers on a hard failure rather than an error/zeros.
+    const lastGood = await readCache(rangeKey);
+    if (lastGood) return json({ ...lastGood.data, configured: true, ok: true, synced_at: lastGood.synced_at, stale: true });
     return json({ configured: true, ok: false, error: (e as Error).message }, 500);
   }
 });

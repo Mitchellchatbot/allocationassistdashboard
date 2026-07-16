@@ -9,7 +9,8 @@
  */
 import { useZohoBooks } from "@/hooks/use-zoho-books";
 import { useCurrency } from "@/lib/CurrencyProvider";
-import { TrendingUp, TrendingDown, Minus, ArrowUpRight, ArrowDownRight, Loader2 } from "lucide-react";
+import { KpiSkeleton } from "@/components/ui/data-skeleton";
+import { TrendingUp, TrendingDown, Minus, ArrowUpRight, ArrowDownRight } from "lucide-react";
 
 const DAY_MS = 86_400_000;
 
@@ -85,13 +86,10 @@ export function PeriodPnlSummary({ dateRange }: {
     }
   };
 
-  // Slim skeleton while the current-period actuals load.
-  if (isLoading) {
-    return (
-      <div className="mb-5 rounded-xl border border-border/50 bg-muted/20 px-4 py-3 flex items-center gap-2 text-[12px] text-muted-foreground">
-        <Loader2 className="h-3.5 w-3.5 animate-spin" /> Loading profit &amp; loss…
-      </div>
-    );
+  // Skeleton while the current-period actuals load — show placeholders, never
+  // flash the estimate or a stale number and then snap to the real one.
+  if (isLoading && !cur) {
+    return <div className="mb-5"><KpiSkeleton count={4} /></div>;
   }
 
   // No actuals to show — stay quiet, the page's estimate sections cover it.
@@ -122,9 +120,16 @@ export function PeriodPnlSummary({ dateRange }: {
           <h3 className="text-[14px] font-semibold text-foreground">Profit &amp; Loss</h3>
           <p className="text-[11px] text-muted-foreground mt-0.5">{rangeLabel(dateRange)}</p>
         </div>
-        <span className="inline-flex items-center gap-1 text-[9px] font-bold uppercase tracking-wide px-2 py-0.5 rounded-full bg-emerald-100 text-emerald-700">
-          <span className="h-1.5 w-1.5 rounded-full bg-emerald-500" /> Zoho Books · actuals
-        </span>
+        {cur.stale ? (
+          <span className="inline-flex items-center gap-1 text-[9px] font-bold uppercase tracking-wide px-2 py-0.5 rounded-full bg-amber-100 text-amber-700" title="Zoho was briefly unreachable — showing the last figures that synced">
+            <span className="h-1.5 w-1.5 rounded-full bg-amber-500" />
+            {cur.synced_at ? `as of ${new Date(cur.synced_at).toLocaleTimeString("en-GB", { hour: "2-digit", minute: "2-digit" })}` : "last-known"}
+          </span>
+        ) : (
+          <span className="inline-flex items-center gap-1 text-[9px] font-bold uppercase tracking-wide px-2 py-0.5 rounded-full bg-emerald-100 text-emerald-700">
+            <span className="h-1.5 w-1.5 rounded-full bg-emerald-500" /> Zoho Books · actuals
+          </span>
+        )}
       </div>
 
       {/* Headline tiles — exact numbers, no abbreviation */}

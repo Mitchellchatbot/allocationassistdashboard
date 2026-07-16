@@ -9,6 +9,7 @@ import { useFilters } from "@/lib/filters";
 import { ChannelWinnerCards } from "@/components/ChannelEconomics";
 import { PeriodPnlSummary } from "@/components/finance/PeriodPnlSummary";
 import { useZohoBooks } from "@/hooks/use-zoho-books";
+import { ZohoBooksFreshness } from "@/components/finance/ZohoBooksFreshness";
 import { useMetaAdsApi } from "@/hooks/use-meta-ads-api";
 import { FinanceDigest } from "@/components/finance/FinanceDigest";
 import { useCurrency } from "@/lib/CurrencyProvider";
@@ -453,16 +454,11 @@ const Finance = () => {
     return (to.getFullYear() - from.getFullYear()) * 12 + (to.getMonth() - from.getMonth()) + 1;
   }, [dateRange]);
 
-  // Auto-switch to "This Year" the first time Finance page mounts,
-  // since the imported data is mostly historical (2025 + early 2026).
-  const didAutoSetRef = useRef(false);
-  useEffect(() => {
-    if (!didAutoSetRef.current && preset !== "year" && preset !== "custom") {
-      didAutoSetRef.current = true;
-      setPreset("year");
-    }
-  // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, []);
+  // The Finance route opens on "This Year" synchronously via
+  // <FilterProvider initialPreset="year"> in App.tsx (data is mostly historical
+  // — 2025 + early 2026). Doing it there, on the first paint, avoids the old
+  // post-mount setPreset("year") that recomputed every figure a beat after load
+  // and made the numbers look like they were changing on their own.
 
   // Zoho leads created in the selected period — the real signal of marketing working.
   // Revenue is not used here because Zoho Deals module has almost no data
@@ -843,6 +839,10 @@ const Finance = () => {
               ({rangeMonthCount} {rangeMonthCount === 1 ? "month" : "months"})
             </span>
           </p>
+          {/* Freshness of the shared Zoho Books figures + a manual live-pull, so
+              everyone can see how current the numbers are and converge before a
+              meeting. */}
+          <div className="mt-1.5"><ZohoBooksFreshness dateRange={dateRange} /></div>
         </div>
         <div className="text-right">
           <p className="text-[10px] uppercase tracking-widest font-semibold text-blue-700/80 mb-0.5">

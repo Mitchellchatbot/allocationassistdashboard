@@ -147,7 +147,7 @@ function ProtectedShell() {
           path-keyed FilterProvider so it persists across navigation (launches
           once per session, not per page). */}
       <OnboardingGate />
-      <FilterProvider key={location.pathname}>
+      <FilterProvider key={location.pathname} initialPreset={location.pathname === "/finance" ? "year" : "last3months"}>
         <DashboardLayout>
           <Suspense fallback={<ViewportSpinner />}>
             {/* Page-level error boundary — one render crash on /reports

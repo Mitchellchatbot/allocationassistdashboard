@@ -44,6 +44,12 @@ const EXCLUDE_FIRST_KEY = new Set<string>([
   "wp-doctor-photos",
   "jotform-doctor-photos",
   "meta-leads-stats",   // returns { metaLeadEmails: Set, metaLeadPhones: Set }
+  // Finance: served from a fast SHARED server cache now, so don't also persist a
+  // per-browser snapshot — that's what made numbers "flash" (a stale localStorage
+  // value shown, then a jump to fresh) and diverge between people. A reload now
+  // shows a brief skeleton, then the shared cached number (identical for everyone).
+  "zoho-books",
+  "zoho-accounttxns",
 ]);
 
 /** JSON.stringify turns Set/Map into `{}`, which hydrates as a plain object and
