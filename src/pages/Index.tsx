@@ -87,8 +87,8 @@ const Index = () => {
   // real Lead_Source channel always wins; see Marketing.tsx channelOf).
   const { data: metaStats } = useMetaLeadsStats(dateRange);
   const channelOf = useMemo(() => {
-    const metaEmails = metaStats?.metaLeadEmails ?? new Set<string>();
-    const metaPhones = metaStats?.metaLeadPhones ?? new Set<string>();
+    const metaEmails = metaStats?.metaLeadEmails instanceof Set ? metaStats.metaLeadEmails : new Set<string>();
+    const metaPhones = metaStats?.metaLeadPhones instanceof Set ? metaStats.metaLeadPhones : new Set<string>();
     return (email: string | null | undefined, phone: string | null | undefined, leadSource: string | null | undefined): string => {
       const ds = displaySource(leadSource);
       if (ds !== "Undefined") return ds;          // a real channel always wins

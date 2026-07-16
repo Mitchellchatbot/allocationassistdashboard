@@ -100,8 +100,8 @@ const Marketing = () => {
     // "Undefined"); a real channel always wins. `channelOf` resolves the final
     // channel: trust the Lead_Source, fall back to the meta_leads signal only
     // when the source is junk.
-    const metaEmails = metaStats?.metaLeadEmails ?? new Set<string>();
-    const metaPhones = metaStats?.metaLeadPhones ?? new Set<string>();
+    const metaEmails = metaStats?.metaLeadEmails instanceof Set ? metaStats.metaLeadEmails : new Set<string>();
+    const metaPhones = metaStats?.metaLeadPhones instanceof Set ? metaStats.metaLeadPhones : new Set<string>();
     const channelOf = (email: string | null | undefined, phone: string | null | undefined, src: string | null | undefined): string => {
       const ds = displaySource(src);
       if (ds !== "Undefined") return ds;          // a real channel always wins
@@ -361,8 +361,8 @@ const Marketing = () => {
     if (!selectedKpiChannel || !zoho?.rawDoctorsOnBoard) return [];
     const fromMs = dateRange.from.getTime();
     const toMs   = dateRange.to.getTime() + 86_400_000;
-    const metaEmails = metaStats?.metaLeadEmails ?? new Set<string>();
-    const metaPhones = metaStats?.metaLeadPhones ?? new Set<string>();
+    const metaEmails = metaStats?.metaLeadEmails instanceof Set ? metaStats.metaLeadEmails : new Set<string>();
+    const metaPhones = metaStats?.metaLeadPhones instanceof Set ? metaStats.metaLeadPhones : new Set<string>();
     const chOf = (email: string | null | undefined, phone: string | null | undefined, src: string | null | undefined) => {
       const ds = displaySource(src ?? null);
       if (ds !== "Undefined") return ds;          // a real channel always wins

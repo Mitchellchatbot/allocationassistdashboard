@@ -17,7 +17,7 @@ import { dehydrate, hydrate, type QueryClient, type Query } from "@tanstack/reac
 
 // Bump the version suffix to invalidate every persisted cache after a release
 // that changes a query's data SHAPE (so we never hydrate a stale structure).
-const STORAGE_KEY = "aa-rq-cache-v2";
+const STORAGE_KEY = "aa-rq-cache-v3";
 // localStorage is ~5MB of UTF-16; stay well under so a write can't throw quota.
 const MAX_CHARS = 2_000_000;
 // Don't hydrate anything older than this — avoids showing day-old numbers.
@@ -38,15 +38,32 @@ const EXCLUDE_FIRST_KEY = new Set<string>([
   "zoho-data",
   "wp-candidates",
   "form-responses-infinite",
-  // These queries return Map<string,string> which JSON.stringify serialises to {}
-  // — hydrating a plain object breaks .get() calls. Exclude them so they always
-  // cold-start from Supabase (cheap read, no bottleneck).
+  // These queries return Map<string,string> / Set which JSON.stringify serialises
+  // to {} — hydrating a plain object breaks .get()/.has() calls. Exclude them so
+  // they always cold-start from Supabase (cheap read, no bottleneck).
   "wp-doctor-photos",
   "jotform-doctor-photos",
+  "meta-leads-stats",   // returns { metaLeadEmails: Set, metaLeadPhones: Set }
 ]);
 
+/** JSON.stringify turns Set/Map into `{}`, which hydrates as a plain object and
+ *  then throws "x.has is not a function" / "x.get is not a function" on the
+ *  consumer. Never persist a query whose data holds a Set/Map (top-level or one
+ *  level deep) — a catch-all so a new such hook can't reintroduce the crash. */
+function hasUnserialisableCollections(data: unknown, depth = 0): boolean {
+  if (data instanceof Set || data instanceof Map) return true;
+  if (depth >= 2 || data == null || typeof data !== "object") return false;
+  for (const v of Object.values(data as Record<string, unknown>)) {
+    if (v instanceof Set || v instanceof Map) return true;
+    if (depth < 1 && v && typeof v === "object" && hasUnserialisableCollections(v, depth + 1)) return true;
+  }
+  return false;
+}
+
 function shouldPersist(q: Query): boolean {
-  return q.state.status === "success" && !EXCLUDE_FIRST_KEY.has(String(q.queryKey[0]));
+  return q.state.status === "success"
+    && !EXCLUDE_FIRST_KEY.has(String(q.queryKey[0]))
+    && !hasUnserialisableCollections(q.state.data);
 }
 
 /** Restore the last snapshot into the cache. Call ONCE, synchronously, before
