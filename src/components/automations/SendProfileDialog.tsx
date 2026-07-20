@@ -1054,7 +1054,7 @@ function HospitalRecipientsOverride({ hospitals, contacts, overrides, onOverride
  * "Use profile card image" — rasterises the candidate profile card (the
  * View-full-profile look, empty fields dropped) to a flat PNG via html2canvas,
  * uploads it to the public email-card-images bucket, and reports the URL up so
- * the hospital email renders that image IN PLACE OF the data table
+ * the hospital email renders that image ABOVE the data table (both are shown)
  * ({{#doctor_card_image_url}} section). Once captured, shows a thumbnail with
  * Re-capture / Undo. No auto-download (the Save-As dialog was unwanted).
  */
@@ -1076,7 +1076,7 @@ function CardScreenshotControl({
     try {
       const url = await captureAndUploadCard(cardHtml, { width: captureWidth });
       onSetCardImage(url);
-      toast.success("Profile card attached — it'll replace the data table as a clean image.");
+      toast.success("Profile card attached — it'll appear above the data table in the email.");
     } catch (e) {
       toast.error(e instanceof Error ? e.message : "Couldn't build the profile image. Try again.");
     } finally {
@@ -1107,7 +1107,7 @@ function CardScreenshotControl({
         />
         <div className="min-w-0 flex-1 text-[11px] leading-tight">
           <div className="flex items-center gap-1 font-medium text-emerald-800">
-            <ImageIcon className="h-3 w-3 shrink-0" /> <span className="truncate">Profile image replaces the table</span>
+            <ImageIcon className="h-3 w-3 shrink-0" /> <span className="truncate">Profile card shown above the table</span>
           </div>
           <div className="truncate text-emerald-700/80">Clean card, empty fields dropped · pixel-perfect in any client.</div>
         </div>
@@ -1130,7 +1130,7 @@ function CardScreenshotControl({
       onClick={capture}
       disabled={busy}
       className="inline-flex max-w-full items-center gap-1.5 rounded-md border border-teal-200 bg-teal-50 px-2.5 py-1.5 text-[11px] font-medium text-teal-700 transition-colors hover:bg-teal-100 disabled:opacity-60"
-      title="Render the candidate profile card as a clean image (empty fields dropped) and send it in place of the data table"
+      title="Render the candidate profile card as a clean image (empty fields dropped) and show it above the data table"
     >
       {busy ? <Loader2 className="h-3.5 w-3.5 shrink-0 animate-spin" /> : <Camera className="h-3.5 w-3.5 shrink-0" />}
       <span className="truncate">{busy ? "Building image…" : "Use profile card as image"}</span>
@@ -1614,8 +1614,9 @@ function PreviewConfirm({
             )}
           </div>
           {/* Profile-as-image: render the candidate profile card (View-full-profile
-              look, empty fields dropped) to a flat PNG and send it IN PLACE OF the
-              data table, so the hospital sees a clean, pixel-perfect card. */}
+              look, empty fields dropped) to a flat PNG and show it ABOVE the data
+              table (both render), so the hospital sees a clean, pixel-perfect card
+              plus the full detail table. */}
           <CardScreenshotControl
             cardHtml={profileCardHtml}
             captureWidth={profileCardWidth}

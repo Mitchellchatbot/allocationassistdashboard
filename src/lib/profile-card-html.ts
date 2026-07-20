@@ -10,6 +10,8 @@
 //
 // Built as an HTML string (not React) so html2canvas rasterises it deterministically.
 
+import { formatAreasOfInterest } from "@/lib/format-list";
+
 const LOGO_URL = `${import.meta.env.VITE_SUPABASE_URL}/storage/v1/object/public/email-assets/logo.png`;
 const TEAL = "#0d9488"; // teal-600, matches SharedProfile's icon + header colour
 
@@ -65,7 +67,7 @@ export function buildProfileCardHtml(v: Record<string, string>): string {
 
   // The exact 8 facts SharedProfile shows, in the same order + icons. Area of
   // Interest is skipped when it's what we already used for the bio (no dupe).
-  const aoi = (v.doctor_area_of_interest || "").trim();
+  const aoi = formatAreasOfInterest(v.doctor_area_of_interest);  // short "A, B & C" line
   const factDefs: Array<[string, string, string | undefined]> = [
     [ICON.award,     "Area of Interest",   aoi && aoi !== bioRaw ? aoi : ""],
     [ICON.cap,       "UAE License",        v.doctor_license],

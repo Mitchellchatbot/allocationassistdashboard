@@ -457,7 +457,7 @@ Deno.serve(async (req: Request) => {
       profileTokens = {
         doctor_title:              String(wp.job_title              ?? ""),
         doctor_bio:                String(wp.area_of_interest       ?? ""),  // WP has no bio; closest analogue
-        doctor_area_of_interest:   String(wp.area_of_interest       ?? ""),
+        doctor_area_of_interest:   formatAreasOfInterest(wp.area_of_interest as string | null),
         doctor_country_training:   String(wp.country_of_training    ?? ""),
         doctor_years_experience:   wp.years_experience != null ? String(wp.years_experience) : "",
         doctor_nationality:        String(wp.nationality            ?? ""),
@@ -495,7 +495,7 @@ Deno.serve(async (req: Request) => {
       const fallback: Record<string, string> = {
         doctor_title:              String(prof.title              ?? ""),
         doctor_bio:                String(prof.bio                ?? ""),
-        doctor_area_of_interest:   String(prof.area_of_interest   ?? ""),
+        doctor_area_of_interest:   formatAreasOfInterest(prof.area_of_interest as string | null),
         doctor_country_training:   String(prof.country_training   ?? ""),
         doctor_years_experience:   prof.years_experience != null ? String(prof.years_experience) : "",
         doctor_nationality:        String(prof.nationality        ?? ""),
@@ -545,7 +545,7 @@ Deno.serve(async (req: Request) => {
       const sFallback: Record<string, string> = {
         doctor_title:              String(sacf.job_title              ?? ""),
         doctor_bio:                String(sacf.bio                    ?? ""),
-        doctor_area_of_interest:   String(sacf.specific_areas_of_interests_within_the_specialization ?? ""),
+        doctor_area_of_interest:   formatAreasOfInterest(sacf.specific_areas_of_interests_within_the_specialization as string | null),
         doctor_country_training:   String(sacf.country_of_training    ?? ""),
         doctor_years_experience:   sacf.years_of_experience_post_specialization != null ? String(sacf.years_of_experience_post_specialization) : "",
         doctor_nationality:        String(sacf.nationality            ?? ""),
@@ -760,10 +760,10 @@ Deno.serve(async (req: Request) => {
   vars.doctor_card_html = doctorCardHtml(vars);
   // Card-as-image (Hasan): if the dispatcher captured a profile-card PNG in the
   // Send Profile dialog, its URL rides in metadata. The profile_sent_hospital
-  // template renders it inline IN PLACE OF the data table via the
-  // {{#doctor_card_image_url}} / {{^doctor_card_image_url}} sections, so the
-  // hospital sees a pixel-perfect card (empty fields already dropped) instead of
-  // a table with blank cells. Empty string ⇒ the table renders as before.
+  // template renders it inline ABOVE the data table via the
+  // {{#doctor_card_image_url}} section, then the table always follows — so the
+  // hospital sees BOTH the pixel-perfect card (empty fields dropped) and the full
+  // detail table. Empty string ⇒ just the table renders.
   vars.doctor_card_image_url = String(md.doctor_card_image_url ?? "").trim();
   // The full horizontal data row UNDER the card (team's existing hospital-comms
   // format), minus the Area of Interest column. Styled token so it survives
@@ -1166,6 +1166,26 @@ const RAW_HTML_TOKENS = new Set(["signature", "doctors_table_html", "doctor_card
 
 /** Age from WP date_of_birth. Accepts "YYYYMMDD", "YYYY-MM-DD", or
  *  human-formatted "4 September 1987". Returns null if unparseable. */
+/** Short "A, B & C" areas-of-interest line. MIRROR of src/lib/format-list.ts
+ *  formatAreasOfInterest — keep the two in lockstep so the token renders the
+ *  same in the preview and the sent email. */
+function formatAreasOfInterest(raw: string | null | undefined, maxWords = 30): string {
+  if (!raw) return "";
+  const parts = String(raw)
+    .split(/\s*(?:[,;/\n·•]|\band\b|&)\s*/i)
+    .map(s => s.trim().replace(/[.\s]+$/, ""))
+    .filter(Boolean);
+  const seen = new Set<string>();
+  const terms: string[] = [];
+  for (const p of parts) { const k = p.toLowerCase(); if (!seen.has(k)) { seen.add(k); terms.push(p); } }
+  if (!terms.length) return "";
+  const kept: string[] = [];
+  let words = 0;
+  for (const t of terms) { const w = t.split(/\s+/).length; if (kept.length && words + w > maxWords) break; kept.push(t); words += w; }
+  if (kept.length === 1) return kept[0];
+  return `${kept.slice(0, -1).join(", ")} & ${kept[kept.length - 1]}`;
+}
+
 function computeAgeFromDob(dob: string | null | undefined): number | null {
   if (!dob) return null;
   let d: Date | null = null;

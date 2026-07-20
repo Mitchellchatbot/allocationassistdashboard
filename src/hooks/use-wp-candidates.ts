@@ -11,6 +11,7 @@ import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { supabase } from "@/lib/supabase";
 import { useCallback, useMemo } from "react";
 import { useTableSubscription } from "@/lib/realtime-registry";
+import { formatAreasOfInterest } from "@/lib/format-list";
 
 export interface WpCandidate {
   id:                  number;
@@ -998,7 +999,8 @@ export function wpCandidateToTokens(c: WpCandidate | null): Record<string, strin
     // continue to render correctly.
     doctor_title:               c.job_title              ?? "",
     doctor_bio:                 c.area_of_interest       ?? "",  // closest analogue; WP has no bio field
-    doctor_area_of_interest:    c.area_of_interest       ?? "",
+    doctor_area_of_interest:    formatAreasOfInterest(c.area_of_interest),  // short "A, B & C" line
+
     doctor_country_training:    c.country_of_training    ?? "",
     doctor_years_experience:    c.years_experience != null ? String(c.years_experience) : "",
     doctor_nationality:         c.nationality            ?? "",
