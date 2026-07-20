@@ -1,9 +1,9 @@
-import { useMemo, useRef, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Textarea } from "@/components/ui/textarea";
 import { toast } from "sonner";
-import { FileUp, Image as ImageIcon, Wand2, Download, Loader2, FileText, X, Search, Link2, RotateCcw, Pencil } from "lucide-react";
+import { FileUp, Image as ImageIcon, Wand2, Download, Loader2, FileText, X, Search, Link2, RotateCcw, Pencil, Maximize2, Minimize2 } from "lucide-react";
 import { supabase } from "@/lib/supabase";
 import { uploadEmailAttachment } from "@/lib/email-attachments";
 import { downloadBlob } from "@/lib/card-screenshot";
@@ -39,10 +39,19 @@ export default function ConvertCv() {
   const [text, setText]     = useState("");
   const [busy, setBusy]     = useState<"" | "convert" | "download" | "link">("");
   const [data, setData]     = useState<AaCvData | null>(null);
+  const [fullscreen, setFullscreen] = useState(false);
 
   const cvInput    = useRef<HTMLInputElement>(null);
   const photoInput = useRef<HTMLInputElement>(null);
   const surfaceRef = useRef<EditableCvHandle>(null);
+
+  // Esc exits the full-screen preview.
+  useEffect(() => {
+    if (!fullscreen) return;
+    const onKey = (e: KeyboardEvent) => { if (e.key === "Escape") setFullscreen(false); };
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, [fullscreen]);
 
   const docMatches = useMemo(() => {
     const q = docQuery.trim().toLowerCase();
@@ -226,22 +235,31 @@ export default function ConvertCv() {
         )}
       </div>
 
-      {/* Preview (editable) */}
-      <div className="rounded-xl border border-slate-200 bg-slate-100 overflow-hidden min-h-[70vh]">
+      {/* Preview (editable). Full-screen just repositions THIS same container to
+          cover the viewport, so the contentEditable surface stays mounted and
+          any inline edits carry over between the panel and full-screen. */}
+      <div className={fullscreen
+        ? "fixed inset-0 z-[70] bg-slate-100 flex flex-col"
+        : "rounded-xl border border-slate-200 bg-slate-100 overflow-hidden min-h-[70vh] flex flex-col"}>
         {data ? (
-          <div className="flex flex-col h-full">
-            <div className="flex items-center justify-between px-3 py-1.5 border-b border-slate-200 bg-white/70">
+          <>
+            <div className="flex items-center justify-between px-3 py-1.5 border-b border-slate-200 bg-white/70 shrink-0">
               <span className="text-[11px] text-muted-foreground inline-flex items-center gap-1"><Pencil className="h-3 w-3" /> Click any text to edit it</span>
-              <Button variant="ghost" size="sm" onClick={() => surfaceRef.current?.reset()} className="h-7 text-[11px] gap-1 text-slate-500">
-                <RotateCcw className="h-3 w-3" /> Reset edits
-              </Button>
+              <div className="flex items-center gap-1">
+                <Button variant="ghost" size="sm" onClick={() => surfaceRef.current?.reset()} className="h-7 text-[11px] gap-1 text-slate-500">
+                  <RotateCcw className="h-3 w-3" /> Reset edits
+                </Button>
+                <Button variant="ghost" size="sm" onClick={() => setFullscreen(f => !f)} className="h-7 text-[11px] gap-1 text-slate-500" title={fullscreen ? "Exit full screen (Esc)" : "Full-screen preview"}>
+                  {fullscreen ? <><Minimize2 className="h-3 w-3" /> Exit full screen</> : <><Maximize2 className="h-3 w-3" /> Full screen</>}
+                </Button>
+              </div>
             </div>
-            <div className="overflow-auto p-4">
+            <div className="overflow-auto p-4 flex-1">
               <div className="mx-auto bg-white shadow-sm" style={{ width: 760 }}>
                 <EditableCvSurface ref={surfaceRef} data={data} />
               </div>
             </div>
-          </div>
+          </>
         ) : (
           <div className="h-[70vh] flex flex-col items-center justify-center text-center p-10 text-muted-foreground">
             <FileText className="h-9 w-9 mb-2 text-slate-300" />
