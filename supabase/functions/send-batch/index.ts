@@ -503,11 +503,14 @@ Deno.serve(async (req: Request) => {
 
   // ── Send — one email per hospital ─────────────────────────────────────
   // Resend's /emails/batch sends up to 100 in one call (no per-request rate
-  // limit) but does NOT support attachments, so we fall back to individual
-  // sends when the batch carries a CV/logbook.
+  // limit) but does NOT support attachments OR per-message cc/bcc. So we fall
+  // back to individual /emails sends when the batch carries a CV/logbook OR any
+  // extra CC/BCC — putting cc/bcc on a /emails/batch payload returns a non-2xx
+  // and failed the whole send (the Top-15-with-CC bug).
+  const usePerEmail = builtAttachments.length > 0 || extraCc.length > 0 || extraBcc.length > 0;
   let sentCount = 0, failedCount = 0, messageId = "", lastError = "";
   try {
-    if (builtAttachments.length === 0) {
+    if (!usePerEmail) {
       for (let i = 0; i < emails.length; i += 100) {
         const chunk = emails.slice(i, i + 100);
         const res = await fetch("https://api.resend.com/emails/batch", {
