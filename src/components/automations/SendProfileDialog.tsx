@@ -1962,6 +1962,7 @@ function previewDoctorRowTableHtml(v: Record<string, string>): string {
     ["#", "1"],
     ["Name", v.doctor_name || ""],
     ["Title and Specialty as per the UAE license", v.doctor_title || ""],
+    ["Area of Interest", v.doctor_area_of_interest || ""],
     ["Country Of Training", v.doctor_country_training || ""],
     ["Years of Experience", v.doctor_years_experience || ""],
     ["Nationality", v.doctor_nationality || ""],

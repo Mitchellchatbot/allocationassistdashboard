@@ -568,10 +568,10 @@ Deno.serve(async (req: Request) => {
     }
   }
 
-  // Area of Interest is sent in FULL — Ammar 2026-06-11 reversed the earlier
-  // condense (it dropped sub-specialties / "cut" the list). The template's
-  // area-of-interest column is widened + wraps instead, so the whole value
-  // shows without blowing out the table.
+  // Area of Interest now renders as a SHORT "A, B & C" line
+  // (formatAreasOfInterest, applied above) in its own data-table column — short
+  // enough not to blow out the table, which was the original reason it had been
+  // dropped. Empty for doctors with no area_of_interest on file.
 
   // ── Lookup per-emirate relocation guide URL ─────────────────────────────
   // Ammar 2026-06-03: 'we sent it for Dubai Abu Dhabi and all of them'.
@@ -1444,6 +1444,7 @@ function doctorRowTableHtml(v: Record<string, string>): string {
     ["#",                                            "1"],
     ["Name",                                         v.doctor_name || ""],
     ["Title and Specialty as per the UAE license",   v.doctor_title || ""],
+    ["Area of Interest",                             v.doctor_area_of_interest || ""],
     ["Country Of Training",                          v.doctor_country_training || ""],
     ["Years of Experience",                          v.doctor_years_experience || ""],
     ["Nationality",                                  v.doctor_nationality || ""],

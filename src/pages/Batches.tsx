@@ -1544,12 +1544,13 @@ function BatchDialog({ target, onTargetChange, batches, suggestedSpecialty }: {
               <AttachmentsPicker
                 attachments={batch.attachments ?? []}
                 onChange={setAttachments}
-                // Only block while the batch isn't a draft or Daily-Duo card
-                // images are being rasterised — NOT on every `update` mutation.
-                // The shared `update.isPending` used to grey this out whenever a
-                // doctor was added (which triggers card prep), so the button felt
-                // broken specifically on Daily-Duo batches.
-                disabled={batch.status !== "draft" || preparingCards}
+                // Allow attaching on DRAFT and SENT batches (sent → so a file can
+                // ride a resend); only block cancelled batches and the moment
+                // Daily-Duo card images are being rasterised. Previously this was
+                // gated on the shared `update.isPending`, which greyed the button
+                // out on every mutation (adding a doctor triggers card prep), AND
+                // on `status !== "draft"`, which hid it on the common resend flow.
+                disabled={preparingCards || (batch.status !== "draft" && batch.status !== "sent")}
                 hint="CV, logbook, etc. — attached to every hospital in this batch"
               />
             </section>
