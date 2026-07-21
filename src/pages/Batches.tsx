@@ -1012,6 +1012,9 @@ function BatchDialog({ target, onTargetChange, batches, suggestedSpecialty }: {
   // Ammar's spec (one batch per country, sent to all hospitals in that
   // country). Empty string = broadcast to all hospitals (legacy fallback).
   const [country,   setCountry]         = useState<string>("UAE");
+  // Subject framing (Hasan 2026-07-20): "none" = legacy template subject;
+  // "recap"/"specialty" swap in the "Excited to work in <hospital city>" headers.
+  const [headerMode, setHeaderMode]     = useState<"none" | "recap" | "specialty">("none");
   const [creating, setCreating]         = useState(false);
 
   // Editor-only state.
@@ -1097,6 +1100,7 @@ function BatchDialog({ target, onTargetChange, batches, suggestedSpecialty }: {
           : { freq: "none" },
         specialty:     finalSpecialty,
         country:       country.trim() || null,
+        header_mode:   headerMode === "none" ? null : headerMode,
       });
       toast.success("Batch created. Pick doctors below.");
       // Stay in the dialog — swap into doctor-picker mode.
@@ -1437,6 +1441,20 @@ function BatchDialog({ target, onTargetChange, batches, suggestedSpecialty }: {
                   {country === "UAE" ? "UAE team" : `${country} team`} work week: <strong>{workWeekLabel(country)}</strong>
                   <span className="text-sky-600/70">({workWeekLabel(country) === "Sun–Thu" ? "Fri–Sat weekend" : "Sat–Sun weekend"})</span>
                 </div>
+              </div>
+              <div className="space-y-1">
+                <Label className="text-[11px]">Subject header</Label>
+                <Select value={headerMode} onValueChange={(v) => setHeaderMode(v as "none" | "recap" | "specialty")}>
+                  <SelectTrigger className="h-9 text-[12px]"><SelectValue /></SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="none">Default (Available &lt;specialty&gt; — Allocation Assist)</SelectItem>
+                    <SelectItem value="recap">Recap — "This weeks available doctors … Excited to work in &lt;city&gt;"</SelectItem>
+                    <SelectItem value="specialty">Specialty — "&lt;Specialty&gt; available … Excited to work in &lt;city&gt;"</SelectItem>
+                  </SelectContent>
+                </Select>
+                <p className="text-[10px] text-muted-foreground">
+                  &lt;city&gt; is each recipient hospital's city. Use <strong>Recap</strong> for a weekly round-up of sent doctors, <strong>Specialty</strong> for a Top-15-by-specialty blast.
+                </p>
               </div>
               {kind === "specialty_of_day" && (
                 <div className="space-y-1">

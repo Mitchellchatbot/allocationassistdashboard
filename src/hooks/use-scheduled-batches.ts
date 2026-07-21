@@ -57,6 +57,11 @@ export interface ScheduledBatch {
   // Null = all hospitals (legacy / broadcast). Ammar 2026-06-03 spec is
   // that going forward every batch picks a country at create time.
   country:          string | null;
+  /** Subject framing (Hasan 2026-07-20): 'recap' → "This weeks available doctors
+   *  - Allocation Assist Platform - Excited to work in <city>"; 'specialty' →
+   *  "<Specialty> available - … Excited to work in <city>"; null → legacy
+   *  template subject. <city> = the recipient hospital's city. */
+  header_mode:      "recap" | "specialty" | null;
   status:           BatchStatus;
   doctor_ids:       string[];
   /** Daily Duo only — one profile-card image URL per queued doctor, aligned to
@@ -172,6 +177,7 @@ export interface UpsertBatchInput {
   recurrence?:    BatchRecurrence | null;
   specialty?:     string | null;
   country?:       string | null;
+  header_mode?:   "recap" | "specialty" | null;
   doctor_ids?:    string[];
   notes?:         string | null;
   excluded_emails?: string[];
@@ -192,6 +198,7 @@ export function useUpsertBatch() {
         ...(input.recurrence !== undefined ? { recurrence: input.recurrence } : {}),
         specialty:     input.specialty ?? null,
         country:       input.country   ?? null,
+        ...(input.header_mode !== undefined ? { header_mode: input.header_mode } : {}),
         doctor_ids:    input.doctor_ids ?? [],
         notes:         input.notes ?? null,
         ...(input.excluded_emails !== undefined ? { excluded_emails: input.excluded_emails } : {}),

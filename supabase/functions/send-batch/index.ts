@@ -194,6 +194,7 @@ Deno.serve(async (req: Request) => {
         email,
         contact:      String(h.primary_contact_name ?? "").trim(),
         greetContact: h.greet_with_contact_name === true,
+        city:         String(h.city ?? "").trim(),
         toEmails,
       };
     })
@@ -401,8 +402,20 @@ Deno.serve(async (req: Request) => {
   // Body is wrapped in the same Garamond shell send-flow-email uses.
   const wrapHtml = (bodyHtml: string) =>
     `${FONT_IMPORT}<div style="font-family:${FONT_STACK};font-size:17px;color:#1a2332;line-height:1.55;">${bodyHtml}</div>`;
-  const renderFor = (contactName: string) => ({
-    subject: renderText(String(tpl.subject ?? ""), { specialty: specialtyLabel, hospital_contact_name: contactName }),
+  // Subject "header mode" (Hasan 2026-07-20): recap vs specialty framing, with
+  // the RECIPIENT HOSPITAL's city as the location (falls back to the batch
+  // country, then drops the "Excited to work in …" tail if neither is known).
+  // NULL mode keeps the legacy template subject.
+  const headerMode = String((batch as Record<string, unknown>).header_mode ?? "").trim();
+  const subjectFor = (city: string): string => {
+    const loc = (city || String(batchCountry ?? "")).trim();
+    const tail = loc ? ` - Excited to work in ${loc}` : "";
+    if (headerMode === "recap")     return `This weeks available doctors - Allocation Assist Platform${tail}`;
+    if (headerMode === "specialty") return `${specialtyLabel} available - Allocation Assist Platform${tail}`;
+    return renderText(String(tpl.subject ?? ""), { specialty: specialtyLabel, hospital_contact_name: "" });
+  };
+  const renderFor = (contactName: string, city: string) => ({
+    subject: subjectFor(city),
     html:    wrapHtml(renderText(String(tpl.body_html ?? ""), { specialty: specialtyLabel, hospital_contact_name: contactName, doctors_table_html: doctorsHtmlBlock, signature: SIGNATURE_HTML })),
     text:    renderText(String(tpl.body_text ?? ""), { specialty: specialtyLabel, hospital_contact_name: contactName, doctors_table_html: doctorsTextBlock, signature: SIGNATURE_TEXT }),
   });
@@ -413,7 +426,8 @@ Deno.serve(async (req: Request) => {
 
   // ── Dry run? Preview the FIRST hospital's personalised version ─────────
   if (dryRun) {
-    const sample = renderFor(recipientHospitals[0] ? greetingFor(recipientHospitals[0]) : "Team");
+    const h0 = recipientHospitals[0];
+    const sample = renderFor(h0 ? greetingFor(h0) : "Team", h0?.city ?? "");
     return json({
       ok: true, dry_run: true,
       preview: { from: MAIL_FROM, bcc_count: recipients.length, subject: sample.subject, html: sample.html, text: sample.text },
@@ -482,8 +496,8 @@ Deno.serve(async (req: Request) => {
   // One personalised email per hospital.
   const emails = targets.map((h, i) => {
     const rendered = editedHtml
-      ? { subject: editedSubject || renderFor(greetingFor(h)).subject, html: wrapHtml(editedHtml), text: editedText || stripHtml(editedHtml) }
-      : renderFor(greetingFor(h));
+      ? { subject: editedSubject || renderFor(greetingFor(h), h.city).subject, html: wrapHtml(editedHtml), text: editedText || stripHtml(editedHtml) }
+      : renderFor(greetingFor(h), h.city);
     // Live To = this hospital's resolved list (one recruiter email, or EVERY
     // eligible contact for an 'all'-mode hospital), minus any batch-excluded /
     // Ammar addresses. Test mode still funnels every copy to the test inbox.
