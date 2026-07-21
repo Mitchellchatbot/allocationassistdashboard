@@ -896,21 +896,34 @@ function HospitalPicker({
 }) {
   const [q, setQ] = useState("");
   const [country, setCountry] = useState("all");
+  const [city, setCity] = useState("all");
   const countries = useMemo(() => {
     const s = new Set<string>();
     for (const h of hospitals) { const c = h.country?.trim(); if (c) s.add(c); }
     return Array.from(s).sort((a, b) => a.localeCompare(b));
   }, [hospitals]);
+  // Cities/emirates scoped to the selected country, so "UAE → Dubai/Abu Dhabi…".
+  const cities = useMemo(() => {
+    const s = new Set<string>();
+    for (const h of hospitals) {
+      if (country !== "all" && (h.country ?? "").trim().toLowerCase() !== country.toLowerCase()) continue;
+      const c = h.city?.trim(); if (c) s.add(c);
+    }
+    return Array.from(s).sort((a, b) => a.localeCompare(b));
+  }, [hospitals, country]);
+  // A city no longer in the (country-scoped) list falls back to "all".
+  const effCity = city !== "all" && cities.some(c => c.toLowerCase() === city.toLowerCase()) ? city : "all";
   const filtered = useMemo(() => {
     const term = q.trim().toLowerCase();
     return hospitals.filter(h => {
       if (country !== "all" && (h.country ?? "").trim().toLowerCase() !== country.toLowerCase()) return false;
+      if (effCity !== "all" && (h.city ?? "").trim().toLowerCase() !== effCity.toLowerCase()) return false;
       if (!term) return true;
       return h.name.toLowerCase().includes(term) ||
         h.city?.toLowerCase().includes(term) ||
         h.country?.toLowerCase().includes(term);
     });
-  }, [hospitals, q, country]);
+  }, [hospitals, q, country, effCity]);
 
   // "Select all" acts on whatever's currently filtered (so a search narrows it).
   const allFilteredSelected = filtered.length > 0 && filtered.every(h => selectedIds.includes(h.id));
@@ -944,6 +957,17 @@ function HospitalPicker({
           <option value="all">All countries</option>
           {countries.map(c => <option key={c} value={c}>{c}</option>)}
         </select>
+        {cities.length > 0 && (
+          <select
+            value={effCity}
+            onChange={e => setCity(e.target.value)}
+            title="Show only hospitals in this city / emirate"
+            className="shrink-0 rounded-md border border-input bg-white text-slate-800 text-[12px] px-2 h-9 max-w-[140px]"
+          >
+            <option value="all">All cities</option>
+            {cities.map(c => <option key={c} value={c}>{c}</option>)}
+          </select>
+        )}
       </div>
       <div className="flex shrink-0 items-center justify-between text-[11px]">
         <div className="flex items-center gap-2">
