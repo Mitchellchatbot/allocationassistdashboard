@@ -31,12 +31,43 @@ export interface Hospital {
    *  (email_doctor stage) — carries the {{hospital_image}} slot. */
   doctor_template_key:     string | null;
   notes:                   string | null;
+  /** Send state (the color-sheet "state"): false = DON'T send (paused). A send
+   *  dialog hides these; null/true = sendable. */
+  active:                  boolean | null;
+  /** If non-empty, only OFFER this hospital for doctors in these specialties. */
+  specialty_only:          string[] | null;
+  /** Never offer this hospital for doctors in these specialties. */
+  specialty_skip:          string[] | null;
+  /** Extra CC recipients automatically added to this hospital's emails. */
+  cc_emails:               string[] | null;
   health_score:            number | null;
   created_at:              string;
   updated_at:              string;
 }
 
 export type HospitalInput = Partial<Omit<Hospital, "id" | "created_at" | "updated_at">> & { name: string };
+
+/** "Don't send" state: paused only when active is EXPLICITLY false (null/true = send). */
+export function isHospitalPaused(h: Pick<Hospital, "active">): boolean {
+  return h.active === false;
+}
+
+/** Whether a hospital should be OFFERED for a doctor of the given specialty,
+ *  honouring specialty_only / specialty_skip. Case-insensitive substring match
+ *  (specialty names differ between systems). Unknown doctor specialty → allowed
+ *  (never hide a hospital we can't rule out). */
+export function hospitalAllowsSpecialty(
+  h: Pick<Hospital, "specialty_only" | "specialty_skip">,
+  specialty: string | null | undefined,
+): boolean {
+  const s = (specialty ?? "").trim().toLowerCase();
+  const hit = (list: string[] | null | undefined) =>
+    (list ?? []).some(x => { const t = x.trim().toLowerCase(); return !!t && !!s && (s.includes(t) || t.includes(s)); });
+  if (hit(h.specialty_skip)) return false;
+  const only = (h.specialty_only ?? []).filter(x => x.trim());
+  if (only.length && s) return hit(h.specialty_only);
+  return true;
+}
 
 const KEY = ["hospitals"] as const;
 

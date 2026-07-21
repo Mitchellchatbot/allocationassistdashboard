@@ -10,7 +10,7 @@ import { toast } from "sonner";
 import { useQueryClient } from "@tanstack/react-query";
 import { supabase } from "@/lib/supabase";
 import { useAuth } from "@/hooks/use-auth";
-import { useHospitals } from "@/hooks/use-hospitals";
+import { useHospitals, isHospitalPaused } from "@/hooks/use-hospitals";
 import { usePublishedWpCandidates } from "@/hooks/use-wp-candidates";
 import { useEmailTemplates, renderTemplate } from "@/hooks/use-email-templates";
 import { TemplatePicker } from "@/components/automations/TemplatePicker";
@@ -106,6 +106,7 @@ export function BulkProfileSendDialog({ open, onClose }: { open: boolean; onClos
     const q = hospQuery.trim().toLowerCase();
     return hospitals
       .filter(h => h.primary_recruiter_email)
+      .filter(h => !isHospitalPaused(h))   // send-state: hide "don't send" hospitals
       .filter(h => hospCountry === "all" || (h.country ?? "").trim().toLowerCase() === hospCountry.toLowerCase())
       .filter(h => effHospCity === "all" || (h.city ?? "").trim().toLowerCase() === effHospCity.toLowerCase())
       .filter(h => !q || h.name.toLowerCase().includes(q) || (h.city ?? "").toLowerCase().includes(q) || (h.country ?? "").toLowerCase().includes(q));

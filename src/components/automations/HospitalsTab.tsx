@@ -377,6 +377,10 @@ export function HospitalDialog({
     image_url:               initial.image_url ?? "",
     template_key:            initial.template_key ?? "",
     notes:                   initial.notes ?? "",
+    active:                  initial.active ?? true,
+    specialty_only:          initial.specialty_only ?? [],
+    specialty_skip:          initial.specialty_skip ?? [],
+    cc_emails:               initial.cc_emails ?? [],
   }));
   const [imgUploading, setImgUploading] = useState(false);
 
@@ -409,6 +413,10 @@ export function HospitalDialog({
       image_url:               initial.image_url ?? "",
       template_key:            initial.template_key ?? "",
       notes:                   initial.notes ?? "",
+      active:                  initial.active ?? true,
+      specialty_only:          initial.specialty_only ?? [],
+      specialty_skip:          initial.specialty_skip ?? [],
+      cc_emails:               initial.cc_emails ?? [],
     });
   }, [initial]);
 
@@ -507,6 +515,39 @@ export function HospitalDialog({
             </div>
             <Field label="Template key (override)" placeholder="e.g. profile_sent_american_hospital"
               value={form.template_key ?? ""} onChange={v => setForm(f => ({ ...f, template_key: v }))} />
+            <div className="rounded-md border border-slate-200 bg-slate-50 p-3 space-y-3">
+              <Label className="text-[11px] uppercase tracking-wider text-muted-foreground">Send state</Label>
+              <div className="flex flex-wrap items-center gap-2">
+                <button type="button" onClick={() => setForm(f => ({ ...f, active: true }))}
+                  className={`rounded-md px-3 py-1 text-[12px] font-medium ${form.active !== false ? "bg-emerald-600 text-white" : "bg-white text-slate-500 border border-slate-200"}`}>Send</button>
+                <button type="button" onClick={() => setForm(f => ({ ...f, active: false }))}
+                  className={`rounded-md px-3 py-1 text-[12px] font-medium ${form.active === false ? "bg-rose-600 text-white" : "bg-white text-slate-500 border border-slate-200"}`}>Don't send</button>
+                <span className="text-[10px] text-muted-foreground">Paused hospitals are hidden from the send dialogs.</span>
+              </div>
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                <div>
+                  <Label className="text-[10.5px]">Only for specialties</Label>
+                  <Input className="mt-1 text-[12px]" placeholder="e.g. Psychiatry, Psychology"
+                    value={(form.specialty_only ?? []).join(", ")}
+                    onChange={e => setForm(f => ({ ...f, specialty_only: e.target.value.split(/[,;\n]+/).map(s => s.trim()).filter(Boolean) }))} />
+                  <p className="text-[10px] text-muted-foreground mt-0.5">If set, only offered for these; blank = any.</p>
+                </div>
+                <div>
+                  <Label className="text-[10.5px]">Never for specialties</Label>
+                  <Input className="mt-1 text-[12px]" placeholder="e.g. Nephrology, Ophthalmology"
+                    value={(form.specialty_skip ?? []).join(", ")}
+                    onChange={e => setForm(f => ({ ...f, specialty_skip: e.target.value.split(/[,;\n]+/).map(s => s.trim()).filter(Boolean) }))} />
+                  <p className="text-[10px] text-muted-foreground mt-0.5">Skipped for these specialties.</p>
+                </div>
+              </div>
+              <div>
+                <Label className="text-[10.5px]">Auto-CC emails</Label>
+                <Input className="mt-1 text-[12px]" placeholder="cc1@x.com, cc2@y.com"
+                  value={(form.cc_emails ?? []).join(", ")}
+                  onChange={e => setForm(f => ({ ...f, cc_emails: e.target.value.split(/[,;\n]+/).map(s => s.trim()).filter(Boolean) }))} />
+                <p className="text-[10px] text-muted-foreground mt-0.5">Added to CC on a single-hospital Send Profile.</p>
+              </div>
+            </div>
             <div>
               <Label className="text-[11px] uppercase tracking-wider text-muted-foreground">Notes</Label>
               <Textarea

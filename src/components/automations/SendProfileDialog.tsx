@@ -15,7 +15,7 @@ import { useAuth } from "@/hooks/use-auth";
 import { AA_SENDERS, findSenderByEmail } from "@/lib/hi-team";
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
 import { supabase } from "@/lib/supabase";
-import { useHospitals, useUpdateHospital, type Hospital } from "@/hooks/use-hospitals";
+import { useHospitals, useUpdateHospital, isHospitalPaused, hospitalAllowsSpecialty, type Hospital } from "@/hooks/use-hospitals";
 import { useHospitalContacts, resolveRecipient, resolveAllRecipients, type HospitalContact } from "@/hooks/use-hospital-contacts";
 import { useEmailTemplates, renderTemplate } from "@/hooks/use-email-templates";
 import { useDoctorProfile, useDoctorProfiles, profileToTokens, calcCompletion, type DoctorProfile } from "@/hooks/use-doctor-profiles";
@@ -531,6 +531,8 @@ function SendProfileDialogBody({ onClose, initial }: { onClose: () => void; init
         const recipientName  = (isAllMode || overrideIsMulti)
           ? ""
           : (overrideContact?.name ?? resolved.contact?.name ?? h.primary_contact_name ?? "").trim();
+        // Auto-CC (send-state): the hospital's configured cc_emails ride the send.
+        const runCc = [...new Set([...ccList, ...(h.cc_emails ?? [])].map(e => e.trim()).filter(Boolean))];
         // Only advance the cursor when we actually used the cycle rotation
         // (no override, cycle mode, real matched contacts).
         if (!overrideEmail && (h.contact_mode ?? "primary") === "cycle" && !resolved.fromHospitalRow && resolved.nextCursor !== (h.cycle_cursor ?? 0)) {
@@ -567,7 +569,7 @@ function SendProfileDialogBody({ onClose, initial }: { onClose: () => void; init
               // Dispatcher-picked recipients. The roster is BCC'd; Amir (if
               // picked) is CC'd. send-flow-email reads bcc_override / cc_override.
               bcc_override:       bccList,
-              ...(ccList.length ? { cc_override: ccList } : {}),
+              ...(runCc.length ? { cc_override: runCc } : {}),
               // Per-stage edits from the preview (email_hospital / email_doctor).
               // send-flow-email reads stage_overrides[<stage>] when each email
               // fires — including the doctor heads-up that auto-continues
@@ -919,6 +921,10 @@ function HospitalPicker({
   const filtered = useMemo(() => {
     const term = q.trim().toLowerCase();
     return hospitals.filter(h => {
+      // Send-state system: never offer a paused ("don't send") hospital, or one
+      // whose specialty rules exclude this doctor's specialty.
+      if (isHospitalPaused(h)) return false;
+      if (!hospitalAllowsSpecialty(h, doctor.speciality)) return false;
       if (country !== "all" && (h.country ?? "").trim().toLowerCase() !== country.toLowerCase()) return false;
       if (effCity !== "all" && (h.city ?? "").trim().toLowerCase() !== effCity.toLowerCase()) return false;
       if (!term) return true;
@@ -926,7 +932,7 @@ function HospitalPicker({
         h.city?.toLowerCase().includes(term) ||
         h.country?.toLowerCase().includes(term);
     });
-  }, [hospitals, q, country, effCity]);
+  }, [hospitals, q, country, effCity, doctor.speciality]);
 
   // "Select all" acts on whatever's currently filtered (so a search narrows it).
   const allFilteredSelected = filtered.length > 0 && filtered.every(h => selectedIds.includes(h.id));
