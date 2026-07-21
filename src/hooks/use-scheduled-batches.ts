@@ -62,6 +62,9 @@ export interface ScheduledBatch {
    *  "<Specialty> available - … Excited to work in <city>"; null → legacy
    *  template subject. <city> = the recipient hospital's city. */
   header_mode:      "recap" | "specialty" | null;
+  /** When true, the batch also emails each queued doctor a "working opportunity"
+   *  note listing the hospitals it's recommending them to (with photos). */
+  include_doctor_email: boolean;
   status:           BatchStatus;
   doctor_ids:       string[];
   /** Daily Duo only — one profile-card image URL per queued doctor, aligned to
@@ -178,6 +181,7 @@ export interface UpsertBatchInput {
   specialty?:     string | null;
   country?:       string | null;
   header_mode?:   "recap" | "specialty" | null;
+  include_doctor_email?: boolean;
   doctor_ids?:    string[];
   notes?:         string | null;
   excluded_emails?: string[];
@@ -297,6 +301,8 @@ export function useSendBatchNow() {
         // Edits from the preview, shipped verbatim by send-batch instead of
         // re-rendering the template. Omit/blank → template version is sent.
         subjectOverride?: string; htmlOverride?: string; textOverride?: string;
+        // Same, for the optional doctor "working opportunity" email.
+        doctorSubjectOverride?: string; doctorHtmlOverride?: string;
         // Extra CC / BCC from the preview, added on top of the hospital BCC list.
         ccOverride?: string[]; bccOverride?: string[];
         // Recruiter emails to DROP from this send (hospitals unchecked in the preview).
@@ -311,6 +317,8 @@ export function useSendBatchNow() {
         ...(input.subjectOverride ? { subject_override: input.subjectOverride } : {}),
         ...(input.htmlOverride    ? { html_override:    input.htmlOverride }    : {}),
         ...(input.textOverride    ? { text_override:    input.textOverride }    : {}),
+        ...(input.doctorSubjectOverride ? { doctor_subject_override: input.doctorSubjectOverride } : {}),
+        ...(input.doctorHtmlOverride    ? { doctor_html_override:    input.doctorHtmlOverride }    : {}),
         ...(input.ccOverride?.length  ? { cc_override:  input.ccOverride }  : {}),
         ...(input.bccOverride?.length ? { bcc_override: input.bccOverride } : {}),
         ...(input.excludeOverride?.length ? { exclude_override: input.excludeOverride } : {}),
@@ -332,17 +340,19 @@ export function useSendBatchNow() {
 /** Build the batch email WITHOUT sending it (send-batch `dry_run`), so the
  *  user can preview exactly what hospitals will receive before firing.
  *  Returns the rendered subject + HTML + the BCC recipient count. */
+export interface BatchDoctorPreview { included: boolean; subject: string; html: string; text: string; recipient_count: number }
+export interface BatchPreviewResult { subject: string; html: string; text: string; from: string; bcc_count: number; doctor_email?: BatchDoctorPreview }
 export function useBatchPreview() {
   return useMutation({
-    mutationFn: async (input: string | { batchId: string; force?: boolean }): Promise<{ subject: string; html: string; text: string; from: string; bcc_count: number }> => {
+    mutationFn: async (input: string | { batchId: string; force?: boolean }): Promise<BatchPreviewResult> => {
       const batchId = typeof input === "string" ? input : input.batchId;
       const force   = typeof input === "string" ? false  : !!input.force;
-      const { data, error } = await invokeWithTimeout<{ ok: boolean; preview?: { subject: string; html: string; text: string; from: string; bcc_count: number }; error?: string }>(
+      const { data, error } = await invokeWithTimeout<{ ok: boolean; preview?: Omit<BatchPreviewResult, "doctor_email">; doctor_email?: BatchDoctorPreview; error?: string }>(
         "send-batch", { batch_id: batchId, dry_run: true, force }, 60_000);
       if (error) throw error;
-      const res = data as { ok: boolean; preview?: { subject: string; html: string; text: string; from: string; bcc_count: number }; error?: string };
+      const res = data as { ok: boolean; preview?: Omit<BatchPreviewResult, "doctor_email">; doctor_email?: BatchDoctorPreview; error?: string };
       if (!res.ok || !res.preview) throw new Error(res.error ?? "Preview failed");
-      return res.preview;
+      return { ...res.preview, doctor_email: res.doctor_email };
     },
   });
 }

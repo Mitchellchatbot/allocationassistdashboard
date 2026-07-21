@@ -90,6 +90,8 @@ Deno.serve(async (req: Request) => {
     // a dry run always returns the freshly-rendered template so "Reset to
     // template" works by simply re-previewing.
     subject_override?: string; html_override?: string; text_override?: string;
+    // Same, for the optional doctor "working opportunity" email leg.
+    doctor_subject_override?: string; doctor_html_override?: string;
     // Extra recipients from the preview's CcBccPicker — added ON TOP of the
     // hospital BCC list (bcc) / shown to everyone (cc).
     cc_override?: string[]; bcc_override?: string[];
@@ -195,6 +197,7 @@ Deno.serve(async (req: Request) => {
         contact:      String(h.primary_contact_name ?? "").trim(),
         greetContact: h.greet_with_contact_name === true,
         city:         String(h.city ?? "").trim(),
+        image_url:    String(h.image_url ?? "").trim(),
         toEmails,
       };
     })
@@ -424,6 +427,41 @@ Deno.serve(async (req: Request) => {
   const greetingFor = (h: { name: string; contact: string; greetContact: boolean }) =>
     (h.greetContact && h.contact) ? h.contact : (h.name ? `${h.name} team` : "Team");
 
+  // ── Doctor "working opportunity" email (Hasan 2026-07-20) ──────────────
+  // When include_doctor_email is on, each queued doctor also gets a note listing
+  // the hospitals they're being recommended to (grouped by city, with photos).
+  // Greets generically ("Hello Dr.") like the team's real template, so ONE body
+  // serves every doctor and the edited preview can be sent verbatim.
+  const includeDoctorEmail = (batch as Record<string, unknown>).include_doctor_email === true;
+  const doctorHospitalsHtml = (() => {
+    const byCity = new Map<string, typeof recipientHospitals>();
+    for (const h of recipientHospitals) {
+      const c = h.city || "Other";
+      (byCity.get(c) ?? byCity.set(c, []).get(c)!).push(h);
+    }
+    const blocks: string[] = [];
+    for (const [c, hs] of byCity) {
+      const items = hs.map(h => {
+        const img = h.image_url
+          ? `<div style="margin:4px 0 8px;"><img src="${h.image_url}" alt="${escapeHtml(h.name)}" width="160" style="display:block;width:160px;height:auto;border-radius:8px;border:0;" /></div>`
+          : "";
+        return `<li style="margin:0 0 6px;">${escapeHtml(h.name)}${img}</li>`;
+      }).join("");
+      blocks.push(`<p style="font-weight:700;margin:12px 0 4px;">In ${escapeHtml(c)}:</p><ul style="margin:0 0 8px;padding-left:20px;">${items}</ul>`);
+    }
+    return blocks.join("");
+  })();
+  const doctorSubjectFresh = `Working opportunities${batchCountry ? ` in ${batchCountry}` : ""} - Allocation Assist`;
+  const doctorBodyFresh = `<p>Hello Dr.,</p>
+<p>I hope you are well.</p>
+<p>We are currently discussing your profile with the hospitals below; please let us know if you hear from any of them through email, phone call, or LinkedIn. We will also keep you informed as soon as we receive feedback.</p>
+<p>We will help you with the salary and allowance negotiation to secure the best offer for you.</p>
+${doctorHospitalsHtml}
+<p>If you have any questions, feel free to reach out any time.</p>
+${SIGNATURE_HTML}`;
+  const doctorEmailBody = (!dryRun && body.doctor_html_override) ? body.doctor_html_override : doctorBodyFresh;
+  const doctorEmailSubject = (!dryRun && body.doctor_subject_override) ? body.doctor_subject_override : doctorSubjectFresh;
+
   // ── Dry run? Preview the FIRST hospital's personalised version ─────────
   if (dryRun) {
     const h0 = recipientHospitals[0];
@@ -431,6 +469,13 @@ Deno.serve(async (req: Request) => {
     return json({
       ok: true, dry_run: true,
       preview: { from: MAIL_FROM, bcc_count: recipients.length, subject: sample.subject, html: sample.html, text: sample.text },
+      doctor_email: {
+        included: includeDoctorEmail,
+        subject:  doctorSubjectFresh,
+        html:     wrapHtml(doctorBodyFresh),
+        text:     stripHtml(wrapHtml(doctorBodyFresh)),
+        recipient_count: rows.filter(r => String(r.email ?? "").trim()).length,
+      },
       doctor_count: rows.length,
     }, 200);
   }
@@ -564,6 +609,36 @@ Deno.serve(async (req: Request) => {
     return json({ ok: false, error: "Batch failed to send", detail: lastError }, 502);
   }
 
+  // ── Doctor "working opportunity" emails — one per queued doctor with an email
+  // (test mode redirects to the test inbox). Sent AFTER the hospital emails
+  // succeeded. Hospital-facing attachments are NOT attached to the doctor note.
+  let doctorSent = 0, doctorFailed = 0;
+  if (includeDoctorEmail) {
+    const finalDoctorHtml = wrapHtml(doctorEmailBody);
+    const finalDoctorText = stripHtml(finalDoctorHtml);
+    const doctorTargets = rows
+      .map(r => String(r.email ?? "").trim())
+      .filter(e => e && e.toLowerCase() !== EXCLUDED_RECIPIENT && !excludeSet.has(e.toLowerCase()));
+    for (const de of doctorTargets) {
+      try {
+        const res = await fetch("https://api.resend.com/emails", {
+          method:  "POST",
+          headers: { "Authorization": `Bearer ${RESEND_API_KEY}`, "Content-Type": "application/json" },
+          body: JSON.stringify({
+            from:    MAIL_FROM,
+            to:      TEST_OVERRIDE_LIST.length ? [TEST_OVERRIDE_LIST[0]] : [de],
+            subject: doctorEmailSubject,
+            html:    finalDoctorHtml,
+            text:    finalDoctorText,
+            headers: { "X-AA-Batch-Id": String(batch.id), "X-AA-Kind": "doctor_working_op" },
+          }),
+        });
+        if (res.ok) doctorSent++; else doctorFailed++;
+      } catch { doctorFailed++; }
+      await new Promise(r => setTimeout(r, 120));
+    }
+  }
+
   await supabase.from("scheduled_batch_sends").update({
     status:          "sent",
     sent_at:         new Date().toISOString(),
@@ -588,6 +663,8 @@ Deno.serve(async (req: Request) => {
     message_id: messageId,
     bcc_count: sentCount,           // hospitals actually emailed (one each now)
     doctor_count: rows.length,
+    doctor_email_sent: doctorSent,  // doctors emailed the working-opportunity note
+    doctor_email_failed: doctorFailed,
     specialty: specialtyLabel,
   }, 200);
 });

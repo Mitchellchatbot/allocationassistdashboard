@@ -14,7 +14,7 @@ import { Checkbox } from "@/components/ui/checkbox";
 import { toast } from "sonner";
 import { useScheduledBatches, useUpsertBatch, useUpdateBatch, useCancelBatch, useSendBatchNow, useBatchPreview,
   useSpecialtyRotation, useUpdateSpecialtyRotation,
-  type ScheduledBatch, type BatchKind,
+  type ScheduledBatch, type BatchKind, type BatchDoctorPreview,
 } from "@/hooks/use-scheduled-batches";
 import { useHospitals } from "@/hooks/use-hospitals";
 import { useZohoData, type ZohoLead, type ZohoDoctorOnBoard } from "@/hooks/use-zoho-data";
@@ -960,12 +960,15 @@ function BatchDialog({ target, onTargetChange, batches, suggestedSpecialty }: {
   const update = useUpdateBatch();
   const sendNow = useSendBatchNow();
   const previewMut = useBatchPreview();
-  const [emailPreview, setEmailPreview] = useState<{ subject: string; html: string; text: string; bcc_count: number } | null>(null);
+  const [emailPreview, setEmailPreview] = useState<{ subject: string; html: string; text: string; bcc_count: number; doctor_email?: BatchDoctorPreview } | null>(null);
   // Editable-preview state: the team can tweak the subject/body before sending.
   // editSubject/editHtml are the live (possibly edited) values; emailPreview
   // holds the pristine template render so "Reset" + the edited-diff check work.
   const [editSubject, setEditSubject] = useState("");
   const [editHtml, setEditHtml] = useState("");
+  // The optional doctor "working opportunity" email (editable second pane).
+  const [editDoctorSubject, setEditDoctorSubject] = useState("");
+  const [editDoctorHtml, setEditDoctorHtml] = useState("");
   const [previewResetTick, setPreviewResetTick] = useState(0);
   const [batchCc, setBatchCc] = useState<string[]>([]);
   const [batchBcc, setBatchBcc] = useState<string[]>([]);
@@ -1185,6 +1188,7 @@ function BatchDialog({ target, onTargetChange, batches, suggestedSpecialty }: {
   // True once the team edited away from the (greeting-swapped) preview base —
   // gates the html_override on send and the "edited" hint.
   const batchEdited = !!emailPreview && (editSubject !== emailPreview.subject || editHtml !== displayHtml);
+  const doctorEdited = !!emailPreview?.doctor_email && (editDoctorSubject !== emailPreview.doctor_email.subject || editDoctorHtml !== emailPreview.doctor_email.html);
   // id → DoctorOption lookup so resolving picked doctor_ids is O(picked)
   // instead of O(picked × allDoctors) on every render.
   const doctorById = useMemo(() => {
@@ -1677,7 +1681,7 @@ function BatchDialog({ target, onTargetChange, batches, suggestedSpecialty }: {
                   if (picked.length === 0) { toast.error("Queue at least one doctor to preview."); return; }
                   try {
                     const p = await previewMut.mutateAsync(batch.status === "sent" ? { batchId: batch.id, force: true } : batch.id);
-                    setEmailPreview({ subject: p.subject, html: p.html, text: p.text, bcc_count: p.bcc_count });
+                    setEmailPreview({ subject: p.subject, html: p.html, text: p.text, bcc_count: p.bcc_count, doctor_email: p.doctor_email });
                     // Seed the exclusion list from the batch so a previously-saved
                     // (e.g. scheduled) exclusion shows pre-unchecked.
                     setExcludedEmails(batch.excluded_emails ?? []);
@@ -1685,6 +1689,8 @@ function BatchDialog({ target, onTargetChange, batches, suggestedSpecialty }: {
                     setBatchCc([]); setBatchBcc([]);
                     setEditSubject(p.subject);
                     setEditHtml(p.html);
+                    setEditDoctorSubject(p.doctor_email?.subject ?? "");
+                    setEditDoctorHtml(p.doctor_email?.html ?? "");
                     setPreviewResetTick(t => t + 1);
                   } catch (e) {
                     toast.error(e instanceof Error ? e.message : "Preview failed");
@@ -1837,7 +1843,33 @@ function BatchDialog({ target, onTargetChange, batches, suggestedSpecialty }: {
             className="min-h-0 flex-1 border-0 rounded-none shadow-none"
           />
         ),
-      }] : []}
+      },
+      ...(emailPreview.doctor_email && emailPreview.doctor_email.recipient_count > 0 ? [{
+        key: "doctor",
+        label: `Doctor email${batch?.include_doctor_email ? "" : " · off"}`,
+        subLabel: `Working opportunity → ${emailPreview.doctor_email.recipient_count} doctor${emailPreview.doctor_email.recipient_count === 1 ? "" : "s"}`,
+        preview: (
+          <div className="flex min-h-0 flex-1 flex-col">
+            <label className="flex items-center gap-2 px-3 py-2 border-b border-slate-200 bg-slate-50 text-[12px] text-slate-700">
+              <input type="checkbox" checked={!!batch?.include_doctor_email}
+                onChange={e => batch && update.mutate({ id: batch.id, patch: { include_doctor_email: e.target.checked } })}
+                className="h-3.5 w-3.5 accent-teal-600" />
+              <span>Also send this to the <strong>{emailPreview.doctor_email.recipient_count}</strong> doctor{emailPreview.doctor_email.recipient_count === 1 ? "" : "s"} when the batch sends</span>
+            </label>
+            <EditableEmailPreview
+              subject={editDoctorSubject}
+              html={editDoctorHtml}
+              onSubjectChange={setEditDoctorSubject}
+              onHtmlChange={setEditDoctorHtml}
+              edited={doctorEdited}
+              onReset={() => { if (emailPreview?.doctor_email) { setEditDoctorSubject(emailPreview.doctor_email.subject); setEditDoctorHtml(emailPreview.doctor_email.html); } }}
+              from="Allocation Assist Team <hello@allocationassist.com>"
+              className="min-h-0 flex-1 border-0 rounded-none shadow-none"
+            />
+          </div>
+        ),
+      }] : []),
+      ] : []}
       footer={
         <>
           <Button variant="outline" onClick={() => setEmailPreview(null)}>Close preview</Button>
@@ -1850,6 +1882,7 @@ function BatchDialog({ target, onTargetChange, batches, suggestedSpecialty }: {
               try {
                 const overrides = {
                   ...(batchEdited ? { subjectOverride: editSubject, htmlOverride: editHtml } : {}),
+                  ...(batch.include_doctor_email && doctorEdited ? { doctorSubjectOverride: editDoctorSubject, doctorHtmlOverride: editDoctorHtml } : {}),
                   ...(batchCc.length  ? { ccOverride:  batchCc }  : {}),
                   ...(batchBcc.length ? { bccOverride: batchBcc } : {}),
                   ...(excludedEmails.length ? { excludeOverride: excludedEmails } : {}),
