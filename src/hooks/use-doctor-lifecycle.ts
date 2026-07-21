@@ -13,7 +13,7 @@
  *                                         approved). See README in the
  *                                         function body for the matrix.
  */
-import { useEffect } from "react";
+import { useEffect, useMemo } from "react";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { supabase } from "@/lib/supabase";
 import { useAuth } from "@/hooks/use-auth";
@@ -114,9 +114,16 @@ export function useDoctorLifecycleMap(): Record<string, DoctorLifecycle> {
     staleTime: 30_000,
   });
 
-  const map: Record<string, DoctorLifecycle> = {};
-  for (const row of data) map[row.doctor_id] = row;
-  return map;
+  // Memoize on `data` — WITHOUT this the map was a brand-new object every
+  // render, which invalidated every downstream memo that keys on it
+  // (useMemoDoctors, the batch specialty-rotation scoring, candidatePool…),
+  // recomputing the whole doctor pool + scores on every render. That was the
+  // main reason the Batches page felt slow.
+  return useMemo(() => {
+    const map: Record<string, DoctorLifecycle> = {};
+    for (const row of data) map[row.doctor_id] = row;
+    return map;
+  }, [data]);
 }
 
 export type LifecycleAction =
