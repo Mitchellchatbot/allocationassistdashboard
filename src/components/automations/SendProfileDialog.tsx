@@ -525,7 +525,10 @@ function SendProfileDialogBody({ onClose, initial }: { onClose: () => void; init
           : (overrideEmail ?? resolved.contact?.email ?? h.primary_recruiter_email ?? null);
         // Going to everyone → greet with the hospital name (leave contact name
         // blank), since no single contact owns the email.
-        const recipientName  = isAllMode
+        // Multiple manual recipients (comma-joined) — like 'all' mode — greet the
+        // hospital name, since no single contact owns the email.
+        const overrideIsMulti = !!overrideEmail && /[,;]/.test(overrideEmail);
+        const recipientName  = (isAllMode || overrideIsMulti)
           ? ""
           : (overrideContact?.name ?? resolved.contact?.name ?? h.primary_contact_name ?? "").trim();
         // Only advance the cursor when we actually used the cycle rotation
@@ -1029,8 +1032,7 @@ function HospitalRecipientsOverride({ hospitals, contacts, overrides, onOverride
     const hc = contacts.forHospital(h.name);
     const resolved = resolveRecipient(hc, h).contact;
     const override = overrides[h.id];
-    const chosen = override ? hc.find(c => c.email?.toLowerCase() === override.toLowerCase()) ?? resolved : resolved;
-    return { h, hc, resolved, override, chosen };
+    return { h, hc, resolved, override };
   });
   if (!rows.some(r => r.hc.length > 0)) return null;
 
@@ -1038,37 +1040,45 @@ function HospitalRecipientsOverride({ hospitals, contacts, overrides, onOverride
     <div className="rounded-lg border border-sidebar-border/40 bg-white/95 p-3 space-y-2 shadow-sm text-slate-700">
       <div className="text-[11px] font-medium text-teal-700 flex items-center gap-1.5 flex-wrap">
         <Mail className="h-3.5 w-3.5" /> Hospital recipient{rows.length > 1 ? "s" : ""}
-        <span className="text-[10px] font-normal text-muted-foreground">— auto-picked by each hospital's setting; override here for this send only</span>
+        <span className="text-[10px] font-normal text-muted-foreground">— auto-picked by each hospital's setting; tick people to override for this send only</span>
       </div>
-      <div className="space-y-1.5">
-        {rows.map(({ h, hc, resolved, override }) => (
-          <div key={h.id} className="flex min-w-0 items-center gap-2 text-[11px]">
-            <span className="w-24 shrink-0 truncate font-medium text-slate-700" title={h.name}>{h.name}</span>
-            {hc.length === 0 ? (
-              <span className="min-w-0 flex-1 truncate text-muted-foreground italic">{h.primary_recruiter_email ?? "no recipient"}</span>
-            ) : (
-              <>
-                <select
-                  value={override ?? "__auto__"}
-                  onChange={e => onOverride(h.id, e.target.value === "__auto__" ? null : e.target.value)}
-                  className="h-7 min-w-0 flex-1 rounded-md border border-border/60 bg-white px-1.5 text-[11px] text-slate-800"
-                >
-                  <option value="__auto__">
-                    {h.contact_mode === "all"
-                      ? `Auto (all ${resolveAllRecipients(hc, h).length}) → ${resolveAllRecipients(hc, h).join(", ") || "—"}`
-                      : `Auto (${h.contact_mode === "cycle" ? "cycle" : "primary"}) → ${resolved?.name || resolved?.email || "—"}`}
-                  </option>
-                  {hc.filter(c => c.email).map(c => (
-                    <option key={c.id} value={c.email!}>
-                      {c.name || c.email}{c.title ? ` · ${c.title}` : ""}{c.isPrimary ? " · Primary" : ""}
-                    </option>
-                  ))}
-                </select>
-                {override && <span className="shrink-0 text-[9px] font-medium text-amber-600">overridden</span>}
-              </>
-            )}
-          </div>
-        ))}
+      <div className="space-y-2">
+        {rows.map(({ h, hc, resolved, override }) => {
+          // Override is a comma-joined email list; tick contacts to build it.
+          const selected = new Set((override ?? "").split(/[,;]+/).map(s => s.trim().toLowerCase()).filter(Boolean));
+          const toggle = (email: string) => {
+            const k = email.toLowerCase();
+            const next = new Set(selected);
+            if (next.has(k)) next.delete(k); else next.add(k);
+            const emails = hc.filter(c => c.email && next.has(c.email.toLowerCase())).map(c => c.email!);
+            onOverride(h.id, emails.length ? emails.join(", ") : null); // empty → back to Auto
+          };
+          const autoLabel = h.contact_mode === "all"
+            ? `Auto (all ${resolveAllRecipients(hc, h).length})`
+            : `Auto (${h.contact_mode === "cycle" ? "cycle" : "primary"}) → ${resolved?.name || resolved?.email || "—"}`;
+          return (
+            <div key={h.id} className="flex min-w-0 items-start gap-2 text-[11px]">
+              <span className="w-24 shrink-0 truncate font-medium text-slate-700 pt-0.5" title={h.name}>{h.name}</span>
+              {hc.length === 0 ? (
+                <span className="min-w-0 flex-1 truncate text-muted-foreground italic pt-0.5">{h.primary_recruiter_email ?? "no recipient"}</span>
+              ) : (
+                <div className="min-w-0 flex-1 space-y-1">
+                  <div className="text-[10px] text-muted-foreground">
+                    {override ? <span className="text-amber-600 font-medium">{selected.size} selected — overriding auto</span> : autoLabel}
+                  </div>
+                  <div className="flex flex-wrap gap-x-3 gap-y-1">
+                    {hc.filter(c => c.email).map(c => (
+                      <label key={c.id} className="inline-flex items-center gap-1 cursor-pointer" title={c.email}>
+                        <input type="checkbox" checked={selected.has(c.email!.toLowerCase())} onChange={() => toggle(c.email!)} className="h-3 w-3 accent-teal-600" />
+                        <span className="truncate max-w-[150px] text-slate-700">{c.name || c.email}{c.isPrimary ? " · Primary" : ""}</span>
+                      </label>
+                    ))}
+                  </div>
+                </div>
+              )}
+            </div>
+          );
+        })}
       </div>
     </div>
   );
