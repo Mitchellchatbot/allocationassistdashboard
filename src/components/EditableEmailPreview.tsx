@@ -152,12 +152,47 @@ export function EditableEmailPreview({
     const r = el.getBoundingClientRect();
     return clientX >= r.right - GRAB_PX && clientX <= r.right + 2 ? el : null;
   };
+  // ── Drag-to-resize images (Gmail-style) ──────────────────────────────────────
+  // Grab an image's right edge and drag to set its width. Width is written inline
+  // (px), which email clients honour, and flows into the sent HTML via flush() —
+  // so what you size is what's sent, on the profile card image OR any photo, in
+  // every preview that uses this component.
+  const imgAtBorder = (target: EventTarget | null, clientX: number): HTMLImageElement | null => {
+    const el = target as HTMLElement | null;
+    if (!el || el.tagName !== "IMG") return null;
+    const r = el.getBoundingClientRect();
+    return clientX >= r.right - GRAB_PX * 2 && clientX <= r.right + 4 ? (el as HTMLImageElement) : null;
+  };
   const onBodyMouseMove = (e: React.MouseEvent) => {
     const body = bodyRef.current; if (!body) return;
-    // Show the col-resize affordance when hovering a column boundary.
-    body.style.cursor = cellAtBorder(e.target, e.clientX) ? "col-resize" : "";
+    // Resize affordance on image edges + column boundaries.
+    body.style.cursor = imgAtBorder(e.target, e.clientX) ? "ew-resize"
+      : cellAtBorder(e.target, e.clientX) ? "col-resize" : "";
   };
   const onBodyMouseDown = (e: React.MouseEvent) => {
+    // Image resize takes priority over cell resize / text editing.
+    const img = imgAtBorder(e.target, e.clientX);
+    if (img) {
+      e.preventDefault();                    // don't start a drag/selection
+      const startX = e.clientX;
+      const startW = img.getBoundingClientRect().width;
+      const parentW = img.parentElement?.getBoundingClientRect().width || 640;
+      const move = (ev: MouseEvent) => {
+        const w = Math.max(80, Math.min(Math.round(startW + ev.clientX - startX), Math.round(parentW)));
+        img.style.width = `${w}px`;
+        img.style.maxWidth = `${w}px`;
+        img.style.height = "auto";
+      };
+      const up = () => {
+        document.removeEventListener("mousemove", move);
+        document.removeEventListener("mouseup", up);
+        if (bodyRef.current) bodyRef.current.style.cursor = "";
+        flush();                             // persist the new width into the sent HTML
+      };
+      document.addEventListener("mousemove", move);
+      document.addEventListener("mouseup", up);
+      return;
+    }
     const cell = cellAtBorder(e.target, e.clientX);
     if (!cell) return;                       // not on a border → normal editing
     const table = cell.closest("table") as HTMLTableElement | null;
