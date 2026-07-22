@@ -321,8 +321,10 @@ export function useSendBatchNow() {
         // doctor (index-aligned with the queue) — a single htmlOverride would
         // put the same doctor in every email.
         perDoctorHtmlOverride?: string[];
-        // Same, for the optional doctor "working opportunity" email.
+        // Same, for the optional doctor "working opportunity" email. Each doctor
+        // has their own editable pane, so bodies ship as an array.
         doctorSubjectOverride?: string; doctorHtmlOverride?: string;
+        doctorHtmlOverrides?: string[];
         // Extra CC / BCC from the preview, added on top of the hospital BCC list.
         ccOverride?: string[]; bccOverride?: string[];
         // Recruiter emails to DROP from this send (hospitals unchecked in the preview).
@@ -340,6 +342,7 @@ export function useSendBatchNow() {
         ...(input.perDoctorHtmlOverride?.some(Boolean) ? { per_doctor_html_override: input.perDoctorHtmlOverride } : {}),
         ...(input.doctorSubjectOverride ? { doctor_subject_override: input.doctorSubjectOverride } : {}),
         ...(input.doctorHtmlOverride    ? { doctor_html_override:    input.doctorHtmlOverride }    : {}),
+        ...(input.doctorHtmlOverrides?.some(Boolean) ? { doctor_html_overrides: input.doctorHtmlOverrides } : {}),
         ...(input.ccOverride?.length  ? { cc_override:  input.ccOverride }  : {}),
         ...(input.bccOverride?.length ? { bcc_override: input.bccOverride } : {}),
         ...(input.excludeOverride?.length ? { exclude_override: input.excludeOverride } : {}),
@@ -362,14 +365,16 @@ export function useSendBatchNow() {
  *  user can preview exactly what hospitals will receive before firing.
  *  Returns the rendered subject + HTML + the BCC recipient count. */
 export interface BatchDoctorPreview { included: boolean; subject: string; html: string; text: string; recipient_count: number }
-/** One separately-sent hospital email (Daily Duo → one per doctor). */
-export interface BatchPerDoctorPreview { name: string; subject: string; html: string; text: string }
+/** One separately-sent email, previewed on its own profile sub-tab. */
+export interface BatchPerDoctorPreview { name: string; subject: string; html: string; text: string; email?: string }
 export interface BatchPreviewResult {
   subject: string; html: string; text: string; from: string; bcc_count: number;
   doctor_email?: BatchDoctorPreview;
-  /** Daily Duo: the per-doctor emails this batch will actually send. Empty for
+  /** Daily Duo: the per-doctor HOSPITAL emails this batch will send. Empty for
    *  single-email batches, where `subject`/`html` above IS the email. */
   per_doctor?: BatchPerDoctorPreview[];
+  /** The per-doctor working-opportunity emails (one per queued doctor). */
+  doctor_emails?: BatchPerDoctorPreview[];
   /** Total emails that will go out (hospitals × per-doctor emails). */
   email_count?: number;
 }
@@ -378,14 +383,21 @@ export function useBatchPreview() {
     mutationFn: async (input: string | { batchId: string; force?: boolean }): Promise<BatchPreviewResult> => {
       const batchId = typeof input === "string" ? input : input.batchId;
       const force   = typeof input === "string" ? false  : !!input.force;
-      type Raw = { ok: boolean; preview?: Omit<BatchPreviewResult, "doctor_email" | "per_doctor" | "email_count">;
-                   doctor_email?: BatchDoctorPreview; per_doctor?: BatchPerDoctorPreview[]; email_count?: number; error?: string };
+      type Raw = { ok: boolean; preview?: Omit<BatchPreviewResult, "doctor_email" | "per_doctor" | "doctor_emails" | "email_count">;
+                   doctor_email?: BatchDoctorPreview; per_doctor?: BatchPerDoctorPreview[];
+                   doctor_emails?: BatchPerDoctorPreview[]; email_count?: number; error?: string };
       const { data, error } = await invokeWithTimeout<Raw>(
         "send-batch", { batch_id: batchId, dry_run: true, force }, 60_000);
       if (error) throw new Error(await fnErrorMessage(error, "Preview failed"));
       const res = data as Raw;
       if (!res.ok || !res.preview) throw new Error(res.error ?? "Preview failed");
-      return { ...res.preview, doctor_email: res.doctor_email, per_doctor: res.per_doctor ?? [], email_count: res.email_count };
+      return {
+        ...res.preview,
+        doctor_email:  res.doctor_email,
+        per_doctor:    res.per_doctor ?? [],
+        doctor_emails: res.doctor_emails ?? [],
+        email_count:   res.email_count,
+      };
     },
   });
 }

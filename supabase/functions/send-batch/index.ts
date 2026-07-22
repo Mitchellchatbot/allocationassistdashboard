@@ -92,8 +92,11 @@ Deno.serve(async (req: Request) => {
     subject_override?: string; html_override?: string; text_override?: string;
     // Daily Duo sends one email per doctor, so edits arrive one body per doctor.
     per_doctor_html_override?: string[];
-    // Same, for the optional doctor "working opportunity" email leg.
+    // Same, for the optional doctor "working opportunity" email leg. Each doctor
+    // gets their own email, so edits arrive as an array (the singular form is
+    // still honoured and applies to every doctor).
     doctor_subject_override?: string; doctor_html_override?: string;
+    doctor_html_overrides?: string[];
     // Extra recipients from the preview's CcBccPicker — added ON TOP of the
     // hospital BCC list (bcc) / shown to everyone (cc).
     cc_override?: string[]; bcc_override?: string[];
@@ -477,15 +480,27 @@ Deno.serve(async (req: Request) => {
     return blocks.join("");
   })();
   const doctorSubjectFresh = `Working opportunities${batchCountry ? ` in ${batchCountry}` : ""} - Allocation Assist`;
-  const doctorBodyFresh = `<p>Hello Dr.,</p>
+  // Greet the doctor by name — each doctor gets their OWN editable email now
+  // (Hasan 2026-07-22: a tab per profile under "Doctor email"), so there's no
+  // reason to keep the generic "Hello Dr.," that one shared body required.
+  const doctorGreeting = (name: string) => {
+    const clean = String(name || "").replace(/^\s*(dr\.?|prof\.?)\s*/i, "").trim();
+    return clean ? `Hello Dr. ${clean},` : "Hello Dr.,";
+  };
+  const doctorBodyFor = (name: string) => `<p>${esc(doctorGreeting(name))}</p>
 <p>I hope you are well.</p>
 <p>We are currently discussing your profile with the hospitals below; please let us know if you hear from any of them through email, phone call, or LinkedIn. We will also keep you informed as soon as we receive feedback.</p>
 <p>We will help you with the salary and allowance negotiation to secure the best offer for you.</p>
 ${doctorHospitalsHtml}
 <p>If you have any questions, feel free to reach out any time.</p>
 ${SIGNATURE_HTML}`;
-  const doctorEmailBody = (!dryRun && body.doctor_html_override) ? body.doctor_html_override : doctorBodyFresh;
-  const doctorEmailSubject = (!dryRun && body.doctor_subject_override) ? body.doctor_subject_override : doctorSubjectFresh;
+  // One working-opportunity email per queued doctor, index-aligned with `rows`.
+  const doctorBlocks = rows.map(r => ({
+    name:    r.name,
+    email:   String(r.email ?? "").trim(),
+    subject: doctorSubjectFresh,
+    html:    doctorBodyFor(r.name),
+  }));
 
   // ── Dry run? Preview the FIRST hospital's personalised version ─────────
   if (dryRun) {
@@ -510,10 +525,18 @@ ${SIGNATURE_HTML}`;
       doctor_email: {
         included: includeDoctorEmail,
         subject:  doctorSubjectFresh,
-        html:     wrapHtml(doctorBodyFresh),
-        text:     stripHtml(wrapHtml(doctorBodyFresh)),
-        recipient_count: rows.filter(r => String(r.email ?? "").trim()).length,
+        html:     wrapHtml(doctorBlocks[0]?.html ?? ""),
+        text:     stripHtml(wrapHtml(doctorBlocks[0]?.html ?? "")),
+        recipient_count: doctorBlocks.filter(d => d.email).length,
       },
+      // One pane per doctor under the "Doctor email" tab — each is its own send.
+      doctor_emails: doctorBlocks.map(d => ({
+        name:    d.name,
+        email:   d.email,
+        subject: d.subject,
+        html:    wrapHtml(d.html),
+        text:    stripHtml(wrapHtml(d.html)),
+      })),
       doctor_count: rows.length,
     }, 200);
   }
@@ -666,12 +689,18 @@ ${SIGNATURE_HTML}`;
   // succeeded. Hospital-facing attachments are NOT attached to the doctor note.
   let doctorSent = 0, doctorFailed = 0;
   if (includeDoctorEmail) {
-    const finalDoctorHtml = wrapHtml(doctorEmailBody);
-    const finalDoctorText = stripHtml(finalDoctorHtml);
-    const doctorTargets = rows
-      .map(r => String(r.email ?? "").trim())
-      .filter(e => e && e.toLowerCase() !== EXCLUDED_RECIPIENT && !excludeSet.has(e.toLowerCase()));
-    for (const de of doctorTargets) {
+    // Per-doctor edits from the preview's profile sub-tabs, index-aligned with
+    // doctorBlocks. The legacy single override still applies to every doctor.
+    const docOverrides: string[] = Array.isArray(body.doctor_html_overrides)
+      ? (body.doctor_html_overrides as unknown[]).map(v => typeof v === "string" ? v.trim() : "")
+      : [];
+    const legacyOverride = (body.doctor_html_override ?? "").trim();
+    const doctorSubject  = (body.doctor_subject_override ?? "").trim() || doctorSubjectFresh;
+    for (let i = 0; i < doctorBlocks.length; i++) {
+      const blk = doctorBlocks[i];
+      const de  = blk.email;
+      if (!de || de.toLowerCase() === EXCLUDED_RECIPIENT || excludeSet.has(de.toLowerCase())) continue;
+      const finalDoctorHtml = wrapHtml(docOverrides[i] || legacyOverride || blk.html);
       try {
         const res = await fetch("https://api.resend.com/emails", {
           method:  "POST",
@@ -679,9 +708,9 @@ ${SIGNATURE_HTML}`;
           body: JSON.stringify({
             from:    MAIL_FROM,
             to:      TEST_OVERRIDE_LIST.length ? [TEST_OVERRIDE_LIST[0]] : [de],
-            subject: doctorEmailSubject,
+            subject: doctorSubject,
             html:    finalDoctorHtml,
-            text:    finalDoctorText,
+            text:    stripHtml(finalDoctorHtml),
             headers: { "X-AA-Batch-Id": String(batch.id), "X-AA-Kind": "doctor_working_op" },
           }),
         });

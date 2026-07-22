@@ -100,6 +100,7 @@ export function EditableEmailPreview({
   tools = true, text, attachments, onAttachmentsChange, templatePicker,
 }: EditableEmailPreviewProps) {
   const bodyRef = useRef<HTMLDivElement>(null);
+  const scrollRef = useRef<HTMLDivElement>(null);
   const savedRange = useRef<Range | null>(null);
   const [tableOpen, setTableOpen] = useState(false);
   const [fullOpen, setFullOpen]   = useState(false);
@@ -153,13 +154,40 @@ export function EditableEmailPreview({
     return clientX >= r.right - GRAB_PX && clientX <= r.right + 2 ? el : null;
   };
   // ── Drag-to-resize images (Gmail-style) ──────────────────────────────────────
-  // Grab an image's right edge and drag to set its width. Width is written inline
-  // (px), which email clients honour, and flows into the sent HTML via flush() —
-  // so what you size is what's sent, on the profile card image OR any photo, in
-  // every preview that uses this component.
-  // Grab any CORNER of an image (the Gmail-style affordance) — or its right edge
-  // as a wider target — and drag to resize.
+  // Hovering an image draws a selection outline with a little square at each
+  // CORNER; dragging a square (or the image's own corner/right edge) sets its
+  // width. Width is written inline in px AND as the width attribute, which email
+  // clients honour, and flows into the sent HTML via flush() — so what you size
+  // is what the recipient sees, on the profile card image or any photo.
   const IMG_GRAB = 18;
+  // Box of the image currently under the pointer, in SCROLL-CONTAINER
+  // coordinates, so the handle squares can be drawn outside the contentEditable
+  // (injecting them inside would pollute the HTML we send).
+  const [imgBox, setImgBox] = useState<{ left: number; top: number; w: number; h: number } | null>(null);
+  const activeImgRef = useRef<HTMLImageElement | null>(null);
+  const resizingRef  = useRef(false);
+  const trackImage = (img: HTMLImageElement | null) => {
+    const sc = scrollRef.current;
+    if (!img || !sc) { activeImgRef.current = null; setImgBox(null); return; }
+    const r = img.getBoundingClientRect();
+    const s = sc.getBoundingClientRect();
+    activeImgRef.current = img;
+    setImgBox({ left: r.left - s.left + sc.scrollLeft, top: r.top - s.top + sc.scrollTop, w: r.width, h: r.height });
+  };
+  // Show/hide the squares as the pointer nears an image. The hit box is padded
+  // so moving onto a corner square (which sits just OUTSIDE the image) doesn't
+  // count as leaving the image and make the handles vanish under the cursor.
+  const onSurfaceMouseMove = (e: React.MouseEvent) => {
+    if (resizingRef.current) return;         // the drag handler owns the box
+    const body = bodyRef.current; if (!body) return;
+    const PAD = 14;
+    const hit = (Array.from(body.querySelectorAll("img")) as HTMLImageElement[]).find(im => {
+      const r = im.getBoundingClientRect();
+      return e.clientX >= r.left - PAD && e.clientX <= r.right + PAD
+          && e.clientY >= r.top  - PAD && e.clientY <= r.bottom + PAD;
+    }) ?? null;
+    if (hit !== activeImgRef.current) trackImage(hit);
+  };
   const imgHandleAt = (target: EventTarget | null, clientX: number, clientY: number):
     { img: HTMLImageElement; fromLeft: boolean; corner: boolean } | null => {
     const el = target as HTMLElement | null;
@@ -181,36 +209,42 @@ export function EditableEmailPreview({
     body.style.cursor = h ? (h.corner ? "nwse-resize" : "ew-resize")
       : cellAtBorder(e.target, e.clientX) ? "col-resize" : "";
   };
+  // Shared by the in-body corner/edge grab AND the visible corner squares.
+  const beginImgResize = (img: HTMLImageElement, startX: number, fromLeft: boolean) => {
+    const startW  = img.getBoundingClientRect().width;
+    const parentW = img.parentElement?.getBoundingClientRect().width || 640;
+    const dir     = fromLeft ? -1 : 1;       // left-side corners grow leftwards
+    resizingRef.current = true;
+    const move = (ev: MouseEvent) => {
+      const w = Math.max(80, Math.min(Math.round(startW + dir * (ev.clientX - startX)), Math.round(parentW)));
+      img.style.width = `${w}px`;
+      img.style.maxWidth = `${w}px`;
+      img.style.height = "auto";
+      // The size has to survive into the RECIPIENT'S inbox, not just this
+      // preview: Outlook ignores max-width and only honours the width
+      // ATTRIBUTE, so write that too and drop any fixed height so the image
+      // scales proportionally. flush() then bakes this into the sent HTML.
+      img.setAttribute("width", String(w));
+      img.removeAttribute("height");
+      trackImage(img);                       // keep the handle squares on the corners
+    };
+    const up = () => {
+      resizingRef.current = false;
+      document.removeEventListener("mousemove", move);
+      document.removeEventListener("mouseup", up);
+      if (bodyRef.current) bodyRef.current.style.cursor = "";
+      trackImage(img);
+      flush();                               // persist the new width into the sent HTML
+    };
+    document.addEventListener("mousemove", move);
+    document.addEventListener("mouseup", up);
+  };
   const onBodyMouseDown = (e: React.MouseEvent) => {
     // Image resize takes priority over cell resize / text editing.
     const handle = imgHandleAt(e.target, e.clientX, e.clientY);
     if (handle) {
-      const { img, fromLeft } = handle;
       e.preventDefault();                    // don't start a drag/selection
-      const startX = e.clientX;
-      const startW = img.getBoundingClientRect().width;
-      const parentW = img.parentElement?.getBoundingClientRect().width || 640;
-      const dir = fromLeft ? -1 : 1;         // left-side corners grow leftwards
-      const move = (ev: MouseEvent) => {
-        const w = Math.max(80, Math.min(Math.round(startW + dir * (ev.clientX - startX)), Math.round(parentW)));
-        img.style.width = `${w}px`;
-        img.style.maxWidth = `${w}px`;
-        img.style.height = "auto";
-        // The size has to survive into the RECIPIENT'S inbox, not just this
-        // preview: Outlook ignores max-width and only honours the width
-        // ATTRIBUTE, so write that too and drop any fixed height so the image
-        // scales proportionally. flush() then bakes this into the sent HTML.
-        img.setAttribute("width", String(w));
-        img.removeAttribute("height");
-      };
-      const up = () => {
-        document.removeEventListener("mousemove", move);
-        document.removeEventListener("mouseup", up);
-        if (bodyRef.current) bodyRef.current.style.cursor = "";
-        flush();                             // persist the new width into the sent HTML
-      };
-      document.addEventListener("mousemove", move);
-      document.addEventListener("mouseup", up);
+      beginImgResize(handle.img, e.clientX, handle.fromLeft);
       return;
     }
     const cell = cellAtBorder(e.target, e.clientX);
@@ -584,7 +618,40 @@ export function EditableEmailPreview({
           email itself never scrolls sideways; a wide data table scrolls INSIDE
           its own overflow-x:auto box (independently), and max-w-full bounds that
           box to the visible width so it actually can. */}
-      <div className="bg-slate-100/60 px-4 py-5 overflow-y-auto overflow-x-hidden flex-1 min-h-0 min-w-0 w-full">
+      <div
+        ref={scrollRef}
+        onMouseMove={onSurfaceMouseMove}
+        onMouseLeave={() => { if (!resizingRef.current) trackImage(null); }}
+        onScroll={() => { if (!resizingRef.current) trackImage(activeImgRef.current); }}
+        className="relative bg-slate-100/60 px-4 py-5 overflow-y-auto overflow-x-hidden flex-1 min-h-0 min-w-0 w-full"
+      >
+        {/* Gmail-style selection outline + corner squares for the hovered image.
+            Drawn OUTSIDE the contentEditable so they never end up in the sent
+            HTML; positioned in scroll-container coordinates. */}
+        {imgBox && (
+          <div
+            className="pointer-events-none absolute z-20 ring-1 ring-teal-400/80"
+            style={{ left: imgBox.left, top: imgBox.top, width: imgBox.w, height: imgBox.h }}
+          >
+            {([
+              { k: "tl", style: { left: -5, top: -5 },     cursor: "nwse-resize", fromLeft: true  },
+              { k: "tr", style: { right: -5, top: -5 },    cursor: "nesw-resize", fromLeft: false },
+              { k: "bl", style: { left: -5, bottom: -5 },  cursor: "nesw-resize", fromLeft: true  },
+              { k: "br", style: { right: -5, bottom: -5 }, cursor: "nwse-resize", fromLeft: false },
+            ] as const).map(c => (
+              <span
+                key={c.k}
+                onMouseDown={(e) => {
+                  const img = activeImgRef.current; if (!img) return;
+                  e.preventDefault(); e.stopPropagation();
+                  beginImgResize(img, e.clientX, c.fromLeft);
+                }}
+                className="pointer-events-auto absolute h-2.5 w-2.5 rounded-[2px] border border-white bg-teal-600 shadow-sm"
+                style={{ ...c.style, cursor: c.cursor }}
+              />
+            ))}
+          </div>
+        )}
         <div
           ref={bodyRef}
           contentEditable
