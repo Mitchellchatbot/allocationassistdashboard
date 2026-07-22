@@ -43,6 +43,22 @@ async function invokeWithTimeout<T>(name: string, body: unknown, ms = 60_000): P
   }
 }
 
+/** supabase.functions.invoke throws a generic "Edge Function returned a non-2xx
+ *  status code" and hides the function's OWN message in the response body. Dig
+ *  it out so the UI shows the real reason — e.g. "No hospitals in Oman with a
+ *  recruiter email…" instead of an opaque status error. */
+async function fnErrorMessage(error: unknown, fallback: string): Promise<string> {
+  const ctx = (error as { context?: { json?: () => Promise<unknown> } } | null)?.context;
+  if (ctx && typeof ctx.json === "function") {
+    try {
+      const b = (await ctx.json()) as { error?: string; detail?: string } | null;
+      if (b?.error) return b.detail ? `${b.error} — ${b.detail}` : b.error;
+    } catch { /* body wasn't JSON — fall through */ }
+  }
+  const m = (error as { message?: string } | null)?.message;
+  return m && !/non-2xx/i.test(m) ? m : fallback;
+}
+
 export interface ScheduledBatch {
   id:               string;
   kind:             BatchKind;
@@ -325,7 +341,7 @@ export function useSendBatchNow() {
       };
       const { data, error } = await invokeWithTimeout<{ ok: boolean; bcc_count?: number; doctor_count?: number; message_id?: string; error?: string }>(
         "send-batch", { batch_id: batchId, force, ...overrides }, 90_000);
-      if (error) throw error;
+      if (error) throw new Error(await fnErrorMessage(error, "send-batch failed"));
       const res = data as { ok: boolean; bcc_count?: number; doctor_count?: number; message_id?: string; error?: string };
       if (!res.ok) throw new Error(res.error ?? "send-batch failed");
       return res;
@@ -349,7 +365,7 @@ export function useBatchPreview() {
       const force   = typeof input === "string" ? false  : !!input.force;
       const { data, error } = await invokeWithTimeout<{ ok: boolean; preview?: Omit<BatchPreviewResult, "doctor_email">; doctor_email?: BatchDoctorPreview; error?: string }>(
         "send-batch", { batch_id: batchId, dry_run: true, force }, 60_000);
-      if (error) throw error;
+      if (error) throw new Error(await fnErrorMessage(error, "Preview failed"));
       const res = data as { ok: boolean; preview?: Omit<BatchPreviewResult, "doctor_email">; doctor_email?: BatchDoctorPreview; error?: string };
       if (!res.ok || !res.preview) throw new Error(res.error ?? "Preview failed");
       return { ...res.preview, doctor_email: res.doctor_email };

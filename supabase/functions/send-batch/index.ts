@@ -443,11 +443,11 @@ Deno.serve(async (req: Request) => {
     for (const [c, hs] of byCity) {
       const items = hs.map(h => {
         const img = h.image_url
-          ? `<div style="margin:4px 0 8px;"><img src="${h.image_url}" alt="${escapeHtml(h.name)}" width="160" style="display:block;width:160px;height:auto;border-radius:8px;border:0;" /></div>`
+          ? `<div style="margin:4px 0 8px;"><img src="${h.image_url}" alt="${esc(h.name)}" width="160" style="display:block;width:160px;height:auto;border-radius:8px;border:0;" /></div>`
           : "";
-        return `<li style="margin:0 0 6px;">${escapeHtml(h.name)}${img}</li>`;
+        return `<li style="margin:0 0 6px;">${esc(h.name)}${img}</li>`;
       }).join("");
-      blocks.push(`<p style="font-weight:700;margin:12px 0 4px;">In ${escapeHtml(c)}:</p><ul style="margin:0 0 8px;padding-left:20px;">${items}</ul>`);
+      blocks.push(`<p style="font-weight:700;margin:12px 0 4px;">In ${esc(c)}:</p><ul style="margin:0 0 8px;padding-left:20px;">${items}</ul>`);
     }
     return blocks.join("");
   })();
