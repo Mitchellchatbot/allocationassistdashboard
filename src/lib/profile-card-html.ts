@@ -67,7 +67,9 @@ export function buildProfileCardHtml(v: Record<string, string>): string {
 
   // The exact 8 facts SharedProfile shows, in the same order + icons. Area of
   // Interest is skipped when it's what we already used for the bio (no dupe).
-  const aoi = formatAreasOfInterest(v.doctor_area_of_interest);  // short "A, B & C" line
+  // Short "A, B & C" line; prose (WP stores the bio here) falls back to the
+  // title rendered as a field rather than dumping a paragraph into the tile.
+  const aoi = formatAreasOfInterest(v.doctor_area_of_interest, { fallback: v.doctor_title || v.doctor_specialty || "" });
   const factDefs: Array<[string, string, string | undefined]> = [
     [ICON.award,     "Area of Interest",   aoi && aoi !== bioRaw ? aoi : ""],
     [ICON.cap,       "UAE License",        v.doctor_license],

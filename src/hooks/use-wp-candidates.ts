@@ -999,7 +999,9 @@ export function wpCandidateToTokens(c: WpCandidate | null): Record<string, strin
     // continue to render correctly.
     doctor_title:               c.job_title              ?? "",
     doctor_bio:                 c.area_of_interest       ?? "",  // closest analogue; WP has no bio field
-    doctor_area_of_interest:    formatAreasOfInterest(c.area_of_interest),  // short "A, B & C" line
+    // Short "A, B & C" line. WP stores the BIO in area_of_interest, so prose
+    // falls back to the job title as a field ("Plastic Surgery") — never fluff.
+    doctor_area_of_interest:    formatAreasOfInterest(c.area_of_interest, { fallback: c.job_title ?? c.specialty ?? "" }),
 
     doctor_country_training:    c.country_of_training    ?? "",
     doctor_years_experience:    c.years_experience != null ? String(c.years_experience) : "",

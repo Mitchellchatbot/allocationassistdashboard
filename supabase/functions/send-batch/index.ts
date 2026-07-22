@@ -339,7 +339,7 @@ Deno.serve(async (req: Request) => {
       idx:        idx + 1,
       name:         pick(wp?.full_name, lead?.Full_Name, dob?.Full_Name, p?.doctor_name) || "(unknown)",
       title:        pick(wp?.job_title, p?.title),
-      areas:        formatAreasOfInterest(pick(wp?.area_of_interest, p?.area_of_interest)),
+      areas:        formatAreasOfInterest(pick(wp?.area_of_interest, p?.area_of_interest), { fallback: pick(wp?.job_title, p?.title, p?.specialty) }),
       training:     pick(wp?.country_of_training, p?.country_training, lead?.Country_of_Specialty_training),
       years:        pick(wp?.years_experience, p?.years_experience),
       nationality:  pick(wp?.nationality, p?.nationality),
@@ -897,19 +897,86 @@ function renderDoctorCard(r: RowData): string {
     </div>`;
 }
 
-/** Area-of-interest formatter — MIRROR of send-flow-email's + src/lib/format-list.ts.
- *  Splits the stored free-text field, dedupes, caps at ~30 words and joins with
- *  ", " + " & " before the last. Keep all three copies in lockstep. */
-function formatAreasOfInterest(raw: string | null | undefined, maxWords = 30): string {
-  if (!raw) return "";
+/** Area-of-interest formatter — MIRROR of src/lib/format-list.ts (and
+ *  send-flow-email's copy). `area_of_interest` often holds free-text BIO prose,
+ *  so only segments that LOOK like interest terms are kept; if none do, we fall
+ *  back to the job title rendered as a field ("Consultant Plastic Surgeon" →
+ *  "Plastic Surgery"). Keep all three copies in lockstep. */
+const PROSE_WORDS = new Set([
+  "he", "she", "his", "her", "him", "they", "their", "them", "i", "we", "our", "who", "which", "that",
+  "is", "are", "was", "were", "be", "been", "being", "has", "have", "had", "holds", "holding",
+  "with", "from", "the", "an", "including", "include", "includes", "also", "currently",
+  "experience", "experienced", "extensive", "certification", "certified", "qualification", "qualified",
+  "university", "master", "masters", "bachelor", "degree", "diploma", "training", "trained",
+  "graduated", "graduate", "years", "year", "over", "more", "than", "after", "before", "during",
+  "since", "worked", "works", "working", "completed", "obtained", "received", "awarded",
+  "specialises", "specializes", "specialising", "specializing", "dr", "doctor", "consultant",
+]);
+const GRADE_WORDS = new Set([
+  "consultant", "specialist", "senior", "junior", "associate", "assistant", "attending",
+  "registrar", "fellow", "head", "department", "chief", "staff", "locum", "trainee", "resident",
+  "dr", "doctor", "of", "and",
+]);
+const ROLE_TO_FIELD: Array<[RegExp, string]> = [
+  [/^surgeons?$/i,                                  "Surgery"],
+  [/^physicians?$/i,                                "Medicine"],
+  [/^an(a)?esthetists?$|^an(a)?esthesiologists?$/i, "Anaesthesia"],
+  [/^obstetricians?$/i,                             "Obstetrics"],
+  [/^gyn(a)?ecologists?$/i,                         "Gynaecology"],
+  [/^p(a)?ediatricians?$/i,                         "Paediatrics"],
+  [/^psychiatrists?$/i,                             "Psychiatry"],
+  [/^dentists?$/i,                                  "Dentistry"],
+  [/^radiographers?$/i,                             "Radiography"],
+  [/^nurses?$/i,                                    "Nursing"],
+  [/^midwi(fe|ves)$/i,                              "Midwifery"],
+];
+function isInterestTerm(term: string): boolean {
+  if (!term) return false;
+  if (/[0-9()]/.test(term)) return false;
+  const words = term.split(/\s+/);
+  if (words.length > 4) return false;
+  return !words.some(w => PROSE_WORDS.has(w.replace(/[^a-z]/gi, "").toLowerCase()));
+}
+function capitaliseWord(w: string): string {
+  if (!w) return w;
+  if (w.length <= 4 && w === w.toUpperCase()) return w;
+  return w[0].toUpperCase() + w.slice(1).toLowerCase();
+}
+function specialtyToField(title: string | null | undefined): string {
+  if (!title) return "";
+  const words = String(title)
+    .replace(/[^\p{L}\s-]/gu, " ")
+    .split(/\s+/)
+    .filter(Boolean)
+    .filter(w => !GRADE_WORDS.has(w.toLowerCase()));
+  if (!words.length) return "";
+  const last = words[words.length - 1];
+  let mapped = "";
+  for (const [re, field] of ROLE_TO_FIELD) if (re.test(last)) { mapped = field; break; }
+  if (!mapped && /ologist$/i.test(last)) mapped = last.replace(/ologist$/i, "ology");
+  if (!mapped && /iatrist$/i.test(last)) mapped = last.replace(/iatrist$/i, "iatry");
+  if (mapped) words[words.length - 1] = mapped;
+  return words.map(capitaliseWord).join(" ");
+}
+function formatAreasOfInterest(
+  raw: string | null | undefined,
+  opts: { fallback?: string; maxWords?: number } = {},
+): string {
+  const { fallback = "", maxWords = 30 } = opts;
+  const fromTitle = () => specialtyToField(fallback);
+  if (!raw) return fromTitle();
   const parts = String(raw)
-    .split(/\s*(?:[,;/\n·•]|\band\b|&)\s*/i)
+    .split(/\s*(?:[,;/\n·•]|\.\s|\band\b|&)\s*/i)
     .map(s => s.trim().replace(/[.\s]+$/, ""))
     .filter(Boolean);
   const seen = new Set<string>();
   const terms: string[] = [];
-  for (const p of parts) { const k = p.toLowerCase(); if (!seen.has(k)) { seen.add(k); terms.push(p); } }
-  if (!terms.length) return "";
+  for (const p of parts) {
+    if (!isInterestTerm(p)) continue;
+    const k = p.toLowerCase();
+    if (!seen.has(k)) { seen.add(k); terms.push(p); }
+  }
+  if (!terms.length) return fromTitle();
   const kept: string[] = [];
   let words = 0;
   for (const t of terms) { const w = t.split(/\s+/).length; if (kept.length && words + w > maxWords) break; kept.push(t); words += w; }
