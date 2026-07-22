@@ -90,6 +90,8 @@ Deno.serve(async (req: Request) => {
     // a dry run always returns the freshly-rendered template so "Reset to
     // template" works by simply re-previewing.
     subject_override?: string; html_override?: string; text_override?: string;
+    // Daily Duo sends one email per doctor, so edits arrive one body per doctor.
+    per_doctor_html_override?: string[];
     // Same, for the optional doctor "working opportunity" email leg.
     doctor_subject_override?: string; doctor_html_override?: string;
     // Extra recipients from the preview's CcBccPicker — added ON TOP of the
@@ -337,7 +339,7 @@ Deno.serve(async (req: Request) => {
       idx:        idx + 1,
       name:         pick(wp?.full_name, lead?.Full_Name, dob?.Full_Name, p?.doctor_name) || "(unknown)",
       title:        pick(wp?.job_title, p?.title),
-      areas:        pick(wp?.area_of_interest, p?.area_of_interest),
+      areas:        formatAreasOfInterest(pick(wp?.area_of_interest, p?.area_of_interest)),
       training:     pick(wp?.country_of_training, p?.country_training, lead?.Country_of_Specialty_training),
       years:        pick(wp?.years_experience, p?.years_experience),
       nationality:  pick(wp?.nationality, p?.nationality),
@@ -392,6 +394,27 @@ Deno.serve(async (req: Request) => {
   const doctorsHtmlBlock = useCardImages ? renderDoctorProfiles(rows, cardImageUrls) : doctorsTableHtml;
   const doctorsTextBlock = useCardImages ? renderDoctorsPlain(rows)                  : stripHtml(doctorsTableHtml);
 
+  // Daily Duo (Hasan 2026-07-22): the hospital gets TWO DISTINCT emails — one
+  // per doctor — each in the full Profile-Sent format, i.e. that doctor's card
+  // image ABOVE their own data table. Previously a Daily Duo was ONE email with
+  // both cards stacked and no table at all. Every other kind keeps its single
+  // combined email.
+  const perDoctorMode = batch.kind === "daily_duo";
+  const perDoctorBlocks: Array<{ name: string; html: string; text: string }> = perDoctorMode
+    ? rows.map((r, i) => {
+        const url = String(cardImageUrls[i] ?? "").trim();
+        // width attr as well as the style — Outlook ignores max-width.
+        const card = url
+          ? `<div style="margin:0 0 18px;"><img src="${esc(url)}" alt="${esc(r.name)}" width="700" style="display:block;width:100%;max-width:700px;height:auto;border:0;border-radius:14px;margin:0 auto;" /></div>`
+          : renderDoctorCard(r);
+        return { name: r.name, html: `${card}${renderDoctorsTable([r])}`, text: renderDoctorsPlain([r]) };
+      })
+    : [];
+  // What actually gets sent per hospital: one block (combined) or N (per doctor).
+  const sendBlocks: Array<{ name: string; html: string; text: string }> = perDoctorMode && perDoctorBlocks.length
+    ? perDoctorBlocks
+    : [{ name: "", html: doctorsHtmlBlock, text: doctorsTextBlock }];
+
   // ── Load the template ────────────────────────────────────────────────
   const { data: tpl, error: tplErr } = await supabase
     .from("email_templates")
@@ -417,10 +440,12 @@ Deno.serve(async (req: Request) => {
     if (headerMode === "specialty") return `${specialtyLabel} available - Allocation Assist Platform${tail}`;
     return renderText(String(tpl.subject ?? ""), { specialty: specialtyLabel, hospital_contact_name: "" });
   };
-  const renderFor = (contactName: string, city: string) => ({
+  // blockHtml/blockText default to the combined block; per-doctor mode passes
+  // one doctor's card+table so each email carries a single profile.
+  const renderFor = (contactName: string, city: string, blockHtml = doctorsHtmlBlock, blockText = doctorsTextBlock) => ({
     subject: subjectFor(city),
-    html:    wrapHtml(renderText(String(tpl.body_html ?? ""), { specialty: specialtyLabel, hospital_contact_name: contactName, doctors_table_html: doctorsHtmlBlock, signature: SIGNATURE_HTML })),
-    text:    renderText(String(tpl.body_text ?? ""), { specialty: specialtyLabel, hospital_contact_name: contactName, doctors_table_html: doctorsTextBlock, signature: SIGNATURE_TEXT }),
+    html:    wrapHtml(renderText(String(tpl.body_html ?? ""), { specialty: specialtyLabel, hospital_contact_name: contactName, doctors_table_html: blockHtml, signature: SIGNATURE_HTML })),
+    text:    renderText(String(tpl.body_text ?? ""), { specialty: specialtyLabel, hospital_contact_name: contactName, doctors_table_html: blockText, signature: SIGNATURE_TEXT }),
   });
   // A hospital's greeting: its contact person (when it greets by contact), else
   // "<Hospital name> team".
@@ -465,10 +490,23 @@ ${SIGNATURE_HTML}`;
   // ── Dry run? Preview the FIRST hospital's personalised version ─────────
   if (dryRun) {
     const h0 = recipientHospitals[0];
-    const sample = renderFor(h0 ? greetingFor(h0) : "Team", h0?.city ?? "");
+    const greet = h0 ? greetingFor(h0) : "Team";
+    const city  = h0?.city ?? "";
+    // sendBlocks[0] is the combined block for normal batches and the FIRST
+    // doctor for a Daily Duo, so this preview always matches what really sends.
+    const sample = renderFor(greet, city, sendBlocks[0].html, sendBlocks[0].text);
     return json({
       ok: true, dry_run: true,
       preview: { from: MAIL_FROM, bcc_count: recipients.length, subject: sample.subject, html: sample.html, text: sample.text },
+      // Daily Duo: one pane per doctor — each is a separately-sent email, so the
+      // team edits each one on its own.
+      per_doctor: perDoctorMode
+        ? sendBlocks.map((blk) => {
+            const r = renderFor(greet, city, blk.html, blk.text);
+            return { name: blk.name, subject: r.subject, html: r.html, text: r.text };
+          })
+        : [],
+      email_count: recipientHospitals.length * sendBlocks.length,
       doctor_email: {
         included: includeDoctorEmail,
         subject:  doctorSubjectFresh,
@@ -538,27 +576,41 @@ ${SIGNATURE_HTML}`;
     return await failAndReturn("No hospitals left to send to — every recipient was excluded for this send.");
   }
 
-  // One personalised email per hospital.
-  const emails = targets.map((h, i) => {
-    const rendered = editedHtml
-      ? { subject: editedSubject || renderFor(greetingFor(h), h.city).subject, html: wrapHtml(editedHtml), text: editedText || stripHtml(editedHtml) }
-      : renderFor(greetingFor(h), h.city);
-    // Live To = this hospital's resolved list (one recruiter email, or EVERY
-    // eligible contact for an 'all'-mode hospital), minus any batch-excluded /
-    // Ammar addresses. Test mode still funnels every copy to the test inbox.
-    const liveTo = h.toEmails.filter(e => !excludeSet.has(e.toLowerCase()) && e.toLowerCase() !== EXCLUDED_RECIPIENT);
-    return {
-      from: MAIL_FROM,
-      to:   TEST_OVERRIDE_LIST.length ? [TEST_OVERRIDE_LIST[0]] : (liveTo.length ? liveTo : [h.email]),
-      ...(i === 0 && extraCc.length  ? { cc:  extraCc }  : {}),
-      ...(i === 0 && extraBcc.length ? { bcc: extraBcc } : {}),
-      subject: rendered.subject,
-      html:    rendered.html,
-      text:    rendered.text,
-      headers: { "X-AA-Batch-Id": String(batch.id), "X-AA-Batch-Kind": String(batch.kind) },
-      ...(builtAttachments.length ? { attachments: builtAttachments } : {}),
-    };
-  });
+  // One personalised email per hospital — times one per doctor in per-doctor
+  // (Daily Duo) mode, so a hospital receives a separate profile-sent email for
+  // each doctor rather than one combined one.
+  const perDoctorOverrides: string[] = Array.isArray(body.per_doctor_html_override)
+    ? (body.per_doctor_html_override as unknown[]).map(v => typeof v === "string" ? v.trim() : "")
+    : [];
+  const emails = targets.flatMap((h) =>
+    sendBlocks.map((blk, di) => {
+      // Preview edits: per-doctor mode carries one edited body per doctor (a
+      // single html_override would send the SAME doctor to every slot).
+      const ov = perDoctorMode ? (perDoctorOverrides[di] ?? "") : editedHtml;
+      const fresh = renderFor(greetingFor(h), h.city, blk.html, blk.text);
+      const rendered = ov
+        ? { subject: editedSubject || fresh.subject, html: wrapHtml(ov), text: (perDoctorMode ? "" : editedText) || stripHtml(ov) }
+        : fresh;
+      // Live To = this hospital's resolved list (one recruiter email, or EVERY
+      // eligible contact for an 'all'-mode hospital), minus any batch-excluded /
+      // Ammar addresses. Test mode still funnels every copy to the test inbox.
+      const liveTo = h.toEmails.filter(e => !excludeSet.has(e.toLowerCase()) && e.toLowerCase() !== EXCLUDED_RECIPIENT);
+      return {
+        from: MAIL_FROM,
+        to:   TEST_OVERRIDE_LIST.length ? [TEST_OVERRIDE_LIST[0]] : (liveTo.length ? liveTo : [h.email]),
+        subject: rendered.subject,
+        html:    rendered.html,
+        text:    rendered.text,
+        headers: { "X-AA-Batch-Id": String(batch.id), "X-AA-Batch-Kind": String(batch.kind) },
+        ...(builtAttachments.length ? { attachments: builtAttachments } : {}),
+      };
+    })
+  // CC/BCC ride the very FIRST email only, so the team gets one copy of the run.
+  ).map((e, i) => ({
+    ...e,
+    ...(i === 0 && extraCc.length  ? { cc:  extraCc }  : {}),
+    ...(i === 0 && extraBcc.length ? { bcc: extraBcc } : {}),
+  }));
 
   // ── Send — one email per hospital ─────────────────────────────────────
   // Resend's /emails/batch sends up to 100 in one call (no per-request rate
@@ -727,12 +779,14 @@ function renderDoctorsTable(rows: RowData[]): string {
     `<th style="text-align:center;border:1px solid #cbd5e1;padding:8px 11px;background:#0f766e;color:#ffffff;font-size:13px;font-weight:600;white-space:nowrap;">${esc(label)}</th>`;
   const td = (val: string) =>
     `<td style="text-align:center;border:1px solid #cbd5e1;padding:8px 11px;font-size:14px;color:#1a2332;vertical-align:top;">${esc(val)}</td>`;
+  // Column list kept 1:1 with send-flow-email's doctorRowTableHtml, including
+  // Area of Interest — a Daily Duo now sends the same profile-sent format.
   const head =
-    `<tr>${th("#")}${th("Name")}${th("Title and Specialty as per the UAE license")}${th("Country Of Training")}` +
+    `<tr>${th("#")}${th("Name")}${th("Title and Specialty as per the UAE license")}${th("Area of Interest")}${th("Country Of Training")}` +
     `${th("Years of Experience")}${th("Nationality")}${th("Age")}${th("Marital Status")}${th("Family Status")}` +
     `${th("UAE license type / Status")}${th("Salary Expectation")}${th("Notice Period")}${th("Mobile")}${th("Email")}</tr>`;
   const body = rows.map(r =>
-    `<tr>${td(String(r.idx))}${td(r.name)}${td(r.title || r.specialty)}${td(r.training)}${td(r.years)}${td(r.nationality)}` +
+    `<tr>${td(String(r.idx))}${td(r.name)}${td(r.title || r.specialty)}${td(r.areas)}${td(r.training)}${td(r.years)}${td(r.nationality)}` +
     `${td(r.age)}${td(r.marital)}${td(r.family)}${td(r.license)}${td(r.salary)}${td(r.notice)}${td(r.mobile)}${td(r.email)}</tr>`,
   ).join("");
   return `<div style="overflow-x:auto;margin:18px 0;">` +
@@ -841,6 +895,26 @@ function renderDoctorCard(r: RowData): string {
       ${buttonsHtml}
       ${contactHtml}
     </div>`;
+}
+
+/** Area-of-interest formatter — MIRROR of send-flow-email's + src/lib/format-list.ts.
+ *  Splits the stored free-text field, dedupes, caps at ~30 words and joins with
+ *  ", " + " & " before the last. Keep all three copies in lockstep. */
+function formatAreasOfInterest(raw: string | null | undefined, maxWords = 30): string {
+  if (!raw) return "";
+  const parts = String(raw)
+    .split(/\s*(?:[,;/\n·•]|\band\b|&)\s*/i)
+    .map(s => s.trim().replace(/[.\s]+$/, ""))
+    .filter(Boolean);
+  const seen = new Set<string>();
+  const terms: string[] = [];
+  for (const p of parts) { const k = p.toLowerCase(); if (!seen.has(k)) { seen.add(k); terms.push(p); } }
+  if (!terms.length) return "";
+  const kept: string[] = [];
+  let words = 0;
+  for (const t of terms) { const w = t.split(/\s+/).length; if (kept.length && words + w > maxWords) break; kept.push(t); words += w; }
+  if (kept.length === 1) return kept[0];
+  return `${kept.slice(0, -1).join(", ")} & ${kept[kept.length - 1]}`;
 }
 
 function esc(s: string | undefined | null): string {

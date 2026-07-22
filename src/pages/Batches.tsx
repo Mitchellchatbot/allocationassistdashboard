@@ -14,7 +14,7 @@ import { Checkbox } from "@/components/ui/checkbox";
 import { toast } from "sonner";
 import { useScheduledBatches, useUpsertBatch, useUpdateBatch, useCancelBatch, useSendBatchNow, useBatchPreview,
   useSpecialtyRotation, useUpdateSpecialtyRotation,
-  type ScheduledBatch, type BatchKind, type BatchDoctorPreview,
+  type ScheduledBatch, type BatchKind, type BatchDoctorPreview, type BatchPerDoctorPreview,
 } from "@/hooks/use-scheduled-batches";
 import { useHospitals } from "@/hooks/use-hospitals";
 import { useZohoData, type ZohoLead, type ZohoDoctorOnBoard } from "@/hooks/use-zoho-data";
@@ -960,7 +960,10 @@ function BatchDialog({ target, onTargetChange, batches, suggestedSpecialty }: {
   const update = useUpdateBatch();
   const sendNow = useSendBatchNow();
   const previewMut = useBatchPreview();
-  const [emailPreview, setEmailPreview] = useState<{ subject: string; html: string; text: string; bcc_count: number; doctor_email?: BatchDoctorPreview } | null>(null);
+  const [emailPreview, setEmailPreview] = useState<{ subject: string; html: string; text: string; bcc_count: number; doctor_email?: BatchDoctorPreview; per_doctor?: BatchPerDoctorPreview[] } | null>(null);
+  // Daily Duo sends a SEPARATE profile-sent email per doctor, so each gets its
+  // own editable pane. Index-aligned with emailPreview.per_doctor.
+  const [perDoctor, setPerDoctor] = useState<Array<{ subject: string; html: string }>>([]);
   // Editable-preview state: the team can tweak the subject/body before sending.
   // editSubject/editHtml are the live (possibly edited) values; emailPreview
   // holds the pristine template render so "Reset" + the edited-diff check work.
@@ -1182,9 +1185,16 @@ function BatchDialog({ target, onTargetChange, batches, suggestedSpecialty }: {
   // a hospital swaps the "Hello …!" line so the preview matches the copy that
   // hospital actually receives now that each gets its own email.
   const previewGreetHospital = (previewGreetId ? previewHospitals.find(h => h.id === previewGreetId) : null) ?? eligibleHospitals[0];
-  const displayHtml = (emailPreview && previewGreetHospital)
-    ? emailPreview.html.replace(/Hello <strong>[^<]*<\/strong>!/, `Hello <strong>${batchGreeting(previewGreetHospital)}</strong>!`)
-    : (emailPreview?.html ?? "");
+  const greetSwap = (h: string) => (previewGreetHospital && h)
+    ? h.replace(/Hello <strong>[^<]*<\/strong>!/, `Hello <strong>${batchGreeting(previewGreetHospital)}</strong>!`)
+    : h;
+  const displayHtml = greetSwap(emailPreview?.html ?? "");
+  // Daily Duo: each doctor is a separate email, so each has its own pristine
+  // base + edited flag (a single html_override would send one doctor twice).
+  const perDoctorList = emailPreview?.per_doctor ?? [];
+  const perDoctorPristine = (i: number) => greetSwap(perDoctorList[i]?.html ?? "");
+  const perDoctorEdited = (i: number) =>
+    !!perDoctor[i] && (perDoctor[i].html !== perDoctorPristine(i) || perDoctor[i].subject !== (perDoctorList[i]?.subject ?? ""));
   // True once the team edited away from the (greeting-swapped) preview base —
   // gates the html_override on send and the "edited" hint.
   const batchEdited = !!emailPreview && (editSubject !== emailPreview.subject || editHtml !== displayHtml);
@@ -1681,7 +1691,7 @@ function BatchDialog({ target, onTargetChange, batches, suggestedSpecialty }: {
                   if (picked.length === 0) { toast.error("Queue at least one doctor to preview."); return; }
                   try {
                     const p = await previewMut.mutateAsync(batch.status === "sent" ? { batchId: batch.id, force: true } : batch.id);
-                    setEmailPreview({ subject: p.subject, html: p.html, text: p.text, bcc_count: p.bcc_count, doctor_email: p.doctor_email });
+                    setEmailPreview({ subject: p.subject, html: p.html, text: p.text, bcc_count: p.bcc_count, doctor_email: p.doctor_email, per_doctor: p.per_doctor ?? [] });
                     // Seed the exclusion list from the batch so a previously-saved
                     // (e.g. scheduled) exclusion shows pre-unchecked.
                     setExcludedEmails(batch.excluded_emails ?? []);
@@ -1691,6 +1701,8 @@ function BatchDialog({ target, onTargetChange, batches, suggestedSpecialty }: {
                     setEditHtml(p.html);
                     setEditDoctorSubject(p.doctor_email?.subject ?? "");
                     setEditDoctorHtml(p.doctor_email?.html ?? "");
+                    // Daily Duo: one editable body per doctor (each is its own email).
+                    setPerDoctor((p.per_doctor ?? []).map(d => ({ subject: d.subject, html: d.html })));
                     setPreviewResetTick(t => t + 1);
                   } catch (e) {
                     toast.error(e instanceof Error ? e.message : "Preview failed");
@@ -1819,7 +1831,35 @@ function BatchDialog({ target, onTargetChange, batches, suggestedSpecialty }: {
           </div>
         </div>
       }
-      emails={emailPreview ? [{
+      emails={emailPreview ? [
+      // Daily Duo → one pane per doctor, because each doctor is a SEPARATE
+      // profile-sent email (card image + their own table) to every hospital.
+      // Every other kind is a single combined email.
+      ...(perDoctorList.length ? perDoctorList.map((d, i) => ({
+        key: `hospital-${i}`,
+        label: d.name || `Doctor ${i + 1}`,
+        subLabel: `Email ${i + 1} of ${perDoctorList.length} to each hospital`,
+        preview: (
+          <EditableEmailPreview
+            subject={perDoctor[i]?.subject ?? d.subject}
+            html={perDoctorPristine(i)}
+            onSubjectChange={(s: string) => setPerDoctor(prev => prev.map((p, j) => j === i ? { ...p, subject: s } : p))}
+            onHtmlChange={(h: string) => setPerDoctor(prev => prev.map((p, j) => j === i ? { ...p, html: h } : p))}
+            resetKey={`${previewResetTick}:${previewGreetId ?? "first"}:${i}`}
+            edited={perDoctorEdited(i)}
+            onReset={() => {
+              setPerDoctor(prev => prev.map((p, j) => j === i ? { subject: d.subject, html: perDoctorPristine(i) } : p));
+              setPreviewResetTick(t => t + 1);
+            }}
+            from="Hospital Intro <hospitalintro@allocationassist.com>"
+            cc={batchCc}
+            bcc={batchBcc}
+            attachments={batch?.attachments ?? []}
+            onAttachmentsChange={setAttachments}
+            className="min-h-0 flex-1 border-0 rounded-none shadow-none"
+          />
+        ),
+      })) : [{
         key: "batch",
         label: "Hospital email",
         subLabel: "Hospital Intro <hospitalintro@allocationassist.com>",
@@ -1840,10 +1880,12 @@ function BatchDialog({ target, onTargetChange, batches, suggestedSpecialty }: {
             from="Hospital Intro <hospitalintro@allocationassist.com>"
             cc={batchCc}
             bcc={batchBcc}
+            attachments={batch?.attachments ?? []}
+            onAttachmentsChange={setAttachments}
             className="min-h-0 flex-1 border-0 rounded-none shadow-none"
           />
         ),
-      },
+      }]),
       ...(emailPreview.doctor_email && emailPreview.doctor_email.recipient_count > 0 ? [{
         key: "doctor",
         label: `Doctor email${batch?.include_doctor_email ? "" : " · off"}`,
@@ -1881,7 +1923,16 @@ function BatchDialog({ target, onTargetChange, batches, suggestedSpecialty }: {
                 && !confirm(`Resend this batch? Same ${picked.length} doctor${picked.length === 1 ? "" : "s"} will go out again.`)) return;
               try {
                 const overrides = {
-                  ...(batchEdited ? { subjectOverride: editSubject, htmlOverride: editHtml } : {}),
+                  // Per-doctor mode ships one body per doctor; a single
+                  // htmlOverride would put the same doctor in every email.
+                  ...(perDoctorList.length
+                    ? {
+                        ...(perDoctorList.some((_, i) => perDoctorEdited(i))
+                          ? { perDoctorHtmlOverride: perDoctorList.map((_, i) => perDoctorEdited(i) ? (perDoctor[i]?.html ?? "") : "") }
+                          : {}),
+                        ...(perDoctor[0] && perDoctor[0].subject !== perDoctorList[0].subject ? { subjectOverride: perDoctor[0].subject } : {}),
+                      }
+                    : (batchEdited ? { subjectOverride: editSubject, htmlOverride: editHtml } : {})),
                   ...(batch.include_doctor_email && doctorEdited ? { doctorSubjectOverride: editDoctorSubject, doctorHtmlOverride: editDoctorHtml } : {}),
                   ...(batchCc.length  ? { ccOverride:  batchCc }  : {}),
                   ...(batchBcc.length ? { bccOverride: batchBcc } : {}),

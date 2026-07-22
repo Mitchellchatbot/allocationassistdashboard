@@ -157,31 +157,51 @@ export function EditableEmailPreview({
   // (px), which email clients honour, and flows into the sent HTML via flush() —
   // so what you size is what's sent, on the profile card image OR any photo, in
   // every preview that uses this component.
-  const imgAtBorder = (target: EventTarget | null, clientX: number): HTMLImageElement | null => {
+  // Grab any CORNER of an image (the Gmail-style affordance) — or its right edge
+  // as a wider target — and drag to resize.
+  const IMG_GRAB = 18;
+  const imgHandleAt = (target: EventTarget | null, clientX: number, clientY: number):
+    { img: HTMLImageElement; fromLeft: boolean; corner: boolean } | null => {
     const el = target as HTMLElement | null;
     if (!el || el.tagName !== "IMG") return null;
     const r = el.getBoundingClientRect();
-    return clientX >= r.right - GRAB_PX * 2 && clientX <= r.right + 4 ? (el as HTMLImageElement) : null;
+    const nearRight  = clientX >= r.right  - IMG_GRAB && clientX <= r.right  + 6;
+    const nearLeft   = clientX >= r.left   - 6        && clientX <= r.left   + IMG_GRAB;
+    const nearBottom = clientY >= r.bottom - IMG_GRAB && clientY <= r.bottom + 6;
+    const nearTop    = clientY >= r.top    - 6        && clientY <= r.top    + IMG_GRAB;
+    if ((nearRight || nearLeft) && (nearBottom || nearTop))
+      return { img: el as HTMLImageElement, fromLeft: nearLeft, corner: true };
+    if (nearRight) return { img: el as HTMLImageElement, fromLeft: false, corner: false };
+    return null;
   };
   const onBodyMouseMove = (e: React.MouseEvent) => {
     const body = bodyRef.current; if (!body) return;
-    // Resize affordance on image edges + column boundaries.
-    body.style.cursor = imgAtBorder(e.target, e.clientX) ? "ew-resize"
+    // Resize affordance on image corners/edges + column boundaries.
+    const h = imgHandleAt(e.target, e.clientX, e.clientY);
+    body.style.cursor = h ? (h.corner ? "nwse-resize" : "ew-resize")
       : cellAtBorder(e.target, e.clientX) ? "col-resize" : "";
   };
   const onBodyMouseDown = (e: React.MouseEvent) => {
     // Image resize takes priority over cell resize / text editing.
-    const img = imgAtBorder(e.target, e.clientX);
-    if (img) {
+    const handle = imgHandleAt(e.target, e.clientX, e.clientY);
+    if (handle) {
+      const { img, fromLeft } = handle;
       e.preventDefault();                    // don't start a drag/selection
       const startX = e.clientX;
       const startW = img.getBoundingClientRect().width;
       const parentW = img.parentElement?.getBoundingClientRect().width || 640;
+      const dir = fromLeft ? -1 : 1;         // left-side corners grow leftwards
       const move = (ev: MouseEvent) => {
-        const w = Math.max(80, Math.min(Math.round(startW + ev.clientX - startX), Math.round(parentW)));
+        const w = Math.max(80, Math.min(Math.round(startW + dir * (ev.clientX - startX)), Math.round(parentW)));
         img.style.width = `${w}px`;
         img.style.maxWidth = `${w}px`;
         img.style.height = "auto";
+        // The size has to survive into the RECIPIENT'S inbox, not just this
+        // preview: Outlook ignores max-width and only honours the width
+        // ATTRIBUTE, so write that too and drop any fixed height so the image
+        // scales proportionally. flush() then bakes this into the sent HTML.
+        img.setAttribute("width", String(w));
+        img.removeAttribute("height");
       };
       const up = () => {
         document.removeEventListener("mousemove", move);
@@ -435,7 +455,7 @@ export function EditableEmailPreview({
       <div className="px-4 py-1.5 bg-teal-50/70 border-b border-teal-100 text-[11px] text-teal-800 flex items-center justify-between gap-2">
         <span className="flex items-center gap-1.5 min-w-0">
           <Pencil className="h-3 w-3 shrink-0" />
-          <span className="truncate">Editable — click text to change the wording, or drag a table column's edge to resize it. This exact version is what sends.</span>
+          <span className="truncate">Editable — click text to change the wording, drag an <strong>image corner</strong> to resize it, or drag a table column's edge. This exact version is what sends.</span>
         </span>
         {edited && onReset && (
           <button
