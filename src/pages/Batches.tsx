@@ -33,6 +33,7 @@ import { CcBccPicker } from "@/components/automations/CcBccPicker";
 import { AttachmentsPicker } from "@/components/automations/AttachmentsPicker";
 import type { EmailAttachment } from "@/lib/email-attachments";
 import { GulfClock, composeGulfDateTime } from "@/components/GulfClock";
+import { cn } from "@/lib/utils";
 import { useScheduledProfileSends, useCancelScheduledProfileSend } from "@/hooks/use-scheduled-profile-sends";
 import { UserSquare2 } from "lucide-react";
 
