@@ -17,7 +17,7 @@ import { bucketKey, bucketLabel, parseDate, type Granularity } from "@/lib/time-
 import { ComposedChart, Bar, Line, XAxis, YAxis, Tooltip, ResponsiveContainer, CartesianGrid, Legend, ReferenceLine } from "recharts";
 import { TrendingUp, TrendingDown, Loader2 } from "lucide-react";
 
-interface DigestRow { key: string; label: string; revenue: number; spend: number; profit: number; cumulative: number; conversions: number; }
+interface DigestRow { key: string; label: string; revenue: number; spend: number; profit: number; cumulative: number; conversions: number; projRevenue: number; }
 
 export function FinanceDigest() {
   const { rows: expenseRows } = useMarketingExpenses();
@@ -38,7 +38,7 @@ export function FinanceDigest() {
     const map = new Map<string, DigestRow>();
     const get = (k: string): DigestRow => {
       let r = map.get(k);
-      if (!r) { r = { key: k, label: bucketLabel(k, gran), revenue: 0, spend: 0, profit: 0, cumulative: 0, conversions: 0 }; map.set(k, r); }
+      if (!r) { r = { key: k, label: bucketLabel(k, gran), revenue: 0, spend: 0, profit: 0, cumulative: 0, conversions: 0, projRevenue: 0 }; map.set(k, r); }
       return r;
     };
     // Conversions (operational placement count) — always from Zoho DoB.
@@ -90,7 +90,18 @@ export function FinanceDigest() {
     // Running cumulative profit across the period, so the chart shows the
     // period's net building up to its end total.
     let run = 0;
-    for (const r of out) { r.profit = r.revenue - r.spend; run += r.profit; r.cumulative = run; }
+    for (const r of out) {
+      r.profit = r.revenue - r.spend; run += r.profit; r.cumulative = run;
+      // Projected revenue (translucent bar): only in Books mode, and only for a
+      // bucket that has NOT been invoiced yet (revenue === 0) but does have
+      // placements — i.e. the current month, where the work is done but the
+      // invoices lag. Shows the expected value from those conversions
+      // (× the standard fee) so a not-yet-billed month isn't read as "£0 earned".
+      // Never feeds profit/cumulative — those stay hard actuals.
+      r.projRevenue = useBooks && r.revenue === 0 && r.conversions > 0
+        ? r.conversions * REVENUE_PER_CONVERSION_AED
+        : 0;
+    }
     return out;
   }, [expenseRows, zoho, gran, fromMs, toMs, useBooks, books]);
 
@@ -154,11 +165,35 @@ export function FinanceDigest() {
             <CartesianGrid strokeDasharray="3 3" stroke="hsl(var(--border))" vertical={false} />
             <XAxis dataKey="label" tick={{ fontSize: 11 }} tickLine={false} axisLine={false} interval={gran === "day" ? "preserveStartEnd" : 0} minTickGap={4} />
             <YAxis tick={{ fontSize: 10 }} tickLine={false} axisLine={false} tickFormatter={compact} width={48} />
-            <Tooltip formatter={(v: number, n) => [fmt(v), n]} contentStyle={{ fontSize: 11, borderRadius: 8 }} cursor={{ fill: "rgba(100,116,139,0.10)" }} />
+            <Tooltip
+              cursor={{ fill: "rgba(100,116,139,0.10)" }}
+              content={({ active, payload, label }) => {
+                if (!active || !payload?.length) return null;
+                // Drop the projected series when it's 0 (every already-invoiced
+                // month) so the tooltip doesn't read "Projected: AED 0".
+                const rows = payload.filter(p => !(p.dataKey === "projRevenue" && !p.value));
+                if (!rows.length) return null;
+                return (
+                  <div className="rounded-lg border border-border/60 bg-white/95 px-2.5 py-2 shadow-md text-[11px]">
+                    <div className="font-semibold text-foreground mb-1">{label}</div>
+                    {rows.map(p => (
+                      <div key={p.dataKey as string} className="flex items-center gap-2">
+                        <span className="inline-block h-2 w-2 rounded-full" style={{ background: p.color }} />
+                        <span className="text-muted-foreground">{p.name}</span>
+                        <span className="ml-auto tabular-nums font-medium text-foreground">{fmt(Number(p.value) || 0)}</span>
+                      </div>
+                    ))}
+                  </div>
+                );
+              }}
+            />
             <ReferenceLine y={0} stroke="hsl(var(--border))" strokeWidth={1.5} />
             <Legend wrapperStyle={{ fontSize: 11 }} iconType="circle" />
-            <Bar dataKey="revenue" name="Revenue" fill="#10b981" radius={[3, 3, 0, 0]} maxBarSize={gran === "day" ? 8 : 40} />
-            <Bar dataKey="spend"   name="Spend"   fill="#f43f5e" radius={[3, 3, 0, 0]} maxBarSize={gran === "day" ? 8 : 40} />
+            <Bar dataKey="revenue"     name="Revenue"           stackId="rev" fill="#10b981" radius={[3, 3, 0, 0]} maxBarSize={gran === "day" ? 8 : 40} />
+            {/* Projected revenue for an un-invoiced (current) month — translucent
+                green, stacked on the revenue slot so it fills the same column. */}
+            <Bar dataKey="projRevenue" name="Projected (conv.)"  stackId="rev" fill="#10b981" fillOpacity={0.22} stroke="#10b981" strokeOpacity={0.55} strokeDasharray="4 2" radius={[3, 3, 0, 0]} maxBarSize={gran === "day" ? 8 : 40} />
+            <Bar dataKey="spend"       name="Spend"             fill="#f43f5e" radius={[3, 3, 0, 0]} maxBarSize={gran === "day" ? 8 : 40} />
             <Line dataKey="profit" name="Net P/L"  stroke="#3b82f6" strokeWidth={2.5} dot={{ r: 3, fill: "#3b82f6", strokeWidth: 0 }} activeDot={{ r: 5 }} />
             {/* Cumulative P/L only on the monthly view — for day/week the net
                 P/L line is smoother and easier to read (cumulative lives in the
@@ -182,7 +217,11 @@ export function FinanceDigest() {
               {digest.map(r => (
                 <tr key={r.key} className="border-b border-border/30 hover:bg-muted/20">
                   <td className="py-2 px-3 font-medium">{r.label}</td>
-                  <td className="py-2 px-3 text-right tabular-nums text-emerald-700">{fmt(r.revenue)}</td>
+                  {/* Un-invoiced (current) month: show the conversion-based
+                      projection in muted italics so it's clearly not an actual. */}
+                  {r.projRevenue > 0
+                    ? <td className="py-2 px-3 text-right tabular-nums text-emerald-600/70 italic" title="Projected from this month's placements — not yet invoiced in Zoho Books">≈ {fmt(r.projRevenue)}<span className="not-italic text-muted-foreground/70 text-[10px]"> proj.</span></td>
+                    : <td className="py-2 px-3 text-right tabular-nums text-emerald-700">{fmt(r.revenue)}</td>}
                   <td className="py-2 px-3 text-right tabular-nums text-rose-700">{fmt(r.spend)}</td>
                   <td className={`py-2 px-3 text-right tabular-nums font-semibold ${r.profit >= 0 ? "text-blue-700" : "text-rose-700"}`}>{fmt(r.profit)}</td>
                   {gran === "month" && <td className={`py-2 px-3 text-right tabular-nums font-medium ${r.cumulative >= 0 ? "text-violet-700" : "text-rose-700"}`}>{fmt(r.cumulative)}</td>}
