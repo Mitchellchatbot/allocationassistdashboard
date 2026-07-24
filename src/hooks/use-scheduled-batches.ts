@@ -377,15 +377,20 @@ export interface BatchPreviewResult {
   doctor_emails?: BatchPerDoctorPreview[];
   /** Total emails that will go out (hospitals × per-doctor emails). */
   email_count?: number;
+  /** True when MAIL_TEST_RECIPIENT_OVERRIDE is set — every copy is redirected to
+   *  the test inbox instead of the real hospital recruiters. */
+  test_mode?: boolean;
+  test_recipient?: string | null;
 }
 export function useBatchPreview() {
   return useMutation({
     mutationFn: async (input: string | { batchId: string; force?: boolean }): Promise<BatchPreviewResult> => {
       const batchId = typeof input === "string" ? input : input.batchId;
       const force   = typeof input === "string" ? false  : !!input.force;
-      type Raw = { ok: boolean; preview?: Omit<BatchPreviewResult, "doctor_email" | "per_doctor" | "doctor_emails" | "email_count">;
+      type Raw = { ok: boolean; preview?: Omit<BatchPreviewResult, "doctor_email" | "per_doctor" | "doctor_emails" | "email_count" | "test_mode" | "test_recipient">;
                    doctor_email?: BatchDoctorPreview; per_doctor?: BatchPerDoctorPreview[];
-                   doctor_emails?: BatchPerDoctorPreview[]; email_count?: number; error?: string };
+                   doctor_emails?: BatchPerDoctorPreview[]; email_count?: number;
+                   test_mode?: boolean; test_recipient?: string | null; error?: string };
       const { data, error } = await invokeWithTimeout<Raw>(
         "send-batch", { batch_id: batchId, dry_run: true, force }, 60_000);
       if (error) throw new Error(await fnErrorMessage(error, "Preview failed"));
@@ -397,6 +402,8 @@ export function useBatchPreview() {
         per_doctor:    res.per_doctor ?? [],
         doctor_emails: res.doctor_emails ?? [],
         email_count:   res.email_count,
+        test_mode:     res.test_mode,
+        test_recipient: res.test_recipient,
       };
     },
   });

@@ -9,7 +9,7 @@ import { Label } from "@/components/ui/label";
 import { Textarea } from "@/components/ui/textarea";
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription, DialogFooter } from "@/components/ui/dialog";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
-import { Mailbox, Plus, Send, X, CheckCircle2, Calendar, ChevronRight, ChevronDown, RefreshCw, AlertCircle, Sparkles, UserSquare, GripVertical, Wand2, Pencil, Building2 } from "lucide-react";
+import { Mailbox, Plus, Send, X, CheckCircle2, Calendar, ChevronRight, ChevronDown, RefreshCw, AlertCircle, AlertTriangle, TestTube, Sparkles, UserSquare, GripVertical, Wand2, Pencil, Building2 } from "lucide-react";
 import { Checkbox } from "@/components/ui/checkbox";
 import { toast } from "sonner";
 import { useScheduledBatches, useUpsertBatch, useUpdateBatch, useCancelBatch, useSendBatchNow, useBatchPreview,
@@ -1002,7 +1002,7 @@ function BatchDialog({ target, onTargetChange, batches, suggestedSpecialty }: {
   const update = useUpdateBatch();
   const sendNow = useSendBatchNow();
   const previewMut = useBatchPreview();
-  const [emailPreview, setEmailPreview] = useState<{ subject: string; html: string; text: string; bcc_count: number; doctor_email?: BatchDoctorPreview; per_doctor?: BatchPerDoctorPreview[]; doctor_emails?: BatchPerDoctorPreview[] } | null>(null);
+  const [emailPreview, setEmailPreview] = useState<{ subject: string; html: string; text: string; bcc_count: number; doctor_email?: BatchDoctorPreview; per_doctor?: BatchPerDoctorPreview[]; doctor_emails?: BatchPerDoctorPreview[]; test_mode?: boolean; test_recipient?: string | null } | null>(null);
   // Daily Duo sends a SEPARATE profile-sent email per doctor, so each gets its
   // own editable pane. Index-aligned with emailPreview.per_doctor.
   const [perDoctor, setPerDoctor] = useState<Array<{ subject: string; html: string }>>([]);
@@ -1779,7 +1779,7 @@ function BatchDialog({ target, onTargetChange, batches, suggestedSpecialty }: {
                     // what a Profile Sent looks like.
                     await ensureCardImages();
                     const p = await previewMut.mutateAsync(batch.status === "sent" ? { batchId: batch.id, force: true } : batch.id);
-                    setEmailPreview({ subject: p.subject, html: p.html, text: p.text, bcc_count: p.bcc_count, doctor_email: p.doctor_email, per_doctor: p.per_doctor ?? [], doctor_emails: p.doctor_emails ?? [] });
+                    setEmailPreview({ subject: p.subject, html: p.html, text: p.text, bcc_count: p.bcc_count, doctor_email: p.doctor_email, per_doctor: p.per_doctor ?? [], doctor_emails: p.doctor_emails ?? [], test_mode: p.test_mode, test_recipient: p.test_recipient });
                     // Seed the exclusion list from the batch so a previously-saved
                     // (e.g. scheduled) exclusion shows pre-unchecked.
                     setExcludedEmails(batch.excluded_emails ?? []);
@@ -1802,7 +1802,7 @@ function BatchDialog({ target, onTargetChange, batches, suggestedSpecialty }: {
               >
                 {previewMut.isPending
                   ? <><RefreshCw className="h-3.5 w-3.5 mr-1.5 animate-spin" /> Building preview…</>
-                  : <><Mailbox className="h-3.5 w-3.5 mr-1.5" /> {batch.status === "sent" ? "Preview & resend" : "Preview & send"}</>}
+                  : <><Mailbox className="h-3.5 w-3.5 mr-1.5" /> Preview{/* opens the review step — nothing sends until you click Send inside it */}</>}
               </Button>
               <Button variant="outline" onClick={close}>Close</Button>
             </DialogFooter>
@@ -1821,6 +1821,15 @@ function BatchDialog({ target, onTargetChange, batches, suggestedSpecialty }: {
       subtitle={typeof emailPreview?.bcc_count === "number" ? `BCC to ${emailPreview.bcc_count} hospital${emailPreview.bcc_count === 1 ? "" : "s"}` : undefined}
       headerExtra={
         <div className="space-y-2">
+          {/* Where a send actually lands — the single most important thing to
+              know before clicking Send. Green = safe (test inbox); red = live. */}
+          {emailPreview && (emailPreview.test_mode
+            ? <div className="rounded-lg border border-emerald-300 bg-emerald-50 p-2.5 text-[11px] text-emerald-900 shadow-sm">
+                <span className="inline-flex items-start gap-1.5"><TestTube className="h-3.5 w-3.5 mt-[1px] shrink-0" /><span><strong>Test mode is ON.</strong> Every copy goes to the test inbox (<strong>{emailPreview.test_recipient ?? "test recipient"}</strong>), <strong>not</strong> real hospitals — the "Hello &lt;hospital&gt; team" greetings are just personalised previews. Nothing reaches a real recruiter.</span></span>
+              </div>
+            : <div className="rounded-lg border border-rose-300 bg-rose-50 p-2.5 text-[11px] text-rose-900 shadow-sm">
+                <span className="inline-flex items-start gap-1.5"><AlertTriangle className="h-3.5 w-3.5 mt-[1px] shrink-0" /><span><strong>LIVE mode.</strong> Clicking Send emails <strong>{emailPreview.bcc_count} real hospital{emailPreview.bcc_count === 1 ? "" : "s"}</strong>. There is no undo.</span></span>
+              </div>)}
           <div className={`rounded-lg border p-2.5 text-[11px] space-y-1 shadow-sm ${batchEdited ? "border-amber-300 bg-amber-50 text-amber-900" : "border-sidebar-border/40 bg-white/95 text-slate-500"}`}>
             <div>
               {batchEdited
@@ -2035,8 +2044,19 @@ function BatchDialog({ target, onTargetChange, batches, suggestedSpecialty }: {
           <Button
             onClick={async () => {
               if (!batch) return;
-              if (batch.status === "sent"
-                && !confirm(`Resend this batch? Same ${picked.length} doctor${picked.length === 1 ? "" : "s"} will go out again.`)) return;
+              // Always confirm before firing — this is the real, irreversible send
+              // (drafts used to go out on a single click with no prompt). Spell out
+              // exactly where it lands: the test inbox in test mode, else the real
+              // hospitals, so nobody sends to 86 hospitals thinking they're still
+              // reviewing.
+              const emailCount = emailPreview?.per_doctor?.length
+                ? (emailPreview.bcc_count || picked.length) * emailPreview.per_doctor.length
+                : (emailPreview?.bcc_count || picked.length);
+              const dest = emailPreview?.test_mode
+                ? `the TEST inbox (${emailPreview.test_recipient ?? "test recipient"}) — NOT real hospitals`
+                : `${emailPreview?.bcc_count ?? picked.length} REAL hospital recruiter inbox${(emailPreview?.bcc_count ?? 0) === 1 ? "" : "es"}`;
+              const verb = batch.status === "sent" ? "Resend" : "Send";
+              if (!confirm(`${verb} now?\n\n${emailCount} email${emailCount === 1 ? "" : "s"} will go to ${dest}.`)) return;
               try {
                 const overrides = {
                   // Per-doctor mode ships one body per doctor; a single

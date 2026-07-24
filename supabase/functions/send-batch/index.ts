@@ -512,6 +512,10 @@ ${SIGNATURE_HTML}`;
     const sample = renderFor(greet, city, sendBlocks[0].html, sendBlocks[0].text);
     return json({
       ok: true, dry_run: true,
+      // Test-mode state so the preview can warn LOUDLY that a send won't reach
+      // real hospitals (or, if off, that it WILL) before anyone clicks send.
+      test_mode: TEST_OVERRIDE_LIST.length > 0,
+      test_recipient: TEST_OVERRIDE_LIST[0] ?? null,
       preview: { from: MAIL_FROM, bcc_count: recipients.length, subject: sample.subject, html: sample.html, text: sample.text },
       // Daily Duo: one pane per doctor — each is a separately-sent email, so the
       // team edits each one on its own.
