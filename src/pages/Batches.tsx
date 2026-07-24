@@ -1154,7 +1154,9 @@ function BatchDialog({ target, onTargetChange, batches, suggestedSpecialty }: {
           : { freq: "none" },
         specialty:     finalSpecialty,
         country:       country.trim() || null,
-        header_mode:   headerMode === "none" ? null : headerMode,
+        // Recap/Specialty framings are Top-15 only — never persist one on any
+        // other kind, even if it lingered in state from a kind switch.
+        header_mode:   (kind === "tuesday_top_15" && headerMode !== "none") ? headerMode : null,
       });
       toast.success("Batch created. Pick doctors below.");
       // Stay in the dialog — swap into doctor-picker mode.
@@ -1364,21 +1366,17 @@ function BatchDialog({ target, onTargetChange, batches, suggestedSpecialty }: {
   const cardUrlCacheRef = useRef<Map<string, string>>(new Map());
   const [preparingCards, setPreparingCards] = useState(false);
 
-  const setDoctors = async (next: string[]) => {
-    if (!batch) return;
-    try { await update.mutateAsync({ id: batch.id, patch: { doctor_ids: next } }); }
-    catch (e) { toast.error(e instanceof Error ? e.message : "Update failed"); return; }
-
-    // For a Daily Duo, each doctor sends as their OWN Profile-Sent card image.
-    // The scheduled send runs server-side (no browser), so we rasterise the two
-    // cards here and store their URLs (aligned to doctor_ids) for send-batch to
-    // embed. Non-fatal: a failed capture leaves an empty slot and send-batch
-    // falls back to that doctor's card, so the send never breaks.
-    if (batch.kind !== "daily_duo") return;
+  // Rasterise each Daily-Duo doctor's Profile-Sent card to an image URL, aligned
+  // to `ids`. The scheduled send runs server-side (no browser), so we capture the
+  // cards here for send-batch to embed. Non-fatal: a failed capture leaves an
+  // empty slot and send-batch falls back to that doctor's HTML card, so the send
+  // never breaks. Returns the URL list (also patched onto the batch).
+  const generateCardUrls = async (ids: string[]): Promise<string[]> => {
+    if (!batch) return [];
     setPreparingCards(true);
     try {
       const urls: string[] = [];
-      for (const id of next) {
+      for (const id of ids) {
         let url = cardUrlCacheRef.current.get(id);
         if (!url) {
           const opt = doctorById.get(id);
@@ -1392,11 +1390,31 @@ function BatchDialog({ target, onTargetChange, batches, suggestedSpecialty }: {
         urls.push(url ?? "");
       }
       await update.mutateAsync({ id: batch.id, patch: { doctor_card_image_urls: urls } });
+      return urls;
     } catch {
-      /* non-fatal — send-batch renders the card fallback for any empty slot */
+      return [];  // non-fatal — send-batch renders the HTML card for empty slots
     } finally {
       setPreparingCards(false);
     }
+  };
+
+  /** Capture any MISSING card images before a preview/send so a Daily Duo never
+   *  goes out as the HTML fallback just because the images were never generated
+   *  (e.g. a resend, or a batch opened without re-adding doctors). Skips work
+   *  when every slot is already filled. */
+  const ensureCardImages = async () => {
+    if (!batch || batch.kind !== "daily_duo" || batch.doctor_ids.length === 0) return;
+    const have = batch.doctor_card_image_urls ?? [];
+    const complete = have.length === batch.doctor_ids.length && have.every(Boolean);
+    if (!complete) await generateCardUrls(batch.doctor_ids);
+  };
+
+  const setDoctors = async (next: string[]) => {
+    if (!batch) return;
+    try { await update.mutateAsync({ id: batch.id, patch: { doctor_ids: next } }); }
+    catch (e) { toast.error(e instanceof Error ? e.message : "Update failed"); return; }
+    // For a Daily Duo, each doctor sends as their OWN Profile-Sent card image.
+    if (batch.kind === "daily_duo") await generateCardUrls(next);
   };
   const setAttachments = async (next: EmailAttachment[]) => {
     if (!batch) return;
@@ -1455,7 +1473,13 @@ function BatchDialog({ target, onTargetChange, batches, suggestedSpecialty }: {
             <div className="space-y-3 py-2">
               <div className="space-y-1">
                 <Label className="text-[11px]">Kind</Label>
-                <Select value={kind} onValueChange={(v) => setKind(v as BatchKind)}>
+                <Select value={kind} onValueChange={(v) => {
+                  const k = v as BatchKind;
+                  setKind(k);
+                  // The Subject-header selector only exists for Top 15; clear any
+                  // recap/specialty choice when leaving it so it can't be saved.
+                  if (k !== "tuesday_top_15") setHeaderMode("none");
+                }}>
                   <SelectTrigger className="h-9 text-[12px]"><SelectValue /></SelectTrigger>
                   <SelectContent>
                     <SelectItem value="daily_duo">Daily duo (Mon-Fri · 2 profiles)</SelectItem>
@@ -1509,20 +1533,25 @@ function BatchDialog({ target, onTargetChange, batches, suggestedSpecialty }: {
                   <span className="text-sky-600/70">({workWeekLabel(country) === "Sun–Thu" ? "Fri–Sat weekend" : "Sat–Sun weekend"})</span>
                 </div>
               </div>
-              <div className="space-y-1">
-                <Label className="text-[11px]">Subject header</Label>
-                <Select value={headerMode} onValueChange={(v) => setHeaderMode(v as "none" | "recap" | "specialty")}>
-                  <SelectTrigger className="h-9 text-[12px]"><SelectValue /></SelectTrigger>
-                  <SelectContent>
-                    <SelectItem value="none">Default (Available &lt;specialty&gt; — Allocation Assist)</SelectItem>
-                    <SelectItem value="recap">Recap — "This weeks available doctors … Excited to work in &lt;city&gt;"</SelectItem>
-                    <SelectItem value="specialty">Specialty — "&lt;Specialty&gt; available … Excited to work in &lt;city&gt;"</SelectItem>
-                  </SelectContent>
-                </Select>
-                <p className="text-[10px] text-muted-foreground">
-                  &lt;city&gt; is each recipient hospital's city. Use <strong>Recap</strong> for a weekly round-up of sent doctors, <strong>Specialty</strong> for a Top-15-by-specialty blast.
-                </p>
-              </div>
+              {/* Recap / Specialty subject framings are a Top-15 thing only —
+                  a weekly round-up or a specialty blast. Daily Duo and
+                  Specialty-of-the-day always use the default subject. */}
+              {kind === "tuesday_top_15" && (
+                <div className="space-y-1">
+                  <Label className="text-[11px]">Subject header</Label>
+                  <Select value={headerMode} onValueChange={(v) => setHeaderMode(v as "none" | "recap" | "specialty")}>
+                    <SelectTrigger className="h-9 text-[12px]"><SelectValue /></SelectTrigger>
+                    <SelectContent>
+                      <SelectItem value="none">Default (Available &lt;specialty&gt; — Allocation Assist)</SelectItem>
+                      <SelectItem value="recap">Recap — "This weeks available doctors … Excited to work in &lt;city&gt;"</SelectItem>
+                      <SelectItem value="specialty">Specialty — "&lt;Specialty&gt; available … Excited to work in &lt;city&gt;"</SelectItem>
+                    </SelectContent>
+                  </Select>
+                  <p className="text-[10px] text-muted-foreground">
+                    &lt;city&gt; is each recipient hospital's city. Use <strong>Recap</strong> for a weekly round-up of sent doctors, <strong>Specialty</strong> for a Top-15-by-specialty blast.
+                  </p>
+                </div>
+              )}
               {kind === "specialty_of_day" && (
                 <div className="space-y-1">
                   <Label className="text-[11px]">Specialty</Label>
@@ -1586,8 +1615,9 @@ function BatchDialog({ target, onTargetChange, batches, suggestedSpecialty }: {
                           </span>
                         )}
                   </div>
-                  {batch.status === "draft" && picked.length > 0 && (
-                    <Button size="sm" variant="ghost" className="h-6 text-[10px] shrink-0" disabled={preparingCards} onClick={() => setDoctors(batch.doctor_ids)}>
+                  {picked.length > 0 && (
+                    <Button size="sm" variant="ghost" className="h-6 text-[10px] shrink-0" disabled={preparingCards}
+                      onClick={() => { cardUrlCacheRef.current.clear(); generateCardUrls(batch.doctor_ids); }}>
                       <RefreshCw className={`h-3 w-3 mr-1 ${preparingCards ? "animate-spin" : ""}`} /> Refresh images
                     </Button>
                   )}
@@ -1743,6 +1773,11 @@ function BatchDialog({ target, onTargetChange, batches, suggestedSpecialty }: {
                 onClick={async () => {
                   if (picked.length === 0) { toast.error("Queue at least one doctor to preview."); return; }
                   try {
+                    // Make sure every Daily-Duo card image exists BEFORE we build
+                    // the preview — otherwise a resend (or a batch opened without
+                    // re-adding doctors) falls back to the HTML card, which is not
+                    // what a Profile Sent looks like.
+                    await ensureCardImages();
                     const p = await previewMut.mutateAsync(batch.status === "sent" ? { batchId: batch.id, force: true } : batch.id);
                     setEmailPreview({ subject: p.subject, html: p.html, text: p.text, bcc_count: p.bcc_count, doctor_email: p.doctor_email, per_doctor: p.per_doctor ?? [], doctor_emails: p.doctor_emails ?? [] });
                     // Seed the exclusion list from the batch so a previously-saved

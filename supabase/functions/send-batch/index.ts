@@ -342,7 +342,7 @@ Deno.serve(async (req: Request) => {
       idx:        idx + 1,
       name:         pick(wp?.full_name, lead?.Full_Name, dob?.Full_Name, p?.doctor_name) || "(unknown)",
       title:        pick(wp?.job_title, p?.title),
-      areas:        formatAreasOfInterest(pick(wp?.area_of_interest, p?.area_of_interest), { fallback: pick(wp?.job_title, p?.title, p?.specialty) }),
+      areas:        formatAreasOfInterest(pick(wp?.area_of_interest, p?.area_of_interest), { fallback: pick(p?.specialty, wp?.specialty, wp?.job_title, p?.title) }),
       training:     pick(wp?.country_of_training, p?.country_training, lead?.Country_of_Specialty_training),
       years:        pick(wp?.years_experience, p?.years_experience),
       nationality:  pick(wp?.nationality, p?.nationality),
@@ -940,6 +940,13 @@ const PROSE_WORDS = new Set([
   "graduated", "graduate", "years", "year", "over", "more", "than", "after", "before", "during",
   "since", "worked", "works", "working", "completed", "obtained", "received", "awarded",
   "specialises", "specializes", "specialising", "specializing", "dr", "doctor", "consultant",
+  "status", "registration", "registered", "chartered", "accredited", "license", "licensed",
+  "roles", "role", "managerial", "management", "manager", "leadership", "leading", "led",
+  "operations", "operational", "governance", "consultancy", "consulting", "organisation",
+  "organisations", "organization", "organizations", "organizational", "teams", "team",
+  "deputy", "service", "services", "held", "key", "senior", "head", "director", "board",
+  "multisite", "multidisciplinary", "academic", "academia", "strategy", "strategic",
+  "stakeholder", "delivery", "compliance", "audit", "policy",
 ]);
 const GRADE_WORDS = new Set([
   "consultant", "specialist", "senior", "junior", "associate", "assistant", "attending",
@@ -1005,7 +1012,8 @@ function formatAreasOfInterest(
     const k = p.toLowerCase();
     if (!seen.has(k)) { seen.add(k); terms.push(p); }
   }
-  if (!terms.length) return fromTitle();
+  const rawWords = String(raw).trim().split(/\s+/).length;
+  if (!terms.length || rawWords > 14 || terms.length > 6) return fromTitle();
   const kept: string[] = [];
   let words = 0;
   for (const t of terms) { const w = t.split(/\s+/).length; if (kept.length && words + w > maxWords) break; kept.push(t); words += w; }

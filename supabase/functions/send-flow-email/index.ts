@@ -457,7 +457,7 @@ Deno.serve(async (req: Request) => {
       profileTokens = {
         doctor_title:              String(wp.job_title              ?? ""),
         doctor_bio:                String(wp.area_of_interest       ?? ""),  // WP has no bio; closest analogue
-        doctor_area_of_interest:   formatAreasOfInterest(wp.area_of_interest as string | null, { fallback: String(wp.job_title ?? wp.specialty ?? "") }),
+        doctor_area_of_interest:   formatAreasOfInterest(wp.area_of_interest as string | null, { fallback: String(wp.specialty ?? wp.job_title ?? "") }),
         doctor_country_training:   String(wp.country_of_training    ?? ""),
         doctor_years_experience:   wp.years_experience != null ? String(wp.years_experience) : "",
         doctor_nationality:        String(wp.nationality            ?? ""),
@@ -495,7 +495,7 @@ Deno.serve(async (req: Request) => {
       const fallback: Record<string, string> = {
         doctor_title:              String(prof.title              ?? ""),
         doctor_bio:                String(prof.bio                ?? ""),
-        doctor_area_of_interest:   formatAreasOfInterest(prof.area_of_interest as string | null, { fallback: String(prof.title ?? prof.specialty ?? "") }),
+        doctor_area_of_interest:   formatAreasOfInterest(prof.area_of_interest as string | null, { fallback: String(prof.specialty ?? prof.title ?? "") }),
         doctor_country_training:   String(prof.country_training   ?? ""),
         doctor_years_experience:   prof.years_experience != null ? String(prof.years_experience) : "",
         doctor_nationality:        String(prof.nationality        ?? ""),
@@ -545,7 +545,7 @@ Deno.serve(async (req: Request) => {
       const sFallback: Record<string, string> = {
         doctor_title:              String(sacf.job_title              ?? ""),
         doctor_bio:                String(sacf.bio                    ?? ""),
-        doctor_area_of_interest:   formatAreasOfInterest(sacf.specific_areas_of_interests_within_the_specialization as string | null, { fallback: String(sacf.job_title ?? sacf.specialty ?? "") }),
+        doctor_area_of_interest:   formatAreasOfInterest(sacf.specific_areas_of_interests_within_the_specialization as string | null, { fallback: String(sacf.specialty ?? sacf.job_title ?? "") }),
         doctor_country_training:   String(sacf.country_of_training    ?? ""),
         doctor_years_experience:   sacf.years_of_experience_post_specialization != null ? String(sacf.years_of_experience_post_specialization) : "",
         doctor_nationality:        String(sacf.nationality            ?? ""),
@@ -1184,6 +1184,13 @@ const PROSE_WORDS = new Set([
   "graduated", "graduate", "years", "year", "over", "more", "than", "after", "before", "during",
   "since", "worked", "works", "working", "completed", "obtained", "received", "awarded",
   "specialises", "specializes", "specialising", "specializing", "dr", "doctor", "consultant",
+  "status", "registration", "registered", "chartered", "accredited", "license", "licensed",
+  "roles", "role", "managerial", "management", "manager", "leadership", "leading", "led",
+  "operations", "operational", "governance", "consultancy", "consulting", "organisation",
+  "organisations", "organization", "organizations", "organizational", "teams", "team",
+  "deputy", "service", "services", "held", "key", "senior", "head", "director", "board",
+  "multisite", "multidisciplinary", "academic", "academia", "strategy", "strategic",
+  "stakeholder", "delivery", "compliance", "audit", "policy",
 ]);
 const GRADE_WORDS = new Set([
   "consultant", "specialist", "senior", "junior", "associate", "assistant", "attending",
@@ -1249,7 +1256,8 @@ function formatAreasOfInterest(
     const k = p.toLowerCase();
     if (!seen.has(k)) { seen.add(k); terms.push(p); }
   }
-  if (!terms.length) return fromTitle();
+  const rawWords = String(raw).trim().split(/\s+/).length;
+  if (!terms.length || rawWords > 14 || terms.length > 6) return fromTitle();
   const kept: string[] = [];
   let words = 0;
   for (const t of terms) { const w = t.split(/\s+/).length; if (kept.length && words + w > maxWords) break; kept.push(t); words += w; }

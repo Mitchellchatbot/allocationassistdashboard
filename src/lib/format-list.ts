@@ -34,6 +34,15 @@ const PROSE_WORDS = new Set([
   "graduated", "graduate", "years", "year", "over", "more", "than", "after", "before", "during",
   "since", "worked", "works", "working", "completed", "obtained", "received", "awarded",
   "specialises", "specializes", "specialising", "specializing", "dr", "doctor", "consultant",
+  // Credential / management / org words — these mark an "about me" blurb (often
+  // comma-listed, so it dodges the sentence check above), not a clinical interest.
+  "status", "registration", "registered", "chartered", "accredited", "license", "licensed",
+  "roles", "role", "managerial", "management", "manager", "leadership", "leading", "led",
+  "operations", "operational", "governance", "consultancy", "consulting", "organisation",
+  "organisations", "organization", "organizations", "organizational", "teams", "team",
+  "deputy", "service", "services", "held", "key", "senior", "head", "director", "board",
+  "multisite", "multidisciplinary", "academic", "academia", "strategy", "strategic",
+  "stakeholder", "delivery", "compliance", "audit", "policy",
 ]);
 
 /** Seniority/grade noise to strip before deriving a field from a job title. */
@@ -116,8 +125,11 @@ export function formatAreasOfInterest(
     const k = p.toLowerCase();
     if (!seen.has(k)) { seen.add(k); terms.push(p); }
   }
-  // Nothing term-like in there — it was prose. Use the specialty instead.
-  if (!terms.length) return fromTitle();
+  // Blurb guards — a genuine "areas of interest" is a handful of short clinical
+  // terms. If the raw text is long (a bio/CV dump) or there are too many items,
+  // it's not a clean list; show the specialty instead of a wall of fluff.
+  const rawWords = String(raw).trim().split(/\s+/).length;
+  if (!terms.length || rawWords > 14 || terms.length > 6) return fromTitle();
 
   // Keep whole terms until we'd exceed ~maxWords total words.
   const kept: string[] = [];
