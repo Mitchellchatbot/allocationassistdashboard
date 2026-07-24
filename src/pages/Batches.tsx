@@ -962,7 +962,7 @@ function ProfileSubTabs({ names, active, onSelect, panes }: {
   panes: React.ReactNode[];
 }) {
   return (
-    <div className="flex min-h-0 flex-1 flex-col">
+    <div className="flex min-h-0 min-w-0 flex-1 flex-col">
       {names.length > 1 && (
         <div className="flex flex-wrap items-center gap-1 border-b border-slate-200 bg-slate-50/80 px-2 py-1.5">
           {names.map((n, i) => (
@@ -983,7 +983,7 @@ function ProfileSubTabs({ names, active, onSelect, panes }: {
         </div>
       )}
       {panes.map((p, i) => (
-        <div key={i} className={cn("min-h-0 flex-1 flex-col", i === active ? "flex" : "hidden")}>{p}</div>
+        <div key={i} className={cn("min-h-0 min-w-0 flex-1 flex-col", i === active ? "flex" : "hidden")}>{p}</div>
       ))}
     </div>
   );
@@ -2069,7 +2069,7 @@ function BatchDialog({ target, onTargetChange, batches, suggestedSpecialty }: {
         label: `Doctor email${batch?.include_doctor_email ? "" : " · off"}`,
         subLabel: `Working opportunity → ${emailPreview.doctor_email.recipient_count} doctor${emailPreview.doctor_email.recipient_count === 1 ? "" : "s"}`,
         preview: (
-          <div className="flex min-h-0 flex-1 flex-col">
+          <div className="flex min-h-0 min-w-0 flex-1 flex-col">
             <label className="flex items-center gap-2 px-3 py-2 border-b border-slate-200 bg-slate-50 text-[12px] text-slate-700">
               <input type="checkbox" checked={!!batch?.include_doctor_email}
                 onChange={e => batch && update.mutate({ id: batch.id, patch: { include_doctor_email: e.target.checked } })}
