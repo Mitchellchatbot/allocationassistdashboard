@@ -822,7 +822,7 @@ function renderDoctorsTable(rows: RowData[]): string {
     `<tr>${td(String(r.idx))}${td(r.name)}${td(r.title || r.specialty)}${td(r.areas)}${td(r.training)}${td(r.years)}${td(r.nationality)}` +
     `${td(r.age)}${td(r.marital)}${td(r.family)}${td(r.license)}${td(r.salary)}${td(r.notice)}${td(r.mobile)}${td(r.email)}</tr>`,
   ).join("");
-  return `<div style="overflow-x:auto;margin:18px 0;">` +
+  return `<div style="overflow-x:auto;max-width:100%;margin:18px 0;">` +
     `<table role="presentation" cellspacing="0" cellpadding="0" border="0" style="border-collapse:collapse;border:1px solid #cbd5e1;">` +
     `<thead>${head}</thead><tbody>${body}</tbody></table></div>`;
 }

@@ -1217,6 +1217,31 @@ function BatchDialog({ target, onTargetChange, batches, suggestedSpecialty }: {
       .sort((a, b) => a.name.localeCompare(b.name)),
     [previewHospitals, eligibleEmails, bccSet],
   );
+  // Region filter for the "Add another hospital" picker — narrow the (often
+  // long, cross-country) addable list to one city/region. "" = all regions.
+  const [addRegion, setAddRegion] = useState<string>("");
+  const REGION_SEP = "‖";
+  const addRegions = useMemo(() => {
+    const m = new Map<string, { key: string; label: string; count: number }>();
+    for (const h of addableHospitals) {
+      const city = (h.city ?? "").trim();
+      if (!city) continue;
+      const country = (h.country ?? "").trim();
+      const key = `${city}${REGION_SEP}${country}`;
+      const label = country && country.toLowerCase() !== city.toLowerCase() ? `${city} · ${country}` : city;
+      const e = m.get(key) ?? { key, label, count: 0 };
+      e.count++; m.set(key, e);
+    }
+    return [...m.values()].sort((a, b) => a.label.localeCompare(b.label));
+  }, [addableHospitals]);
+  // Guard against a stale region that no longer exists in the current list.
+  const activeRegion = addRegion && addRegions.some(r => r.key === addRegion) ? addRegion : "";
+  const filteredAddable = useMemo(
+    () => activeRegion
+      ? addableHospitals.filter(h => `${(h.city ?? "").trim()}${REGION_SEP}${(h.country ?? "").trim()}` === activeRegion)
+      : addableHospitals,
+    [addableHospitals, activeRegion],
+  );
   const addHospitalBcc = (hospitalId: string) => {
     const h = previewHospitals.find(x => x.id === hospitalId);
     const email = h?.primary_recruiter_email?.trim();
@@ -1793,6 +1818,7 @@ function BatchDialog({ target, onTargetChange, batches, suggestedSpecialty }: {
                     setPerDoctor((p.per_doctor ?? []).map(d => ({ subject: d.subject, html: d.html })));
                     setPerDoctorNote((p.doctor_emails ?? []).map(d => ({ subject: d.subject, html: d.html })));
                     setHospitalTab(0); setDoctorTab(0);
+                    setAddRegion("");
                     setPreviewResetTick(t => t + 1);
                   } catch (e) {
                     toast.error(e instanceof Error ? e.message : "Preview failed");
@@ -1909,15 +1935,29 @@ function BatchDialog({ target, onTargetChange, batches, suggestedSpecialty }: {
               )}
             </div>
             {addableHospitals.length > 0 && (
-              <div className="mt-1.5">
+              <div className="mt-1.5 flex items-center gap-1.5">
+                {/* Region filter — narrow the add list to one city/region first. */}
+                {addRegions.length > 1 && (
+                  <Select value={activeRegion || "__all"} onValueChange={v => setAddRegion(v === "__all" ? "" : v)} disabled={sendNow.isPending}>
+                    <SelectTrigger className="h-7 w-[38%] shrink-0 text-[11px] text-slate-700"><SelectValue /></SelectTrigger>
+                    <SelectContent>
+                      <SelectItem value="__all" className="text-[11px]">All regions ({addableHospitals.length})</SelectItem>
+                      {addRegions.map(r => (
+                        <SelectItem key={r.key} value={r.key} className="text-[11px]">{r.label} ({r.count})</SelectItem>
+                      ))}
+                    </SelectContent>
+                  </Select>
+                )}
                 <Select value="" onValueChange={addHospitalBcc} disabled={sendNow.isPending}>
-                  <SelectTrigger className="h-7 text-[11px] text-slate-700"><SelectValue placeholder="+ Add another hospital…" /></SelectTrigger>
+                  <SelectTrigger className="h-7 flex-1 text-[11px] text-slate-700"><SelectValue placeholder={`+ Add another hospital…${activeRegion ? ` (${filteredAddable.length})` : ""}`} /></SelectTrigger>
                   <SelectContent>
-                    {addableHospitals.map(h => (
-                      <SelectItem key={h.id} value={h.id} className="text-[11px]">
-                        {h.name}{h.country ? ` · ${h.country}` : ""}
-                      </SelectItem>
-                    ))}
+                    {filteredAddable.length === 0
+                      ? <div className="px-2 py-1.5 text-[11px] text-slate-400">No hospitals in this region.</div>
+                      : filteredAddable.map(h => (
+                          <SelectItem key={h.id} value={h.id} className="text-[11px]">
+                            {h.name}{h.city ? ` · ${h.city}` : h.country ? ` · ${h.country}` : ""}
+                          </SelectItem>
+                        ))}
                   </SelectContent>
                 </Select>
               </div>

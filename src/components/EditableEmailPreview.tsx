@@ -462,7 +462,7 @@ export function EditableEmailPreview({
       `<th style="text-align:center;border:1px solid #cbd5e1;padding:8px 11px;background:#0f766e;color:#ffffff;font-size:13px;font-weight:600;white-space:nowrap;">${escCell(head[i] ?? "")}</th>`).join("");
     const tb = bodyRows.map(r =>
       `<tr>${Array.from({ length: cols }, (_, i) => `<td style="text-align:center;border:1px solid #cbd5e1;padding:8px 11px;font-size:14px;color:#1a2332;vertical-align:top;">${escCell(r[i] ?? "")}</td>`).join("")}</tr>`).join("");
-    const html = `<div style="overflow-x:auto;margin:18px 0;"><table role="presentation" cellspacing="0" cellpadding="0" border="0" style="border-collapse:collapse;border:1px solid #cbd5e1;"><thead><tr>${th}</tr></thead><tbody>${tb}</tbody></table></div>`;
+    const html = `<div style="overflow-x:auto;max-width:100%;margin:18px 0;"><table role="presentation" cellspacing="0" cellpadding="0" border="0" style="border-collapse:collapse;border:1px solid #cbd5e1;"><thead><tr>${th}</tr></thead><tbody>${tb}</tbody></table></div>`;
     const sel = window.getSelection();
     if (sel && sel.rangeCount) {
       const holder = document.createElement("div");
