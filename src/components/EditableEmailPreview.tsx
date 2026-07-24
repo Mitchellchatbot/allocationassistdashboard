@@ -436,6 +436,45 @@ export function EditableEmailPreview({
     }
   };
 
+  // ── Drag & drop images onto the body ────────────────────────────────────────
+  // Drop one or more image files anywhere in the preview to insert them at the
+  // drop point (same upload + hosted-<img> path as paste / the toolbar button).
+  const [dragOver, setDragOver] = useState(false);
+  const placeCaretAtPoint = (x: number, y: number) => {
+    const body = bodyRef.current; if (!body) return;
+    const doc = document as Document & {
+      caretRangeFromPoint?: (x: number, y: number) => Range | null;
+      caretPositionFromPoint?: (x: number, y: number) => { offsetNode: Node; offset: number } | null;
+    };
+    let range: Range | null = null;
+    if (doc.caretRangeFromPoint) range = doc.caretRangeFromPoint(x, y);
+    else if (doc.caretPositionFromPoint) {
+      const p = doc.caretPositionFromPoint(x, y);
+      if (p) { range = document.createRange(); range.setStart(p.offsetNode, p.offset); range.collapse(true); }
+    }
+    if (range && body.contains(range.commonAncestorContainer)) savedRange.current = range.cloneRange();
+  };
+  const hasFiles = (dt: DataTransfer) => Array.from(dt.types).includes("Files");
+  const onDragOver = (e: React.DragEvent<HTMLDivElement>) => {
+    if (!hasFiles(e.dataTransfer)) return;
+    e.preventDefault();                       // allow the drop
+    e.dataTransfer.dropEffect = "copy";
+    if (!dragOver) setDragOver(true);
+  };
+  const onDragLeave = (e: React.DragEvent<HTMLDivElement>) => {
+    // Only clear when the pointer actually leaves the scroll container, not when
+    // it crosses onto a child element.
+    if (e.currentTarget === e.target) setDragOver(false);
+  };
+  const onDrop = (e: React.DragEvent<HTMLDivElement>) => {
+    const images = Array.from(e.dataTransfer.files).filter(f => f.type.startsWith("image/"));
+    setDragOver(false);
+    if (!images.length) return;               // non-image drop → leave to the browser
+    e.preventDefault();
+    placeCaretAtPoint(e.clientX, e.clientY);
+    void (async () => { for (const f of images) await insertImage(f); })();
+  };
+
   // ── Paste Excel / Sheets data as a table ────────────────────────────────────
   // Copying a range from Excel/Google Sheets puts tab-separated rows on the
   // clipboard. When we see that shape, build a styled email table (green header,
@@ -489,7 +528,7 @@ export function EditableEmailPreview({
       <div className="px-4 py-1.5 bg-teal-50/70 border-b border-teal-100 text-[11px] text-teal-800 flex items-center justify-between gap-2">
         <span className="flex items-center gap-1.5 min-w-0">
           <Pencil className="h-3 w-3 shrink-0" />
-          <span className="truncate">Editable — click text to change the wording, drag an <strong>image corner</strong> to resize it, or drag a table column's edge. This exact version is what sends.</span>
+          <span className="truncate">Editable — click text to change the wording, <strong>paste or drop an image</strong> to add one, drag an image corner to resize, or drag a table column's edge. This exact version is what sends.</span>
         </span>
         {edited && onReset && (
           <button
@@ -623,8 +662,22 @@ export function EditableEmailPreview({
         onMouseMove={onSurfaceMouseMove}
         onMouseLeave={() => { if (!resizingRef.current) trackImage(null); }}
         onScroll={() => { if (!resizingRef.current) trackImage(activeImgRef.current); }}
-        className="relative bg-slate-100/60 px-4 py-5 overflow-y-auto overflow-x-hidden flex-1 min-h-0 min-w-0 w-full"
+        onDragOver={onDragOver}
+        onDragLeave={onDragLeave}
+        onDrop={onDrop}
+        className={cn(
+          "relative bg-slate-100/60 px-4 py-5 overflow-y-auto overflow-x-hidden flex-1 min-h-0 min-w-0 w-full",
+          dragOver && "outline-dashed outline-2 outline-offset-[-6px] outline-teal-400 bg-teal-50/50",
+        )}
       >
+        {/* Drop-an-image affordance — only while dragging a file over the body. */}
+        {dragOver && (
+          <div className="pointer-events-none absolute inset-2 z-30 flex items-center justify-center rounded-lg bg-teal-50/70">
+            <span className="inline-flex items-center gap-1.5 rounded-full bg-white/90 px-3 py-1.5 text-[12px] font-medium text-teal-700 shadow-sm">
+              <ImageIcon className="h-3.5 w-3.5" /> Drop image to insert
+            </span>
+          </div>
+        )}
         {/* Gmail-style selection outline + corner squares for the hovered image.
             Drawn OUTSIDE the contentEditable so they never end up in the sent
             HTML; positioned in scroll-container coordinates. */}
