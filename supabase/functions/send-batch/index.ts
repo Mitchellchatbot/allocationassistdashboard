@@ -100,6 +100,9 @@ Deno.serve(async (req: Request) => {
     // Extra recipients from the preview's CcBccPicker — added ON TOP of the
     // hospital BCC list (bcc) / shown to everyone (cc).
     cc_override?: string[]; bcc_override?: string[];
+    // "Send to only this region" — an explicit recipient list that REPLACES the
+    // batch-country hospital scope. Each becomes a personalised recipient.
+    recipient_emails_override?: string[];
     // Recruiter emails to DROP from this send — hospitals the team unchecked in
     // the preview's "Sending to N hospitals" list.
     exclude_override?: string[];
@@ -173,12 +176,21 @@ Deno.serve(async (req: Request) => {
   // send. Normalising both sides makes label drift harmless.
   const { data: hospitals, error: hospErr } = await supabase
     .from("hospitals")
-    .select("id, name, primary_contact_name, primary_recruiter_email, greet_with_contact_name, country, contact_mode, excluded_contact_emails")
+    .select("id, name, primary_contact_name, primary_recruiter_email, greet_with_contact_name, country, city, image_url, contact_mode, excluded_contact_emails")
     .not("primary_recruiter_email", "is", null);
   if (hospErr) return json({ ok: false, error: "Hospital fetch failed", detail: hospErr.message }, 500);
   const wantCountry = batchCountry ? normCountry(batchCountry) : null;
-  const matchedHospitals = (hospitals ?? [])
-    .filter(h => !wantCountry || normCountry(String(h.country ?? "")) === wantCountry);
+  // Explicit recipient override (the preview's "send to only this region" picker):
+  // when present, these EXACT hospitals are the personalised recipients, replacing
+  // the batch-country filter entirely. Empty → fall back to the country scope.
+  const recipOverride = new Set(
+    (Array.isArray(body.recipient_emails_override) ? body.recipient_emails_override : [])
+      .map(e => String(e).trim().toLowerCase()).filter(e => e.includes("@")),
+  );
+  const matchedHospitals = (hospitals ?? []).filter(h =>
+    recipOverride.size
+      ? recipOverride.has(String(h.primary_recruiter_email ?? "").trim().toLowerCase())
+      : (!wantCountry || normCountry(String(h.country ?? "")) === wantCountry));
 
   // 'all' contact_mode → this hospital's email lists EVERY eligible (checked)
   // contact in the To field. Those contacts live in Zoho (zoho_cache row 2 →
@@ -232,6 +244,7 @@ Deno.serve(async (req: Request) => {
   // to build (redirected) copies from — zero recipients means nothing to send,
   // so surface the clear reason rather than proceeding to "No emails sent".
   if (recipients.length === 0) {
+    if (recipOverride.size) return await failAndReturn(`None of the ${recipOverride.size} selected hospitals had a usable recruiter email.`);
     const scope = batchCountry ? `in ${batchCountry}` : "on file";
     return await failAndReturn(`No hospitals ${scope} with a recruiter email. Add them (or fill in their recruiter email) in the Hospitals tab, or change the batch's country.`);
   }

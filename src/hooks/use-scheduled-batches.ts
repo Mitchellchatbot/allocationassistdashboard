@@ -329,6 +329,9 @@ export function useSendBatchNow() {
         ccOverride?: string[]; bccOverride?: string[];
         // Recruiter emails to DROP from this send (hospitals unchecked in the preview).
         excludeOverride?: string[];
+        // Explicit recipient list that REPLACES the batch-country scope ("send to
+        // only this region"). Each becomes a personalised recipient.
+        recipientEmailsOverride?: string[];
       },
     ): Promise<{ ok: boolean; bcc_count?: number; doctor_count?: number; message_id?: string; error?: string }> => {
       // Accept either a bare id (legacy callers) or an object with a force
@@ -346,6 +349,7 @@ export function useSendBatchNow() {
         ...(input.ccOverride?.length  ? { cc_override:  input.ccOverride }  : {}),
         ...(input.bccOverride?.length ? { bcc_override: input.bccOverride } : {}),
         ...(input.excludeOverride?.length ? { exclude_override: input.excludeOverride } : {}),
+        ...(input.recipientEmailsOverride?.length ? { recipient_emails_override: input.recipientEmailsOverride } : {}),
       };
       const { data, error } = await invokeWithTimeout<{ ok: boolean; bcc_count?: number; doctor_count?: number; message_id?: string; error?: string }>(
         "send-batch", { batch_id: batchId, force, ...overrides }, 90_000);
@@ -384,15 +388,16 @@ export interface BatchPreviewResult {
 }
 export function useBatchPreview() {
   return useMutation({
-    mutationFn: async (input: string | { batchId: string; force?: boolean }): Promise<BatchPreviewResult> => {
+    mutationFn: async (input: string | { batchId: string; force?: boolean; recipientEmailsOverride?: string[] }): Promise<BatchPreviewResult> => {
       const batchId = typeof input === "string" ? input : input.batchId;
       const force   = typeof input === "string" ? false  : !!input.force;
+      const recipientEmailsOverride = typeof input === "string" ? undefined : input.recipientEmailsOverride;
       type Raw = { ok: boolean; preview?: Omit<BatchPreviewResult, "doctor_email" | "per_doctor" | "doctor_emails" | "email_count" | "test_mode" | "test_recipient">;
                    doctor_email?: BatchDoctorPreview; per_doctor?: BatchPerDoctorPreview[];
                    doctor_emails?: BatchPerDoctorPreview[]; email_count?: number;
                    test_mode?: boolean; test_recipient?: string | null; error?: string };
       const { data, error } = await invokeWithTimeout<Raw>(
-        "send-batch", { batch_id: batchId, dry_run: true, force }, 60_000);
+        "send-batch", { batch_id: batchId, dry_run: true, force, ...(recipientEmailsOverride?.length ? { recipient_emails_override: recipientEmailsOverride } : {}) }, 60_000);
       if (error) throw new Error(await fnErrorMessage(error, "Preview failed"));
       const res = data as Raw;
       if (!res.ok || !res.preview) throw new Error(res.error ?? "Preview failed");
