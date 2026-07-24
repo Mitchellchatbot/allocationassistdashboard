@@ -332,6 +332,9 @@ export function useSendBatchNow() {
         // Explicit recipient list that REPLACES the batch-country scope ("send to
         // only this region"). Each becomes a personalised recipient.
         recipientEmailsOverride?: string[];
+        // Per-hospital recipient choice: hospital id → the exact contact emails to
+        // put in that hospital's To (for hospitals with several reps).
+        contactOverrides?: Record<string, string[]>;
       },
     ): Promise<{ ok: boolean; bcc_count?: number; doctor_count?: number; message_id?: string; error?: string }> => {
       // Accept either a bare id (legacy callers) or an object with a force
@@ -350,6 +353,7 @@ export function useSendBatchNow() {
         ...(input.bccOverride?.length ? { bcc_override: input.bccOverride } : {}),
         ...(input.excludeOverride?.length ? { exclude_override: input.excludeOverride } : {}),
         ...(input.recipientEmailsOverride?.length ? { recipient_emails_override: input.recipientEmailsOverride } : {}),
+        ...(input.contactOverrides && Object.keys(input.contactOverrides).length ? { contact_overrides: input.contactOverrides } : {}),
       };
       const { data, error } = await invokeWithTimeout<{ ok: boolean; bcc_count?: number; doctor_count?: number; message_id?: string; error?: string }>(
         "send-batch", { batch_id: batchId, force, ...overrides }, 90_000);

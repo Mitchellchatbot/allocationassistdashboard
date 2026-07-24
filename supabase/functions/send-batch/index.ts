@@ -103,6 +103,10 @@ Deno.serve(async (req: Request) => {
     // "Send to only this region" — an explicit recipient list that REPLACES the
     // batch-country hospital scope. Each becomes a personalised recipient.
     recipient_emails_override?: string[];
+    // Per-hospital recipient choice from the preview: hospital id → the exact
+    // contact emails to put in that hospital's To (for hospitals with several
+    // reps). Overrides the hospital's contact_mode routing for this send only.
+    contact_overrides?: Record<string, string[]>;
     // Recruiter emails to DROP from this send — hospitals the team unchecked in
     // the preview's "Sending to N hospitals" list.
     exclude_override?: string[];
@@ -214,6 +218,11 @@ Deno.serve(async (req: Request) => {
   // gets its OWN email greeting them by name (Sean: "hello team → hello name"),
   // plus toEmails — the actual To list for this hospital ('all' → every eligible
   // contact, deduped, falling back to the recruiter email if none matched).
+  // Per-hospital recipient choice from the preview (hospital id → contact emails).
+  const contactOverrides: Record<string, string[]> =
+    (body.contact_overrides && typeof body.contact_overrides === "object")
+      ? body.contact_overrides as Record<string, string[]>
+      : {};
   const recipientHospitals = matchedHospitals
     .map(h => {
       const email = String(h.primary_recruiter_email ?? "").trim();
@@ -227,6 +236,12 @@ Deno.serve(async (req: Request) => {
           if (!seen.has(k) && !excluded.has(k)) { seen.add(k); list.push(e); }
         }
         if (list.length) toEmails = list;   // else keep the recruiter-email fallback
+      }
+      // Preview's per-hospital pick wins over the mode-based routing above.
+      const ov = contactOverrides[String(h.id)];
+      if (Array.isArray(ov)) {
+        const list = ov.map(e => String(e).trim()).filter(e => e.includes("@"));
+        if (list.length) toEmails = [...new Set(list)];
       }
       return {
         name:         String(h.name ?? "").trim(),

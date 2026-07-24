@@ -17,6 +17,7 @@ import { useScheduledBatches, useUpsertBatch, useUpdateBatch, useCancelBatch, us
   type ScheduledBatch, type BatchKind, type BatchDoctorPreview, type BatchPerDoctorPreview,
 } from "@/hooks/use-scheduled-batches";
 import { useHospitals } from "@/hooks/use-hospitals";
+import { useHospitalContacts, resolveAllRecipients, resolveRecipient, type HospitalContact } from "@/hooks/use-hospital-contacts";
 import { useZohoData, type ZohoLead, type ZohoDoctorOnBoard } from "@/hooks/use-zoho-data";
 import { useDoctorLifecycleMap } from "@/hooks/use-doctor-lifecycle";
 import { groupSpecialty } from "@/lib/specialty-groups";
@@ -1276,6 +1277,43 @@ function BatchDialog({ target, onTargetChange, batches, suggestedSpecialty }: {
   const displayHospitals = regionOnly ? regionHospitals : eligibleHospitals;
   const sendingCount = displayHospitals.filter(h => !isExcluded(h.primary_recruiter_email)).length
     + (regionOnly ? 0 : addedHospitals.length);
+
+  // ── Per-hospital recipient (contact) selection ─────────────────────────
+  // A hospital can have several reps (Zoho contacts). Let the team pick exactly
+  // who gets THIS send's email per hospital, in the preview. Default matches what
+  // send-batch would do from the hospital's contact_mode.
+  const hospitalContacts = useHospitalContacts();
+  const contactsFor = useCallback((h: { name: string; primary_recruiter_email: string | null; primary_contact_name: string | null }): HospitalContact[] => {
+    const list = hospitalContacts.forHospital(h.name).filter(c => c.email);
+    const rec = h.primary_recruiter_email?.trim();
+    // Always include the hospital-row recruiter email as a selectable option.
+    if (rec && !list.some(c => c.email?.trim().toLowerCase() === rec.toLowerCase())) {
+      return [{ id: "hospital-row", name: h.primary_contact_name ?? "", title: "Recruiter email", email: rec, phone: null, type: "Primary", isPrimary: true }, ...list];
+    }
+    return list;
+  }, [hospitalContacts]);
+  const defaultToFor = useCallback((h: Parameters<typeof resolveRecipient>[1] & { name: string }): string[] => {
+    const contacts = hospitalContacts.forHospital(h.name);
+    if ((h.contact_mode ?? "primary") === "all") return resolveAllRecipients(contacts, h);
+    const r = resolveRecipient(contacts, h);
+    return r.contact?.email ? [r.contact.email] : (h.primary_recruiter_email ? [h.primary_recruiter_email] : []);
+  }, [hospitalContacts]);
+  // hospitalId → chosen contact emails. Absent = use defaultToFor (mode routing).
+  const [contactSel, setContactSel] = useState<Record<string, string[]>>({});
+  const [contactOpen, setContactOpen] = useState<Record<string, boolean>>({});
+  const effectiveTo = (h: { id: string } & Parameters<typeof defaultToFor>[0]): string[] =>
+    contactSel[h.id] ?? defaultToFor(h);
+  const toggleContact = (hId: string, email: string, current: string[]) => {
+    const has = current.some(e => e.toLowerCase() === email.toLowerCase());
+    const next = has ? current.filter(e => e.toLowerCase() !== email.toLowerCase()) : [...current, email];
+    setContactSel(prev => ({ ...prev, [hId]: next }));
+  };
+  // Only send overrides for hospitals the team actually customised.
+  const contactOverridesPayload = useMemo(() => {
+    const out: Record<string, string[]> = {};
+    for (const [id, emails] of Object.entries(contactSel)) out[id] = emails;
+    return out;
+  }, [contactSel]);
   const removeHospitalBcc = (email: string) =>
     setBatchBcc(prev => prev.filter(e => e.trim().toLowerCase() !== email.trim().toLowerCase()));
 
@@ -1846,6 +1884,7 @@ function BatchDialog({ target, onTargetChange, batches, suggestedSpecialty }: {
                     setPerDoctorNote((p.doctor_emails ?? []).map(d => ({ subject: d.subject, html: d.html })));
                     setHospitalTab(0); setDoctorTab(0);
                     setRegionOnly(null);   // each preview starts from the batch's country scope
+                    setContactSel({}); setContactOpen({});
                     setPreviewResetTick(t => t + 1);
                   } catch (e) {
                     toast.error(e instanceof Error ? e.message : "Preview failed");
@@ -1941,6 +1980,51 @@ function BatchDialog({ target, onTargetChange, batches, suggestedSpecialty }: {
                             {excluded ? <Plus className="h-3 w-3" /> : <X className="h-3 w-3" />}
                           </button>
                         </div>
+                        {/* Pick which of this hospital's reps get the email (only
+                            when it actually has more than one contact). */}
+                        {!excluded && (() => {
+                          const contacts = contactsFor(h);
+                          if (contacts.length <= 1) return null;
+                          const to = effectiveTo(h);
+                          const open = !!contactOpen[h.id];
+                          const custom = !!contactSel[h.id];
+                          return (
+                            <div className="ml-3 mt-0.5">
+                              <button type="button"
+                                onClick={() => setContactOpen(p => ({ ...p, [h.id]: !open }))}
+                                className="inline-flex items-center gap-1 text-[10px] text-slate-500 hover:text-teal-700">
+                                {open ? <ChevronDown className="h-2.5 w-2.5" /> : <ChevronRight className="h-2.5 w-2.5" />}
+                                {to.length} of {contacts.length} recipient{contacts.length === 1 ? "" : "s"}
+                                {custom && <span className="text-teal-600">· custom</span>}
+                              </button>
+                              {open && (
+                                <div className="mt-0.5 space-y-0.5 rounded-md border border-slate-100 bg-white/70 p-1">
+                                  {contacts.map(c => {
+                                    const email = c.email!.trim();
+                                    const checked = to.some(e => e.toLowerCase() === email.toLowerCase());
+                                    return (
+                                      <label key={c.id + email} className="flex items-center gap-1.5 px-0.5 py-0.5 cursor-pointer">
+                                        <input type="checkbox" checked={checked}
+                                          onChange={() => toggleContact(h.id, email, to)}
+                                          className="h-3 w-3 accent-teal-600 shrink-0" />
+                                        <span className="min-w-0 flex-1 truncate text-[10px] text-slate-600">
+                                          {c.name ? <span className="text-slate-700">{c.name}</span> : null}
+                                          {c.title ? <span className="text-slate-400"> · {c.title}</span> : null}
+                                          <span className="text-teal-600"> {email}</span>
+                                        </span>
+                                      </label>
+                                    );
+                                  })}
+                                  {to.length === 0 && <div className="px-0.5 text-[9.5px] text-rose-500">Pick at least one — this hospital won't be emailed otherwise.</div>}
+                                  {custom && (
+                                    <button type="button" onClick={() => setContactSel(p => { const n = { ...p }; delete n[h.id]; return n; })}
+                                      className="px-0.5 text-[9.5px] text-slate-400 hover:text-teal-700">Reset to default</button>
+                                  )}
+                                </div>
+                              )}
+                            </div>
+                          );
+                        })()}
                         {shown && (
                           <button
                             type="button"
@@ -2166,6 +2250,7 @@ function BatchDialog({ target, onTargetChange, batches, suggestedSpecialty }: {
                   ...(batchBcc.length ? { bccOverride: batchBcc } : {}),
                   ...(excludedEmails.length ? { excludeOverride: excludedEmails } : {}),
                   ...(recipientOverrideEmails?.length ? { recipientEmailsOverride: recipientOverrideEmails } : {}),
+                  ...(Object.keys(contactOverridesPayload).length ? { contactOverrides: contactOverridesPayload } : {}),
                 };
                 const res = await sendNow.mutateAsync(
                   batch.status === "sent"
