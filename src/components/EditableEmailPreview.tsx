@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from "react";
-import { Pencil, RotateCcw, Bold, Italic, Underline, List, ListOrdered, Link2, Table2, Maximize2, Image as ImageIcon, AlignLeft, AlignCenter, AlignRight, AlignJustify, AlignVerticalJustifyStart, AlignVerticalJustifyCenter, AlignVerticalJustifyEnd } from "lucide-react";
+import { Pencil, RotateCcw, Bold, Italic, Underline, List, ListOrdered, Link2, Table2, Maximize2, Image as ImageIcon, AlignLeft, AlignCenter, AlignRight, AlignJustify, AlignVerticalJustifyStart, AlignVerticalJustifyCenter, AlignVerticalJustifyEnd, Trash2 } from "lucide-react";
 import { toast } from "sonner";
 import { uploadEmailAttachment } from "@/lib/email-attachments";
 import { cn } from "@/lib/utils";
@@ -115,6 +115,10 @@ export function EditableEmailPreview({
   useEffect(() => {
     if (bodyRef.current && bodyRef.current.innerHTML !== html) {
       bodyRef.current.innerHTML = html;
+      // The old image nodes are gone — drop any selection pointing at them.
+      activeImgRef.current = null;
+      setImgBox(null);
+      setPinned(false);
     }
   }, [html, resetKey]);
 
@@ -166,6 +170,10 @@ export function EditableEmailPreview({
   const [imgBox, setImgBox] = useState<{ left: number; top: number; w: number; h: number } | null>(null);
   const activeImgRef = useRef<HTMLImageElement | null>(null);
   const resizingRef  = useRef(false);
+  // A clicked image stays "selected" (pinned) so its toolbar (align + delete)
+  // and the Delete key act on it, instead of the box vanishing when the pointer
+  // moves off. Cleared by clicking elsewhere or Escape.
+  const [pinned, setPinned] = useState(false);
   const trackImage = (img: HTMLImageElement | null) => {
     const sc = scrollRef.current;
     if (!img || !sc) { activeImgRef.current = null; setImgBox(null); return; }
@@ -177,8 +185,24 @@ export function EditableEmailPreview({
   // Show/hide the squares as the pointer nears an image. The hit box is padded
   // so moving onto a corner square (which sits just OUTSIDE the image) doesn't
   // count as leaving the image and make the handles vanish under the cursor.
+  // Align a block image via auto margins (email-client safe). flush() bakes it in.
+  const alignImage = (img: HTMLImageElement, how: "left" | "center" | "right") => {
+    img.style.display = "block";
+    img.style.marginLeft  = how === "left"  ? "0" : "auto";
+    img.style.marginRight = how === "right" ? "0" : "auto";
+    trackImage(img);
+    flush();
+  };
+  const deleteImage = (img: HTMLImageElement | null) => {
+    if (!img) return;
+    img.remove();
+    activeImgRef.current = null;
+    setImgBox(null);
+    setPinned(false);
+    flush();
+  };
   const onSurfaceMouseMove = (e: React.MouseEvent) => {
-    if (resizingRef.current) return;         // the drag handler owns the box
+    if (resizingRef.current || pinned) return;  // drag handler / a pinned selection owns the box
     const body = bodyRef.current; if (!body) return;
     const PAD = 14;
     const hit = (Array.from(body.querySelectorAll("img")) as HTMLImageElement[]).find(im => {
@@ -247,6 +271,16 @@ export function EditableEmailPreview({
       beginImgResize(handle.img, e.clientX, handle.fromLeft);
       return;
     }
+    // Click on an image body → SELECT it (pin): shows the align/delete toolbar
+    // and lets the Delete key remove it. Clicking anything else clears it.
+    const tgt = e.target as HTMLElement | null;
+    if (tgt?.tagName === "IMG") {
+      e.preventDefault();                    // select, don't drop a caret inside
+      setPinned(true);
+      trackImage(tgt as HTMLImageElement);
+      return;
+    }
+    if (pinned) { setPinned(false); trackImage(null); }
     const cell = cellAtBorder(e.target, e.clientX);
     if (!cell) return;                       // not on a border → normal editing
     const table = cell.closest("table") as HTMLTableElement | null;
@@ -703,6 +737,19 @@ export function EditableEmailPreview({
                 style={{ ...c.style, cursor: c.cursor }}
               />
             ))}
+            {/* Align + delete toolbar — only for a SELECTED (clicked) image. */}
+            {pinned && (
+              <div
+                className="pointer-events-auto absolute -top-9 left-0 z-30 flex items-center gap-0.5 rounded-md border border-slate-200 bg-white px-1 py-0.5 shadow-md"
+                onMouseDown={(e) => e.preventDefault()}   // keep the image selected/focused
+              >
+                <button type="button" title="Align left"  onClick={() => activeImgRef.current && alignImage(activeImgRef.current, "left")}   className="rounded p-1 text-slate-600 hover:bg-slate-100"><AlignLeft className="h-3.5 w-3.5" /></button>
+                <button type="button" title="Center"      onClick={() => activeImgRef.current && alignImage(activeImgRef.current, "center")} className="rounded p-1 text-slate-600 hover:bg-slate-100"><AlignCenter className="h-3.5 w-3.5" /></button>
+                <button type="button" title="Align right" onClick={() => activeImgRef.current && alignImage(activeImgRef.current, "right")}  className="rounded p-1 text-slate-600 hover:bg-slate-100"><AlignRight className="h-3.5 w-3.5" /></button>
+                <span className="mx-0.5 h-4 w-px bg-slate-200" />
+                <button type="button" title="Delete image (or press Delete)" onClick={() => deleteImage(activeImgRef.current)} className="rounded p-1 text-rose-500 hover:bg-rose-50"><Trash2 className="h-3.5 w-3.5" /></button>
+              </div>
+            )}
           </div>
         )}
         <div
@@ -711,6 +758,13 @@ export function EditableEmailPreview({
           suppressContentEditableWarning
           onInput={(e) => onHtmlChange((e.target as HTMLDivElement).innerHTML)}
           onPaste={onPaste}
+          onKeyDown={(e) => {
+            // A selected image: Delete/Backspace removes it, Escape deselects.
+            if (pinned && activeImgRef.current) {
+              if (e.key === "Delete" || e.key === "Backspace") { e.preventDefault(); deleteImage(activeImgRef.current); return; }
+              if (e.key === "Escape") { setPinned(false); trackImage(null); }
+            }
+          }}
           onKeyUp={saveSelection}
           onMouseMove={onBodyMouseMove}
           onMouseDown={onBodyMouseDown}
