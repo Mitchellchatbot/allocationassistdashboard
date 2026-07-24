@@ -110,9 +110,19 @@ Deno.serve(async (req: Request) => {
     // Recruiter emails to DROP from this send — hospitals the team unchecked in
     // the preview's "Sending to N hospitals" list.
     exclude_override?: string[];
+    // ── Ad-hoc mode (Bulk send from Profile Sent) ──────────────────────────
+    // Send a tabular multi-doctor blast WITHOUT a scheduled_batch_sends row: the
+    // caller passes the doctors + recipient hospitals directly. No DB row is
+    // created or mutated, and rotation is untouched — this is a one-off send.
+    adhoc?: boolean;
+    doctor_ids?: string[];
+    include_doctor_email?: boolean;
+    specialty?: string;
+    attachments?: Array<{ filename: string; path: string }>;
   };
   try { body = await req.json(); } catch { return json({ ok: false, error: "Invalid JSON body" }, 400); }
-  if (!body.batch_id) return json({ ok: false, error: "batch_id required" }, 400);
+  const adhoc = !!body.adhoc;
+  if (!adhoc && !body.batch_id) return json({ ok: false, error: "batch_id required" }, 400);
   const dryRun = !!body.dry_run;
   // `force: true` lets the user resend a batch that already fired. Used by
   // the Resend button in the UI. Cancelled batches are still blocked even
@@ -129,34 +139,49 @@ Deno.serve(async (req: Request) => {
   // read a couple of times to ride out a transient blip before giving up.
   // deno-lint-ignore no-explicit-any
   let batch: any = null;
-  let batchErr: { message?: string } | null = null;
-  for (let attempt = 0; attempt < 3; attempt++) {
-    const res = await supabase
-      .from("scheduled_batch_sends")
-      .select("*")
-      .eq("id", body.batch_id)
-      .maybeSingle();
-    batch = res.data;
-    batchErr = res.error;
-    if (batch || !batchErr) break;             // found, or a clean "0 rows" → stop
-    await new Promise(r => setTimeout(r, 400 * (attempt + 1)));  // transient → back off + retry
+  if (adhoc) {
+    // Synthesize an in-memory batch from the request — no DB row involved. Uses
+    // the tabular (non-daily-duo) render, so it's one multi-doctor table per
+    // hospital, plus the per-doctor working-opportunity email when asked.
+    batch = {
+      id: "adhoc", kind: "tuesday_top_15", country: null,
+      specialty: body.specialty ?? null, header_mode: null,
+      include_doctor_email: !!body.include_doctor_email,
+      status: "draft", doctor_ids: Array.isArray(body.doctor_ids) ? body.doctor_ids : [],
+      doctor_card_image_urls: [], attachments: Array.isArray(body.attachments) ? body.attachments : [],
+      excluded_emails: [],
+    };
+  } else {
+    // maybeSingle() so a genuine "no such row" (data null, no error) is told apart
+    // from a transient DB error (a timeout / dropped connection surfaces as an
+    // error, NOT zero rows). Retry a couple of times to ride out a transient blip.
+    let batchErr: { message?: string } | null = null;
+    for (let attempt = 0; attempt < 3; attempt++) {
+      const res = await supabase
+        .from("scheduled_batch_sends")
+        .select("*")
+        .eq("id", body.batch_id)
+        .maybeSingle();
+      batch = res.data;
+      batchErr = res.error;
+      if (batch || !batchErr) break;             // found, or a clean "0 rows" → stop
+      await new Promise(r => setTimeout(r, 400 * (attempt + 1)));  // transient → back off + retry
+    }
+    if (batchErr) {
+      console.error("[send-batch] batch load failed:", batchErr.message);
+      return json({ ok: false, error: "Couldn't load the batch — the database didn't respond. Please try again.", detail: batchErr.message }, 503);
+    }
+    if (!batch) return json({ ok: false, error: "Batch not found", detail: `No batch with id ${body.batch_id}` }, 404);
+    if (batch.status === "sent" && !force) return json({ ok: false, error: "Batch already sent (use force to resend)", sent_at: batch.sent_at }, 409);
+    if (batch.status === "cancelled") return json({ ok: false, error: "Batch is cancelled" }, 409);
   }
-  if (batchErr) {
-    // A real DB error (not "row missing") — say so, and 503 so the client can
-    // treat it as retryable rather than "this batch is gone".
-    console.error("[send-batch] batch load failed:", batchErr.message);
-    return json({ ok: false, error: "Couldn't load the batch — the database didn't respond. Please try again.", detail: batchErr.message }, 503);
-  }
-  if (!batch) return json({ ok: false, error: "Batch not found", detail: `No batch with id ${body.batch_id}` }, 404);
-  if (batch.status === "sent" && !force) return json({ ok: false, error: "Batch already sent (use force to resend)", sent_at: batch.sent_at }, 409);
-  if (batch.status === "cancelled") return json({ ok: false, error: "Batch is cancelled" }, 409);
 
   // Mark the batch failed with a HUMAN reason (skipped on a dry-run preview, so
   // previewing never mutates status) — a failed card then shows WHY it failed
   // ("No hospitals in Saudi Arabia with a recruiter email") instead of the vague
   // "No emails sent" the empty-recipient path used to leave behind.
   const failAndReturn = async (reason: string, code = 400) => {
-    if (!dryRun) {
+    if (!dryRun && !adhoc) {
       await supabase.from("scheduled_batch_sends")
         .update({ status: "failed", error: reason, updated_at: new Date().toISOString() })
         .eq("id", batch.id);
@@ -723,14 +748,14 @@ ${SIGNATURE_HTML}`;
       }
     }
   } catch (e) {
-    await supabase.from("scheduled_batch_sends")
+    if (!adhoc) await supabase.from("scheduled_batch_sends")
       .update({ status: "failed", error: String(e), updated_at: new Date().toISOString() })
       .eq("id", batch.id);
     return json({ ok: false, error: "Network error reaching Resend", detail: String(e) }, 502);
   }
 
   if (sentCount === 0) {
-    await supabase.from("scheduled_batch_sends")
+    if (!adhoc) await supabase.from("scheduled_batch_sends")
       .update({ status: "failed", error: lastError || "No emails sent", updated_at: new Date().toISOString() })
       .eq("id", batch.id);
     return json({ ok: false, error: "Batch failed to send", detail: lastError }, 502);
@@ -772,22 +797,25 @@ ${SIGNATURE_HTML}`;
     }
   }
 
-  await supabase.from("scheduled_batch_sends").update({
-    status:          "sent",
-    sent_at:         new Date().toISOString(),
-    hospital_count:  sentCount,
-    sent_message_id: messageId,
-    error:           failedCount > 0 ? `${failedCount} of ${emails.length} failed: ${lastError}` : null,
-    updated_at:      new Date().toISOString(),
-  }).eq("id", batch.id);
+  // Ad-hoc sends own no DB row and never touch the rotation.
+  if (!adhoc) {
+    await supabase.from("scheduled_batch_sends").update({
+      status:          "sent",
+      sent_at:         new Date().toISOString(),
+      hospital_count:  sentCount,
+      sent_message_id: messageId,
+      error:           failedCount > 0 ? `${failedCount} of ${emails.length} failed: ${lastError}` : null,
+      updated_at:      new Date().toISOString(),
+    }).eq("id", batch.id);
 
-  // ── Stamp last-sent on the rotation, but DON'T advance the cursor ────
-  // The cursor now auto-advances one per calendar day via the derived
-  // effective_cursor_index in useSpecialtyRotation. Bumping it again on
-  // send would double-count — sending today would push tomorrow's pick
-  // two specialties forward instead of one.
-  if (batch.kind === "specialty_of_day") {
-    await markRotationSent(supabase, String(batch.specialty ?? ""));
+    // ── Stamp last-sent on the rotation, but DON'T advance the cursor ────
+    // The cursor now auto-advances one per calendar day via the derived
+    // effective_cursor_index in useSpecialtyRotation. Bumping it again on
+    // send would double-count — sending today would push tomorrow's pick
+    // two specialties forward instead of one.
+    if (batch.kind === "specialty_of_day") {
+      await markRotationSent(supabase, String(batch.specialty ?? ""));
+    }
   }
 
   return json({

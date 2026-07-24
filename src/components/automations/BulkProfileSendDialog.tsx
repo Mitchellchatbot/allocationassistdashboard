@@ -53,6 +53,13 @@ export function BulkProfileSendDialog({ open, onClose }: { open: boolean; onClos
   const [bccSelf, setBccSelf] = useState(true);
   const [sending, setSending] = useState(false);
   const [progress, setProgress] = useState<{ done: number; total: number } | null>(null);
+  // Send shape: "individual" = one email per doctor×hospital (legacy); "combined"
+  // = ONE tabular email per hospital listing every selected doctor (like a batch),
+  // and each doctor optionally gets one email listing all their hospitals.
+  const [mode, setMode] = useState<"individual" | "combined">("combined");
+  const [includeDoctorEmail, setIncludeDoctorEmail] = useState(true);
+  const [combinedPreview, setCombinedPreview] = useState<{ html: string; subject: string; emailCount: number; doctorCount: number } | null>(null);
+  const [loadingCombinedPreview, setLoadingCombinedPreview] = useState(false);
 
   useEffect(() => {
     if (open) {
@@ -60,6 +67,7 @@ export function BulkProfileSendDialog({ open, onClose }: { open: boolean; onClos
       setDocQuery(""); setHospQuery("");
       setHospitalTemplateKey(HOSPITAL_DEFAULT_KEY); setDoctorTemplateKey(DOCTOR_DEFAULT_KEY);
       setCustomMessage(""); setBccSelf(true); setProgress(null);
+      setMode("combined"); setIncludeDoctorEmail(true); setCombinedPreview(null);
     }
   }, [open]);
 
@@ -232,6 +240,69 @@ export function BulkProfileSendDialog({ open, onClose }: { open: boolean; onClos
     if (sent > 0) onClose();
   };
 
+  // Emails of the selected hospitals that can actually receive a send.
+  const selectedHospEmails = useMemo(
+    () => selectedHosps.map(h => h.primary_recruiter_email?.trim()).filter((e): e is string => !!e),
+    [selectedHosps],
+  );
+
+  // COMBINED: one tabular email per hospital (all doctors in a table) + one
+  // "working opportunity" email per doctor listing every hospital — routed
+  // through send-batch's ad-hoc mode (no batch row created).
+  const sendCombined = async () => {
+    if (selectedDocs.length === 0 || selectedHospEmails.length === 0) {
+      toast.error("Pick at least one doctor and one hospital (with a recruiter email).");
+      return;
+    }
+    setSending(true);
+    const me = findSenderByEmail(user?.email ?? null);
+    const bcc = bccSelf && me ? [me.email] : [];
+    try {
+      const { data, error } = await supabase.functions.invoke("send-batch", { body: {
+        adhoc: true,
+        doctor_ids: selectedDocs.map(d => d.key),
+        recipient_emails_override: selectedHospEmails,
+        include_doctor_email: includeDoctorEmail,
+        ...(bcc.length ? { bcc_override: bcc } : {}),
+      } });
+      if (error) throw error;
+      const r = data as { ok?: boolean; error?: string; bcc_count?: number; doctor_email_sent?: number; doctor_count?: number };
+      if (!r?.ok) throw new Error(r?.error ?? "send failed");
+      qc.invalidateQueries({ queryKey: ["automation-flow-runs"] });
+      toast.success(
+        `Sent to ${r.bcc_count ?? selectedHospEmails.length} hospital${(r.bcc_count ?? 0) === 1 ? "" : "s"} — ${selectedDocs.length} doctor${selectedDocs.length === 1 ? "" : "s"} in one table each`
+        + (includeDoctorEmail ? `, and ${r.doctor_email_sent ?? 0} doctor email${(r.doctor_email_sent ?? 0) === 1 ? "" : "s"}.` : "."),
+      );
+      onClose();
+    } catch (e) {
+      toast.error(e instanceof Error ? e.message : "Send failed");
+    } finally {
+      setSending(false);
+    }
+  };
+
+  // Dry-run preview of the combined hospital email (what one hospital receives).
+  const loadCombinedPreview = async () => {
+    if (selectedDocs.length === 0 || selectedHospEmails.length === 0) return;
+    setLoadingCombinedPreview(true);
+    try {
+      const { data, error } = await supabase.functions.invoke("send-batch", { body: {
+        adhoc: true, dry_run: true,
+        doctor_ids: selectedDocs.map(d => d.key),
+        recipient_emails_override: selectedHospEmails,
+        include_doctor_email: includeDoctorEmail,
+      } });
+      if (error) throw error;
+      const r = data as { ok?: boolean; error?: string; preview?: { html: string; subject: string }; email_count?: number; doctor_count?: number };
+      if (!r?.ok || !r.preview) throw new Error(r?.error ?? "Preview failed");
+      setCombinedPreview({ html: r.preview.html, subject: r.preview.subject, emailCount: r.email_count ?? selectedHospEmails.length, doctorCount: r.doctor_count ?? selectedDocs.length });
+    } catch (e) {
+      toast.error(e instanceof Error ? e.message : "Preview failed");
+    } finally {
+      setLoadingCombinedPreview(false);
+    }
+  };
+
   return (
     <Dialog open={open} onOpenChange={(v) => !v && !sending && onClose()}>
       <DialogContent className="w-[92vw] max-w-[860px] max-h-[92vh] overflow-y-auto">
@@ -240,9 +311,26 @@ export function BulkProfileSendDialog({ open, onClose }: { open: boolean; onClos
             <Send className="h-4 w-4 text-teal-600" /> Bulk send profiles
           </DialogTitle>
           <DialogDescription className="text-[12px]">
-            Send multiple doctors to multiple hospitals — <strong>one email per doctor</strong> (each doctor × hospital is its own email, never bundled). For a hand-edited one-off, use the single Send Profile flow instead.
+            Send multiple doctors to multiple hospitals. Pick a send shape below — for a hand-edited one-off, use the single Send Profile flow instead.
           </DialogDescription>
         </DialogHeader>
+
+        {/* Send shape: combined (one tabular email per hospital) vs individual. */}
+        <div className="grid grid-cols-2 gap-2">
+          {([
+            { key: "combined",   title: "Combined (recommended)", desc: "One email per hospital with every doctor in a table. No spam." },
+            { key: "individual", title: "Individual", desc: "One email per doctor × hospital. Legacy — can be a lot of emails." },
+          ] as const).map(o => (
+            <button key={o.key} type="button" onClick={() => setMode(o.key)}
+              className={`rounded-lg border p-2 text-left transition ${mode === o.key ? "border-teal-400 bg-teal-50 ring-1 ring-teal-200" : "border-slate-200 hover:bg-slate-50"}`}>
+              <div className="flex items-center gap-1.5 text-[12px] font-semibold text-slate-800">
+                <span className={`h-2.5 w-2.5 rounded-full ${mode === o.key ? "bg-teal-500" : "bg-slate-300"}`} />
+                {o.title}
+              </div>
+              <div className="mt-0.5 text-[10.5px] text-slate-500">{o.desc}</div>
+            </button>
+          ))}
+        </div>
 
         <div className="grid grid-cols-2 gap-3">
           {/* Doctors */}
@@ -306,66 +394,116 @@ export function BulkProfileSendDialog({ open, onClose }: { open: boolean; onClos
           <TemplatePicker templates={templates} value={doctorTemplateKey} onChange={setDoctorTemplateKey} defaultKey={DOCTOR_DEFAULT_KEY} renderVars={sampleVars(selectedDocs[0] ?? docPool[0] ?? { key: "", doctor_id: null, name: "Dr. Example", email: null, phone: null, speciality: "Cardiology" })} label="Doctor 'working opportunity' template" flowFilter="profile_sent" />
         </div>
 
-        <div className="space-y-1">
-          <span className="text-[10px] uppercase tracking-wider text-muted-foreground">Custom note (optional — added to every hospital email)</span>
-          <Textarea value={customMessage} onChange={(e) => setCustomMessage(e.target.value)} className="text-[12px] min-h-[56px]" placeholder="e.g. These are our latest available cardiologists for your Q3 openings." />
+        {mode === "individual" && (
+          <div className="space-y-1">
+            <span className="text-[10px] uppercase tracking-wider text-muted-foreground">Custom note (optional — added to every hospital email)</span>
+            <Textarea value={customMessage} onChange={(e) => setCustomMessage(e.target.value)} className="text-[12px] min-h-[56px]" placeholder="e.g. These are our latest available cardiologists for your Q3 openings." />
+          </div>
+        )}
+
+        <div className="flex flex-col gap-1.5">
+          <label className="flex items-center gap-2 text-[12px] cursor-pointer">
+            <Checkbox checked={bccSelf} onCheckedChange={(v) => setBccSelf(!!v)} /> BCC me on {mode === "combined" ? "the send" : "every send"}
+          </label>
+          {mode === "combined" && (
+            <label className="flex items-center gap-2 text-[12px] cursor-pointer">
+              <Checkbox checked={includeDoctorEmail} onCheckedChange={(v) => setIncludeDoctorEmail(!!v)} />
+              Also email each doctor the hospitals they were sent to
+            </label>
+          )}
         </div>
 
-        <label className="flex items-center gap-2 text-[12px] cursor-pointer">
-          <Checkbox checked={bccSelf} onCheckedChange={(v) => setBccSelf(!!v)} /> BCC me on every send
-        </label>
-
-        {pairCount > 40 && (
+        {mode === "combined" ? (
+          <div className="rounded-md border border-teal-200 bg-teal-50 p-2 text-[11px] text-teal-900 flex items-start gap-2">
+            <Send className="h-3.5 w-3.5 mt-[2px] shrink-0" />
+            <span><strong>{selectedHospEmails.length} email{selectedHospEmails.length === 1 ? "" : "s"}</strong> — one per hospital, each with all <strong>{selectedDocs.length}</strong> doctor{selectedDocs.length === 1 ? "" : "s"} in a table{includeDoctorEmail ? `, plus ${selectedDocs.length} doctor email${selectedDocs.length === 1 ? "" : "s"}` : ""}.</span>
+          </div>
+        ) : pairCount > 40 && (
           <div className="rounded-md border border-amber-200 bg-amber-50 p-2 text-[11px] text-amber-900 flex items-start gap-2">
             <AlertTriangle className="h-3.5 w-3.5 mt-[2px] shrink-0" />
             That's <strong>{pairCount} individual emails</strong>. Double-check the doctor and hospital selections before sending.
           </div>
         )}
 
-        {/* Preview of the working-opportunity email each doctor receives (sample
-            pair = first selected doctor × first selected hospital). */}
-        <div className="rounded-md border bg-white">
-          <button
-            type="button"
-            onClick={() => setShowPreview(s => !s)}
-            className="w-full flex items-center gap-1.5 px-2.5 py-1.5 text-[11px] font-medium text-slate-700 hover:bg-slate-50"
-          >
-            <Eye className="h-3.5 w-3.5 text-teal-600" />
-            {showPreview ? "Hide" : "Preview"} the working-opportunity email
-            {previewDoc && previewHosp && (
-              <span className="ml-1 font-normal text-slate-400 truncate">· {previewDoc.name} → {previewHosp.name}</span>
-            )}
-          </button>
-          {showPreview && (
-            <div className="border-t p-2 bg-slate-50/60">
-              {!previewDoc || !previewHosp ? (
-                <div className="py-6 text-center text-[11px] text-muted-foreground italic">
-                  Pick at least one doctor and one hospital to preview.
+        {mode === "combined" ? (
+          /* Preview the ACTUAL tabular email a hospital receives (send-batch dry run). */
+          <div className="rounded-md border bg-white">
+            <button
+              type="button"
+              onClick={() => { if (combinedPreview) setCombinedPreview(null); else void loadCombinedPreview(); }}
+              disabled={loadingCombinedPreview || selectedDocs.length === 0 || selectedHospEmails.length === 0}
+              className="w-full flex items-center gap-1.5 px-2.5 py-1.5 text-[11px] font-medium text-slate-700 hover:bg-slate-50 disabled:opacity-50"
+            >
+              {loadingCombinedPreview ? <Loader2 className="h-3.5 w-3.5 animate-spin text-teal-600" /> : <Eye className="h-3.5 w-3.5 text-teal-600" />}
+              {combinedPreview ? "Hide" : "Preview"} the hospital email (with the doctor table)
+            </button>
+            {combinedPreview && (
+              <div className="border-t p-2 bg-slate-50/60">
+                <div className="mb-1.5 px-0.5 text-[11px]">
+                  <span className="text-slate-400">Subject:</span> <span className="font-medium text-slate-700">{combinedPreview.subject || "—"}</span>
                 </div>
-              ) : (
-                <>
-                  <div className="mb-1.5 px-0.5 text-[11px]">
-                    <span className="text-slate-400">Subject:</span> <span className="font-medium text-slate-700">{previewSubject || "—"}</span>
-                  </div>
-                  <div className="rounded border border-slate-200 bg-white overflow-hidden">
-                    <EmailFrame html={previewHtml} minHeight={180} maxHeight={420} />
-                  </div>
-                  <p className="mt-1.5 px-0.5 text-[10px] text-muted-foreground">
-                    Sample render — every selected doctor gets their own copy with their name. The real send mints the branded signature per sender.
-                  </p>
-                </>
+                <div className="rounded border border-slate-200 bg-white overflow-hidden">
+                  <EmailFrame html={combinedPreview.html} minHeight={200} maxHeight={460} />
+                </div>
+                <p className="mt-1.5 px-0.5 text-[10px] text-muted-foreground">
+                  Each of the {selectedHospEmails.length} hospital{selectedHospEmails.length === 1 ? "" : "s"} gets this exact email (greeted by their own name){includeDoctorEmail ? `; each of the ${combinedPreview.doctorCount} doctors also gets a note listing every hospital` : ""}.
+                </p>
+              </div>
+            )}
+          </div>
+        ) : (
+          /* Individual mode — preview the per-doctor working-opportunity email. */
+          <div className="rounded-md border bg-white">
+            <button
+              type="button"
+              onClick={() => setShowPreview(s => !s)}
+              className="w-full flex items-center gap-1.5 px-2.5 py-1.5 text-[11px] font-medium text-slate-700 hover:bg-slate-50"
+            >
+              <Eye className="h-3.5 w-3.5 text-teal-600" />
+              {showPreview ? "Hide" : "Preview"} the working-opportunity email
+              {previewDoc && previewHosp && (
+                <span className="ml-1 font-normal text-slate-400 truncate">· {previewDoc.name} → {previewHosp.name}</span>
               )}
-            </div>
-          )}
-        </div>
+            </button>
+            {showPreview && (
+              <div className="border-t p-2 bg-slate-50/60">
+                {!previewDoc || !previewHosp ? (
+                  <div className="py-6 text-center text-[11px] text-muted-foreground italic">
+                    Pick at least one doctor and one hospital to preview.
+                  </div>
+                ) : (
+                  <>
+                    <div className="mb-1.5 px-0.5 text-[11px]">
+                      <span className="text-slate-400">Subject:</span> <span className="font-medium text-slate-700">{previewSubject || "—"}</span>
+                    </div>
+                    <div className="rounded border border-slate-200 bg-white overflow-hidden">
+                      <EmailFrame html={previewHtml} minHeight={180} maxHeight={420} />
+                    </div>
+                    <p className="mt-1.5 px-0.5 text-[10px] text-muted-foreground">
+                      Sample render — every selected doctor gets their own copy with their name. The real send mints the branded signature per sender.
+                    </p>
+                  </>
+                )}
+              </div>
+            )}
+          </div>
+        )}
 
         <DialogFooter>
           <Button variant="outline" onClick={onClose} disabled={sending}>Cancel</Button>
-          <Button onClick={send} disabled={sending || pairCount === 0} className="bg-teal-600 hover:bg-teal-700 text-white">
-            {sending
-              ? <><Loader2 className="h-4 w-4 mr-1.5 animate-spin" /> Sending {progress ? `${progress.done}/${progress.total}` : ""}…</>
-              : <><Send className="h-4 w-4 mr-1.5" /> Send {pairCount || ""} email{pairCount === 1 ? "" : "s"}</>}
-          </Button>
+          {mode === "combined" ? (
+            <Button onClick={sendCombined} disabled={sending || selectedDocs.length === 0 || selectedHospEmails.length === 0} className="bg-teal-600 hover:bg-teal-700 text-white">
+              {sending
+                ? <><Loader2 className="h-4 w-4 mr-1.5 animate-spin" /> Sending…</>
+                : <><Send className="h-4 w-4 mr-1.5" /> Send to {selectedHospEmails.length || ""} hospital{selectedHospEmails.length === 1 ? "" : "s"}</>}
+            </Button>
+          ) : (
+            <Button onClick={send} disabled={sending || pairCount === 0} className="bg-teal-600 hover:bg-teal-700 text-white">
+              {sending
+                ? <><Loader2 className="h-4 w-4 mr-1.5 animate-spin" /> Sending {progress ? `${progress.done}/${progress.total}` : ""}…</>
+                : <><Send className="h-4 w-4 mr-1.5" /> Send {pairCount || ""} email{pairCount === 1 ? "" : "s"}</>}
+            </Button>
+          )}
         </DialogFooter>
       </DialogContent>
     </Dialog>
