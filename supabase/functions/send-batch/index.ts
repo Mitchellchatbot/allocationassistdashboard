@@ -115,12 +115,32 @@ Deno.serve(async (req: Request) => {
   const supabase = createClient(SUPABASE_URL, SUPABASE_SERVICE_ROLE_KEY);
 
   // ── Load the batch ─────────────────────────────────────────────────────
-  const { data: batch, error: batchErr } = await supabase
-    .from("scheduled_batch_sends")
-    .select("*")
-    .eq("id", body.batch_id)
-    .single();
-  if (batchErr || !batch) return json({ ok: false, error: "Batch not found", detail: batchErr?.message }, 404);
+  // maybeSingle() so a genuine "no such row" (data null, no error) is told apart
+  // from a transient DB error (a timeout / dropped connection surfaces as an
+  // error, NOT zero rows). The old .single() collapsed both into "Batch not
+  // found", so a blip on the load read as "the batch doesn't exist". Retry the
+  // read a couple of times to ride out a transient blip before giving up.
+  // deno-lint-ignore no-explicit-any
+  let batch: any = null;
+  let batchErr: { message?: string } | null = null;
+  for (let attempt = 0; attempt < 3; attempt++) {
+    const res = await supabase
+      .from("scheduled_batch_sends")
+      .select("*")
+      .eq("id", body.batch_id)
+      .maybeSingle();
+    batch = res.data;
+    batchErr = res.error;
+    if (batch || !batchErr) break;             // found, or a clean "0 rows" → stop
+    await new Promise(r => setTimeout(r, 400 * (attempt + 1)));  // transient → back off + retry
+  }
+  if (batchErr) {
+    // A real DB error (not "row missing") — say so, and 503 so the client can
+    // treat it as retryable rather than "this batch is gone".
+    console.error("[send-batch] batch load failed:", batchErr.message);
+    return json({ ok: false, error: "Couldn't load the batch — the database didn't respond. Please try again.", detail: batchErr.message }, 503);
+  }
+  if (!batch) return json({ ok: false, error: "Batch not found", detail: `No batch with id ${body.batch_id}` }, 404);
   if (batch.status === "sent" && !force) return json({ ok: false, error: "Batch already sent (use force to resend)", sent_at: batch.sent_at }, 409);
   if (batch.status === "cancelled") return json({ ok: false, error: "Batch is cancelled" }, 409);
 
