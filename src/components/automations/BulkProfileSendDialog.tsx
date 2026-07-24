@@ -15,6 +15,8 @@ import { usePublishedWpCandidates } from "@/hooks/use-wp-candidates";
 import { useEmailTemplates, renderTemplate } from "@/hooks/use-email-templates";
 import { TemplatePicker } from "@/components/automations/TemplatePicker";
 import { EmailFrame } from "@/components/EmailFrame";
+import { EmailPreviewStudio } from "@/components/EmailPreviewStudio";
+import { EditableEmailPreview } from "@/components/EditableEmailPreview";
 import { findSenderByEmail } from "@/lib/hi-team";
 
 // Branded sign-off shown where {{signature}} sits in the preview (send-flow-email
@@ -58,8 +60,18 @@ export function BulkProfileSendDialog({ open, onClose }: { open: boolean; onClos
   // and each doctor optionally gets one email listing all their hospitals.
   const [mode, setMode] = useState<"individual" | "combined">("combined");
   const [includeDoctorEmail, setIncludeDoctorEmail] = useState(true);
-  const [combinedPreview, setCombinedPreview] = useState<{ html: string; subject: string; emailCount: number; doctorCount: number } | null>(null);
-  const [loadingCombinedPreview, setLoadingCombinedPreview] = useState(false);
+  const [buildingStudio, setBuildingStudio] = useState(false);
+  // Full preview-and-send studio for Combined mode (mirrors the batch preview):
+  // review the exact hospital + doctor emails, edit them, then send from here.
+  const [studio, setStudio] = useState<{
+    hospital: { subject: string; html: string; text: string };
+    doctor:   { subject: string; html: string; text: string; recipientCount: number } | null;
+    emailCount: number; doctorCount: number; testMode?: boolean; testRecipient?: string | null;
+  } | null>(null);
+  const [hospSubject, setHospSubject] = useState("");
+  const [hospHtml,    setHospHtml]    = useState("");
+  const [docSubject,  setDocSubject]  = useState("");
+  const [docHtml,     setDocHtml]     = useState("");
 
   useEffect(() => {
     if (open) {
@@ -67,7 +79,7 @@ export function BulkProfileSendDialog({ open, onClose }: { open: boolean; onClos
       setDocQuery(""); setHospQuery("");
       setHospitalTemplateKey(HOSPITAL_DEFAULT_KEY); setDoctorTemplateKey(DOCTOR_DEFAULT_KEY);
       setCustomMessage(""); setBccSelf(true); setProgress(null);
-      setMode("combined"); setIncludeDoctorEmail(true); setCombinedPreview(null);
+      setMode("combined"); setIncludeDoctorEmail(true); setStudio(null);
     }
   }, [open]);
 
@@ -246,45 +258,14 @@ export function BulkProfileSendDialog({ open, onClose }: { open: boolean; onClos
     [selectedHosps],
   );
 
-  // COMBINED: one tabular email per hospital (all doctors in a table) + one
-  // "working opportunity" email per doctor listing every hospital — routed
-  // through send-batch's ad-hoc mode (no batch row created).
-  const sendCombined = async () => {
+  // COMBINED — step 1: build the preview (send-batch dry run) and open the studio
+  // so the team reviews/edits the exact hospital + doctor emails before sending.
+  const openCombinedStudio = async () => {
     if (selectedDocs.length === 0 || selectedHospEmails.length === 0) {
       toast.error("Pick at least one doctor and one hospital (with a recruiter email).");
       return;
     }
-    setSending(true);
-    const me = findSenderByEmail(user?.email ?? null);
-    const bcc = bccSelf && me ? [me.email] : [];
-    try {
-      const { data, error } = await supabase.functions.invoke("send-batch", { body: {
-        adhoc: true,
-        doctor_ids: selectedDocs.map(d => d.key),
-        recipient_emails_override: selectedHospEmails,
-        include_doctor_email: includeDoctorEmail,
-        ...(bcc.length ? { bcc_override: bcc } : {}),
-      } });
-      if (error) throw error;
-      const r = data as { ok?: boolean; error?: string; bcc_count?: number; doctor_email_sent?: number; doctor_count?: number };
-      if (!r?.ok) throw new Error(r?.error ?? "send failed");
-      qc.invalidateQueries({ queryKey: ["automation-flow-runs"] });
-      toast.success(
-        `Sent to ${r.bcc_count ?? selectedHospEmails.length} hospital${(r.bcc_count ?? 0) === 1 ? "" : "s"} — ${selectedDocs.length} doctor${selectedDocs.length === 1 ? "" : "s"} in one table each`
-        + (includeDoctorEmail ? `, and ${r.doctor_email_sent ?? 0} doctor email${(r.doctor_email_sent ?? 0) === 1 ? "" : "s"}.` : "."),
-      );
-      onClose();
-    } catch (e) {
-      toast.error(e instanceof Error ? e.message : "Send failed");
-    } finally {
-      setSending(false);
-    }
-  };
-
-  // Dry-run preview of the combined hospital email (what one hospital receives).
-  const loadCombinedPreview = async () => {
-    if (selectedDocs.length === 0 || selectedHospEmails.length === 0) return;
-    setLoadingCombinedPreview(true);
+    setBuildingStudio(true);
     try {
       const { data, error } = await supabase.functions.invoke("send-batch", { body: {
         adhoc: true, dry_run: true,
@@ -293,17 +274,66 @@ export function BulkProfileSendDialog({ open, onClose }: { open: boolean; onClos
         include_doctor_email: includeDoctorEmail,
       } });
       if (error) throw error;
-      const r = data as { ok?: boolean; error?: string; preview?: { html: string; subject: string }; email_count?: number; doctor_count?: number };
+      const r = data as {
+        ok?: boolean; error?: string;
+        preview?: { subject: string; html: string; text: string };
+        doctor_email?: { subject: string; html: string; text: string; recipient_count: number };
+        email_count?: number; doctor_count?: number; test_mode?: boolean; test_recipient?: string | null;
+      };
       if (!r?.ok || !r.preview) throw new Error(r?.error ?? "Preview failed");
-      setCombinedPreview({ html: r.preview.html, subject: r.preview.subject, emailCount: r.email_count ?? selectedHospEmails.length, doctorCount: r.doctor_count ?? selectedDocs.length });
+      const doctor = includeDoctorEmail && r.doctor_email
+        ? { subject: r.doctor_email.subject, html: r.doctor_email.html, text: r.doctor_email.text, recipientCount: r.doctor_email.recipient_count }
+        : null;
+      setStudio({
+        hospital: { subject: r.preview.subject, html: r.preview.html, text: r.preview.text },
+        doctor, emailCount: r.email_count ?? selectedHospEmails.length, doctorCount: r.doctor_count ?? selectedDocs.length,
+        testMode: r.test_mode, testRecipient: r.test_recipient,
+      });
+      setHospSubject(r.preview.subject); setHospHtml(r.preview.html);
+      setDocSubject(doctor?.subject ?? ""); setDocHtml(doctor?.html ?? "");
     } catch (e) {
       toast.error(e instanceof Error ? e.message : "Preview failed");
     } finally {
-      setLoadingCombinedPreview(false);
+      setBuildingStudio(false);
+    }
+  };
+
+  // COMBINED — step 2: send exactly what's in the studio (edits ride as overrides).
+  const sendFromStudio = async () => {
+    if (!studio) return;
+    setSending(true);
+    const me = findSenderByEmail(user?.email ?? null);
+    const bcc = bccSelf && me ? [me.email] : [];
+    const hospEdited = hospHtml !== studio.hospital.html || hospSubject !== studio.hospital.subject;
+    const docEdited  = !!studio.doctor && (docHtml !== studio.doctor.html || docSubject !== studio.doctor.subject);
+    try {
+      const { data, error } = await supabase.functions.invoke("send-batch", { body: {
+        adhoc: true,
+        doctor_ids: selectedDocs.map(d => d.key),
+        recipient_emails_override: selectedHospEmails,
+        include_doctor_email: includeDoctorEmail,
+        ...(hospEdited ? { subject_override: hospSubject, html_override: hospHtml } : {}),
+        ...(docEdited  ? { doctor_subject_override: docSubject, doctor_html_override: docHtml } : {}),
+        ...(bcc.length ? { bcc_override: bcc } : {}),
+      } });
+      if (error) throw error;
+      const r = data as { ok?: boolean; error?: string; bcc_count?: number; doctor_email_sent?: number };
+      if (!r?.ok) throw new Error(r?.error ?? "send failed");
+      qc.invalidateQueries({ queryKey: ["automation-flow-runs"] });
+      toast.success(
+        `Sent to ${r.bcc_count ?? selectedHospEmails.length} hospital${(r.bcc_count ?? 0) === 1 ? "" : "s"} — ${selectedDocs.length} doctor${selectedDocs.length === 1 ? "" : "s"} in one table each`
+        + (includeDoctorEmail ? `, and ${r.doctor_email_sent ?? 0} doctor email${(r.doctor_email_sent ?? 0) === 1 ? "" : "s"}.` : "."),
+      );
+      setStudio(null); onClose();
+    } catch (e) {
+      toast.error(e instanceof Error ? e.message : "Send failed");
+    } finally {
+      setSending(false);
     }
   };
 
   return (
+    <>
     <Dialog open={open} onOpenChange={(v) => !v && !sending && onClose()}>
       <DialogContent className="w-[92vw] max-w-[860px] max-h-[92vh] overflow-y-auto">
         <DialogHeader>
@@ -426,31 +456,9 @@ export function BulkProfileSendDialog({ open, onClose }: { open: boolean; onClos
         )}
 
         {mode === "combined" ? (
-          /* Preview the ACTUAL tabular email a hospital receives (send-batch dry run). */
-          <div className="rounded-md border bg-white">
-            <button
-              type="button"
-              onClick={() => { if (combinedPreview) setCombinedPreview(null); else void loadCombinedPreview(); }}
-              disabled={loadingCombinedPreview || selectedDocs.length === 0 || selectedHospEmails.length === 0}
-              className="w-full flex items-center gap-1.5 px-2.5 py-1.5 text-[11px] font-medium text-slate-700 hover:bg-slate-50 disabled:opacity-50"
-            >
-              {loadingCombinedPreview ? <Loader2 className="h-3.5 w-3.5 animate-spin text-teal-600" /> : <Eye className="h-3.5 w-3.5 text-teal-600" />}
-              {combinedPreview ? "Hide" : "Preview"} the hospital email (with the doctor table)
-            </button>
-            {combinedPreview && (
-              <div className="border-t p-2 bg-slate-50/60">
-                <div className="mb-1.5 px-0.5 text-[11px]">
-                  <span className="text-slate-400">Subject:</span> <span className="font-medium text-slate-700">{combinedPreview.subject || "—"}</span>
-                </div>
-                <div className="rounded border border-slate-200 bg-white overflow-hidden">
-                  <EmailFrame html={combinedPreview.html} minHeight={200} maxHeight={460} />
-                </div>
-                <p className="mt-1.5 px-0.5 text-[10px] text-muted-foreground">
-                  Each of the {selectedHospEmails.length} hospital{selectedHospEmails.length === 1 ? "" : "s"} gets this exact email (greeted by their own name){includeDoctorEmail ? `; each of the ${combinedPreview.doctorCount} doctors also gets a note listing every hospital` : ""}.
-                </p>
-              </div>
-            )}
-          </div>
+          <p className="px-0.5 text-[10.5px] text-muted-foreground">
+            Hit <strong>Preview &amp; send</strong> to review the exact hospital email (with the doctor table){includeDoctorEmail ? " and the doctor email" : ""}, edit them, then send.
+          </p>
         ) : (
           /* Individual mode — preview the per-doctor working-opportunity email. */
           <div className="rounded-md border bg-white">
@@ -492,10 +500,10 @@ export function BulkProfileSendDialog({ open, onClose }: { open: boolean; onClos
         <DialogFooter>
           <Button variant="outline" onClick={onClose} disabled={sending}>Cancel</Button>
           {mode === "combined" ? (
-            <Button onClick={sendCombined} disabled={sending || selectedDocs.length === 0 || selectedHospEmails.length === 0} className="bg-teal-600 hover:bg-teal-700 text-white">
-              {sending
-                ? <><Loader2 className="h-4 w-4 mr-1.5 animate-spin" /> Sending…</>
-                : <><Send className="h-4 w-4 mr-1.5" /> Send to {selectedHospEmails.length || ""} hospital{selectedHospEmails.length === 1 ? "" : "s"}</>}
+            <Button onClick={openCombinedStudio} disabled={buildingStudio || selectedDocs.length === 0 || selectedHospEmails.length === 0} className="bg-teal-600 hover:bg-teal-700 text-white">
+              {buildingStudio
+                ? <><Loader2 className="h-4 w-4 mr-1.5 animate-spin" /> Building preview…</>
+                : <><Eye className="h-4 w-4 mr-1.5" /> Preview &amp; send</>}
             </Button>
           ) : (
             <Button onClick={send} disabled={sending || pairCount === 0} className="bg-teal-600 hover:bg-teal-700 text-white">
@@ -507,6 +515,69 @@ export function BulkProfileSendDialog({ open, onClose }: { open: boolean; onClos
         </DialogFooter>
       </DialogContent>
     </Dialog>
+
+    {/* Combined preview-and-send studio — review the exact hospital + doctor
+        emails (editable), then send. Mirrors the batch preview. */}
+    <EmailPreviewStudio
+      open={!!studio}
+      onClose={() => { if (!sending) setStudio(null); }}
+      title="Bulk send preview"
+      subtitle={studio ? `${studio.emailCount} hospital email${studio.emailCount === 1 ? "" : "s"} · ${studio.doctorCount} doctor${studio.doctorCount === 1 ? "" : "s"} in each` : undefined}
+      headerExtra={studio && (
+        <div className={`rounded-lg border p-2.5 text-[11px] shadow-sm ${studio.testMode ? "border-emerald-300 bg-emerald-50 text-emerald-900" : "border-rose-300 bg-rose-50 text-rose-900"}`}>
+          {studio.testMode
+            ? <span><strong>Test mode is ON.</strong> Every copy goes to the test inbox (<strong>{studio.testRecipient ?? "test recipient"}</strong>), not real hospitals.</span>
+            : <span><strong>LIVE.</strong> Sends to <strong>{selectedHospEmails.length}</strong> real hospital{selectedHospEmails.length === 1 ? "" : "s"}{studio.doctor ? ` and ${studio.doctor.recipientCount} doctor${studio.doctor.recipientCount === 1 ? "" : "s"}` : ""}. No undo.</span>}
+        </div>
+      )}
+      emails={studio ? [
+        {
+          key: "hospital",
+          label: "Hospital email",
+          subLabel: `Same email to each of ${selectedHospEmails.length} hospital${selectedHospEmails.length === 1 ? "" : "s"}`,
+          preview: (
+            <EditableEmailPreview
+              subject={hospSubject}
+              html={studio.hospital.html}
+              onSubjectChange={setHospSubject}
+              onHtmlChange={setHospHtml}
+              edited={hospHtml !== studio.hospital.html || hospSubject !== studio.hospital.subject}
+              onReset={() => { setHospSubject(studio.hospital.subject); setHospHtml(studio.hospital.html); }}
+              from="Hospital Intro <hospitalintro@allocationassist.com>"
+              className="min-h-0 flex-1 border-0 rounded-none shadow-none"
+            />
+          ),
+        },
+        ...(studio.doctor ? [{
+          key: "doctor",
+          label: "Doctor email",
+          subLabel: `Working opportunity → ${studio.doctor.recipientCount} doctor${studio.doctor.recipientCount === 1 ? "" : "s"}`,
+          preview: (
+            <EditableEmailPreview
+              subject={docSubject}
+              html={studio.doctor.html}
+              onSubjectChange={setDocSubject}
+              onHtmlChange={setDocHtml}
+              edited={!!studio.doctor && (docHtml !== studio.doctor.html || docSubject !== studio.doctor.subject)}
+              onReset={() => { if (studio.doctor) { setDocSubject(studio.doctor.subject); setDocHtml(studio.doctor.html); } }}
+              from="Allocation Assist Team <hello@allocationassist.com>"
+              className="min-h-0 flex-1 border-0 rounded-none shadow-none"
+            />
+          ),
+        }] : []),
+      ] : []}
+      footer={
+        <>
+          <Button variant="outline" onClick={() => setStudio(null)} disabled={sending}>Back</Button>
+          <Button onClick={sendFromStudio} disabled={sending} className="bg-teal-600 hover:bg-teal-700 text-white">
+            {sending
+              ? <><Loader2 className="h-4 w-4 mr-1.5 animate-spin" /> Sending…</>
+              : <><Send className="h-4 w-4 mr-1.5" /> Send to {selectedHospEmails.length} hospital{selectedHospEmails.length === 1 ? "" : "s"}</>}
+          </Button>
+        </>
+      }
+    />
+    </>
   );
 }
 
