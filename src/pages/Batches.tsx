@@ -1549,6 +1549,26 @@ function BatchDialog({ target, onTargetChange, batches, suggestedSpecialty }: {
     toast.success(`Auto-picked top ${pool.length} by rank.`);
   };
 
+  // Recap mode: fill the queue with the most recently SENT doctors (across past
+  // sent batches, newest first, deduped) — a weekly round-up of who went out.
+  const fillFromRecap = () => {
+    if (!batch) return;
+    const pickedSet = new Set(batch.doctor_ids);
+    const seen = new Set<string>();
+    const recent: string[] = [];
+    for (const b of [...batches]
+      .filter(x => x.status === "sent" && x.id !== batch.id)
+      .sort((a, b) => String(b.sent_at ?? "").localeCompare(String(a.sent_at ?? "")))) {
+      for (const did of b.doctor_ids ?? []) {
+        if (!seen.has(did) && !pickedSet.has(did)) { seen.add(did); recent.push(did); }
+      }
+    }
+    const add = recent.slice(0, Math.max(0, expectedCount - batch.doctor_ids.length));
+    if (add.length === 0) { toast.error("No recently-sent doctors to recap."); return; }
+    setDoctors([...batch.doctor_ids, ...add]);
+    toast.success(`Recapped ${add.length} recently-sent doctor${add.length === 1 ? "" : "s"}.`);
+  };
+
   const countWarning = batch && batch.status === "draft" && picked.length !== expectedCount;
 
   return (
@@ -1770,9 +1790,16 @@ function BatchDialog({ target, onTargetChange, batches, suggestedSpecialty }: {
                   <Label className="text-[11px]">
                     {q ? "Search results" : "Top ranked eligible doctors"}
                   </Label>
-                  <Button size="sm" variant="ghost" className="h-7 text-[10px]" onClick={autoPickTop}>
-                    <Wand2 className="h-3 w-3 mr-1 text-violet-600" /> Auto-pick top {Math.max(1, expectedCount - picked.length)}
-                  </Button>
+                  <div className="flex items-center gap-1.5">
+                    {batch.header_mode === "recap" && (
+                      <Button size="sm" variant="ghost" className="h-7 text-[10px]" onClick={fillFromRecap} title="Fill with the most recently sent doctors">
+                        <RefreshCw className="h-3 w-3 mr-1 text-teal-600" /> Recap recently-sent
+                      </Button>
+                    )}
+                    <Button size="sm" variant="ghost" className="h-7 text-[10px]" onClick={autoPickTop}>
+                      <Wand2 className="h-3 w-3 mr-1 text-violet-600" /> Auto-pick top {Math.max(1, expectedCount - picked.length)}
+                    </Button>
+                  </div>
                 </div>
                 <div className="flex items-center gap-3 flex-wrap">
                   <label className="flex items-center gap-1.5 text-[10px] text-muted-foreground cursor-pointer">
