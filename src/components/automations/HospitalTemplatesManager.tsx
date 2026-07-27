@@ -7,7 +7,8 @@ import { Textarea } from "@/components/ui/textarea";
 import { Badge } from "@/components/ui/badge";
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription, DialogFooter } from "@/components/ui/dialog";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
-import { Hospital as HospitalIcon, Image as ImageIcon, Search, Save, Eye, RotateCcw, Pencil, Wand2, Plus, Sparkles, Trash2, Users, Mail } from "lucide-react";
+import { Hospital as HospitalIcon, Image as ImageIcon, Search, Save, Eye, RotateCcw, Pencil, Wand2, Plus, Sparkles, Trash2, Users, Mail, Upload } from "lucide-react";
+import { HospitalSendListImportDialog } from "@/components/automations/HospitalSendListImportDialog";
 import { toast } from "sonner";
 import { useHospitals, useCreateHospital, useUpdateHospital, useDeleteHospital, type Hospital, type HospitalInput } from "@/hooks/use-hospitals";
 import { useHospitalContacts } from "@/hooks/use-hospital-contacts";
@@ -156,6 +157,7 @@ export function HospitalTemplatesManager() {
   const [editingDetails, setEditingDetails] = useState<Hospital | null>(null); // name/city/recruiter/…
   const [contactsFor,    setContactsFor]    = useState<Hospital | null>(null); // Zoho contacts + routing
   const [creating, setCreating] = useState(false);
+  const [importOpen, setImportOpen] = useState(false);
 
   function rank(h: Hospital) {
     return (h.image_url ? 2 : 0) + (h.doctor_template_key ? 1 : 0);
@@ -211,6 +213,9 @@ export function HospitalTemplatesManager() {
           <div className="flex items-center gap-2 shrink-0">
             <Badge variant="outline" className="text-[10px]">{withPhoto} photo</Badge>
             <Badge variant="outline" className="text-[10px]">{withCopy} copy</Badge>
+            <Button size="sm" variant="outline" onClick={() => setImportOpen(true)}>
+              <Upload className="h-3.5 w-3.5 mr-1" /> Import send-list
+            </Button>
             <Button size="sm" onClick={() => setCreating(true)}>
               <Plus className="h-3.5 w-3.5 mr-1" /> Add hospital
             </Button>
@@ -305,6 +310,7 @@ export function HospitalTemplatesManager() {
       {creating && (
         <TemplateStudio mode="new" hospitals={hospitals} onClose={() => setCreating(false)} />
       )}
+      <HospitalSendListImportDialog open={importOpen} onClose={() => setImportOpen(false)} />
       {liveDetails && (
         <HospitalDialog
           open
