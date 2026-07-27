@@ -5,18 +5,20 @@ import { Input } from "@/components/ui/input";
 import { Textarea } from "@/components/ui/textarea";
 import { Checkbox } from "@/components/ui/checkbox";
 import { Badge } from "@/components/ui/badge";
-import { Search, Send, Users, Building2, Loader2, AlertTriangle, Eye } from "lucide-react";
+import { Search, Send, Users, Building2, Loader2, AlertTriangle, Eye, ChevronRight, ChevronDown } from "lucide-react";
 import { toast } from "sonner";
 import { useQueryClient } from "@tanstack/react-query";
 import { supabase } from "@/lib/supabase";
 import { useAuth } from "@/hooks/use-auth";
 import { useHospitals, isHospitalPaused } from "@/hooks/use-hospitals";
+import { useHospitalContacts, resolveAllRecipients, resolveRecipient, type HospitalContact } from "@/hooks/use-hospital-contacts";
 import { usePublishedWpCandidates } from "@/hooks/use-wp-candidates";
 import { useEmailTemplates, renderTemplate } from "@/hooks/use-email-templates";
 import { TemplatePicker } from "@/components/automations/TemplatePicker";
 import { EmailFrame } from "@/components/EmailFrame";
 import { EmailPreviewStudio } from "@/components/EmailPreviewStudio";
 import { EditableEmailPreview } from "@/components/EditableEmailPreview";
+import type { EmailAttachment } from "@/lib/email-attachments";
 import { findSenderByEmail } from "@/lib/hi-team";
 
 // Branded sign-off shown where {{signature}} sits in the preview (send-flow-email
@@ -72,6 +74,10 @@ export function BulkProfileSendDialog({ open, onClose }: { open: boolean; onClos
   const [hospHtml,    setHospHtml]    = useState("");
   const [docSubject,  setDocSubject]  = useState("");
   const [docHtml,     setDocHtml]     = useState("");
+  // Per-email attachments — the hospital email and the doctor email carry their
+  // own separate files (item 13: "attach attachments for each email separately").
+  const [hospAttachments, setHospAttachments] = useState<EmailAttachment[]>([]);
+  const [docAttachments,  setDocAttachments]  = useState<EmailAttachment[]>([]);
 
   useEffect(() => {
     if (open) {
@@ -80,6 +86,8 @@ export function BulkProfileSendDialog({ open, onClose }: { open: boolean; onClos
       setHospitalTemplateKey(HOSPITAL_DEFAULT_KEY); setDoctorTemplateKey(DOCTOR_DEFAULT_KEY);
       setCustomMessage(""); setBccSelf(true); setProgress(null);
       setMode("combined"); setIncludeDoctorEmail(true); setStudio(null);
+      setHospAttachments([]); setDocAttachments([]);
+      setContactSel({}); setContactOpen({});
     }
   }, [open]);
 
@@ -135,6 +143,31 @@ export function BulkProfileSendDialog({ open, onClose }: { open: boolean; onClos
   const selectedDocs  = useMemo(() => docPool.filter(d => docIds.has(d.key)), [docPool, docIds]);
   const selectedHosps = useMemo(() => hospitals.filter(h => hospIds.has(h.id)), [hospitals, hospIds]);
   const pairCount = selectedDocs.length * selectedHosps.length;
+
+  // ── Per-hospital recipient (contact) selection — parity with the batch
+  //    preview. A hospital with several reps lets you pick who gets its email.
+  const hospitalContacts = useHospitalContacts();
+  const contactsFor = (h: { name: string; primary_recruiter_email: string | null; primary_contact_name: string | null }): HospitalContact[] => {
+    const list = hospitalContacts.forHospital(h.name).filter(c => c.email);
+    const rec = h.primary_recruiter_email?.trim();
+    if (rec && !list.some(c => c.email?.trim().toLowerCase() === rec.toLowerCase())) {
+      return [{ id: "hospital-row", name: h.primary_contact_name ?? "", title: "Recruiter email", email: rec, phone: null, type: "Primary", isPrimary: true }, ...list];
+    }
+    return list;
+  };
+  const defaultToFor = (h: Parameters<typeof resolveRecipient>[1] & { name: string }): string[] => {
+    const contacts = hospitalContacts.forHospital(h.name);
+    if ((h.contact_mode ?? "primary") === "all") return resolveAllRecipients(contacts, h);
+    const r = resolveRecipient(contacts, h);
+    return r.contact?.email ? [r.contact.email] : (h.primary_recruiter_email ? [h.primary_recruiter_email] : []);
+  };
+  const [contactSel, setContactSel] = useState<Record<string, string[]>>({});
+  const [contactOpen, setContactOpen] = useState<Record<string, boolean>>({});
+  const effectiveTo = (h: { id: string } & Parameters<typeof defaultToFor>[0]): string[] => contactSel[h.id] ?? defaultToFor(h);
+  const toggleContact = (hId: string, email: string, current: string[]) => {
+    const has = current.some(e => e.toLowerCase() === email.toLowerCase());
+    setContactSel(prev => ({ ...prev, [hId]: has ? current.filter(e => e.toLowerCase() !== email.toLowerCase()) : [...current, email] }));
+  };
 
   const toggle = (set: Set<string>, id: string, setter: (s: Set<string>) => void) => {
     const next = new Set(set);
@@ -314,6 +347,9 @@ export function BulkProfileSendDialog({ open, onClose }: { open: boolean; onClos
         include_doctor_email: includeDoctorEmail,
         ...(hospEdited ? { subject_override: hospSubject, html_override: hospHtml } : {}),
         ...(docEdited  ? { doctor_subject_override: docSubject, doctor_html_override: docHtml } : {}),
+        ...(hospAttachments.length ? { attachments: hospAttachments.map(a => ({ filename: a.filename, path: a.path })) } : {}),
+        ...(docAttachments.length ? { doctor_attachments: docAttachments.map(a => ({ filename: a.filename, path: a.path })) } : {}),
+        ...(Object.keys(contactSel).length ? { contact_overrides: contactSel } : {}),
         ...(bcc.length ? { bcc_override: bcc } : {}),
       } });
       if (error) throw error;
@@ -524,10 +560,61 @@ export function BulkProfileSendDialog({ open, onClose }: { open: boolean; onClos
       title="Bulk send preview"
       subtitle={studio ? `${studio.emailCount} hospital email${studio.emailCount === 1 ? "" : "s"} · ${studio.doctorCount} doctor${studio.doctorCount === 1 ? "" : "s"} in each` : undefined}
       headerExtra={studio && (
-        <div className={`rounded-lg border p-2.5 text-[11px] shadow-sm ${studio.testMode ? "border-emerald-300 bg-emerald-50 text-emerald-900" : "border-rose-300 bg-rose-50 text-rose-900"}`}>
-          {studio.testMode
-            ? <span><strong>Test mode is ON.</strong> Every copy goes to the test inbox (<strong>{studio.testRecipient ?? "test recipient"}</strong>), not real hospitals.</span>
-            : <span><strong>LIVE.</strong> Sends to <strong>{selectedHospEmails.length}</strong> real hospital{selectedHospEmails.length === 1 ? "" : "s"}{studio.doctor ? ` and ${studio.doctor.recipientCount} doctor${studio.doctor.recipientCount === 1 ? "" : "s"}` : ""}. No undo.</span>}
+        <div className="space-y-2">
+          <div className={`rounded-lg border p-2.5 text-[11px] shadow-sm ${studio.testMode ? "border-emerald-300 bg-emerald-50 text-emerald-900" : "border-rose-300 bg-rose-50 text-rose-900"}`}>
+            {studio.testMode
+              ? <span><strong>Test mode is ON.</strong> Every copy goes to the test inbox (<strong>{studio.testRecipient ?? "test recipient"}</strong>), not real hospitals.</span>
+              : <span><strong>LIVE.</strong> Sends to <strong>{selectedHospEmails.length}</strong> real hospital{selectedHospEmails.length === 1 ? "" : "s"}{studio.doctor ? ` and ${studio.doctor.recipientCount} doctor${studio.doctor.recipientCount === 1 ? "" : "s"}` : ""}. No undo.</span>}
+          </div>
+          {/* Per-hospital rep selection — only for hospitals with more than one
+              contact. Parity with the batch preview. */}
+          {selectedHosps.some(h => contactsFor(h).length > 1) && (
+            <div className="rounded-lg border border-sidebar-border/40 bg-white/95 p-2 shadow-sm">
+              <div className="mb-1 px-0.5 text-[10px] font-medium text-slate-600">Who receives each hospital's email</div>
+              <div className="max-h-40 space-y-0.5 overflow-y-auto">
+                {selectedHosps.map(h => {
+                  const contacts = contactsFor(h);
+                  if (contacts.length <= 1) return null;
+                  const to = effectiveTo(h);
+                  const open = !!contactOpen[h.id];
+                  const custom = !!contactSel[h.id];
+                  return (
+                    <div key={h.id} className="px-0.5">
+                      <button type="button" onClick={() => setContactOpen(p => ({ ...p, [h.id]: !open }))}
+                        className="flex w-full items-center gap-1.5 py-0.5 text-left text-[11px] text-slate-700 hover:text-teal-700">
+                        {open ? <ChevronDown className="h-3 w-3 shrink-0" /> : <ChevronRight className="h-3 w-3 shrink-0" />}
+                        <span className="flex-1 truncate">{h.name}</span>
+                        <span className="text-[10px] text-slate-400">{to.length} of {contacts.length}{custom ? " · custom" : ""}</span>
+                      </button>
+                      {open && (
+                        <div className="ml-4 mb-1 space-y-0.5 rounded-md border border-slate-100 bg-slate-50/60 p-1">
+                          {contacts.map(c => {
+                            const email = c.email!.trim();
+                            const checked = to.some(e => e.toLowerCase() === email.toLowerCase());
+                            return (
+                              <label key={c.id + email} className="flex cursor-pointer items-center gap-1.5 px-0.5 py-0.5">
+                                <input type="checkbox" checked={checked} onChange={() => toggleContact(h.id, email, to)} className="h-3 w-3 shrink-0 accent-teal-600" />
+                                <span className="min-w-0 flex-1 truncate text-[10px] text-slate-600">
+                                  {c.name ? <span className="text-slate-700">{c.name}</span> : null}
+                                  {c.title ? <span className="text-slate-400"> · {c.title}</span> : null}
+                                  <span className="text-teal-600"> {email}</span>
+                                </span>
+                              </label>
+                            );
+                          })}
+                          {to.length === 0 && <div className="px-0.5 text-[9.5px] text-rose-500">Pick at least one, or this hospital won't be emailed.</div>}
+                          {custom && (
+                            <button type="button" onClick={() => setContactSel(p => { const n = { ...p }; delete n[h.id]; return n; })}
+                              className="px-0.5 text-[9.5px] text-slate-400 hover:text-teal-700">Reset to default</button>
+                          )}
+                        </div>
+                      )}
+                    </div>
+                  );
+                })}
+              </div>
+            </div>
+          )}
         </div>
       )}
       emails={studio ? [
@@ -544,6 +631,8 @@ export function BulkProfileSendDialog({ open, onClose }: { open: boolean; onClos
               edited={hospHtml !== studio.hospital.html || hospSubject !== studio.hospital.subject}
               onReset={() => { setHospSubject(studio.hospital.subject); setHospHtml(studio.hospital.html); }}
               from="Hospital Intro <hospitalintro@allocationassist.com>"
+              attachments={hospAttachments}
+              onAttachmentsChange={setHospAttachments}
               className="min-h-0 flex-1 border-0 rounded-none shadow-none"
             />
           ),
@@ -561,6 +650,8 @@ export function BulkProfileSendDialog({ open, onClose }: { open: boolean; onClos
               edited={!!studio.doctor && (docHtml !== studio.doctor.html || docSubject !== studio.doctor.subject)}
               onReset={() => { if (studio.doctor) { setDocSubject(studio.doctor.subject); setDocHtml(studio.doctor.html); } }}
               from="Allocation Assist Team <hello@allocationassist.com>"
+              attachments={docAttachments}
+              onAttachmentsChange={setDocAttachments}
               className="min-h-0 flex-1 border-0 rounded-none shadow-none"
             />
           ),

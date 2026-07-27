@@ -119,6 +119,9 @@ Deno.serve(async (req: Request) => {
     include_doctor_email?: boolean;
     specialty?: string;
     attachments?: Array<{ filename: string; path: string }>;
+    // Files to attach to the DOCTOR working-opportunity emails (separate from the
+    // hospital-email `attachments`). Used by the bulk preview's per-pane pickers.
+    doctor_attachments?: Array<{ filename: string; path: string }>;
   };
   try { body = await req.json(); } catch { return json({ ok: false, error: "Invalid JSON body" }, 400); }
   const adhoc = !!body.adhoc;
@@ -205,10 +208,13 @@ Deno.serve(async (req: Request) => {
   // send. Normalising both sides makes label drift harmless.
   const { data: hospitals, error: hospErr } = await supabase
     .from("hospitals")
-    .select("id, name, primary_contact_name, primary_recruiter_email, greet_with_contact_name, country, city, image_url, contact_mode, excluded_contact_emails")
+    .select("id, name, primary_contact_name, primary_recruiter_email, greet_with_contact_name, country, city, image_url, contact_mode, excluded_contact_emails, active")
     .not("primary_recruiter_email", "is", null);
   if (hospErr) return json({ ok: false, error: "Hospital fetch failed", detail: hospErr.message }, 500);
   const wantCountry = batchCountry ? normCountry(batchCountry) : null;
+  // Send-state (the colour-coded sheet): NEVER email a hospital flagged
+  // "don't send" (active === false), even if it matches the country / override.
+  const activeHospitals = (hospitals ?? []).filter(h => h.active !== false);
   // Explicit recipient override (the preview's "send to only this region" picker):
   // when present, these EXACT hospitals are the personalised recipients, replacing
   // the batch-country filter entirely. Empty → fall back to the country scope.
@@ -216,7 +222,7 @@ Deno.serve(async (req: Request) => {
     (Array.isArray(body.recipient_emails_override) ? body.recipient_emails_override : [])
       .map(e => String(e).trim().toLowerCase()).filter(e => e.includes("@")),
   );
-  const matchedHospitals = (hospitals ?? []).filter(h =>
+  const matchedHospitals = activeHospitals.filter(h =>
     recipOverride.size
       ? recipOverride.has(String(h.primary_recruiter_email ?? "").trim().toLowerCase())
       : (!wantCountry || normCountry(String(h.country ?? "")) === wantCountry));
@@ -638,34 +644,41 @@ ${SIGNATURE_HTML}`;
     : [];
   const excludeSet = new Set([...clean(body.exclude_override).map(e => e.toLowerCase()), ...savedExcludes]);
 
-  const attachRaw = (batch.attachments as unknown);
-  const attachments: Array<{ filename: string; path: string }> = Array.isArray(attachRaw)
-    ? (attachRaw as Array<Record<string, unknown>>)
-        .map(a => ({ filename: String(a?.filename ?? "attachment"), path: String(a?.path ?? "") }))
-        .filter(a => a.path.startsWith("http"))
-    : [];
-
-  // Base64-inline the attachments ONCE (same files for every hospital) so a bad
-  // URL / oversized file is skipped rather than failing the batch. Bulletproof —
-  // the email always goes out even if an attachment can't be fetched.
+  // Base64-inline an attachment list ONCE (same files for every recipient) so a
+  // bad URL / oversized file is skipped rather than failing the send. Bulletproof
+  // — the email always goes out even if an attachment can't be fetched.
   const MAX_TOTAL_ATTACH_BYTES = 25 * 1024 * 1024;
   const toBase64 = (bytes: Uint8Array): string => {
     let bin = ""; const CHUNK = 0x8000;
     for (let i = 0; i < bytes.length; i += CHUNK) bin += String.fromCharCode(...bytes.subarray(i, i + CHUNK));
     return btoa(bin);
   };
-  const builtAttachments: Array<{ filename: string; content: string }> = [];
-  let attachTotal = 0;
-  for (const a of attachments) {
-    try {
-      const res = await fetch(a.path);
-      if (!res.ok) { console.warn(`[send-batch] attachment "${a.filename}" HTTP ${res.status} — skipping`); continue; }
-      const bytes = new Uint8Array(await res.arrayBuffer());
-      if (bytes.byteLength === 0 || attachTotal + bytes.byteLength > MAX_TOTAL_ATTACH_BYTES) { console.warn(`[send-batch] attachment "${a.filename}" empty/oversized — skipping`); continue; }
-      attachTotal += bytes.byteLength;
-      builtAttachments.push({ filename: a.filename, content: toBase64(bytes) });
-    } catch (e) { console.warn(`[send-batch] attachment "${a.filename}" fetch failed — skipping`, e); }
-  }
+  const normAttach = (raw: unknown): Array<{ filename: string; path: string }> =>
+    Array.isArray(raw)
+      ? (raw as Array<Record<string, unknown>>)
+          .map(a => ({ filename: String(a?.filename ?? "attachment"), path: String(a?.path ?? "") }))
+          .filter(a => a.path.startsWith("http"))
+      : [];
+  const buildAttachments = async (list: Array<{ filename: string; path: string }>, tag: string) => {
+    const built: Array<{ filename: string; content: string }> = [];
+    let total = 0;
+    for (const a of list) {
+      try {
+        const res = await fetch(a.path);
+        if (!res.ok) { console.warn(`[send-batch] ${tag} "${a.filename}" HTTP ${res.status} — skipping`); continue; }
+        const bytes = new Uint8Array(await res.arrayBuffer());
+        if (bytes.byteLength === 0 || total + bytes.byteLength > MAX_TOTAL_ATTACH_BYTES) { console.warn(`[send-batch] ${tag} "${a.filename}" empty/oversized — skipping`); continue; }
+        total += bytes.byteLength;
+        built.push({ filename: a.filename, content: toBase64(bytes) });
+      } catch (e) { console.warn(`[send-batch] ${tag} "${a.filename}" fetch failed — skipping`, e); }
+    }
+    return built;
+  };
+  // Hospital-email attachments (from the batch row / adhoc body).
+  const builtAttachments = await buildAttachments(normAttach(batch.attachments), "hospital attachment");
+  // Doctor-email attachments — separate list so the two emails can carry
+  // DIFFERENT files (the bulk preview attaches to each pane independently).
+  const builtDoctorAttachments = await buildAttachments(normAttach(body.doctor_attachments), "doctor attachment");
 
   // Target hospitals — drop excluded + Ammar. In TEST mode every copy is
   // redirected to the test inbox (personalised copies still go there so the
@@ -789,6 +802,7 @@ ${SIGNATURE_HTML}`;
             html:    finalDoctorHtml,
             text:    stripHtml(finalDoctorHtml),
             headers: { "X-AA-Batch-Id": String(batch.id), "X-AA-Kind": "doctor_working_op" },
+            ...(builtDoctorAttachments.length ? { attachments: builtDoctorAttachments } : {}),
           }),
         });
         if (res.ok) doctorSent++; else doctorFailed++;

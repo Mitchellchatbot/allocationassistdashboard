@@ -1021,6 +1021,9 @@ function BatchDialog({ target, onTargetChange, batches, suggestedSpecialty }: {
   // The optional doctor "working opportunity" email (editable second pane).
   const [editDoctorSubject, setEditDoctorSubject] = useState("");
   const [editDoctorHtml, setEditDoctorHtml] = useState("");
+  // Attachments for the DOCTOR email (separate from the hospital attachments) —
+  // send-now only, parity with the bulk preview's per-pane pickers.
+  const [doctorAttachments, setDoctorAttachments] = useState<EmailAttachment[]>([]);
   const [previewResetTick, setPreviewResetTick] = useState(0);
   const [batchCc, setBatchCc] = useState<string[]>([]);
   const [batchBcc, setBatchBcc] = useState<string[]>([]);
@@ -1189,6 +1192,7 @@ function BatchDialog({ target, onTargetChange, batches, suggestedSpecialty }: {
     const bc = (batch?.country ?? "").trim().toLowerCase();
     return previewHospitals
       .filter(h => !!h.primary_recruiter_email?.trim())
+      .filter(h => h.active !== false)   // never offer "don't send" hospitals (send-batch drops them too)
       .filter(h => !bc || (h.country ?? "").trim().toLowerCase() === bc)
       .sort((a, b) => a.name.localeCompare(b.name));
   }, [previewHospitals, batch?.country]);
@@ -1885,6 +1889,7 @@ function BatchDialog({ target, onTargetChange, batches, suggestedSpecialty }: {
                     setHospitalTab(0); setDoctorTab(0);
                     setRegionOnly(null);   // each preview starts from the batch's country scope
                     setContactSel({}); setContactOpen({});
+                    setDoctorAttachments([]);
                     setPreviewResetTick(t => t + 1);
                   } catch (e) {
                     toast.error(e instanceof Error ? e.message : "Preview failed");
@@ -2178,6 +2183,8 @@ function BatchDialog({ target, onTargetChange, batches, suggestedSpecialty }: {
                       setPreviewResetTick(t => t + 1);
                     }}
                     from="Allocation Assist Team <hello@allocationassist.com>"
+                    attachments={doctorAttachments}
+                    onAttachmentsChange={setDoctorAttachments}
                     className="min-h-0 flex-1 border-0 rounded-none shadow-none"
                   />
                 ))}
@@ -2191,6 +2198,8 @@ function BatchDialog({ target, onTargetChange, batches, suggestedSpecialty }: {
                 edited={doctorEdited}
                 onReset={() => { if (emailPreview?.doctor_email) { setEditDoctorSubject(emailPreview.doctor_email.subject); setEditDoctorHtml(emailPreview.doctor_email.html); } }}
                 from="Allocation Assist Team <hello@allocationassist.com>"
+                attachments={doctorAttachments}
+                onAttachmentsChange={setDoctorAttachments}
                 className="min-h-0 flex-1 border-0 rounded-none shadow-none"
               />
             )}
@@ -2251,6 +2260,7 @@ function BatchDialog({ target, onTargetChange, batches, suggestedSpecialty }: {
                   ...(excludedEmails.length ? { excludeOverride: excludedEmails } : {}),
                   ...(recipientOverrideEmails?.length ? { recipientEmailsOverride: recipientOverrideEmails } : {}),
                   ...(Object.keys(contactOverridesPayload).length ? { contactOverrides: contactOverridesPayload } : {}),
+                  ...(doctorAttachments.length ? { doctorAttachments: doctorAttachments.map(a => ({ filename: a.filename, path: a.path })) } : {}),
                 };
                 const res = await sendNow.mutateAsync(
                   batch.status === "sent"

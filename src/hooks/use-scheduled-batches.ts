@@ -335,6 +335,8 @@ export function useSendBatchNow() {
         // Per-hospital recipient choice: hospital id → the exact contact emails to
         // put in that hospital's To (for hospitals with several reps).
         contactOverrides?: Record<string, string[]>;
+        // Files attached to the DOCTOR working-opportunity emails (send-now only).
+        doctorAttachments?: Array<{ filename: string; path: string }>;
       },
     ): Promise<{ ok: boolean; bcc_count?: number; doctor_count?: number; message_id?: string; error?: string }> => {
       // Accept either a bare id (legacy callers) or an object with a force
@@ -354,6 +356,7 @@ export function useSendBatchNow() {
         ...(input.excludeOverride?.length ? { exclude_override: input.excludeOverride } : {}),
         ...(input.recipientEmailsOverride?.length ? { recipient_emails_override: input.recipientEmailsOverride } : {}),
         ...(input.contactOverrides && Object.keys(input.contactOverrides).length ? { contact_overrides: input.contactOverrides } : {}),
+        ...(input.doctorAttachments?.length ? { doctor_attachments: input.doctorAttachments } : {}),
       };
       const { data, error } = await invokeWithTimeout<{ ok: boolean; bcc_count?: number; doctor_count?: number; message_id?: string; error?: string }>(
         "send-batch", { batch_id: batchId, force, ...overrides }, 90_000);
