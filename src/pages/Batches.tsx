@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef, useState, useMemo as useMemoReact, memo } from "react";
+import { useSearchParams } from "react-router-dom";
 import { DashboardLayout } from "@/components/layout/DashboardLayout";
 import { DocLink } from "@/components/DocLink";
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "@/components/ui/card";
@@ -66,6 +67,20 @@ export default function Batches() {
   // "One-off send" button presets it to one_off so the unified dialog shows the
   // doctor + hospital pickers straight away (absorbs the old OneOffBatchDialog).
   const [newBatchKind, setNewBatchKind] = useState<BatchKind>("daily_duo");
+
+  // Deep-link: arriving from Profile Sent → "Batch send" (?compose=oneoff) opens
+  // the one-off (bulk) composer straight away, so bulk-sending doctors is one
+  // click from the Profile Sent launchpad.
+  const [searchParams, setSearchParams] = useSearchParams();
+  useEffect(() => {
+    if (searchParams.get("compose") === "oneoff") {
+      setNewBatchKind("one_off");
+      setDialogTarget("new");
+      const next = new URLSearchParams(searchParams);
+      next.delete("compose");
+      setSearchParams(next, { replace: true });
+    }
+  }, [searchParams, setSearchParams]);
 
   // Stable per-row edit handler so React.memo'd BatchRow rows don't re-render
   // on unrelated parent state changes (e.g. opening the dialog).

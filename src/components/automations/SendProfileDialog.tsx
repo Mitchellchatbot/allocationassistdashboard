@@ -29,6 +29,7 @@ import { ProfileSubTabs } from "@/components/ProfileSubTabs";
 import { MailModeBanner } from "@/components/MailModeBanner";
 import { EmailFrame } from "@/components/EmailFrame";
 import { wrapBodyForSend } from "@/lib/email-preview";
+import { buildWorkingOpBody, buildWorkingOpSubject, type WorkingOpHospital } from "@/lib/doctor-working-op";
 import { type EmailAttachment } from "@/lib/email-attachments";
 import { normCountry, countryFilterOptions } from "@/lib/normalize-country";
 import { AttachmentsPicker } from "@/components/automations/AttachmentsPicker";
@@ -476,17 +477,21 @@ function SendProfileDialogBody({ onClose, initial }: { onClose: () => void; init
       templateKeys?: { hospital: string; doctor: string };
       schedule?:    { date: string; time: string };
       sender?:      { assignedTo: string | null };
-      greeting?:    { mode: "auto" | "contact" | "team" };
+      // Feature 3: per-HOSPITAL greeting (hospitalId → mode); absent key = "auto".
+      greeting?:    Record<string, "auto" | "contact" | "team">;
+      // Feature 1: Combined (one consolidated doctor email per doctor) vs
+      // Individual (one doctor email per doctor per hospital). Multi-hospital only.
+      combineDoctorEmails?: boolean;
     } = {},
   ) => {
-    const { attachments, templateKeys, schedule, sender, greeting } = opts;
+    const { attachments, templateKeys, schedule, sender, greeting, combineDoctorEmails } = opts;
     // Explicit sender pick from the dialog. When set it's written to each run's
     // assigned_to so send-flow-email's pickSender uses it as the From line;
     // null → leave assigned_to unset so the hospital-owner trigger decides.
     const senderAssignedTo = sender?.assignedTo ?? null;
-    // Per-send greeting override ("refer by name" vs "hospital team"); "auto"
-    // keeps each hospital's stored greet_with_contact_name flag.
-    const greetMode = greeting?.mode ?? "auto";
+    // Per-HOSPITAL greeting override (hospitalId → mode); "auto" keeps each
+    // hospital's stored greet_with_contact_name flag. Empty = all auto.
+    const greetModeByHospital = greeting ?? {};
     const hospitalAttach = attachments?.hospital ?? [];
     const doctorAttach   = attachments?.doctor ?? [];
     if (selectedDoctors.length === 0 || selectedHospitals.length === 0) return;
@@ -619,6 +624,10 @@ function SendProfileDialogBody({ onClose, initial }: { onClose: () => void; init
       const batchHospitalsMeta = selectedHospitals.map(hh => ({
         name: hh.name, city: hh.city ?? null, country: hh.country ?? null, image_url: hh.image_url ?? null,
       }));
+      // Feature 1: only consolidate when the user kept "Combined" AND it's a
+      // multi-hospital send. Individual mode (or single-hospital) → no
+      // consolidation, so each run auto-continues to its own doctor email.
+      const consolidate = (combineDoctorEmails ?? true) && isMultiHospital;
 
       // Collect the ids the inserts return, flattened across the whole
       // doctor × hospital matrix — so we send exactly the runs we created.
@@ -696,17 +705,18 @@ function SendProfileDialogBody({ onClose, initial }: { onClose: () => void; init
                 // so it looks identical in every client. This doctor's own image,
                 // same for every hospital they're sent to.
                 ...(cardImageUrl ? { doctor_card_image_url: cardImageUrl } : {}),
-                // Multi-hospital → consolidated doctor email. `send_doctor_email`
-                // true on exactly one run per doctor (their first) so only it
-                // auto-continues to the doctor leg; `batch_hospitals` is the full
-                // list it renders. Single-hospital sends leave these unset → the
-                // per-hospital doctor template (incl. hospitals.doctor_template_key).
-                ...(isMultiHospital
+                // Feature 1: consolidated doctor email only in Combined +
+                // multi-hospital mode. `send_doctor_email` true on exactly one run
+                // per doctor (their first) so only it auto-continues to the doctor
+                // leg; `batch_hospitals` is the full list it renders. Individual
+                // mode OR single-hospital stamps NEITHER → every run auto-continues
+                // to its own per-hospital doctor email (incl. doctor_template_key).
+                ...(consolidate
                   ? { send_doctor_email: hIndex === 0, batch_hospitals: batchHospitalsMeta }
                   : {}),
-                // Per-send greeting choice — send-flow-email honours greet_mode
-                // over the hospital's stored greet_with_contact_name flag.
-                ...(greetMode !== "auto" ? { greet_mode: greetMode } : {}),
+                // Feature 3: per-hospital greeting choice — send-flow-email honours
+                // greet_mode over the hospital's stored greet_with_contact_name flag.
+                ...((greetModeByHospital[h.id] ?? "auto") !== "auto" ? { greet_mode: greetModeByHospital[h.id] } : {}),
               },
             })
             .select("id")
@@ -1201,7 +1211,8 @@ function PreviewConfirm({
       templateKeys?: { hospital: string; doctor: string };
       schedule?:    { date: string; time: string };
       sender?:      { assignedTo: string | null };
-      greeting?:    { mode: "auto" | "contact" | "team" };
+      greeting?:    Record<string, "auto" | "contact" | "team">;
+      combineDoctorEmails?: boolean;
     },
   ) => void;
   submitting: boolean;
@@ -1269,9 +1280,16 @@ function PreviewConfirm({
   // each hospital its own greeting/recipient). Defaults to the first; follows
   // removals so it never points at a dropped hospital.
   const [previewHospitalId, setPreviewHospitalId] = useState<string | null>(hospitals[0]?.id ?? null);
-  // Per-send greeting override: "auto" keeps each hospital's stored setting,
-  // "contact" greets the named recipient, "team" greets the hospital team.
-  const [greetMode, setGreetMode] = useState<"auto" | "contact" | "team">("auto");
+  // Feature 3: per-HOSPITAL greeting override (hospitalId → mode); absent key =
+  // "auto" (keep the hospital's stored setting). "contact" greets the named
+  // recipient, "team" greets the hospital team. Selected per row in the panel.
+  const [greetModeByHospital, setGreetModeByHospital] = useState<Record<string, "auto" | "contact" | "team">>({});
+  // Feature 1: Combined (one consolidated doctor email per doctor, listing all
+  // hospitals) vs Individual (one doctor email per doctor per hospital). Only
+  // meaningful for multi-hospital sends; the toggle is hidden when single.
+  const [combineDoctorEmails, setCombineDoctorEmails] = useState(true);
+  // Feature 2: which hospital's per-hospital doctor email shows in Individual mode.
+  const [doctorPreviewHospIdx, setDoctorPreviewHospIdx] = useState(0);
   useEffect(() => {
     if (!hospitals.some(h => h.id === previewHospitalId)) setPreviewHospitalId(hospitals[0]?.id ?? null);
   }, [hospitals, previewHospitalId]);
@@ -1297,9 +1315,13 @@ function PreviewConfirm({
       doctor_speciality:  doctor.speciality ?? "",
       doctor_country_training: (mergedProfileTokens.doctor_country_training || doctor.country_training || ""),
       hospital_name:      hosp?.name ?? "",
-      hospital_contact_name: ((greetMode === "contact" || (greetMode === "auto" && hosp?.greet_with_contact_name)) && hosp?.primary_contact_name?.trim())
-        ? hosp.primary_contact_name
-        : (hosp?.name ?? "Team"),
+      hospital_contact_name: (() => {
+        // Feature 3: this hospital's own greeting mode drives the greeting.
+        const gm = hosp ? (greetModeByHospital[hosp.id] ?? "auto") : "auto";
+        return ((gm === "contact" || (gm === "auto" && hosp?.greet_with_contact_name)) && hosp?.primary_contact_name?.trim())
+          ? hosp.primary_contact_name
+          : (hosp?.name ?? "Team");
+      })(),
       city:               hosp?.city ?? "",
       country:            hosp?.country ?? "",
       profile_link:       `https://allocationassist.com/shared-profile/${doctor.id}`,
@@ -1341,7 +1363,7 @@ function PreviewConfirm({
     }
     return m;
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [doctors, sendDataByDoctor, sampleHospital, cardImageByDoctor, greetMode, customMessage, hospitalSubject, hospitalBody, doctorSubject, doctorBody]);
+  }, [doctors, sendDataByDoctor, sampleHospital, cardImageByDoctor, greetModeByHospital, customMessage, hospitalSubject, hospitalBody, doctorSubject, doctorBody]);
 
   const activeRender = renderByDoctor.get(activeDoctor.id);
   const hospitalRecipient = isSingle ? (hospitals[0].primary_recruiter_email ?? "(no recruiter email)") : `preview: ${sampleHospital?.name ?? "hospital"} · ${hospitals.length} hospitals`;
@@ -1465,7 +1487,8 @@ function PreviewConfirm({
       templateKeys: { hospital: hospitalTemplateKey, doctor: doctorTemplateKey },
       schedule: sendMode === "later" ? { date: schedDate, time: schedTime } : undefined,
       sender: { assignedTo: senderAssignedTo },
-      greeting: { mode: greetMode },
+      greeting: greetModeByHospital,
+      combineDoctorEmails,
     });
   };
   // Human-readable local label of the chosen slot, for the schedule button.
@@ -1494,36 +1517,20 @@ function PreviewConfirm({
         specialty={activeDoctor.speciality}
         activeHospitalId={previewHospitalId}
         onSelectHospital={setPreviewHospitalId}
+        greetMode={greetModeByHospital}
+        onGreetMode={(id, mode) => setGreetModeByHospital(prev => ({ ...prev, [id]: mode }))}
       />
       {!isSingle && (
         <div className="rounded-lg border border-teal-200 bg-teal-50 p-2.5 text-[11px] text-teal-900">
-          {multiDoctor
-            ? <>Each of the <strong>{doctors.length} doctors</strong> gets <strong>one</strong> consolidated “Working opportunity” email listing all {hospitals.length} hospitals (grouped by city, with photos) — not one per hospital. The Doctor-email tab below previews a single hospital's wording per doctor.</>
-            : <><strong>{doctors[0].name.replace(/^\s*Dr\.?\s+/i, "")}</strong> gets <strong>one</strong> consolidated “Working opportunity” email listing all {hospitals.length} hospitals (grouped by city, with photos) — not one per hospital. The Doctor-email tab below previews a single hospital's wording.</>}
+          {combineDoctorEmails
+            ? (multiDoctor
+                ? <>Each of the <strong>{doctors.length} doctors</strong> gets <strong>one</strong> consolidated “Working opportunity” email listing all {hospitals.length} hospitals (grouped by city, with photos) — not one per hospital. Switch to <strong>Individual</strong> on the Doctor-email tab to send one email per hospital instead.</>
+                : <><strong>{doctors[0].name.replace(/^\s*Dr\.?\s+/i, "")}</strong> gets <strong>one</strong> consolidated “Working opportunity” email listing all {hospitals.length} hospitals (grouped by city, with photos) — not one per hospital. Switch to <strong>Individual</strong> on the Doctor-email tab to send one email per hospital instead.</>)
+            : (multiDoctor
+                ? <>Each of the <strong>{doctors.length} doctors</strong> gets <strong>one doctor email per hospital</strong> ({doctors.length * hospitals.length} doctor emails total) — the per-hospital template, not the consolidated list. Switch to <strong>Combined</strong> for one email per doctor.</>
+                : <><strong>{doctors[0].name.replace(/^\s*Dr\.?\s+/i, "")}</strong> gets <strong>one doctor email per hospital</strong> ({hospitals.length} doctor emails) — the per-hospital template, not the consolidated list. Switch to <strong>Combined</strong> for one email listing all hospitals.</>)}
         </div>
       )}
-      {/* Greeting: refer by the contact's name, or greet the hospital team.
-          "Auto" keeps each hospital's saved preference. */}
-      <div className="rounded-lg border border-sidebar-border/40 bg-white/95 p-2.5 shadow-sm">
-        <div className="mb-1.5 text-[11px] font-medium text-teal-700">Greeting</div>
-        <div className="grid grid-cols-3 gap-1">
-          {([
-            { key: "auto",    label: "Auto" },
-            { key: "contact", label: "Refer by name" },
-            { key: "team",    label: "Hospital team" },
-          ] as const).map(o => (
-            <button
-              key={o.key}
-              type="button"
-              onClick={() => setGreetMode(o.key)}
-              className={`rounded-md px-2 py-1 text-[10.5px] font-medium transition ${greetMode === o.key ? "bg-teal-600 text-white shadow-sm" : "bg-slate-100 text-slate-600 hover:bg-slate-200"}`}
-              title={o.key === "auto" ? "Use each hospital's saved greeting preference" : o.key === "contact" ? "Greet the named recipient (e.g. 'Hello Ms. Sandra')" : "Greet the hospital team (e.g. 'Hello City Hospital team')"}
-            >
-              {o.label}
-            </button>
-          ))}
-        </div>
-      </div>
       <div className="rounded-lg border border-sidebar-border/40 bg-white/95 p-3 text-[12px] space-y-1 shadow-sm text-slate-700">
         <div>
           <strong>{multiDoctor ? `${doctors.length} doctors` : doctors[0].name}</strong> → {hospitals.length === 1 ? hospitals[0].name : `${hospitals.length} hospitals (BCC)`}
@@ -1742,6 +1749,43 @@ function PreviewConfirm({
       />
     );
   };
+  // ── Feature 2: multi-hospital doctor-email preview (READ-ONLY). ─────────────
+  // Combined → the consolidated "working opportunity" email per doctor, built
+  // with the shared buildWorkingOp* composer so it matches what send-flow-email
+  // ships. Individual → the per-hospital doctor template, one hospital sub-tab at
+  // a time. Single-hospital keeps the editable doctorPane above (unchanged).
+  const combinedDoctorPane = (doc: DoctorOption) => {
+    const hospWO: WorkingOpHospital[] = hospitals.map(h => ({
+      name: h.name, city: h.city, country: h.country, image_url: h.image_url,
+    }));
+    const subject = buildWorkingOpSubject(hospWO);
+    const body = wrapBodyForSend(buildWorkingOpBody(doc.name, hospWO, PREVIEW_SIGNATURE_HTML));
+    return <PreviewBlock label={`Consolidated · ${hospitals.length} hospitals`} subject={subject} body={body} />;
+  };
+  // Render the per-hospital doctor email for one (doctor, hospital) pair — same
+  // pipeline renderByDoctor uses, but for the chosen hospital, not only sampleHospital.
+  const renderDoctorEmail = (doc: DoctorOption, hosp: Hospital) => {
+    const vars = varsFor(doc, hosp, cardImageByDoctor[doc.id] ?? null);
+    return {
+      subject: renderTemplate(doctorSubject, vars),
+      body:    wrapBodyForSend(renderTemplate(doctorBody, vars)),
+    };
+  };
+  const individualDoctorPane = (doc: DoctorOption) => {
+    const activeHospIdx = Math.min(doctorPreviewHospIdx, hospitals.length - 1);
+    const panes = hospitals.map(h => {
+      const { subject, body } = renderDoctorEmail(doc, h);
+      return <PreviewBlock key={h.id} label={`To doctor · ${doc.email ?? "(no email)"} · ${h.name}`} subject={subject} body={body} />;
+    });
+    return (
+      <ProfileSubTabs
+        names={hospitals.map(h => h.name)}
+        active={activeHospIdx}
+        onSelect={setDoctorPreviewHospIdx}
+        panes={panes}
+      />
+    );
+  };
   const doctorNames = doctors.map(d => d.name);
 
   // ── The two emails: switcher label + left-rail controls + right-pane preview.
@@ -1796,6 +1840,31 @@ function PreviewConfirm({
       subLabel: multiDoctor ? `${doctors.length} doctors` : (doctors[0].email ?? "(no email)"),
       controls: (
         <div className="space-y-2">
+          {/* Feature 1: Combined vs Individual — multi-hospital only. */}
+          {!isSingle && (
+            <div className="rounded-md border border-sidebar-border/40 bg-white/95 p-2 shadow-sm">
+              <div className="mb-1 text-[10px] uppercase tracking-wider text-slate-500">Doctor email</div>
+              <div className="grid grid-cols-2 gap-1">
+                {([["combined", "Combined"], ["individual", "Individual"]] as const).map(([k, l]) => {
+                  const on = (k === "combined") === combineDoctorEmails;
+                  return (
+                    <button
+                      key={k}
+                      type="button"
+                      onClick={() => setCombineDoctorEmails(k === "combined")}
+                      className={`rounded-md px-2 py-1 text-[10.5px] font-medium transition ${on ? "bg-teal-600 text-white shadow-sm" : "bg-slate-100 text-slate-600 hover:bg-slate-200"}`}
+                      title={k === "combined" ? "One email per doctor listing all hospitals" : "One email per doctor, per hospital"}
+                    >
+                      {l}
+                    </button>
+                  );
+                })}
+              </div>
+              <div className="mt-1 text-[9.5px] text-slate-500">
+                {combineDoctorEmails ? "One consolidated email per doctor, listing all hospitals." : `One email per doctor per hospital (${hospitals.length}).`}
+              </div>
+            </div>
+          )}
           <div className="flex items-start justify-between gap-2">
             <div className="flex-1 min-w-0">
               <TemplatePicker templates={templates} value={doctorTemplateKey} onChange={setDoctorTemplateKey} defaultKey="profile_sent_doctor" renderVars={activeRender?.vars ?? {}} label="Doctor 'working opportunity' email template" flowFilter="profile_sent" audience="doctor" />
@@ -1812,9 +1881,19 @@ function PreviewConfirm({
           />
         </div>
       ),
-      preview: multiDoctor
-        ? <ProfileSubTabs names={doctorNames} active={activeDoctorIdx} onSelect={setActiveDoctorIdx} panes={doctors.map(doctorPane)} />
-        : doctorPane(doctors[0]),
+      // Single-hospital keeps the editable doctorPane (unchanged). Multi-hospital
+      // shows read-only panes: a doctor row of sub-tabs, each pane the consolidated
+      // email (Combined) or a nested hospital row of per-hospital emails (Individual).
+      preview: isSingle
+        ? (multiDoctor
+            ? <ProfileSubTabs names={doctorNames} active={activeDoctorIdx} onSelect={setActiveDoctorIdx} panes={doctors.map(doctorPane)} />
+            : doctorPane(doctors[0]))
+        : <ProfileSubTabs
+            names={doctorNames}
+            active={activeDoctorIdx}
+            onSelect={setActiveDoctorIdx}
+            panes={doctors.map(combineDoctorEmails ? combinedDoctorPane : individualDoctorPane)}
+          />,
     },
   ];
 

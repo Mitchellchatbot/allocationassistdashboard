@@ -29,6 +29,7 @@ export function HospitalRecipientsPanel({
   specialty = null,
   activeHospitalId, onSelectHospital,
   heading,
+  greetMode, onGreetMode,
 }: {
   /** Hospitals currently being emailed. */
   selected: Hospital[];
@@ -46,6 +47,11 @@ export function HospitalRecipientsPanel({
   activeHospitalId?: string | null;
   onSelectHospital?: (hospitalId: string) => void;
   heading?: string;
+  /** Optional per-hospital greeting picker (hospitalId → mode; absent = "auto").
+   *  When both props are supplied, each row shows a tiny Auto/Name/Team control.
+   *  Callers that don't pass these (e.g. the batch flow) render without it. */
+  greetMode?: Record<string, "auto" | "contact" | "team">;
+  onGreetMode?: (hospitalId: string, mode: "auto" | "contact" | "team") => void;
 }) {
   const [country, setCountry] = useState("all");
   const [addOpen, setAddOpen] = useState(false);
@@ -192,6 +198,22 @@ export function HospitalRecipientsPanel({
                         </label>
                       ))}
                     </div>
+                  </div>
+                )}
+                {greetMode && onGreetMode && (
+                  <div className="mt-1 pl-3 flex items-center gap-1">
+                    <span className="text-[9px] uppercase tracking-wider text-muted-foreground mr-0.5">Greeting</span>
+                    {([["auto", "Auto"], ["contact", "Name"], ["team", "Team"]] as const).map(([k, l]) => (
+                      <button
+                        key={k}
+                        type="button"
+                        onClick={() => onGreetMode(h.id, k)}
+                        title={k === "auto" ? "Use this hospital's saved greeting preference" : k === "contact" ? "Greet the named recipient (e.g. 'Hello Ms. Sandra')" : "Greet the hospital team (e.g. 'Hello City Hospital team')"}
+                        className={`rounded px-1.5 py-0.5 text-[9.5px] font-medium transition ${(greetMode[h.id] ?? "auto") === k ? "bg-teal-600 text-white shadow-sm" : "bg-slate-100 text-slate-600 hover:bg-slate-200"}`}
+                      >
+                        {l}
+                      </button>
+                    ))}
                   </div>
                 )}
               </div>

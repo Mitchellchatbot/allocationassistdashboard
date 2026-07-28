@@ -35,8 +35,8 @@ export default function ProfileSent() {
             </p>
           </div>
           <div className="flex items-center gap-2">
-            <Button variant="outline" onClick={() => navigate("/batches")}>
-              <Users className="h-4 w-4 mr-1.5" /> Batch send
+            <Button variant="outline" onClick={() => navigate("/batches?compose=oneoff")}>
+              <Users className="h-4 w-4 mr-1.5" /> Bulk send
             </Button>
             <Button onClick={() => setSendOpen(true)} className="bg-teal-600 hover:bg-teal-700 text-white">
               <Send className="h-4 w-4 mr-1.5" /> Send a profile
@@ -48,14 +48,14 @@ export default function ProfileSent() {
         <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
           <Card className="hover:border-teal-300 transition-colors cursor-pointer" onClick={() => setSendOpen(true)}>
             <CardHeader className="pb-2">
-              <CardTitle className="text-[14px] flex items-center gap-2"><UserSquare2 className="h-4 w-4 text-teal-600" /> Single send</CardTitle>
-              <CardDescription className="text-[12px]">One doctor → one or more hospitals, with full preview + editing, attachments, templates, and schedule-for-later.</CardDescription>
+              <CardTitle className="text-[14px] flex items-center gap-2"><UserSquare2 className="h-4 w-4 text-teal-600" /> Personalized send</CardTitle>
+              <CardDescription className="text-[12px]">One or more doctors → one or more hospitals, each a personalized email. Full preview + editing, attachments, templates, schedule-for-later.</CardDescription>
             </CardHeader>
           </Card>
-          <Card className="hover:border-teal-300 transition-colors cursor-pointer" onClick={() => navigate("/batches")}>
+          <Card className="hover:border-teal-300 transition-colors cursor-pointer" onClick={() => navigate("/batches?compose=oneoff")}>
             <CardHeader className="pb-2">
-              <CardTitle className="text-[14px] flex items-center gap-2"><Users className="h-4 w-4 text-teal-600" /> Batch send</CardTitle>
-              <CardDescription className="text-[12px]">Many doctors → one table per hospital. Schedule recurring blasts or fire a one-off now — all on the Batch Sends page.</CardDescription>
+              <CardTitle className="text-[14px] flex items-center gap-2"><Users className="h-4 w-4 text-teal-600" /> Bulk send</CardTitle>
+              <CardDescription className="text-[12px]">Many doctors → one table per hospital, sent now — opens the batch composer (where you can also schedule recurring blasts).</CardDescription>
             </CardHeader>
           </Card>
         </div>
