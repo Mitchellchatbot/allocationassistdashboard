@@ -1358,6 +1358,9 @@ function BatchDialog({ target, onTargetChange, batches, initialKind, suggestedSp
     [eligibleHospitals],
   );
   const bccSet = useMemo(() => new Set(batchBcc.map(e => e.trim().toLowerCase())), [batchBcc]);
+  // Country filter for the "+ Add a single hospital…" picker (parity with the
+  // single composer's add-a-hospital country filter). "all" = no filter.
+  const [addHospCountry, setAddHospCountry] = useState("all");
   // Hospitals the user has manually added on top (their recruiter email is in
   // the extra-BCC list but they aren't already an eligible recipient).
   const addedHospitals = useMemo(
@@ -1378,6 +1381,12 @@ function BatchDialog({ target, onTargetChange, batches, initialKind, suggestedSp
       })
       .sort((a, b) => a.name.localeCompare(b.name)),
     [previewHospitals, eligibleEmails, bccSet],
+  );
+  // Country options + filtered list for the "+ Add a single hospital…" picker.
+  const addHospCountries = useMemo(() => countryFilterOptions(addableHospitals.map(h => h.country)), [addableHospitals]);
+  const filteredAddable = useMemo(
+    () => addHospCountry === "all" ? addableHospitals : addableHospitals.filter(h => normCountry(h.country) === addHospCountry),
+    [addableHospitals, addHospCountry],
   );
   // Regions present among the addable (not-yet-sending) hospitals — for the
   // "add a whole region at once" picker below.
@@ -1428,7 +1437,7 @@ function BatchDialog({ target, onTargetChange, batches, initialKind, suggestedSp
   const repreviewWith = async (overrideEmails: string[] | null) => {
     if (!batch) return;
     try {
-      const p = await previewMut.mutateAsync({ batchId: batch.id, force: batch.status === "sent", recipientEmailsOverride: overrideEmails ?? undefined });
+      const p = await previewMut.mutateAsync({ batchId: batch.id, force: batch.status === "sent", recipientEmailsOverride: overrideEmails ?? undefined, ...(Object.keys(greetOverridesPayload).length ? { greetOverrides: greetOverridesPayload } : {}) });
       setEmailPreview(prev => prev ? { ...prev, subject: p.subject, html: p.html, text: p.text, bcc_count: p.bcc_count, per_doctor: p.per_doctor ?? [], doctor_emails: p.doctor_emails ?? [], test_mode: p.test_mode, test_recipient: p.test_recipient } : prev);
       setEditSubject(p.subject); setEditHtml(p.html);
       setEditDoctorSubject(p.doctor_email?.subject ?? ""); setEditDoctorHtml(p.doctor_email?.html ?? "");
@@ -1479,6 +1488,11 @@ function BatchDialog({ target, onTargetChange, batches, initialKind, suggestedSp
   // hospitalId → chosen contact emails. Absent = use defaultToFor (mode routing).
   const [contactSel, setContactSel] = useState<Record<string, string[]>>({});
   const [contactOpen, setContactOpen] = useState<Record<string, boolean>>({});
+  // Per-hospital greeting choice from the preview's Auto / Name / Team control.
+  // hospitalId → "auto" (the hospital's stored greet flag) | "contact" (greet the
+  // contact person) | "team" ("<Hospital> team"). Absent = "auto". Reset each
+  // fresh preview so a new target starts from the stored defaults.
+  const [greetModeByHospital, setGreetModeByHospital] = useState<Record<string, "auto" | "contact" | "team">>({});
   const effectiveTo = (h: { id: string } & Parameters<typeof defaultToFor>[0]): string[] =>
     contactSel[h.id] ?? defaultToFor(h);
   const toggleContact = (hId: string, email: string, current: string[]) => {
@@ -1492,13 +1506,31 @@ function BatchDialog({ target, onTargetChange, batches, initialKind, suggestedSp
     for (const [id, emails] of Object.entries(contactSel)) out[id] = emails;
     return out;
   }, [contactSel]);
+  // Non-auto greeting choices, keyed by recruiter email (lowercased) → "contact" |
+  // "team" — the shape send-batch's greet_overrides expects. Auto entries omitted.
+  const greetOverridesPayload = useMemo(() => {
+    const out: Record<string, "contact" | "team"> = {};
+    for (const [id, mode] of Object.entries(greetModeByHospital)) {
+      if (mode === "auto") continue;
+      const em = previewHospitals.find(x => x.id === id)?.primary_recruiter_email?.trim().toLowerCase();
+      if (em) out[em] = mode;
+    }
+    return out;
+  }, [greetModeByHospital, previewHospitals]);
   const removeHospitalBcc = (email: string) =>
     setBatchBcc(prev => prev.filter(e => e.trim().toLowerCase() !== email.trim().toLowerCase()));
 
   // Personalised greeting per hospital (mirrors send-batch's greetingFor): the
   // hospital's contact person when it greets by contact, else "<Name> team".
-  const batchGreeting = (h?: { name: string; primary_contact_name: string | null; greet_with_contact_name: boolean }) =>
-    h ? ((h.greet_with_contact_name && h.primary_contact_name?.trim()) ? h.primary_contact_name.trim() : `${h.name} team`) : "Team";
+  const batchGreeting = (h?: { id: string; name: string; primary_contact_name: string | null; greet_with_contact_name: boolean }) => {
+    if (!h) return "Team";
+    const mode = greetModeByHospital[h.id] ?? "auto";
+    // "Name" → greet the contact person (fall back to the team greeting);
+    // "Team" → "<Hospital> team"; "Auto" → the hospital's stored-flag logic.
+    if (mode === "contact") return h.primary_contact_name?.trim() || `${h.name} team`;
+    if (mode === "team")    return `${h.name} team`;
+    return (h.greet_with_contact_name && h.primary_contact_name?.trim()) ? h.primary_contact_name.trim() : `${h.name} team`;
+  };
   // Which hospital's greeting the preview shows (defaults to the first). Clicking
   // a hospital swaps the "Hello …!" line so the preview matches the copy that
   // hospital actually receives now that each gets its own email.
@@ -2107,6 +2139,8 @@ function BatchDialog({ target, onTargetChange, batches, initialKind, suggestedSp
                     setHospitalTab(0); setDoctorTab(0);
                     setRegionOnly(null);   // each preview starts from the batch's country scope
                     setContactSel({}); setContactOpen({});
+                    setGreetModeByHospital({});   // fresh preview → stored greeting defaults
+                    setAddHospCountry("all");
                     setDoctorAttachments([]);
                     setPreviewResetTick(t => t + 1);
                   } catch (e) {
@@ -2203,6 +2237,28 @@ function BatchDialog({ target, onTargetChange, batches, initialKind, suggestedSp
                             {excluded ? <Plus className="h-3 w-3" /> : <X className="h-3 w-3" />}
                           </button>
                         </div>
+                        {/* Greeting knob — Auto (stored setting) / Name (greet the
+                            contact person) / Team ("<Hospital> team"). Also selects
+                            this hospital for the previewed "Hello …" line. */}
+                        {!excluded && (
+                          <div className="ml-3 mt-0.5 flex items-center gap-1">
+                            <span className="text-[9px] uppercase tracking-wider text-slate-400">Greet</span>
+                            {([["auto", "Auto"], ["contact", "Name"], ["team", "Team"]] as const).map(([m, label]) => {
+                              const active = (greetModeByHospital[h.id] ?? "auto") === m;
+                              return (
+                                <button
+                                  key={m}
+                                  type="button"
+                                  onClick={() => { setGreetModeByHospital(prev => ({ ...prev, [h.id]: m })); setPreviewGreetId(h.id); }}
+                                  title={m === "auto" ? "Use the hospital's saved greeting setting" : m === "contact" ? "Greet the contact person by name" : "Greet the hospital team"}
+                                  className={`rounded px-1.5 py-[1px] text-[9px] border transition-colors ${active ? "border-teal-400 bg-teal-50 text-teal-700 font-medium" : "border-slate-200 bg-white text-slate-500 hover:text-teal-700"}`}
+                                >
+                                  {label}
+                                </button>
+                              );
+                            })}
+                          </div>
+                        )}
                         {/* Pick which of this hospital's reps get the email (only
                             when it actually has more than one contact). */}
                         {!excluded && (() => {
@@ -2291,18 +2347,32 @@ function BatchDialog({ target, onTargetChange, batches, initialKind, suggestedSp
                     ))}
                   </SelectContent>
                 </Select>
-                {/* …or add a single hospital on top of the current list. */}
+                {/* …or add a single hospital on top of the current list, optionally
+                    narrowed to one country (parity with the single composer). */}
                 {!regionOnly && addableHospitals.length > 0 && (
-                  <Select value="" onValueChange={addHospitalBcc} disabled={sendNow.isPending}>
-                    <SelectTrigger className="h-7 text-[11px] text-slate-700"><SelectValue placeholder="+ Add a single hospital…" /></SelectTrigger>
-                    <SelectContent>
-                      {addableHospitals.map(h => (
-                        <SelectItem key={h.id} value={h.id} className="text-[11px]">
-                          {h.name}{h.city ? ` · ${h.city}` : h.country ? ` · ${h.country}` : ""}
-                        </SelectItem>
-                      ))}
-                    </SelectContent>
-                  </Select>
+                  <div className="flex items-center gap-1.5">
+                    <select
+                      value={addHospCountry}
+                      onChange={e => setAddHospCountry(e.target.value)}
+                      disabled={sendNow.isPending}
+                      className="shrink-0 rounded-md border border-input bg-white text-slate-700 text-[11px] px-1.5 h-7 max-w-[104px]"
+                    >
+                      <option value="all">All countries</option>
+                      {addHospCountries.map(c => <option key={c.value} value={c.value}>{c.label}</option>)}
+                    </select>
+                    <Select value="" onValueChange={addHospitalBcc} disabled={sendNow.isPending}>
+                      <SelectTrigger className="h-7 flex-1 text-[11px] text-slate-700"><SelectValue placeholder="+ Add a single hospital…" /></SelectTrigger>
+                      <SelectContent>
+                        {filteredAddable.length === 0 ? (
+                          <div className="px-2 py-1.5 text-[11px] italic text-slate-400">No addable hospitals in this country.</div>
+                        ) : filteredAddable.map(h => (
+                          <SelectItem key={h.id} value={h.id} className="text-[11px]">
+                            {h.name}{h.city ? ` · ${h.city}` : h.country ? ` · ${h.country}` : ""}
+                          </SelectItem>
+                        ))}
+                      </SelectContent>
+                    </Select>
+                  </div>
                 )}
               </div>
             )}
@@ -2383,6 +2453,17 @@ function BatchDialog({ target, onTargetChange, batches, initialKind, suggestedSp
                 className="h-3.5 w-3.5 accent-teal-600" />
               <span>Also send this to the <strong>{emailPreview.doctor_email.recipient_count}</strong> doctor{emailPreview.doctor_email.recipient_count === 1 ? "" : "s"} when the batch sends</span>
             </label>
+            {/* Doctor-email attachments — visible here (not just in full-screen) so
+                both legs' attachments are editable in the preview, matching the
+                single composer. Separate list from the hospital-email attachments. */}
+            <div className="border-b border-slate-200 bg-slate-50/60 px-3 py-2">
+              <AttachmentsPicker
+                attachments={doctorAttachments}
+                onChange={setDoctorAttachments}
+                disabled={sendNow.isPending}
+                hint="CV, logbook, etc. — attached to the doctor working-opportunity email (not the hospital email)"
+              />
+            </div>
             {doctorNoteList.length ? (
               <ProfileSubTabs
                 names={doctorNoteList.map(d => d.name)}
@@ -2482,6 +2563,7 @@ function BatchDialog({ target, onTargetChange, batches, initialKind, suggestedSp
                   ...(excludedEmails.length ? { excludeOverride: excludedEmails } : {}),
                   ...(recipientOverrideEmails?.length ? { recipientEmailsOverride: recipientOverrideEmails } : {}),
                   ...(Object.keys(contactOverridesPayload).length ? { contactOverrides: contactOverridesPayload } : {}),
+                  ...(Object.keys(greetOverridesPayload).length ? { greetOverrides: greetOverridesPayload } : {}),
                   ...(doctorAttachments.length ? { doctorAttachments: doctorAttachments.map(a => ({ filename: a.filename, path: a.path })) } : {}),
                 };
                 const res = await sendNow.mutateAsync(

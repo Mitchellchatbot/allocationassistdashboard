@@ -113,6 +113,12 @@ Deno.serve(async (req: Request) => {
     // Recruiter emails to DROP from this send — hospitals the team unchecked in
     // the preview's "Sending to N hospitals" list.
     exclude_override?: string[];
+    // Per-hospital greeting override from the preview's Auto / Name / Team control:
+    // recruiter email (lowercased) → "contact" (greet the contact person) or
+    // "team" ("<Hospital> team"). Hospitals not listed keep greetingFor()'s
+    // stored-flag logic. Applied in BOTH the dry-run preview and the real send so
+    // the preview matches what's actually sent.
+    greet_overrides?: Record<string, "contact" | "team">;
     // ── Ad-hoc mode (Bulk send from Profile Sent) ──────────────────────────
     // Send a tabular multi-doctor blast WITHOUT a scheduled_batch_sends row: the
     // caller passes the doctors + recipient hospitals directly. No DB row is
@@ -561,6 +567,20 @@ Deno.serve(async (req: Request) => {
   // "<Hospital name> team".
   const greetingFor = (h: { name: string; contact: string; greetContact: boolean }) =>
     (h.greetContact && h.contact) ? h.contact : (h.name ? `${h.name} team` : "Team");
+  // Per-hospital greeting override from the preview's Auto / Name / Team control,
+  // keyed by the hospital's recruiter email (lowercased). "contact" greets the
+  // contact person (falling back to "<Hospital> team"), "team" forces the team
+  // greeting; anything else defers to greetingFor()'s stored-flag logic.
+  const greetOverrides: Record<string, string> =
+    (body.greet_overrides && typeof body.greet_overrides === "object")
+      ? body.greet_overrides as Record<string, string>
+      : {};
+  const greetingWithOverride = (h: { name: string; contact: string; greetContact: boolean; email: string }): string => {
+    const ov = greetOverrides[String(h.email ?? "").trim().toLowerCase()];
+    if (ov === "contact") return h.contact || `${h.name} team`;
+    if (ov === "team")    return h.name ? `${h.name} team` : "Team";
+    return greetingFor(h);
+  };
 
   // ── Doctor "working opportunity" email (Hasan 2026-07-20) ──────────────
   // When include_doctor_email is on, each queued doctor also gets a note listing
@@ -585,7 +605,7 @@ Deno.serve(async (req: Request) => {
   // ── Dry run? Preview the FIRST hospital's personalised version ─────────
   if (dryRun) {
     const h0 = recipientHospitals[0];
-    const greet = h0 ? greetingFor(h0) : "Team";
+    const greet = h0 ? greetingWithOverride(h0) : "Team";
     const city  = h0?.city ?? "";
     // sendBlocks[0] is the combined block for normal batches and the FIRST
     // doctor for a Daily Duo, so this preview always matches what really sends.
@@ -720,7 +740,7 @@ Deno.serve(async (req: Request) => {
       // Preview edits: per-doctor mode carries one edited body per doctor (a
       // single html_override would send the SAME doctor to every slot).
       const ov = perDoctorMode ? (perDoctorOverrides[di] ?? "") : editedHtml;
-      const fresh = renderFor(greetingFor(h), h.city, blk.html, blk.text);
+      const fresh = renderFor(greetingWithOverride(h), h.city, blk.html, blk.text);
       const subjOv = perDoctorMode ? (perDoctorSubjects[di] || editedSubject) : editedSubject;
       const rendered = (ov || subjOv)
         ? { subject: subjOv || fresh.subject, html: ov ? wrapHtml(ov) : fresh.html, text: ov ? ((perDoctorMode ? "" : editedText) || stripHtml(ov)) : fresh.text }

@@ -346,6 +346,9 @@ export function useSendBatchNow() {
         // Per-hospital recipient choice: hospital id → the exact contact emails to
         // put in that hospital's To (for hospitals with several reps).
         contactOverrides?: Record<string, string[]>;
+        // Per-hospital greeting choice from the preview's Auto / Name / Team control:
+        // recruiter email (lowercased) → "contact" | "team". Non-auto entries only.
+        greetOverrides?: Record<string, "contact" | "team">;
         // Files attached to the DOCTOR working-opportunity emails (send-now only).
         doctorAttachments?: Array<{ filename: string; path: string }>;
       },
@@ -368,6 +371,7 @@ export function useSendBatchNow() {
         ...(input.excludeOverride?.length ? { exclude_override: input.excludeOverride } : {}),
         ...(input.recipientEmailsOverride?.length ? { recipient_emails_override: input.recipientEmailsOverride } : {}),
         ...(input.contactOverrides && Object.keys(input.contactOverrides).length ? { contact_overrides: input.contactOverrides } : {}),
+        ...(input.greetOverrides && Object.keys(input.greetOverrides).length ? { greet_overrides: input.greetOverrides } : {}),
         ...(input.doctorAttachments?.length ? { doctor_attachments: input.doctorAttachments } : {}),
       };
       const { data, error } = await invokeWithTimeout<{ ok: boolean; bcc_count?: number; doctor_count?: number; message_id?: string; error?: string }>(
@@ -407,16 +411,17 @@ export interface BatchPreviewResult {
 }
 export function useBatchPreview() {
   return useMutation({
-    mutationFn: async (input: string | { batchId: string; force?: boolean; recipientEmailsOverride?: string[] }): Promise<BatchPreviewResult> => {
+    mutationFn: async (input: string | { batchId: string; force?: boolean; recipientEmailsOverride?: string[]; greetOverrides?: Record<string, "contact" | "team"> }): Promise<BatchPreviewResult> => {
       const batchId = typeof input === "string" ? input : input.batchId;
       const force   = typeof input === "string" ? false  : !!input.force;
       const recipientEmailsOverride = typeof input === "string" ? undefined : input.recipientEmailsOverride;
+      const greetOverrides = typeof input === "string" ? undefined : input.greetOverrides;
       type Raw = { ok: boolean; preview?: Omit<BatchPreviewResult, "doctor_email" | "per_doctor" | "doctor_emails" | "email_count" | "test_mode" | "test_recipient">;
                    doctor_email?: BatchDoctorPreview; per_doctor?: BatchPerDoctorPreview[];
                    doctor_emails?: BatchPerDoctorPreview[]; email_count?: number;
                    test_mode?: boolean; test_recipient?: string | null; error?: string };
       const { data, error } = await invokeWithTimeout<Raw>(
-        "send-batch", { batch_id: batchId, dry_run: true, force, ...(recipientEmailsOverride?.length ? { recipient_emails_override: recipientEmailsOverride } : {}) }, 60_000);
+        "send-batch", { batch_id: batchId, dry_run: true, force, ...(recipientEmailsOverride?.length ? { recipient_emails_override: recipientEmailsOverride } : {}), ...(greetOverrides && Object.keys(greetOverrides).length ? { greet_overrides: greetOverrides } : {}) }, 60_000);
       if (error) throw new Error(await fnErrorMessage(error, "Preview failed"));
       const res = data as Raw;
       if (!res.ok || !res.preview) throw new Error(res.error ?? "Preview failed");

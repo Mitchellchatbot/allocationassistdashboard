@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from "react";
-import { Pencil, RotateCcw, Bold, Italic, Underline, List, ListOrdered, Link2, Table2, Maximize2, Image as ImageIcon, AlignLeft, AlignCenter, AlignRight, AlignJustify, AlignVerticalJustifyStart, AlignVerticalJustifyCenter, AlignVerticalJustifyEnd, Trash2 } from "lucide-react";
+import { Pencil, RotateCcw, Bold, Italic, Underline, List, ListOrdered, Link2, Table2, Maximize2, Image as ImageIcon, AlignLeft, AlignCenter, AlignRight, AlignJustify, AlignVerticalJustifyStart, AlignVerticalJustifyCenter, AlignVerticalJustifyEnd, Trash2, Crop, Check, X } from "lucide-react";
 import { toast } from "sonner";
 import { uploadEmailAttachment } from "@/lib/email-attachments";
 import { cn } from "@/lib/utils";
@@ -119,6 +119,7 @@ export function EditableEmailPreview({
       activeImgRef.current = null;
       setImgBox(null);
       setPinned(false);
+      setCropRect(null);
     }
   }, [html, resetKey]);
 
@@ -168,6 +169,10 @@ export function EditableEmailPreview({
   // coordinates, so the handle squares can be drawn outside the contentEditable
   // (injecting them inside would pollute the HTML we send).
   const [imgBox, setImgBox] = useState<{ left: number; top: number; w: number; h: number } | null>(null);
+  // Crop rectangle (in DISPLAY px, relative to the image top-left) while cropping.
+  // null = not cropping. Drag the corners to shrink it; Apply re-renders the
+  // cropped region to a NEW hosted image so it emails cleanly.
+  const [cropRect, setCropRect] = useState<{ x: number; y: number; w: number; h: number } | null>(null);
   const activeImgRef = useRef<HTMLImageElement | null>(null);
   const resizingRef  = useRef(false);
   // A clicked image stays "selected" (pinned) so its toolbar (align + delete)
@@ -199,6 +204,7 @@ export function EditableEmailPreview({
     activeImgRef.current = null;
     setImgBox(null);
     setPinned(false);
+    setCropRect(null);
     flush();
   };
   const onSurfaceMouseMove = (e: React.MouseEvent) => {
@@ -263,7 +269,80 @@ export function EditableEmailPreview({
     document.addEventListener("mousemove", move);
     document.addEventListener("mouseup", up);
   };
+  // ── Crop the selected image ──────────────────────────────────────────────────
+  // Enter crop mode → a rectangle overlays the image; drag its corners to frame
+  // the keep-region. Apply draws that region to a canvas and re-uploads it as a
+  // fresh hosted image (email clients strip data: URIs), then swaps the src.
+  const startCrop = () => {
+    if (!imgBox) return;
+    setCropRect({ x: 0, y: 0, w: imgBox.w, h: imgBox.h });   // whole image; drag corners in
+  };
+  const cancelCrop = () => setCropRect(null);
+  const dragCropCorner = (corner: "tl" | "tr" | "bl" | "br", e: React.MouseEvent) => {
+    e.preventDefault(); e.stopPropagation();
+    if (!imgBox || !cropRect) return;
+    const startX = e.clientX, startY = e.clientY;
+    const s = { ...cropRect };
+    const maxW = imgBox.w, maxH = imgBox.h, MIN = 24;
+    const right = s.x + s.w, bottom = s.y + s.h;
+    const move = (ev: MouseEvent) => {
+      const dx = ev.clientX - startX, dy = ev.clientY - startY;
+      let { x, y, w, h } = s;
+      if (corner === "tl")      { x = Math.min(Math.max(0, s.x + dx), right - MIN); y = Math.min(Math.max(0, s.y + dy), bottom - MIN); w = right - x; h = bottom - y; }
+      else if (corner === "tr") { y = Math.min(Math.max(0, s.y + dy), bottom - MIN); w = Math.min(Math.max(MIN, s.w + dx), maxW - s.x); h = bottom - y; }
+      else if (corner === "bl") { x = Math.min(Math.max(0, s.x + dx), right - MIN); w = right - x; h = Math.min(Math.max(MIN, s.h + dy), maxH - s.y); }
+      else                      { w = Math.min(Math.max(MIN, s.w + dx), maxW - s.x); h = Math.min(Math.max(MIN, s.h + dy), maxH - s.y); }
+      setCropRect({ x, y, w, h });
+    };
+    const up = () => { document.removeEventListener("mousemove", move); document.removeEventListener("mouseup", up); };
+    document.addEventListener("mousemove", move);
+    document.addEventListener("mouseup", up);
+  };
+  const applyCrop = async () => {
+    const img = activeImgRef.current;
+    if (!img || !cropRect || !imgBox) return;
+    const dispW = imgBox.w, dispH = imgBox.h;
+    const src = img.getAttribute("src") ?? "";
+    const toastId = toast.loading("Cropping image…");
+    try {
+      // Load a fresh cross-origin copy so the canvas isn't tainted (the on-page
+      // <img> was loaded without crossOrigin). Fails cleanly if the host sends
+      // no CORS header.
+      const loaded = await new Promise<HTMLImageElement>((resolve, reject) => {
+        const im = new Image();
+        im.crossOrigin = "anonymous";
+        im.onload = () => resolve(im);
+        im.onerror = () => reject(new Error("load"));
+        im.src = src;
+      });
+      const scaleX = (loaded.naturalWidth || dispW) / dispW;
+      const scaleY = (loaded.naturalHeight || dispH) / dispH;
+      const canvas = document.createElement("canvas");
+      canvas.width  = Math.max(1, Math.round(cropRect.w * scaleX));
+      canvas.height = Math.max(1, Math.round(cropRect.h * scaleY));
+      const ctx = canvas.getContext("2d");
+      if (!ctx) throw new Error("ctx");
+      ctx.drawImage(loaded, Math.max(0, cropRect.x * scaleX), Math.max(0, cropRect.y * scaleY), canvas.width, canvas.height, 0, 0, canvas.width, canvas.height);
+      const blob = await new Promise<Blob | null>(res => canvas.toBlob(res, "image/png"));
+      if (!blob) throw new Error("blob");
+      const att = await uploadEmailAttachment(new File([blob], "cropped.png", { type: "image/png" }));
+      img.setAttribute("src", att.path);
+      const newW = Math.round(cropRect.w);
+      img.style.width = `${newW}px`;
+      img.style.maxWidth = `${newW}px`;
+      img.style.height = "auto";
+      img.setAttribute("width", String(newW));
+      img.removeAttribute("height");
+      setCropRect(null);
+      trackImage(img);
+      flush();
+      toast.success("Image cropped.", { id: toastId });
+    } catch {
+      toast.error("Couldn't crop this image — it may be hosted without cross-origin access.", { id: toastId });
+    }
+  };
   const onBodyMouseDown = (e: React.MouseEvent) => {
+    if (cropRect) { e.preventDefault(); return; }   // cropping owns all interaction
     // Image resize takes priority over cell resize / text editing.
     const handle = imgHandleAt(e.target, e.clientX, e.clientY);
     if (handle) {
@@ -720,35 +799,73 @@ export function EditableEmailPreview({
             className="pointer-events-none absolute z-20 ring-1 ring-teal-400/80"
             style={{ left: imgBox.left, top: imgBox.top, width: imgBox.w, height: imgBox.h }}
           >
-            {([
-              { k: "tl", style: { left: -5, top: -5 },     cursor: "nwse-resize", fromLeft: true  },
-              { k: "tr", style: { right: -5, top: -5 },    cursor: "nesw-resize", fromLeft: false },
-              { k: "bl", style: { left: -5, bottom: -5 },  cursor: "nesw-resize", fromLeft: true  },
-              { k: "br", style: { right: -5, bottom: -5 }, cursor: "nwse-resize", fromLeft: false },
-            ] as const).map(c => (
-              <span
-                key={c.k}
-                onMouseDown={(e) => {
-                  const img = activeImgRef.current; if (!img) return;
-                  e.preventDefault(); e.stopPropagation();
-                  beginImgResize(img, e.clientX, c.fromLeft);
-                }}
-                className="pointer-events-auto absolute h-2.5 w-2.5 rounded-[2px] border border-white bg-teal-600 shadow-sm"
-                style={{ ...c.style, cursor: c.cursor }}
-              />
-            ))}
-            {/* Align + delete toolbar — only for a SELECTED (clicked) image. */}
-            {pinned && (
-              <div
-                className="pointer-events-auto absolute -top-9 left-0 z-30 flex items-center gap-0.5 rounded-md border border-slate-200 bg-white px-1 py-0.5 shadow-md"
-                onMouseDown={(e) => e.preventDefault()}   // keep the image selected/focused
-              >
-                <button type="button" title="Align left"  onClick={() => activeImgRef.current && alignImage(activeImgRef.current, "left")}   className="rounded p-1 text-slate-600 hover:bg-slate-100"><AlignLeft className="h-3.5 w-3.5" /></button>
-                <button type="button" title="Center"      onClick={() => activeImgRef.current && alignImage(activeImgRef.current, "center")} className="rounded p-1 text-slate-600 hover:bg-slate-100"><AlignCenter className="h-3.5 w-3.5" /></button>
-                <button type="button" title="Align right" onClick={() => activeImgRef.current && alignImage(activeImgRef.current, "right")}  className="rounded p-1 text-slate-600 hover:bg-slate-100"><AlignRight className="h-3.5 w-3.5" /></button>
-                <span className="mx-0.5 h-4 w-px bg-slate-200" />
-                <button type="button" title="Delete image (or press Delete)" onClick={() => deleteImage(activeImgRef.current)} className="rounded p-1 text-rose-500 hover:bg-rose-50"><Trash2 className="h-3.5 w-3.5" /></button>
-              </div>
+            {cropRect ? (
+              <>
+                {/* Dim everything outside the crop frame (clipped to the image). */}
+                <div className="absolute inset-0 overflow-hidden">
+                  <div
+                    className="pointer-events-none absolute border border-white/90"
+                    style={{ left: cropRect.x, top: cropRect.y, width: cropRect.w, height: cropRect.h, boxShadow: "0 0 0 9999px rgba(15,23,42,0.45)" }}
+                  />
+                </div>
+                {/* Crop-frame corner handles — drag to frame the keep-region. */}
+                {([
+                  { k: "tl", cx: cropRect.x,              cy: cropRect.y,              cursor: "nwse-resize" },
+                  { k: "tr", cx: cropRect.x + cropRect.w, cy: cropRect.y,              cursor: "nesw-resize" },
+                  { k: "bl", cx: cropRect.x,              cy: cropRect.y + cropRect.h, cursor: "nesw-resize" },
+                  { k: "br", cx: cropRect.x + cropRect.w, cy: cropRect.y + cropRect.h, cursor: "nwse-resize" },
+                ] as const).map(c => (
+                  <span
+                    key={c.k}
+                    onMouseDown={(e) => dragCropCorner(c.k, e)}
+                    className="pointer-events-auto absolute h-3 w-3 -translate-x-1/2 -translate-y-1/2 rounded-[2px] border border-white bg-teal-600 shadow"
+                    style={{ left: c.cx, top: c.cy, cursor: c.cursor }}
+                  />
+                ))}
+                {/* Apply / cancel the crop. */}
+                <div
+                  className="pointer-events-auto absolute -top-9 left-0 z-30 flex items-center gap-0.5 rounded-md border border-slate-200 bg-white px-1 py-0.5 shadow-md"
+                  onMouseDown={(e) => e.preventDefault()}
+                >
+                  <button type="button" title="Apply crop" onClick={applyCrop} className="rounded p-1 text-teal-600 hover:bg-teal-50"><Check className="h-3.5 w-3.5" /></button>
+                  <button type="button" title="Cancel crop" onClick={cancelCrop} className="rounded p-1 text-slate-500 hover:bg-slate-100"><X className="h-3.5 w-3.5" /></button>
+                </div>
+              </>
+            ) : (
+              <>
+                {([
+                  { k: "tl", style: { left: -5, top: -5 },     cursor: "nwse-resize", fromLeft: true  },
+                  { k: "tr", style: { right: -5, top: -5 },    cursor: "nesw-resize", fromLeft: false },
+                  { k: "bl", style: { left: -5, bottom: -5 },  cursor: "nesw-resize", fromLeft: true  },
+                  { k: "br", style: { right: -5, bottom: -5 }, cursor: "nwse-resize", fromLeft: false },
+                ] as const).map(c => (
+                  <span
+                    key={c.k}
+                    onMouseDown={(e) => {
+                      const img = activeImgRef.current; if (!img) return;
+                      e.preventDefault(); e.stopPropagation();
+                      beginImgResize(img, e.clientX, c.fromLeft);
+                    }}
+                    className="pointer-events-auto absolute h-2.5 w-2.5 rounded-[2px] border border-white bg-teal-600 shadow-sm"
+                    style={{ ...c.style, cursor: c.cursor }}
+                  />
+                ))}
+                {/* Align + crop + delete toolbar — only for a SELECTED (clicked) image. */}
+                {pinned && (
+                  <div
+                    className="pointer-events-auto absolute -top-9 left-0 z-30 flex items-center gap-0.5 rounded-md border border-slate-200 bg-white px-1 py-0.5 shadow-md"
+                    onMouseDown={(e) => e.preventDefault()}   // keep the image selected/focused
+                  >
+                    <button type="button" title="Align left"  onClick={() => activeImgRef.current && alignImage(activeImgRef.current, "left")}   className="rounded p-1 text-slate-600 hover:bg-slate-100"><AlignLeft className="h-3.5 w-3.5" /></button>
+                    <button type="button" title="Center"      onClick={() => activeImgRef.current && alignImage(activeImgRef.current, "center")} className="rounded p-1 text-slate-600 hover:bg-slate-100"><AlignCenter className="h-3.5 w-3.5" /></button>
+                    <button type="button" title="Align right" onClick={() => activeImgRef.current && alignImage(activeImgRef.current, "right")}  className="rounded p-1 text-slate-600 hover:bg-slate-100"><AlignRight className="h-3.5 w-3.5" /></button>
+                    <span className="mx-0.5 h-4 w-px bg-slate-200" />
+                    <button type="button" title="Crop image" onClick={startCrop} className="rounded p-1 text-slate-600 hover:bg-slate-100"><Crop className="h-3.5 w-3.5" /></button>
+                    <span className="mx-0.5 h-4 w-px bg-slate-200" />
+                    <button type="button" title="Delete image (or press Delete)" onClick={() => deleteImage(activeImgRef.current)} className="rounded p-1 text-rose-500 hover:bg-rose-50"><Trash2 className="h-3.5 w-3.5" /></button>
+                  </div>
+                )}
+              </>
             )}
           </div>
         )}
@@ -762,7 +879,7 @@ export function EditableEmailPreview({
             // A selected image: Delete/Backspace removes it, Escape deselects.
             if (pinned && activeImgRef.current) {
               if (e.key === "Delete" || e.key === "Backspace") { e.preventDefault(); deleteImage(activeImgRef.current); return; }
-              if (e.key === "Escape") { setPinned(false); trackImage(null); }
+              if (e.key === "Escape") { setPinned(false); setCropRect(null); trackImage(null); }
             }
           }}
           onKeyUp={saveSelection}
