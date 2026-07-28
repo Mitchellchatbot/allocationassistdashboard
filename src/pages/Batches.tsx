@@ -158,7 +158,7 @@ export default function Batches() {
         target={dialogTarget}
         onTargetChange={setDialogTarget}
         batches={batches}
-        suggestedSpecialty={rotation && rotation.queue.length > 0 ? rotation.queue[rotation.effective_cursor_index] ?? null : null}
+        suggestedSpecialty={rotation?.queue?.length ? rotation.queue[rotation.effective_cursor_index] ?? null : null}
       />
     </DashboardLayout>
   );
@@ -807,9 +807,9 @@ function SpecialtyRotationCard({ rotation }: { rotation: ReturnType<typeof useSp
             <div>
               <div className="text-[10px] uppercase tracking-wider text-muted-foreground mb-1.5">Next up</div>
               <div className="flex items-center gap-1.5 flex-wrap">
-                {upcoming.slice(1, 6).map((s) => (
+                {upcoming.slice(1, 6).map((s, si) => (
                   <Badge
-                    key={s}
+                    key={`${s}-${si}`}
                     variant="outline"
                     className="bg-slate-50 text-slate-700 border-slate-200 text-[10px] uppercase tracking-wider"
                   >
@@ -1261,9 +1261,26 @@ function BatchDialog({ target, onTargetChange, batches, suggestedSpecialty }: {
     setBatchBcc([]);            // region override replaces any manual additions
     setExcludedEmails([]);      // start fresh — nothing excluded within the region
     if (inRegion[0]?.id) setPreviewGreetId(inRegion[0].id);  // greet a region hospital in the sample
+    void repreviewWith(emails);   // re-render so bcc_count + subject/city match the region
     toast.success(`Now sending to only ${label} (${emails.length} hospital${emails.length === 1 ? "" : "s"}).`);
   };
-  const clearRegionOnly = () => { setRegionOnly(null); toast.message("Back to the batch's country hospitals."); };
+  const clearRegionOnly = () => { setRegionOnly(null); void repreviewWith(null); toast.message("Back to the batch's country hospitals."); };
+  // Re-run the dry-run preview with (or without) a region recipient override so
+  // the previewed subject/city + bcc_count reflect what actually sends. Re-seeds
+  // the editable panes; region is normally picked before hand-editing.
+  const repreviewWith = async (overrideEmails: string[] | null) => {
+    if (!batch) return;
+    try {
+      const p = await previewMut.mutateAsync({ batchId: batch.id, force: batch.status === "sent", recipientEmailsOverride: overrideEmails ?? undefined });
+      setEmailPreview(prev => prev ? { ...prev, subject: p.subject, html: p.html, text: p.text, bcc_count: p.bcc_count, per_doctor: p.per_doctor ?? [], doctor_emails: p.doctor_emails ?? [], test_mode: p.test_mode, test_recipient: p.test_recipient } : prev);
+      setEditSubject(p.subject); setEditHtml(p.html);
+      setEditDoctorSubject(p.doctor_email?.subject ?? ""); setEditDoctorHtml(p.doctor_email?.html ?? "");
+      setPerDoctor((p.per_doctor ?? []).map(d => ({ subject: d.subject, html: d.html })));
+      setPerDoctorNote((p.doctor_emails ?? []).map(d => ({ subject: d.subject, html: d.html })));
+      setHospitalTab(0); setDoctorTab(0);
+      setPreviewResetTick(t => t + 1);
+    } catch (e) { toast.error(e instanceof Error ? e.message : "Preview failed"); }
+  };
   // The recipient list actually going out (before per-hospital exclusions): the
   // region override when set, else the batch-country eligible hospitals.
   const recipientOverrideEmails = regionOnly
@@ -2266,7 +2283,11 @@ function BatchDialog({ target, onTargetChange, batches, suggestedSpecialty }: {
                         ...(perDoctorList.some((_, i) => perDoctorEdited(i))
                           ? { perDoctorHtmlOverride: perDoctorList.map((_, i) => perDoctorEdited(i) ? (perDoctor[i]?.html ?? "") : "") }
                           : {}),
-                        ...(perDoctor[0] && perDoctor[0].subject !== perDoctorList[0].subject ? { subjectOverride: perDoctor[0].subject } : {}),
+                        // Per-doctor subjects (index-aligned) — a subject edit on
+                        // doctor N stays on doctor N's email, not doctor 0's.
+                        ...(perDoctorList.some((d, i) => (perDoctor[i]?.subject ?? d.subject) !== d.subject)
+                          ? { perDoctorSubjectOverride: perDoctorList.map((d, i) => { const s = perDoctor[i]?.subject ?? d.subject; return s !== d.subject ? s : ""; }) }
+                          : {}),
                       }
                     : (batchEdited ? { subjectOverride: editSubject, htmlOverride: editHtml } : {})),
                   // Doctor leg: per-profile bodies when we have them, else the

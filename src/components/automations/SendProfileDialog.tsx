@@ -25,6 +25,7 @@ import * as DialogPrimitive from "@radix-ui/react-dialog";
 import { EditableEmailPreview } from "@/components/EditableEmailPreview";
 import { humanizePlaceholders, stripPlaceholderPills } from "@/lib/humanize-placeholders";
 import { EmailPreviewStudioLayout, type StudioEmail } from "@/components/EmailPreviewStudio";
+import { MailModeBanner } from "@/components/MailModeBanner";
 import { EmailFrame } from "@/components/EmailFrame";
 import { wrapBodyForSend } from "@/lib/email-preview";
 import { type EmailAttachment } from "@/lib/email-attachments";
@@ -506,6 +507,10 @@ function SendProfileDialogBody({ onClose, initial }: { onClose: () => void; init
       // Cycle-mode cursor advances, applied after the runs are created so the
       // next send to each hospital rotates to its next contact.
       const cursorAdvances: { id: string; name: string; next: number }[] = [];
+      // Collect the ids the inserts return, in order — so we send exactly the
+      // runs we created. (Re-querying by batch_id could miss a just-inserted row
+      // that isn't visible yet → that hospital would never get sent.)
+      const createdRunIds: string[] = [];
       for (const h of selectedHospitals) {
         // Resolve THIS send's recipient from the hospital's Zoho contacts +
         // routing mode (primary vs cycle), honouring a manual override. Falls
@@ -609,6 +614,7 @@ function SendProfileDialogBody({ onClose, initial }: { onClose: () => void; init
         if (runErr) throw runErr;
         if (!runRow) continue;
         const runId = runRow.id;
+        createdRunIds.push(runId);
 
         // Seed the trigger + the two outgoing-email events.
         // Marked `event_type='entered'` rather than `email_sent` until the
@@ -648,28 +654,23 @@ function SendProfileDialogBody({ onClose, initial }: { onClose: () => void; init
       // email automatically once the hospital send advances the stage.
       let sent = 0, failed = 0;
       const lastFailMsg: { msg: string | null } = { msg: null };
-      // Refetch the runs we just created so we have their IDs in order. The
-      // `batchId` shared across all of them lets us pick out just this batch.
-      const { data: createdRuns } = await supabase
-        .from("automation_flow_runs")
-        .select("id")
-        .filter("metadata->>batch_id", "eq", batchId);
-      for (const r of createdRuns ?? []) {
-        try {
-          const { data: sendResp, error: sendErr } = await supabase.functions.invoke("send-flow-email", {
-            // Edits ride along in the run's metadata.stage_overrides (set above),
-            // so both the hospital email and the auto-continued doctor email
-            // pick up their own edited version.
-            body: { run_id: r.id },
-          });
-          if (sendErr) throw sendErr;
-          const resp = sendResp as { ok: boolean; error?: string };
-          if (!resp?.ok) throw new Error(resp?.error ?? "Send failed");
-          sent++;
-        } catch (e) {
-          failed++;
-          lastFailMsg.msg = e instanceof Error ? e.message : "unknown";
-        }
+      // Send exactly the runs we created, using the ids the inserts returned
+      // (no refetch — that could skip a not-yet-visible row). A small concurrency
+      // pool keeps a 20-hospital send from being 20 serial round-trips while
+      // staying under Resend's rate limit.
+      const POOL = 4;
+      for (let i = 0; i < createdRunIds.length; i += POOL) {
+        const slice = createdRunIds.slice(i, i + POOL);
+        const results = await Promise.all(slice.map(async (id) => {
+          try {
+            const { data: sendResp, error: sendErr } = await supabase.functions.invoke("send-flow-email", { body: { run_id: id } });
+            if (sendErr) throw sendErr;
+            const resp = sendResp as { ok: boolean; error?: string };
+            if (!resp?.ok) throw new Error(resp?.error ?? "Send failed");
+            return true;
+          } catch (e) { lastFailMsg.msg = e instanceof Error ? e.message : "unknown"; return false; }
+        }));
+        for (const okr of results) okr ? sent++ : failed++;
       }
 
       if (failed === 0) {
@@ -763,6 +764,7 @@ function SendProfileDialogBody({ onClose, initial }: { onClose: () => void; init
               railFill
               headerExtra={
                 <div className="flex h-full min-h-0 flex-col gap-2">
+                  {step === "pick-hospitals" && <MailModeBanner liveCount={selectedHospitals.length} liveWhat="hospital" />}
                   <Stepper step={step} />
                   <div className="min-h-0 flex-1">
                     {step === "pick-doctor" ? (

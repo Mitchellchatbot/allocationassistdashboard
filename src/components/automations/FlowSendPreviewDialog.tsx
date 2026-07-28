@@ -22,6 +22,7 @@ import { supabase } from "@/lib/supabase";
 import { toast } from "sonner";
 import { EditableEmailPreview } from "@/components/EditableEmailPreview";
 import { EmailPreviewStudio, type StudioEmail } from "@/components/EmailPreviewStudio";
+import { MailModeBanner } from "@/components/MailModeBanner";
 import { AttachmentsPicker } from "@/components/automations/AttachmentsPicker";
 import { CcBccPicker, isEmail } from "@/components/automations/CcBccPicker";
 import type { EmailAttachment } from "@/lib/email-attachments";
@@ -154,6 +155,7 @@ export function FlowSendPreviewDialog({
 
   const headerExtra = (
     <div className="space-y-2">
+      <MailModeBanner liveCount={1} liveWhat="recipient" />
       <div className="rounded-lg border border-sidebar-border/40 bg-white/95 p-2.5 text-[11px] text-slate-500 shadow-sm">
         {edited
           ? <span className="font-medium text-teal-700">Edited — your version sends, not the template.</span>

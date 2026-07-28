@@ -268,7 +268,10 @@ export function useUpdateBatch() {
       const c = ctx as { prev?: ScheduledBatch[] } | undefined;
       if (c?.prev) qc.setQueryData(BATCHES_KEY, c.prev);
     },
-    onSettled: () => qc.invalidateQueries({ queryKey: BATCHES_KEY }),
+    // No onSettled invalidate: the optimistic patch already reflects our own
+    // write, and the realtime subscription on scheduled_batch_sends reconciles
+    // it once. Invalidating here too caused a double refetch of the 200-row list
+    // on every doctor toggle (and 4× when Daily-Duo card prep also writes).
   });
 }
 
@@ -321,6 +324,7 @@ export function useSendBatchNow() {
         // doctor (index-aligned with the queue) — a single htmlOverride would
         // put the same doctor in every email.
         perDoctorHtmlOverride?: string[];
+        perDoctorSubjectOverride?: string[];
         // Same, for the optional doctor "working opportunity" email. Each doctor
         // has their own editable pane, so bodies ship as an array.
         doctorSubjectOverride?: string; doctorHtmlOverride?: string;
@@ -348,6 +352,7 @@ export function useSendBatchNow() {
         ...(input.htmlOverride    ? { html_override:    input.htmlOverride }    : {}),
         ...(input.textOverride    ? { text_override:    input.textOverride }    : {}),
         ...(input.perDoctorHtmlOverride?.some(Boolean) ? { per_doctor_html_override: input.perDoctorHtmlOverride } : {}),
+        ...(input.perDoctorSubjectOverride?.some(Boolean) ? { per_doctor_subject_override: input.perDoctorSubjectOverride } : {}),
         ...(input.doctorSubjectOverride ? { doctor_subject_override: input.doctorSubjectOverride } : {}),
         ...(input.doctorHtmlOverride    ? { doctor_html_override:    input.doctorHtmlOverride }    : {}),
         ...(input.doctorHtmlOverrides?.some(Boolean) ? { doctor_html_overrides: input.doctorHtmlOverrides } : {}),

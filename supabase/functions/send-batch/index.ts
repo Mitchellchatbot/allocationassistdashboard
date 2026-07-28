@@ -92,6 +92,7 @@ Deno.serve(async (req: Request) => {
     subject_override?: string; html_override?: string; text_override?: string;
     // Daily Duo sends one email per doctor, so edits arrive one body per doctor.
     per_doctor_html_override?: string[];
+    per_doctor_subject_override?: string[];
     // Same, for the optional doctor "working opportunity" email leg. Each doctor
     // gets their own email, so edits arrive as an array (the singular form is
     // still honoured and applies to every doctor).
@@ -347,60 +348,77 @@ Deno.serve(async (req: Request) => {
   const normName = (n: unknown): string => String(n ?? "").toLowerCase().replace(/\s+/g, " ").trim();
   const WP_COLS = "id, doctor_id, status, full_name, job_title, email, phone, date_of_birth, nationality, specialty, subspecialty, area_of_interest, years_experience, license_status, family_status, expected_salary, notice_period, country_of_training, current_location, languages, english_level, targeted_locations, cv_url, wp_link";
 
-  // Two-phase for speed: scan a LIGHTWEIGHT index (5 small columns) over all
-  // published candidates to find each queued doctor's matching id, then fetch
-  // the FULL row for only the handful of matched ids. Loading every column for
-  // all ~1.3k candidates made the preview take ~7s; this keeps it snappy.
+  // Resolve each queued doctor → WP candidate. TARGETED queries (id / linked
+  // doctor_id / email) for the 2–15 doctors we actually need — NOT a scan of the
+  // whole candidate table, which used to dominate preview/send latency (~7s). A
+  // bounded fallback scan runs ONLY if a doctor can't be matched that way (rare:
+  // a Zoho-only doctor matched by phone/name), so matching never regresses.
   const wpForDoctor = new Map<string, Record<string, unknown>>();
   {
-    const idByDoctorId = new Map<string, number>();
-    const idByWpKey    = new Map<string, number>();
-    const idByPhone    = new Map<string, number>();
-    const idByEmail    = new Map<string, number>();
-    const idByName     = new Map<string, number>();
-    const PAGE = 1000;
-    for (let from = 0; from < 50000; from += PAGE) {
-      const { data } = await supabase
-        .from("wordpress_candidates")
-        .select("id, doctor_id, phone, email, full_name")
-        .eq("status", "publish")
-        .range(from, from + PAGE - 1);
-      const batch = (data ?? []) as Array<{ id: number; doctor_id: string | null; phone: string | null; email: string | null; full_name: string | null }>;
-      for (const w of batch) {
-        idByWpKey.set(`wp:${w.id}`, w.id);
-        if (w.doctor_id) idByDoctorId.set(String(w.doctor_id), w.id);
-        const ph = phoneKey(w.phone);                          if (ph && !idByPhone.has(ph)) idByPhone.set(ph, w.id);
-        const em = String(w.email ?? "").toLowerCase().trim(); if (em && !idByEmail.has(em)) idByEmail.set(em, w.id);
-        const nm = normName(w.full_name);                      if (nm && !idByName.has(nm)) idByName.set(nm, w.id);
-      }
-      if (batch.length < PAGE) break;
-    }
-
-    // Resolve each queued doctor → candidate id, same keys/priority as the
-    // picker (linked doctor_id → website id → phone → email → name).
-    const matchedIdByDoctor = new Map<string, number>();
+    // Per-doctor match keys (same priority as the picker).
+    const zByDid = new Map<string, { zphone: string; zemail: string; zname: string }>();
+    const wpIds: number[] = [], doctorIdVals: string[] = [], emails: string[] = [];
     for (const did of doctorIds) {
+      if (did.startsWith("wp:")) { const n = Number(did.slice(3)); if (Number.isFinite(n)) wpIds.push(n); }
+      else doctorIdVals.push(did);
       const lead = leadById.get(did); const dob = dobById.get(did);
       const zphone = phoneKey(lead?.Mobile ?? lead?.Phone ?? dob?.Mobile ?? dob?.Phone);
       const zemail = String((lead?.Email ?? dob?.Email ?? "")).toLowerCase().trim();
       const zname  = normName((lead?.Full_Name ?? dob?.Full_Name)
                       || `${lead?.First_Name ?? dob?.First_Name ?? ""} ${lead?.Last_Name ?? dob?.Last_Name ?? ""}`);
-      const id = idByDoctorId.get(did)
-              ?? idByWpKey.get(did)
-              ?? (zphone ? idByPhone.get(zphone) : undefined)
-              ?? (zemail ? idByEmail.get(zemail) : undefined)
-              ?? (zname  ? idByName.get(zname)   : undefined);
-      if (id != null) matchedIdByDoctor.set(did, id);
+      zByDid.set(did, { zphone, zemail, zname });
+      if (zemail) emails.push(zemail);
     }
 
-    // Fetch full data for just the matched ids.
-    const matchedIds = [...new Set([...matchedIdByDoctor.values()])];
-    if (matchedIds.length) {
-      const { data } = await supabase.from("wordpress_candidates").select(WP_COLS).in("id", matchedIds);
-      const fullById = new Map<number, Record<string, unknown>>();
-      for (const w of (data ?? []) as Array<Record<string, unknown>>) fullById.set(Number(w.id), w);
-      for (const [did, id] of matchedIdByDoctor) {
-        const full = fullById.get(id);
+    const fetched = new Map<number, Record<string, unknown>>();   // id → full row
+    const absorb = (rows: Array<Record<string, unknown>> | null | undefined) => { for (const w of rows ?? []) fetched.set(Number(w.id), w); };
+    await Promise.all([
+      wpIds.length        ? supabase.from("wordpress_candidates").select(WP_COLS).in("id", [...new Set(wpIds)]).then(r => absorb(r.data as Array<Record<string, unknown>>)) : Promise.resolve(),
+      doctorIdVals.length ? supabase.from("wordpress_candidates").select(WP_COLS).eq("status", "publish").in("doctor_id", [...new Set(doctorIdVals)]).then(r => absorb(r.data as Array<Record<string, unknown>>)) : Promise.resolve(),
+      emails.length       ? supabase.from("wordpress_candidates").select(WP_COLS).eq("status", "publish").in("email", [...new Set(emails)]).then(r => absorb(r.data as Array<Record<string, unknown>>)) : Promise.resolve(),
+    ]);
+
+    const idByDoctorId = new Map<string, number>();
+    const idByWpKey    = new Map<string, number>();
+    const idByPhone    = new Map<string, number>();
+    const idByEmail    = new Map<string, number>();
+    const idByName     = new Map<string, number>();
+    const indexRow = (w: Record<string, unknown>) => {
+      const id = Number(w.id);
+      idByWpKey.set(`wp:${id}`, id);
+      if (w.doctor_id) idByDoctorId.set(String(w.doctor_id), id);
+      const ph = phoneKey(w.phone);                          if (ph && !idByPhone.has(ph)) idByPhone.set(ph, id);
+      const em = String(w.email ?? "").toLowerCase().trim(); if (em && !idByEmail.has(em)) idByEmail.set(em, id);
+      const nm = normName(w.full_name);                      if (nm && !idByName.has(nm)) idByName.set(nm, id);
+    };
+    for (const w of fetched.values()) indexRow(w);
+    const resolve = (did: string): number | undefined => {
+      const z = zByDid.get(did);
+      return idByDoctorId.get(did) ?? idByWpKey.get(did)
+        ?? (z?.zphone ? idByPhone.get(z.zphone) : undefined)
+        ?? (z?.zemail ? idByEmail.get(z.zemail) : undefined)
+        ?? (z?.zname  ? idByName.get(z.zname)   : undefined);
+    };
+
+    // Bounded fallback: only if a doctor is still unresolved (needs phone/name
+    // match against a candidate we didn't already fetch). Breaks early once all
+    // are resolved, so the common (all-WP-linked) case never scans.
+    let unresolved = doctorIds.filter(did => resolve(did) == null);
+    if (unresolved.length) {
+      const PAGE = 1000;
+      for (let from = 0; from < 50000; from += PAGE) {
+        const { data } = await supabase.from("wordpress_candidates").select(WP_COLS).eq("status", "publish").range(from, from + PAGE - 1);
+        const rows = (data ?? []) as Array<Record<string, unknown>>;
+        for (const w of rows) { const id = Number(w.id); if (!fetched.has(id)) { fetched.set(id, w); indexRow(w); } }
+        unresolved = unresolved.filter(did => resolve(did) == null);
+        if (rows.length < PAGE || unresolved.length === 0) break;
+      }
+    }
+
+    {
+      for (const did of doctorIds) {
+        const id = resolve(did);
+        const full = id != null ? fetched.get(id) : undefined;
         if (full) wpForDoctor.set(did, full);
       }
     }
@@ -664,7 +682,13 @@ ${SIGNATURE_HTML}`;
     let total = 0;
     for (const a of list) {
       try {
-        const res = await fetch(a.path);
+        // 10s cap per file: a hung storage URL must NOT stall the whole send past
+        // the client's 90s timeout — that showed the user a failure while the
+        // function kept running, and a retry then double-sent the batch.
+        const ctrl = new AbortController();
+        const t = setTimeout(() => ctrl.abort(), 10_000);
+        let res: Response;
+        try { res = await fetch(a.path, { signal: ctrl.signal }); } finally { clearTimeout(t); }
         if (!res.ok) { console.warn(`[send-batch] ${tag} "${a.filename}" HTTP ${res.status} — skipping`); continue; }
         const bytes = new Uint8Array(await res.arrayBuffer());
         if (bytes.byteLength === 0 || total + bytes.byteLength > MAX_TOTAL_ATTACH_BYTES) { console.warn(`[send-batch] ${tag} "${a.filename}" empty/oversized — skipping`); continue; }
@@ -695,14 +719,22 @@ ${SIGNATURE_HTML}`;
   const perDoctorOverrides: string[] = Array.isArray(body.per_doctor_html_override)
     ? (body.per_doctor_html_override as unknown[]).map(v => typeof v === "string" ? v.trim() : "")
     : [];
+  // Per-doctor SUBJECT edits, index-aligned with sendBlocks. A single
+  // subject_override was previously applied to whichever doctor happened to have
+  // a body edit — so doctor #2's email got doctor #0's subject, and subject-only
+  // edits were dropped entirely.
+  const perDoctorSubjects: string[] = Array.isArray(body.per_doctor_subject_override)
+    ? (body.per_doctor_subject_override as unknown[]).map(v => typeof v === "string" ? v.trim() : "")
+    : [];
   const emails = targets.flatMap((h) =>
     sendBlocks.map((blk, di) => {
       // Preview edits: per-doctor mode carries one edited body per doctor (a
       // single html_override would send the SAME doctor to every slot).
       const ov = perDoctorMode ? (perDoctorOverrides[di] ?? "") : editedHtml;
       const fresh = renderFor(greetingFor(h), h.city, blk.html, blk.text);
-      const rendered = ov
-        ? { subject: editedSubject || fresh.subject, html: wrapHtml(ov), text: (perDoctorMode ? "" : editedText) || stripHtml(ov) }
+      const subjOv = perDoctorMode ? (perDoctorSubjects[di] || editedSubject) : editedSubject;
+      const rendered = (ov || subjOv)
+        ? { subject: subjOv || fresh.subject, html: ov ? wrapHtml(ov) : fresh.html, text: ov ? ((perDoctorMode ? "" : editedText) || stripHtml(ov)) : fresh.text }
         : fresh;
       // Live To = this hospital's resolved list (one recruiter email, or EVERY
       // eligible contact for an 'all'-mode hospital), minus any batch-excluded /
@@ -733,15 +765,22 @@ ${SIGNATURE_HTML}`;
   // and failed the whole send (the Top-15-with-CC bug).
   const usePerEmail = builtAttachments.length > 0 || extraCc.length > 0 || extraBcc.length > 0;
   let sentCount = 0, failedCount = 0, messageId = "", lastError = "";
+  // Retry a transient failure (429 rate-limit / 5xx) with backoff before giving
+  // up — a single blip used to silently drop up to 100 hospitals.
+  const postWithRetry = async (url: string, body: unknown): Promise<Response> => {
+    let res!: Response;
+    for (let attempt = 0; attempt < 3; attempt++) {
+      res = await fetch(url, { method: "POST", headers: { "Authorization": `Bearer ${RESEND_API_KEY}`, "Content-Type": "application/json" }, body: JSON.stringify(body) });
+      if (res.ok || (res.status !== 429 && res.status < 500)) return res;   // success or a non-transient error
+      await new Promise(r => setTimeout(r, 500 * (attempt + 1)));
+    }
+    return res;
+  };
   try {
     if (!usePerEmail) {
       for (let i = 0; i < emails.length; i += 100) {
         const chunk = emails.slice(i, i + 100);
-        const res = await fetch("https://api.resend.com/emails/batch", {
-          method:  "POST",
-          headers: { "Authorization": `Bearer ${RESEND_API_KEY}`, "Content-Type": "application/json" },
-          body:    JSON.stringify(chunk),
-        });
+        const res = await postWithRetry("https://api.resend.com/emails/batch", chunk);
         const txt = await res.text();
         if (!res.ok) { failedCount += chunk.length; lastError = `Resend batch ${res.status}: ${txt.slice(0, 200)}`; continue; }
         sentCount += chunk.length;
@@ -749,11 +788,7 @@ ${SIGNATURE_HTML}`;
       }
     } else {
       for (const payload of emails) {
-        const res = await fetch("https://api.resend.com/emails", {
-          method:  "POST",
-          headers: { "Authorization": `Bearer ${RESEND_API_KEY}`, "Content-Type": "application/json" },
-          body:    JSON.stringify(payload),
-        });
+        const res = await postWithRetry("https://api.resend.com/emails", payload);
         const txt = await res.text();
         if (res.ok) { sentCount++; if (!messageId) { try { messageId = (JSON.parse(txt) as { id?: string }).id ?? ""; } catch { /* */ } } }
         else { failedCount++; lastError = `Resend ${res.status}: ${txt.slice(0, 200)}`; }

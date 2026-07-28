@@ -285,8 +285,15 @@ Deno.serve(async (req: Request) => {
     // consulted when the run's metadata has no per-stage attachments, and NOT
     // forwarded to auto-continue sends (they re-invoke with run_id only).
     attachments?: Array<{ filename?: string; path?: string }>;
+    // Lightweight status probe — returns whether the test-inbox override is on,
+    // so the profile/flow previews can show the same "test vs LIVE" banner the
+    // batch/bulk previews do. No send, no run needed.
+    action?: string;
   };
   try { body = await req.json(); } catch { return json({ ok: false, error: "Invalid JSON body" }, 400); }
+  if (body.action === "test_status") {
+    return json({ ok: true, test_mode: TEST_OVERRIDE_LIST.length > 0, test_recipient: TEST_OVERRIDE || null }, 200);
+  }
   const runId = body.run_id;
   const dryRun = !!body.dry_run;
   const force  = !!body.force;  // explicit override to re-send even if already sent

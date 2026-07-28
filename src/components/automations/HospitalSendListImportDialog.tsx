@@ -4,7 +4,9 @@ import { Button } from "@/components/ui/button";
 import { Checkbox } from "@/components/ui/checkbox";
 import { Loader2, Upload, CheckCircle2, AlertTriangle, Ban, PlusCircle } from "lucide-react";
 import { toast } from "sonner";
-import { useHospitals, useCreateHospital, useUpdateHospital, type Hospital, type HospitalInput } from "@/hooks/use-hospitals";
+import { useQueryClient } from "@tanstack/react-query";
+import { supabase } from "@/lib/supabase";
+import { useHospitals, type Hospital, type HospitalInput } from "@/hooks/use-hospitals";
 import { HOSPITAL_SENDLIST, type SendListEntry } from "@/lib/hospital-sendlist";
 
 /** Normalise a hospital name for fuzzy matching (drop generic words + punctuation). */
@@ -76,8 +78,7 @@ function buildChanges(entry: SendListEntry, h: Hospital | null): Change[] {
 
 export function HospitalSendListImportDialog({ open, onClose }: { open: boolean; onClose: () => void }) {
   const { data: hospitals = [] } = useHospitals();
-  const createHospital = useCreateHospital();
-  const updateHospital = useUpdateHospital();
+  const qc = useQueryClient();
   const [applying, setApplying] = useState<{ done: number; total: number } | null>(null);
   const [skip, setSkip] = useState<Set<string>>(new Set());   // entry names the user unchecked
 
@@ -115,15 +116,24 @@ export function HospitalSendListImportDialog({ open, onClose }: { open: boolean;
     if (selected.length === 0) { toast.error("Nothing selected to apply."); return; }
     setApplying({ done: 0, total: selected.length });
     let ok = 0, fail = 0;
+    // Write directly and invalidate ONCE at the end — going through the per-row
+    // mutation hooks would refetch the whole (limit-5000) hospitals table after
+    // every one of the ~110 writes.
     for (const r of selected) {
       try {
         const patch = Object.assign({}, ...r.changes.map(c => c.patch)) as Partial<Hospital>;
-        if (r.match) await updateHospital.mutateAsync({ id: r.match.id, name: r.match.name, ...patch });
-        else await createHospital.mutateAsync(patch as HospitalInput);
+        if (r.match) {
+          const { error } = await supabase.from("hospitals").update({ ...patch, updated_at: new Date().toISOString() }).eq("id", r.match.id);
+          if (error) throw error;
+        } else {
+          const { error } = await supabase.from("hospitals").insert(patch as HospitalInput);
+          if (error) throw error;
+        }
         ok++;
       } catch { fail++; }
       setApplying(p => p && { ...p, done: p.done + 1 });
     }
+    await qc.invalidateQueries({ queryKey: ["hospitals"] });
     setApplying(null);
     if (fail === 0) toast.success(`Applied ${ok} hospital update${ok === 1 ? "" : "s"}.`);
     else toast.warning(`${ok} applied, ${fail} failed.`);

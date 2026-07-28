@@ -7,8 +7,7 @@ import { Textarea } from "@/components/ui/textarea";
 import { Badge } from "@/components/ui/badge";
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription, DialogFooter } from "@/components/ui/dialog";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
-import { Hospital as HospitalIcon, Plus, Pencil, Trash2, Search, Save, ChevronRight, ChevronDown, Upload } from "lucide-react";
-import { HospitalSendListImportDialog } from "@/components/automations/HospitalSendListImportDialog";
+import { Hospital as HospitalIcon, Plus, Pencil, Trash2, Search, Save, ChevronRight, ChevronDown } from "lucide-react";
 import { toast } from "sonner";
 import {
   useHospitals, useCreateHospital, useUpdateHospital, useDeleteHospital,
@@ -162,7 +161,6 @@ export function HospitalsTab() {
   const [search,  setSearch]  = useState("");
   const [editing, setEditing] = useState<Hospital | null>(null);
   const [creating, setCreating] = useState(false);
-  const [importOpen, setImportOpen] = useState(false);
   const [expandedId, setExpandedId] = useState<string | null>(null);
   const contacts = useHospitalContacts();
 
@@ -210,14 +208,9 @@ export function HospitalsTab() {
                 Saif's full 95-hospital list will be loaded here; seeded entries are starter rows for the demo.
               </CardDescription>
             </div>
-            <div className="flex items-center gap-2">
-              <Button size="sm" variant="outline" onClick={() => setImportOpen(true)}>
-                <Upload className="h-3.5 w-3.5 mr-1" /> Import send-list
-              </Button>
-              <Button size="sm" onClick={() => setCreating(true)}>
-                <Plus className="h-3.5 w-3.5 mr-1" /> Add hospital
-              </Button>
-            </div>
+            <Button size="sm" onClick={() => setCreating(true)}>
+              <Plus className="h-3.5 w-3.5 mr-1" /> Add hospital
+            </Button>
           </div>
         </CardHeader>
         <CardContent className="space-y-3">
@@ -360,7 +353,6 @@ export function HospitalsTab() {
           toast.success(`Updated ${input.name}`);
         }}
       />
-      <HospitalSendListImportDialog open={importOpen} onClose={() => setImportOpen(false)} />
     </div>
   );
 }

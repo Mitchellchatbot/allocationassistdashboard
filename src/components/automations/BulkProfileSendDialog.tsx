@@ -74,6 +74,7 @@ export function BulkProfileSendDialog({ open, onClose }: { open: boolean; onClos
   const [hospHtml,    setHospHtml]    = useState("");
   const [docSubject,  setDocSubject]  = useState("");
   const [docHtml,     setDocHtml]     = useState("");
+  const [resetTick,   setResetTick]   = useState(0);   // bump to re-seed the studio editors (Reset / open)
   // Per-email attachments — the hospital email and the doctor email carry their
   // own separate files (item 13: "attach attachments for each email separately").
   const [hospAttachments, setHospAttachments] = useState<EmailAttachment[]>([]);
@@ -95,6 +96,10 @@ export function BulkProfileSendDialog({ open, onClose }: { open: boolean; onClos
   // renders), newest first. Key by a stable identity that send-flow-email can
   // resolve back to the profile (linked Zoho id when present, else wp:<id>).
   const docPool = useMemo(() => {
+    // Dedupe by `key` — two published WP candidates can link to the SAME Zoho
+    // doctor_id, which would collide as a React key AND make one checkbox toggle
+    // both (selection is a Set of keys).
+    const seen = new Set<string>();
     return candidates
       .filter(c => (c.full_name ?? "").trim())
       .map(c => ({
@@ -104,7 +109,8 @@ export function BulkProfileSendDialog({ open, onClose }: { open: boolean; onClos
         email:      c.email ?? null,
         phone:      c.phone ?? null,
         speciality: c.specialty ?? null,
-      }));
+      }))
+      .filter(d => { if (seen.has(d.key)) return false; seen.add(d.key); return true; });
   }, [candidates]);
 
   const docFiltered = useMemo(() => {
@@ -324,6 +330,7 @@ export function BulkProfileSendDialog({ open, onClose }: { open: boolean; onClos
       });
       setHospSubject(r.preview.subject); setHospHtml(r.preview.html);
       setDocSubject(doctor?.subject ?? ""); setDocHtml(doctor?.html ?? "");
+      setResetTick(t => t + 1);   // re-seed the editors from the fresh preview
     } catch (e) {
       toast.error(e instanceof Error ? e.message : "Preview failed");
     } finally {
@@ -628,8 +635,9 @@ export function BulkProfileSendDialog({ open, onClose }: { open: boolean; onClos
               html={studio.hospital.html}
               onSubjectChange={setHospSubject}
               onHtmlChange={setHospHtml}
+              resetKey={`hosp:${resetTick}`}
               edited={hospHtml !== studio.hospital.html || hospSubject !== studio.hospital.subject}
-              onReset={() => { setHospSubject(studio.hospital.subject); setHospHtml(studio.hospital.html); }}
+              onReset={() => { setHospSubject(studio.hospital.subject); setHospHtml(studio.hospital.html); setResetTick(t => t + 1); }}
               from="Hospital Intro <hospitalintro@allocationassist.com>"
               attachments={hospAttachments}
               onAttachmentsChange={setHospAttachments}
@@ -647,8 +655,9 @@ export function BulkProfileSendDialog({ open, onClose }: { open: boolean; onClos
               html={studio.doctor.html}
               onSubjectChange={setDocSubject}
               onHtmlChange={setDocHtml}
+              resetKey={`doc:${resetTick}`}
               edited={!!studio.doctor && (docHtml !== studio.doctor.html || docSubject !== studio.doctor.subject)}
-              onReset={() => { if (studio.doctor) { setDocSubject(studio.doctor.subject); setDocHtml(studio.doctor.html); } }}
+              onReset={() => { if (studio.doctor) { setDocSubject(studio.doctor.subject); setDocHtml(studio.doctor.html); setResetTick(t => t + 1); } }}
               from="Allocation Assist Team <hello@allocationassist.com>"
               attachments={docAttachments}
               onAttachmentsChange={setDocAttachments}
