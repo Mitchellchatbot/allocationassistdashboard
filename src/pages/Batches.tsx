@@ -9,14 +9,14 @@ import { Label } from "@/components/ui/label";
 import { Textarea } from "@/components/ui/textarea";
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription, DialogFooter } from "@/components/ui/dialog";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
-import { Mailbox, Plus, Send, X, CheckCircle2, Calendar, ChevronRight, ChevronDown, RefreshCw, AlertCircle, AlertTriangle, TestTube, Sparkles, UserSquare, GripVertical, Wand2, Pencil, Building2 } from "lucide-react";
+import { Mailbox, Plus, Send, X, CheckCircle2, Calendar, ChevronRight, ChevronDown, RefreshCw, AlertCircle, AlertTriangle, TestTube, Sparkles, UserSquare, GripVertical, Wand2, Pencil, Building2, Search, Loader2, Users } from "lucide-react";
 import { Checkbox } from "@/components/ui/checkbox";
 import { toast } from "sonner";
 import { useScheduledBatches, useUpsertBatch, useUpdateBatch, useCancelBatch, useSendBatchNow, useBatchPreview,
   useSpecialtyRotation, useUpdateSpecialtyRotation,
   type ScheduledBatch, type BatchKind, type BatchDoctorPreview, type BatchPerDoctorPreview,
 } from "@/hooks/use-scheduled-batches";
-import { useHospitals } from "@/hooks/use-hospitals";
+import { useHospitals, isHospitalPaused, type Hospital } from "@/hooks/use-hospitals";
 import { useHospitalContacts, resolveAllRecipients, resolveRecipient, type HospitalContact } from "@/hooks/use-hospital-contacts";
 import { useZohoData, type ZohoLead, type ZohoDoctorOnBoard } from "@/hooks/use-zoho-data";
 import { useDoctorLifecycleMap } from "@/hooks/use-doctor-lifecycle";
@@ -34,6 +34,7 @@ import { ProfileSubTabs } from "@/components/ProfileSubTabs";
 import { CcBccPicker } from "@/components/automations/CcBccPicker";
 import { AttachmentsPicker } from "@/components/automations/AttachmentsPicker";
 import type { EmailAttachment } from "@/lib/email-attachments";
+import { normCountry, countryFilterOptions } from "@/lib/normalize-country";
 import { GulfClock, composeGulfDateTime } from "@/components/GulfClock";
 import { cn } from "@/lib/utils";
 import { useScheduledProfileSends, useCancelScheduledProfileSend } from "@/hooks/use-scheduled-profile-sends";
@@ -61,6 +62,10 @@ export default function Batches() {
   // form and doctor-picker without unmounting, so creating a batch flows
   // straight into queueing doctors with no popup hop.
   const [dialogTarget, setDialogTarget] = useState<"new" | string | null>(null);
+  // Which kind the create form opens on. "New batch" opens on daily_duo; the
+  // "One-off send" button presets it to one_off so the unified dialog shows the
+  // doctor + hospital pickers straight away (absorbs the old OneOffBatchDialog).
+  const [newBatchKind, setNewBatchKind] = useState<BatchKind>("daily_duo");
 
   // Stable per-row edit handler so React.memo'd BatchRow rows don't re-render
   // on unrelated parent state changes (e.g. opening the dialog).
@@ -99,7 +104,10 @@ export default function Batches() {
             <Badge variant="outline" className="text-[10px] bg-slate-50">
               {eligibleRecipients} hospital{eligibleRecipients === 1 ? "" : "s"} with recruiter email
             </Badge>
-            <Button size="sm" onClick={() => setDialogTarget("new")}>
+            <Button size="sm" variant="outline" onClick={() => { setNewBatchKind("one_off"); setDialogTarget("new"); }}>
+              <Send className="h-3.5 w-3.5 mr-1.5" /> One-off send
+            </Button>
+            <Button size="sm" onClick={() => { setNewBatchKind("daily_duo"); setDialogTarget("new"); }}>
               <Plus className="h-3.5 w-3.5 mr-1.5" /> New batch
             </Button>
           </div>
@@ -159,6 +167,7 @@ export default function Batches() {
         target={dialogTarget}
         onTargetChange={setDialogTarget}
         batches={batches}
+        initialKind={newBatchKind}
         suggestedSpecialty={rotation?.queue?.length ? rotation.queue[rotation.effective_cursor_index] ?? null : null}
       />
     </DashboardLayout>
@@ -915,6 +924,7 @@ const KIND_ICON_MAP: Record<BatchKind, { Icon: typeof Calendar; cls: string }> =
   daily_duo:        { Icon: Calendar,  cls: "text-teal-600" },
   tuesday_top_15:   { Icon: Sparkles,  cls: "text-amber-600" },
   specialty_of_day: { Icon: RefreshCw, cls: "text-violet-600" },
+  one_off:          { Icon: Send,      cls: "text-teal-600" },
 };
 
 function KindIcon({ kind }: { kind: BatchKind }) {
@@ -926,6 +936,7 @@ const KIND_LABEL: Record<BatchKind, string> = {
   daily_duo:        "Daily duo (2 profiles)",
   tuesday_top_15:   "Tuesday top 15",
   specialty_of_day: "Specialty of the day",
+  one_off:          "One-off send",
 };
 
 // Gulf work weeks differ by country: UAE runs Mon–Fri (Sat–Sun weekend) while
@@ -943,6 +954,121 @@ function workWeekdays(country: string | null | undefined): number[] {
     : [1, 2, 3, 4, 5];  // Mon–Fri
 }
 
+// One-off create form — pick specific doctors + specific hospitals for an
+// ad-hoc tabular send (kind === "one_off"). Doctors come from the SAME
+// `allDoctors` pool the scheduled picker uses (so the persisted doctor_ids
+// resolve straight back in the preview + send); hospitals are country-filtered
+// and their recruiter emails become the batch's recipient_emails. After create,
+// the row flows into BatchDialog's normal preview/send — one composer for all
+// tabular sends.
+function OneOffCreateFields({
+  allDoctors, hospitals, docIds, setDocIds, hospIds, setHospIds,
+  docQuery, setDocQuery, hospQuery, setHospQuery, hospCountry, setHospCountry,
+  includeDoctorEmail, setIncludeDoctorEmail,
+}: {
+  allDoctors: Array<{ id: string; name: string; speciality?: string | null; email?: string | null }>;
+  hospitals: Hospital[];
+  docIds: Set<string>; setDocIds: (s: Set<string>) => void;
+  hospIds: Set<string>; setHospIds: (s: Set<string>) => void;
+  docQuery: string; setDocQuery: (v: string) => void;
+  hospQuery: string; setHospQuery: (v: string) => void;
+  hospCountry: string; setHospCountry: (v: string) => void;
+  includeDoctorEmail: boolean; setIncludeDoctorEmail: (v: boolean) => void;
+}) {
+  const hospCountries = useMemo(() => countryFilterOptions(hospitals.filter(h => h.primary_recruiter_email).map(h => h.country)), [hospitals]);
+  const hospPool = useMemo(() => {
+    const q = hospQuery.trim().toLowerCase();
+    return hospitals
+      .filter(h => !!h.primary_recruiter_email?.trim())
+      .filter(h => h.active !== false)
+      .filter(h => hospCountry === "all" || normCountry(h.country) === hospCountry)
+      .filter(h => !q || h.name.toLowerCase().includes(q) || (h.city ?? "").toLowerCase().includes(q) || (h.country ?? "").toLowerCase().includes(q))
+      .sort((a, b) => a.name.localeCompare(b.name));
+  }, [hospitals, hospQuery, hospCountry]);
+  const docPool = useMemo(() => {
+    const q = docQuery.trim().toLowerCase();
+    return allDoctors.filter(d => !q || d.name.toLowerCase().includes(q) || (d.speciality ?? "").toLowerCase().includes(q) || (d.email ?? "").toLowerCase().includes(q));
+  }, [allDoctors, docQuery]);
+  const toggle = (set: Set<string>, id: string, setter: (s: Set<string>) => void) => {
+    const next = new Set(set); if (next.has(id)) next.delete(id); else next.add(id); setter(next);
+  };
+  return (
+    <div className="space-y-2.5">
+      <div className="rounded-md border border-teal-200 bg-teal-50 p-2 text-[11px] text-teal-900">
+        One table-email per selected hospital (all selected doctors in a table), sent now — plus an optional working-opportunity email per doctor. Review &amp; edit on the next screen.
+      </div>
+      <div className="grid grid-cols-2 gap-2">
+        {/* Doctors */}
+        <div className="rounded-md border bg-white flex flex-col min-h-0">
+          <div className="px-2 py-1.5 border-b flex items-center gap-1.5">
+            <UserSquare className="h-3.5 w-3.5 text-teal-600" />
+            <span className="text-[11px] font-medium">Doctors</span>
+            {docIds.size > 0 && <Badge variant="outline" className="text-[9px] bg-teal-50 text-teal-700 border-teal-200">{docIds.size}</Badge>}
+            <div className="ml-auto flex items-center gap-1.5 text-[10px]">
+              <button type="button" onClick={() => setDocIds(new Set(docPool.slice(0, 200).map(d => d.id)))} className="text-teal-700 hover:underline">All</button>
+              <span className="text-slate-300">·</span>
+              <button type="button" onClick={() => setDocIds(new Set())} className="text-slate-500 hover:underline">Clear</button>
+            </div>
+          </div>
+          <div className="p-1.5 border-b">
+            <div className="relative">
+              <Search className="absolute left-2 top-1/2 -translate-y-1/2 h-3.5 w-3.5 text-slate-400" />
+              <Input value={docQuery} onChange={e => setDocQuery(e.target.value)} placeholder="Search doctors…" className="h-8 pl-7 text-[12px]" />
+            </div>
+          </div>
+          <div className="max-h-[200px] overflow-y-auto">
+            {docPool.length === 0 ? <div className="p-3 text-center text-[11px] text-muted-foreground italic">No doctors match.</div>
+              : docPool.slice(0, 200).map(d => (
+                <label key={d.id} className="flex items-start gap-2 px-2 py-1.5 hover:bg-teal-50/50 cursor-pointer border-b border-slate-50">
+                  <Checkbox checked={docIds.has(d.id)} onCheckedChange={() => toggle(docIds, d.id, setDocIds)} className="mt-0.5" />
+                  <span className="min-w-0"><span className="block text-[12px] font-medium truncate">{d.name}</span>
+                    {d.speciality && <span className="block text-[10px] text-muted-foreground truncate">{d.speciality}</span>}</span>
+                </label>
+              ))}
+          </div>
+        </div>
+        {/* Hospitals */}
+        <div className="rounded-md border bg-white flex flex-col min-h-0">
+          <div className="px-2 py-1.5 border-b flex items-center gap-1.5">
+            <Building2 className="h-3.5 w-3.5 text-teal-600" />
+            <span className="text-[11px] font-medium">Hospitals</span>
+            {hospIds.size > 0 && <Badge variant="outline" className="text-[9px] bg-teal-50 text-teal-700 border-teal-200">{hospIds.size}</Badge>}
+            <div className="ml-auto flex items-center gap-1.5 text-[10px]">
+              <button type="button" onClick={() => setHospIds(new Set(hospPool.map(h => h.id)))} className="text-teal-700 hover:underline">All</button>
+              <span className="text-slate-300">·</span>
+              <button type="button" onClick={() => setHospIds(new Set())} className="text-slate-500 hover:underline">Clear</button>
+            </div>
+          </div>
+          <div className="p-1.5 border-b flex gap-1.5">
+            <div className="relative flex-1">
+              <Search className="absolute left-2 top-1/2 -translate-y-1/2 h-3.5 w-3.5 text-slate-400" />
+              <Input value={hospQuery} onChange={e => setHospQuery(e.target.value)} placeholder="Search…" className="h-8 pl-7 text-[12px]" />
+            </div>
+            <select value={hospCountry} onChange={e => setHospCountry(e.target.value)} className="shrink-0 rounded-md border border-input bg-white text-slate-800 text-[11px] px-1.5 h-8 max-w-[110px]">
+              <option value="all">All countries</option>
+              {hospCountries.map(c => <option key={c.value} value={c.value}>{c.label}</option>)}
+            </select>
+          </div>
+          <div className="max-h-[200px] overflow-y-auto">
+            {hospPool.length === 0 ? <div className="p-3 text-center text-[11px] text-muted-foreground italic">No hospitals match.</div>
+              : hospPool.map(h => (
+                <label key={h.id} className="flex items-start gap-2 px-2 py-1.5 hover:bg-teal-50/50 cursor-pointer border-b border-slate-50">
+                  <Checkbox checked={hospIds.has(h.id)} onCheckedChange={() => toggle(hospIds, h.id, setHospIds)} className="mt-0.5" />
+                  <span className="min-w-0"><span className="block text-[12px] font-medium truncate">{h.name}</span>
+                    <span className="block text-[10px] text-muted-foreground truncate">{[h.city, h.country].filter(Boolean).join(", ")}</span></span>
+                </label>
+              ))}
+          </div>
+        </div>
+      </div>
+      <label className="flex items-center gap-2 text-[12px] cursor-pointer">
+        <Checkbox checked={includeDoctorEmail} onCheckedChange={(v) => setIncludeDoctorEmail(!!v)} />
+        Also email each doctor a working-opportunity note (individually editable in the preview)
+      </label>
+    </div>
+  );
+}
+
 // ── Unified create / edit dialog ─────────────────────────────────────────
 //
 // Single modal that handles both "create new batch" and "queue doctors into
@@ -950,10 +1076,11 @@ function workWeekdays(country: string | null | undefined): number[] {
 // create mode; on submit, we swap the body in place to the doctor picker
 // using the newly-created row's id — no close + reopen popup hop.
 
-function BatchDialog({ target, onTargetChange, batches, suggestedSpecialty }: {
+function BatchDialog({ target, onTargetChange, batches, initialKind, suggestedSpecialty }: {
   target: "new" | string | null;
   onTargetChange: (next: "new" | string | null) => void;
   batches: ScheduledBatch[];
+  initialKind: BatchKind;
   suggestedSpecialty: string | null;
 }) {
   const open = target !== null;
@@ -1034,6 +1161,16 @@ function BatchDialog({ target, onTargetChange, batches, suggestedSpecialty }: {
   // "recap"/"specialty" swap in the "Excited to work in <hospital city>" headers.
   const [headerMode, setHeaderMode]     = useState<"none" | "recap" | "specialty">("none");
   const [creating, setCreating]         = useState(false);
+  // ── One-off create-form state (kind === "one_off") — pick doctors + specific
+  //    hospitals here, then the created row swaps into the shared preview/send
+  //    flow. Doctors are keyed off the SAME allDoctors pool the picker uses, so
+  //    the persisted doctor_ids resolve straight back in the preview + send.
+  const [oneOffDocIds,  setOneOffDocIds]  = useState<Set<string>>(new Set());
+  const [oneOffHospIds, setOneOffHospIds] = useState<Set<string>>(new Set());
+  const [oneOffDocQuery,  setOneOffDocQuery]  = useState("");
+  const [oneOffHospQuery, setOneOffHospQuery] = useState("");
+  const [oneOffHospCountry, setOneOffHospCountry] = useState("all");
+  const [oneOffIncludeDoctorEmail, setOneOffIncludeDoctorEmail] = useState(true);
 
   // Editor-only state.
   const [search, setSearch] = useState("");
@@ -1073,6 +1210,18 @@ function BatchDialog({ target, onTargetChange, batches, suggestedSpecialty }: {
     setSpecialtyOnly(hasSpecialtyScope);
   }, [editingBatch?.id, editingBatch?.specialty, editingBatch?.kind, suggestedSpecialty]);
 
+  // Preset the create-form kind whenever the dialog opens in "new" mode — the
+  // "One-off send" button opens it on one_off, "New batch" on daily_duo — and
+  // clear any prior one-off selections so each fresh open starts clean.
+  useEffect(() => {
+    if (target === "new") {
+      setKind(initialKind);
+      setOneOffDocIds(new Set()); setOneOffHospIds(new Set());
+      setOneOffDocQuery(""); setOneOffHospQuery(""); setOneOffHospCountry("all");
+      setOneOffIncludeDoctorEmail(true);
+    }
+  }, [target, initialKind]);
+
   const close = () => {
     onTargetChange(null);
     setKind("daily_duo"); setScheduledFor(todayISO()); setSpecialty(""); setCountry("UAE"); setSearch("");
@@ -1082,6 +1231,30 @@ function BatchDialog({ target, onTargetChange, batches, suggestedSpecialty }: {
   const handleCreate = async () => {
     setCreating(true);
     try {
+      // One-off: persist an explicit doctors + hospitals send, then swap into the
+      // shared preview/send (no scheduling / rotation). recipient_emails carries
+      // the chosen hospitals; doctor_ids the chosen doctors.
+      if (kind === "one_off") {
+        const hospEmails = [...oneOffHospIds]
+          .map(id => previewHospitals.find(h => h.id === id)?.primary_recruiter_email?.trim())
+          .filter((e): e is string => !!e);
+        const docIds = [...oneOffDocIds];
+        if (docIds.length === 0 || hospEmails.length === 0) {
+          toast.error("Pick at least one doctor and one hospital for the one-off send.");
+          setCreating(false); return;
+        }
+        const created = await upsert.mutateAsync({
+          kind: "one_off",
+          scheduled_for: todayISO(),
+          country: null,
+          recipient_emails: hospEmails,
+          doctor_ids: docIds,
+          include_doctor_email: oneOffIncludeDoctorEmail,
+        });
+        toast.success("One-off batch created — review & send below.");
+        onTargetChange(created.id);
+        setCreating(false); return;
+      }
       const finalSpecialty = kind === "specialty_of_day"
         ? (specialty.trim() || suggestedSpecialty || "")
         : null;
@@ -1150,12 +1323,21 @@ function BatchDialog({ target, onTargetChange, batches, suggestedSpecialty }: {
     // Case-insensitive country match — hospital rows are entered by hand and a
     // "oman" / "Oman " mismatch would wrongly show 0 recipients for the area.
     const bc = (batch?.country ?? "").trim().toLowerCase();
+    // One-off batches target an EXPLICIT recipient list (recipient_emails), not a
+    // country scope — show exactly those hospitals.
+    if (batch?.kind === "one_off") {
+      const set = new Set((batch.recipient_emails ?? []).map(e => e.trim().toLowerCase()));
+      return previewHospitals
+        .filter(h => !!h.primary_recruiter_email?.trim())
+        .filter(h => set.has(h.primary_recruiter_email!.trim().toLowerCase()))
+        .sort((a, b) => a.name.localeCompare(b.name));
+    }
     return previewHospitals
       .filter(h => !!h.primary_recruiter_email?.trim())
       .filter(h => h.active !== false)   // never offer "don't send" hospitals (send-batch drops them too)
       .filter(h => !bc || (h.country ?? "").trim().toLowerCase() === bc)
       .sort((a, b) => a.name.localeCompare(b.name));
-  }, [previewHospitals, batch?.country]);
+  }, [previewHospitals, batch?.country, batch?.kind, batch?.recipient_emails]);
   const eligibleEmails = useMemo(
     () => new Set(eligibleHospitals.map(h => h.primary_recruiter_email!.trim().toLowerCase())),
     [eligibleHospitals],
@@ -1337,7 +1519,9 @@ function BatchDialog({ target, onTargetChange, batches, suggestedSpecialty }: {
     [batch, doctorById],
   );
 
-  const expectedCount = batch ? (batch.kind === "daily_duo" ? 2 : batch.kind === "tuesday_top_15" ? 15 : 1) : 0;
+  // One-off has no fixed count (the team picks any number of doctors), so its
+  // "expected" is however many are queued — no count warning.
+  const expectedCount = batch ? (batch.kind === "daily_duo" ? 2 : batch.kind === "tuesday_top_15" ? 15 : batch.kind === "one_off" ? batch.doctor_ids.length : 1) : 0;
 
   // Pool of eligible candidates, ranked by score so the strongest profiles
   // surface first. When the user types, we also filter by the query. When
@@ -1576,9 +1760,23 @@ function BatchDialog({ target, onTargetChange, batches, suggestedSpecialty }: {
                     <SelectItem value="daily_duo">Daily duo (Mon-Fri · 2 profiles)</SelectItem>
                     <SelectItem value="tuesday_top_15">Tuesday top 15</SelectItem>
                     <SelectItem value="specialty_of_day">Specialty of the day (Wed-Fri)</SelectItem>
+                    <SelectItem value="one_off">One-off (pick doctors + hospitals, send now)</SelectItem>
                   </SelectContent>
                 </Select>
               </div>
+              {kind === "one_off" && (
+                <OneOffCreateFields
+                  allDoctors={allDoctors}
+                  hospitals={previewHospitals}
+                  docIds={oneOffDocIds} setDocIds={setOneOffDocIds}
+                  hospIds={oneOffHospIds} setHospIds={setOneOffHospIds}
+                  docQuery={oneOffDocQuery} setDocQuery={setOneOffDocQuery}
+                  hospQuery={oneOffHospQuery} setHospQuery={setOneOffHospQuery}
+                  hospCountry={oneOffHospCountry} setHospCountry={setOneOffHospCountry}
+                  includeDoctorEmail={oneOffIncludeDoctorEmail} setIncludeDoctorEmail={setOneOffIncludeDoctorEmail}
+                />
+              )}
+              {kind !== "one_off" && (<>
               <div className="grid grid-cols-2 gap-2">
                 <div className="space-y-1">
                   <Label className="text-[11px]">Date</Label>
@@ -1659,11 +1857,12 @@ function BatchDialog({ target, onTargetChange, batches, suggestedSpecialty }: {
                   )}
                 </div>
               )}
+              </>)}
             </div>
             <DialogFooter>
               <Button variant="outline" onClick={close} disabled={creating}>Cancel</Button>
               <Button onClick={handleCreate} disabled={creating}>
-                {creating ? "Creating..." : "Create & pick doctors"}
+                {creating ? "Creating..." : kind === "one_off" ? "Create & review" : "Create & pick doctors"}
               </Button>
             </DialogFooter>
           </>

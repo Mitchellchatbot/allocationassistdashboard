@@ -13,7 +13,7 @@ import { supabase } from "@/lib/supabase";
 import { useTableSubscription } from "@/lib/realtime-registry";
 import type { EmailAttachment } from "@/lib/email-attachments";
 
-export type BatchKind   = "daily_duo" | "tuesday_top_15" | "specialty_of_day";
+export type BatchKind   = "daily_duo" | "tuesday_top_15" | "specialty_of_day" | "one_off";
 export type BatchStatus = "draft" | "sent" | "cancelled" | "failed";
 
 /** Recurrence rule for a scheduled batch (Amir #5). */
@@ -83,6 +83,9 @@ export interface ScheduledBatch {
   include_doctor_email: boolean;
   status:           BatchStatus;
   doctor_ids:       string[];
+  /** One-off batches only: the explicit hospital recruiter emails this send
+   *  targets (in place of a country scope). Empty for the recurring kinds. */
+  recipient_emails: string[];
   /** Daily Duo only — one profile-card image URL per queued doctor, aligned to
    *  doctor_ids order. Generated client-side (html2canvas) when the duo is
    *  built, so the scheduled send can embed two individual profile images (like
@@ -201,6 +204,8 @@ export interface UpsertBatchInput {
   doctor_ids?:    string[];
   notes?:         string | null;
   excluded_emails?: string[];
+  /** One-off batches: explicit hospital recruiter emails to send to. */
+  recipient_emails?: string[];
 }
 
 export function useUpsertBatch() {
@@ -219,9 +224,11 @@ export function useUpsertBatch() {
         specialty:     input.specialty ?? null,
         country:       input.country   ?? null,
         ...(input.header_mode !== undefined ? { header_mode: input.header_mode } : {}),
+        ...(input.include_doctor_email !== undefined ? { include_doctor_email: input.include_doctor_email } : {}),
         doctor_ids:    input.doctor_ids ?? [],
         notes:         input.notes ?? null,
         ...(input.excluded_emails !== undefined ? { excluded_emails: input.excluded_emails } : {}),
+        ...(input.recipient_emails !== undefined ? { recipient_emails: input.recipient_emails } : {}),
         created_by:    createdBy,
         updated_at:    new Date().toISOString(),
       };

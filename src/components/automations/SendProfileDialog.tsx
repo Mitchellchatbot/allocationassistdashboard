@@ -5,7 +5,7 @@ import { Label } from "@/components/ui/label";
 import { Textarea } from "@/components/ui/textarea";
 import { Badge } from "@/components/ui/badge";
 import { Checkbox } from "@/components/ui/checkbox";
-import { Search, Send, X, Eye, ChevronLeft, AlertTriangle, Mail, ChevronDown, Camera, Image as ImageIcon, FileText } from "lucide-react";
+import { Search, Send, Eye, ChevronLeft, AlertTriangle, ChevronDown } from "lucide-react";
 import { captureAndUploadCard } from "@/lib/card-screenshot";
 import { buildProfileCardHtml } from "@/lib/profile-card-html";
 import { buildDoctorProfileHtml, PROFILE_IMAGE_WIDTH } from "@/lib/doctor-profile-image";
@@ -25,12 +25,15 @@ import * as DialogPrimitive from "@radix-ui/react-dialog";
 import { EditableEmailPreview } from "@/components/EditableEmailPreview";
 import { humanizePlaceholders, stripPlaceholderPills } from "@/lib/humanize-placeholders";
 import { EmailPreviewStudioLayout, type StudioEmail } from "@/components/EmailPreviewStudio";
+import { ProfileSubTabs } from "@/components/ProfileSubTabs";
 import { MailModeBanner } from "@/components/MailModeBanner";
 import { EmailFrame } from "@/components/EmailFrame";
 import { wrapBodyForSend } from "@/lib/email-preview";
 import { type EmailAttachment } from "@/lib/email-attachments";
+import { normCountry, countryFilterOptions } from "@/lib/normalize-country";
 import { AttachmentsPicker } from "@/components/automations/AttachmentsPicker";
-import { CvStudioDialog } from "@/components/cv/CvStudioDialog";
+import { CardScreenshotControl, CvStudioControl } from "@/components/automations/ProfileCardControls";
+import { HospitalRecipientsPanel } from "@/components/automations/HospitalRecipientsPanel";
 import { TemplatePicker } from "@/components/automations/TemplatePicker";
 import { CcBccPicker, isEmail } from "@/components/automations/CcBccPicker";
 import { detectUnfilledVars, describeUnfilled } from "@/lib/email-validation";
@@ -150,7 +153,11 @@ export function SendProfileDialog({ open, onClose, initial }: Props) {
 
 function SendProfileDialogBody({ onClose, initial }: { onClose: () => void; initial: SendProfileInitial | null }) {
   const [step,            setStep]            = useState<Step>("pick-doctor");
-  const [selectedDoctor,  setSelectedDoctor]  = useState<DoctorOption | null>(null);
+  // MULTI-doctor: 1..N doctors per send, each gets their own personalized
+  // email(s). Single-doctor (the common case + vacancy pre-fill) is just N=1 and
+  // behaves byte-for-byte as before. `selectedDoctors` is derived from the ids so
+  // it always tracks the loaded roster.
+  const [selectedDoctorIds, setSelectedDoctorIds] = useState<string[]>([]);
   const [selectedIds,     setSelectedIds]     = useState<string[]>([]);
   const [customMessage,   setCustomMessage]   = useState("");
   const [submitting,      setSubmitting]      = useState(false);
@@ -164,10 +171,13 @@ function SendProfileDialogBody({ onClose, initial }: { onClose: () => void; init
   // for THIS send only — overrides the hospital's primary/cycle routing.
   const [recipientOverrides, setRecipientOverrides] = useState<Record<string, string>>({});
   // When set, the doctor CARD ships as a flat inline image (a screenshot) in
-  // the hospital email instead of the {{doctor_card_html}} block. One image per
-  // doctor → applies to every hospital in a BCC batch. Captured on demand from
-  // the preview via the "Download & attach card screenshot" button.
-  const [cardImageUrl, setCardImageUrl] = useState<string | null>(null);
+  // the hospital email instead of the {{doctor_card_html}} block. One image PER
+  // DOCTOR → applies to every hospital that doctor is sent to. Captured on demand
+  // (or auto) from the preview. Keyed by doctor.id so each doctor has their own.
+  const [cardImageByDoctor, setCardImageByDoctor] = useState<Record<string, string | null>>({});
+  const setCardImageForDoctor = useCallback((doctorId: string, url: string | null) => {
+    setCardImageByDoctor(prev => ({ ...prev, [doctorId]: url }));
+  }, []);
   // Per-send template keys (Amir #3). Persisted preference re-loads on open.
   const [hospitalTemplateKey, setHospitalTemplateKey] = useState<string>(() => loadDefaultTemplate("hospital"));
   const [doctorTemplateKey,   setDoctorTemplateKey]   = useState<string>(() => loadDefaultTemplate("doctor"));
@@ -185,16 +195,16 @@ function SendProfileDialogBody({ onClose, initial }: { onClose: () => void; init
   // Reset the wizard ONCE on open. The body only mounts while open, so
   // "on open" == "on mount". This must NOT depend on the user — auth resolves a
   // tick after mount (user?.email goes undefined → real), and re-running this
-  // would reset step/selectedDoctor and wipe out a vacancy pre-fill that already
+  // would reset step/selectedDoctorIds and wipe out a vacancy pre-fill that already
   // jumped to the preview (the "flash then back to zero" bug).
   useEffect(() => {
     setStep("pick-doctor");
-    setSelectedDoctor(null);
+    setSelectedDoctorIds([]);
     setSelectedIds([]);
     setCustomMessage("");
     setHospitalTemplateKey(loadDefaultTemplate("hospital"));
     setDoctorTemplateKey(loadDefaultTemplate("doctor"));
-    setCardImageUrl(null);
+    setCardImageByDoctor({});
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
@@ -238,18 +248,28 @@ function SendProfileDialogBody({ onClose, initial }: { onClose: () => void; init
     return { byDoctorId, byWpId, byPhone, byEmail, byName, profileById };
   }, [allWpPool, allProfiles]);
 
-  // Same resolution priority as useWpCandidateForDoctor: id → wp:id → phone
-  // → email → unique name. Returns 0 when nothing's on file.
-  const completionFor = useCallback((o: DoctorOption): number => {
+  // Resolve a doctor to their WP candidate the SAME way useWpCandidateForDoctor
+  // does (id → wp:id → phone → email → unique name), but off the already-loaded
+  // completionIndex — no per-doctor hook. This is the single resolver shared by
+  // completionFor (picker filter) AND sendDataByDoctor (preview token merge), so
+  // the two can never disagree about which record a doctor maps to.
+  const resolveWpCandidate = useCallback((o: DoctorOption): WpCandidate | undefined => {
     const idx = completionIndex;
     let hit = idx.byDoctorId.get(o.id);
     if (!hit && o.id.startsWith("wp:")) { const n = Number(o.id.slice(3)); if (Number.isFinite(n)) hit = idx.byWpId.get(n); }
     if (!hit && o.phone) { const k = normalizePhone(o.phone); if (k) hit = idx.byPhone.get(k); }
     if (!hit && o.email) { const e = o.email.toLowerCase().trim(); if (e) hit = idx.byEmail.get(e); }
     if (!hit && o.name) { const nm = normName(o.name); const ms = nm ? idx.byName.get(nm) : undefined; if (ms && ms.length === 1) hit = ms[0]; }
-    if (hit) return wpCandidateCompletion(hit);
-    return calcCompletion(idx.profileById.get(o.id));
+    return hit;
   }, [completionIndex]);
+
+  // Same resolution priority as useWpCandidateForDoctor: id → wp:id → phone
+  // → email → unique name. Returns 0 when nothing's on file.
+  const completionFor = useCallback((o: DoctorOption): number => {
+    const hit = resolveWpCandidate(o);
+    if (hit) return wpCandidateCompletion(hit);
+    return calcCompletion(completionIndex.profileById.get(o.id));
+  }, [resolveWpCandidate, completionIndex]);
 
   const doctorOptions: DoctorOption[] = useMemo(() => {
     const opts: DoctorOption[] = [];
@@ -303,6 +323,38 @@ function SendProfileDialogBody({ onClose, initial }: { onClose: () => void; init
     [hospitals, selectedIds],
   );
 
+  // The chosen doctors, in roster order. Derived from the ids so a doctor that
+  // drops out of the roster (e.g. becomes ineligible) silently drops here too.
+  const selectedDoctors = useMemo(
+    () => doctorOptions.filter(d => selectedDoctorIds.includes(d.id)),
+    [doctorOptions, selectedDoctorIds],
+  );
+  // First selected doctor — drives the step-1/2 live-placeholder preview (a
+  // single doctor there is enough; the per-doctor previews live in step 3).
+  const firstDoctor = selectedDoctors[0] ?? null;
+
+  // Per-doctor send data resolved OFF the already-loaded indexes (no per-doctor
+  // hooks — those can't be called in a loop for N doctors). Mirrors exactly what
+  // PreviewConfirm used to compute for the single doctor: the WP candidate +
+  // wpCandidateToTokens merged over profileToTokens (WP wins when populated).
+  const sendDataByDoctor = useMemo(() => {
+    const m = new Map<string, { wpCandidate: WpCandidate | null; mergedProfileTokens: Record<string, string>; completion: number }>();
+    for (const doc of selectedDoctors) {
+      const wpCandidate = resolveWpCandidate(doc) ?? null;
+      const profile = completionIndex.profileById.get(doc.id) ?? null;
+      const wpTokens     = wpCandidateToTokens(wpCandidate);
+      const legacyTokens = profileToTokens(profile);
+      const merged: Record<string, string> = { ...legacyTokens };
+      for (const [k, v] of Object.entries(wpTokens)) {
+        if (v) merged[k] = v;                // WP wins when populated
+        else if (!(k in merged)) merged[k] = "";
+      }
+      const completion = wpCandidate ? wpCandidateCompletion(wpCandidate) : (profile ? calcCompletion(profile) : 0);
+      m.set(doc.id, { wpCandidate, mergedProfileTokens: merged, completion });
+    }
+    return m;
+  }, [selectedDoctors, resolveWpCandidate, completionIndex]);
+
   // Pre-fill (vacancy mail button): once the doctor list is loaded, select the
   // doctor + hospital and jump straight to the send preview. Runs after the
   // reset effect (doctorOptions load async), so it wins.
@@ -318,7 +370,7 @@ function SendProfileDialogBody({ onClose, initial }: { onClose: () => void; init
       (initial.doctorId    ? doctorOptions.find(d => d.id === initial.doctorId) : undefined) ??
       (initial.doctorEmail ? doctorOptions.find(d => d.email?.toLowerCase() === initial.doctorEmail!.toLowerCase()) : undefined);
     if (!doc) { setInitialApplied(true); return; } // not eligible → leave on step 1
-    setSelectedDoctor(doc);
+    setSelectedDoctorIds([doc.id]);
     const h =
       (initial.hospitalId   ? hospitals.find(x => x.id === initial.hospitalId) : undefined) ??
       (initial.hospitalName ? hospitals.find(x => x.name.trim().toLowerCase() === initial.hospitalName!.trim().toLowerCase()) : undefined);
@@ -354,8 +406,8 @@ function SendProfileDialogBody({ onClose, initial }: { onClose: () => void; init
   // picker steps show the SAME filled-in details as the final preview — not just
   // pills until step 3 (Amir: "the info is there, it doesn't show up in steps 1/2").
   const [wizardTab, setWizardTab] = useState<string>("hospital");
-  const wizardWp = useWpCandidateForDoctor(selectedDoctor, { includeDrafts: true });
-  const { data: wizardProfile } = useDoctorProfile(selectedDoctor?.id ?? null);
+  const wizardWp = useWpCandidateForDoctor(firstDoctor, { includeDrafts: true });
+  const { data: wizardProfile } = useDoctorProfile(firstDoctor?.id ?? null);
   const wizardProfileTokens = useMemo(() => {
     const wpTokens = wpCandidateToTokens(wizardWp);
     const merged: Record<string, string> = { ...profileToTokens(wizardProfile) };
@@ -367,13 +419,13 @@ function SendProfileDialogBody({ onClose, initial }: { onClose: () => void; init
       ...wizardProfileTokens,
       signature: PREVIEW_SIGNATURE_HTML, signature_text: PREVIEW_SIGNATURE_TEXT, logo_header: "",
     };
-    if (selectedDoctor) {
-      v.doctor_name       = selectedDoctor.name.replace(/^\s*Dr\.?\s+/i, "");
-      v.doctor_email      = selectedDoctor.email ?? "";
-      v.doctor_phone      = selectedDoctor.phone ?? "";
-      v.doctor_speciality = selectedDoctor.speciality ?? "";
-      v.doctor_country_training = wizardProfileTokens.doctor_country_training || selectedDoctor.country_training || "";
-      v.profile_link      = `https://allocationassist.com/shared-profile/${selectedDoctor.id}`;
+    if (firstDoctor) {
+      v.doctor_name       = firstDoctor.name.replace(/^\s*Dr\.?\s+/i, "");
+      v.doctor_email      = firstDoctor.email ?? "";
+      v.doctor_phone      = firstDoctor.phone ?? "";
+      v.doctor_speciality = firstDoctor.speciality ?? "";
+      v.doctor_country_training = wizardProfileTokens.doctor_country_training || firstDoctor.country_training || "";
+      v.profile_link      = `https://allocationassist.com/shared-profile/${firstDoctor.id}`;
     }
     const h = selectedHospitals[0];
     if (h) {
@@ -387,7 +439,7 @@ function SendProfileDialogBody({ onClose, initial }: { onClose: () => void; init
     v.doctor_card_image_url = "";
     v.hospital_image        = hospitalImageHtml(h?.image_url, h?.name);
     return v;
-  }, [selectedDoctor, selectedHospitals, wizardProfileTokens]);
+  }, [firstDoctor, selectedHospitals, wizardProfileTokens]);
 
   const wizardEmails: StudioEmail[] = useMemo(() => {
     const hSubj = renderTemplate(hospitalTemplate?.subject ?? "Candidate introduction — {{doctor_name}}", previewVars);
@@ -409,47 +461,58 @@ function SendProfileDialogBody({ onClose, initial }: { onClose: () => void; init
     );
     return [
       { key: "hospital", label: "Hospital intro", subLabel: selectedHospitals[0]?.name ?? "pick a hospital", preview: pane(hSubj, hHtml) },
-      { key: "doctor",   label: "Doctor email",   subLabel: selectedDoctor?.email ?? "pick a doctor",        preview: pane(dSubj, dHtml) },
+      { key: "doctor",   label: "Doctor email",   subLabel: firstDoctor?.email ?? "pick a doctor",           preview: pane(dSubj, dHtml) },
     ];
-  }, [hospitalTemplate, doctorTemplate, previewVars, customMessage, selectedHospitals, selectedDoctor]);
+  }, [hospitalTemplate, doctorTemplate, previewVars, customMessage, selectedHospitals, firstDoctor]);
 
   const handleConfirm = async (
-    stageOverrides?: Record<string, SendOverrides>,
-    attachments?: { hospital?: EmailAttachment[]; doctor?: EmailAttachment[] },
-    templateKeys?: { hospital: string; doctor: string },
-    schedule?: { date: string; time: string },
-    recipients?: { doctorEmail?: string },
-    sender?: { assignedTo: string | null },
+    // Per-doctor edit state keyed by doctor.id: hand-edited bodies (stageOverrides)
+    // + a retyped doctor "To". Card images ride separately in cardImageByDoctor
+    // (body state) so handleConfirm reads them directly. Everything else (opts) is
+    // GLOBAL — shared across every doctor in the send.
+    perDoctor: Record<string, { stageOverrides?: Record<string, SendOverrides>; doctorEmail?: string }>,
+    opts: {
+      attachments?: { hospital?: EmailAttachment[]; doctor?: EmailAttachment[] };
+      templateKeys?: { hospital: string; doctor: string };
+      schedule?:    { date: string; time: string };
+      sender?:      { assignedTo: string | null };
+      greeting?:    { mode: "auto" | "contact" | "team" };
+    } = {},
   ) => {
+    const { attachments, templateKeys, schedule, sender, greeting } = opts;
     // Explicit sender pick from the dialog. When set it's written to each run's
     // assigned_to so send-flow-email's pickSender uses it as the From line;
     // null → leave assigned_to unset so the hospital-owner trigger decides.
     const senderAssignedTo = sender?.assignedTo ?? null;
+    // Per-send greeting override ("refer by name" vs "hospital team"); "auto"
+    // keeps each hospital's stored greet_with_contact_name flag.
+    const greetMode = greeting?.mode ?? "auto";
     const hospitalAttach = attachments?.hospital ?? [];
     const doctorAttach   = attachments?.doctor ?? [];
-    if (!selectedDoctor || selectedHospitals.length === 0) return;
-    // Retyped doctor recipient (single-hospital only) wins over the doctor's own
-    // email for the "working opportunity" heads-up. Falls back to their profile
-    // email when not overridden.
-    const doctorEmailToUse = (recipients?.doctorEmail ?? "").trim() || selectedDoctor.email;
-    // Edits only apply to a single-hospital send — the preview (and so the
-    // A hand-edited body (stageOverrides) is a SHARED copy: for a multi-hospital
-    // send it goes verbatim to every hospital, so the previewed greeting replaces
-    // each hospital's own — the UI warns about exactly this. Unedited multi sends
-    // still render per-hospital from the template (no override).
-    const effectiveStageOverrides =
-      stageOverrides && Object.keys(stageOverrides).length ? stageOverrides : undefined;
+    if (selectedDoctors.length === 0 || selectedHospitals.length === 0) return;
     const templateOverridesPayload = templateKeys && (templateKeys.hospital !== HOSPITAL_DEFAULT_KEY || templateKeys.doctor !== DOCTOR_DEFAULT_KEY)
       ? {
           ...(templateKeys.hospital !== HOSPITAL_DEFAULT_KEY ? { email_hospital: templateKeys.hospital } : {}),
           ...(templateKeys.doctor   !== DOCTOR_DEFAULT_KEY   ? { email_doctor:   templateKeys.doctor }   : {}),
         }
       : null;
+    // Resolve THIS doctor's send data from the per-doctor edit map + body state.
+    // Retyped doctor recipient (single-hospital only) wins over the doctor's own
+    // email; hand-edited body (stageOverrides) is a SHARED copy across that
+    // doctor's hospitals. Card image is the doctor's captured card, if any.
+    const dataFor = (doctor: DoctorOption) => {
+      const pd = perDoctor[doctor.id] ?? {};
+      return {
+        doctorEmailToUse: (pd.doctorEmail ?? "").trim() || doctor.email,
+        effectiveStageOverrides: pd.stageOverrides && Object.keys(pd.stageOverrides).length ? pd.stageOverrides : undefined,
+        cardImageUrl: cardImageByDoctor[doctor.id] ?? null,
+      };
+    };
 
     // ── Schedule-for-later branch (Amir #5) ─────────────────────────────────
     // Instead of creating runs + sending now, stash everything the send needs
-    // in a scheduled_profile_sends row. A deployed scheduler expands it later;
-    // the Scheduled queue lets the team Send now / Reschedule / Cancel.
+    // in a scheduled_profile_sends row — ONE per doctor. A deployed scheduler
+    // expands each later; the Scheduled queue lets the team Send now / Reschedule.
     if (schedule?.date) {
       // Guard against a cleared/half-typed slot — localToGulfParts + Intl.format
       // below throw on an Invalid Date. The buttons already disable on this, so
@@ -466,28 +529,37 @@ function SendProfileDialogBody({ onClose, initial }: { onClose: () => void; init
         const gulf = localToGulfParts(schedule.date, schedule.time || "09:00");
         const localLabel = new Intl.DateTimeFormat(undefined, { weekday: "short", month: "short", day: "numeric", hour: "2-digit", minute: "2-digit", hour12: true })
           .format(composeLocalDateTime(schedule.date, schedule.time || "09:00"));
-        await scheduleProfileSend.mutateAsync({
-          doctor_id:         selectedDoctor.id,
-          doctor_name:       selectedDoctor.name,
-          doctor_email:      doctorEmailToUse,
-          doctor_phone:      selectedDoctor.phone,
-          doctor_speciality: selectedDoctor.speciality,
-          hospital_ids:      selectedHospitals.map(h => h.id),
-          custom_message:    customMessage || null,
-          bcc_override:      bccList,
-          cc_override:       ccList.length ? ccList : null,
-          assigned_to:       senderAssignedTo,
-          stage_overrides:   effectiveStageOverrides ?? null,
-          template_overrides: templateOverridesPayload,
-          attachments:        hospitalAttach.map(a => ({ filename: a.filename, path: a.path })),
-          attachments_doctor: doctorAttach.map(a => ({ filename: a.filename, path: a.path })),
-          scheduled_for:     gulf.date,
-          scheduled_at_time: gulf.time,
-          timezone:          "Asia/Dubai",
-        });
-        toast.success(`Scheduled for ${localLabel} (your time) — ${selectedDoctor.name} → ${selectedHospitals.length} hospital${selectedHospitals.length === 1 ? "" : "s"}`, {
-          action: { label: "View queue", onClick: () => navigate("/batches") },
-        });
+        // One scheduled row per doctor (each row supports hospital_ids[] +
+        // per-doctor stage_overrides / doctor_email). Global fields repeat per row.
+        for (const doctor of selectedDoctors) {
+          const { doctorEmailToUse, effectiveStageOverrides } = dataFor(doctor);
+          await scheduleProfileSend.mutateAsync({
+            doctor_id:         doctor.id,
+            doctor_name:       doctor.name,
+            doctor_email:      doctorEmailToUse,
+            doctor_phone:      doctor.phone,
+            doctor_speciality: doctor.speciality,
+            hospital_ids:      selectedHospitals.map(h => h.id),
+            custom_message:    customMessage || null,
+            bcc_override:      bccList,
+            cc_override:       ccList.length ? ccList : null,
+            assigned_to:       senderAssignedTo,
+            stage_overrides:   effectiveStageOverrides ?? null,
+            template_overrides: templateOverridesPayload,
+            attachments:        hospitalAttach.map(a => ({ filename: a.filename, path: a.path })),
+            attachments_doctor: doctorAttach.map(a => ({ filename: a.filename, path: a.path })),
+            scheduled_for:     gulf.date,
+            scheduled_at_time: gulf.time,
+            timezone:          "Asia/Dubai",
+          });
+        }
+        const nD = selectedDoctors.length, nH = selectedHospitals.length;
+        toast.success(
+          nD === 1
+            ? `Scheduled for ${localLabel} (your time) — ${selectedDoctors[0].name} → ${nH} hospital${nH === 1 ? "" : "s"}`
+            : `Scheduled for ${localLabel} (your time) — ${nD} doctors × ${nH} hospital${nH === 1 ? "" : "s"}`,
+          { action: { label: "View queue", onClick: () => navigate("/batches") } },
+        );
         onClose();
       } catch (err) {
         toast.error(err instanceof Error ? err.message : "Could not schedule");
@@ -499,22 +571,17 @@ function SendProfileDialogBody({ onClose, initial }: { onClose: () => void; init
 
     setSubmitting(true);
     try {
-      // One run per hospital — keeps Flow 2 timeline focused per relationship,
-      // matches how Saif's team thinks about "Doctor X sent to Hospital Y".
-      // For multi-hospital sends we group all runs under a shared batch_id
-      // in metadata so the BCC nature is queryable later.
-      const batchId = crypto.randomUUID();
-      // Cycle-mode cursor advances, applied after the runs are created so the
-      // next send to each hospital rotates to its next contact.
+      // ── Per-hospital routing, resolved ONCE (doctor-independent) ──────────
+      // Recipient / override / all-mode / cursor decisions depend only on the
+      // hospital, so compute them before the doctor loop. Advancing a cycle-mode
+      // cursor inside the doctor loop would over-rotate it N times (a real bug) —
+      // so cursorAdvances is collected here once and applied once at the end.
       const cursorAdvances: { id: string; name: string; next: number }[] = [];
-      // Collect the ids the inserts return, in order — so we send exactly the
-      // runs we created. (Re-querying by batch_id could miss a just-inserted row
-      // that isn't visible yet → that hospital would never get sent.)
-      const createdRunIds: string[] = [];
+      const routingByHospital = new Map<string, { recipientEmail: string | null; recipientName: string; runCc: string[] }>();
       for (const h of selectedHospitals) {
-        // Resolve THIS send's recipient from the hospital's Zoho contacts +
-        // routing mode (primary vs cycle), honouring a manual override. Falls
-        // back to the hospital row's primary_recruiter_email if nothing matched.
+        // Resolve THIS hospital's recipient from its Zoho contacts + routing mode
+        // (primary vs cycle), honouring a manual override. Falls back to the
+        // hospital row's primary_recruiter_email if nothing matched.
         const contactsForH = hospitalContacts.forHospital(h.name);
         const resolved = resolveRecipient(contactsForH, h);
         const overrideEmail = recipientOverrides[h.id];
@@ -528,10 +595,8 @@ function SendProfileDialogBody({ onClose, initial }: { onClose: () => void; init
         const recipientEmail = isAllMode
           ? (allEmails.join(", ") || h.primary_recruiter_email || null)
           : (overrideEmail ?? resolved.contact?.email ?? h.primary_recruiter_email ?? null);
-        // Going to everyone → greet with the hospital name (leave contact name
-        // blank), since no single contact owns the email.
-        // Multiple manual recipients (comma-joined) — like 'all' mode — greet the
-        // hospital name, since no single contact owns the email.
+        // Going to everyone (or multiple manual recipients) → greet with the
+        // hospital name (blank contact name), since no single contact owns it.
         const overrideIsMulti = !!overrideEmail && /[,;]/.test(overrideEmail);
         const recipientName  = (isAllMode || overrideIsMulti)
           ? ""
@@ -539,109 +604,145 @@ function SendProfileDialogBody({ onClose, initial }: { onClose: () => void; init
         // Auto-CC (send-state): the hospital's configured cc_emails ride the send.
         const runCc = [...new Set([...ccList, ...(h.cc_emails ?? [])].map(e => e.trim()).filter(Boolean))];
         // Only advance the cursor when we actually used the cycle rotation
-        // (no override, cycle mode, real matched contacts).
+        // (no override, cycle mode, real matched contacts). Once per hospital.
         if (!overrideEmail && (h.contact_mode ?? "primary") === "cycle" && !resolved.fromHospitalRow && resolved.nextCursor !== (h.cycle_cursor ?? 0)) {
           cursorAdvances.push({ id: h.id, name: h.name, next: resolved.nextCursor });
         }
-        const { data: runRow, error: runErr } = await supabase
-          .from("automation_flow_runs")
-          .insert({
-            flow_key:      "profile_sent",
-            doctor_id:     selectedDoctor.id,
-            doctor_name:   selectedDoctor.name,
-            doctor_email:  doctorEmailToUse,
-            doctor_phone:  selectedDoctor.phone,
-            hospital:      h.name,
-            current_stage: "email_hospital",
-            status:        "active",
-            created_by:    user?.email ?? null,
-            // Explicit sender pick → stamp assigned_to so pickSender uses it as
-            // the From line. Omit when "auto" so the assign_run_from_hospital_owner
-            // trigger stamps each hospital's own owner (unchanged behaviour).
-            ...(senderAssignedTo ? { assigned_to: senderAssignedTo } : {}),
-            metadata: {
-              batch_id:           batchId,
-              hospital_id:        h.id,
-              hospital_email:     recipientEmail,
-              // The chosen contact's name → direct addressing (send-flow-email
-              // greets this person when hospitals.greet_with_contact_name is on).
-              ...(recipientName ? { hospital_contact_name: recipientName } : {}),
-              bcc:                selectedHospitals.length > 1,
-              total_in_batch:     selectedHospitals.length,
-              custom_message:     customMessage || null,
-              doctor_speciality:  selectedDoctor.speciality,
-              triggered_via:      "send_profile_dialog",
-              // Dispatcher-picked recipients. The roster is BCC'd; Amir (if
-              // picked) is CC'd. send-flow-email reads bcc_override / cc_override.
-              bcc_override:       bccList,
-              ...(runCc.length ? { cc_override: runCc } : {}),
-              // Per-stage edits from the preview (email_hospital / email_doctor).
-              // send-flow-email reads stage_overrides[<stage>] when each email
-              // fires — including the doctor heads-up that auto-continues
-              // server-side — and ships that edited version verbatim.
-              ...(effectiveStageOverrides ? { stage_overrides: effectiveStageOverrides } : {}),
-              // CVs / logbooks attached in the preview — PER EMAIL. Same files
-              // for every hospital in a BCC batch. send-flow-email reads
-              // `attachments` on the hospital stage and `attachments_doctor` on
-              // the doctor stage. Store the minimal Resend shape.
-              ...(hospitalAttach.length
-                ? { attachments: hospitalAttach.map(a => ({ filename: a.filename, path: a.path })) }
-                : {}),
-              ...(doctorAttach.length
-                ? { attachments_doctor: doctorAttach.map(a => ({ filename: a.filename, path: a.path })) }
-                : {}),
-              // Per-send template pick (Amir #3). send-flow-email reads
-              // template_overrides[<stage>] and renders that template server-side
-              // with each hospital's own tokens — so a picked template works even
-              // for a multi-hospital BCC batch. For single-hospital sends the
-              // editable-preview override (stage_overrides above) also carries it,
-              // so it works pre-deploy too.
-              ...((templateKeys && (templateKeys.hospital !== HOSPITAL_DEFAULT_KEY || templateKeys.doctor !== DOCTOR_DEFAULT_KEY))
-                ? { template_overrides: {
-                    ...(templateKeys.hospital !== HOSPITAL_DEFAULT_KEY ? { email_hospital: templateKeys.hospital } : {}),
-                    ...(templateKeys.doctor   !== DOCTOR_DEFAULT_KEY   ? { email_doctor:   templateKeys.doctor }   : {}),
-                  } }
-                : {}),
-              // Card-as-image (Hasan): a captured screenshot of the doctor card,
-              // rendered inline in the hospital email in place of the HTML card
-              // so it looks identical in every client. Same image for every
-              // hospital in the batch (the card is doctor-specific).
-              ...(cardImageUrl ? { doctor_card_image_url: cardImageUrl } : {}),
-            },
-          })
-          .select("id")
-          .single();
-        if (runErr) throw runErr;
-        if (!runRow) continue;
-        const runId = runRow.id;
-        createdRunIds.push(runId);
+        routingByHospital.set(h.id, { recipientEmail, recipientName, runCc });
+      }
 
-        // Seed the trigger + the two outgoing-email events.
-        // Marked `event_type='entered'` rather than `email_sent` until the
-        // real sender confirms delivery — the sender will append a follow-up
-        // event when it actually ships.
-        await supabase.from("automation_flow_events").insert([
-          {
-            run_id:     runId,
-            stage_key:  "trigger_send_clicked",
-            event_type: "entered",
-            message:    `Send requested for ${selectedDoctor.name} → ${h.name}${selectedHospitals.length > 1 ? ` (BCC batch of ${selectedHospitals.length})` : ""}.`,
-            payload:    { batch_id: batchId, hospital_id: h.id },
-          },
-          {
-            run_id:     runId,
-            stage_key:  "email_hospital",
-            event_type: "entered",
-            message:    `Queued for sending. Template: ${h.template_key ?? "profile_sent_hospital"}.`,
-            payload:    { template_key: h.template_key ?? "profile_sent_hospital", recipient: recipientEmail },
-          },
-        ]);
+      // Multi-hospital singular send → ONE consolidated doctor "working
+      // opportunity" email PER DOCTOR listing every hospital (send-flow-email
+      // builds it from batch_hospitals via the shared composer). Mark exactly one
+      // run per doctor (their first) as the doctor-email sender.
+      const isMultiHospital = selectedHospitals.length > 1;
+      const batchHospitalsMeta = selectedHospitals.map(hh => ({
+        name: hh.name, city: hh.city ?? null, country: hh.country ?? null, image_url: hh.image_url ?? null,
+      }));
+
+      // Collect the ids the inserts return, flattened across the whole
+      // doctor × hospital matrix — so we send exactly the runs we created.
+      const createdRunIds: string[] = [];
+
+      // ── Send matrix: for each doctor, one run per hospital ────────────────
+      for (const doctor of selectedDoctors) {
+        // One batch_id per DOCTOR — groups that doctor's hospital runs so the
+        // BCC/consolidated nature stays queryable per doctor.
+        const batchId = crypto.randomUUID();
+        const { doctorEmailToUse, effectiveStageOverrides, cardImageUrl } = dataFor(doctor);
+        for (const [hIndex, h] of selectedHospitals.entries()) {
+          const routing = routingByHospital.get(h.id)!;
+          const { recipientEmail, recipientName, runCc } = routing;
+          const { data: runRow, error: runErr } = await supabase
+            .from("automation_flow_runs")
+            .insert({
+              flow_key:      "profile_sent",
+              doctor_id:     doctor.id,
+              doctor_name:   doctor.name,
+              doctor_email:  doctorEmailToUse,
+              doctor_phone:  doctor.phone,
+              hospital:      h.name,
+              current_stage: "email_hospital",
+              status:        "active",
+              created_by:    user?.email ?? null,
+              // Explicit sender pick → stamp assigned_to so pickSender uses it as
+              // the From line. Omit when "auto" so the assign_run_from_hospital_owner
+              // trigger stamps each hospital's own owner (unchanged behaviour).
+              ...(senderAssignedTo ? { assigned_to: senderAssignedTo } : {}),
+              metadata: {
+                batch_id:           batchId,
+                hospital_id:        h.id,
+                hospital_email:     recipientEmail,
+                // The chosen contact's name → direct addressing (send-flow-email
+                // greets this person when hospitals.greet_with_contact_name is on).
+                ...(recipientName ? { hospital_contact_name: recipientName } : {}),
+                bcc:                selectedHospitals.length > 1,
+                total_in_batch:     selectedHospitals.length,
+                custom_message:     customMessage || null,
+                doctor_speciality:  doctor.speciality,
+                triggered_via:      "send_profile_dialog",
+                // Dispatcher-picked recipients. The roster is BCC'd; Amir (if
+                // picked) is CC'd. send-flow-email reads bcc_override / cc_override.
+                bcc_override:       bccList,
+                ...(runCc.length ? { cc_override: runCc } : {}),
+                // Per-stage edits from the preview (email_hospital / email_doctor).
+                // send-flow-email reads stage_overrides[<stage>] when each email
+                // fires — including the doctor heads-up that auto-continues
+                // server-side — and ships that edited version verbatim. PER DOCTOR.
+                ...(effectiveStageOverrides ? { stage_overrides: effectiveStageOverrides } : {}),
+                // CVs / logbooks attached in the preview — PER EMAIL. Same files
+                // for every hospital. send-flow-email reads `attachments` on the
+                // hospital stage and `attachments_doctor` on the doctor stage.
+                ...(hospitalAttach.length
+                  ? { attachments: hospitalAttach.map(a => ({ filename: a.filename, path: a.path })) }
+                  : {}),
+                ...(doctorAttach.length
+                  ? { attachments_doctor: doctorAttach.map(a => ({ filename: a.filename, path: a.path })) }
+                  : {}),
+                // Per-send template pick (Amir #3). send-flow-email reads
+                // template_overrides[<stage>] and renders that template server-side
+                // with each hospital's own tokens — so a picked template works even
+                // for a multi-hospital BCC batch. For single-hospital sends the
+                // editable-preview override (stage_overrides above) also carries it,
+                // so it works pre-deploy too.
+                ...((templateKeys && (templateKeys.hospital !== HOSPITAL_DEFAULT_KEY || templateKeys.doctor !== DOCTOR_DEFAULT_KEY))
+                  ? { template_overrides: {
+                      ...(templateKeys.hospital !== HOSPITAL_DEFAULT_KEY ? { email_hospital: templateKeys.hospital } : {}),
+                      ...(templateKeys.doctor   !== DOCTOR_DEFAULT_KEY   ? { email_doctor:   templateKeys.doctor }   : {}),
+                    } }
+                  : {}),
+                // Card-as-image (Hasan): a captured screenshot of the doctor card,
+                // rendered inline in the hospital email in place of the HTML card
+                // so it looks identical in every client. This doctor's own image,
+                // same for every hospital they're sent to.
+                ...(cardImageUrl ? { doctor_card_image_url: cardImageUrl } : {}),
+                // Multi-hospital → consolidated doctor email. `send_doctor_email`
+                // true on exactly one run per doctor (their first) so only it
+                // auto-continues to the doctor leg; `batch_hospitals` is the full
+                // list it renders. Single-hospital sends leave these unset → the
+                // per-hospital doctor template (incl. hospitals.doctor_template_key).
+                ...(isMultiHospital
+                  ? { send_doctor_email: hIndex === 0, batch_hospitals: batchHospitalsMeta }
+                  : {}),
+                // Per-send greeting choice — send-flow-email honours greet_mode
+                // over the hospital's stored greet_with_contact_name flag.
+                ...(greetMode !== "auto" ? { greet_mode: greetMode } : {}),
+              },
+            })
+            .select("id")
+            .single();
+          if (runErr) throw runErr;
+          if (!runRow) continue;
+          const runId = runRow.id;
+          createdRunIds.push(runId);
+
+          // Seed the trigger + the two outgoing-email events.
+          // Marked `event_type='entered'` rather than `email_sent` until the
+          // real sender confirms delivery — the sender will append a follow-up
+          // event when it actually ships.
+          await supabase.from("automation_flow_events").insert([
+            {
+              run_id:     runId,
+              stage_key:  "trigger_send_clicked",
+              event_type: "entered",
+              message:    `Send requested for ${doctor.name} → ${h.name}${selectedHospitals.length > 1 ? ` (BCC batch of ${selectedHospitals.length})` : ""}.`,
+              payload:    { batch_id: batchId, hospital_id: h.id },
+            },
+            {
+              run_id:     runId,
+              stage_key:  "email_hospital",
+              event_type: "entered",
+              message:    `Queued for sending. Template: ${h.template_key ?? "profile_sent_hospital"}.`,
+              payload:    { template_key: h.template_key ?? "profile_sent_hospital", recipient: recipientEmail },
+            },
+          ]);
+        }
       }
 
       qc.invalidateQueries({ queryKey: ["automation-flow-runs"] });
 
-      // Advance each cycle-mode hospital's cursor so the NEXT send rotates to
-      // its next contact. Non-fatal — a failure just repeats a contact.
+      // Advance each cycle-mode hospital's cursor ONCE so the NEXT send rotates
+      // to its next contact. Non-fatal — a failure just repeats a contact.
       for (const adv of cursorAdvances) {
         try { await updateHospital.mutateAsync({ id: adv.id, name: adv.name, cycle_cursor: adv.next }); }
         catch { /* ignore — rotation retries next time */ }
@@ -656,8 +757,8 @@ function SendProfileDialogBody({ onClose, initial }: { onClose: () => void; init
       const lastFailMsg: { msg: string | null } = { msg: null };
       // Send exactly the runs we created, using the ids the inserts returned
       // (no refetch — that could skip a not-yet-visible row). A small concurrency
-      // pool keeps a 20-hospital send from being 20 serial round-trips while
-      // staying under Resend's rate limit.
+      // pool keeps a large matrix from being N serial round-trips while
+      // staying under Resend's rate limit. One pool over the flattened list.
       const POOL = 4;
       for (let i = 0; i < createdRunIds.length; i += POOL) {
         const slice = createdRunIds.slice(i, i + POOL);
@@ -673,11 +774,14 @@ function SendProfileDialogBody({ onClose, initial }: { onClose: () => void; init
         for (const okr of results) okr ? sent++ : failed++;
       }
 
+      const nD = selectedDoctors.length, nH = selectedHospitals.length;
       if (failed === 0) {
         toast.success(
-          selectedHospitals.length === 1
-            ? `Sent ${selectedDoctor.name} → ${selectedHospitals[0].name}`
-            : `Sent ${selectedDoctor.name} → ${selectedHospitals.length} hospitals (BCC)`,
+          nD === 1 && nH === 1
+            ? `Sent ${selectedDoctors[0].name} → ${selectedHospitals[0].name}`
+            : nD === 1
+              ? `Sent ${selectedDoctors[0].name} → ${nH} hospitals (BCC)`
+              : `Sent ${nD} doctors × ${nH} hospital${nH === 1 ? "" : "s"} (${sent} email${sent === 1 ? "" : "s"})`,
         );
       } else if (sent === 0) {
         toast.error(`All sends failed: ${lastFailMsg.msg}`);
@@ -716,10 +820,11 @@ function SendProfileDialogBody({ onClose, initial }: { onClose: () => void; init
                 <Loader2 className="h-4 w-4 animate-spin" /> Preparing the introduction…
               </div>
             </div>
-          ) : step === "preview-confirm" && selectedDoctor ? (
+          ) : step === "preview-confirm" && selectedDoctors.length > 0 ? (
             <PreviewConfirm
               onClose={onClose}
-              doctor={selectedDoctor}
+              doctors={selectedDoctors}
+              sendDataByDoctor={sendDataByDoctor}
               hospitals={selectedHospitals}
               customMessage={customMessage}
               hospitalSubject={hospitalTemplate?.subject ?? "Candidate introduction — {{doctor_name}}"}
@@ -746,16 +851,18 @@ function SendProfileDialogBody({ onClose, initial }: { onClose: () => void; init
                 if (email) next[id] = email; else delete next[id];
                 return next;
               })}
-              cardImageUrl={cardImageUrl}
-              onSetCardImage={setCardImageUrl}
+              cardImageByDoctor={cardImageByDoctor}
+              onSetCardImage={setCardImageForDoctor}
               onRemoveHospital={(id) => setSelectedIds(prev => prev.filter(x => x !== id))}
+              hospitalPool={hospitals}
+              onAddHospital={(id) => setSelectedIds(prev => prev.includes(id) ? prev : [...prev, id])}
             />
           ) : (
             <EmailPreviewStudioLayout
               title="Send Profile to Hospital"
               subtitle={step === "pick-doctor"
-                ? "Step 1 · Choose a doctor"
-                : `Step 2 · ${selectedDoctor?.name ?? "doctor"} → choose hospital(s)`}
+                ? "Step 1 · Choose doctor(s)"
+                : `Step 2 · ${firstDoctor?.name ?? "doctor"}${selectedDoctors.length > 1 ? ` +${selectedDoctors.length - 1} more` : ""} → choose hospital(s)`}
               onClose={onClose}
               emails={wizardEmails}
               activeKey={wizardTab}
@@ -771,11 +878,13 @@ function SendProfileDialogBody({ onClose, initial }: { onClose: () => void; init
                       <DoctorPicker
                         options={doctorOptions}
                         isLoading={zohoLoading || !completionReady}
-                        onPick={(d) => { setSelectedDoctor(d); setStep("pick-hospitals"); }}
+                        selectedIds={selectedDoctorIds}
+                        onToggle={(id) => setSelectedDoctorIds(prev => prev.includes(id) ? prev.filter(x => x !== id) : [...prev, id])}
+                        onSetSelected={setSelectedDoctorIds}
                       />
-                    ) : selectedDoctor ? (
+                    ) : selectedDoctors.length > 0 ? (
                       <HospitalPicker
-                        doctor={selectedDoctor}
+                        doctors={selectedDoctors}
                         hospitals={hospitals}
                         selectedIds={selectedIds}
                         onToggle={(id) => setSelectedIds(prev => prev.includes(id) ? prev.filter(x => x !== id) : [...prev, id])}
@@ -787,7 +896,11 @@ function SendProfileDialogBody({ onClose, initial }: { onClose: () => void; init
                   </div>
                 </div>
               }
-              footer={step === "pick-hospitals" ? (
+              footer={step === "pick-doctor" ? (
+                <Button onClick={() => setStep("pick-hospitals")} disabled={selectedDoctorIds.length === 0} className="ml-auto">
+                  Continue to hospitals →
+                </Button>
+              ) : step === "pick-hospitals" ? (
                 <>
                   <Button variant="outline" onClick={() => setStep("pick-doctor")} className="mr-auto">
                     <ChevronLeft className="h-3.5 w-3.5 mr-1" /> Back
@@ -826,8 +939,12 @@ function Stepper({ step }: { step: Step }) {
   );
 }
 
-function DoctorPicker({ options, isLoading, onPick }: {
-  options: DoctorOption[]; isLoading: boolean; onPick: (d: DoctorOption) => void;
+function DoctorPicker({ options, isLoading, selectedIds, onToggle, onSetSelected }: {
+  options: DoctorOption[];
+  isLoading: boolean;
+  selectedIds: string[];
+  onToggle: (id: string) => void;
+  onSetSelected: (ids: string[]) => void;
 }) {
   const [q, setQ] = useState("");
   // Defer only the filter term: the <Input> stays controlled by the raw `q`
@@ -845,6 +962,18 @@ function DoctorPicker({ options, isLoading, onPick }: {
     ).slice(0, 100);
   }, [options, deferredQ]);
 
+  // "Select all" acts on whatever's currently filtered (so a search narrows it),
+  // mirroring the HospitalPicker's multi-select pattern.
+  const allFilteredSelected = filtered.length > 0 && filtered.every(d => selectedIds.includes(d.id));
+  const toggleAll = () => {
+    if (allFilteredSelected) {
+      const drop = new Set(filtered.map(d => d.id));
+      onSetSelected(selectedIds.filter(id => !drop.has(id)));
+    } else {
+      onSetSelected([...new Set([...selectedIds, ...filtered.map(d => d.id)])]);
+    }
+  };
+
   return (
     <div className="flex h-full min-h-0 flex-col gap-2.5">
       <div className="relative shrink-0">
@@ -857,43 +986,57 @@ function DoctorPicker({ options, isLoading, onPick }: {
           className="pl-7 text-[12px] bg-white text-slate-800"
         />
       </div>
+      <div className="flex shrink-0 items-center justify-between text-[11px]">
+        <div className="flex items-center gap-2">
+          <button
+            type="button"
+            onClick={toggleAll}
+            disabled={filtered.length === 0}
+            className="inline-flex items-center gap-1 rounded-md border border-sidebar-border/50 bg-white/10 px-2 py-1 text-[11px] font-medium text-sidebar-foreground/85 hover:bg-white/20 hover:text-white transition-colors disabled:opacity-40"
+          >
+            {allFilteredSelected ? "Deselect all" : `Select all${q ? " (filtered)" : ""}`}
+            {!allFilteredSelected && <span className="text-sidebar-foreground/55">· {filtered.length}</span>}
+          </button>
+          <span className="text-sidebar-foreground/70">{selectedIds.length} selected</span>
+        </div>
+        {selectedIds.length > 1 && <Badge variant="outline" className="text-[10px] bg-teal-50 border-teal-200">{selectedIds.length} doctors</Badge>}
+      </div>
       <div className="min-h-0 flex-1 rounded-md border border-sidebar-border/40 bg-white overflow-y-auto divide-y aa-scrollbar-hide">
         {isLoading && <div className="px-4 py-6 text-[12px] text-muted-foreground text-center">Loading...</div>}
         {!isLoading && filtered.length === 0 && (
           <div className="px-4 py-6 text-[12px] text-muted-foreground text-center">No doctors match.</div>
         )}
-        {filtered.map(d => (
-          <button
-            key={d.id}
-            onClick={() => onPick(d)}
-            className="group w-full text-left px-3 py-2 hover:bg-teal-50/60 transition-colors flex items-center gap-2.5"
-          >
-            <div className="min-w-0 flex-1">
-              <div className="flex items-center gap-1.5">
-                <span className="min-w-0 flex-1 truncate text-[13px] font-medium text-slate-800">{d.name || "—"}</span>
-                <span className={`shrink-0 rounded px-1.5 py-px text-[8.5px] font-semibold uppercase tracking-wide ${d.source === "dob" ? "bg-emerald-100 text-emerald-700" : "bg-sky-100 text-sky-700"}`}>
-                  {d.source === "dob" ? "DoB" : "Lead"}
-                </span>
+        {filtered.map(d => {
+          const checked = selectedIds.includes(d.id);
+          return (
+            <label key={d.id} className="flex items-center gap-3 px-3 py-2 hover:bg-teal-50/60 cursor-pointer transition-colors">
+              <Checkbox checked={checked} onCheckedChange={() => onToggle(d.id)} />
+              <div className="min-w-0 flex-1">
+                <div className="flex items-center gap-1.5">
+                  <span className="min-w-0 flex-1 truncate text-[13px] font-medium text-slate-800">{d.name || "—"}</span>
+                  <span className={`shrink-0 rounded px-1.5 py-px text-[8.5px] font-semibold uppercase tracking-wide ${d.source === "dob" ? "bg-emerald-100 text-emerald-700" : "bg-sky-100 text-sky-700"}`}>
+                    {d.source === "dob" ? "DoB" : "Lead"}
+                  </span>
+                </div>
+                <div className="truncate text-[11px] text-muted-foreground">
+                  {d.speciality ?? "—"}{(d.email ?? d.phone) ? ` · ${d.email ?? d.phone}` : ""}
+                </div>
               </div>
-              <div className="truncate text-[11px] text-muted-foreground">
-                {d.speciality ?? "—"}{(d.email ?? d.phone) ? ` · ${d.email ?? d.phone}` : ""}
-              </div>
-            </div>
-            <ChevronLeft className="h-4 w-4 shrink-0 text-slate-300 rotate-180 group-hover:text-teal-500 transition-colors" />
-          </button>
-        ))}
+            </label>
+          );
+        })}
       </div>
       <div className="shrink-0 text-[10px] text-sidebar-foreground/60">
-        Showing {filtered.length} of {options.length}. Refine search to narrow.
+        Showing {filtered.length} of {options.length}. Each doctor gets their own personalized email(s).
       </div>
     </div>
   );
 }
 
 function HospitalPicker({
-  doctor, hospitals, selectedIds, onToggle, onSetSelected, customMessage, setCustomMessage,
+  doctors, hospitals, selectedIds, onToggle, onSetSelected, customMessage, setCustomMessage,
 }: {
-  doctor: DoctorOption;
+  doctors: DoctorOption[];
   hospitals: Hospital[];
   selectedIds: string[];
   onToggle: (id: string) => void;
@@ -902,39 +1045,30 @@ function HospitalPicker({
   setCustomMessage: (s: string) => void;
 }) {
   const [q, setQ] = useState("");
+  // Country filter only — the city/emirate filter was removed (send flows scope
+  // by country). Options collapse alias variants (KSA≡Saudi Arabia, UAE≡United
+  // Arab Emirates…) via the shared normaliser, so the dropdown value is a
+  // canonical key and matching is alias-tolerant.
   const [country, setCountry] = useState("all");
-  const [city, setCity] = useState("all");
-  const countries = useMemo(() => {
-    const s = new Set<string>();
-    for (const h of hospitals) { const c = h.country?.trim(); if (c) s.add(c); }
-    return Array.from(s).sort((a, b) => a.localeCompare(b));
-  }, [hospitals]);
-  // Cities/emirates scoped to the selected country, so "UAE → Dubai/Abu Dhabi…".
-  const cities = useMemo(() => {
-    const s = new Set<string>();
-    for (const h of hospitals) {
-      if (country !== "all" && (h.country ?? "").trim().toLowerCase() !== country.toLowerCase()) continue;
-      const c = h.city?.trim(); if (c) s.add(c);
-    }
-    return Array.from(s).sort((a, b) => a.localeCompare(b));
-  }, [hospitals, country]);
-  // A city no longer in the (country-scoped) list falls back to "all".
-  const effCity = city !== "all" && cities.some(c => c.toLowerCase() === city.toLowerCase()) ? city : "all";
+  const countries = useMemo(() => countryFilterOptions(hospitals.map(h => h.country)), [hospitals]);
+  // Distinct specialties across the chosen doctors — a hospital is offered when
+  // it accepts ANY of them (don't hide a hospital that's valid for at least one
+  // doctor in a mixed-specialty batch). One doctor → the same single-doctor rule.
+  const specialties = useMemo(() => [...new Set(doctors.map(d => d.speciality))], [doctors]);
   const filtered = useMemo(() => {
     const term = q.trim().toLowerCase();
     return hospitals.filter(h => {
       // Send-state system: never offer a paused ("don't send") hospital, or one
-      // whose specialty rules exclude this doctor's specialty.
+      // whose specialty rules exclude every chosen doctor's specialty.
       if (isHospitalPaused(h)) return false;
-      if (!hospitalAllowsSpecialty(h, doctor.speciality)) return false;
-      if (country !== "all" && (h.country ?? "").trim().toLowerCase() !== country.toLowerCase()) return false;
-      if (effCity !== "all" && (h.city ?? "").trim().toLowerCase() !== effCity.toLowerCase()) return false;
+      if (!specialties.some(s => hospitalAllowsSpecialty(h, s))) return false;
+      if (country !== "all" && normCountry(h.country) !== country) return false;
       if (!term) return true;
       return h.name.toLowerCase().includes(term) ||
         h.city?.toLowerCase().includes(term) ||
         h.country?.toLowerCase().includes(term);
     });
-  }, [hospitals, q, country, effCity, doctor.speciality]);
+  }, [hospitals, q, country, specialties]);
 
   // "Select all" acts on whatever's currently filtered (so a search narrows it).
   const allFilteredSelected = filtered.length > 0 && filtered.every(h => selectedIds.includes(h.id));
@@ -950,9 +1084,19 @@ function HospitalPicker({
   return (
     <div className="flex h-full min-h-0 flex-col gap-2.5">
       <div className="shrink-0 rounded-lg border border-sidebar-border/40 bg-white/95 p-2.5 shadow-sm">
-        <div className="text-[10px] uppercase tracking-wider text-muted-foreground">Sending profile of</div>
-        <div className="text-[13px] font-medium text-slate-800">{doctor.name}</div>
-        <div className="text-[11px] text-muted-foreground">{doctor.speciality ?? "—"} · {doctor.email ?? doctor.phone ?? "no contact"}</div>
+        <div className="text-[10px] uppercase tracking-wider text-muted-foreground">
+          Sending profile{doctors.length === 1 ? " of" : `s of ${doctors.length} doctors`}
+        </div>
+        {doctors.length === 1 ? (
+          <>
+            <div className="text-[13px] font-medium text-slate-800">{doctors[0].name}</div>
+            <div className="text-[11px] text-muted-foreground">{doctors[0].speciality ?? "—"} · {doctors[0].email ?? doctors[0].phone ?? "no contact"}</div>
+          </>
+        ) : (
+          <div className="text-[12px] font-medium text-slate-800 leading-snug">
+            {doctors.map(d => d.name).join(", ")}
+          </div>
+        )}
       </div>
       <div className="flex shrink-0 gap-2">
         <div className="relative flex-1">
@@ -966,19 +1110,8 @@ function HospitalPicker({
           className="shrink-0 rounded-md border border-input bg-white text-slate-800 text-[12px] px-2 h-9 max-w-[140px]"
         >
           <option value="all">All countries</option>
-          {countries.map(c => <option key={c} value={c}>{c}</option>)}
+          {countries.map(c => <option key={c.value} value={c.value}>{c.label}</option>)}
         </select>
-        {cities.length > 0 && (
-          <select
-            value={effCity}
-            onChange={e => setCity(e.target.value)}
-            title="Show only hospitals in this city / emirate"
-            className="shrink-0 rounded-md border border-input bg-white text-slate-800 text-[12px] px-2 h-9 max-w-[140px]"
-          >
-            <option value="all">All cities</option>
-            {cities.map(c => <option key={c} value={c}>{c}</option>)}
-          </select>
-        )}
       </div>
       <div className="flex shrink-0 items-center justify-between text-[11px]">
         <div className="flex items-center gap-2">
@@ -1027,198 +1160,33 @@ function HospitalPicker({
   );
 }
 
-/** Per-hospital recipient line on the send screen: shows the auto-picked
- *  contact (from the hospital's primary/cycle setting) and lets the sender
- *  override it for THIS send. Hidden when no hospital has matched contacts. */
-function HospitalRecipientsOverride({ hospitals, contacts, overrides, onOverride }: {
-  hospitals: Hospital[];
-  contacts: { forHospital: (name: string) => HospitalContact[] };
-  overrides: Record<string, string>;
-  onOverride: (hospitalId: string, email: string | null) => void;
-}) {
-  const rows = hospitals.map(h => {
-    const hc = contacts.forHospital(h.name);
-    const resolved = resolveRecipient(hc, h).contact;
-    const override = overrides[h.id];
-    return { h, hc, resolved, override };
-  });
-  if (!rows.some(r => r.hc.length > 0)) return null;
+// HospitalRecipientsOverride replaced by the shared <HospitalRecipientsPanel>
+// (imported at the top) so the singular + batch previews edit recipients
+// identically — plus a country filter and add-a-hospital.
 
-  return (
-    <div className="rounded-lg border border-sidebar-border/40 bg-white/95 p-3 space-y-2 shadow-sm text-slate-700">
-      <div className="text-[11px] font-medium text-teal-700 flex items-center gap-1.5 flex-wrap">
-        <Mail className="h-3.5 w-3.5" /> Hospital recipient{rows.length > 1 ? "s" : ""}
-        <span className="text-[10px] font-normal text-muted-foreground">— auto-picked by each hospital's setting; tick people to override for this send only</span>
-      </div>
-      <div className="space-y-2">
-        {rows.map(({ h, hc, resolved, override }) => {
-          // Override is a comma-joined email list; tick contacts to build it.
-          const selected = new Set((override ?? "").split(/[,;]+/).map(s => s.trim().toLowerCase()).filter(Boolean));
-          const toggle = (email: string) => {
-            const k = email.toLowerCase();
-            const next = new Set(selected);
-            if (next.has(k)) next.delete(k); else next.add(k);
-            const emails = hc.filter(c => c.email && next.has(c.email.toLowerCase())).map(c => c.email!);
-            onOverride(h.id, emails.length ? emails.join(", ") : null); // empty → back to Auto
-          };
-          const autoLabel = h.contact_mode === "all"
-            ? `Auto (all ${resolveAllRecipients(hc, h).length})`
-            : `Auto (${h.contact_mode === "cycle" ? "cycle" : "primary"}) → ${resolved?.name || resolved?.email || "—"}`;
-          return (
-            <div key={h.id} className="flex min-w-0 items-start gap-2 text-[11px]">
-              <span className="w-24 shrink-0 truncate font-medium text-slate-700 pt-0.5" title={h.name}>{h.name}</span>
-              {hc.length === 0 ? (
-                <span className="min-w-0 flex-1 truncate text-muted-foreground italic pt-0.5">{h.primary_recruiter_email ?? "no recipient"}</span>
-              ) : (
-                <div className="min-w-0 flex-1 space-y-1">
-                  <div className="text-[10px] text-muted-foreground">
-                    {override ? <span className="text-amber-600 font-medium">{selected.size} selected — overriding auto</span> : autoLabel}
-                  </div>
-                  <div className="flex flex-wrap gap-x-3 gap-y-1">
-                    {hc.filter(c => c.email).map(c => (
-                      <label key={c.id} className="inline-flex items-center gap-1 cursor-pointer" title={c.email}>
-                        <input type="checkbox" checked={selected.has(c.email!.toLowerCase())} onChange={() => toggle(c.email!)} className="h-3 w-3 accent-teal-600" />
-                        <span className="truncate max-w-[150px] text-slate-700">{c.name || c.email}{c.isPrimary ? " · Primary" : ""}</span>
-                      </label>
-                    ))}
-                  </div>
-                </div>
-              )}
-            </div>
-          );
-        })}
-      </div>
-    </div>
-  );
-}
+// CardScreenshotControl + CvStudioControl now live in ./ProfileCardControls so
+// the batch preview shares the exact same controls (imported at the top).
 
-/**
- * "Use profile card image" — rasterises the candidate profile card (the
- * View-full-profile look, empty fields dropped) to a flat PNG via html2canvas,
- * uploads it to the public email-card-images bucket, and reports the URL up so
- * the hospital email renders that image ABOVE the data table (both are shown)
- * ({{#doctor_card_image_url}} section). Once captured, shows a thumbnail with
- * Re-capture / Undo. No auto-download (the Save-As dialog was unwanted).
- */
-function CardScreenshotControl({
-  cardHtml, cardImageUrl, onSetCardImage, autoBusy = false, captureWidth,
-}: {
-  cardHtml: string;
-  cardImageUrl: string | null;
-  onSetCardImage: (url: string | null) => void;
-  /** The parent is auto-attaching the card (single-doctor sends) — show a
-   *  quiet "attaching…" state instead of the manual button. */
-  autoBusy?: boolean;
-  /** Capture width — the 3:2 profile card is wider than the legacy card. */
-  captureWidth?: number;
-}) {
-  const [busy, setBusy] = useState(false);
-  const capture = async () => {
-    setBusy(true);
-    try {
-      const url = await captureAndUploadCard(cardHtml, { width: captureWidth });
-      onSetCardImage(url);
-      toast.success("Profile card attached — it'll appear above the data table in the email.");
-    } catch (e) {
-      toast.error(e instanceof Error ? e.message : "Couldn't build the profile image. Try again.");
-    } finally {
-      setBusy(false);
-    }
-  };
-
-  // Auto-attaching (single-doctor send) — quiet status, no button to press.
-  if (autoBusy && !cardImageUrl) {
-    return (
-      <div className="inline-flex items-center gap-1.5 rounded-md border border-teal-200 bg-teal-50 px-2.5 py-1.5 text-[11px] font-medium text-teal-700">
-        <Loader2 className="h-3.5 w-3.5 shrink-0 animate-spin" />
-        <span>Attaching the profile card image…</span>
-      </div>
-    );
-  }
-
-  if (cardImageUrl) {
-    return (
-      // Left-aligned + width-capped so it never stretches to the full dialog
-      // (where the right edge could be clipped by overflow-x-hidden). min-w-0
-      // children truncate instead of pushing the row wide.
-      <div className="flex items-center gap-2 rounded-md border border-emerald-200 bg-emerald-50 px-2 py-1.5 max-w-[520px] min-w-0">
-        <img
-          src={cardImageUrl}
-          alt="Doctor card screenshot"
-          className="h-9 w-16 shrink-0 rounded border border-emerald-200 object-cover object-top"
-        />
-        <div className="min-w-0 flex-1 text-[11px] leading-tight">
-          <div className="flex items-center gap-1 font-medium text-emerald-800">
-            <ImageIcon className="h-3 w-3 shrink-0" /> <span className="truncate">Profile card shown above the table</span>
-          </div>
-          <div className="truncate text-emerald-700/80">Clean card, empty fields dropped · pixel-perfect in any client.</div>
-        </div>
-        <button type="button" onClick={capture} disabled={busy} className="shrink-0 text-[10px] font-medium text-emerald-700 hover:underline disabled:opacity-50">
-          {busy ? "…" : "Re-capture"}
-        </button>
-        <button type="button" onClick={() => { onSetCardImage(null); toast.message("Reverted — the card will send as HTML."); }} className="shrink-0 text-[10px] text-slate-500 hover:underline">
-          Undo
-        </button>
-      </div>
-    );
-  }
-
-  return (
-    // Auto-width, left-aligned button (NOT w-full): a full-width bar's centered
-    // label ran off into the dialog's clipped right edge. inline-flex keeps it
-    // compact and tidy under the "Hospital intro email" label.
-    <button
-      type="button"
-      onClick={capture}
-      disabled={busy}
-      className="inline-flex max-w-full items-center gap-1.5 rounded-md border border-teal-200 bg-teal-50 px-2.5 py-1.5 text-[11px] font-medium text-teal-700 transition-colors hover:bg-teal-100 disabled:opacity-60"
-      title="Render the candidate profile card as a clean image (empty fields dropped) and show it above the data table"
-    >
-      {busy ? <Loader2 className="h-3.5 w-3.5 shrink-0 animate-spin" /> : <Camera className="h-3.5 w-3.5 shrink-0" />}
-      <span className="truncate">{busy ? "Building image…" : "Use profile card as image"}</span>
-    </button>
-  );
-}
-
-/**
- * "Generate branded CV" — build the doctor's Allocation-Assist-branded CV from
- * their CV on file (form-response upload), view + edit it, and attach the PDF to
- * this email. Falls back to manual upload inside the dialog when there's no CV
- * on file. Reuses the same studio as the Doctors → Convert CV tab.
- */
-function CvStudioControl({ doctor, onAttach }: { doctor: WpCandidate | null; onAttach: (att: EmailAttachment) => void }) {
-  const [open, setOpen] = useState(false);
-  return (
-    <>
-      <button
-        type="button"
-        onClick={() => setOpen(true)}
-        className="inline-flex max-w-full items-center gap-1.5 rounded-md border border-teal-200 bg-teal-50 px-2.5 py-1.5 text-[11px] font-medium text-teal-700 transition-colors hover:bg-teal-100"
-        title="Build the doctor's branded CV from their CV on file, edit it, and attach it to this email"
-      >
-        <FileText className="h-3.5 w-3.5 shrink-0" />
-        <span className="truncate">Generate &amp; attach branded CV</span>
-      </button>
-      <CvStudioDialog
-        open={open}
-        onOpenChange={setOpen}
-        doctor={doctor}
-        cvSourceUrl={doctor?.cv_url}
-        onAttach={onAttach}
-      />
-    </>
-  );
-}
+/** Per-doctor resolved send data (WP candidate + merged tokens + completion). */
+type DoctorSendData = { wpCandidate: WpCandidate | null; mergedProfileTokens: Record<string, string>; completion: number };
+/** Per-doctor edit payload delivered to handleConfirm. */
+type PerDoctorSend = { stageOverrides?: Record<string, SendOverrides>; doctorEmail?: string };
 
 function PreviewConfirm({
-  doctor, hospitals, customMessage, hospitalSubject, hospitalBody, doctorSubject, doctorBody,
+  doctors, sendDataByDoctor, hospitals, customMessage, hospitalSubject, hospitalBody, doctorSubject, doctorBody,
   onBack, onClose, onConfirm, submitting, ccList, setCcList, bccList, setBccList,
   templates, hospitalTemplateKey, setHospitalTemplateKey, doctorTemplateKey, setDoctorTemplateKey, onSaveDefault,
   hospitalContacts, recipientOverrides, onOverrideRecipient,
-  cardImageUrl, onSetCardImage, onRemoveHospital,
+  cardImageByDoctor, onSetCardImage, onRemoveHospital, hospitalPool, onAddHospital,
 }: {
-  doctor: DoctorOption;
+  /** 1..N doctors — each gets their own personalized email(s), previewed under a
+   *  per-doctor sub-tab. N=1 is the single-doctor common case (unchanged UI). */
+  doctors: DoctorOption[];
+  sendDataByDoctor: Map<string, DoctorSendData>;
   hospitals: Hospital[];
+  /** Full hospital pool — feeds the preview's country filter + add-hospital. */
+  hospitalPool: Hospital[];
+  onAddHospital: (id: string) => void;
   customMessage: string;
   hospitalSubject: string;
   hospitalBody: string;
@@ -1226,7 +1194,16 @@ function PreviewConfirm({
   doctorBody: string;
   onBack: () => void;
   onClose: () => void;
-  onConfirm: (stageOverrides?: Record<string, SendOverrides>, attachments?: { hospital?: EmailAttachment[]; doctor?: EmailAttachment[] }, templateKeys?: { hospital: string; doctor: string }, schedule?: { date: string; time: string }, recipients?: { doctorEmail?: string }, sender?: { assignedTo: string | null }) => void;
+  onConfirm: (
+    perDoctor: Record<string, PerDoctorSend>,
+    opts?: {
+      attachments?: { hospital?: EmailAttachment[]; doctor?: EmailAttachment[] };
+      templateKeys?: { hospital: string; doctor: string };
+      schedule?:    { date: string; time: string };
+      sender?:      { assignedTo: string | null };
+      greeting?:    { mode: "auto" | "contact" | "team" };
+    },
+  ) => void;
   submitting: boolean;
   ccList: string[];
   setCcList: (next: string[]) => void;
@@ -1241,25 +1218,28 @@ function PreviewConfirm({
   hospitalContacts: { forHospital: (name: string) => HospitalContact[] };
   recipientOverrides: Record<string, string>;
   onOverrideRecipient: (hospitalId: string, email: string | null) => void;
-  cardImageUrl: string | null;
-  onSetCardImage: (url: string | null) => void;
+  /** Card image PER DOCTOR (keyed by doctor.id) — the doctor's captured card. */
+  cardImageByDoctor: Record<string, string | null>;
+  onSetCardImage: (doctorId: string, url: string | null) => void;
   onRemoveHospital: (id: string) => void;
 }) {
   // Editing is offered for single-hospital sends only — the preview (and the
   // edited HTML) is rendered for one hospital, so reusing it across a BCC
-  // batch would bake the wrong hospital's tokens into the others.
+  // batch would bake the wrong hospital's tokens into the others. Evaluated per
+  // doctor pane below.
   const isSingle = hospitals.length === 1;
-  // Per-stage overrides captured from the editable previews (null = unedited).
-  const [hospitalOv, setHospitalOv] = useState<SendOverrides | null>(null);
-  const [doctorOv,   setDoctorOv]   = useState<SendOverrides | null>(null);
-  // Editable recipient for the doctor "working opportunity" email — empty means
-  // "send to the doctor's own email" (Mitchell: a field to change where the
-  // doctor email is sent). Only editable on single-hospital sends.
-  const [doctorEmailOv, setDoctorEmailOv] = useState("");
-  // CVs / logbooks to attach — PER EMAIL, so the dispatcher controls exactly
-  // which file rides which email. Uploaded to the public email-attachments
-  // bucket on pick; the URLs ride along in run metadata (attachments =
-  // hospital email, attachments_doctor = doctor email).
+  const multiDoctor = doctors.length > 1;
+  // Which doctor's sub-tab is active (shared by the Hospital + Doctor top-tabs
+  // so switching top-tab keeps you on the same doctor). No tab bar renders for a
+  // single doctor, so the view is unchanged there.
+  const [activeDoctorIdx, setActiveDoctorIdx] = useState(0);
+  const activeDoctor = doctors[Math.min(activeDoctorIdx, doctors.length - 1)] ?? doctors[0];
+  // Per-DOCTOR edit state (keyed by doctor.id): hand-edited bodies + a retyped
+  // doctor "To". null/absent = unedited. Each doctor pane owns its own entry.
+  const [hospitalOvByDoctor, setHospitalOvByDoctor] = useState<Record<string, SendOverrides | null>>({});
+  const [doctorOvByDoctor,   setDoctorOvByDoctor]   = useState<Record<string, SendOverrides | null>>({});
+  const [doctorEmailOvByDoctor, setDoctorEmailOvByDoctor] = useState<Record<string, string>>({});
+  // CVs / logbooks to attach — GLOBAL (PER EMAIL leg, shared across doctors).
   const [hospitalAttachments, setHospitalAttachments] = useState<EmailAttachment[]>([]);
   const [doctorAttachments, setDoctorAttachments]     = useState<EmailAttachment[]>([]);
   // Send now vs schedule for later (Amir #5).
@@ -1285,42 +1265,28 @@ function PreviewConfirm({
   const sender = findSenderByEmail(senderOverride);
   const senderAssignedTo = senderOverride;
 
-  // Pull the doctor's profile data for the preview. WP candidates are
-  // now the source of truth — if the doctor is linked to a WP record
-  // we use that; for any field WP doesn't have set, we fall back to
-  // the legacy doctor_profiles row so historical data still renders.
-  const wpCandidate           = useWpCandidateForDoctor(doctor, { includeDrafts: true });
-  const { data: profile }     = useDoctorProfile(doctor.id);
-  const mergedProfileTokens: Record<string, string> = useMemo(() => {
-    const wpTokens     = wpCandidateToTokens(wpCandidate);
-    const legacyTokens = profileToTokens(profile);
-    const merged: Record<string, string> = { ...legacyTokens };
-    for (const [k, v] of Object.entries(wpTokens)) {
-      if (v) merged[k] = v;                // WP wins when populated
-      else if (!(k in merged)) merged[k] = "";
-    }
-    return merged;
-  }, [wpCandidate, profile]);
-  // Completion %: prefer WP candidate filled-fields ratio; fall back to
-  // the legacy profile's completion if no WP record exists. Same helper the
-  // picker uses to drop 0%-complete doctors, so the two always agree.
-  const profileCompletion = wpCandidate
-    ? wpCandidateCompletion(wpCandidate)
-    : profile ? calcCompletion(profile) : 0;
   // Which hospital's version of the email to preview (multi-hospital sends give
   // each hospital its own greeting/recipient). Defaults to the first; follows
   // removals so it never points at a dropped hospital.
   const [previewHospitalId, setPreviewHospitalId] = useState<string | null>(hospitals[0]?.id ?? null);
+  // Per-send greeting override: "auto" keeps each hospital's stored setting,
+  // "contact" greets the named recipient, "team" greets the hospital team.
+  const [greetMode, setGreetMode] = useState<"auto" | "contact" | "team">("auto");
   useEffect(() => {
     if (!hospitals.some(h => h.id === previewHospitalId)) setPreviewHospitalId(hospitals[0]?.id ?? null);
   }, [hospitals, previewHospitalId]);
   const sampleHospital = hospitals.find(h => h.id === previewHospitalId) ?? hospitals[0];
 
-  const vars: Record<string, string> = useMemo(() => {
+  // Pure per-doctor token builder — the old single-doctor `vars` memo, now a
+  // function of the doctor. Same shape as send-flow-email so the preview matches
+  // the actual send. Reads the doctor's already-resolved WP/legacy tokens.
+  const varsFor = (doctor: DoctorOption, hosp: Hospital | undefined, cardImageUrl: string | null): Record<string, string> => {
+    const data = sendDataByDoctor.get(doctor.id);
+    const wpCandidate = data?.wpCandidate ?? null;
+    const mergedProfileTokens = data?.mergedProfileTokens ?? {};
     // Strip any redundant "Dr." prefix so templates that hard-code "Hi Dr.
-    // {{doctor_name}}" don't render "Hi Dr. Dr. Louise Denjean". Prefer
-    // the WP candidate's full_name when present (it's the canonical
-    // record); fall back to the Zoho-derived name otherwise.
+    // {{doctor_name}}" don't render "Hi Dr. Dr. Louise Denjean". Prefer the WP
+    // candidate's full_name when present; fall back to the Zoho-derived name.
     const rawName = (wpCandidate?.full_name && wpCandidate.full_name.trim()) || doctor.name;
     const cleanedDoctorName = rawName.replace(/^\s*Dr\.?\s+/i, "");
     const v: Record<string, string> = {
@@ -1329,103 +1295,117 @@ function PreviewConfirm({
       doctor_email:       doctor.email ?? "",
       doctor_phone:       doctor.phone ?? "",
       doctor_speciality:  doctor.speciality ?? "",
-      // Country of training: WP/legacy profile wins; else fall back to Zoho's
-      // Country_of_Specialty_training so this field still fills for DOB-only doctors.
       doctor_country_training: (mergedProfileTokens.doctor_country_training || doctor.country_training || ""),
-      hospital_name:      sampleHospital?.name ?? "",
-      // Greeting name honours the per-hospital toggle so the preview matches what
-      // send-flow-email will render (contact person when ON + on file, else name).
-      hospital_contact_name: (sampleHospital?.greet_with_contact_name && sampleHospital?.primary_contact_name?.trim())
-        ? sampleHospital.primary_contact_name
-        : (sampleHospital?.name ?? "Team"),
-      // city / country come from the hospital record so the doctor email's
-      // "Working Opportunity in {{city}}" line resolves in the preview.
-      city:               sampleHospital?.city ?? "",
-      country:            sampleHospital?.country ?? "",
-      // Preview-only URL — the real link is minted at send time by
-      // send-flow-email (shared_profile token, ${APP_ORIGIN}/shared-profile/<token>).
-      // Use the production app origin here so the preview reads like
-      // what hospitals actually receive, not 'aa.example'.
+      hospital_name:      hosp?.name ?? "",
+      hospital_contact_name: ((greetMode === "contact" || (greetMode === "auto" && hosp?.greet_with_contact_name)) && hosp?.primary_contact_name?.trim())
+        ? hosp.primary_contact_name
+        : (hosp?.name ?? "Team"),
+      city:               hosp?.city ?? "",
+      country:            hosp?.country ?? "",
       profile_link:       `https://allocationassist.com/shared-profile/${doctor.id}`,
-      // The {{signature}} token is injected by send-flow-email at send time;
-      // for the preview we render the same Allocation Assist branded block
-      // inline so the doctor-side preview shows it too.
       signature:          PREVIEW_SIGNATURE_HTML,
       signature_text:     PREVIEW_SIGNATURE_TEXT,
     };
-    // Build the card + data-table tokens the same way send-flow-email does, so
-    // this preview matches the actual send (otherwise they'd show as literal
-    // {{doctor_card_html}} / {{doctor_row_table_html}}).
     v.doctor_card_html      = previewDoctorCardHtml(v);
     v.doctor_row_table_html = previewDoctorRowTableHtml(v);
-    v.hospital_image        = hospitalImageHtml(sampleHospital?.image_url, sampleHospital?.name);
-    // Captured profile-card image URL. The hospital template swaps its data
-    // table for this <img> via {{#/^doctor_card_image_url}} when it's set, so
-    // the preview reflects exactly what the hospital receives.
+    v.hospital_image        = hospitalImageHtml(hosp?.image_url, hosp?.name);
     v.doctor_card_image_url = cardImageUrl ?? "";
     return v;
-  }, [mergedProfileTokens, doctor, sampleHospital, cardImageUrl]);
+  };
 
-  // Auto-attach the profile-card image for SINGLE-doctor sends — the team asked
-  // for it to happen automatically instead of a button press. Fires once, once
-  // the doctor's profile data has loaded (so the card isn't blank). If it fails,
-  // the manual "Use profile card as image" button reappears as a fallback.
-  const autoCardTried = useRef(false);
-  const [autoCardBusy, setAutoCardBusy] = useState(false);
-  const profileLoaded = !!(mergedProfileTokens.doctor_bio || mergedProfileTokens.doctor_title || mergedProfileTokens.doctor_specialty || wpCandidate);
-  // The doctor profile IMAGE that ships in the to-hospital email. When the
-  // doctor has a WordPress record, use the rich 3:2 landscape profile card;
-  // fall back to the old compact card for doctors with no WP profile.
-  const profileCardHtml  = wpCandidate ? buildDoctorProfileHtml(wpCandidate) : buildProfileCardHtml(vars);
-  const profileCardWidth = wpCandidate ? PROFILE_IMAGE_WIDTH : undefined;
-  useEffect(() => {
-    if (!isSingle || cardImageUrl || autoCardTried.current || !profileLoaded) return;
-    autoCardTried.current = true;
-    setAutoCardBusy(true);
-    captureAndUploadCard(profileCardHtml, { width: profileCardWidth })
-      .then(url => onSetCardImage(url))
-      .catch(e => console.warn("[SendProfile] profile card image failed:", e))   // manual button stays available
-      .finally(() => setAutoCardBusy(false));
-    // vars intentionally omitted from deps — we snapshot it at first-load; adding
-    // it would re-fire on every token change. profileLoaded gates the timing.
+  // The exact emails the team sees, built ONCE PER DOCTOR (no hooks in a loop).
+  // Bodies are wrapped in the same font shell send-flow-email uses, so edits
+  // shipped verbatim render like a normal send.
+  const renderByDoctor = useMemo(() => {
+    const m = new Map<string, {
+      vars: Record<string, string>;
+      rHospSubj: string; rHospBody: string; hHtml: string;
+      rDocSubj: string; dHtml: string; dBody: string;
+      wpCandidate: WpCandidate | null;
+      profileCardHtml: string; profileCardWidth: number | undefined;
+    }>();
+    for (const doc of doctors) {
+      const wpCandidate = sendDataByDoctor.get(doc.id)?.wpCandidate ?? null;
+      const vars = varsFor(doc, sampleHospital, cardImageByDoctor[doc.id] ?? null);
+      const rHospSubj = renderTemplate(hospitalSubject, vars);
+      const rHospBody = renderTemplate(hospitalBody, vars) + (customMessage ? `\n\n--- Custom note ---\n${customMessage}` : "");
+      const hHtml = wrapBodyForSend(rHospBody);
+      const rDocSubj = renderTemplate(doctorSubject, vars);
+      const dBody = renderTemplate(doctorBody, vars);
+      const dHtml = wrapBodyForSend(dBody);
+      // The doctor profile IMAGE that ships in the to-hospital email — rich 3:2
+      // WordPress card when linked, else the compact fallback card.
+      const profileCardHtml  = wpCandidate ? buildDoctorProfileHtml(wpCandidate) : buildProfileCardHtml(vars);
+      const profileCardWidth = wpCandidate ? PROFILE_IMAGE_WIDTH : undefined;
+      m.set(doc.id, { vars, rHospSubj, rHospBody, hHtml, rDocSubj, dHtml, dBody, wpCandidate, profileCardHtml, profileCardWidth });
+    }
+    return m;
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [isSingle, cardImageUrl, profileLoaded]);
+  }, [doctors, sendDataByDoctor, sampleHospital, cardImageByDoctor, greetMode, customMessage, hospitalSubject, hospitalBody, doctorSubject, doctorBody]);
 
-  // The exact emails the team sees. Bodies are wrapped in the same font shell
-  // send-flow-email uses, so edits shipped verbatim render like a normal send.
-  const renderedHospitalSubject = useMemo(() => renderTemplate(hospitalSubject, vars), [hospitalSubject, vars]);
-  const renderedHospitalBody    = useMemo(() => renderTemplate(hospitalBody, vars) + (customMessage ? `\n\n--- Custom note ---\n${customMessage}` : ""), [hospitalBody, vars, customMessage]);
-  const hospitalHtml            = useMemo(() => wrapBodyForSend(renderedHospitalBody), [renderedHospitalBody]);
-  const hospitalRecipient       = isSingle ? (hospitals[0].primary_recruiter_email ?? "(no recruiter email)") : `preview: ${sampleHospital?.name ?? "hospital"} · ${hospitals.length} hospitals`;
+  const activeRender = renderByDoctor.get(activeDoctor.id);
+  const hospitalRecipient = isSingle ? (hospitals[0].primary_recruiter_email ?? "(no recruiter email)") : `preview: ${sampleHospital?.name ?? "hospital"} · ${hospitals.length} hospitals`;
 
-  const renderedDoctorSubject   = useMemo(() => renderTemplate(doctorSubject, vars), [doctorSubject, vars]);
-  const doctorHtml              = useMemo(() => wrapBodyForSend(renderTemplate(doctorBody, vars)), [doctorBody, vars]);
+  // Auto-attach the profile-card image PER DOCTOR (single-HOSPITAL sends only, as
+  // before). Runs sequentially — one html2canvas capture at a time — so a batch
+  // of doctors doesn't fire a burst. Fires once per doctor, once that doctor's
+  // profile data has loaded. Manual "Use profile card" button stays as fallback.
+  const autoCardTried = useRef<Set<string>>(new Set());
+  const [autoCardBusyId, setAutoCardBusyId] = useState<string | null>(null);
+  useEffect(() => {
+    if (!isSingle || autoCardBusyId) return;
+    for (const doc of doctors) {
+      if (autoCardTried.current.has(doc.id) || cardImageByDoctor[doc.id]) continue;
+      const data = sendDataByDoctor.get(doc.id);
+      const tokens = data?.mergedProfileTokens ?? {};
+      const loaded = !!(tokens.doctor_bio || tokens.doctor_title || tokens.doctor_specialty || data?.wpCandidate);
+      if (!loaded) continue;
+      autoCardTried.current.add(doc.id);
+      setAutoCardBusyId(doc.id);
+      const r = renderByDoctor.get(doc.id);
+      captureAndUploadCard(r?.profileCardHtml ?? "", { width: r?.profileCardWidth })
+        .then(url => onSetCardImage(doc.id, url))
+        .catch(e => console.warn("[SendProfile] profile card image failed:", e))   // manual button stays available
+        .finally(() => setAutoCardBusyId(null));
+      break;   // one capture at a time — the effect re-runs for the next doctor
+    }
+    // renderByDoctor intentionally omitted — we read it at fire time; the gating
+    // deps below drive re-runs without re-firing on every token change.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [isSingle, autoCardBusyId, doctors, cardImageByDoctor, sendDataByDoctor]);
 
-  const anyEdited = !!hospitalOv || !!doctorOv;
+  const anyHospitalEdited = doctors.some(d => hospitalOvByDoctor[d.id]);
+  const anyDoctorEdited   = doctors.some(d => doctorOvByDoctor[d.id]);
+  const anyEdited = anyHospitalEdited || anyDoctorEdited;
 
   // Draft-template guard: a template whose copy still starts with PLACEHOLDER
   // must not be emailed to a real hospital/doctor. Picking it ships via
   // stage_overrides, which BYPASSES send-flow-email's own placeholder guard, so
   // we block here. Editing the email inline (sets an override) clears the flag,
-  // so the team can still send an edited version of a draft template.
+  // so the team can still send an edited version of a draft template — a draft
+  // still blocks while ANY doctor has left that leg unedited.
   const isPlaceholder = (key: string) =>
     (templates.find(t => t.key === key)?.body_text ?? "").trim().toUpperCase().startsWith("PLACEHOLDER");
-  const hospitalDraft = !hospitalOv && isPlaceholder(hospitalTemplateKey);
-  const doctorDraft   = !doctorOv   && isPlaceholder(doctorTemplateKey);
+  const hospitalDraft = isPlaceholder(hospitalTemplateKey) && doctors.some(d => !hospitalOvByDoctor[d.id]);
+  const doctorDraft   = isPlaceholder(doctorTemplateKey)   && doctors.some(d => !doctorOvByDoctor[d.id]);
   const anyDraft = hospitalDraft || doctorDraft;
 
   // Unfilled-variable guard: any {{token}} that would render BLANK (e.g. {{city}}
   // when the hospital has no city on file) blocks the send and is explained
-  // below — unless the team edited that email inline (override), in which case
-  // they've taken control of the copy. Skipped for multi-hospital BCC (per-
-  // hospital tokens vary; the render happens server-side per hospital).
+  // below — unless the team edited that email inline (override). Skipped for
+  // multi-hospital BCC (per-hospital tokens vary; render happens server-side).
+  // Checked across EVERY doctor pane.
   const unfilledIssues = useMemo(() => {
     if (!isSingle) return [];
     const tokens = new Set<string>();
-    if (!hospitalOv) for (const t of detectUnfilledVars(`${hospitalSubject}\n${hospitalBody}`, vars)) tokens.add(t);
-    if (!doctorOv)   for (const t of detectUnfilledVars(`${doctorSubject}\n${doctorBody}`, vars)) tokens.add(t);
+    for (const doc of doctors) {
+      const r = renderByDoctor.get(doc.id);
+      if (!r) continue;
+      if (!hospitalOvByDoctor[doc.id]) for (const t of detectUnfilledVars(`${hospitalSubject}\n${hospitalBody}`, r.vars)) tokens.add(t);
+      if (!doctorOvByDoctor[doc.id])   for (const t of detectUnfilledVars(`${doctorSubject}\n${doctorBody}`, r.vars)) tokens.add(t);
+    }
     return describeUnfilled([...tokens]);
-  }, [isSingle, hospitalOv, doctorOv, hospitalSubject, hospitalBody, doctorSubject, doctorBody, vars]);
+  }, [isSingle, doctors, renderByDoctor, hospitalOvByDoctor, doctorOvByDoctor, hospitalSubject, hospitalBody, doctorSubject, doctorBody]);
   const hasUnfilled = unfilledIssues.length > 0;
 
   // Single submit path shared by the footer button and the contextual
@@ -1437,11 +1417,13 @@ function PreviewConfirm({
       return;
     }
     // Guard the editable recipient fields — a typo'd address would send into the
-    // void. Empty doctor override = keep the doctor's own email.
-    const doctorEmailTrimmed = doctorEmailOv.trim();
-    if (doctorEmailTrimmed && !isEmail(doctorEmailTrimmed)) {
-      toast.error("The doctor's email (To) doesn't look like a valid address.");
-      return;
+    // void. Empty doctor override = keep the doctor's own email. Per doctor.
+    for (const doc of doctors) {
+      const t = (doctorEmailOvByDoctor[doc.id] ?? "").trim();
+      if (t && !isEmail(t)) {
+        toast.error(`${doc.name}'s email (To) doesn't look like a valid address.`);
+        return;
+      }
     }
     if (isSingle) {
       const hospTo = (recipientOverrides[hospitals[0].id] ?? "").trim();
@@ -1451,30 +1433,40 @@ function PreviewConfirm({
       }
     }
     // A non-default template pick ships as a stage override too (the rendered
-    // template), so single-hospital sends honour the pick with no deploy.
-    // Manual edits (hospitalOv/doctorOv) take precedence. Multi-hospital relies
-    // on metadata.template_overrides (per-hospital server render).
-    const hospitalOverride = hospitalOv
-      ?? (isSingle && hospitalTemplateKey !== "profile_sent_hospital"
-            ? { subject_override: renderedHospitalSubject, html_override: hospitalHtml } : null);
-    const doctorOverride = doctorOv
-      ?? (isSingle && doctorTemplateKey !== "profile_sent_doctor"
-            ? { subject_override: renderedDoctorSubject, html_override: doctorHtml } : null);
-    const stageOverrides: Record<string, SendOverrides> = {
-      ...(hospitalOverride ? { email_hospital: hospitalOverride } : {}),
-      ...(doctorOverride   ? { email_doctor:   doctorOverride }   : {}),
-    };
-    onConfirm(
-      Object.keys(stageOverrides).length ? stageOverrides : undefined,
-      {
+    // template), so single-hospital sends honour the pick with no deploy. Manual
+    // edits take precedence. Multi-hospital relies on metadata.template_overrides
+    // (per-hospital server render). Built PER DOCTOR.
+    const perDoctor: Record<string, PerDoctorSend> = {};
+    for (const doc of doctors) {
+      const r = renderByDoctor.get(doc.id);
+      const hOv = hospitalOvByDoctor[doc.id] ?? null;
+      const dOv = doctorOvByDoctor[doc.id] ?? null;
+      const dEmail = (doctorEmailOvByDoctor[doc.id] ?? "").trim();
+      const hospitalOverride = hOv
+        ?? (isSingle && hospitalTemplateKey !== "profile_sent_hospital" && r
+              ? { subject_override: r.rHospSubj, html_override: r.hHtml } : null);
+      const doctorOverride = dOv
+        ?? (isSingle && doctorTemplateKey !== "profile_sent_doctor" && r
+              ? { subject_override: r.rDocSubj, html_override: r.dHtml } : null);
+      const stageOverrides: Record<string, SendOverrides> = {
+        ...(hospitalOverride ? { email_hospital: hospitalOverride } : {}),
+        ...(doctorOverride   ? { email_doctor:   doctorOverride }   : {}),
+      };
+      perDoctor[doc.id] = {
+        ...(Object.keys(stageOverrides).length ? { stageOverrides } : {}),
+        ...(dEmail ? { doctorEmail: dEmail } : {}),
+      };
+    }
+    onConfirm(perDoctor, {
+      attachments: {
         hospital: hospitalAttachments.length ? hospitalAttachments : undefined,
         doctor:   doctorAttachments.length   ? doctorAttachments   : undefined,
       },
-      { hospital: hospitalTemplateKey, doctor: doctorTemplateKey },
-      sendMode === "later" ? { date: schedDate, time: schedTime } : undefined,
-      doctorEmailTrimmed ? { doctorEmail: doctorEmailTrimmed } : undefined,
-      { assignedTo: senderAssignedTo },
-    );
+      templateKeys: { hospital: hospitalTemplateKey, doctor: doctorTemplateKey },
+      schedule: sendMode === "later" ? { date: schedDate, time: schedTime } : undefined,
+      sender: { assignedTo: senderAssignedTo },
+      greeting: { mode: greetMode },
+    });
   };
   // Human-readable local label of the chosen slot, for the schedule button.
   // A cleared/half-typed date or time yields an Invalid Date — Intl.format()
@@ -1489,44 +1481,57 @@ function PreviewConfirm({
   // ── Left-rail GLOBAL controls (routing, BCC, send-mode, warnings) ──────────
   const headerExtra = (
     <div className="space-y-3">
-      {hospitals.length > 1 && (
-        <div className="rounded-lg border border-sidebar-border/40 bg-white/95 p-2.5 shadow-sm space-y-1.5">
-          <div className="flex items-center gap-1.5 text-[11px] font-medium text-teal-700">
-            <Mail className="h-3.5 w-3.5" /> {hospitals.length} hospitals — click one to preview, ✕ to remove
-          </div>
-          <div className="max-h-40 overflow-y-auto space-y-0.5">
-            {hospitals.map(h => (
-              <div
-                key={h.id}
-                onClick={() => setPreviewHospitalId(h.id)}
-                className={`group flex cursor-pointer items-center gap-1.5 rounded px-1.5 py-1 text-[11px] ${previewHospitalId === h.id ? "bg-teal-50 text-teal-800" : "text-slate-700 hover:bg-slate-50"}`}
-              >
-                <span className={`h-1.5 w-1.5 shrink-0 rounded-full ${previewHospitalId === h.id ? "bg-teal-500" : "bg-slate-300"}`} />
-                <span className="flex-1 truncate" title={h.name}>{h.name}</span>
-                {previewHospitalId === h.id && <Eye className="h-3 w-3 shrink-0 text-teal-600" />}
-                <button
-                  type="button"
-                  title={`Remove ${h.name} from this send`}
-                  className="shrink-0 text-slate-300 hover:text-rose-600"
-                  onClick={(e) => { e.stopPropagation(); onRemoveHospital(h.id); }}
-                >
-                  <X className="h-3 w-3" />
-                </button>
-              </div>
-            ))}
-          </div>
+      <HospitalRecipientsPanel
+        selected={hospitals}
+        pool={hospitalPool}
+        contacts={hospitalContacts}
+        contactOverrides={Object.fromEntries(
+          Object.entries(recipientOverrides).map(([id, s]) => [id, String(s).split(/[,;]+/).map(x => x.trim()).filter(Boolean)]),
+        )}
+        onContactOverride={(id, emails) => onOverrideRecipient(id, emails && emails.length ? emails.join(", ") : null)}
+        onRemoveHospital={onRemoveHospital}
+        onAddHospital={onAddHospital}
+        specialty={activeDoctor.speciality}
+        activeHospitalId={previewHospitalId}
+        onSelectHospital={setPreviewHospitalId}
+      />
+      {!isSingle && (
+        <div className="rounded-lg border border-teal-200 bg-teal-50 p-2.5 text-[11px] text-teal-900">
+          {multiDoctor
+            ? <>Each of the <strong>{doctors.length} doctors</strong> gets <strong>one</strong> consolidated “Working opportunity” email listing all {hospitals.length} hospitals (grouped by city, with photos) — not one per hospital. The Doctor-email tab below previews a single hospital's wording per doctor.</>
+            : <><strong>{doctors[0].name.replace(/^\s*Dr\.?\s+/i, "")}</strong> gets <strong>one</strong> consolidated “Working opportunity” email listing all {hospitals.length} hospitals (grouped by city, with photos) — not one per hospital. The Doctor-email tab below previews a single hospital's wording.</>}
         </div>
       )}
-      <HospitalRecipientsOverride
-        hospitals={hospitals}
-        contacts={hospitalContacts}
-        overrides={recipientOverrides}
-        onOverride={onOverrideRecipient}
-      />
+      {/* Greeting: refer by the contact's name, or greet the hospital team.
+          "Auto" keeps each hospital's saved preference. */}
+      <div className="rounded-lg border border-sidebar-border/40 bg-white/95 p-2.5 shadow-sm">
+        <div className="mb-1.5 text-[11px] font-medium text-teal-700">Greeting</div>
+        <div className="grid grid-cols-3 gap-1">
+          {([
+            { key: "auto",    label: "Auto" },
+            { key: "contact", label: "Refer by name" },
+            { key: "team",    label: "Hospital team" },
+          ] as const).map(o => (
+            <button
+              key={o.key}
+              type="button"
+              onClick={() => setGreetMode(o.key)}
+              className={`rounded-md px-2 py-1 text-[10.5px] font-medium transition ${greetMode === o.key ? "bg-teal-600 text-white shadow-sm" : "bg-slate-100 text-slate-600 hover:bg-slate-200"}`}
+              title={o.key === "auto" ? "Use each hospital's saved greeting preference" : o.key === "contact" ? "Greet the named recipient (e.g. 'Hello Ms. Sandra')" : "Greet the hospital team (e.g. 'Hello City Hospital team')"}
+            >
+              {o.label}
+            </button>
+          ))}
+        </div>
+      </div>
       <div className="rounded-lg border border-sidebar-border/40 bg-white/95 p-3 text-[12px] space-y-1 shadow-sm text-slate-700">
-        <div><strong>{doctor.name}</strong> → {hospitals.length === 1 ? hospitals[0].name : `${hospitals.length} hospitals (BCC)`}</div>
+        <div>
+          <strong>{multiDoctor ? `${doctors.length} doctors` : doctors[0].name}</strong> → {hospitals.length === 1 ? hospitals[0].name : `${hospitals.length} hospitals (BCC)`}
+        </div>
         <div className="text-[11px] text-muted-foreground">
-          One run per hospital will be created in Flow 2. Hospital + doctor emails fire automatically on confirm.
+          {multiDoctor
+            ? `${doctors.length * hospitals.length} runs (one per doctor × hospital) will be created in Flow 2. Every hospital + doctor email fires automatically on confirm.`
+            : "One run per hospital will be created in Flow 2. Hospital + doctor emails fire automatically on confirm."}
         </div>
         <div className="text-[11px] text-muted-foreground pt-1 border-t border-slate-200/70 mt-1.5 space-y-1.5">
           {/* Sender picker — the From line the recipient sees. Defaults to the
@@ -1572,23 +1577,33 @@ function PreviewConfirm({
         </div>
       </div>
 
-      {profileCompletion < 100 && (
-        <div className="rounded-md border border-amber-200 bg-amber-50 p-2 text-[11px] text-amber-900 flex items-start gap-2">
-          <AlertTriangle className="h-3.5 w-3.5 mt-[2px] shrink-0" />
-          <div>
-            <strong>{doctor.name}'s profile is {profileCompletion}% complete.</strong> Missing fields will render as <code>{`{{token}}`}</code> in the hospital email. Fill the profile in <strong>Doctor Profiles</strong> for a polished send.
+      {(() => {
+        // Per-doctor completion warning. Single doctor keeps the exact original
+        // copy; multi lists every doctor whose profile is under 100%.
+        const incomplete = doctors
+          .map(d => ({ d, pct: sendDataByDoctor.get(d.id)?.completion ?? 0 }))
+          .filter(x => x.pct < 100);
+        if (incomplete.length === 0) return null;
+        return (
+          <div className="rounded-md border border-amber-200 bg-amber-50 p-2 text-[11px] text-amber-900 flex items-start gap-2">
+            <AlertTriangle className="h-3.5 w-3.5 mt-[2px] shrink-0" />
+            <div>
+              {incomplete.length === 1
+                ? <><strong>{incomplete[0].d.name}'s profile is {incomplete[0].pct}% complete.</strong> Missing fields will render as <code>{`{{token}}`}</code> in the hospital email. Fill the profile in <strong>Doctor Profiles</strong> for a polished send.</>
+                : <><strong>{incomplete.length} doctors have incomplete profiles</strong> ({incomplete.map(x => `${x.d.name.replace(/^\s*Dr\.?\s+/i, "")} ${x.pct}%`).join(", ")}). Missing fields render as <code>{`{{token}}`}</code>. Fill them in <strong>Doctor Profiles</strong> for a polished send.</>}
+            </div>
           </div>
-        </div>
-      )}
+        );
+      })()}
 
       <div className="text-[10.5px] text-sidebar-foreground/65 px-0.5">
         {anyEdited
           ? <span className="text-emerald-300 font-medium">
-              You've edited {hospitalOv && doctorOv ? "both emails" : hospitalOv ? "the hospital email" : "the doctor email"} — your version sends instead of the template.
+              You've edited {anyHospitalEdited && anyDoctorEdited ? "both emails" : anyHospitalEdited ? "the hospital email" : "the doctor email"}{multiDoctor ? " (per doctor)" : ""} — your version sends instead of the template.
               {!isSingle ? " Every hospital gets this exact copy, so the per-hospital greeting is replaced by the previewed one — Reset to keep personalised greetings." : ""}
             </span>
           : isSingle
-            ? "Click into either email to tweak the wording before it sends."
+            ? `Click into either email to tweak the wording before it sends.${multiDoctor ? " Edits are per doctor." : ""}`
             : `Click into either email to edit. Your edit goes to all ${hospitals.length} hospitals (the per-hospital greeting is replaced) — leave it unedited to keep each greeting personalised.`}
       </div>
 
@@ -1642,7 +1657,95 @@ function PreviewConfirm({
     </div>
   );
 
+  // ── Per-doctor pane builders. Kept mounted via ProfileSubTabs so an
+  //    in-progress edit survives switching between doctors' sub-tabs. Single
+  //    doctor renders the pane directly (no sub-tab bar) — unchanged view. ────
+  const hospitalPane = (doc: DoctorOption) => {
+    const r = renderByDoctor.get(doc.id);
+    if (!r) return null;
+    // While THIS doctor's card is auto-capturing, show the same spinner the
+    // single-doctor preview used (the section mounts once the capture lands).
+    if (autoCardBusyId === doc.id) {
+      return (
+        <div className="flex min-h-0 w-full flex-1 flex-col items-center justify-center gap-2 bg-white text-slate-500">
+          <Loader2 className="h-6 w-6 animate-spin text-teal-500" />
+          <span className="text-[12px]">Preparing the profile card image…</span>
+        </div>
+      );
+    }
+    return (
+      <EditableEmailSection
+        label={`To hospital · ${hospitalRecipient}`}
+        subject={r.rHospSubj}
+        html={r.hHtml}
+        from={senderLine}
+        to={isSingle ? (recipientOverrides[hospitals[0].id] ?? hospitals[0].primary_recruiter_email ?? "") : undefined}
+        onToChange={isSingle ? (v) => onOverrideRecipient(hospitals[0].id, v.trim() ? v.trim() : null) : undefined}
+        cc={ccList}
+        bcc={bccList}
+        editable
+        onChange={(ov) => setHospitalOvByDoctor(prev => ({ ...prev, [doc.id]: ov }))}
+        plainBody={r.rHospBody}
+        attachments={hospitalAttachments}
+        onAttachmentsChange={setHospitalAttachments}
+        templatePicker={
+          <TemplatePicker
+            templates={templates}
+            value={hospitalTemplateKey}
+            onChange={setHospitalTemplateKey}
+            defaultKey="profile_sent_hospital"
+            renderVars={r.vars}
+            label="Hospital intro email template"
+            flowFilter="profile_sent"
+            audience="hospital"
+            contentClassName="z-[200]"
+          />
+        }
+      />
+    );
+  };
+  const doctorPane = (doc: DoctorOption) => {
+    const r = renderByDoctor.get(doc.id);
+    if (!r) return null;
+    const dEmailOv = doctorEmailOvByDoctor[doc.id] ?? "";
+    return (
+      <EditableEmailSection
+        label={`To doctor · ${dEmailOv || doc.email || "(no email)"}`}
+        subject={r.rDocSubj}
+        html={r.dHtml}
+        from={senderLine}
+        to={isSingle ? (dEmailOv || doc.email || "") : (doc.email ?? undefined)}
+        onToChange={isSingle ? (v) => setDoctorEmailOvByDoctor(prev => ({ ...prev, [doc.id]: v })) : undefined}
+        cc={ccList}
+        bcc={bccList}
+        editable
+        onChange={(ov) => setDoctorOvByDoctor(prev => ({ ...prev, [doc.id]: ov }))}
+        plainBody={r.dBody}
+        attachments={doctorAttachments}
+        onAttachmentsChange={setDoctorAttachments}
+        // Same picker as the left rail, forwarded into the full-screen editor
+        // so the doctor template can be swapped from full screen too. Popover
+        // raised above the full-screen overlay via contentClassName.
+        templatePicker={
+          <TemplatePicker
+            templates={templates}
+            value={doctorTemplateKey}
+            onChange={setDoctorTemplateKey}
+            defaultKey="profile_sent_doctor"
+            renderVars={r.vars}
+            label="Doctor 'working opportunity' email template"
+            flowFilter="profile_sent"
+            audience="doctor"
+            contentClassName="z-[200]"
+          />
+        }
+      />
+    );
+  };
+  const doctorNames = doctors.map(d => d.name);
+
   // ── The two emails: switcher label + left-rail controls + right-pane preview.
+  //    Left-rail card/CV controls follow the ACTIVE doctor's sub-tab.
   const emails: StudioEmail[] = [
     {
       key: "hospital",
@@ -1652,25 +1755,27 @@ function PreviewConfirm({
         <div className="space-y-2">
           <div className="flex items-start justify-between gap-2">
             <div className="flex-1 min-w-0">
-              <TemplatePicker templates={templates} value={hospitalTemplateKey} onChange={setHospitalTemplateKey} defaultKey="profile_sent_hospital" renderVars={vars} label="Hospital intro email template" flowFilter="profile_sent" audience="hospital" />
+              <TemplatePicker templates={templates} value={hospitalTemplateKey} onChange={setHospitalTemplateKey} defaultKey="profile_sent_hospital" renderVars={activeRender?.vars ?? {}} label="Hospital intro email template" flowFilter="profile_sent" audience="hospital" />
             </div>
             {hospitalTemplateKey !== "profile_sent_hospital" && (
               <button type="button" onClick={() => { onSaveDefault("hospital", hospitalTemplateKey); toast.success("Saved as your default hospital template"); }} className="text-[10px] text-sidebar-foreground/60 hover:text-sidebar-foreground hover:underline whitespace-nowrap mt-4">Save as my default</button>
             )}
           </div>
-          {/* Profile-as-image: render the candidate profile card (View-full-profile
-              look, empty fields dropped) to a flat PNG and show it ABOVE the data
-              table (both render), so the hospital sees a clean, pixel-perfect card
-              plus the full detail table. */}
+          {multiDoctor && (
+            <div className="text-[10px] uppercase tracking-wider text-sidebar-foreground/60">Card &amp; CV for <strong className="text-sidebar-foreground/85">{activeDoctor.name}</strong></div>
+          )}
+          {/* Profile-as-image: render THIS doctor's candidate profile card (View-
+              full-profile look, empty fields dropped) to a flat PNG and show it
+              ABOVE the data table (both render). Follows the active sub-tab. */}
           <CardScreenshotControl
-            cardHtml={profileCardHtml}
-            captureWidth={profileCardWidth}
-            cardImageUrl={cardImageUrl}
-            onSetCardImage={onSetCardImage}
-            autoBusy={autoCardBusy}
+            cardHtml={activeRender?.profileCardHtml ?? ""}
+            captureWidth={activeRender?.profileCardWidth}
+            cardImageUrl={cardImageByDoctor[activeDoctor.id] ?? null}
+            onSetCardImage={(url) => onSetCardImage(activeDoctor.id, url)}
+            autoBusy={autoCardBusyId === activeDoctor.id}
           />
           <CvStudioControl
-            doctor={wpCandidate}
+            doctor={activeRender?.wpCandidate ?? null}
             onAttach={(att) => setHospitalAttachments(prev => [...prev, att])}
           />
           <AttachmentsPicker
@@ -1681,51 +1786,19 @@ function PreviewConfirm({
           />
         </div>
       ),
-      preview: autoCardBusy ? (
-        <div className="flex min-h-0 w-full flex-1 flex-col items-center justify-center gap-2 bg-white text-slate-500">
-          <Loader2 className="h-6 w-6 animate-spin text-teal-500" />
-          <span className="text-[12px]">Preparing the profile card image…</span>
-        </div>
-      ) : (
-        <EditableEmailSection
-          label={`To hospital · ${hospitalRecipient}`}
-          subject={renderedHospitalSubject}
-          html={hospitalHtml}
-          from={senderLine}
-          to={isSingle ? (recipientOverrides[hospitals[0].id] ?? hospitals[0].primary_recruiter_email ?? "") : undefined}
-          onToChange={isSingle ? (v) => onOverrideRecipient(hospitals[0].id, v.trim() ? v.trim() : null) : undefined}
-          cc={ccList}
-          bcc={bccList}
-          editable
-          onChange={setHospitalOv}
-          plainBody={renderedHospitalBody}
-          attachments={hospitalAttachments}
-          onAttachmentsChange={setHospitalAttachments}
-          templatePicker={
-            <TemplatePicker
-              templates={templates}
-              value={hospitalTemplateKey}
-              onChange={setHospitalTemplateKey}
-              defaultKey="profile_sent_hospital"
-              renderVars={vars}
-              label="Hospital intro email template"
-              flowFilter="profile_sent"
-              audience="hospital"
-              contentClassName="z-[200]"
-            />
-          }
-        />
-      ),
+      preview: multiDoctor
+        ? <ProfileSubTabs names={doctorNames} active={activeDoctorIdx} onSelect={setActiveDoctorIdx} panes={doctors.map(hospitalPane)} />
+        : hospitalPane(doctors[0]),
     },
     {
       key: "doctor",
       label: "Doctor email",
-      subLabel: doctor.email ?? "(no email)",
+      subLabel: multiDoctor ? `${doctors.length} doctors` : (doctors[0].email ?? "(no email)"),
       controls: (
         <div className="space-y-2">
           <div className="flex items-start justify-between gap-2">
             <div className="flex-1 min-w-0">
-              <TemplatePicker templates={templates} value={doctorTemplateKey} onChange={setDoctorTemplateKey} defaultKey="profile_sent_doctor" renderVars={vars} label="Doctor 'working opportunity' email template" flowFilter="profile_sent" audience="doctor" />
+              <TemplatePicker templates={templates} value={doctorTemplateKey} onChange={setDoctorTemplateKey} defaultKey="profile_sent_doctor" renderVars={activeRender?.vars ?? {}} label="Doctor 'working opportunity' email template" flowFilter="profile_sent" audience="doctor" />
             </div>
             {doctorTemplateKey !== "profile_sent_doctor" && (
               <button type="button" onClick={() => { onSaveDefault("doctor", doctorTemplateKey); toast.success("Saved as your default doctor template"); }} className="text-[10px] text-sidebar-foreground/60 hover:text-sidebar-foreground hover:underline whitespace-nowrap mt-4">Save as my default</button>
@@ -1739,39 +1812,9 @@ function PreviewConfirm({
           />
         </div>
       ),
-      preview: (
-        <EditableEmailSection
-          label={`To doctor · ${doctorEmailOv || doctor.email || "(no email)"}`}
-          subject={renderedDoctorSubject}
-          html={doctorHtml}
-          from={senderLine}
-          to={isSingle ? (doctorEmailOv || doctor.email || "") : (doctor.email ?? undefined)}
-          onToChange={isSingle ? setDoctorEmailOv : undefined}
-          cc={ccList}
-          bcc={bccList}
-          editable
-          onChange={setDoctorOv}
-          plainBody={renderTemplate(doctorBody, vars)}
-          attachments={doctorAttachments}
-          onAttachmentsChange={setDoctorAttachments}
-          // Same picker as the left rail, forwarded into the full-screen editor
-          // so the doctor template can be swapped from full screen too. Popover
-          // raised above the full-screen overlay via contentClassName.
-          templatePicker={
-            <TemplatePicker
-              templates={templates}
-              value={doctorTemplateKey}
-              onChange={setDoctorTemplateKey}
-              defaultKey="profile_sent_doctor"
-              renderVars={vars}
-              label="Doctor 'working opportunity' email template"
-              flowFilter="profile_sent"
-              audience="doctor"
-              contentClassName="z-[200]"
-            />
-          }
-        />
-      ),
+      preview: multiDoctor
+        ? <ProfileSubTabs names={doctorNames} active={activeDoctorIdx} onSelect={setActiveDoctorIdx} panes={doctors.map(doctorPane)} />
+        : doctorPane(doctors[0]),
     },
   ];
 
@@ -1779,7 +1822,8 @@ function PreviewConfirm({
   // in the default state, "Schedule for later" flips to scheduling mode
   // (revealing the date/time card) and "Send now" fires immediately; once
   // scheduling, the primary becomes "Schedule N sends" with a way back.
-  const sendCount = `${hospitals.length} send${hospitals.length === 1 ? "" : "s"}`;
+  const totalSends = doctors.length * hospitals.length;
+  const sendCount = `${totalSends} send${totalSends === 1 ? "" : "s"}`;
   // Icon-only actions: clock = schedule, paper-plane = send now.
   const footer = sendMode === "later" ? (
     <>
@@ -1813,7 +1857,7 @@ function PreviewConfirm({
     <EmailPreviewStudioLayout
       onClose={onClose}
       title="Send Profile to Hospital"
-      subtitle={`${doctor.name} → ${hospitals.length === 1 ? hospitals[0].name : `${hospitals.length} hospitals (BCC)`}`}
+      subtitle={`${multiDoctor ? `${doctors.length} doctors` : doctors[0].name} → ${hospitals.length === 1 ? hospitals[0].name : `${hospitals.length} hospitals (BCC)`}`}
       emails={emails}
       headerExtra={headerExtra}
       footer={footer}

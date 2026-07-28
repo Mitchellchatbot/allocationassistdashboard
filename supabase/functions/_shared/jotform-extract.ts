@@ -91,6 +91,16 @@ function stringifyValue(v: unknown): string {
     if (typeof obj.url === "string")           return obj.url.trim();
     if (typeof obj.prettyFormat === "string")  return obj.prettyFormat.trim();
     if (typeof obj.text === "string")          return obj.text.trim();
+    // Multi-select checkbox answers can arrive as an INDEXED object
+    // ({ "0": "Dubai", "1": "Qatar", "2": "Riyadh" }) rather than a real array.
+    // JSON.stringify would render "{\"0\":\"Dubai\"…}" and downstream splits
+    // would only ever surface one value — the "dashboard doesn't show multiple
+    // checks" bug. Any plain object whose values are all scalars → join them,
+    // exactly like the Array branch above.
+    const vals = Object.values(obj);
+    if (vals.length && vals.every(x => x == null || typeof x === "string" || typeof x === "number" || typeof x === "boolean")) {
+      return vals.map(stringifyValue).filter(Boolean).join(", ");
+    }
     return JSON.stringify(obj);
   }
   return String(v);
@@ -317,8 +327,12 @@ export function mapToProfile(flat: Record<string, string>): {
                || pickContains("dhadohmoh", "license");
   if (license) acf.dha__haad__moh_license = license;
 
+  // Targeted locations — includes the multi-select "Which regions are you open
+  // to?" checklist (Dubai / Abu Dhabi / Qatar / Riyadh / …). All checked regions
+  // are captured (stringifyValue joins them) and split into the ACF array so the
+  // profile shows EVERY region the doctor picked, not just one.
   const targeted = pick("targetedlocations", "preferredlocations")
-                || pickContains("targetedlocation");
+                || pickContains("targetedlocation", "regionsareyou", "regionsopento", "openregions");
   if (targeted) acf.targeted_locations = targeted.split(/[,;\n]+/).map(s => s.trim()).filter(Boolean);
 
   const cv = pick("cv", "resume", "cvresume", "uploadcv", "uploadyourcv")

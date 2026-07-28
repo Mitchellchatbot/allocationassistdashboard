@@ -30,6 +30,7 @@
  */
 
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2";
+import { buildWorkingOpBody, buildWorkingOpSubject, type WorkingOpHospital } from "../_shared/doctor-working-op.ts";
 
 // ── Stage → Template + next-stage routing ──────────────────────────────────
 // Hardcoded here (also defined in src/lib/automation-flows.ts) because the
@@ -694,17 +695,25 @@ Deno.serve(async (req: Request) => {
     doctor_phone:       String(run.doctor_phone ?? ""),
     doctor_speciality:  String(md.doctor_speciality ?? ""),
     hospital_name:      String(run.hospital ?? ""),
-    // Greeting name — per-hospital toggle (hospitals.greet_with_contact_name):
-    // ON → the chosen recipient's own name (metadata.hospital_contact_name,
-    // set by the send screen for the primary/cycle/override contact), falling
-    // back to the hospital's primary_contact_name, then the hospital name.
-    // OFF → the hospital name.
+    // Greeting name — per-hospital toggle (hospitals.greet_with_contact_name),
+    // optionally overridden PER SEND by metadata.greet_mode from the preview's
+    // "refer by name / hospital team" control:
+    //   "contact" → the chosen recipient's own name (metadata.hospital_contact_name),
+    //               falling back to primary_contact_name, then the hospital name.
+    //   "team"    → the hospital name ("Hello <hospital> team!").
+    //   unset     → the hospital's stored greet_with_contact_name flag (default).
     hospital_contact_name: String(
-      hospital?.greet_with_contact_name
-        ? (String((md as { hospital_contact_name?: string }).hospital_contact_name ?? "").trim()
-           || String(hospital?.primary_contact_name ?? "").trim()
-           || (run.hospital ?? ""))
-        : (run.hospital ?? ""),
+      (() => {
+        const greetMode = String((md as { greet_mode?: string }).greet_mode ?? "").trim();
+        const byContact = greetMode === "contact" ? true
+                        : greetMode === "team"    ? false
+                        : !!hospital?.greet_with_contact_name;
+        return byContact
+          ? (String((md as { hospital_contact_name?: string }).hospital_contact_name ?? "").trim()
+             || String(hospital?.primary_contact_name ?? "").trim()
+             || (run.hospital ?? ""))
+          : (run.hospital ?? "");
+      })(),
     ),
     city:               String(hospital?.city ?? md.city ?? ""),
     country:            String(hospital?.country ?? ""),
@@ -777,7 +786,7 @@ Deno.serve(async (req: Request) => {
   // plainifyBody and keeps its coloured header.
   vars.doctor_row_table_html = doctorRowTableHtml(vars);
 
-  const subject = collapseDoubledDr(render(tpl.subject ?? "", vars));
+  let subject = collapseDoubledDr(render(tpl.subject ?? "", vars));
   // HTML gets escaped token values (so a doctor name like "Dr. <Smith>" or
   // a Claude-extracted field with stray HTML doesn't break the layout or
   // become an XSS vector in a hospital recipient's inbox). Plain text gets
@@ -794,8 +803,24 @@ Deno.serve(async (req: Request) => {
   // inherits the sans-serif look from the user's reference email.
   // Inline styles on individual elements still win (signature keeps
   // its teal-bold weight, link colour, etc.).
-  const html          = `${FONT_IMPORT}<div style="font-family:${FONT_STACK};font-size:17px;color:#1a2332;line-height:1.55;">${renderedBody}</div>`;
-  const text          = collapseDoubledDr(render(tpl.body_text ?? "", vars));
+  let html            = `${FONT_IMPORT}<div style="font-family:${FONT_STACK};font-size:17px;color:#1a2332;line-height:1.55;">${renderedBody}</div>`;
+  let text            = collapseDoubledDr(render(tpl.body_text ?? "", vars));
+
+  // ── Consolidated doctor "working opportunity" email ───────────────────────
+  // When a doctor was sent to MORE THAN ONE hospital in the same send, the
+  // singular flow ships ONE location-grouped email listing every hospital (with
+  // photos), instead of one per-hospital note. SendProfileDialog stamps the full
+  // hospital list on metadata.batch_hospitals (and marks a single run as the one
+  // that sends the doctor leg via send_doctor_email). The shared composer keeps
+  // this identical to the batch flow's doctor email. Single-hospital sends keep
+  // the per-hospital DB template (incl. hospitals.doctor_template_key overrides).
+  const batchHospitals = Array.isArray(md.batch_hospitals) ? (md.batch_hospitals as WorkingOpHospital[]) : [];
+  if (run.current_stage === "email_doctor" && batchHospitals.length > 1) {
+    subject = buildWorkingOpSubject(batchHospitals);
+    const workingOpHtml = buildWorkingOpBody(String(run.doctor_name ?? ""), batchHospitals, String(vars.signature ?? ""));
+    html = `${FONT_IMPORT}<div style="font-family:${FONT_STACK};font-size:17px;color:#1a2332;line-height:1.55;">${workingOpHtml}</div>`;
+    text = htmlToText(workingOpHtml);
+  }
 
   // Refuse to send templates that still carry the PLACEHOLDER stub copy
   // from the seed migrations. The template editor warns the team, but
@@ -954,7 +979,18 @@ Deno.serve(async (req: Request) => {
 
   // Explicit CC override from the dispatcher (e.g. CC a manager on the send).
   // Merged with any test CCs, deduped, and never CC the To.
-  const ccOverrideRaw = (body.cc_override ?? md.cc_override) as unknown;
+  //
+  // The hospital's cc_emails (stamped on metadata.cc_override) must NOT ride the
+  // DOCTOR's private "working opportunity" email — otherwise, in test mode, real
+  // hospital recruiters get CC'd on the doctor email even though the To is safely
+  // redirected to the test inbox. Suppress the metadata CC on the doctor leg
+  // while test mode is on (user: "not while we're in testing mode"); a deliberate
+  // per-send body.cc_override still rides. Production CC policy for the doctor leg
+  // is a pre-go-live decision.
+  const dropHospitalCcOnDoctorLeg = run.current_stage === "email_doctor" && !!TEST_OVERRIDE;
+  const ccOverrideRaw = (dropHospitalCcOnDoctorLeg
+    ? body.cc_override
+    : (body.cc_override ?? md.cc_override)) as unknown;
   const ccOverride: string[] = Array.isArray(ccOverrideRaw)
     ? (ccOverrideRaw as unknown[])
         .map(v => typeof v === "string" ? v.trim() : "")
@@ -1132,7 +1168,14 @@ Deno.serve(async (req: Request) => {
   // hospital + doctor notification), fire the next email immediately rather
   // than making the team click Send now twice. Fire-and-forget — we don't
   // wait on the chained send before responding to the original caller.
-  if (route.auto_continue && !route.terminal_next) {
+  // A multi-hospital singular send fans out to N hospital runs but must produce
+  // just ONE consolidated doctor email. SendProfileDialog marks exactly one run
+  // with send_doctor_email:true and the rest false; a false run stops after the
+  // hospital email so only the marked run auto-continues to email_doctor. Other
+  // flows (single-hospital, contract check-ins) leave send_doctor_email unset →
+  // unchanged behaviour.
+  const suppressDoctorLeg = run.current_stage === "email_hospital" && md.send_doctor_email === false;
+  if (route.auto_continue && !route.terminal_next && !suppressDoctorLeg) {
     console.log("[send-flow-email] auto-continuing to", route.next_stage);
     fetch(`${Deno.env.get("SUPABASE_URL")}/functions/v1/send-flow-email`, {
       method: "POST",

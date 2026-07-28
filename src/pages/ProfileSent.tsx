@@ -6,7 +6,6 @@ import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { Send, Users, UserSquare2, History, ExternalLink } from "lucide-react";
 import { SendProfileDialog } from "@/components/automations/SendProfileDialog";
-import { BulkProfileSendDialog } from "@/components/automations/BulkProfileSendDialog";
 import { ScheduledProfileSendsCard } from "@/pages/Batches";
 import { useSentHistory } from "@/hooks/use-sent-history";
 import { GulfClock } from "@/components/GulfClock";
@@ -21,7 +20,6 @@ import { GulfClock } from "@/components/GulfClock";
 export default function ProfileSent() {
   const navigate = useNavigate();
   const [sendOpen, setSendOpen] = useState(false);
-  const [bulkOpen, setBulkOpen] = useState(false);
   const { records } = useSentHistory();
 
   const recent = useMemo(() => records.filter(r => r.sentKind === "individual").slice(0, 25), [records]);
@@ -37,8 +35,8 @@ export default function ProfileSent() {
             </p>
           </div>
           <div className="flex items-center gap-2">
-            <Button variant="outline" onClick={() => setBulkOpen(true)}>
-              <Users className="h-4 w-4 mr-1.5" /> Bulk send
+            <Button variant="outline" onClick={() => navigate("/batches")}>
+              <Users className="h-4 w-4 mr-1.5" /> Batch send
             </Button>
             <Button onClick={() => setSendOpen(true)} className="bg-teal-600 hover:bg-teal-700 text-white">
               <Send className="h-4 w-4 mr-1.5" /> Send a profile
@@ -54,10 +52,10 @@ export default function ProfileSent() {
               <CardDescription className="text-[12px]">One doctor → one or more hospitals, with full preview + editing, attachments, templates, and schedule-for-later.</CardDescription>
             </CardHeader>
           </Card>
-          <Card className="hover:border-teal-300 transition-colors cursor-pointer" onClick={() => setBulkOpen(true)}>
+          <Card className="hover:border-teal-300 transition-colors cursor-pointer" onClick={() => navigate("/batches")}>
             <CardHeader className="pb-2">
-              <CardTitle className="text-[14px] flex items-center gap-2"><Users className="h-4 w-4 text-teal-600" /> Bulk send</CardTitle>
-              <CardDescription className="text-[12px]">Many doctors → many hospitals, one email per doctor. Template-only, great for blasting your latest available doctors to a set of hospitals.</CardDescription>
+              <CardTitle className="text-[14px] flex items-center gap-2"><Users className="h-4 w-4 text-teal-600" /> Batch send</CardTitle>
+              <CardDescription className="text-[12px]">Many doctors → one table per hospital. Schedule recurring blasts or fire a one-off now — all on the Batch Sends page.</CardDescription>
             </CardHeader>
           </Card>
         </div>
@@ -100,7 +98,6 @@ export default function ProfileSent() {
       </div>
 
       <SendProfileDialog open={sendOpen} onClose={() => setSendOpen(false)} />
-      <BulkProfileSendDialog open={bulkOpen} onClose={() => setBulkOpen(false)} />
     </DashboardLayout>
   );
 }

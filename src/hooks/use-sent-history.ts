@@ -34,6 +34,7 @@ export const SENT_KIND_LABEL: Record<SentKind, string> = {
   daily_duo:        "Daily duo",
   tuesday_top_15:   "Tuesday top 15",
   specialty_of_day: "Specialty of the day",
+  one_off:          "One-off send",
   individual:       "Individual send",
 };
 
@@ -41,6 +42,7 @@ export const SENT_KIND_LABEL: Record<SentKind, string> = {
 function slotLabel(kind: BatchKind, i: number): string {
   if (kind === "daily_duo") return i === 0 ? "1st profile" : i === 1 ? "2nd profile" : `profile #${i + 1}`;
   if (kind === "tuesday_top_15") return `top 15 · #${i + 1}`;
+  if (kind === "one_off") return `one-off · #${i + 1}`;
   return "daily specialty";
 }
 

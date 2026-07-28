@@ -330,7 +330,7 @@ export function useSearchIndex(): SearchEntity[] {
 
     // ── Batch sends ───────────────────────────────────────────────────────
     for (const b of batches) {
-      const kindLabel = ({ daily_duo: "Daily duo", tuesday_top_15: "Tuesday top 15", specialty_of_day: "Specialty of the day" } as const)[b.kind] ?? b.kind;
+      const kindLabel = ({ daily_duo: "Daily duo", tuesday_top_15: "Tuesday top 15", specialty_of_day: "Specialty of the day", one_off: "One-off send" } as const)[b.kind] ?? b.kind;
       out.push({
         id:       `batch:${b.id}`,
         kind:     "Batch",

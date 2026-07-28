@@ -146,7 +146,10 @@ export function mapAnswersToWp(flat: Record<string, string>): MappedProfile {
                || pickContains("dhadohmoh", "license");
   if (license) acf.dha__haad__moh_license = license;
 
-  const targeted = pick("targetedlocations", "preferredlocations") || pickContains("targetedlocation");
+  // Includes the multi-select "Which regions are you open to?" checklist — all
+  // checked regions become targeted_locations (mirror of _shared/jotform-extract).
+  const targeted = pick("targetedlocations", "preferredlocations")
+                || pickContains("targetedlocation", "regionsareyou", "regionsopento", "openregions");
   if (targeted) acf.targeted_locations = targeted.split(/[,;\n]+/).map(s => s.trim()).filter(Boolean);
 
   // ── Value-pattern fallbacks (mirrors supabase _shared/jotform-extract) ─

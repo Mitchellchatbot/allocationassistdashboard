@@ -20,6 +20,7 @@
  */
 
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2";
+import { buildWorkingOpBody, buildWorkingOpSubject } from "../_shared/doctor-working-op.ts";
 
 const SUPABASE_URL              = Deno.env.get("SUPABASE_URL") ?? "";
 const SUPABASE_SERVICE_ROLE_KEY = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY") ?? "";
@@ -220,9 +221,17 @@ Deno.serve(async (req: Request) => {
   // Explicit recipient override (the preview's "send to only this region" picker):
   // when present, these EXACT hospitals are the personalised recipients, replacing
   // the batch-country filter entirely. Empty → fall back to the country scope.
+  //
+  // A ONE-OFF batch carries its explicit recipient hospitals on the ROW
+  // (recipient_emails) — that is its whole target set, in place of a country
+  // scope. The preview's per-send region picker (body.recipient_emails_override)
+  // still wins when supplied.
+  const explicitRecipients: unknown[] =
+    (Array.isArray(body.recipient_emails_override) && body.recipient_emails_override.length)
+      ? body.recipient_emails_override
+      : (batch.kind === "one_off" && Array.isArray(batch.recipient_emails) ? batch.recipient_emails : []);
   const recipOverride = new Set(
-    (Array.isArray(body.recipient_emails_override) ? body.recipient_emails_override : [])
-      .map(e => String(e).trim().toLowerCase()).filter(e => e.includes("@")),
+    explicitRecipients.map(e => String(e).trim().toLowerCase()).filter(e => e.includes("@")),
   );
   const matchedHospitals = activeHospitals.filter(h =>
     recipOverride.size
@@ -559,45 +568,18 @@ Deno.serve(async (req: Request) => {
   // Greets generically ("Hello Dr.") like the team's real template, so ONE body
   // serves every doctor and the edited preview can be sent verbatim.
   const includeDoctorEmail = (batch as Record<string, unknown>).include_doctor_email === true;
-  const doctorHospitalsHtml = (() => {
-    const byCity = new Map<string, typeof recipientHospitals>();
-    for (const h of recipientHospitals) {
-      const c = h.city || "Other";
-      (byCity.get(c) ?? byCity.set(c, []).get(c)!).push(h);
-    }
-    const blocks: string[] = [];
-    for (const [c, hs] of byCity) {
-      const items = hs.map(h => {
-        const img = h.image_url
-          ? `<div style="margin:4px 0 8px;"><img src="${h.image_url}" alt="${esc(h.name)}" width="160" style="display:block;width:160px;height:auto;border-radius:8px;border:0;" /></div>`
-          : "";
-        return `<li style="margin:0 0 6px;">${esc(h.name)}${img}</li>`;
-      }).join("");
-      blocks.push(`<p style="font-weight:700;margin:12px 0 4px;">In ${esc(c)}:</p><ul style="margin:0 0 8px;padding-left:20px;">${items}</ul>`);
-    }
-    return blocks.join("");
-  })();
-  const doctorSubjectFresh = `Working opportunities${batchCountry ? ` in ${batchCountry}` : ""} - Allocation Assist`;
-  // Greet the doctor by name — each doctor gets their OWN editable email now
-  // (Hasan 2026-07-22: a tab per profile under "Doctor email"), so there's no
-  // reason to keep the generic "Hello Dr.," that one shared body required.
-  const doctorGreeting = (name: string) => {
-    const clean = String(name || "").replace(/^\s*(dr\.?|prof\.?)\s*/i, "").trim();
-    return clean ? `Hello Dr. ${clean},` : "Hello Dr.,";
-  };
-  const doctorBodyFor = (name: string) => `<p>${esc(doctorGreeting(name))}</p>
-<p>I hope you are well.</p>
-<p>We are currently discussing your profile with the hospitals below; please let us know if you hear from any of them through email, phone call, or LinkedIn. We will also keep you informed as soon as we receive feedback.</p>
-<p>We will help you with the salary and allowance negotiation to secure the best offer for you.</p>
-${doctorHospitalsHtml}
-<p>If you have any questions, feel free to reach out any time.</p>
-${SIGNATURE_HTML}`;
+  // The consolidated doctor email is built by the SHARED composer
+  // (_shared/doctor-working-op.ts) so the singular flow (send-flow-email)
+  // produces an identical email. Subject is country-titled ("Working opportunity
+  // in <country>"), falling back to the batch's country when the recipient rows
+  // carry no country of their own.
+  const doctorSubjectFresh = buildWorkingOpSubject(recipientHospitals, batchCountry);
   // One working-opportunity email per queued doctor, index-aligned with `rows`.
   const doctorBlocks = rows.map(r => ({
     name:    r.name,
     email:   String(r.email ?? "").trim(),
     subject: doctorSubjectFresh,
-    html:    doctorBodyFor(r.name),
+    html:    buildWorkingOpBody(r.name, recipientHospitals, SIGNATURE_HTML),
   }));
 
   // ── Dry run? Preview the FIRST hospital's personalised version ─────────
@@ -699,8 +681,14 @@ ${SIGNATURE_HTML}`;
     }
     return built;
   };
-  // Hospital-email attachments (from the batch row / adhoc body).
-  const builtAttachments = await buildAttachments(normAttach(batch.attachments), "hospital attachment");
+  // Hospital-email attachments. The row (batch.attachments) is the default;
+  // a send-time body.attachments overrides it when present, so the one-off
+  // dialog can attach files without persisting them on the row (adhoc did this
+  // too, since its synthesized batch.attachments WAS body.attachments).
+  const builtAttachments = await buildAttachments(
+    normAttach(Array.isArray(body.attachments) ? body.attachments : batch.attachments),
+    "hospital attachment",
+  );
   // Doctor-email attachments — separate list so the two emails can carry
   // DIFFERENT files (the bulk preview attaches to each pane independently).
   const builtDoctorAttachments = await buildAttachments(normAttach(body.doctor_attachments), "doctor attachment");
