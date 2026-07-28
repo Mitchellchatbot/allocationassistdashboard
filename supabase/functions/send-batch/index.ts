@@ -217,7 +217,7 @@ Deno.serve(async (req: Request) => {
   // send. Normalising both sides makes label drift harmless.
   const { data: hospitals, error: hospErr } = await supabase
     .from("hospitals")
-    .select("id, name, primary_contact_name, primary_recruiter_email, greet_with_contact_name, country, city, image_url, contact_mode, excluded_contact_emails, active")
+    .select("id, name, primary_contact_name, primary_recruiter_email, greet_with_contact_name, country, city, image_url, website, contact_mode, excluded_contact_emails, active")
     .not("primary_recruiter_email", "is", null);
   if (hospErr) return json({ ok: false, error: "Hospital fetch failed", detail: hospErr.message }, 500);
   const wantCountry = batchCountry ? normCountry(batchCountry) : null;
@@ -298,6 +298,7 @@ Deno.serve(async (req: Request) => {
         greetContact: h.greet_with_contact_name === true,
         city:         String(h.city ?? "").trim(),
         image_url:    String(h.image_url ?? "").trim(),
+        link:         String(h.website ?? "").trim() || null,   // hospital website → link in the doctor email
         toEmails,
       };
     })

@@ -375,6 +375,7 @@ export function HospitalDialog({
     greet_with_contact_name: initial.greet_with_contact_name ?? false,
     recruiter_phone:         initial.recruiter_phone ?? "",
     image_url:               initial.image_url ?? "",
+    website:                 initial.website ?? "",
     template_key:            initial.template_key ?? "",
     notes:                   initial.notes ?? "",
     active:                  initial.active ?? true,
@@ -468,6 +469,8 @@ export function HospitalDialog({
               <Field label="Phone"
                 value={form.recruiter_phone ?? ""} onChange={v => setForm(f => ({ ...f, recruiter_phone: v }))} />
             </div>
+            <Field label="Website (used as the hospital's link in the doctor working-opportunity email)" type="url"
+              value={form.website ?? ""} onChange={v => setForm(f => ({ ...f, website: v }))} />
             {/* Greeting source — hospital name vs the named contact person. */}
             <div className="space-y-1">
               <Label className="text-[11px] uppercase tracking-wider text-muted-foreground">Email greeting uses</Label>

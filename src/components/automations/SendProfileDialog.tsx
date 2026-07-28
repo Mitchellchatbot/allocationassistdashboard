@@ -623,6 +623,7 @@ function SendProfileDialogBody({ onClose, initial }: { onClose: () => void; init
       const isMultiHospital = selectedHospitals.length > 1;
       const batchHospitalsMeta = selectedHospitals.map(hh => ({
         name: hh.name, city: hh.city ?? null, country: hh.country ?? null, image_url: hh.image_url ?? null,
+        link: hh.website ?? null,
       }));
       // Feature 1: only consolidate when the user kept "Combined" AND it's a
       // multi-hospital send. Individual mode (or single-hospital) → no
@@ -1368,14 +1369,15 @@ function PreviewConfirm({
   const activeRender = renderByDoctor.get(activeDoctor.id);
   const hospitalRecipient = isSingle ? (hospitals[0].primary_recruiter_email ?? "(no recruiter email)") : `preview: ${sampleHospital?.name ?? "hospital"} · ${hospitals.length} hospitals`;
 
-  // Auto-attach the profile-card image PER DOCTOR (single-HOSPITAL sends only, as
-  // before). Runs sequentially — one html2canvas capture at a time — so a batch
+  // Auto-attach the profile-card image PER DOCTOR for EVERY send (single- AND
+  // multi-hospital) so the pixel-perfect flat image always ships in place of the
+  // HTML card. Runs sequentially — one html2canvas capture at a time — so a batch
   // of doctors doesn't fire a burst. Fires once per doctor, once that doctor's
   // profile data has loaded. Manual "Use profile card" button stays as fallback.
   const autoCardTried = useRef<Set<string>>(new Set());
   const [autoCardBusyId, setAutoCardBusyId] = useState<string | null>(null);
   useEffect(() => {
-    if (!isSingle || autoCardBusyId) return;
+    if (autoCardBusyId) return;
     for (const doc of doctors) {
       if (autoCardTried.current.has(doc.id) || cardImageByDoctor[doc.id]) continue;
       const data = sendDataByDoctor.get(doc.id);
@@ -1394,7 +1396,7 @@ function PreviewConfirm({
     // renderByDoctor intentionally omitted — we read it at fire time; the gating
     // deps below drive re-runs without re-firing on every token change.
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [isSingle, autoCardBusyId, doctors, cardImageByDoctor, sendDataByDoctor]);
+  }, [autoCardBusyId, doctors, cardImageByDoctor, sendDataByDoctor]);
 
   const anyHospitalEdited = doctors.some(d => hospitalOvByDoctor[d.id]);
   const anyDoctorEdited   = doctors.some(d => doctorOvByDoctor[d.id]);
@@ -1756,7 +1758,7 @@ function PreviewConfirm({
   // a time. Single-hospital keeps the editable doctorPane above (unchanged).
   const combinedDoctorPane = (doc: DoctorOption) => {
     const hospWO: WorkingOpHospital[] = hospitals.map(h => ({
-      name: h.name, city: h.city, country: h.country, image_url: h.image_url,
+      name: h.name, city: h.city, country: h.country, image_url: h.image_url, link: h.website,
     }));
     const subject = buildWorkingOpSubject(hospWO);
     const body = wrapBodyForSend(buildWorkingOpBody(doc.name, hospWO, PREVIEW_SIGNATURE_HTML));
