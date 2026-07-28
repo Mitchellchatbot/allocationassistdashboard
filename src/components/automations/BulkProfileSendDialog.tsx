@@ -18,6 +18,7 @@ import { TemplatePicker } from "@/components/automations/TemplatePicker";
 import { EmailFrame } from "@/components/EmailFrame";
 import { EmailPreviewStudio } from "@/components/EmailPreviewStudio";
 import { EditableEmailPreview } from "@/components/EditableEmailPreview";
+import { ProfileSubTabs } from "@/components/ProfileSubTabs";
 import type { EmailAttachment } from "@/lib/email-attachments";
 import { findSenderByEmail } from "@/lib/hi-team";
 
@@ -67,13 +68,16 @@ export function BulkProfileSendDialog({ open, onClose }: { open: boolean; onClos
   // review the exact hospital + doctor emails, edit them, then send from here.
   const [studio, setStudio] = useState<{
     hospital: { subject: string; html: string; text: string };
-    doctor:   { subject: string; html: string; text: string; recipientCount: number } | null;
+    doctor:   { recipientCount: number } | null;
+    // One editable email PER doctor (each doctor gets their own, greeted by name).
+    doctorList: { name: string; subject: string; html: string }[];
     emailCount: number; doctorCount: number; testMode?: boolean; testRecipient?: string | null;
   } | null>(null);
   const [hospSubject, setHospSubject] = useState("");
   const [hospHtml,    setHospHtml]    = useState("");
-  const [docSubject,  setDocSubject]  = useState("");
-  const [docHtml,     setDocHtml]     = useState("");
+  // Per-doctor working-op email edits (index-aligned with studio.doctorList).
+  const [perDoctorNote, setPerDoctorNote] = useState<{ subject: string; html: string }[]>([]);
+  const [doctorTab,   setDoctorTab]   = useState(0);
   const [resetTick,   setResetTick]   = useState(0);   // bump to re-seed the studio editors (Reset / open)
   // Per-email attachments — the hospital email and the doctor email carry their
   // own separate files (item 13: "attach attachments for each email separately").
@@ -88,6 +92,7 @@ export function BulkProfileSendDialog({ open, onClose }: { open: boolean; onClos
       setCustomMessage(""); setBccSelf(true); setProgress(null);
       setMode("combined"); setIncludeDoctorEmail(true); setStudio(null);
       setHospAttachments([]); setDocAttachments([]);
+      setPerDoctorNote([]); setDoctorTab(0);
       setContactSel({}); setContactOpen({});
     }
   }, [open]);
@@ -239,6 +244,7 @@ export function BulkProfileSendDialog({ open, onClose }: { open: boolean; onClos
     let sent = 0, failed = 0, lastErr = "";
     for (const d of selectedDocs) {
       for (const h of selectedHosps) {
+        let createdId: string | null = null;
         try {
           const { data: runRow, error: runErr } = await supabase
             .from("automation_flow_runs")
@@ -272,7 +278,8 @@ export function BulkProfileSendDialog({ open, onClose }: { open: boolean; onClos
             .select("id")
             .single();
           if (runErr || !runRow) throw new Error(runErr?.message ?? "run insert failed");
-          const { data: resp, error: sendErr } = await supabase.functions.invoke("send-flow-email", { body: { run_id: runRow.id } });
+          createdId = runRow.id;
+          const { data: resp, error: sendErr } = await supabase.functions.invoke("send-flow-email", { body: { run_id: createdId } });
           if (sendErr) throw sendErr;
           const r = resp as { ok?: boolean; error?: string };
           if (!r?.ok) throw new Error(r?.error ?? "send failed");
@@ -280,6 +287,10 @@ export function BulkProfileSendDialog({ open, onClose }: { open: boolean; onClos
         } catch (e) {
           failed++;
           lastErr = e instanceof Error ? e.message : "unknown";
+          // send-flow-email only returns ok AFTER the hospital email ships, so a
+          // failure here means nothing was sent — remove the stuck "active" run
+          // instead of leaving a phantom send in Flow 2 / Past Sent.
+          if (createdId) { try { await supabase.from("automation_flow_runs").delete().eq("id", createdId); } catch { /* leave it rather than crash the loop */ } }
         }
         setProgress(p => p && ({ ...p, done: p.done + 1 }));
       }
@@ -317,19 +328,24 @@ export function BulkProfileSendDialog({ open, onClose }: { open: boolean; onClos
         ok?: boolean; error?: string;
         preview?: { subject: string; html: string; text: string };
         doctor_email?: { subject: string; html: string; text: string; recipient_count: number };
+        doctor_emails?: { name: string; subject: string; html: string }[];
         email_count?: number; doctor_count?: number; test_mode?: boolean; test_recipient?: string | null;
       };
       if (!r?.ok || !r.preview) throw new Error(r?.error ?? "Preview failed");
-      const doctor = includeDoctorEmail && r.doctor_email
-        ? { subject: r.doctor_email.subject, html: r.doctor_email.html, text: r.doctor_email.text, recipientCount: r.doctor_email.recipient_count }
-        : null;
+      // One editable email per doctor (each greeted by name); only those with an
+      // email actually receive one.
+      const doctorList = includeDoctorEmail
+        ? (r.doctor_emails ?? []).map(d => ({ name: d.name, subject: d.subject, html: d.html }))
+        : [];
+      const doctor = includeDoctorEmail && r.doctor_email ? { recipientCount: r.doctor_email.recipient_count } : null;
       setStudio({
         hospital: { subject: r.preview.subject, html: r.preview.html, text: r.preview.text },
-        doctor, emailCount: r.email_count ?? selectedHospEmails.length, doctorCount: r.doctor_count ?? selectedDocs.length,
+        doctor, doctorList, emailCount: r.email_count ?? selectedHospEmails.length, doctorCount: r.doctor_count ?? selectedDocs.length,
         testMode: r.test_mode, testRecipient: r.test_recipient,
       });
       setHospSubject(r.preview.subject); setHospHtml(r.preview.html);
-      setDocSubject(doctor?.subject ?? ""); setDocHtml(doctor?.html ?? "");
+      setPerDoctorNote(doctorList.map(d => ({ subject: d.subject, html: d.html })));
+      setDoctorTab(0);
       setResetTick(t => t + 1);   // re-seed the editors from the fresh preview
     } catch (e) {
       toast.error(e instanceof Error ? e.message : "Preview failed");
@@ -345,7 +361,11 @@ export function BulkProfileSendDialog({ open, onClose }: { open: boolean; onClos
     const me = findSenderByEmail(user?.email ?? null);
     const bcc = bccSelf && me ? [me.email] : [];
     const hospEdited = hospHtml !== studio.hospital.html || hospSubject !== studio.hospital.subject;
-    const docEdited  = !!studio.doctor && (docHtml !== studio.doctor.html || docSubject !== studio.doctor.subject);
+    // Per-doctor edits ride as arrays (index-aligned) — a single doctor override
+    // would send doctor 0's name-baked greeting to every doctor.
+    const dl = studio.doctorList;
+    const anyDocHtmlEdit = dl.some((d, i) => (perDoctorNote[i]?.html ?? d.html) !== d.html);
+    const anyDocSubjEdit = dl.some((d, i) => (perDoctorNote[i]?.subject ?? d.subject) !== d.subject);
     try {
       const { data, error } = await supabase.functions.invoke("send-batch", { body: {
         adhoc: true,
@@ -353,7 +373,8 @@ export function BulkProfileSendDialog({ open, onClose }: { open: boolean; onClos
         recipient_emails_override: selectedHospEmails,
         include_doctor_email: includeDoctorEmail,
         ...(hospEdited ? { subject_override: hospSubject, html_override: hospHtml } : {}),
-        ...(docEdited  ? { doctor_subject_override: docSubject, doctor_html_override: docHtml } : {}),
+        ...(anyDocHtmlEdit ? { doctor_html_overrides: dl.map((d, i) => (perDoctorNote[i]?.html ?? d.html) !== d.html ? (perDoctorNote[i]?.html ?? "") : "") } : {}),
+        ...(anyDocSubjEdit ? { doctor_subject_overrides: dl.map((d, i) => (perDoctorNote[i]?.subject ?? d.subject) !== d.subject ? (perDoctorNote[i]?.subject ?? "") : "") } : {}),
         ...(hospAttachments.length ? { attachments: hospAttachments.map(a => ({ filename: a.filename, path: a.path })) } : {}),
         ...(docAttachments.length ? { doctor_attachments: docAttachments.map(a => ({ filename: a.filename, path: a.path })) } : {}),
         ...(Object.keys(contactSel).length ? { contact_overrides: contactSel } : {}),
@@ -645,23 +666,30 @@ export function BulkProfileSendDialog({ open, onClose }: { open: boolean; onClos
             />
           ),
         },
-        ...(studio.doctor ? [{
+        ...(studio.doctor && studio.doctorList.length ? [{
           key: "doctor",
           label: "Doctor email",
           subLabel: `Working opportunity → ${studio.doctor.recipientCount} doctor${studio.doctor.recipientCount === 1 ? "" : "s"}`,
           preview: (
-            <EditableEmailPreview
-              subject={docSubject}
-              html={studio.doctor.html}
-              onSubjectChange={setDocSubject}
-              onHtmlChange={setDocHtml}
-              resetKey={`doc:${resetTick}`}
-              edited={!!studio.doctor && (docHtml !== studio.doctor.html || docSubject !== studio.doctor.subject)}
-              onReset={() => { if (studio.doctor) { setDocSubject(studio.doctor.subject); setDocHtml(studio.doctor.html); setResetTick(t => t + 1); } }}
-              from="Allocation Assist Team <hello@allocationassist.com>"
-              attachments={docAttachments}
-              onAttachmentsChange={setDocAttachments}
-              className="min-h-0 flex-1 border-0 rounded-none shadow-none"
+            <ProfileSubTabs
+              names={studio.doctorList.map(d => d.name)}
+              active={Math.min(doctorTab, studio.doctorList.length - 1)}
+              onSelect={setDoctorTab}
+              panes={studio.doctorList.map((d, i) => (
+                <EditableEmailPreview
+                  subject={perDoctorNote[i]?.subject ?? d.subject}
+                  html={d.html}
+                  onSubjectChange={(s: string) => setPerDoctorNote(prev => prev.map((p, j) => j === i ? { ...p, subject: s } : p))}
+                  onHtmlChange={(h: string) => setPerDoctorNote(prev => prev.map((p, j) => j === i ? { ...p, html: h } : p))}
+                  resetKey={`doc:${i}:${resetTick}`}
+                  edited={(perDoctorNote[i]?.html ?? d.html) !== d.html || (perDoctorNote[i]?.subject ?? d.subject) !== d.subject}
+                  onReset={() => { setPerDoctorNote(prev => prev.map((p, j) => j === i ? { subject: d.subject, html: d.html } : p)); setResetTick(t => t + 1); }}
+                  from="Allocation Assist Team <hello@allocationassist.com>"
+                  attachments={docAttachments}
+                  onAttachmentsChange={setDocAttachments}
+                  className="min-h-0 flex-1 border-0 rounded-none shadow-none"
+                />
+              ))}
             />
           ),
         }] : []),

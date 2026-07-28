@@ -30,6 +30,7 @@ import { useDebounce } from "@/hooks/use-zoho-leads";
 import { MatchScoreChip, MatchReasons } from "@/components/DoctorVacancyMatches";
 import { EditableEmailPreview } from "@/components/EditableEmailPreview";
 import { EmailPreviewStudio } from "@/components/EmailPreviewStudio";
+import { ProfileSubTabs } from "@/components/ProfileSubTabs";
 import { CcBccPicker } from "@/components/automations/CcBccPicker";
 import { AttachmentsPicker } from "@/components/automations/AttachmentsPicker";
 import type { EmailAttachment } from "@/lib/email-attachments";
@@ -948,47 +949,6 @@ function workWeekdays(country: string | null | undefined): number[] {
 // an existing batch". When the user clicks New batch, the form starts in
 // create mode; on submit, we swap the body in place to the doctor picker
 // using the newly-created row's id — no close + reopen popup hop.
-
-/** Second-level tabs INSIDE a preview pane — "Hospital email" / "Doctor email"
- *  are the top-level tabs, and each holds one tab per doctor profile, since a
- *  Daily Duo sends a separate email per doctor on both legs.
- *
- *  Every pane stays MOUNTED (inactive ones are just hidden): the editors are
- *  contentEditable surfaces, and unmounting one would drop an in-progress edit
- *  when the user flicks between profiles. */
-function ProfileSubTabs({ names, active, onSelect, panes }: {
-  names: string[];
-  active: number;
-  onSelect: (i: number) => void;
-  panes: React.ReactNode[];
-}) {
-  return (
-    <div className="flex min-h-0 min-w-0 flex-1 flex-col">
-      {names.length > 1 && (
-        <div className="flex flex-wrap items-center gap-1 border-b border-slate-200 bg-slate-50/80 px-2 py-1.5">
-          {names.map((n, i) => (
-            <button
-              key={i}
-              type="button"
-              onClick={() => onSelect(i)}
-              className={cn(
-                "rounded-md px-2.5 py-1 text-[11px] font-medium transition",
-                i === active
-                  ? "bg-teal-600 text-white shadow-sm"
-                  : "text-slate-600 hover:bg-slate-200/70",
-              )}
-            >
-              {n || `Profile ${i + 1}`}
-            </button>
-          ))}
-        </div>
-      )}
-      {panes.map((p, i) => (
-        <div key={i} className={cn("min-h-0 min-w-0 flex-1 flex-col", i === active ? "flex" : "hidden")}>{p}</div>
-      ))}
-    </div>
-  );
-}
 
 function BatchDialog({ target, onTargetChange, batches, suggestedSpecialty }: {
   target: "new" | string | null;

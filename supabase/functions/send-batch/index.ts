@@ -98,6 +98,7 @@ Deno.serve(async (req: Request) => {
     // still honoured and applies to every doctor).
     doctor_subject_override?: string; doctor_html_override?: string;
     doctor_html_overrides?: string[];
+    doctor_subject_overrides?: string[];
     // Extra recipients from the preview's CcBccPicker — added ON TOP of the
     // hospital BCC list (bcc) / shown to everyone (cc).
     cc_override?: string[]; bcc_override?: string[];
@@ -820,12 +821,16 @@ ${SIGNATURE_HTML}`;
       ? (body.doctor_html_overrides as unknown[]).map(v => typeof v === "string" ? v.trim() : "")
       : [];
     const legacyOverride = (body.doctor_html_override ?? "").trim();
-    const doctorSubject  = (body.doctor_subject_override ?? "").trim() || doctorSubjectFresh;
+    const legacySubject  = (body.doctor_subject_override ?? "").trim();
+    const docSubjects: string[] = Array.isArray(body.doctor_subject_overrides)
+      ? (body.doctor_subject_overrides as unknown[]).map(v => typeof v === "string" ? v.trim() : "")
+      : [];
     for (let i = 0; i < doctorBlocks.length; i++) {
       const blk = doctorBlocks[i];
       const de  = blk.email;
       if (!de || de.toLowerCase() === EXCLUDED_RECIPIENT || excludeSet.has(de.toLowerCase())) continue;
       const finalDoctorHtml = wrapHtml(docOverrides[i] || legacyOverride || blk.html);
+      const finalSubject    = docSubjects[i] || legacySubject || blk.subject || doctorSubjectFresh;
       try {
         const res = await fetch("https://api.resend.com/emails", {
           method:  "POST",
@@ -833,7 +838,7 @@ ${SIGNATURE_HTML}`;
           body: JSON.stringify({
             from:    MAIL_FROM,
             to:      TEST_OVERRIDE_LIST.length ? [TEST_OVERRIDE_LIST[0]] : [de],
-            subject: doctorSubject,
+            subject: finalSubject,
             html:    finalDoctorHtml,
             text:    stripHtml(finalDoctorHtml),
             headers: { "X-AA-Batch-Id": String(batch.id), "X-AA-Kind": "doctor_working_op" },

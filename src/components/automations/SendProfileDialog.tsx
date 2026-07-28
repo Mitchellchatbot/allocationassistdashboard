@@ -433,12 +433,12 @@ function SendProfileDialogBody({ onClose, initial }: { onClose: () => void; init
     // email when not overridden.
     const doctorEmailToUse = (recipients?.doctorEmail ?? "").trim() || selectedDoctor.email;
     // Edits only apply to a single-hospital send — the preview (and so the
-    // edited HTML) is rendered for one hospital, and the override would bake
-    // that hospital's tokens into every BCC run. The preview UI already
-    // disables editing for multi-hospital, but guard here too.
+    // A hand-edited body (stageOverrides) is a SHARED copy: for a multi-hospital
+    // send it goes verbatim to every hospital, so the previewed greeting replaces
+    // each hospital's own — the UI warns about exactly this. Unedited multi sends
+    // still render per-hospital from the template (no override).
     const effectiveStageOverrides =
-      selectedHospitals.length === 1 && stageOverrides && Object.keys(stageOverrides).length
-        ? stageOverrides : undefined;
+      stageOverrides && Object.keys(stageOverrides).length ? stageOverrides : undefined;
     const templateOverridesPayload = templateKeys && (templateKeys.hospital !== HOSPITAL_DEFAULT_KEY || templateKeys.doctor !== DOCTOR_DEFAULT_KEY)
       ? {
           ...(templateKeys.hospital !== HOSPITAL_DEFAULT_KEY ? { email_hospital: templateKeys.hospital } : {}),
@@ -1582,11 +1582,14 @@ function PreviewConfirm({
       )}
 
       <div className="text-[10.5px] text-sidebar-foreground/65 px-0.5">
-        {!isSingle
-          ? "Editing is available when sending to a single hospital (a shared edit can't be reused across a BCC batch)."
-          : anyEdited
-            ? <span className="text-emerald-300 font-medium">You've edited {hospitalOv && doctorOv ? "both emails" : hospitalOv ? "the hospital email" : "the doctor email"} — your version sends instead of the template.</span>
-            : "Click into either email to tweak the wording before it sends."}
+        {anyEdited
+          ? <span className="text-emerald-300 font-medium">
+              You've edited {hospitalOv && doctorOv ? "both emails" : hospitalOv ? "the hospital email" : "the doctor email"} — your version sends instead of the template.
+              {!isSingle ? " Every hospital gets this exact copy, so the per-hospital greeting is replaced by the previewed one — Reset to keep personalised greetings." : ""}
+            </span>
+          : isSingle
+            ? "Click into either email to tweak the wording before it sends."
+            : `Click into either email to edit. Your edit goes to all ${hospitals.length} hospitals (the per-hospital greeting is replaced) — leave it unedited to keep each greeting personalised.`}
       </div>
 
       {/* Schedule details — only when "Schedule for later" is picked in the
@@ -1693,7 +1696,7 @@ function PreviewConfirm({
           onToChange={isSingle ? (v) => onOverrideRecipient(hospitals[0].id, v.trim() ? v.trim() : null) : undefined}
           cc={ccList}
           bcc={bccList}
-          editable={isSingle}
+          editable
           onChange={setHospitalOv}
           plainBody={renderedHospitalBody}
           attachments={hospitalAttachments}
@@ -1746,7 +1749,7 @@ function PreviewConfirm({
           onToChange={isSingle ? setDoctorEmailOv : undefined}
           cc={ccList}
           bcc={bccList}
-          editable={isSingle}
+          editable
           onChange={setDoctorOv}
           plainBody={renderTemplate(doctorBody, vars)}
           attachments={doctorAttachments}
