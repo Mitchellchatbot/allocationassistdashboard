@@ -55,7 +55,7 @@ export function buildDoctorHospitalsHtml(hospitals: WorkingOpHospital[]): string
         ? `<a href="${esc(h.link)}" style="color:#0f766e;text-decoration:underline;">${esc(h.name)}</a>`
         : esc(h.name);
       const img = h.image_url
-        ? `<div style="margin:4px 0 8px;"><img src="${esc(h.image_url)}" alt="${esc(h.name)}" width="160" style="display:block;width:160px;height:auto;border-radius:8px;border:0;" /></div>`
+        ? `<div style="margin:6px 0 16px;"><img src="${esc(h.image_url)}" alt="${esc(h.name)}" width="500" style="display:block;width:100%;max-width:500px;height:auto;border-radius:12px;border:0;" /></div>`
         : "";
       return `<li style="margin:0 0 6px;">${nameHtml}${img}</li>`;
     }).join("");
