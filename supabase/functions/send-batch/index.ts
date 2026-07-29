@@ -131,6 +131,17 @@ Deno.serve(async (req: Request) => {
     // Files to attach to the DOCTOR working-opportunity emails (separate from the
     // hospital-email `attachments`). Used by the bulk preview's per-pane pickers.
     doctor_attachments?: Array<{ filename: string; path: string }>;
+    // Sender identity for the HOSPITAL emails — a full "Name <email>" header from
+    // the preview's "Sending as" picker. Replaces MAIL_FROM for the hospital
+    // emails only (the doctor working-op emails keep MAIL_FROM). Empty/absent →
+    // MAIL_FROM, so an untouched picker sends exactly as before. Applied in BOTH
+    // the dry-run preview and the real send.
+    from_override?: string;
+    // Free-text note from the preview's "Custom note" box. When non-empty, it's
+    // injected into the HOSPITAL email body as a short paragraph placed right
+    // after the greeting/intro and before the doctors table. Escaped. Applied in
+    // BOTH the dry-run preview and the real send; empty → nothing injected.
+    custom_message?: string;
   };
   try { body = await req.json(); } catch { return json({ ok: false, error: "Invalid JSON body" }, 400); }
   const adhoc = !!body.adhoc;
@@ -540,6 +551,24 @@ Deno.serve(async (req: Request) => {
     .maybeSingle();
   if (tplErr || !tpl) return json({ ok: false, error: "Template profile_sent_hospital_batch not found" }, 500);
 
+  // Sender identity for the HOSPITAL emails (preview's "Sending as" picker). When
+  // a full "Name <email>" header is supplied, it replaces MAIL_FROM for the
+  // hospital emails only — the doctor working-op emails keep MAIL_FROM. Empty →
+  // MAIL_FROM, so an untouched picker sends exactly as before. Used in BOTH the
+  // dry-run preview `from` and the real send.
+  const hospitalFrom = String(body.from_override ?? "").trim() || MAIL_FROM;
+
+  // Custom note (preview's "Custom note" box). When non-empty, it's injected into
+  // the hospital body right after the greeting/intro and before the doctors
+  // table — done by PREPENDING it to the doctors_table_html token below, so it
+  // lands identically in the dry-run preview and the real send. Escaped; newlines
+  // become <br>. Empty → nothing injected.
+  const customMessageRaw = String(body.custom_message ?? "").trim();
+  const customMessageHtml = customMessageRaw
+    ? `<p style="margin:0 0 16px;font-family:${FONT_STACK};font-size:17px;color:#1a2332;line-height:1.55;">${esc(customMessageRaw).replace(/\n/g, "<br>")}</p>`
+    : "";
+  const customMessageText = customMessageRaw ? `${customMessageRaw}\n\n` : "";
+
   // Render the email for ONE greeting. Each hospital gets its own copy so the
   // intro reads "Hello <hospital> team!" instead of a generic "Hello Team!".
   // Body is wrapped in the same Garamond shell send-flow-email uses.
@@ -559,10 +588,13 @@ Deno.serve(async (req: Request) => {
   };
   // blockHtml/blockText default to the combined block; per-doctor mode passes
   // one doctor's card+table so each email carries a single profile.
+  // customMessageHtml/customMessageText are prepended to the doctors block so the
+  // custom note sits after the greeting/intro and before the table (both empty
+  // when no note was supplied → byte-for-byte the previous render).
   const renderFor = (contactName: string, city: string, blockHtml = doctorsHtmlBlock, blockText = doctorsTextBlock) => ({
     subject: subjectFor(city),
-    html:    wrapHtml(renderText(String(tpl.body_html ?? ""), { specialty: specialtyLabel, hospital_contact_name: contactName, doctors_table_html: blockHtml, signature: SIGNATURE_HTML })),
-    text:    renderText(String(tpl.body_text ?? ""), { specialty: specialtyLabel, hospital_contact_name: contactName, doctors_table_html: blockText, signature: SIGNATURE_TEXT }),
+    html:    wrapHtml(renderText(String(tpl.body_html ?? ""), { specialty: specialtyLabel, hospital_contact_name: contactName, doctors_table_html: customMessageHtml + blockHtml, signature: SIGNATURE_HTML })),
+    text:    renderText(String(tpl.body_text ?? ""), { specialty: specialtyLabel, hospital_contact_name: contactName, doctors_table_html: customMessageText + blockText, signature: SIGNATURE_TEXT }),
   });
   // A hospital's greeting: its contact person (when it greets by contact), else
   // "<Hospital name> team".
@@ -617,7 +649,7 @@ Deno.serve(async (req: Request) => {
       // real hospitals (or, if off, that it WILL) before anyone clicks send.
       test_mode: TEST_OVERRIDE_LIST.length > 0,
       test_recipient: TEST_OVERRIDE_LIST[0] ?? null,
-      preview: { from: MAIL_FROM, bcc_count: recipients.length, subject: sample.subject, html: sample.html, text: sample.text },
+      preview: { from: hospitalFrom, bcc_count: recipients.length, subject: sample.subject, html: sample.html, text: sample.text },
       // Daily Duo: one pane per doctor — each is a separately-sent email, so the
       // team edits each one on its own.
       per_doctor: perDoctorMode
@@ -751,7 +783,7 @@ Deno.serve(async (req: Request) => {
       // Ammar addresses. Test mode still funnels every copy to the test inbox.
       const liveTo = h.toEmails.filter(e => !excludeSet.has(e.toLowerCase()) && e.toLowerCase() !== EXCLUDED_RECIPIENT);
       return {
-        from: MAIL_FROM,
+        from: hospitalFrom,
         to:   TEST_OVERRIDE_LIST.length ? [TEST_OVERRIDE_LIST[0]] : (liveTo.length ? liveTo : [h.email]),
         subject: rendered.subject,
         html:    rendered.html,

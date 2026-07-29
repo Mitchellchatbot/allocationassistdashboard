@@ -351,6 +351,12 @@ export function useSendBatchNow() {
         greetOverrides?: Record<string, "contact" | "team">;
         // Files attached to the DOCTOR working-opportunity emails (send-now only).
         doctorAttachments?: Array<{ filename: string; path: string }>;
+        // Sender identity for the HOSPITAL emails — a full "Name <email>" header
+        // from the preview's "Sending as" picker. Blank → send-batch uses MAIL_FROM.
+        fromOverride?: string;
+        // Free-text note injected into the hospital body (after the greeting,
+        // before the doctors table). Blank → nothing injected.
+        customMessage?: string;
       },
     ): Promise<{ ok: boolean; bcc_count?: number; doctor_count?: number; message_id?: string; error?: string }> => {
       // Accept either a bare id (legacy callers) or an object with a force
@@ -373,6 +379,8 @@ export function useSendBatchNow() {
         ...(input.contactOverrides && Object.keys(input.contactOverrides).length ? { contact_overrides: input.contactOverrides } : {}),
         ...(input.greetOverrides && Object.keys(input.greetOverrides).length ? { greet_overrides: input.greetOverrides } : {}),
         ...(input.doctorAttachments?.length ? { doctor_attachments: input.doctorAttachments } : {}),
+        ...(input.fromOverride  ? { from_override:  input.fromOverride }  : {}),
+        ...(input.customMessage ? { custom_message: input.customMessage } : {}),
       };
       const { data, error } = await invokeWithTimeout<{ ok: boolean; bcc_count?: number; doctor_count?: number; message_id?: string; error?: string }>(
         "send-batch", { batch_id: batchId, force, ...overrides }, 90_000);
@@ -411,17 +419,20 @@ export interface BatchPreviewResult {
 }
 export function useBatchPreview() {
   return useMutation({
-    mutationFn: async (input: string | { batchId: string; force?: boolean; recipientEmailsOverride?: string[]; greetOverrides?: Record<string, "contact" | "team"> }): Promise<BatchPreviewResult> => {
+    mutationFn: async (input: string | { batchId: string; force?: boolean; recipientEmailsOverride?: string[]; greetOverrides?: Record<string, "contact" | "team">; fromOverride?: string; customMessage?: string }): Promise<BatchPreviewResult> => {
       const batchId = typeof input === "string" ? input : input.batchId;
       const force   = typeof input === "string" ? false  : !!input.force;
       const recipientEmailsOverride = typeof input === "string" ? undefined : input.recipientEmailsOverride;
       const greetOverrides = typeof input === "string" ? undefined : input.greetOverrides;
+      // So the previewed body matches the real send when a note / sender is set.
+      const fromOverride  = typeof input === "string" ? undefined : input.fromOverride;
+      const customMessage = typeof input === "string" ? undefined : input.customMessage;
       type Raw = { ok: boolean; preview?: Omit<BatchPreviewResult, "doctor_email" | "per_doctor" | "doctor_emails" | "email_count" | "test_mode" | "test_recipient">;
                    doctor_email?: BatchDoctorPreview; per_doctor?: BatchPerDoctorPreview[];
                    doctor_emails?: BatchPerDoctorPreview[]; email_count?: number;
                    test_mode?: boolean; test_recipient?: string | null; error?: string };
       const { data, error } = await invokeWithTimeout<Raw>(
-        "send-batch", { batch_id: batchId, dry_run: true, force, ...(recipientEmailsOverride?.length ? { recipient_emails_override: recipientEmailsOverride } : {}), ...(greetOverrides && Object.keys(greetOverrides).length ? { greet_overrides: greetOverrides } : {}) }, 60_000);
+        "send-batch", { batch_id: batchId, dry_run: true, force, ...(recipientEmailsOverride?.length ? { recipient_emails_override: recipientEmailsOverride } : {}), ...(greetOverrides && Object.keys(greetOverrides).length ? { greet_overrides: greetOverrides } : {}), ...(fromOverride ? { from_override: fromOverride } : {}), ...(customMessage ? { custom_message: customMessage } : {}) }, 60_000);
       if (error) throw new Error(await fnErrorMessage(error, "Preview failed"));
       const res = data as Raw;
       if (!res.ok || !res.preview) throw new Error(res.error ?? "Preview failed");

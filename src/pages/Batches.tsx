@@ -34,6 +34,8 @@ import { EmailPreviewStudio } from "@/components/EmailPreviewStudio";
 import { ProfileSubTabs } from "@/components/ProfileSubTabs";
 import { CcBccPicker } from "@/components/automations/CcBccPicker";
 import { AttachmentsPicker } from "@/components/automations/AttachmentsPicker";
+import { CvStudioControl } from "@/components/automations/ProfileCardControls";
+import { AA_SENDERS, findSenderByEmail } from "@/lib/hi-team";
 import type { EmailAttachment } from "@/lib/email-attachments";
 import { normCountry, countryFilterOptions } from "@/lib/normalize-country";
 import { GulfClock, composeGulfDateTime } from "@/components/GulfClock";
@@ -53,6 +55,12 @@ import { UserSquare2 } from "lucide-react";
  * and tracking. Specialty rotation auto-advances after each specialty_of_day
  * send.
  */
+
+// The generic Allocation Assist team address — the default "Sending as" identity
+// for the hospital emails (mirrors SendProfileDialog's AA_TEAM_EMAIL). Picking a
+// person in the preview swaps the hospital From to their mailbox instead.
+const AA_TEAM_EMAIL = "hello@allocationassist.com";
+
 export default function Batches() {
   const { data: batches = [], isLoading } = useScheduledBatches();
   const { data: rotation } = useSpecialtyRotation();
@@ -1129,6 +1137,14 @@ function BatchDialog({ target, onTargetChange, batches, initialKind, suggestedSp
   const [previewResetTick, setPreviewResetTick] = useState(0);
   const [batchCc, setBatchCc] = useState<string[]>([]);
   const [batchBcc, setBatchBcc] = useState<string[]>([]);
+  // "Sending as" identity for the HOSPITAL emails — defaults to the generic AA
+  // team address (send-batch then uses its MAIL_FROM, unchanged). Pick a person
+  // to send those emails from their mailbox instead. Reset when the target
+  // changes so a new batch starts from the team default.
+  const [senderEmail, setSenderEmail] = useState<string>(AA_TEAM_EMAIL);
+  // Free-text note added to the hospital email (after the greeting, before the
+  // doctors table). Reset when the target changes.
+  const [customNote, setCustomNote] = useState("");
   // Recruiter emails the team has EXCLUDED from this send — unchecked in the
   // "Sending to N hospitals" list. Passed as exclude_override so send-batch drops
   // them from the BCC (Sean: "exclusion ability for hospitals in email sends").
@@ -1236,6 +1252,14 @@ function BatchDialog({ target, onTargetChange, batches, initialKind, suggestedSp
       setOneOffIncludeDoctorEmail(true);
     }
   }, [target, initialKind]);
+
+  // A fresh dialog target starts from the team-default sender + an empty note
+  // (the dialog stays mounted across target swaps, so these would otherwise
+  // leak from a previous batch).
+  useEffect(() => {
+    setSenderEmail(AA_TEAM_EMAIL);
+    setCustomNote("");
+  }, [target]);
 
   const close = () => {
     onTargetChange(null);
@@ -1437,7 +1461,7 @@ function BatchDialog({ target, onTargetChange, batches, initialKind, suggestedSp
   const repreviewWith = async (overrideEmails: string[] | null) => {
     if (!batch) return;
     try {
-      const p = await previewMut.mutateAsync({ batchId: batch.id, force: batch.status === "sent", recipientEmailsOverride: overrideEmails ?? undefined, ...(Object.keys(greetOverridesPayload).length ? { greetOverrides: greetOverridesPayload } : {}) });
+      const p = await previewMut.mutateAsync({ batchId: batch.id, force: batch.status === "sent", recipientEmailsOverride: overrideEmails ?? undefined, ...(Object.keys(greetOverridesPayload).length ? { greetOverrides: greetOverridesPayload } : {}), ...(customNote.trim() ? { customMessage: customNote.trim() } : {}) });
       setEmailPreview(prev => prev ? { ...prev, subject: p.subject, html: p.html, text: p.text, bcc_count: p.bcc_count, per_doctor: p.per_doctor ?? [], doctor_emails: p.doctor_emails ?? [], test_mode: p.test_mode, test_recipient: p.test_recipient } : prev);
       setEditSubject(p.subject); setEditHtml(p.html);
       setEditDoctorSubject(p.doctor_email?.subject ?? ""); setEditDoctorHtml(p.doctor_email?.html ?? "");
@@ -1452,6 +1476,17 @@ function BatchDialog({ target, onTargetChange, batches, initialKind, suggestedSp
   const recipientOverrideEmails = regionOnly
     ? regionOnly.emails.filter(e => !isExcluded(e))
     : null;
+  // Re-render the previewed body when the custom note settles, so the note shows
+  // in the same spot (after the greeting, before the table) that send-batch will
+  // inject it — keeping preview == send. Only while a preview is open; the sender
+  // doesn't change the body (it's reflected client-side via the From label), so
+  // it isn't a dependency here.
+  const debouncedNote = useDebounce(customNote, 500);
+  useEffect(() => {
+    if (!emailPreview || !batch) return;
+    void repreviewWith(recipientOverrideEmails);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [debouncedNote]);
   // Hospitals shown in the "Sending to…" list: the region's hospitals when a
   // region override is active, else the batch-country eligible ones. Region
   // override REPLACES the send, so manual single-adds are hidden while it's on.
@@ -1722,6 +1757,24 @@ function BatchDialog({ target, onTargetChange, batches, initialKind, suggestedSp
     if (!batch) return;
     try { await update.mutateAsync({ id: batch.id, patch: { attachments: next } }); }
     catch (e) { toast.error(e instanceof Error ? e.message : "Attachment update failed"); }
+  };
+  // "Sending as" identity for the hospital emails. The generic team address has
+  // no AA_SENDERS entry (findSenderByEmail → null); only a picked PERSON produces
+  // a fromOverride, so leaving the picker on the default sends exactly as before
+  // (send-batch falls back to MAIL_FROM). senderLine is the full "Name <email>"
+  // header shown in the preview.
+  const senderMember = findSenderByEmail(senderEmail);
+  const senderLine = senderMember
+    ? `${senderMember.name} <${senderMember.email}>`
+    : `Allocation Assist Team <${AA_TEAM_EMAIL}>`;
+  const fromOverride = senderMember ? senderLine : undefined;
+  // Append a generated branded CV to the batch's HOSPITAL-email attachments
+  // (persisted via the existing update path). Deduped so re-generating the same
+  // file doesn't attach it twice.
+  const attachBrandedCv = (att: EmailAttachment) => {
+    const current = batch?.attachments ?? [];
+    if (current.some(a => a.path === att.path && a.filename === att.filename)) return;
+    void setAttachments([...current, att]);
   };
   // Dedupe guard: doctor_ids comes from the query cache, so a fast double-
   // click before the refetch lands could otherwise queue the same doctor
@@ -2142,6 +2195,8 @@ function BatchDialog({ target, onTargetChange, batches, initialKind, suggestedSp
                     setGreetModeByHospital({});   // fresh preview → stored greeting defaults
                     setAddHospCountry("all");
                     setDoctorAttachments([]);
+                    setSenderEmail(AA_TEAM_EMAIL);   // fresh preview → team-default sender + empty note
+                    setCustomNote("");
                     setPreviewResetTick(t => t + 1);
                   } catch (e) {
                     toast.error(e instanceof Error ? e.message : "Preview failed");
@@ -2378,9 +2433,46 @@ function BatchDialog({ target, onTargetChange, batches, initialKind, suggestedSp
             )}
           </div>
 
+          {/* Sending as — the From line the recipient hospital sees. Defaults to
+              the generic AA team address (send-batch keeps its MAIL_FROM); pick a
+              person to send the hospital emails from their mailbox instead. */}
+          <div className="rounded-lg border border-sidebar-border/40 bg-white/95 p-2 shadow-sm space-y-1">
+            <div className="flex flex-wrap items-center gap-1.5 text-[11px] text-slate-600">
+              <span className="font-medium">Sending as:</span>
+              <select
+                value={senderEmail}
+                onChange={e => setSenderEmail(e.target.value)}
+                disabled={sendNow.isPending}
+                className="max-w-full rounded border border-slate-300 bg-white px-1.5 py-0.5 text-[11px] font-medium text-slate-700"
+              >
+                <option value={AA_TEAM_EMAIL}>Allocation Assist Team &lt;{AA_TEAM_EMAIL}&gt;</option>
+                {AA_SENDERS.map(s => (
+                  <option key={s.email} value={s.email}>{s.name} &lt;{s.email}&gt;</option>
+                ))}
+              </select>
+            </div>
+            <div className="text-[10px] text-slate-500">
+              Hospital emails go out as <span className="font-medium text-slate-700">{senderLine}</span>{fromOverride ? "" : " (the batch's default sender)"}.
+            </div>
+          </div>
+
           <div className="rounded-lg border border-sidebar-border/40 bg-white/95 p-2 shadow-sm">
             <div className="mb-1 px-0.5 text-[10px] text-slate-500">Extra CC / BCC recipients (people, not hospitals):</div>
             <CcBccPicker cc={batchCc} bcc={batchBcc} onCcChange={setBatchCc} onBccChange={setBatchBcc} disabled={sendNow.isPending} />
+          </div>
+
+          {/* Custom note — a short paragraph added to the hospital email after the
+              greeting and before the doctors table (send-batch injects it in both
+              the dry-run preview and the real send). Empty → nothing added. */}
+          <div className="rounded-lg border border-sidebar-border/40 bg-white/95 p-2 shadow-sm">
+            <div className="mb-1 px-0.5 text-[10px] text-slate-500">Custom note (added to the hospital email):</div>
+            <Textarea
+              value={customNote}
+              onChange={e => setCustomNote(e.target.value)}
+              disabled={sendNow.isPending}
+              className="min-h-[52px] bg-white text-[12px] text-slate-800"
+              placeholder="Anything to add above the doctors table — context, urgency, etc."
+            />
           </div>
         </div>
       }
@@ -2391,7 +2483,27 @@ function BatchDialog({ target, onTargetChange, batches, initialKind, suggestedSp
       {
         key: "hospital",
         label: "Hospital email",
-        subLabel: "Hospital Intro <hospitalintro@allocationassist.com>",
+        subLabel: fromOverride ?? "Hospital Intro <hospitalintro@allocationassist.com>",
+        // Branded CV per doctor — generate a doctor's Allocation-Assist CV and
+        // attach it to THIS hospital email (batch.attachments). Resolved from the
+        // queued doctors' WP candidates; doctors with no website profile show a
+        // disabled note instead of the control (never crash).
+        controls: (
+          <div className="space-y-2">
+            <div className="text-[10px] uppercase tracking-wider text-sidebar-foreground/60">Branded CV per doctor</div>
+            <p className="text-[10.5px] leading-snug text-sidebar-foreground/55">
+              Generate a doctor's branded CV and attach it to this hospital email.
+            </p>
+            {picked.map(d => (
+              <div key={d.id} className="flex items-center gap-2 min-w-0">
+                <span className="w-24 shrink-0 truncate text-[11px] font-medium text-sidebar-foreground/85" title={d.name}>{d.name}</span>
+                {d.wp
+                  ? <CvStudioControl doctor={d.wp} onAttach={attachBrandedCv} />
+                  : <span className="text-[10px] italic text-sidebar-foreground/45">No website profile — CV unavailable</span>}
+              </div>
+            ))}
+          </div>
+        ),
         preview: perDoctorList.length ? (
           <ProfileSubTabs
             names={perDoctorList.map(d => d.name)}
@@ -2409,7 +2521,7 @@ function BatchDialog({ target, onTargetChange, batches, initialKind, suggestedSp
                   setPerDoctor(prev => prev.map((p, j) => j === i ? { subject: d.subject, html: perDoctorPristine(i) } : p));
                   setPreviewResetTick(t => t + 1);
                 }}
-                from="Hospital Intro <hospitalintro@allocationassist.com>"
+                from={fromOverride ?? "Hospital Intro <hospitalintro@allocationassist.com>"}
                 cc={batchCc}
                 bcc={batchBcc}
                 attachments={batch?.attachments ?? []}
@@ -2432,7 +2544,7 @@ function BatchDialog({ target, onTargetChange, batches, initialKind, suggestedSp
               setEditHtml(displayHtml);
               setPreviewResetTick(t => t + 1);
             }}
-            from="Hospital Intro <hospitalintro@allocationassist.com>"
+            from={fromOverride ?? "Hospital Intro <hospitalintro@allocationassist.com>"}
             cc={batchCc}
             bcc={batchBcc}
             attachments={batch?.attachments ?? []}
@@ -2565,6 +2677,11 @@ function BatchDialog({ target, onTargetChange, batches, initialKind, suggestedSp
                   ...(Object.keys(contactOverridesPayload).length ? { contactOverrides: contactOverridesPayload } : {}),
                   ...(Object.keys(greetOverridesPayload).length ? { greetOverrides: greetOverridesPayload } : {}),
                   ...(doctorAttachments.length ? { doctorAttachments: doctorAttachments.map(a => ({ filename: a.filename, path: a.path })) } : {}),
+                  // "Sending as" a person → override the hospital From (default team
+                  // sender leaves it to send-batch's MAIL_FROM). Custom note → injected
+                  // into the hospital body. Both no-op when untouched.
+                  ...(fromOverride ? { fromOverride } : {}),
+                  ...(customNote.trim() ? { customMessage: customNote.trim() } : {}),
                 };
                 const res = await sendNow.mutateAsync(
                   batch.status === "sent"
