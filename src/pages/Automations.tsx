@@ -32,7 +32,6 @@ import { useQueryClient } from "@tanstack/react-query";
 import { supabase } from "@/lib/supabase";
 import { ApprovalQueues } from "@/components/automations/ApprovalQueues";
 import { ReassignButton } from "@/components/automations/ReassignButton";
-import { SendProfileDialog } from "@/components/automations/SendProfileDialog";
 import { TriggerFlowDialog } from "@/components/automations/TriggerFlowDialog";
 import { FlowSendPreviewDialog, type EmailOverrides } from "@/components/automations/FlowSendPreviewDialog";
 import { ClassifyReplyDialog } from "@/components/automations/ClassifyReplyDialog";
@@ -112,7 +111,6 @@ export default function Automations() {
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [selectedRunId]);
-  const [sendProfileOpen, setSendProfileOpen] = useState(false);
   const [triggerFlow, setTriggerFlow] = useState<FlowKey | null>(null);
   const [contractOpen, setContractOpen] = useState(false);
   const [tickRunning, setTickRunning] = useState(false);
@@ -154,9 +152,8 @@ export default function Automations() {
 
   // Stable callbacks so FlowTab's props keep referential identity, letting the
   // memoized FlowTab skip re-renders when its own flow/runs are unchanged.
-  // setSelectedRunId / setSendProfileOpen / setTriggerFlow are stable React
-  // setters → empty dep arrays are correct.
-  const handleSendProfile = useCallback(() => setSendProfileOpen(true), []);
+  // setSelectedRunId / setTriggerFlow are stable React setters → empty dep
+  // arrays are correct.
   // Per-flow trigger callbacks, memoized as a stable map keyed by flow key so
   // each panel receives the same function identity across renders.
   const triggerFlowHandlers = useMemo(() => {
@@ -270,7 +267,6 @@ export default function Automations() {
                       flow={FLOW_DEFINITIONS[key]}
                       runs={runsByFlow[key] ?? []}
                       onSelectRun={setSelectedRunId}
-                      onSendProfile={key === "profile_sent" ? handleSendProfile : undefined}
                       onTriggerFlow={
                         // 'onboarding' intentionally absent — Sales sends
                         // the intake email from Zoho now (Ammar 2026-06-03).
@@ -309,11 +305,6 @@ export default function Automations() {
           onClose={() => setSelectedRunId(null)}
         />
       )}
-
-      <SendProfileDialog
-        open={sendProfileOpen}
-        onClose={() => setSendProfileOpen(false)}
-      />
 
       <TriggerFlowDialog
         open={!!triggerFlow}
@@ -374,11 +365,10 @@ const TRIGGER_BUTTON_LABEL: Partial<Record<FlowKey, string>> = {
   second_payment:   "Set joining date",
 };
 
-function FlowTabImpl({ flow, runs, onSelectRun, onSendProfile, onSendContract, onTriggerFlow }: {
+function FlowTabImpl({ flow, runs, onSelectRun, onSendContract, onTriggerFlow }: {
   flow: FlowDefinition;
   runs: FlowRun[];
   onSelectRun: (id: string) => void;
-  onSendProfile?:  () => void;
   onSendContract?: () => void;
   onTriggerFlow?:  () => void;
 }) {
@@ -393,11 +383,6 @@ function FlowTabImpl({ flow, runs, onSelectRun, onSendProfile, onSendContract, o
               <CardDescription className="mt-1">{flow.description}</CardDescription>
             </div>
             <div className="flex items-center gap-2 shrink-0">
-              {onSendProfile && (
-                <Button size="sm" onClick={onSendProfile}>
-                  <Send className="h-3.5 w-3.5 mr-1.5" /> Send profile
-                </Button>
-              )}
               {onSendContract && (
                 <Button size="sm" onClick={onSendContract}>
                   <FileSignature className="h-3.5 w-3.5 mr-1.5" /> Send contract
@@ -428,9 +413,8 @@ function FlowTabImpl({ flow, runs, onSelectRun, onSendProfile, onSendContract, o
               <div className="rounded-md border border-dashed py-10 px-6 text-center">
                 <div className="text-sm font-medium text-slate-600 mb-1">No active runs</div>
                 <div className="text-[12px] text-muted-foreground max-w-[420px] mx-auto">
-                  {onSendProfile  && "Click \"Send profile\" above to introduce a doctor to a hospital."}
                   {onTriggerFlow  && triggerLabel && `Click "${triggerLabel}" above to start a run for a specific doctor.`}
-                  {!onSendProfile && !onTriggerFlow && "Runs appear here once they're triggered by another flow or an external event (e.g. BoldSign webhook)."}
+                  {!onTriggerFlow && "Runs appear here once they're triggered by another flow or an external event (e.g. BoldSign webhook)."}
                 </div>
               </div>
             ) : (
