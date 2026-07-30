@@ -12,6 +12,7 @@
  */
 import { Fragment, memo, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useSearchParams } from "react-router-dom";
+import { supabase } from "@/lib/supabase";
 import { DashboardLayout } from "@/components/layout/DashboardLayout";
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
@@ -1812,6 +1813,41 @@ function StagedProfileDetailDialog({
       }))
     : slotExp;
 
+  // ── The ONE education + ONE experience entry WordPress actually stores ──────
+  // WordPress reads acf slot 1 as the education entry (title1 / academy1 / …) and
+  // slot 2 as the experience entry (title2 / company2 / …) — see
+  // wordpress-candidate-upsert. Only ONE of each publishes. Seed each field from
+  // the CV-parsed first entry when its publishing slot is empty, so the reviewer
+  // sees the CV data and edits land on the slot that ships.
+  type PubEntry = { title: string | null; org: string | null; start: string | null; end: string | null; present: boolean; description: string | null };
+  const pubEdu: PubEntry = {
+    title:       get("title1")       ?? education[0]?.title       ?? null,
+    org:         get("academy1")     ?? education[0]?.org         ?? null,
+    start:       get("start_date1")  ?? education[0]?.start       ?? null,
+    end:         get("end_date1")    ?? education[0]?.end         ?? null,
+    present:     acf.present1 === true || acf.present1 === "Yes" || (education[0]?.present ?? false),
+    description: get("description1") ?? education[0]?.description ?? null,
+  };
+  const pubExp: PubEntry = {
+    title:       get("title2")        ?? experience[0]?.title       ?? null,
+    org:         get("company2")      ?? experience[0]?.org         ?? null,
+    start:       get("start_date_2")  ?? experience[0]?.start       ?? null,
+    end:         get("end_date2")     ?? experience[0]?.end         ?? null,
+    present:     acf.present2 === true || acf.present2 === "Yes" || (experience[0]?.present ?? false),
+    description: get("description2")  ?? experience[0]?.description ?? null,
+  };
+  // Editing ANY field persists the WHOLE entry (all six keys from current values)
+  // so the CV-seeded fields the reviewer didn't touch are still captured to the
+  // publishing slots — what you see becomes what ships. present clears end_date.
+  const saveEdu = (patch: Partial<PubEntry>): Promise<void> => {
+    const v = { ...pubEdu, ...patch };
+    return saveAcf({ title1: v.title ?? "", academy1: v.org ?? "", start_date1: v.start ?? "", end_date1: v.present ? "" : (v.end ?? ""), present1: v.present, description1: v.description ?? "" });
+  };
+  const saveExp = (patch: Partial<PubEntry>): Promise<void> => {
+    const v = { ...pubExp, ...patch };
+    return saveAcf({ title2: v.title ?? "", company2: v.org ?? "", start_date_2: v.start ?? "", end_date2: v.present ? "" : (v.end ?? ""), present2: v.present, description2: v.description ?? "" });
+  };
+
   const memberSince = profile.created_at
     ? new Date(profile.created_at).toLocaleDateString("en-GB", { day: "numeric", month: "long", year: "numeric" })
     : null;
@@ -2010,33 +2046,57 @@ function StagedProfileDetailDialog({
                 >Experience</button>
               </div>
               <div className="p-5 bg-white space-y-4">
-                {(tab === "education" ? education : experience).length === 0 ? (
-                  <div className="text-[12px] text-muted-foreground py-2">
-                    No {tab} entries detected. {Object.keys(cv).length === 0
-                      ? "CV extraction hasn't finished yet — re-open in ~15s."
-                      : "The CV didn't list any."}
-                  </div>
-                ) : (
-                  (tab === "education" ? education : experience).map((entry, i) => (
-                    <div key={i} className="flex items-start gap-3">
-                      <GraduationCap className="h-4 w-4 text-teal-600 mt-1 shrink-0" hidden={tab !== "education"} />
-                      <Briefcase className="h-4 w-4 text-teal-600 mt-1 shrink-0" hidden={tab !== "experience"} />
-                      <div className="min-w-0 flex-1">
-                        <div className="text-[12.5px] uppercase tracking-wide text-teal-700 font-semibold">
-                          {tab === "education" ? "Specialty Training:" : "Role:"}
+                {(() => {
+                  const pub    = tab === "education" ? pubEdu : pubExp;
+                  const save   = tab === "education" ? saveEdu : saveExp;
+                  const extras = (tab === "education" ? education : experience).slice(1);
+                  const titlePh = tab === "education" ? "Degree / specialty training…" : "Job title / role…";
+                  const orgPh   = tab === "education" ? "University / academy…"        : "Hospital / company…";
+                  return (
+                    <>
+                      {/* The one entry that publishes to WordPress — fully editable. */}
+                      <div className="rounded-lg border border-teal-200 bg-teal-50/40 p-3.5 space-y-2">
+                        <div className="flex flex-wrap items-center gap-1.5 text-[11px] font-semibold text-teal-700">
+                          {tab === "education" ? <GraduationCap className="h-3.5 w-3.5" /> : <Briefcase className="h-3.5 w-3.5" />}
+                          <span className="uppercase tracking-wide">{tab === "education" ? "Specialty Training" : "Role"}</span>
+                          <span className="font-normal normal-case text-teal-600/70">· this is what publishes — click any field to edit</span>
                         </div>
-                        <div className="text-[14.5px] font-semibold text-slate-900 mt-0.5">{entry.title ?? "—"}</div>
-                        {entry.org && <div className="text-[13px] text-teal-700 mt-0.5">{entry.org}</div>}
-                        {(entry.start || entry.end || entry.present) && (
-                          <div className="text-[11.5px] text-muted-foreground mt-1">
-                            {entry.start ?? "—"} – {entry.present ? "Present" : (entry.end ?? "—")}
-                          </div>
-                        )}
-                        {entry.description && <div className="text-[12px] text-slate-700 mt-1.5 leading-snug">{entry.description}</div>}
+                        <EditableText value={pub.title} onSave={v => save({ title: v })} placeholder={titlePh} className="text-[14.5px] font-semibold text-slate-900" />
+                        <EditableText value={pub.org}   onSave={v => save({ org: v })}   placeholder={orgPh}   className="text-[13px] text-teal-700" />
+                        <div className="flex flex-wrap items-center gap-x-2 gap-y-1 text-[11.5px] text-muted-foreground">
+                          <EditableText value={pub.start} onSave={v => save({ start: v })} placeholder="Start (year)" className="text-[11.5px] text-muted-foreground" />
+                          <span>–</span>
+                          {pub.present
+                            ? <span className="font-medium text-teal-700">Present</span>
+                            : <EditableText value={pub.end} onSave={v => save({ end: v })} placeholder="End (year)" className="text-[11.5px] text-muted-foreground" />}
+                          <label className="ml-1.5 inline-flex items-center gap-1 cursor-pointer">
+                            <input type="checkbox" checked={pub.present} onChange={e => save({ present: e.target.checked })} className="h-3 w-3 accent-teal-600" />
+                            <span className="text-[11px]">Present</span>
+                          </label>
+                        </div>
+                        <EditableText value={pub.description} onSave={v => save({ description: v })} placeholder="Description…" className="text-[12px] text-slate-700 leading-snug" multiline />
                       </div>
-                    </div>
-                  ))
-                )}
+
+                      {/* Any additional CV entries — read-only, they don't publish. */}
+                      {extras.length > 0 && (
+                        <div className="rounded-lg border border-slate-200 bg-slate-50/60 p-3 space-y-2.5">
+                          <div className="text-[10px] font-semibold uppercase tracking-wide text-slate-400">
+                            Also on the CV ({extras.length}) — not published (WordPress stores one {tab} entry)
+                          </div>
+                          {extras.map((entry, i) => (
+                            <div key={i} className="text-[12px] text-slate-500">
+                              <div className="font-medium text-slate-600">{entry.title ?? "—"}</div>
+                              {entry.org && <div>{entry.org}</div>}
+                              {(entry.start || entry.end || entry.present) && (
+                                <div className="text-[11px] text-slate-400">{entry.start ?? "—"} – {entry.present ? "Present" : (entry.end ?? "—")}</div>
+                              )}
+                            </div>
+                          ))}
+                        </div>
+                      )}
+                    </>
+                  );
+                })()}
               </div>
             </div>
           </div>
