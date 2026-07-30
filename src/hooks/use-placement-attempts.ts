@@ -28,6 +28,7 @@ export interface PlacementAttempt {
   signed_at:        string | null;
   start_date:       string | null;
   joined_at:        string | null;
+  relocated_at:     string | null;
   paid_at:          string | null;
   notes:            string | null;
   source:           string;

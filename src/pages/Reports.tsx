@@ -65,7 +65,11 @@ export default function Reports() {
   // every Collapsible. Everything starts CLOSED except the KPI strip +
   // trend chart (which aren't in the map — always rendered open). Pure
   // UI state, nothing persisted.
-  const [open, setOpen] = useState<Record<string, boolean>>({});
+  // Default the substantive breakdowns OPEN so the page isn't a wall of
+  // collapsed accordions — the data's visible at a glance. The noisier /
+  // secondary sections (top-of-funnel, operations, per-doctor table) stay
+  // collapsed so it doesn't become overwhelming.
+  const [open, setOpen] = useState<Record<string, boolean>>({ team: true, hospital: true, placements: true });
   const toggle = (k: string) => (v: boolean) => setOpen(s => ({ ...s, [k]: v }));
 
   // Headline numbers for the collapsed triggers, so the key figure is
@@ -161,19 +165,9 @@ export default function Reports() {
           </Card>
         </div>
 
-        {/* ── Recap — week/month deltas. DELTAS ONLY now (absolutes live
-            in the KPI strip). Fixed-week by design, so a scope chip flags
-            that it ignores the date filter. ─────────────────────────── */}
-        <CollapsibleSection
-          title="Weekly + Monthly recap"
-          icon={<CalendarRange className="h-4 w-4 text-teal-600" />}
-          scope={<ScopeChip>This / last week + month</ScopeChip>}
-          description="Change in each placement-attempt milestone vs the prior period (the KPI strip up top holds the absolute totals). One doctor shortlisted at 4 hospitals = 4 shortlists."
-          open={!!open.recap}
-          onOpenChange={toggle("recap")}
-        >
-          <RecapCard hospital={hospitalFilter} specialty={specialtyFilter} />
-        </CollapsibleSection>
+        {/* ── Recap — Weekly / Monthly tabs, always expanded. Reads
+            placement_attempts (imported reports + live markings), per-attempt. ── */}
+        <RecapCard hospital={hospitalFilter} specialty={specialtyFilter} />
 
         {/* ── Pipeline health / Operations — the machinery behind the
             funnel: contracts, CV backlog, batch sends, candidate pool.
