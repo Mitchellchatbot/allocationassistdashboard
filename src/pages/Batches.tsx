@@ -61,7 +61,7 @@ import { UserSquare2 } from "lucide-react";
 // person in the preview swaps the hospital From to their mailbox instead.
 const AA_TEAM_EMAIL = "hello@allocationassist.com";
 
-export default function Batches() {
+export function BatchesPanel() {
   const { data: batches = [], isLoading } = useScheduledBatches();
   const { data: rotation } = useSpecialtyRotation();
   const { data: hospitals = [] } = useHospitals();
@@ -110,7 +110,7 @@ export default function Batches() {
   );
 
   return (
-    <DashboardLayout>
+    <>
       <div className="space-y-6">
         <div className="flex items-start justify-between gap-4 flex-wrap">
           <div>
@@ -193,6 +193,14 @@ export default function Batches() {
         initialKind={newBatchKind}
         suggestedSpecialty={rotation?.queue?.length ? rotation.queue[rotation.effective_cursor_index] ?? null : null}
       />
+    </>
+  );
+}
+
+export default function Batches() {
+  return (
+    <DashboardLayout>
+      <BatchesPanel />
     </DashboardLayout>
   );
 }

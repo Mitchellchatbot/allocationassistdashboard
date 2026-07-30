@@ -13,6 +13,7 @@ export const ROUTE_LABELS: Record<string, { label: string; section: string }> = 
   "/follow-ups":       { label: "Follow-ups",       section: "Sales" },
   "/calls":            { label: "Calls",            section: "Sales" },
   "/meta-ads":         { label: "Meta Ads",         section: "Growth" },
+  "/sends":            { label: "Sends",            section: "Hospital Introduction" },
   "/automations":      { label: "Automations",      section: "Hospital Introduction" },
   "/my-workspace":     { label: "My Workspace",     section: "Hospital Introduction" },
   "/doctors":          { label: "Doctors",          section: "Hospital Introduction" },

@@ -49,7 +49,7 @@ function fromAddr(raw: string | null): string {
   return (m?.[1] ?? s).trim();
 }
 
-export default function Replies() {
+export function RepliesPanel() {
   const [page, setPage]         = useState(0);
   const [searchInput, setInput] = useState("");
   const [search, setSearch]     = useState("");
@@ -90,7 +90,7 @@ export default function Replies() {
   ];
 
   return (
-    <DashboardLayout>
+    <>
       <div className="p-4 md:p-6 space-y-4">
         {/* Header */}
         <div className="flex items-center justify-between gap-3 flex-wrap">
@@ -201,6 +201,14 @@ export default function Replies() {
           onClose={() => setCompose(null)}
         />
       )}
+    </>
+  );
+}
+
+export default function Replies() {
+  return (
+    <DashboardLayout>
+      <RepliesPanel />
     </DashboardLayout>
   );
 }

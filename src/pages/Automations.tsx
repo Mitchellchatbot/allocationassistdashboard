@@ -79,7 +79,7 @@ const ADMIN_TAB_ITEMS: AnimatedTabItem[] = [
   { value: "settings",  label: <><Settings className="h-3.5 w-3.5" /> Default Flow Editor</> },
 ];
 
-export default function Automations() {
+export function EmailChainPanel() {
   const [searchParams, setSearchParams] = useSearchParams();
   // Default tab is profile_sent now that Onboarding is hidden (Ammar
   // 2026-06-03: Sales already sends the intake form from Zoho when a
@@ -197,7 +197,7 @@ export default function Automations() {
   };
 
   return (
-    <DashboardLayout>
+    <>
       <div className="space-y-6">
         <div className="flex items-start justify-between gap-4">
           <div>
@@ -338,6 +338,14 @@ export default function Automations() {
           </Suspense>
         </SheetContent>
       </Sheet>
+    </>
+  );
+}
+
+export default function Automations() {
+  return (
+    <DashboardLayout>
+      <EmailChainPanel />
     </DashboardLayout>
   );
 }

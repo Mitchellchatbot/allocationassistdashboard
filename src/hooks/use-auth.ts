@@ -28,7 +28,7 @@ export const WORKER_EMAIL_TO_NAME: Record<string, string> = {
 // /doctors is the unified shell — the old /leads-pipeline, /doctor-profiles
 // and /wp-candidates URLs redirect into it, so they don't need their own
 // entry in the access list. Anyone who can see "doctors" sees all three tabs.
-export const ALL_PAGES = ["/", "/my-workspace", "/sales", "/marketing", "/doctors", "/team", "/finance", "/meta-ads", "/settings", "/worker", "/calls", "/chatbot", "/follow-ups", "/automations", "/information", "/vacancies", "/reports", "/batches", "/profile-sent", "/import-bulk", "/connections", "/forms", "/feedback"];
+export const ALL_PAGES = ["/", "/my-workspace", "/sales", "/marketing", "/doctors", "/team", "/finance", "/meta-ads", "/settings", "/worker", "/calls", "/chatbot", "/follow-ups", "/sends", "/automations", "/information", "/vacancies", "/reports", "/batches", "/profile-sent", "/import-bulk", "/connections", "/forms", "/feedback"];
 
 // Hospital Introduction team page set. They land on /my-workspace and
 // only see the surfaces that matter for moving doctors through the
@@ -36,6 +36,9 @@ export const ALL_PAGES = ["/", "/my-workspace", "/sales", "/marketing", "/doctor
 export const HI_MEMBER_PAGES = [
   "/",
   "/my-workspace",
+  "/sends",
+  // Legacy send routes kept so old bookmarks/deep-links still pass the page
+  // gate and redirect into /sends (they now resolve to tabs on that page).
   "/automations",
   "/information",
   "/doctors",

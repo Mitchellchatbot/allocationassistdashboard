@@ -26,7 +26,7 @@ const PAGE_SIZE = 30;
 type SortKey = "sentAt" | "doctorName" | "specialty" | "sentKind" | "hospital";
 type DateRange = "all" | "7" | "30" | "90";
 
-export default function PastSent() {
+export function PastSentPanel() {
   const { records } = useSentHistory();
   const navigate = useNavigate();
   const [raw, setRaw]       = useState("");
@@ -107,7 +107,7 @@ export default function PastSent() {
   };
 
   return (
-    <DashboardLayout>
+    <>
       <div className="space-y-5">
         <div className="flex items-start justify-between gap-3 flex-wrap">
           <div>
@@ -235,6 +235,14 @@ export default function PastSent() {
           </CardContent>
         </Card>
       </div>
+    </>
+  );
+}
+
+export default function PastSent() {
+  return (
+    <DashboardLayout>
+      <PastSentPanel />
     </DashboardLayout>
   );
 }

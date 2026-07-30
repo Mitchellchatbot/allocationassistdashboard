@@ -17,7 +17,7 @@ import { GulfClock } from "@/components/GulfClock";
  * in Automations, Past Sent and the pipeline counts exactly as before — this
  * page is just the launchpad + at-a-glance queue/history.
  */
-export default function ProfileSent() {
+export function SendProfilePanel() {
   const navigate = useNavigate();
   const [sendOpen, setSendOpen] = useState(false);
   const { records } = useSentHistory();
@@ -25,7 +25,7 @@ export default function ProfileSent() {
   const recent = useMemo(() => records.filter(r => r.sentKind === "individual").slice(0, 25), [records]);
 
   return (
-    <DashboardLayout>
+    <>
       <div className="space-y-5">
         <div className="flex flex-wrap items-start justify-between gap-3">
           <div>
@@ -35,7 +35,7 @@ export default function ProfileSent() {
             </p>
           </div>
           <div className="flex items-center gap-2">
-            <Button variant="outline" onClick={() => navigate("/batches?compose=oneoff")}>
+            <Button variant="outline" onClick={() => navigate("/sends?tab=batch-sends&compose=oneoff")}>
               <Users className="h-4 w-4 mr-1.5" /> Bulk send
             </Button>
             <Button onClick={() => setSendOpen(true)} className="bg-teal-600 hover:bg-teal-700 text-white">
@@ -52,7 +52,7 @@ export default function ProfileSent() {
               <CardDescription className="text-[12px]">One or more doctors → one or more hospitals, each a personalized email. Full preview + editing, attachments, templates, schedule-for-later.</CardDescription>
             </CardHeader>
           </Card>
-          <Card className="hover:border-teal-300 transition-colors cursor-pointer" onClick={() => navigate("/batches?compose=oneoff")}>
+          <Card className="hover:border-teal-300 transition-colors cursor-pointer" onClick={() => navigate("/sends?tab=batch-sends&compose=oneoff")}>
             <CardHeader className="pb-2">
               <CardTitle className="text-[14px] flex items-center gap-2"><Users className="h-4 w-4 text-teal-600" /> Bulk send</CardTitle>
               <CardDescription className="text-[12px]">Many doctors → one table per hospital, sent now — opens the batch composer (where you can also schedule recurring blasts).</CardDescription>
@@ -68,7 +68,7 @@ export default function ProfileSent() {
             <CardTitle className="text-base flex items-center gap-2">
               <History className="h-4 w-4 text-teal-600" /> Recent profile sends
               {recent.length > 0 && <Badge variant="outline" className="text-[9px] bg-slate-50">{recent.length}</Badge>}
-              <button onClick={() => navigate("/past-sent")} className="ml-auto inline-flex items-center gap-1 text-[11px] text-teal-700 hover:underline">
+              <button onClick={() => navigate("/sends?tab=past-sent")} className="ml-auto inline-flex items-center gap-1 text-[11px] text-teal-700 hover:underline">
                 View all in Past Sent <ExternalLink className="h-3 w-3" />
               </button>
             </CardTitle>
@@ -98,6 +98,14 @@ export default function ProfileSent() {
       </div>
 
       <SendProfileDialog open={sendOpen} onClose={() => setSendOpen(false)} />
+    </>
+  );
+}
+
+export default function ProfileSent() {
+  return (
+    <DashboardLayout>
+      <SendProfilePanel />
     </DashboardLayout>
   );
 }

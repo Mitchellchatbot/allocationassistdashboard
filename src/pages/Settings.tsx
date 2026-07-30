@@ -28,6 +28,7 @@ const PAGE_LABELS: Record<string, string> = {
   "/worker":         "Worker Portal (upload & view records)",
   "/my-workspace":   "My Workspace",
   "/doctors":        "Doctors (Progress + Profiles)",
+  "/sends":          "Sends (Profile · Email Chain · Batch · Replies · Past)",
   "/automations":    "Automations",
   "/vacancies":      "Vacancies",
   "/batches":        "Batch Sends",

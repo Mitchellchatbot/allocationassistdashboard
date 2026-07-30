@@ -1,7 +1,7 @@
 import { Suspense, useEffect, lazy as reactLazy, type ComponentType } from "react";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { restoreQueryCache, startQueryPersist } from "@/lib/query-persist";
-import { BrowserRouter, Route, Routes, Outlet, useLocation, Navigate } from "react-router-dom";
+import { BrowserRouter, Route, Routes, Outlet, useLocation, Navigate, useSearchParams } from "react-router-dom";
 import { Toaster as Sonner } from "@/components/ui/sonner";
 import { Toaster } from "@/components/ui/toaster";
 import { TooltipProvider } from "@/components/ui/tooltip";
@@ -68,14 +68,13 @@ const Contracts       = lazy(() => import("./pages/Contracts"));
 const FollowUps       = lazy(() => import("./pages/FollowUps"));
 const Calls           = lazy(() => import("./pages/Calls"));
 const Chatbot         = lazy(() => import("./pages/Chatbot"));
-const Automations     = lazy(() => import("./pages/Automations"));
 const Information      = lazy(() => import("./pages/Information"));
 const Vacancies       = lazy(() => import("./pages/Vacancies"));
 const Reports         = lazy(() => import("./pages/Reports"));
-const Batches         = lazy(() => import("./pages/Batches"));
-const PastSent        = lazy(() => import("./pages/PastSent"));
-const ProfileSent     = lazy(() => import("./pages/ProfileSent"));
-const Replies         = lazy(() => import("./pages/Replies"));
+// Five former pages (Profile Sent, Automations, Batch Sends, Replies, Past
+// Sent) are now tabs inside the unified /sends page. Their old routes redirect
+// into the matching tab (see RedirectToSends below).
+const Sends           = lazy(() => import("./pages/Sends"));
 const FeatureLab      = lazy(() => import("./pages/FeatureLab"));
 const MyWorkspace     = lazy(() => import("./pages/MyWorkspace"));
 const BulkImport      = lazy(() => import("./pages/BulkImport"));
@@ -176,6 +175,21 @@ function requiredPageForPath(pathname: string): string {
   return pathname;
 }
 
+/**
+ * Query-preserving redirect from a legacy send-related route into the unified
+ * /sends page with the right tab pre-selected. Existing deep-links keep
+ * working: `/automations?flow=shortlist` → `/sends?tab=email-chain&flow=shortlist`,
+ * `/batches?compose=oneoff` → `/sends?tab=batch-sends&compose=oneoff`, etc.
+ * URLSearchParams.set() dedupes, so any stale `tab` on the incoming URL is
+ * replaced by the target tab rather than doubled.
+ */
+function RedirectToSends({ tab }: { tab: string }) {
+  const [sp] = useSearchParams();
+  const next = new URLSearchParams(sp);
+  next.set("tab", tab);
+  return <Navigate to={`/sends?${next.toString()}`} replace />;
+}
+
 // One-shot guard: prefetch the likely-next route chunks only once per page
 // load, even if <App/> ever remounts.
 let didPrefetchRoutes = false;
@@ -250,7 +264,10 @@ const App = () => {
                 <Route path="/calls"          element={<Calls />} />
                 <Route path="/chatbot"        element={<Chatbot />} />
                 <Route path="/my-workspace"   element={<MyWorkspace />} />
-                <Route path="/automations"    element={<Automations />} />
+                <Route path="/sends"          element={<Sends />} />
+                {/* Legacy send routes → the matching tab of the unified /sends
+                    page, preserving any deep-link query params (?flow=, ?compose=, ?run=). */}
+                <Route path="/automations"    element={<RedirectToSends tab="email-chain" />} />
                 <Route path="/information"    element={<Information />} />
                 <Route path="/doctors"        element={<Doctors />} />
                 {/* Legacy routes — keep bookmarks working by redirecting
@@ -260,10 +277,10 @@ const App = () => {
                 <Route path="/wp-candidates"   element={<Navigate to="/doctors?tab=profiles" replace />} />
                 <Route path="/vacancies"      element={<Vacancies />} />
                 <Route path="/reports"        element={<Reports />} />
-                <Route path="/batches"        element={<Batches />} />
-                <Route path="/profile-sent"   element={<ProfileSent />} />
-                <Route path="/replies"        element={<Replies />} />
-                <Route path="/past-sent"      element={<PastSent />} />
+                <Route path="/batches"        element={<RedirectToSends tab="batch-sends" />} />
+                <Route path="/profile-sent"   element={<RedirectToSends tab="send-profile" />} />
+                <Route path="/replies"        element={<RedirectToSends tab="replies" />} />
+                <Route path="/past-sent"      element={<RedirectToSends tab="past-sent" />} />
                 <Route path="/feature-lab"    element={<FeatureLab />} />
                 <Route path="/import-bulk"    element={<BulkImport />} />
                 <Route path="/connections"    element={<Connections />} />
