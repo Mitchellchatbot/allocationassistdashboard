@@ -1135,7 +1135,17 @@ function BatchDialog({ target, onTargetChange, batches, initialKind, suggestedSp
   const [editDoctorHtml, setEditDoctorHtml] = useState("");
   // Attachments for the DOCTOR email (separate from the hospital attachments) —
   // send-now only, parity with the bulk preview's per-pane pickers.
-  const [doctorAttachments, setDoctorAttachments] = useState<EmailAttachment[]>([]);
+  // PER-DOCTOR doctor-email attachments, index-aligned with the doctor emails
+  // (doctor_emails / doctorBlocks). A doctor-specific file (e.g. a CV) must go
+  // only to that doctor's working-opportunity email — never fan across the whole
+  // batch. Empty slots = no attachment for that doctor.
+  const [doctorAttachments, setDoctorAttachments] = useState<EmailAttachment[][]>([]);
+  const setDocAtt = (i: number, next: EmailAttachment[]) => setDoctorAttachments(prev => {
+    const c = prev.slice();
+    while (c.length <= i) c.push([]);
+    c[i] = next;
+    return c;
+  });
   const [previewResetTick, setPreviewResetTick] = useState(0);
   const [batchCc, setBatchCc] = useState<string[]>([]);
   const [batchBcc, setBatchBcc] = useState<string[]>([]);
@@ -1585,6 +1595,7 @@ function BatchDialog({ target, onTargetChange, batches, initialKind, suggestedSp
   // The working-opportunity leg, one email per doctor (no greeting swap — it's
   // addressed to the doctor, not a hospital).
   const doctorNoteList = emailPreview?.doctor_emails ?? [];
+  const activeDocIdx = Math.min(doctorTab, Math.max(0, doctorNoteList.length - 1));
   const doctorNoteEdited = (i: number) =>
     !!perDoctorNote[i] && (perDoctorNote[i].html !== (doctorNoteList[i]?.html ?? "") || perDoctorNote[i].subject !== (doctorNoteList[i]?.subject ?? ""));
   // True once the team edited away from the (greeting-swapped) preview base —
@@ -2572,10 +2583,12 @@ function BatchDialog({ target, onTargetChange, batches, initialKind, suggestedSp
                 single composer. Separate list from the hospital-email attachments. */}
             <div className="border-b border-slate-200 bg-slate-50/60 px-3 py-2">
               <AttachmentsPicker
-                attachments={doctorAttachments}
-                onChange={setDoctorAttachments}
+                attachments={doctorAttachments[activeDocIdx] ?? []}
+                onChange={next => setDocAtt(activeDocIdx, next)}
                 disabled={sendNow.isPending}
-                hint="CV, logbook, etc. — attached to the doctor working-opportunity email (not the hospital email)"
+                hint={doctorNoteList.length > 1
+                  ? `CV, logbook, etc. for ${doctorNoteList[activeDocIdx]?.name ?? "this doctor"} — attached to THEIR working-opportunity email only (switch doctor tabs below to set each one's)`
+                  : "CV, logbook, etc. — attached to the doctor working-opportunity email (not the hospital email)"}
               />
             </div>
             {doctorNoteList.length ? (
@@ -2596,8 +2609,8 @@ function BatchDialog({ target, onTargetChange, batches, initialKind, suggestedSp
                       setPreviewResetTick(t => t + 1);
                     }}
                     from="Allocation Assist Team <hello@allocationassist.com>"
-                    attachments={doctorAttachments}
-                    onAttachmentsChange={setDoctorAttachments}
+                    attachments={doctorAttachments[i] ?? []}
+                    onAttachmentsChange={next => setDocAtt(i, next)}
                     className="min-h-0 flex-1 border-0 rounded-none shadow-none"
                   />
                 ))}
@@ -2611,8 +2624,8 @@ function BatchDialog({ target, onTargetChange, batches, initialKind, suggestedSp
                 edited={doctorEdited}
                 onReset={() => { if (emailPreview?.doctor_email) { setEditDoctorSubject(emailPreview.doctor_email.subject); setEditDoctorHtml(emailPreview.doctor_email.html); } }}
                 from="Allocation Assist Team <hello@allocationassist.com>"
-                attachments={doctorAttachments}
-                onAttachmentsChange={setDoctorAttachments}
+                attachments={doctorAttachments[0] ?? []}
+                onAttachmentsChange={next => setDocAtt(0, next)}
                 className="min-h-0 flex-1 border-0 rounded-none shadow-none"
               />
             )}
@@ -2678,7 +2691,7 @@ function BatchDialog({ target, onTargetChange, batches, initialKind, suggestedSp
                   ...(recipientOverrideEmails?.length ? { recipientEmailsOverride: recipientOverrideEmails } : {}),
                   ...(Object.keys(contactOverridesPayload).length ? { contactOverrides: contactOverridesPayload } : {}),
                   ...(Object.keys(greetOverridesPayload).length ? { greetOverrides: greetOverridesPayload } : {}),
-                  ...(doctorAttachments.length ? { doctorAttachments: doctorAttachments.map(a => ({ filename: a.filename, path: a.path })) } : {}),
+                  ...(doctorAttachments.some(arr => arr?.length) ? { perDoctorAttachments: doctorAttachments.map(arr => (arr ?? []).map(a => ({ filename: a.filename, path: a.path }))) } : {}),
                   // "Sending as" a person → override the hospital From (default team
                   // sender leaves it to send-batch's MAIL_FROM). Custom note → injected
                   // into the hospital body. Both no-op when untouched.

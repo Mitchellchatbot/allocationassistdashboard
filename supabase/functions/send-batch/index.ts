@@ -129,8 +129,12 @@ Deno.serve(async (req: Request) => {
     specialty?: string;
     attachments?: Array<{ filename: string; path: string }>;
     // Files to attach to the DOCTOR working-opportunity emails (separate from the
-    // hospital-email `attachments`). Used by the bulk preview's per-pane pickers.
+    // hospital-email `attachments`). Legacy: one global list for every doctor.
     doctor_attachments?: Array<{ filename: string; path: string }>;
+    // PER-DOCTOR doctor-email attachments, index-aligned with the doctor emails
+    // (doctorBlocks). A doctor-specific file (CV) reaches only that doctor. Falls
+    // back to doctor_attachments per index when a slot is empty.
+    per_doctor_attachments?: Array<Array<{ filename: string; path: string }>>;
     // Sender identity for the HOSPITAL emails — a full "Name <email>" header from
     // the preview's "Sending as" picker. Replaces MAIL_FROM for the hospital
     // emails only (the doctor working-op emails keep MAIL_FROM). Empty/absent →
@@ -770,7 +774,15 @@ Deno.serve(async (req: Request) => {
   );
   // Doctor-email attachments — separate list so the two emails can carry
   // DIFFERENT files (the bulk preview attaches to each pane independently).
+  // Legacy global list (applied to every doctor when no per-doctor list is set).
   const builtDoctorAttachments = await buildAttachments(normAttach(body.doctor_attachments), "doctor attachment");
+  // PER-DOCTOR doctor attachments — index-aligned with doctorBlocks, so a
+  // doctor-specific file reaches only that doctor (no cross-doctor fan-out).
+  const perDoctorAtt: Array<Array<{ filename: string; path: string }>> =
+    Array.isArray(body.per_doctor_attachments) ? body.per_doctor_attachments : [];
+  const builtDoctorAttachmentsByDoctor = await Promise.all(
+    perDoctorAtt.map(arr => buildAttachments(normAttach(arr), "doctor attachment")),
+  );
 
   // Target hospitals — drop excluded + Ammar. In TEST mode every copy is
   // redirected to the test inbox (personalised copies still go there so the
@@ -922,6 +934,9 @@ Deno.serve(async (req: Request) => {
       if (!de || de.toLowerCase() === EXCLUDED_RECIPIENT || excludeSet.has(de.toLowerCase())) continue;
       const finalDoctorHtml = wrapHtml(docOverrides[i] || legacyOverride || blk.html);
       const finalSubject    = docSubjects[i] || legacySubject || blk.subject || doctorSubjectFresh;
+      // THIS doctor's own attachments (per-doctor list wins; else the legacy
+      // global list). Never fan one doctor's file across the others.
+      const docAtt = builtDoctorAttachmentsByDoctor[i]?.length ? builtDoctorAttachmentsByDoctor[i] : builtDoctorAttachments;
       try {
         const res = await fetch("https://api.resend.com/emails", {
           method:  "POST",
@@ -933,7 +948,7 @@ Deno.serve(async (req: Request) => {
             html:    finalDoctorHtml,
             text:    stripHtml(finalDoctorHtml),
             headers: { "X-AA-Batch-Id": String(batch.id), "X-AA-Kind": "doctor_working_op" },
-            ...(builtDoctorAttachments.length ? { attachments: builtDoctorAttachments } : {}),
+            ...(docAtt.length ? { attachments: docAtt } : {}),
           }),
         });
         if (res.ok) doctorSent++; else doctorFailed++;
