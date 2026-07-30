@@ -2,7 +2,7 @@ import { useEffect, useRef, useState } from "react";
 import { supabase } from "@/lib/supabase";
 import { clearQueryCachePersist } from "@/lib/query-persist";
 import type { Session, User } from "@supabase/supabase-js";
-import { isHiTeamMember, findHiMemberByEmail } from "@/lib/hi-team";
+import { hasHiSectionAccess, findHiAccessByEmail } from "@/lib/hi-team";
 
 // Map short usernames → Supabase emails for convenient login
 export const USERNAME_MAP: Record<string, string> = {
@@ -96,9 +96,10 @@ export function useAuth() {
         applyProfile({ role: "worker", allowedPages: ["/worker"], fullName: name });
         return;
       }
-      // Hospital Introduction team — restricted to their workspace + the
-      // tabs they actually work in. Falls through to admin for anyone else.
-      const hi = findHiMemberByEmail(email);
+      // Hospital Introduction team (specialists + granted guests) — restricted
+      // to their workspace + the tabs they actually work in. Falls through to
+      // admin for anyone else.
+      const hi = findHiAccessByEmail(email);
       if (hi) {
         applyProfile({ role: "hi_member", allowedPages: HI_MEMBER_PAGES, fullName: hi.name });
         return;
@@ -181,7 +182,7 @@ export function useAuth() {
   const lowerEmail = (user?.email ?? "").toLowerCase();
   const emailBasedDefault = lowerEmail.endsWith("@sales.com")
     ? { role: "worker",    pages: ["/worker"] }
-    : isHiTeamMember(lowerEmail)
+    : hasHiSectionAccess(lowerEmail)
       ? { role: "hi_member", pages: HI_MEMBER_PAGES }
       : { role: "admin",     pages: ALL_PAGES };
   const role         = effectiveProfile?.role         ?? emailBasedDefault.role;
