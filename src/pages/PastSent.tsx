@@ -26,10 +26,19 @@ const PAGE_SIZE = 30;
 type SortKey = "sentAt" | "doctorName" | "specialty" | "sentKind" | "hospital";
 type DateRange = "all" | "7" | "30" | "90";
 
-export function PastSentPanel() {
+/**
+ * `query`/`onQueryChange` let a parent (the /sends shell) drive the free-text
+ * search from a shared bar above the tabs. When `query` is provided the panel is
+ * controlled and hides its own search box; left undefined it manages its own
+ * (standalone /past-sent route). Operators + chips + filters work either way.
+ */
+export function PastSentPanel({ query, onQueryChange }: { query?: string; onQueryChange?: (v: string) => void } = {}) {
   const { records } = useSentHistory();
   const navigate = useNavigate();
-  const [raw, setRaw]       = useState("");
+  const controlled = query !== undefined;
+  const [rawState, setRawState] = useState("");
+  const raw = controlled ? (query ?? "") : rawState;
+  const setRaw = controlled ? (onQueryChange ?? (() => {})) : setRawState;
   const [chip, setChip]     = useState<SentChip>("all");
   const [country, setCountry] = useState<string>("all");
   const [range, setRange]   = useState<DateRange>("all");
@@ -132,10 +141,12 @@ export function PastSentPanel() {
           </CardHeader>
           <CardContent className="space-y-3">
             <div className="flex items-center gap-2 flex-wrap">
-              <div className="relative flex-1 min-w-[240px]">
-                <Search className="absolute left-2.5 top-1/2 -translate-y-1/2 h-4 w-4 text-slate-400" />
-                <Input value={raw} onChange={e => setRaw(e.target.value)} placeholder="Search name, specialty, hospital, or use operators…" className="pl-9 h-9 text-[13px]" />
-              </div>
+              {!controlled && (
+                <div className="relative flex-1 min-w-[240px]">
+                  <Search className="absolute left-2.5 top-1/2 -translate-y-1/2 h-4 w-4 text-slate-400" />
+                  <Input value={raw} onChange={e => setRaw(e.target.value)} placeholder="Search name, specialty, hospital, or use operators…" className="pl-9 h-9 text-[13px]" />
+                </div>
+              )}
               <Select value={country} onValueChange={setCountry}>
                 <SelectTrigger className="h-9 w-[130px] text-[12px]"><SelectValue placeholder="Country" /></SelectTrigger>
                 <SelectContent>

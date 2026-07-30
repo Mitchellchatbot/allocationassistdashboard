@@ -49,7 +49,13 @@ function fromAddr(raw: string | null): string {
   return (m?.[1] ?? s).trim();
 }
 
-export function RepliesPanel() {
+/**
+ * `query` lets the /sends shell drive search from its shared bar above the tabs.
+ * When provided the panel is controlled and hides its own search box; left
+ * undefined it manages its own (standalone /replies route).
+ */
+export function RepliesPanel({ query }: { query?: string } = {}) {
+  const controlled = query !== undefined;
   const [page, setPage]         = useState(0);
   const [searchInput, setInput] = useState("");
   const [search, setSearch]     = useState("");
@@ -57,8 +63,10 @@ export function RepliesPanel() {
   const [selected, setSelected] = useState<HospitalReply | null>(null);
   const [compose, setCompose]   = useState<{ mode: "reply" | "forward"; reply: HospitalReply } | null>(null);
 
-  // Debounce the search box; reset to page 0 whenever the query/filter changes.
-  useEffect(() => { const t = setTimeout(() => setSearch(searchInput), 300); return () => clearTimeout(t); }, [searchInput]);
+  // Debounce whichever input is active (the shared bar when controlled, else the
+  // panel's own box); reset to page 0 whenever the query/filter changes.
+  const effectiveInput = controlled ? (query ?? "") : searchInput;
+  useEffect(() => { const t = setTimeout(() => setSearch(effectiveInput), 300); return () => clearTimeout(t); }, [effectiveInput]);
   useEffect(() => { setPage(0); }, [search, filter]);
 
   useRepliesRealtime();
@@ -105,10 +113,12 @@ export function RepliesPanel() {
               </p>
             </div>
           </div>
-          <div className="relative w-full sm:w-72">
-            <Search className="absolute left-2.5 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" />
-            <Input value={searchInput} onChange={e => setInput(e.target.value)} placeholder="Search replies…" className="pl-8 h-9 text-[13px]" />
-          </div>
+          {!controlled && (
+            <div className="relative w-full sm:w-72">
+              <Search className="absolute left-2.5 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" />
+              <Input value={searchInput} onChange={e => setInput(e.target.value)} placeholder="Search replies…" className="pl-8 h-9 text-[13px]" />
+            </div>
+          )}
         </div>
 
         {/* Filter tabs */}
