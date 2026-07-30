@@ -29,6 +29,7 @@ import { CollapsibleSection, ScopeChip } from "@/components/reports/CollapsibleS
 import { DataGate } from "@/components/reports/AwaitingData";
 import { PlacementBreakdowns } from "@/components/reports/PlacementBreakdowns";
 import { VacanciesSummary } from "@/components/reports/VacanciesSummary";
+import { DataQualityCard } from "@/components/reports/DataQualityCard";
 import { TopOfFunnelContent, useTopOfFunnelStats } from "@/components/reports/TopOfFunnelCard";
 import { OperationsContent, useOperationsSummary } from "@/components/reports/OperationsCard";
 
@@ -232,6 +233,10 @@ export default function Reports() {
             {/* Open vacancies — what the team is recruiting for (links to the
                 full /vacancies list). */}
             <VacanciesSummary />
+
+            {/* Data quality — surfaces unclassified hospital regions to fix
+                (only renders when there's something to clean up). */}
+            <DataQualityCard />
 
             {/* By team */}
             <CollapsibleSection
