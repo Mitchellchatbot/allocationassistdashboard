@@ -941,14 +941,21 @@ Deno.serve(async (req: Request) => {
   const parserReplyTo   = `reply-${run.id}@${MAIL_REPLY_DOMAIN}`;
   const replyToAddress  = personalRouting ? sender.replyHint : parserReplyTo;
 
-  // BCC list — an EXPLICIT override the team typed in the CcBccPicker wins,
-  // even under TEST_OVERRIDE, so they can BCC themselves/colleagues to verify a
-  // send while the main recipient is still redirected to the test inbox (Sean:
-  // "have it send to the people we CC and BCC even with the training wheels on").
-  // Only the DEFAULT auto-BCC (sender mailbox) is suppressed in test mode.
-  // Body wins over run metadata so the preview's CcBccPicker can add recipients
-  // at send time; falls back to whatever was stashed on the run.
-  const bccOverrideRaw = (body.bcc_override ?? md.bcc_override) as unknown;
+  // Drop the AUTO-STAMPED CC/BCC (metadata.cc_override / bcc_override — which can
+  // carry a hospital's own contacts, or a hospital address a dispatcher typed
+  // into the picker) on the DOCTOR's private email (any mode) and while test mode
+  // is on. A deliberate, per-send body.* the dispatcher typed in the LIVE
+  // CcBccPicker still rides in both cases (Sean: "send to the people we CC/BCC
+  // even with the training wheels on").
+  const isDoctorLeg = run.current_stage === "email_doctor";
+  const dropStamped = isDoctorLeg || !!TEST_OVERRIDE;
+
+  // BCC list — same rule as CC: the stamped BCC is dropped on the doctor leg and
+  // in test mode (so a hospital address typed into BCC can't ride the doctor's
+  // private email or reach a real inbox during a "test"); an explicit live
+  // body.bcc_override still rides. Otherwise the default auto-BCC is the sender's
+  // own mailbox (internal), suppressed in test mode.
+  const bccOverrideRaw = (dropStamped ? body.bcc_override : (body.bcc_override ?? md.bcc_override)) as unknown;
   const bccOverride: string[] | null = Array.isArray(bccOverrideRaw)
     ? (bccOverrideRaw as unknown[])
         .map(v => typeof v === "string" ? v.trim().toLowerCase() : "")
@@ -956,8 +963,8 @@ Deno.serve(async (req: Request) => {
     : null;
   let bccList: string[] | undefined;
   if (bccOverride !== null) {
-    // Explicit BCC — honoured always. Drop the To (test-redirect target or the
-    // real recipient) and Ammar so nobody's double-listed. Empty = 'BCC no-one'.
+    // Drop the To (test-redirect target or the real recipient) and Ammar so
+    // nobody's double-listed. Empty = 'BCC no-one'.
     const cleaned = bccOverride.filter(a => !toSet.has(a) && a !== "ammar@allocationassist.com");
     bccList = cleaned.length > 0 ? cleaned : undefined;
   } else if (TEST_OVERRIDE) {
@@ -991,10 +998,8 @@ Deno.serve(async (req: Request) => {
   //     cc_emails still receive the "test" email).
   // A deliberate, per-send body.cc_override the dispatcher typed in the live
   // CcBccPicker still rides in both cases (Sean: "send to the people we CC/BCC
-  // even with the training wheels on").
-  const isDoctorLeg  = run.current_stage === "email_doctor";
-  const dropStampedCc = isDoctorLeg || !!TEST_OVERRIDE;
-  const ccOverrideRaw = (dropStampedCc
+  // even with the training wheels on"). `dropStamped` is computed with BCC above.
+  const ccOverrideRaw = (dropStamped
     ? body.cc_override
     : (body.cc_override ?? md.cc_override)) as unknown;
   const ccOverride: string[] = Array.isArray(ccOverrideRaw)

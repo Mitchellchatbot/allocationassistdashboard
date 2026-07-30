@@ -149,12 +149,21 @@ async function runScheduledProfileSweep(supabase: DB, now: Date, g: GulfNow): Pr
 
       const ids = s.hospital_ids ?? [];
       const { data: hospitals } = await supabase
-        .from("hospitals").select("id, name, primary_recruiter_email").in("id", ids.length ? ids : ["__none__"]);
+        .from("hospitals").select("id, name, primary_recruiter_email, city, country, image_url, website").in("id", ids.length ? ids : ["__none__"]);
       const hmap = new Map((hospitals ?? []).map((h: { id: string }) => [h.id, h]));
       const batchId = crypto.randomUUID();
+      // Multi-hospital scheduled sends consolidate the doctor leg into ONE
+      // "working opportunity" email (like the immediate/Combined path) instead
+      // of one per hospital — send_doctor_email true on the first run only,
+      // batch_hospitals is the full list send-flow-email renders.
+      const consolidate = ids.length > 1;
+      const batchHospitalsMeta = ids
+        .map(hid => hmap.get(hid) as { name: string; city: string | null; country: string | null; image_url: string | null; website: string | null } | undefined)
+        .filter((h): h is NonNullable<typeof h> => !!h)
+        .map(h => ({ name: h.name, city: h.city ?? null, country: h.country ?? null, image_url: h.image_url ?? null, link: h.website ?? null }));
       let sent = 0, failed = 0, lastErr = "";
 
-      for (const hid of ids) {
+      for (const [hIndex, hid] of ids.entries()) {
         const h = hmap.get(hid) as { id: string; name: string; primary_recruiter_email: string | null } | undefined;
         if (!h) { failed++; lastErr = "hospital not found"; continue; }
         const { data: runRow, error: runErr } = await supabase.from("automation_flow_runs").insert({
@@ -172,6 +181,7 @@ async function runScheduledProfileSweep(supabase: DB, now: Date, g: GulfNow): Pr
             ...(s.template_overrides ? { template_overrides: s.template_overrides } : {}),
             ...(Array.isArray(s.attachments) && s.attachments.length ? { attachments: s.attachments } : {}),
             ...(Array.isArray(s.attachments_doctor) && s.attachments_doctor.length ? { attachments_doctor: s.attachments_doctor } : {}),
+            ...(consolidate ? { send_doctor_email: hIndex === 0, batch_hospitals: batchHospitalsMeta } : {}),
           },
         }).select("id").single();
         if (runErr || !runRow) { failed++; lastErr = runErr?.message ?? "run insert failed"; continue; }
