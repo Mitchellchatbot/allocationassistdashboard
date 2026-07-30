@@ -2,7 +2,6 @@ import { useMemo, useState } from "react";
 import { useNavigate } from "react-router-dom";
 import { DashboardLayout } from "@/components/layout/DashboardLayout";
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "@/components/ui/card";
-import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { Send, Users, UserSquare2, History, ExternalLink } from "lucide-react";
 import { SendProfileDialog } from "@/components/automations/SendProfileDialog";
@@ -35,35 +34,42 @@ export function SendProfilePanel({ query = "" }: { query?: string } = {}) {
   return (
     <>
       <div className="space-y-5">
-        <div className="flex flex-wrap items-start justify-between gap-3">
-          <div>
-            <h1 className="text-xl font-semibold flex items-center gap-2"><Send className="h-5 w-5 text-teal-600" /> Profile Sent</h1>
-            <p className="text-[13px] text-muted-foreground mt-0.5 max-w-[640px]">
-              Send doctor profiles to hospitals. Every send flows into Flow 2, Past Sent and the pipeline — this is just the launchpad.
-            </p>
-          </div>
-          <div className="flex items-center gap-2">
-            <Button variant="outline" onClick={() => navigate("/sends?tab=batch-sends&compose=oneoff")}>
-              <Users className="h-4 w-4 mr-1.5" /> Bulk send
-            </Button>
-            <Button onClick={() => setSendOpen(true)} className="bg-teal-600 hover:bg-teal-700 text-white">
-              <Send className="h-4 w-4 mr-1.5" /> Send a profile
-            </Button>
-          </div>
+        <div>
+          <h1 className="text-xl font-semibold flex items-center gap-2"><Send className="h-5 w-5 text-teal-600" /> Profile Sent</h1>
+          <p className="text-[13px] text-muted-foreground mt-0.5 max-w-[640px]">
+            Send doctor profiles to hospitals. Every send flows into Flow 2, Past Sent and the pipeline — this is just the launchpad.
+          </p>
         </div>
 
-        {/* Two ways to send */}
+        {/* Two ways to send — the primary CTAs now that the header buttons
+            are gone. Distinct accents (teal vs indigo) + a hover lift. */}
         <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
-          <Card className="hover:border-teal-300 transition-colors cursor-pointer" onClick={() => setSendOpen(true)}>
+          <Card
+            className="group cursor-pointer border-teal-200 bg-gradient-to-br from-teal-50 to-white transition-all hover:border-teal-400 hover:shadow-md hover:-translate-y-0.5"
+            onClick={() => setSendOpen(true)}
+          >
             <CardHeader className="pb-2">
-              <CardTitle className="text-[14px] flex items-center gap-2"><UserSquare2 className="h-4 w-4 text-teal-600" /> Personalized send</CardTitle>
-              <CardDescription className="text-[12px]">One or more doctors → one or more hospitals, each a personalized email. Full preview + editing, attachments, templates, schedule-for-later.</CardDescription>
+              <CardTitle className="text-[14px] flex items-center gap-2">
+                <span className="inline-flex h-8 w-8 items-center justify-center rounded-lg bg-teal-600 text-white shadow-sm transition-transform group-hover:scale-105">
+                  <UserSquare2 className="h-4 w-4" />
+                </span>
+                Personalized send
+              </CardTitle>
+              <CardDescription className="text-[12px] text-slate-600">One or more doctors → one or more hospitals, each a personalized email. Full preview + editing, attachments, templates, schedule-for-later.</CardDescription>
             </CardHeader>
           </Card>
-          <Card className="hover:border-teal-300 transition-colors cursor-pointer" onClick={() => navigate("/sends?tab=batch-sends&compose=oneoff")}>
+          <Card
+            className="group cursor-pointer border-indigo-200 bg-gradient-to-br from-indigo-50 to-white transition-all hover:border-indigo-400 hover:shadow-md hover:-translate-y-0.5"
+            onClick={() => navigate("/sends?tab=batch-sends&compose=oneoff")}
+          >
             <CardHeader className="pb-2">
-              <CardTitle className="text-[14px] flex items-center gap-2"><Users className="h-4 w-4 text-teal-600" /> Bulk send</CardTitle>
-              <CardDescription className="text-[12px]">Many doctors → one table per hospital, sent now — opens the batch composer (where you can also schedule recurring blasts).</CardDescription>
+              <CardTitle className="text-[14px] flex items-center gap-2">
+                <span className="inline-flex h-8 w-8 items-center justify-center rounded-lg bg-indigo-600 text-white shadow-sm transition-transform group-hover:scale-105">
+                  <Users className="h-4 w-4" />
+                </span>
+                Bulk send
+              </CardTitle>
+              <CardDescription className="text-[12px] text-slate-600">Many doctors → one table per hospital, sent now — opens the batch composer (where you can also schedule recurring blasts).</CardDescription>
             </CardHeader>
           </Card>
         </div>
