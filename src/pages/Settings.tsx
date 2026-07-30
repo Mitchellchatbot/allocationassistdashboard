@@ -29,7 +29,7 @@ const PAGE_LABELS: Record<string, string> = {
   "/my-workspace":   "My Workspace",
   "/doctors":        "Doctors (Progress + Profiles)",
   "/sends":          "Sends (Profile · Email Chain · Batch · Replies · Past)",
-  "/automations":    "Automations",
+  "/automations":    "Email Chain",
   "/vacancies":      "Vacancies",
   "/batches":        "Batch Sends",
   "/reports":        "Reports",
