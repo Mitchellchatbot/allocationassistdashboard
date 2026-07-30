@@ -32,7 +32,7 @@ import { MatchScoreChip, MatchReasons } from "@/components/DoctorVacancyMatches"
 import { EditableEmailPreview } from "@/components/EditableEmailPreview";
 import { EmailPreviewStudio } from "@/components/EmailPreviewStudio";
 import { ProfileSubTabs } from "@/components/ProfileSubTabs";
-import { CcBccPicker } from "@/components/automations/CcBccPicker";
+import { CcBccPicker, makeHospitalFlag } from "@/components/automations/CcBccPicker";
 import { AttachmentsPicker } from "@/components/automations/AttachmentsPicker";
 import { CvStudioControl } from "@/components/automations/ProfileCardControls";
 import { AA_SENDERS, findSenderByEmail } from "@/lib/hi-team";
@@ -2460,7 +2460,7 @@ function BatchDialog({ target, onTargetChange, batches, initialKind, suggestedSp
 
           <div className="rounded-lg border border-sidebar-border/40 bg-white/95 p-2 shadow-sm">
             <div className="mb-1 px-0.5 text-[10px] text-slate-500">Extra CC / BCC recipients (people, not hospitals):</div>
-            <CcBccPicker cc={batchCc} bcc={batchBcc} onCcChange={setBatchCc} onBccChange={setBatchBcc} disabled={sendNow.isPending} />
+            <CcBccPicker cc={batchCc} bcc={batchBcc} onCcChange={setBatchCc} onBccChange={setBatchBcc} flagHospital={makeHospitalFlag(previewHospitals)} disabled={sendNow.isPending} />
           </div>
 
           {/* Custom note — a short paragraph added to the hospital email after the

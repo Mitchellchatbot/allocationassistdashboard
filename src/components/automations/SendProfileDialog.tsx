@@ -36,7 +36,7 @@ import { AttachmentsPicker } from "@/components/automations/AttachmentsPicker";
 import { CardScreenshotControl, CvStudioControl } from "@/components/automations/ProfileCardControls";
 import { HospitalRecipientsPanel } from "@/components/automations/HospitalRecipientsPanel";
 import { TemplatePicker } from "@/components/automations/TemplatePicker";
-import { CcBccPicker, isEmail } from "@/components/automations/CcBccPicker";
+import { CcBccPicker, isEmail, makeHospitalFlag } from "@/components/automations/CcBccPicker";
 import { detectUnfilledVars, describeUnfilled } from "@/lib/email-validation";
 import { useScheduleProfileSend } from "@/hooks/use-scheduled-profile-sends";
 import { GulfClock, composeLocalDateTime, localToGulfParts, localDateInDays } from "@/components/GulfClock";
@@ -1572,6 +1572,7 @@ function PreviewConfirm({
             onBccChange={setBccList}
             bccRoster={AA_SENDERS.map(s => ({ name: s.name, email: s.email }))}
             ccRoster={[{ name: "Amir", email: CC_AMIR_EMAIL }]}
+            flagHospital={makeHospitalFlag(hospitals)}
           />
 
           {sender ? (
