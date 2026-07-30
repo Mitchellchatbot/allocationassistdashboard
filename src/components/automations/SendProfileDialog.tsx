@@ -1533,14 +1533,20 @@ function PreviewConfirm({
                 : <><strong>{doctors[0].name.replace(/^\s*Dr\.?\s+/i, "")}</strong> gets <strong>one doctor email per hospital</strong> ({hospitals.length} doctor emails) — the per-hospital template, not the consolidated list. Switch to <strong>Combined</strong> for one email listing all hospitals.</>)}
         </div>
       )}
+      <MailModeBanner liveCount={hospitals.length} liveWhat="hospital" />
       <div className="rounded-lg border border-sidebar-border/40 bg-white/95 p-3 text-[12px] space-y-1 shadow-sm text-slate-700">
         <div>
           <strong>{multiDoctor ? `${doctors.length} doctors` : doctors[0].name}</strong> → {hospitals.length === 1 ? hospitals[0].name : `${hospitals.length} hospitals (BCC)`}
         </div>
         <div className="text-[11px] text-muted-foreground">
-          {multiDoctor
-            ? `${doctors.length * hospitals.length} runs (one per doctor × hospital) will be created in Flow 2. Every hospital + doctor email fires automatically on confirm.`
-            : "One run per hospital will be created in Flow 2. Hospital + doctor emails fire automatically on confirm."}
+          {(() => {
+            const hosp = doctors.length * hospitals.length;
+            const consolidate = (combineDoctorEmails ?? true) && hospitals.length > 1;
+            const doc = consolidate ? doctors.length : doctors.length * hospitals.length;
+            return (
+              <>On confirm, fires <strong className="text-slate-700">{hosp} hospital email{hosp === 1 ? "" : "s"}</strong> + <strong className="text-slate-700">{doc} doctor email{doc === 1 ? "" : "s"}</strong> <span className="text-slate-400">({hosp + doc} total)</span> automatically.</>
+            );
+          })()}
         </div>
         <div className="text-[11px] text-muted-foreground pt-1 border-t border-slate-200/70 mt-1.5 space-y-1.5">
           {/* Sender picker — the From line the recipient sees. Defaults to the
