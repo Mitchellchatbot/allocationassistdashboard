@@ -23,7 +23,6 @@ import { useNavigate } from "react-router-dom";
 import type { FlowRun } from "@/hooks/use-automation-flows";
 import type { DoctorLifecycle } from "@/hooks/use-doctor-lifecycle";
 import { PlacementsCard } from "@/components/reports/PlacementsCard";
-import { PlacementAnalytics } from "@/components/reports/PlacementAnalytics";
 import { RecapCard } from "@/components/reports/RecapCard";
 import { DoctorTable } from "@/components/reports/DoctorTable";
 import { CollapsibleSection, ScopeChip } from "@/components/reports/CollapsibleSection";
@@ -105,12 +104,6 @@ export default function Reports() {
             two ideas (work-in-progress vs results) instead of one flat
             row. Always open. ─────────────────────────────────────────── */}
         <KpiStrip bundle={bundle} />
-
-        {/* ── Placement results — reads placement_attempts (the imported
-            monthly reports + live markings) directly, with its own period
-            selector, so the full history surfaces regardless of the 90-day
-            filter above. Always open. ─────────────────────────────────── */}
-        <PlacementAnalytics />
 
         {/* ── Top of funnel — what's arriving before the HI pipeline even
             starts (submissions + outreach coverage). Default-collapsed;
@@ -394,18 +387,24 @@ function KpiStrip({ bundle }: { bundle: ReturnType<typeof useReportingMetrics> }
         })()
       : null;
     const passesLifecycleFilters = (l: DoctorLifecycle) => !eligibleDoctorIds || eligibleDoctorIds.has(l.doctor_id);
-    const lifecyclesByMilestone = (key: "signed_at" | "joined_at" | "paid_at"): DoctorLifecycle[] =>
+    const lifecyclesByMilestone = (
+      key: "shortlisted_at" | "interviewed_at" | "offered_at" | "signed_at" | "joined_at" | "paid_at",
+    ): DoctorLifecycle[] =>
       rawLifecycles
         .filter(l => l[key] && inRange(l[key]) && passesLifecycleFilters(l))
         .sort((a, b) => new Date(b[key] as string).getTime() - new Date(a[key] as string).getTime());
+    // Relocated = explicit relocation marking, else the actual join.
+    const relocatedList = rawLifecycles
+      .filter(l => (l.relocated_at ?? l.joined_at) && inRange(l.relocated_at ?? l.joined_at) && passesLifecycleFilters(l))
+      .sort((a, b) => new Date((b.relocated_at ?? b.joined_at) as string).getTime() - new Date((a.relocated_at ?? a.joined_at) as string).getTime());
 
     return {
       profile_sent:     filteredRunsByKey("profile_sent"),
-      shortlist:        filteredRunsByKey("shortlist"),
-      interview:        filteredRunsByKey("interview"),
-      contract_signing: filteredRunsByKey("contract_signing"),
+      shortlisted:      lifecyclesByMilestone("shortlisted_at"),
+      interviewed:      lifecyclesByMilestone("interviewed_at"),
+      offered:          lifecyclesByMilestone("offered_at"),
       signed:           lifecyclesByMilestone("signed_at"),
-      joined:           lifecyclesByMilestone("joined_at"),
+      relocated:        relocatedList,
       paid:             lifecyclesByMilestone("paid_at"),
     };
   }, [rawRuns, rawLifecycles, filters]);
@@ -440,26 +439,26 @@ function KpiStrip({ bundle }: { bundle: ReturnType<typeof useReportingMetrics> }
     {
       label: "Shortlisted",     value: bundle.kpis.shortlisted, icon: UserCheck,
       color: "text-indigo-600", bg: "bg-card", group: "pipeline",
-      meaning: "Doctors a hospital marked shortlisted in the window.",
-      source: "automation_flow_runs · flow_key=shortlist",
-      onClickThrough: () => navigate("/automations?flow=shortlist"),
-      drilldown: <RunsList rows={drilldowns.shortlist} kind="hospital" emptyCta="shortlist" onJump={() => navigate(`/automations?flow=shortlist`)} />,
+      meaning: "Doctors shortlisted in the window (from the marking system + imported reports).",
+      source: "doctor_lifecycle.shortlisted_at",
+      onClickThrough: () => navigate("/doctors?tab=profiles"),
+      drilldown: <LifecycleList rows={drilldowns.shortlisted} milestone="shortlisted_at" onJump={(id) => navigate(`/doctors?tab=profiles&id=${encodeURIComponent(id)}`)} />,
     },
     {
       label: "Interviews",      value: bundle.kpis.interviews, icon: CalendarCheck,
       color: "text-sky-600",    bg: "bg-card", group: "pipeline",
-      meaning: "Interviews scheduled in the window (interview flow triggered).",
-      source: "automation_flow_runs · flow_key=interview",
-      onClickThrough: () => navigate("/automations?flow=interview"),
-      drilldown: <RunsList rows={drilldowns.interview} kind="hospital" emptyCta="interview" onJump={() => navigate(`/automations?flow=interview`)} />,
+      meaning: "Doctors interviewed in the window (from the marking system + imported reports).",
+      source: "doctor_lifecycle.interviewed_at",
+      onClickThrough: () => navigate("/doctors?tab=profiles"),
+      drilldown: <LifecycleList rows={drilldowns.interviewed} milestone="interviewed_at" onJump={(id) => navigate(`/doctors?tab=profiles&id=${encodeURIComponent(id)}`)} />,
     },
     {
       label: "Offered",         value: bundle.kpis.offered, icon: FileSignature,
       color: "text-amber-600",  bg: "bg-card", group: "pipeline",
-      meaning: "Contracts sent for signature in the window (contract_signing flow started).",
-      source: "automation_flow_runs · flow_key=contract_signing",
-      onClickThrough: () => navigate("/automations?flow=contract_signing"),
-      drilldown: <RunsList rows={drilldowns.contract_signing} kind="hospital" emptyCta="contract" onJump={() => navigate(`/automations?flow=contract_signing`)} />,
+      meaning: "Doctors offered in the window (from the marking system + imported reports).",
+      source: "doctor_lifecycle.offered_at",
+      onClickThrough: () => navigate("/doctors?tab=profiles"),
+      drilldown: <LifecycleList rows={drilldowns.offered} milestone="offered_at" onJump={(id) => navigate(`/doctors?tab=profiles&id=${encodeURIComponent(id)}`)} />,
     },
     // Won column — all share the emerald family so the eye reads them as
     // related milestones rather than three different states.
@@ -472,12 +471,12 @@ function KpiStrip({ bundle }: { bundle: ReturnType<typeof useReportingMetrics> }
       drilldown: <LifecycleList rows={drilldowns.signed} milestone="signed_at" onJump={(id) => navigate(`/doctors?tab=profiles&id=${encodeURIComponent(id)}`)} />,
     },
     {
-      label: "Joined",          value: bundle.kpis.joined, icon: MapPin,
+      label: "Relocated",       value: bundle.kpis.joined, icon: MapPin,
       color: "text-emerald-700", bg: "bg-card", group: "outcomes",
-      meaning: "Doctors whose hospital-confirmed joining date fell in the window.",
-      source: "doctor_lifecycle.joined_at",
+      meaning: "Doctors who relocated / started at the hospital in the window (explicit relocation marking, else the confirmed joining date).",
+      source: "doctor_lifecycle.relocated_at ?? joined_at",
       onClickThrough: () => navigate("/doctors?tab=profiles"),
-      drilldown: <LifecycleList rows={drilldowns.joined} milestone="joined_at" onJump={(id) => navigate(`/doctors?tab=profiles&id=${encodeURIComponent(id)}`)} />,
+      drilldown: <LifecycleList rows={drilldowns.relocated} milestone="joined_at" onJump={(id) => navigate(`/doctors?tab=profiles&id=${encodeURIComponent(id)}`)} />,
     },
     {
       label: "Paid",            value: bundle.kpis.paid, icon: CreditCard,
@@ -587,7 +586,7 @@ const RunsList = memo(function RunsList({ rows, kind, emptyCta, onJump }: {
 
 const LifecycleList = memo(function LifecycleList({ rows, milestone, onJump }: {
   rows: DoctorLifecycle[];
-  milestone: "signed_at" | "joined_at" | "paid_at";
+  milestone: "shortlisted_at" | "interviewed_at" | "offered_at" | "signed_at" | "joined_at" | "paid_at";
   onJump: (doctorId: string) => void;
 }) {
   if (rows.length === 0) {

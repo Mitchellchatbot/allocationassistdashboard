@@ -123,33 +123,38 @@ export function computeKpis(
   const lifecycleByDoctor = new Map<string, DoctorLifecycle>();
   for (const l of lifecycles) lifecycleByDoctor.set(l.doctor_id, l);
 
+  // Profile sends stay a flow-run count — it's a send activity, not a placement
+  // milestone.
   for (const r of runs) {
     if (!passesFilters(r, filters)) continue;
-    // Use started_at for "this run happened in the range" — captures shortlist
-    // marks, interview triggers, etc. We don't need stage timestamps for v1.
     if (!inRange(r.started_at, filters.range)) continue;
-    if (isShortlistRun(r))    totals.shortlisted++;
-    if (isInterviewRun(r))    totals.interviews++;
-    if (isOfferRun(r))        totals.offered++;
     if (isProfileSendRun(r))  totals.profilesSent++;
   }
 
-  // Signed / joined / paid come from the lifecycle table where the team
-  // explicitly recorded each milestone. Apply doctor + team-member filters
-  // by joining via the runs that involve this doctor.
+  // ALL placement outcomes read the milestone DATES on doctor_lifecycle (synced
+  // from placement_attempts — the marking system AND the imported reports). This
+  // is what makes the imported history count; the old shortlist/interview/offer
+  // flow-run counts missed every sheet-imported placement (which has no run).
+  // Apply doctor/hospital/team/specialty filters by joining via the runs that
+  // involve this doctor (imported csv: doctors have no runs, so they only count
+  // on the unfiltered view — which is the leadership default).
   const eligibleDoctorIds = new Set<string>();
-  if (filters.doctorId || filters.hospital || filters.teamMember || filters.specialty) {
+  const filterByDoctor = !!(filters.doctorId || filters.hospital || filters.teamMember || filters.specialty);
+  if (filterByDoctor) {
     for (const r of runs) {
       if (passesFilters(r, filters) && r.doctor_id) eligibleDoctorIds.add(r.doctor_id);
     }
   }
-  const filterByDoctor = filters.doctorId || filters.hospital || filters.teamMember || filters.specialty;
 
   for (const l of lifecycles) {
     if (filterByDoctor && !eligibleDoctorIds.has(l.doctor_id)) continue;
-    if (inRange(l.signed_at,  filters.range)) totals.signed++;
-    if (inRange(l.joined_at,  filters.range)) totals.joined++;
-    if (inRange(l.paid_at,    filters.range)) totals.paid++;
+    if (inRange(l.shortlisted_at, filters.range)) totals.shortlisted++;
+    if (inRange(l.interviewed_at, filters.range)) totals.interviews++;
+    if (inRange(l.offered_at,     filters.range)) totals.offered++;
+    if (inRange(l.signed_at,      filters.range)) totals.signed++;
+    // "Relocated" = the explicit relocation marking, else the actual join.
+    if (inRange(l.relocated_at ?? l.joined_at, filters.range)) totals.joined++;
+    if (inRange(l.paid_at,        filters.range)) totals.paid++;
   }
 
   return totals;
@@ -352,13 +357,6 @@ export function computeTrendBuckets(
     return map.get(key) ?? null;
   };
 
-  for (const r of runs) {
-    if (!passesFilters(r, filters)) continue;
-    const b = bucket(r.started_at);
-    if (!b) continue;
-    if (isShortlistRun(r)) b.shortlisted++;
-    if (isInterviewRun(r)) b.interviews++;
-  }
   const eligible = new Set<string>();
   if (filters.doctorId || filters.hospital || filters.teamMember || filters.specialty) {
     for (const r of runs) {
@@ -366,10 +364,13 @@ export function computeTrendBuckets(
     }
   }
   const filterByDoctor = filters.doctorId || filters.hospital || filters.teamMember || filters.specialty;
+  // All three series read the milestone DATES on doctor_lifecycle so the trend
+  // reflects the imported backlog + the marking system, not just flow-runs.
   for (const l of lifecycles) {
     if (filterByDoctor && !eligible.has(l.doctor_id)) continue;
-    const b = bucket(l.signed_at);
-    if (b) b.signed++;
+    const sb = bucket(l.shortlisted_at); if (sb) sb.shortlisted++;
+    const ib = bucket(l.interviewed_at); if (ib) ib.interviews++;
+    const gb = bucket(l.signed_at);      if (gb) gb.signed++;
   }
 
   return [...map.values()].sort((a, b) => a.weekStart.localeCompare(b.weekStart));

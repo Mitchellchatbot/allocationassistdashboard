@@ -30,6 +30,7 @@ export interface DoctorLifecycle {
   signed_at:                 string | null;
   start_date:                string | null;
   joined_at:                 string | null;
+  relocated_at:              string | null;
   approved_at:               string | null;
   paid_at:                   string | null;
   placement_hospital_id:     string | null;
