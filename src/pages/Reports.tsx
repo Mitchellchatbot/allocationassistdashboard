@@ -129,14 +129,14 @@ export default function Reports() {
           <CardHeader className="pb-2">
             <CardTitle className="text-base flex items-center gap-2">
               <Activity className="h-4 w-4 text-teal-600" />
-              Weekly trend
+              Trend
             </CardTitle>
             <CardDescription className="text-[11px]">
-              Shortlists, interviews, and signs per week. Helps catch dropoffs early.
+              Shortlists, interviews, and signs over time — switch between by week and by month. Helps catch dropoffs early.
             </CardDescription>
           </CardHeader>
           <CardContent>
-            <Suspense fallback={<div className="h-[260px] w-full" />}>
+            <Suspense fallback={<div className="h-[296px] w-full" />}>
               <ReportsTrendChart trend={bundle.trend} />
             </Suspense>
           </CardContent>
