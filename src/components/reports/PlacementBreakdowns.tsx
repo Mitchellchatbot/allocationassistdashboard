@@ -9,7 +9,7 @@
  */
 import { useMemo } from "react";
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "@/components/ui/card";
-import { MapPin, Stethoscope, Clock } from "lucide-react";
+import { MapPin, Stethoscope, Clock, Building2 } from "lucide-react";
 import { usePlacementAttempts, type PlacementAttempt } from "@/hooks/use-placement-attempts";
 import { resolveHospitalRegion } from "@/lib/hospital-region";
 import { groupSpecialty } from "@/lib/specialty-groups";
@@ -41,6 +41,7 @@ export function PlacementBreakdowns({ range, hospital, specialty }: Props) {
 
     const byCountry = new Map<string, number>();
     const byCity = new Map<string, number>();
+    const byHospital = new Map<string, { placements: number; signed: number }>();
     const bySpecialty = new Map<string, number>();
     let s2sDays = 0, s2sN = 0, s2rDays = 0, s2rN = 0;
 
@@ -51,6 +52,9 @@ export function PlacementBreakdowns({ range, hospital, specialty }: Props) {
         const reg = resolveHospitalRegion(p.hospital_name);
         byCountry.set(reg.country ?? "Unknown", (byCountry.get(reg.country ?? "Unknown") ?? 0) + 1);
         if (reg.city) byCity.set(reg.city, (byCity.get(reg.city) ?? 0) + 1);
+        const h = byHospital.get(reg.hospital) ?? { placements: 0, signed: 0 };
+        h.placements++; if (inR(p.signed_at)) h.signed++;
+        byHospital.set(reg.hospital, h);
       }
       if ((inR(p.signed_at) || inR(reloc)) && p.doctor_specialty) {
         const g = groupSpecialty(p.doctor_specialty) || p.doctor_specialty;
@@ -64,6 +68,7 @@ export function PlacementBreakdowns({ range, hospital, specialty }: Props) {
     return {
       countries: [...byCountry].sort((a, b) => b[1] - a[1]),
       cities:    [...byCity].sort((a, b) => b[1] - a[1]).slice(0, 12),
+      hospitals: [...byHospital].sort((a, b) => b[1].placements - a[1].placements).slice(0, 12),
       specialties: [...bySpecialty].sort((a, b) => b[1] - a[1]).slice(0, 12),
       avgS2S: s2sN ? Math.round(s2sDays / s2sN) : null,
       avgS2R: s2rN ? Math.round(s2rDays / s2rN) : null,
@@ -72,6 +77,7 @@ export function PlacementBreakdowns({ range, hospital, specialty }: Props) {
 
   const maxCountry = Math.max(1, ...m.countries.map(c => c[1]));
   const maxSpec = Math.max(1, ...m.specialties.map(s => s[1]));
+  const maxHosp = Math.max(1, ...m.hospitals.map(h => h[1].placements));
 
   return (
     <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
@@ -114,6 +120,21 @@ export function PlacementBreakdowns({ range, hospital, specialty }: Props) {
         </CardContent>
       </Card>
 
+      {/* Which hospitals */}
+      <Card className="lg:col-span-2">
+        <CardHeader className="pb-2">
+          <CardTitle className="text-base flex items-center gap-2"><Building2 className="h-4 w-4 text-teal-600" /> Which hospitals</CardTitle>
+          <CardDescription className="text-[11px]">Placements active in the window, by hospital (clean names — includes the imported reports).</CardDescription>
+        </CardHeader>
+        <CardContent>
+          {isLoading ? <Loading /> : m.hospitals.length === 0 ? <Empty /> : (
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-x-6 gap-y-1.5">
+              {m.hospitals.map(([h, v]) => <Bar key={h} label={h} value={v.placements} max={maxHosp} sub={v.signed ? `${v.signed} signed` : undefined} />)}
+            </div>
+          )}
+        </CardContent>
+      </Card>
+
       {/* Lifecycle */}
       <Card className="lg:col-span-2">
         <CardHeader className="pb-2">
@@ -132,7 +153,7 @@ export function PlacementBreakdowns({ range, hospital, specialty }: Props) {
   );
 }
 
-function Bar({ label, value, max, tone = "teal" }: { label: string; value: number; max: number; tone?: string }) {
+function Bar({ label, value, max, tone = "teal", sub }: { label: string; value: number; max: number; tone?: string; sub?: string }) {
   const color = tone === "emerald" ? "bg-emerald-500" : "bg-teal-500";
   return (
     <div className="flex items-center gap-2">
@@ -141,6 +162,7 @@ function Bar({ label, value, max, tone = "teal" }: { label: string; value: numbe
         <div className={`h-full ${color} rounded`} style={{ width: `${Math.max(4, (value / max) * 100)}%` }} />
       </div>
       <span className="text-[11px] font-medium text-slate-700 w-8 text-right tabular-nums">{value}</span>
+      {sub && <span className="text-[9px] text-emerald-600 w-14 text-right shrink-0">{sub}</span>}
     </div>
   );
 }
