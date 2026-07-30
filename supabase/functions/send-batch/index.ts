@@ -228,7 +228,7 @@ Deno.serve(async (req: Request) => {
   // send. Normalising both sides makes label drift harmless.
   const { data: hospitals, error: hospErr } = await supabase
     .from("hospitals")
-    .select("id, name, primary_contact_name, primary_recruiter_email, greet_with_contact_name, country, city, image_url, website, contact_mode, excluded_contact_emails, active")
+    .select("id, name, primary_contact_name, primary_recruiter_email, greet_with_contact_name, country, city, image_url, website, contact_mode, excluded_contact_emails, cc_emails, active")
     .not("primary_recruiter_email", "is", null);
   if (hospErr) return json({ ok: false, error: "Hospital fetch failed", detail: hospErr.message }, 500);
   const wantCountry = batchCountry ? normCountry(batchCountry) : null;
@@ -332,6 +332,11 @@ Deno.serve(async (req: Request) => {
         image_url:    String(h.image_url ?? "").trim(),
         link:         String(h.website ?? "").trim() || null,   // hospital website → link in the doctor email
         toEmails,
+        // This hospital's OWN configured extra CC recipients (hospitals.cc_emails).
+        // Ride only this hospital's own email, and only in production (see below).
+        ccEmails:     Array.isArray(h.cc_emails)
+          ? (h.cc_emails as unknown[]).map(e => String(e).trim()).filter(e => e.includes("@"))
+          : [],
       };
     })
     .filter(h => h.email);
@@ -803,6 +808,18 @@ Deno.serve(async (req: Request) => {
       // eligible contact for an 'all'-mode hospital), minus any batch-excluded /
       // Ammar addresses. Test mode still funnels every copy to the test inbox.
       const liveTo = h.toEmails.filter(e => !excludeSet.has(e.toLowerCase()) && e.toLowerCase() !== EXCLUDED_RECIPIENT);
+      // This hospital's OWN cc_emails ride its OWN email — but NEVER in test mode.
+      // Training wheels: the To is redirected to the test inbox, so the real CC
+      // contacts MUST be dropped too, or they'd receive the "test" send. (A
+      // dispatcher-typed extraCc is a deliberate team copy and still rides — it's
+      // merged below.) Exclude the To, Ammar, and any batch-excluded address.
+      const toLc = new Set((TEST_OVERRIDE_LIST.length ? [] : (liveTo.length ? liveTo : [h.email])).map(x => x.toLowerCase()));
+      const hospCc = TEST_OVERRIDE_LIST.length
+        ? []
+        : h.ccEmails.filter(e => {
+            const lc = e.toLowerCase();
+            return lc !== EXCLUDED_RECIPIENT && !excludeSet.has(lc) && !toLc.has(lc);
+          });
       return {
         from: hospitalFrom,
         to:   TEST_OVERRIDE_LIST.length ? [TEST_OVERRIDE_LIST[0]] : (liveTo.length ? liveTo : [h.email]),
@@ -810,15 +827,23 @@ Deno.serve(async (req: Request) => {
         html:    rendered.html,
         text:    rendered.text,
         headers: { "X-AA-Batch-Id": String(batch.id), "X-AA-Batch-Kind": String(batch.kind) },
+        ...(hospCc.length ? { cc: hospCc } : {}),
         ...(builtAttachments.length ? { attachments: builtAttachments } : {}),
       };
     })
-  // CC/BCC ride the very FIRST email only, so the team gets one copy of the run.
-  ).map((e, i) => ({
-    ...e,
-    ...(i === 0 && extraCc.length  ? { cc:  extraCc }  : {}),
-    ...(i === 0 && extraBcc.length ? { bcc: extraBcc } : {}),
-  }));
+  // Each hospital's own cc_emails already ride its own email (prod only, above).
+  // The dispatcher-typed extraCc/extraBcc are ONE team copy on the FIRST email.
+  ).map((e, i) => {
+    const ccMerged = [...new Set([
+      ...(((e as { cc?: string[] }).cc) ?? []),
+      ...(i === 0 ? extraCc : []),
+    ])];
+    return {
+      ...e,
+      ...(ccMerged.length ? { cc: ccMerged } : {}),
+      ...(i === 0 && extraBcc.length ? { bcc: extraBcc } : {}),
+    };
+  });
 
   // ── Send — one email per hospital ─────────────────────────────────────
   // Resend's /emails/batch sends up to 100 in one call (no per-request rate
@@ -826,7 +851,11 @@ Deno.serve(async (req: Request) => {
   // back to individual /emails sends when the batch carries a CV/logbook OR any
   // extra CC/BCC — putting cc/bcc on a /emails/batch payload returns a non-2xx
   // and failed the whole send (the Top-15-with-CC bug).
-  const usePerEmail = builtAttachments.length > 0 || extraCc.length > 0 || extraBcc.length > 0;
+  // Resend's /emails/batch supports neither attachments nor per-message cc/bcc,
+  // so drop to individual /emails sends whenever ANY email carries a cc (a
+  // hospital's own cc_emails or the dispatcher's extraCc) or a bcc.
+  const anyCc = emails.some(e => Array.isArray((e as { cc?: string[] }).cc) && (e as { cc?: string[] }).cc!.length > 0);
+  const usePerEmail = builtAttachments.length > 0 || anyCc || extraBcc.length > 0;
   let sentCount = 0, failedCount = 0, messageId = "", lastError = "";
   // Retry a transient failure (429 rate-limit / 5xx) with backoff before giving
   // up — a single blip used to silently drop up to 100 hospitals.
