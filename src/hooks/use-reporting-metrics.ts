@@ -10,13 +10,15 @@ import type { FlowRun } from "@/hooks/use-automation-flows";
 import type { DoctorLifecycle } from "@/hooks/use-doctor-lifecycle";
 import type { Vacancy } from "@/hooks/use-vacancies";
 import {
-  computeKpis, computeTeamRows, computeHospitalRows, computeTrendBuckets, computeDoctorsOnTheWay,
+  computeKpis, computeTeamRows, computeHospitalRows, computeTrendBuckets, computeDoctorsOnTheWay, priorRangeOf,
   type ReportingFilters, type KpiTotals, type TeamMemberRow, type HospitalRow, type TrendBucket, type DoctorOnTheWay,
 } from "@/lib/hospital-reporting";
 
 export interface ReportingBundle {
   isLoading:        boolean;
   kpis:             KpiTotals;
+  /** Same KPIs over the immediately-preceding equal window, for the ▲▼ deltas. */
+  kpisPrior:        KpiTotals;
   team:             TeamMemberRow[];
   hospitals:        HospitalRow[];
   trend:            TrendBucket[];
@@ -108,6 +110,7 @@ export function useReportingMetrics(filters: ReportingFilters): ReportingBundle 
     return {
       isLoading: runsLoading || lifeLoading || vacLoading,
       kpis:      computeKpis(runs, lifecycles, filters),
+      kpisPrior: computeKpis(runs, lifecycles, { ...filters, range: priorRangeOf(filters.range) }),
       team:      computeTeamRows(runs, lifecycles, filters),
       hospitals: computeHospitalRows(runs, lifecycles, vacancies, filters),
       trend:     computeTrendBuckets(runs, lifecycles, filters),

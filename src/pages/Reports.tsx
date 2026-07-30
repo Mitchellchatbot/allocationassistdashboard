@@ -16,7 +16,7 @@ import {
   Inbox, CalendarRange, ServerCog,
 } from "lucide-react";
 import { useReportingMetrics } from "@/hooks/use-reporting-metrics";
-import { defaultRange, type ReportingFilters } from "@/lib/hospital-reporting";
+import { defaultRange, pctChange, type ReportingFilters, type KpiTotals } from "@/lib/hospital-reporting";
 import { ExpandableKPICard } from "@/components/ExpandableKPICard";
 import { Skeleton } from "@/components/ui/skeleton";
 import { useNavigate } from "react-router-dom";
@@ -488,8 +488,18 @@ function KpiStrip({ bundle }: { bundle: ReturnType<typeof useReportingMetrics> }
     },
   ], [drilldowns, bundle.kpis, navigate]);
 
-  const pipeline = tiles.filter(t => t.group === "pipeline");
-  const outcomes = tiles.filter(t => t.group === "outcomes");
+  // Attach a period-over-period delta to each tile (▲/▼ vs the prior equal
+  // window). Keyed by the tile label so the value + delta stay in lockstep.
+  const KEY_BY_LABEL: Record<string, keyof KpiTotals> = {
+    "Profile sends": "profilesSent", "Shortlisted": "shortlisted", "Interviews": "interviews",
+    "Offered": "offered", "Signed": "signed", "Relocated": "joined", "Paid": "paid",
+  };
+  const tilesD = tiles.map(t => {
+    const k = KEY_BY_LABEL[t.label];
+    return { ...t, delta: k ? pctChange(bundle.kpis[k], bundle.kpisPrior[k]) : undefined };
+  });
+  const pipeline = tilesD.filter(t => t.group === "pipeline");
+  const outcomes = tilesD.filter(t => t.group === "outcomes");
 
   // Two labeled clusters: "Pipeline" (work in progress) + "Outcomes"
   // (results). Realises the grouping the old single grid-cols-7 only
@@ -507,6 +517,7 @@ function KpiCluster({ label, tiles, className, innerCols, baseDelay = 0 }: {
   tiles: Array<{
     label: string; value: number; icon: typeof Send; color: string; bg: string;
     drilldown: React.ReactNode; onClickThrough: () => void; meaning: string; source: string;
+    delta?: number | null;
   }>;
   className?: string;
   innerCols: string;
@@ -524,6 +535,7 @@ function KpiCluster({ label, tiles, className, innerCols, baseDelay = 0 }: {
               icon={t.icon}
               color={t.color}
               bg={t.bg}
+              delta={t.delta}
               hintMeaning={t.meaning}
               hintSource={t.source}
               expandedHeight={260}

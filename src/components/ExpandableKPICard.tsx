@@ -11,8 +11,24 @@ interface ExpandableKPICardProps {
   hint?: string;           // (kept for backward compat; merged into hintMeaning if hintSource not given)
   hintMeaning?: string;    // what the metric means (1 short sentence)
   hintSource?: string;     // where the data is pulled from
+  /** % change vs the prior equal-length period. null = "new" (no prior
+   *  baseline); undefined = don't show a delta at all. */
+  delta?: number | null;
   expandedContent: React.ReactNode;
   expandedHeight?: number; // px, default 220
+}
+
+/** ▲/▼ percent-change chip vs the prior period. Up is good (green). */
+function DeltaBadge({ pct }: { pct: number | null }) {
+  if (pct === null) return <span className="text-[10px] font-semibold text-teal-600">new</span>;
+  const r = Math.round(pct);
+  if (r === 0) return <span className="text-[10px] font-semibold text-slate-400">0%</span>;
+  const up = r > 0;
+  return (
+    <span className={`inline-flex items-center gap-0.5 text-[10px] font-semibold ${up ? "text-emerald-600" : "text-rose-600"}`}>
+      {up ? "▲" : "▼"}{Math.abs(r)}%
+    </span>
+  );
 }
 
 export function ExpandableKPICard({
@@ -25,6 +41,7 @@ export function ExpandableKPICard({
   hint,
   hintMeaning,
   hintSource,
+  delta,
   expandedContent,
   expandedHeight = 220,
 }: ExpandableKPICardProps) {
@@ -67,9 +84,12 @@ export function ExpandableKPICard({
                 <p className="text-[11px] font-medium text-muted-foreground truncate">{title}</p>
                 {meaning && <InfoIcon meaning={meaning} source={hintSource} side="bottom" />}
               </div>
-              <p className={`text-[24px] font-bold tabular-nums leading-none ${color}`}>{value}</p>
-              {frontExtra && (
-                <p className="text-[10px] text-muted-foreground mt-1 truncate">{frontExtra}</p>
+              <div className="flex items-baseline gap-1.5">
+                <p className={`text-[24px] font-bold tabular-nums leading-none ${color}`}>{value}</p>
+                {delta !== undefined && <DeltaBadge pct={delta} />}
+              </div>
+              {(frontExtra || delta !== undefined) && (
+                <p className="text-[10px] text-muted-foreground mt-1 truncate">{frontExtra ?? "vs prior period"}</p>
               )}
             </div>
             <div className={`h-7 w-7 rounded-lg bg-card/70 flex items-center justify-center shrink-0 ml-2`}>

@@ -416,3 +416,20 @@ export function defaultRange(days = 30): DateRange {
   const from = new Date(to); from.setDate(from.getDate() - (days - 1)); from.setHours(0, 0, 0, 0);
   return { from, to };
 }
+
+/** The equal-length window immediately BEFORE `range`, for period-over-period
+ *  deltas. Ends the day before the range starts (matches the inclusive
+ *  end-of-day convention used across the reporting math). */
+export function priorRangeOf(range: DateRange): DateRange {
+  const span = range.to.getTime() - range.from.getTime();
+  return {
+    from: new Date(range.from.getTime() - span - 86_400_000),
+    to:   new Date(range.from.getTime() - 86_400_000),
+  };
+}
+
+/** Percent change cur vs prior. `null` = "new" (no prior baseline to compare). */
+export function pctChange(cur: number, prior: number): number | null {
+  if (prior === 0) return cur > 0 ? null : 0;
+  return ((cur - prior) / prior) * 100;
+}
