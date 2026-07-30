@@ -17,12 +17,20 @@ import { GulfClock } from "@/components/GulfClock";
  * in Automations, Past Sent and the pipeline counts exactly as before — this
  * page is just the launchpad + at-a-glance queue/history.
  */
-export function SendProfilePanel() {
+/** `query` is the shared /sends search bar — filters the recent-sends list. */
+export function SendProfilePanel({ query = "" }: { query?: string } = {}) {
   const navigate = useNavigate();
   const [sendOpen, setSendOpen] = useState(false);
   const { records } = useSentHistory();
 
-  const recent = useMemo(() => records.filter(r => r.sentKind === "individual").slice(0, 25), [records]);
+  const recent = useMemo(() => {
+    const q = query.trim().toLowerCase();
+    const individual = records.filter(r => r.sentKind === "individual");
+    const matched = q
+      ? individual.filter(r => `${r.doctorName} ${r.hospital ?? ""} ${r.specialty ?? ""}`.toLowerCase().includes(q))
+      : individual;
+    return matched.slice(0, 25);
+  }, [records, query]);
 
   return (
     <>

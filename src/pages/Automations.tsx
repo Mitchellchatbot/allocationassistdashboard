@@ -79,7 +79,10 @@ const ADMIN_TAB_ITEMS: AnimatedTabItem[] = [
   { value: "settings",  label: <><Settings className="h-3.5 w-3.5" /> Default Flow Editor</> },
 ];
 
-export function EmailChainPanel() {
+/** `query` is the shared /sends search bar — filters the per-flow run lists
+ *  (and their tab counts) by doctor, hospital, status and flow. The global KPI
+ *  pills and the open run detail stay bound to the full run set. */
+export function EmailChainPanel({ query = "" }: { query?: string } = {}) {
   const [searchParams, setSearchParams] = useSearchParams();
   // Default tab is profile_sent now that Onboarding is hidden (Ammar
   // 2026-06-03: Sales already sends the intake form from Zoho when a
@@ -120,13 +123,21 @@ export function EmailChainPanel() {
   const configsQ = useFlowConfigs();
 
   const runs = runsQ.data ?? [];
+  const q = query.trim().toLowerCase();
+  // Search narrows the per-flow run LISTS (and their tab counts); the global
+  // KPI pills + the open run detail below still read the full `runs` set.
+  const visibleRuns = useMemo(
+    () => !q ? runs : runs.filter(r =>
+      `${r.doctor_name ?? ""} ${r.hospital ?? ""} ${r.status ?? ""} ${r.flow_key ?? ""}`.toLowerCase().includes(q)),
+    [runs, q],
+  );
   const runsByFlow = useMemo(() => {
     const m: Record<string, FlowRun[]> = {};
-    for (const r of runs) {
+    for (const r of visibleRuns) {
       (m[r.flow_key] ??= []).push(r);
     }
     return m;
-  }, [runs]);
+  }, [visibleRuns]);
 
   const selectedRun = useMemo(
     () => runs.find(r => r.id === selectedRunId) ?? null,

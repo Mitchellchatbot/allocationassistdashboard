@@ -61,7 +61,9 @@ import { UserSquare2 } from "lucide-react";
 // person in the preview swaps the hospital From to their mailbox instead.
 const AA_TEAM_EMAIL = "hello@allocationassist.com";
 
-export function BatchesPanel() {
+/** `query` is the shared /sends search bar — filters the batch lists by type
+ *  (kind), specialty and country. */
+export function BatchesPanel({ query = "" }: { query?: string } = {}) {
   const { data: batches = [], isLoading } = useScheduledBatches();
   const { data: rotation } = useSpecialtyRotation();
   const { data: hospitals = [] } = useHospitals();
@@ -95,13 +97,16 @@ export function BatchesPanel() {
   const handleEditRow = useCallback((id: string) => setDialogTarget(id), []);
 
   const today = todayISO();
+  const q = query.trim().toLowerCase();
+  const matchesQuery = (b: (typeof batches)[number]) =>
+    !q || `${b.kind.replace(/_/g, " ")} ${b.specialty ?? ""} ${b.country ?? ""}`.toLowerCase().includes(q);
   const upcoming = useMemo(
-    () => batches.filter(b => b.scheduled_for >= today && b.status !== "cancelled"),
-    [batches, today],
+    () => batches.filter(b => b.scheduled_for >= today && b.status !== "cancelled" && matchesQuery(b)),
+    [batches, today, q],
   );
   const past = useMemo(
-    () => batches.filter(b => b.scheduled_for <  today || b.status === "sent" || b.status === "cancelled"),
-    [batches, today],
+    () => batches.filter(b => (b.scheduled_for <  today || b.status === "sent" || b.status === "cancelled") && matchesQuery(b)),
+    [batches, today, q],
   );
 
   const eligibleRecipients = useMemo(
