@@ -28,6 +28,7 @@ import { DoctorTable } from "@/components/reports/DoctorTable";
 import { CollapsibleSection, ScopeChip } from "@/components/reports/CollapsibleSection";
 import { DataGate } from "@/components/reports/AwaitingData";
 import { PlacementBreakdowns } from "@/components/reports/PlacementBreakdowns";
+import { VacanciesSummary } from "@/components/reports/VacanciesSummary";
 import { TopOfFunnelContent, useTopOfFunnelStats } from "@/components/reports/TopOfFunnelCard";
 import { OperationsContent, useOperationsSummary } from "@/components/reports/OperationsCard";
 
@@ -214,6 +215,10 @@ export default function Reports() {
                 unified placement data, honouring the date + hospital/specialty
                 filters. Always expanded. */}
             <PlacementBreakdowns range={filters.range} hospital={hospitalFilter} specialty={specialtyFilter} />
+
+            {/* Open vacancies — what the team is recruiting for (links to the
+                full /vacancies list). */}
+            <VacanciesSummary />
 
             {/* By team */}
             <CollapsibleSection
