@@ -38,6 +38,25 @@ function joinAnd(items: string[]): string {
   return `${items.slice(0, -1).join(", ")} and ${items[items.length - 1]}`;
 }
 
+/** Guard against a hospital appearing twice (duplicate selection, or a doubled
+ *  batch_hospitals list) — a doctor must see each hospital ONCE. Dedupe by
+ *  name + city + country (case-insensitive); first occurrence wins, order kept.
+ *  Belt-and-braces against the old "working-op listed hospital A twice" defect,
+ *  regardless of what the caller passes. */
+export function dedupeHospitals(hospitals: WorkingOpHospital[]): WorkingOpHospital[] {
+  const seen = new Set<string>();
+  const out: WorkingOpHospital[] = [];
+  for (const h of hospitals) {
+    const name = String(h.name ?? "").trim();
+    if (!name) continue;  // nameless entry — nothing to show
+    const key = `${name.toLowerCase()}|${String(h.city ?? "").trim().toLowerCase()}|${String(h.country ?? "").trim().toLowerCase()}`;
+    if (seen.has(key)) continue;
+    seen.add(key);
+    out.push(h);
+  }
+  return out;
+}
+
 /** Distinct countries across the hospitals, joined for a subject line:
  *  "Qatar", "Saudi Arabia & Qatar", "Qatar, UAE & Oman". Empty when none known. */
 export function workingOpCountries(hospitals: WorkingOpHospital[]): string {
@@ -67,7 +86,7 @@ export function buildWorkingOpSubject(hospitals: WorkingOpHospital[], fallbackLo
  *  each group's list. This is the heart of the consolidated email. */
 export function buildDoctorHospitalsHtml(hospitals: WorkingOpHospital[]): string {
   const byCountry = new Map<string, WorkingOpHospital[]>();
-  for (const h of hospitals) {
+  for (const h of dedupeHospitals(hospitals)) {
     const key = String(h.country ?? "").trim() || String(h.city ?? "").trim() || "Other";
     const list = byCountry.get(key) ?? byCountry.set(key, []).get(key)!;
     list.push(h);
