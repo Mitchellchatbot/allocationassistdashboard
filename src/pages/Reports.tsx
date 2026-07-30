@@ -19,7 +19,7 @@ import { useReportingMetrics } from "@/hooks/use-reporting-metrics";
 import { defaultRange, pctChange, type ReportingFilters, type KpiTotals } from "@/lib/hospital-reporting";
 import { ExpandableKPICard } from "@/components/ExpandableKPICard";
 import { Skeleton } from "@/components/ui/skeleton";
-import { useNavigate } from "react-router-dom";
+import { useNavigate, useSearchParams } from "react-router-dom";
 import type { FlowRun } from "@/hooks/use-automation-flows";
 import type { DoctorLifecycle } from "@/hooks/use-doctor-lifecycle";
 import { PlacementsCard } from "@/components/reports/PlacementsCard";
@@ -50,10 +50,23 @@ const ReportsTrendChart = lazy(() => import("./ReportsTrendChart"));
  * Source: Saif Ullah meeting, May 20 2026 — Phase 5 spec.
  */
 export default function Reports() {
-  const [rangeDays, setRangeDays] = useState<number>(30);
-  const [hospital,   setHospital]   = useState<string>("__all");
-  const [teamMember, setTeamMember] = useState<string>("__all");
-  const [specialty,  setSpecialty]  = useState<string>("__all");
+  // Filters live in the URL so a view is shareable/bookmarkable and sticks
+  // across navigation. Default range is "This year" (365d) — the 30-day default
+  // hid the imported 2025–26 backlog, which the team kept tripping over.
+  const [searchParams, setSearchParams] = useSearchParams();
+  const rangeDays  = Number(searchParams.get("range")) || 365;
+  const hospital   = searchParams.get("hospital")  ?? "__all";
+  const teamMember = searchParams.get("team")      ?? "__all";
+  const specialty  = searchParams.get("specialty") ?? "__all";
+  const setParam = (key: string, val: string, def: string) => setSearchParams(prev => {
+    const next = new URLSearchParams(prev);
+    if (val === def) next.delete(key); else next.set(key, val);
+    return next;
+  }, { replace: true });
+  const setRangeDays  = (n: number) => setParam("range", String(n), "365");
+  const setHospital   = (v: string) => setParam("hospital", v, "__all");
+  const setTeamMember = (v: string) => setParam("team", v, "__all");
+  const setSpecialty  = (v: string) => setParam("specialty", v, "__all");
 
   const filters: ReportingFilters = useMemo(() => ({
     range:      defaultRange(rangeDays),
