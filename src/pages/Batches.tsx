@@ -104,10 +104,6 @@ export function BatchesPanel({ query = "" }: { query?: string } = {}) {
     () => batches.filter(b => b.scheduled_for >= today && b.status !== "cancelled" && matchesQuery(b)),
     [batches, today, q],
   );
-  const past = useMemo(
-    () => batches.filter(b => (b.scheduled_for <  today || b.status === "sent" || b.status === "cancelled") && matchesQuery(b)),
-    [batches, today, q],
-  );
 
   const eligibleRecipients = useMemo(
     () => hospitals.filter(h => !!h.primary_recruiter_email).length,
@@ -172,23 +168,16 @@ export function BatchesPanel({ query = "" }: { query?: string } = {}) {
 
         <SpecialtyRotationCard rotation={rotation} />
 
-        <Card>
-          <CardHeader className="pb-3">
-            <CardTitle className="text-base">Past sends</CardTitle>
-            <CardDescription className="text-[11px]">Last 30 days of completed or cancelled batches.</CardDescription>
-          </CardHeader>
-          <CardContent className="p-0">
-            {past.length === 0 ? (
-              <div className="px-4 py-8 text-center text-[12px] text-muted-foreground">Nothing yet.</div>
-            ) : (
-              <div className="divide-y">
-                {past.slice(0, 20).map(b => (
-                  <BatchRow key={b.id} batch={b} onEdit={handleEditRow} compact />
-                ))}
-              </div>
-            )}
-          </CardContent>
-        </Card>
+        {/* Past sends now live in the dedicated Past Sent tab (it already
+            lists every batch that's gone out, doctor-by-doctor, searchable).
+            Quiet pointer so the team knows where it moved. */}
+        <button
+          type="button"
+          onClick={() => setSearchParams({ tab: "past-sent" })}
+          className="text-[12px] text-muted-foreground hover:text-teal-700 hover:underline self-start"
+        >
+          Looking for past sends? They now live in the Past Sent tab →
+        </button>
       </div>
 
       <BatchDialog
