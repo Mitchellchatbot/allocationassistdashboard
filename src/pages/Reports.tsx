@@ -23,7 +23,7 @@ import { useNavigate, useSearchParams } from "react-router-dom";
 import type { FlowRun } from "@/hooks/use-automation-flows";
 import type { DoctorLifecycle } from "@/hooks/use-doctor-lifecycle";
 import { PlacementsCard } from "@/components/reports/PlacementsCard";
-import { RecapCard } from "@/components/reports/RecapCard";
+import { CeoSummary } from "@/components/reports/CeoSummary";
 import { DoctorTable } from "@/components/reports/DoctorTable";
 import { CollapsibleSection, ScopeChip } from "@/components/reports/CollapsibleSection";
 import { DataGate } from "@/components/reports/AwaitingData";
@@ -78,15 +78,12 @@ export default function Reports() {
 
   const bundle = useReportingMetrics(filters);
 
-  // Summary-first restructure (2026-06-08): one open-section map drives
-  // every Collapsible. Everything starts CLOSED except the KPI strip +
-  // trend chart (which aren't in the map — always rendered open). Pure
-  // UI state, nothing persisted.
-  // Default the substantive breakdowns OPEN so the page isn't a wall of
-  // collapsed accordions — the data's visible at a glance. The noisier /
-  // secondary sections (top-of-funnel, operations, per-doctor table) stay
-  // collapsed so it doesn't become overwhelming.
-  const [open, setOpen] = useState<Record<string, boolean>>({ team: true, hospital: true, placements: true });
+  // CEO-first restructure (2026-07-31): the page now opens on an answer-first
+  // hero (CeoSummary) + the trend + "where the wins are", and demotes ALL the
+  // per-entity / ops tables into a collapsed "Operational detail" region. One
+  // open-section map drives every Collapsible; everything starts CLOSED so the
+  // exec surface stays a clean one-screen read. Pure UI state, nothing persisted.
+  const [open, setOpen] = useState<Record<string, boolean>>({});
   const toggle = (k: string) => (v: boolean) => setOpen(s => ({ ...s, [k]: v }));
 
   // Headline numbers for the collapsed triggers, so the key figure is
@@ -120,119 +117,128 @@ export default function Reports() {
           />
         </div>
 
-        {/* ── KPI strip — the single canonical home for absolute totals.
-            Split into two labeled clusters so the 7-wide rainbow reads as
-            two ideas (work-in-progress vs results) instead of one flat
-            row. Always open. ─────────────────────────────────────────── */}
-        <KpiStrip bundle={bundle} />
+        {/* ── CEO summary — answer-first hero: a plain-English headline + a
+            Weekly/Monthly outcome scoreboard (distinct doctors, one consistent
+            source). This is the "are we okay?" layer; everything below it is
+            progressively more detail. ─────────────────────────────────────── */}
+        <CeoSummary hospital={hospitalFilter} specialty={specialtyFilter} />
 
-        {/* ── Top of funnel — what's arriving before the HI pipeline even
-            starts (submissions + outreach coverage). Default-collapsed;
-            the trigger shows the all-time submission count. ──────────── */}
-        <CollapsibleSection
-          title="Top of funnel"
-          icon={<Inbox className="h-4 w-4 text-slate-600" />}
-          description="Form submissions + outreach coverage (new → contacted → qualified). Independent of the date filter above."
-          summary={
-            <SummaryBadge
-              loading={funnelLoading}
-              value={funnelStats?.total ?? 0}
-              label="submissions"
-            />
-          }
-          open={!!open.funnel}
-          onOpenChange={toggle("funnel")}
-        >
-          <TopOfFunnelContent stats={funnelStats} loading={funnelLoading} />
-        </CollapsibleSection>
+        {/* ── At-a-glance health line — the one chart a CEO reads without
+            expanding anything. Kept visible, full width. ──────────────────── */}
+        <Card>
+          <CardHeader className="pb-2">
+            <CardTitle className="text-base flex items-center gap-2">
+              <Activity className="h-4 w-4 text-teal-600" />
+              Weekly trend
+            </CardTitle>
+            <CardDescription className="text-[11px]">
+              Shortlists, interviews, and signs per week. Helps catch dropoffs early.
+            </CardDescription>
+          </CardHeader>
+          <CardContent>
+            <Suspense fallback={<div className="h-[260px] w-full" />}>
+              <ReportsTrendChart trend={bundle.trend} />
+            </Suspense>
+          </CardContent>
+        </Card>
 
-        {/* ── Weekly trend + Doctors on the way — kept OPEN (the trend is
-            the at-a-glance health line; the chase list is actionable). ── */}
-        <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
-          <Card className="lg:col-span-2">
-            <CardHeader className="pb-2">
-              <CardTitle className="text-base flex items-center gap-2">
-                <Activity className="h-4 w-4 text-teal-600" />
-                Weekly trend
-              </CardTitle>
-              <CardDescription className="text-[11px]">
-                Shortlists, interviews, and signs per week. Helps catch dropoffs early.
-              </CardDescription>
-            </CardHeader>
-            <CardContent>
-              <Suspense fallback={<div className="h-[260px] w-full" />}>
-                <ReportsTrendChart trend={bundle.trend} />
-              </Suspense>
-            </CardContent>
-          </Card>
-
-          <Card>
-            <CardHeader className="pb-2">
-              <CardTitle className="text-base flex items-center gap-2">
-                <Sparkles className="h-4 w-4 text-amber-600" />
-                Doctors on the way
-              </CardTitle>
-              <CardDescription className="text-[11px]">
-                Signed but not yet joined. Tick-scheduler nudges weekly.
-              </CardDescription>
-            </CardHeader>
-            <CardContent className="p-0">
-              <DoctorsOnTheWay rows={bundle.doctorsOnTheWay} />
-            </CardContent>
-          </Card>
-        </div>
-
-        {/* ── Recap — Weekly / Monthly tabs, always expanded. Reads
-            placement_attempts (imported reports + live markings), per-attempt. ── */}
-        <RecapCard hospital={hospitalFilter} specialty={specialtyFilter} />
-
-        {/* ── Pipeline health / Operations — the machinery behind the
-            funnel: contracts, CV backlog, batch sends, candidate pool.
-            Default-collapsed; trigger flags anything that needs a chase. ── */}
-        <CollapsibleSection
-          title="Pipeline health / Operations"
-          icon={<ServerCog className="h-4 w-4 text-slate-600" />}
-          scope={<ScopeChip>Recent ops</ScopeChip>}
-          description="Contracts e-sign funnel, CV upload backlog, batch sends, and the candidate pool. Reflects recent operations, not the date filter."
-          summary={
-            <div className="flex items-center gap-1.5 justify-end flex-wrap">
-              <Badge variant="outline" className="text-[9px] bg-emerald-50 text-emerald-700 border-emerald-200">
-                {opsSummary.contractsSigned} signed
-              </Badge>
-              {opsSummary.cvPending > 0 && (
-                <Badge variant="outline" className="text-[9px] bg-amber-50 text-amber-700 border-amber-200">
-                  {opsSummary.cvPending} CV pending
-                </Badge>
-              )}
-              {opsSummary.failedBatches > 0 && (
-                <Badge variant="outline" className="text-[9px] bg-rose-50 text-rose-700 border-rose-200">
-                  {opsSummary.failedBatches} batch failed
-                </Badge>
-              )}
-            </div>
-          }
-          open={!!open.ops}
-          onOpenChange={toggle("ops")}
-        >
-          <OperationsContent />
-        </CollapsibleSection>
-
-        {/* ── Breakdowns — the heavy per-entity tables, grouped under one
-            labeled region. All default-collapsed so first paint stays
-            light. ───────────────────────────────────────────────────── */}
-        <div className="pt-2">
+        {/* ── Where the wins are — the segment layer: which region, which
+            specialties, which hospitals, how long the journey takes, and what
+            we're recruiting for. Kept visible so the CEO sees WHERE results
+            come from without digging. ─────────────────────────────────────── */}
+        <div className="pt-1">
           <h2 className="text-[11px] font-semibold uppercase tracking-wider text-muted-foreground mb-3">
-            Breakdowns
+            Where the wins are
           </h2>
           <div className="space-y-6">
-            {/* Region · Specialties · Lifecycle — integrated breakdowns over the
-                unified placement data, honouring the date + hospital/specialty
-                filters. Always expanded. */}
             <PlacementBreakdowns range={filters.range} hospital={hospitalFilter} specialty={specialtyFilter} />
-
-            {/* Open vacancies — what the team is recruiting for (links to the
-                full /vacancies list). */}
             <VacanciesSummary />
+          </div>
+        </div>
+
+        {/* ── Operational detail — the depth layer. Everything the team needs
+            but a CEO shouldn't scroll past: full range metrics, funnel, chase
+            list, per-person / per-hospital / per-doctor tables, ops machinery.
+            All collapsed by default. ──────────────────────────────────────── */}
+        <div className="pt-1">
+          <h2 className="text-[11px] font-semibold uppercase tracking-wider text-muted-foreground mb-3">
+            Operational detail
+          </h2>
+          <div className="space-y-6">
+            {/* Full absolute totals over the custom range + per-tile drill-downs
+                — the analyst's scoreboard, demoted below the CEO summary. */}
+            <CollapsibleSection
+              title="All metrics · custom range"
+              icon={<BarChart3 className="h-4 w-4 text-teal-600" />}
+              description="Absolute totals over the date range chosen above, with per-tile drill-downs. The CEO summary at the top uses calendar weeks/months instead."
+              summary={<SummaryBadge loading={bundle.isLoading} value={bundle.kpis.signed} label="signed" />}
+              open={!!open.metrics}
+              onOpenChange={toggle("metrics")}
+            >
+              <div className="pt-1">
+                <KpiStrip bundle={bundle} />
+              </div>
+            </CollapsibleSection>
+
+            {/* Top of funnel */}
+            <CollapsibleSection
+              title="Top of funnel"
+              icon={<Inbox className="h-4 w-4 text-slate-600" />}
+              description="Form submissions + outreach coverage (new → contacted → qualified). Independent of the date filter above."
+              summary={
+                <SummaryBadge
+                  loading={funnelLoading}
+                  value={funnelStats?.total ?? 0}
+                  label="submissions"
+                />
+              }
+              open={!!open.funnel}
+              onOpenChange={toggle("funnel")}
+            >
+              <TopOfFunnelContent stats={funnelStats} loading={funnelLoading} />
+            </CollapsibleSection>
+
+            {/* Doctors on the way — signed but not yet relocated (chase list). */}
+            <CollapsibleSection
+              title="Doctors on the way"
+              icon={<Sparkles className="h-4 w-4 text-amber-600" />}
+              description="Signed but not yet joined. Tick-scheduler nudges weekly."
+              summary={<SummaryBadge loading={bundle.isLoading} value={bundle.doctorsOnTheWay.length} label="in transit" />}
+              open={!!open.dotw}
+              onOpenChange={toggle("dotw")}
+              flush
+            >
+              <DoctorsOnTheWay rows={bundle.doctorsOnTheWay} />
+            </CollapsibleSection>
+
+            {/* Pipeline health / Operations */}
+            <CollapsibleSection
+              title="Pipeline health / Operations"
+              icon={<ServerCog className="h-4 w-4 text-slate-600" />}
+              scope={<ScopeChip>Recent ops</ScopeChip>}
+              description="Contracts e-sign funnel, CV upload backlog, batch sends, and the candidate pool. Reflects recent operations, not the date filter."
+              summary={
+                <div className="flex items-center gap-1.5 justify-end flex-wrap">
+                  <Badge variant="outline" className="text-[9px] bg-emerald-50 text-emerald-700 border-emerald-200">
+                    {opsSummary.contractsSigned} signed
+                  </Badge>
+                  {opsSummary.cvPending > 0 && (
+                    <Badge variant="outline" className="text-[9px] bg-amber-50 text-amber-700 border-amber-200">
+                      {opsSummary.cvPending} CV pending
+                    </Badge>
+                  )}
+                  {opsSummary.failedBatches > 0 && (
+                    <Badge variant="outline" className="text-[9px] bg-rose-50 text-rose-700 border-rose-200">
+                      {opsSummary.failedBatches} batch failed
+                    </Badge>
+                  )}
+                </div>
+              }
+              open={!!open.ops}
+              onOpenChange={toggle("ops")}
+            >
+              <OperationsContent />
+            </CollapsibleSection>
 
             {/* Data quality — surfaces unclassified hospital regions to fix
                 (only renders when there's something to clean up). */}
