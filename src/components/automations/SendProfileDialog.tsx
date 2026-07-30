@@ -47,6 +47,20 @@ import { useQueryClient } from "@tanstack/react-query";
 // Persisted per-recruiter template preference (Amir #3 "save as my default").
 const HOSPITAL_DEFAULT_KEY = "profile_sent_hospital";
 const DOCTOR_DEFAULT_KEY   = "profile_sent_doctor";
+// Stable empty-array reference so the per-doctor attachment default doesn't churn
+// the AttachmentsPicker props on every render.
+const EMPTY_ATTACHMENTS: EmailAttachment[] = [];
+// Drop doctors with no files from a per-doctor attachment map; returns undefined
+// when nobody attached anything (buildRuns treats that as "no attachments").
+function pruneEmptyAttachments(
+  byDoctor: Record<string, EmailAttachment[]>,
+): Record<string, EmailAttachment[]> | undefined {
+  const out: Record<string, EmailAttachment[]> = {};
+  for (const [id, files] of Object.entries(byDoctor)) {
+    if (files && files.length) out[id] = files;
+  }
+  return Object.keys(out).length ? out : undefined;
+}
 function loadDefaultTemplate(which: "hospital" | "doctor"): string {
   try {
     const v = localStorage.getItem(`aa.profileSend.default.${which}`);
@@ -473,7 +487,8 @@ function SendProfileDialogBody({ onClose, initial }: { onClose: () => void; init
     // GLOBAL — shared across every doctor in the send.
     perDoctor: Record<string, { stageOverrides?: Record<string, SendOverrides>; doctorEmail?: string }>,
     opts: {
-      attachments?: { hospital?: EmailAttachment[]; doctor?: EmailAttachment[] };
+      // PER-DOCTOR attachments, keyed by doctor.id (hospital leg + doctor leg).
+      attachments?: { hospital?: Record<string, EmailAttachment[]>; doctor?: Record<string, EmailAttachment[]> };
       templateKeys?: { hospital: string; doctor: string };
       schedule?:    { date: string; time: string };
       sender?:      { assignedTo: string | null };
@@ -492,8 +507,11 @@ function SendProfileDialogBody({ onClose, initial }: { onClose: () => void; init
     // Per-HOSPITAL greeting override (hospitalId → mode); "auto" keeps each
     // hospital's stored greet_with_contact_name flag. Empty = all auto.
     const greetModeByHospital = greeting ?? {};
-    const hospitalAttach = attachments?.hospital ?? [];
-    const doctorAttach   = attachments?.doctor ?? [];
+    // PER-DOCTOR attachments (keyed by doctor.id) — a doctor-specific CV goes
+    // only to that doctor's hospital + working-op emails, never fanning across
+    // the other doctors in a multi-doctor send.
+    const hospAttByDoctor = attachments?.hospital ?? {};
+    const docAttByDoctor  = attachments?.doctor ?? {};
     if (selectedDoctors.length === 0 || selectedHospitals.length === 0) return;
     const templateOverridesPayload = templateKeys && (templateKeys.hospital !== HOSPITAL_DEFAULT_KEY || templateKeys.doctor !== DOCTOR_DEFAULT_KEY)
       ? {
@@ -511,6 +529,8 @@ function SendProfileDialogBody({ onClose, initial }: { onClose: () => void; init
         doctorEmailToUse: (pd.doctorEmail ?? "").trim() || doctor.email,
         effectiveStageOverrides: pd.stageOverrides && Object.keys(pd.stageOverrides).length ? pd.stageOverrides : undefined,
         cardImageUrl: cardImageByDoctor[doctor.id] ?? null,
+        hospitalAttach: hospAttByDoctor[doctor.id] ?? [],
+        doctorAttach:   docAttByDoctor[doctor.id] ?? [],
       };
     };
 
@@ -537,7 +557,7 @@ function SendProfileDialogBody({ onClose, initial }: { onClose: () => void; init
         // One scheduled row per doctor (each row supports hospital_ids[] +
         // per-doctor stage_overrides / doctor_email). Global fields repeat per row.
         for (const doctor of selectedDoctors) {
-          const { doctorEmailToUse, effectiveStageOverrides } = dataFor(doctor);
+          const { doctorEmailToUse, effectiveStageOverrides, hospitalAttach, doctorAttach } = dataFor(doctor);
           await scheduleProfileSend.mutateAsync({
             doctor_id:         doctor.id,
             doctor_name:       doctor.name,
@@ -639,7 +659,7 @@ function SendProfileDialogBody({ onClose, initial }: { onClose: () => void; init
         // One batch_id per DOCTOR — groups that doctor's hospital runs so the
         // BCC/consolidated nature stays queryable per doctor.
         const batchId = crypto.randomUUID();
-        const { doctorEmailToUse, effectiveStageOverrides, cardImageUrl } = dataFor(doctor);
+        const { doctorEmailToUse, effectiveStageOverrides, cardImageUrl, hospitalAttach, doctorAttach } = dataFor(doctor);
         for (const [hIndex, h] of selectedHospitals.entries()) {
           const routing = routingByHospital.get(h.id)!;
           const { recipientEmail, recipientName, runCc } = routing;
@@ -680,9 +700,11 @@ function SendProfileDialogBody({ onClose, initial }: { onClose: () => void; init
                 // fires — including the doctor heads-up that auto-continues
                 // server-side — and ships that edited version verbatim. PER DOCTOR.
                 ...(effectiveStageOverrides ? { stage_overrides: effectiveStageOverrides } : {}),
-                // CVs / logbooks attached in the preview — PER EMAIL. Same files
-                // for every hospital. send-flow-email reads `attachments` on the
-                // hospital stage and `attachments_doctor` on the doctor stage.
+                // CVs / logbooks attached in the preview — PER DOCTOR. Same files
+                // for every hospital of THIS doctor, but a doctor-specific file
+                // never fans onto another doctor's runs. send-flow-email reads
+                // `attachments` on the hospital stage and `attachments_doctor` on
+                // the doctor stage.
                 ...(hospitalAttach.length
                   ? { attachments: hospitalAttach.map(a => ({ filename: a.filename, path: a.path })) }
                   : {}),
@@ -1208,7 +1230,8 @@ function PreviewConfirm({
   onConfirm: (
     perDoctor: Record<string, PerDoctorSend>,
     opts?: {
-      attachments?: { hospital?: EmailAttachment[]; doctor?: EmailAttachment[] };
+      // PER-DOCTOR attachments, keyed by doctor.id (hospital leg + doctor leg).
+      attachments?: { hospital?: Record<string, EmailAttachment[]>; doctor?: Record<string, EmailAttachment[]> };
       templateKeys?: { hospital: string; doctor: string };
       schedule?:    { date: string; time: string };
       sender?:      { assignedTo: string | null };
@@ -1251,9 +1274,24 @@ function PreviewConfirm({
   const [hospitalOvByDoctor, setHospitalOvByDoctor] = useState<Record<string, SendOverrides | null>>({});
   const [doctorOvByDoctor,   setDoctorOvByDoctor]   = useState<Record<string, SendOverrides | null>>({});
   const [doctorEmailOvByDoctor, setDoctorEmailOvByDoctor] = useState<Record<string, string>>({});
-  // CVs / logbooks to attach — GLOBAL (PER EMAIL leg, shared across doctors).
-  const [hospitalAttachments, setHospitalAttachments] = useState<EmailAttachment[]>([]);
-  const [doctorAttachments, setDoctorAttachments]     = useState<EmailAttachment[]>([]);
+  // CVs / logbooks to attach — PER DOCTOR (keyed by doctor.id, per email leg).
+  // A doctor-specific CV must reach only that doctor's hospital + working-op
+  // emails, so attachments are keyed by doctor.id just like the edit maps above.
+  const [hospitalAttByDoctor, setHospitalAttByDoctor] = useState<Record<string, EmailAttachment[]>>({});
+  const [doctorAttByDoctor,   setDoctorAttByDoctor]   = useState<Record<string, EmailAttachment[]>>({});
+  // The active doctor's attachments + setters that update just this doctor's slot.
+  const hospitalAttachments = hospitalAttByDoctor[activeDoctor?.id ?? ""] ?? EMPTY_ATTACHMENTS;
+  const doctorAttachments   = doctorAttByDoctor[activeDoctor?.id ?? ""]   ?? EMPTY_ATTACHMENTS;
+  const setHospitalAttachments = (next: EmailAttachment[] | ((prev: EmailAttachment[]) => EmailAttachment[])) => {
+    const id = activeDoctor?.id;
+    if (!id) return;
+    setHospitalAttByDoctor(prev => ({ ...prev, [id]: typeof next === "function" ? next(prev[id] ?? []) : next }));
+  };
+  const setDoctorAttachments = (next: EmailAttachment[] | ((prev: EmailAttachment[]) => EmailAttachment[])) => {
+    const id = activeDoctor?.id;
+    if (!id) return;
+    setDoctorAttByDoctor(prev => ({ ...prev, [id]: typeof next === "function" ? next(prev[id] ?? []) : next }));
+  };
   // Send now vs schedule for later (Amir #5).
   const [sendMode, setSendMode] = useState<"now" | "later">("now");
   const [schedDate, setSchedDate] = useState<string>(() => localDateInDays(1));
@@ -1482,9 +1520,11 @@ function PreviewConfirm({
       };
     }
     onConfirm(perDoctor, {
+      // Per-doctor attachment maps (keyed by doctor.id) — buildRuns stamps each
+      // doctor's runs with only that doctor's files. Drop empty slots.
       attachments: {
-        hospital: hospitalAttachments.length ? hospitalAttachments : undefined,
-        doctor:   doctorAttachments.length   ? doctorAttachments   : undefined,
+        hospital: pruneEmptyAttachments(hospitalAttByDoctor),
+        doctor:   pruneEmptyAttachments(doctorAttByDoctor),
       },
       templateKeys: { hospital: hospitalTemplateKey, doctor: doctorTemplateKey },
       schedule: sendMode === "later" ? { date: schedDate, time: schedTime } : undefined,
@@ -1702,8 +1742,8 @@ function PreviewConfirm({
         editable
         onChange={(ov) => setHospitalOvByDoctor(prev => ({ ...prev, [doc.id]: ov }))}
         plainBody={r.rHospBody}
-        attachments={hospitalAttachments}
-        onAttachmentsChange={setHospitalAttachments}
+        attachments={hospitalAttByDoctor[doc.id] ?? EMPTY_ATTACHMENTS}
+        onAttachmentsChange={(next) => setHospitalAttByDoctor(prev => ({ ...prev, [doc.id]: next }))}
         templatePicker={
           <TemplatePicker
             templates={templates}
@@ -1737,8 +1777,8 @@ function PreviewConfirm({
         editable
         onChange={(ov) => setDoctorOvByDoctor(prev => ({ ...prev, [doc.id]: ov }))}
         plainBody={r.dBody}
-        attachments={doctorAttachments}
-        onAttachmentsChange={setDoctorAttachments}
+        attachments={doctorAttByDoctor[doc.id] ?? EMPTY_ATTACHMENTS}
+        onAttachmentsChange={(next) => setDoctorAttByDoctor(prev => ({ ...prev, [doc.id]: next }))}
         // Same picker as the left rail, forwarded into the full-screen editor
         // so the doctor template can be swapped from full screen too. Popover
         // raised above the full-screen overlay via contentClassName.
