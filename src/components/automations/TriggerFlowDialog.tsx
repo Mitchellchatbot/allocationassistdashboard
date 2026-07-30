@@ -305,6 +305,29 @@ export function TriggerFlowDialog({ open, flowKey, onClose }: Props) {
       const { error: evErr } = await supabase.from("automation_flow_events").insert(events);
       if (evErr) throw evErr;
 
+      // Record the outcome as a milestone DATE on placement_attempts so
+      // leadership reporting counts it (→ doctor_lifecycle via the forward
+      // trigger), consistent with the imported sheet. Only the flows that map
+      // to a reportable milestone and carry a hospital.
+      const MILESTONE_COL: Partial<Record<FlowKey, "shortlisted_at" | "interviewed_at" | "offered_at">> = {
+        shortlist:        "shortlisted_at",
+        interview:        "interviewed_at",
+        contract_signing: "offered_at",
+      };
+      const milestoneCol = MILESTONE_COL[flowKey];
+      if (milestoneCol && selectedHospital?.name && doctor.id && doctor.name) {
+        const nowIso = new Date().toISOString();
+        await supabase.from("placement_attempts").upsert({
+          doctor_id:     doctor.id,
+          doctor_name:   doctor.name,
+          hospital_name: selectedHospital.name,
+          [milestoneCol]: nowIso,
+          source:        "flow_marked",
+          updated_at:    nowIso,
+        }, { onConflict: "doctor_id,hospital_name" });
+        qc.invalidateQueries({ queryKey: ["placement-attempts"] });
+      }
+
       qc.invalidateQueries({ queryKey: ["automation-flow-runs"] });
 
       // ── First email: PREVIEW before sending ──────────────────────────────

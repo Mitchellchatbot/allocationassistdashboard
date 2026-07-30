@@ -900,6 +900,12 @@ function RunDetailSheet({ run, open, onClose }: { run: FlowRun | null; open: boo
           </div>
         )}
 
+        {/* Mark relocated — teal panel on active relocation runs. Writes
+            relocated_at to placement_attempts (→ doctor_lifecycle via the
+            forward trigger) so leadership reporting can count relocations,
+            and completes the relocation flow. */}
+        <RelocationCompleteAction run={run} />
+
         {showInvoiceDetails && (
           <div className="rounded-md border-2 border-teal-200 bg-teal-50/50 p-4 mt-4">
             <div className="flex items-start gap-2 mb-3">
@@ -1303,6 +1309,22 @@ function InterviewTimePicker({ run }: { run: FlowRun }) {
           message: "Queued for sending." },
       ]);
 
+      // Record the interview as a milestone DATE so leadership reporting
+      // counts it (placement_attempts → doctor_lifecycle via the trigger),
+      // consistent with how the imported sheet stores interviewed_at.
+      if (run.doctor_id && run.doctor_name && run.hospital) {
+        await supabase.from("placement_attempts")
+          .upsert({
+            doctor_id:      run.doctor_id,
+            doctor_name:    run.doctor_name,
+            hospital_name:  run.hospital,
+            interviewed_at: nowIso,
+            source:         "interview_marked",
+            updated_at:     nowIso,
+          }, { onConflict: "doctor_id,hospital_name" });
+        qc.invalidateQueries({ queryKey: ["placement-attempts"] });
+      }
+
       // Fire the tips + confirmation email to the doctor.
       const { error: sendErr } = await supabase.functions.invoke("send-flow-email", {
         body: { run_id: interviewRun.id, ...overrides },
@@ -1460,6 +1482,22 @@ function ShortlistSuggestion({ run }: { run: FlowRun }) {
         { run_id: shortlistRun.id, stage_key: "send_shortlist_email", event_type: "entered",
           message: "Queued for sending." },
       ]);
+
+      // Record the shortlist as a milestone DATE so leadership reporting
+      // counts it (placement_attempts → doctor_lifecycle via the trigger),
+      // consistent with how the imported sheet stores shortlisted_at.
+      if (run.doctor_id && run.doctor_name && run.hospital) {
+        await supabase.from("placement_attempts")
+          .upsert({
+            doctor_id:      run.doctor_id,
+            doctor_name:    run.doctor_name,
+            hospital_name:  run.hospital,
+            shortlisted_at: nowIso,
+            source:         "shortlist_marked",
+            updated_at:     nowIso,
+          }, { onConflict: "doctor_id,hospital_name" });
+        qc.invalidateQueries({ queryKey: ["placement-attempts"] });
+      }
 
       const { error: sendErr } = await supabase.functions.invoke("send-flow-email", {
         body: { run_id: shortlistRun.id, ...overrides },
@@ -1654,6 +1692,91 @@ function ContractCheckinAction({ run }: { run: FlowRun }) {
         </label>
         <Button size="sm" onClick={handleMarkSigned} disabled={working} className="bg-emerald-600 hover:bg-emerald-700">
           <CheckCircle2 className="h-3.5 w-3.5 mr-1" /> {working ? "Saving…" : "Mark signed"}
+        </Button>
+      </div>
+    </div>
+  );
+}
+
+/** Mark relocated — the relocation counterpart of ContractCheckinAction.
+ *  Shown on active relocation runs. Records the relocation as a real
+ *  milestone date (placement_attempts.relocated_at → doctor_lifecycle via
+ *  the forward trigger) so leadership reporting can count "Relocated", and
+ *  completes the relocation flow. */
+function RelocationCompleteAction({ run }: { run: FlowRun }) {
+  const [working, setWorking] = useState(false);
+  const [relocatedDate, setRelocatedDate] = useState<string>(new Date().toISOString().slice(0, 10));
+  const qc = useQueryClient();
+
+  if (run.flow_key !== "relocation" || run.status !== "active") return null;
+
+  const handleMarkRelocated = async () => {
+    setWorking(true);
+    try {
+      const iso = relocatedDate ? new Date(relocatedDate + "T00:00:00.000Z").toISOString() : new Date().toISOString();
+
+      // 1. Write to placement_attempts. The forward trigger propagates the
+      //    earliest relocated date to doctor_lifecycle.relocated_at.
+      if (run.doctor_id && run.doctor_name && run.hospital) {
+        await supabase.from("placement_attempts")
+          .upsert({
+            doctor_id:     run.doctor_id,
+            doctor_name:   run.doctor_name,
+            hospital_name: run.hospital,
+            relocated_at:  iso,
+            source:        "relocation_marked",
+            updated_at:    new Date().toISOString(),
+          }, { onConflict: "doctor_id,hospital_name" });
+      }
+
+      // 2. Complete the relocation run.
+      const nowIso = new Date().toISOString();
+      await supabase.from("automation_flow_runs").update({
+        current_stage: "relocation_complete",
+        status:        "completed",
+        completed_at:  nowIso,
+        last_event_at: nowIso,
+      }).eq("id", run.id);
+
+      await supabase.from("automation_flow_events").insert({
+        run_id: run.id, stage_key: "relocation_complete", event_type: "completed",
+        message: `Team confirmed the doctor relocated on ${relocatedDate}.`,
+      });
+
+      toast.success("Marked relocated — recorded on the report.");
+      qc.invalidateQueries({ queryKey: ["automation-flow-runs"] });
+      qc.invalidateQueries({ queryKey: ["automation-flow-events", run.id] });
+      qc.invalidateQueries({ queryKey: ["placement-attempts"] });
+    } catch (e) {
+      toast.error(e instanceof Error ? e.message : "Couldn't mark relocated");
+    } finally {
+      setWorking(false);
+    }
+  };
+
+  return (
+    <div className="rounded-md border-2 border-teal-200 bg-teal-50/40 p-4 mt-4">
+      <div className="flex items-start gap-2 mb-3">
+        <span className="text-teal-600 leading-none mt-[2px]">✈️</span>
+        <div className="text-[12px] text-teal-900 leading-relaxed">
+          <strong>Has {run.doctor_name ?? "the doctor"} relocated and started at {run.hospital ?? "the hospital"}?</strong>
+          <span className="block mt-1 text-teal-800/90">
+            Mark it once they've physically moved and begun — this is the number leadership tracks as "Relocated". It completes the relocation flow.
+          </span>
+        </div>
+      </div>
+      <div className="flex items-center gap-2 flex-wrap">
+        <label className="text-[11px] text-teal-900/90 flex items-center gap-1.5">
+          Relocated on
+          <input
+            type="date"
+            value={relocatedDate}
+            onChange={e => setRelocatedDate(e.target.value)}
+            className="rounded-md border border-teal-300 bg-white px-2 py-1 text-[11px]"
+          />
+        </label>
+        <Button size="sm" onClick={handleMarkRelocated} disabled={working} className="bg-teal-600 hover:bg-teal-700">
+          <CheckCircle2 className="h-3.5 w-3.5 mr-1" /> {working ? "Saving…" : "Mark relocated"}
         </Button>
       </div>
     </div>
