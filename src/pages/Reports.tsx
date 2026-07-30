@@ -27,6 +27,7 @@ import { RecapCard } from "@/components/reports/RecapCard";
 import { DoctorTable } from "@/components/reports/DoctorTable";
 import { CollapsibleSection, ScopeChip } from "@/components/reports/CollapsibleSection";
 import { DataGate } from "@/components/reports/AwaitingData";
+import { PlacementBreakdowns } from "@/components/reports/PlacementBreakdowns";
 import { TopOfFunnelContent, useTopOfFunnelStats } from "@/components/reports/TopOfFunnelCard";
 import { OperationsContent, useOperationsSummary } from "@/components/reports/OperationsCard";
 
@@ -209,6 +210,11 @@ export default function Reports() {
             Breakdowns
           </h2>
           <div className="space-y-6">
+            {/* Region · Specialties · Lifecycle — integrated breakdowns over the
+                unified placement data, honouring the date + hospital/specialty
+                filters. Always expanded. */}
+            <PlacementBreakdowns range={filters.range} hospital={hospitalFilter} specialty={specialtyFilter} />
+
             {/* By team */}
             <CollapsibleSection
               title="By team member"
