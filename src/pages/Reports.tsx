@@ -48,7 +48,7 @@ const ReportsTrendChart = lazy(() => import("./ReportsTrendChart"));
  * Source: Saif Ullah meeting, May 20 2026 — Phase 5 spec.
  */
 export default function Reports() {
-  const [rangeDays, setRangeDays] = useState<7 | 30 | 90>(30);
+  const [rangeDays, setRangeDays] = useState<number>(30);
   const [hospital,   setHospital]   = useState<string>("__all");
   const [teamMember, setTeamMember] = useState<string>("__all");
   const [specialty,  setSpecialty]  = useState<string>("__all");
@@ -92,7 +92,7 @@ export default function Reports() {
               <DocLink slug="hospital-introduction/reports" />
             </h1>
             <p className="text-sm text-muted-foreground mt-1">
-              Hospital Introduction Department metrics for the last {rangeDays} days. Filter by hospital, team member, or specialty.
+              Hospital Introduction Department metrics for {rangeDays >= 3650 ? "all time" : rangeDays >= 365 ? "the last year" : `the last ${rangeDays} days`}. Filter by hospital, team member, or specialty.
             </p>
           </div>
           <FilterBar
@@ -283,8 +283,8 @@ function SummaryBadge({ loading, value, label }: { loading: boolean; value: numb
 }
 
 function FilterBar({ rangeDays, setRangeDays, hospital, setHospital, teamMember, setTeamMember, specialty, setSpecialty, options }: {
-  rangeDays: 7 | 30 | 90;
-  setRangeDays: (n: 7 | 30 | 90) => void;
+  rangeDays: number;
+  setRangeDays: (n: number) => void;
   hospital: string; setHospital: (s: string) => void;
   teamMember: string; setTeamMember: (s: string) => void;
   specialty: string; setSpecialty: (s: string) => void;
@@ -293,13 +293,13 @@ function FilterBar({ rangeDays, setRangeDays, hospital, setHospital, teamMember,
   return (
     <div className="flex flex-wrap items-center gap-2" data-tour="reports-filters">
       <div className="inline-flex rounded-md border bg-white">
-        {[7, 30, 90].map(n => (
+        {[{ n: 7, l: "7d" }, { n: 30, l: "30d" }, { n: 90, l: "90d" }, { n: 365, l: "1y" }, { n: 3650, l: "All" }].map(({ n, l }) => (
           <button
             key={n}
-            onClick={() => setRangeDays(n as 7 | 30 | 90)}
+            onClick={() => setRangeDays(n)}
             className={`px-3 py-1.5 text-[11px] font-medium border-r last:border-r-0 ${rangeDays === n ? "bg-teal-50 text-teal-700" : "text-slate-600 hover:bg-slate-50"}`}
           >
-            {n}d
+            {l}
           </button>
         ))}
       </div>

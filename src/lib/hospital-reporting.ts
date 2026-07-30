@@ -10,6 +10,7 @@
 import type { FlowRun } from "@/hooks/use-automation-flows";
 import type { DoctorLifecycle } from "@/hooks/use-doctor-lifecycle";
 import type { Vacancy } from "@/hooks/use-vacancies";
+import { WEEKLY_TEAM_BACKLOG } from "@/lib/weekly-team-backlog";
 
 export interface DateRange {
   from: Date;  // inclusive
@@ -196,6 +197,25 @@ export function computeTeamRows(runs: FlowRun[], lifecycles: DoctorLifecycle[], 
     const row = map.get(owner) ?? blank(owner);
     row.signed++;
     map.set(owner, row);
+  }
+
+  // Merge the historical Weekly-report backlog (per-employee aggregate counts,
+  // by week). The monthly per-doctor import has no owner, so per-person results
+  // for the backlog come from here. Adds each employee's counts for the weeks
+  // inside the range. Skipped when a doctor/hospital/specialty filter is active
+  // (the aggregate isn't per-doctor, so it can't be meaningfully filtered).
+  if (!filters.hospital && !filters.specialty && !filters.doctorId) {
+    for (const w of WEEKLY_TEAM_BACKLOG) {
+      if (filters.teamMember && w.email.toLowerCase() !== filters.teamMember.toLowerCase()) continue;
+      if (!inRange(w.weekStart, filters.range)) continue;
+      const row = map.get(w.email) ?? blank(w.email);
+      row.shortlisted += w.shortlisted;
+      row.interviews  += w.interviewed;
+      row.offered     += w.offered;
+      row.signed      += w.signed;
+      row.total       += w.shortlisted + w.interviewed + w.offered + w.signed;
+      map.set(w.email, row);
+    }
   }
 
   return [...map.values()].sort((a, b) => b.total - a.total);
