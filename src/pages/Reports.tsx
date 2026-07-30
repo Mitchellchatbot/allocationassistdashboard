@@ -26,6 +26,7 @@ import { PlacementsCard } from "@/components/reports/PlacementsCard";
 import { RecapCard } from "@/components/reports/RecapCard";
 import { DoctorTable } from "@/components/reports/DoctorTable";
 import { CollapsibleSection, ScopeChip } from "@/components/reports/CollapsibleSection";
+import { DataGate } from "@/components/reports/AwaitingData";
 import { TopOfFunnelContent, useTopOfFunnelStats } from "@/components/reports/TopOfFunnelCard";
 import { OperationsContent, useOperationsSummary } from "@/components/reports/OperationsCard";
 
@@ -218,7 +219,14 @@ export default function Reports() {
               onOpenChange={toggle("team")}
               flush
             >
-              <TeamTable rows={bundle.team} loading={bundle.isLoading} />
+              <DataGate
+                has={bundle.team.length > 0}
+                loading={bundle.isLoading}
+                title="No per-person results yet"
+                note="This fills in as your team marks doctors (shortlist / interview / offer / sign / relocate) in the dashboard — each marking is attributed to whoever recorded it. The imported historical placements have no owner, so they aren't counted per person here."
+              >
+                <TeamTable rows={bundle.team} loading={bundle.isLoading} />
+              </DataGate>
             </CollapsibleSection>
 
             {/* By hospital — surfaced above the per-doctor table so the team
