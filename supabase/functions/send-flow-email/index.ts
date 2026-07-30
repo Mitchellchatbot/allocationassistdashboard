@@ -980,15 +980,21 @@ Deno.serve(async (req: Request) => {
   // Explicit CC override from the dispatcher (e.g. CC a manager on the send).
   // Merged with any test CCs, deduped, and never CC the To.
   //
-  // The hospital's cc_emails (stamped on metadata.cc_override) must NOT ride the
-  // DOCTOR's private "working opportunity" email — otherwise, in test mode, real
-  // hospital recruiters get CC'd on the doctor email even though the To is safely
-  // redirected to the test inbox. Suppress the metadata CC on the doctor leg
-  // while test mode is on (user: "not while we're in testing mode"); a deliberate
-  // per-send body.cc_override still rides. Production CC policy for the doctor leg
-  // is a pre-go-live decision.
-  const dropHospitalCcOnDoctorLeg = run.current_stage === "email_doctor" && !!TEST_OVERRIDE;
-  const ccOverrideRaw = (dropHospitalCcOnDoctorLeg
+  // The auto-stamped hospital CC (metadata.cc_override = this hospital's own
+  // cc_emails + any manager CC picked at compose time) must NEVER reach:
+  //   • the DOCTOR's private "working opportunity" email — that CC is the
+  //     hospital's recruiter, who has no business on the doctor's email (this
+  //     holds in PRODUCTION too, not just test mode); nor
+  //   • ANY recipient while test mode is on — a "test" send must not touch a
+  //     real hospital contact, so if the To is redirected to the test inbox the
+  //     stamped CC has to be dropped as well (otherwise the hospital's real
+  //     cc_emails still receive the "test" email).
+  // A deliberate, per-send body.cc_override the dispatcher typed in the live
+  // CcBccPicker still rides in both cases (Sean: "send to the people we CC/BCC
+  // even with the training wheels on").
+  const isDoctorLeg  = run.current_stage === "email_doctor";
+  const dropStampedCc = isDoctorLeg || !!TEST_OVERRIDE;
+  const ccOverrideRaw = (dropStampedCc
     ? body.cc_override
     : (body.cc_override ?? md.cc_override)) as unknown;
   const ccOverride: string[] = Array.isArray(ccOverrideRaw)

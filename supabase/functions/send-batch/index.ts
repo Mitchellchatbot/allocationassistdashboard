@@ -257,9 +257,15 @@ Deno.serve(async (req: Request) => {
 
   // 'all' contact_mode → this hospital's email lists EVERY eligible (checked)
   // contact in the To field. Those contacts live in Zoho (zoho_cache row 2 →
-  // data->hospitalContacts), matched to the hospital by fuzzy name. Only load +
-  // index them when at least one target hospital is in 'all' mode.
-  const contactsByCore = new Map<string, string[]>();
+  // data->hospitalContacts), matched to the hospital BY NAME. To stop a
+  // DIFFERENT hospital's contacts from leaking into this hospital's To, index
+  // them two ways: by an exact-ish normalized name (preferred), and by the lossy
+  // stopword-stripped "core" key — but the core key is trusted ONLY when it maps
+  // to a single distinct hospital name (an ambiguous key is skipped below).
+  const normHospName = (s: string) =>
+    (s || "").toLowerCase().replace(/&/g, "and").replace(/[^a-z0-9]+/g, " ").trim().replace(/\s+/g, " ");
+  const contactsByExactName = new Map<string, string[]>();
+  const contactsByCore = new Map<string, { emails: string[]; names: Set<string> }>();
   if (matchedHospitals.some(h => String(h.contact_mode ?? "primary") === "all")) {
     const { data: cRow } = await supabase.from("zoho_cache").select("contacts:data->hospitalContacts").eq("id", 2).maybeSingle();
     for (const c of ((cRow?.contacts ?? []) as Array<Record<string, unknown>>)) {
@@ -267,9 +273,13 @@ Deno.serve(async (req: Request) => {
       if (!email) continue;
       const hosp = c.Hospital as unknown;
       const hospName = typeof hosp === "string" ? hosp : String((hosp as Record<string, unknown>)?.name ?? "");
-      const key = coreHospitalName(hospName);
+      const exact = normHospName(hospName);
+      const key   = coreHospitalName(hospName);
+      if (exact) (contactsByExactName.get(exact) ?? contactsByExactName.set(exact, []).get(exact)!).push(email);
       if (!key) continue;
-      (contactsByCore.get(key) ?? contactsByCore.set(key, []).get(key)!).push(email);
+      const bucket = contactsByCore.get(key) ?? contactsByCore.set(key, { emails: [], names: new Set<string>() }).get(key)!;
+      bucket.emails.push(email);
+      if (exact) bucket.names.add(exact);
     }
   }
 
@@ -288,9 +298,20 @@ Deno.serve(async (req: Request) => {
       let toEmails = email ? [email] : [];
       if (String(h.contact_mode ?? "primary") === "all") {
         const excluded = new Set((Array.isArray(h.excluded_contact_emails) ? h.excluded_contact_emails as string[] : []).map(e => e.toLowerCase()));
+        // Prefer an EXACT normalized-name match; fall back to the lossy "core"
+        // key ONLY when it's unambiguous (a single hospital name fed it). An
+        // ambiguous core key could pull another hospital's contacts into this
+        // hospital's To, so skip it and keep the recruiter-email fallback.
+        const exact = normHospName(String(h.name ?? ""));
+        let matched: string[] = contactsByExactName.get(exact) ?? [];
+        if (!matched.length) {
+          const core = contactsByCore.get(coreHospitalName(String(h.name ?? "")));
+          if (core && core.names.size <= 1) matched = core.emails;
+          else if (core) console.warn(`[send-batch] ambiguous hospital-name key for "${String(h.name ?? "")}" (${[...core.names].join(" | ")}) — skipping fuzzy contact match to avoid cross-hospital leakage`);
+        }
         const seen = new Set<string>();
         const list: string[] = [];
-        for (const e of (contactsByCore.get(coreHospitalName(String(h.name ?? ""))) ?? [])) {
+        for (const e of matched) {
           const k = e.toLowerCase();
           if (!seen.has(k) && !excluded.has(k)) { seen.add(k); list.push(e); }
         }
