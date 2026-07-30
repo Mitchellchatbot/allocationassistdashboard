@@ -23,6 +23,7 @@ import { useNavigate } from "react-router-dom";
 import type { FlowRun } from "@/hooks/use-automation-flows";
 import type { DoctorLifecycle } from "@/hooks/use-doctor-lifecycle";
 import { PlacementsCard } from "@/components/reports/PlacementsCard";
+import { PlacementAnalytics } from "@/components/reports/PlacementAnalytics";
 import { RecapCard } from "@/components/reports/RecapCard";
 import { DoctorTable } from "@/components/reports/DoctorTable";
 import { CollapsibleSection, ScopeChip } from "@/components/reports/CollapsibleSection";
@@ -104,6 +105,12 @@ export default function Reports() {
             two ideas (work-in-progress vs results) instead of one flat
             row. Always open. ─────────────────────────────────────────── */}
         <KpiStrip bundle={bundle} />
+
+        {/* ── Placement results — reads placement_attempts (the imported
+            monthly reports + live markings) directly, with its own period
+            selector, so the full history surfaces regardless of the 90-day
+            filter above. Always open. ─────────────────────────────────── */}
+        <PlacementAnalytics />
 
         {/* ── Top of funnel — what's arriving before the HI pipeline even
             starts (submissions + outreach coverage). Default-collapsed;
