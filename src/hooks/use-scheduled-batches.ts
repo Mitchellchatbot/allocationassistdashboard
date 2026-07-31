@@ -355,6 +355,11 @@ export function useSendBatchNow() {
         // PER-DOCTOR doctor-email attachments, index-aligned with the doctor emails
         // — so a doctor-specific file only reaches that doctor.
         perDoctorAttachments?: Array<Array<{ filename: string; path: string }>>;
+        // PER-HOSPITAL hospital-email attachments, keyed by recruiter email
+        // (lowercased). A hospital listed here OVERRIDES the default `attachments`
+        // for its own email, so different hospitals can carry different files;
+        // hospitals not listed ride the default. (send-now only.)
+        perHospitalAttachments?: Record<string, Array<{ filename: string; path: string }>>;
         // Sender identity for the HOSPITAL emails — a full "Name <email>" header
         // from the preview's "Sending as" picker. Blank → send-batch uses MAIL_FROM.
         fromOverride?: string;
@@ -384,6 +389,7 @@ export function useSendBatchNow() {
         ...(input.greetOverrides && Object.keys(input.greetOverrides).length ? { greet_overrides: input.greetOverrides } : {}),
         ...(input.doctorAttachments?.length ? { doctor_attachments: input.doctorAttachments } : {}),
         ...(input.perDoctorAttachments?.some(a => a?.length) ? { per_doctor_attachments: input.perDoctorAttachments } : {}),
+        ...(input.perHospitalAttachments && Object.keys(input.perHospitalAttachments).length ? { per_hospital_attachments: input.perHospitalAttachments } : {}),
         ...(input.fromOverride  ? { from_override:  input.fromOverride }  : {}),
         ...(input.customMessage ? { custom_message: input.customMessage } : {}),
       };

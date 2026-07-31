@@ -135,6 +135,10 @@ Deno.serve(async (req: Request) => {
     // (doctorBlocks). A doctor-specific file (CV) reaches only that doctor. Falls
     // back to doctor_attachments per index when a slot is empty.
     per_doctor_attachments?: Array<Array<{ filename: string; path: string }>>;
+    // PER-HOSPITAL hospital-email attachments, keyed by recruiter email
+    // (lowercased). A hospital listed here OVERRIDES the default `attachments` for
+    // its own email; hospitals not listed ride the default `attachments`.
+    per_hospital_attachments?: Record<string, Array<{ filename: string; path: string }>>;
     // Sender identity for the HOSPITAL emails — a full "Name <email>" header from
     // the preview's "Sending as" picker. Replaces MAIL_FROM for the hospital
     // emails only (the doctor working-op emails keep MAIL_FROM). Empty/absent →
@@ -783,6 +787,20 @@ Deno.serve(async (req: Request) => {
   const builtDoctorAttachmentsByDoctor = await Promise.all(
     perDoctorAtt.map(arr => buildAttachments(normAttach(arr), "doctor attachment")),
   );
+  // PER-HOSPITAL hospital-email attachments (recruiter email → built files). A
+  // hospital listed here overrides the default builtAttachments for its own
+  // email so different hospitals can carry different CVs/logbooks; unlisted
+  // hospitals ride builtAttachments. Built once, up front, keyed lowercased.
+  const perHospAttInput: Record<string, Array<{ filename: string; path: string }>> =
+    (body.per_hospital_attachments && typeof body.per_hospital_attachments === "object")
+      ? body.per_hospital_attachments : {};
+  const builtAttachmentsByHospital: Record<string, Array<{ filename: string; content: string }>> = {};
+  for (const [email, arr] of Object.entries(perHospAttInput)) {
+    const key = String(email).trim().toLowerCase();
+    if (!key) continue;
+    builtAttachmentsByHospital[key] = await buildAttachments(normAttach(arr), "hospital attachment");
+  }
+  const hasPerHospAtt = Object.keys(builtAttachmentsByHospital).length > 0;
 
   // Target hospitals — drop excluded + Ammar. In TEST mode every copy is
   // redirected to the test inbox (personalised copies still go there so the
@@ -845,6 +863,10 @@ Deno.serve(async (req: Request) => {
             const lc = e.toLowerCase();
             return lc !== EXCLUDED_RECIPIENT && !excludeSet.has(lc) && !toLc.has(lc);
           });
+      // Per-hospital attachments override the default for THIS hospital's email;
+      // fall back to the shared builtAttachments when this hospital wasn't given
+      // its own list.
+      const hospAtt = builtAttachmentsByHospital[h.email.toLowerCase()] ?? builtAttachments;
       return {
         from: hospitalFrom,
         to:   TEST_OVERRIDE_LIST.length ? [TEST_OVERRIDE_LIST[0]] : (liveTo.length ? liveTo : [h.email]),
@@ -853,7 +875,7 @@ Deno.serve(async (req: Request) => {
         text:    rendered.text,
         headers: { "X-AA-Batch-Id": String(batch.id), "X-AA-Batch-Kind": String(batch.kind) },
         ...(hospCc.length ? { cc: hospCc } : {}),
-        ...(builtAttachments.length ? { attachments: builtAttachments } : {}),
+        ...(hospAtt.length ? { attachments: hospAtt } : {}),
       };
     })
   // Each hospital's own cc_emails already ride its own email (prod only, above).
@@ -880,7 +902,7 @@ Deno.serve(async (req: Request) => {
   // so drop to individual /emails sends whenever ANY email carries a cc (a
   // hospital's own cc_emails or the dispatcher's extraCc) or a bcc.
   const anyCc = emails.some(e => Array.isArray((e as { cc?: string[] }).cc) && (e as { cc?: string[] }).cc!.length > 0);
-  const usePerEmail = builtAttachments.length > 0 || anyCc || extraBcc.length > 0;
+  const usePerEmail = builtAttachments.length > 0 || hasPerHospAtt || anyCc || extraBcc.length > 0;
   let sentCount = 0, failedCount = 0, messageId = "", lastError = "";
   // Retry a transient failure (429 rate-limit / 5xx) with backoff before giving
   // up — a single blip used to silently drop up to 100 hospitals.

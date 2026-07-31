@@ -10,7 +10,7 @@ import { Label } from "@/components/ui/label";
 import { Textarea } from "@/components/ui/textarea";
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription, DialogFooter } from "@/components/ui/dialog";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
-import { Mailbox, Plus, Send, X, CheckCircle2, Calendar, ChevronRight, ChevronDown, RefreshCw, AlertCircle, AlertTriangle, TestTube, Sparkles, UserSquare, GripVertical, Wand2, Pencil, Building2, Search, Loader2, Users } from "lucide-react";
+import { Mailbox, Plus, Send, X, CheckCircle2, Calendar, ChevronRight, ChevronDown, RefreshCw, AlertCircle, AlertTriangle, TestTube, Sparkles, UserSquare, GripVertical, Wand2, Pencil, Building2, Search, Loader2, Users, Copy, Paperclip } from "lucide-react";
 import { Checkbox } from "@/components/ui/checkbox";
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
 import { toast } from "sonner";
@@ -1152,6 +1152,13 @@ function BatchDialog({ target, onTargetChange, batches, initialKind, suggestedSp
     c[i] = next;
     return c;
   });
+  // PER-HOSPITAL hospital-email attachments, keyed by hospital id. A hospital
+  // with an entry OVERRIDES the default hospital list (batch.attachments) for its
+  // own email, so different hospitals can carry different files; unlisted
+  // hospitals ride the default. Session-only (sent as per_hospital_attachments on
+  // send-now, keyed by recruiter email) — not persisted on the row. Reset when
+  // the preview is (re)opened so a new send starts from the shared default.
+  const [perHospAtt, setPerHospAtt] = useState<Record<string, EmailAttachment[]>>({});
   const [previewResetTick, setPreviewResetTick] = useState(0);
   const [batchCc, setBatchCc] = useState<string[]>([]);
   const [batchBcc, setBatchBcc] = useState<string[]>([]);
@@ -1631,6 +1638,21 @@ function BatchDialog({ target, onTargetChange, batches, initialKind, suggestedSp
   // greeting is normalised away.
   const neutralizeGreet = (h: string) => h.replace(/Hello <strong>[^<]*<\/strong>!/, "Hello <strong></strong>!");
   const displayHtml = greetSwap(emailPreview?.html ?? "");
+  // Per-hospital attachments. The active hospital is whichever one the preview is
+  // showing (previewGreetHospital); its picker shows its OWN override, else the
+  // shared default (batch.attachments). "Copy to all" stamps the active list onto
+  // every selected hospital; "Use default" drops a hospital's override.
+  const activeHospId = previewGreetHospital?.id ?? panelSelected[0]?.id ?? null;
+  const hospAttFor = (id: string | null): EmailAttachment[] =>
+    (id && id in perHospAtt) ? perHospAtt[id] : (batch?.attachments ?? []);
+  const setHospAtt = (id: string | null, next: EmailAttachment[]) => { if (id) setPerHospAtt(prev => ({ ...prev, [id]: next })); };
+  const hospAttOverridden = (id: string | null) => !!id && id in perHospAtt;
+  const copyHospAttToAll = () => {
+    const src = hospAttFor(activeHospId);
+    setPerHospAtt(Object.fromEntries(panelSelected.map(h => [h.id, src])));
+  };
+  const clearHospAttOverride = (id: string | null) =>
+    { if (id) setPerHospAtt(prev => { const n = { ...prev }; delete n[id]; return n; }); };
   // Daily Duo: each doctor is a separate email, so each has its own pristine
   // base + edited flag (a single html_override would send one doctor twice).
   const perDoctorList = emailPreview?.per_doctor ?? [];
@@ -2259,6 +2281,7 @@ function BatchDialog({ target, onTargetChange, batches, initialKind, suggestedSp
                     setGreetModeByHospital({});   // fresh preview → stored greeting defaults
                     setAddHospCountry("all");
                     setDoctorAttachments([]);
+                    setPerHospAtt({});   // fresh preview → every hospital rides the shared default again
                     setSenderEmail(AA_TEAM_EMAIL);   // fresh preview → team-default sender + empty note
                     setCustomNote("");
                     setPreviewResetTick(t => t + 1);
@@ -2410,17 +2433,49 @@ function BatchDialog({ target, onTargetChange, batches, initialKind, suggestedSp
         // disabled note instead of the control (never crash).
         controls: (
           <div className="space-y-3">
-            {/* Attachments on the HOSPITAL email — CV, logbook, etc. Rides every
-                hospital copy in this batch. Same list the full-screen editor
-                and the send use (batch.attachments). */}
-            <div className="rounded-md border border-sidebar-border/40 bg-white/95 p-2 shadow-sm">
-              <AttachmentsPicker
-                attachments={batch?.attachments ?? []}
-                onChange={setAttachments}
-                disabled={sendNow.isPending}
-                hint="ride on the hospital email — CV, logbook, etc. (goes to every hospital)"
-              />
-            </div>
+            {/* Attachments on the HOSPITAL email — CV, logbook, etc. In a normal
+                batch each hospital can carry its OWN files: the picker follows
+                whichever hospital the preview is showing (click a name in
+                "Sending to…" or the tabs above the email to switch), with a
+                one-click "copy to all". Daily Duo keeps one shared list. */}
+            {perDoctorList.length ? (
+              <div className="rounded-md border border-sidebar-border/40 bg-white/95 p-2 shadow-sm">
+                <AttachmentsPicker
+                  attachments={batch?.attachments ?? []}
+                  onChange={setAttachments}
+                  disabled={sendNow.isPending}
+                  hint="ride on the hospital email — CV, logbook, etc. (goes to every hospital)"
+                />
+              </div>
+            ) : (
+              <div className="rounded-md border border-sidebar-border/40 bg-white/95 p-2 shadow-sm space-y-2">
+                <div className="flex items-center justify-between gap-2">
+                  <span className="truncate text-[10px] uppercase tracking-wider text-sidebar-foreground/60" title={previewGreetHospital?.name}>
+                    Files · {previewGreetHospital?.name ?? "this hospital"}
+                  </span>
+                  {hospAttOverridden(activeHospId)
+                    ? <button type="button" onClick={() => clearHospAttOverride(activeHospId)}
+                        className="shrink-0 text-[10px] font-medium text-teal-700 hover:underline">Use default</button>
+                    : <span className="shrink-0 text-[9.5px] italic text-sidebar-foreground/45">shared default</span>}
+                </div>
+                <AttachmentsPicker
+                  attachments={hospAttFor(activeHospId)}
+                  onChange={next => setHospAtt(activeHospId, next)}
+                  disabled={sendNow.isPending || !activeHospId}
+                  hint={hospAttOverridden(activeHospId)
+                    ? `only ${previewGreetHospital?.name ?? "this hospital"} gets these files`
+                    : "shared default — edit to give THIS hospital its own files"}
+                />
+                {panelSelected.length > 1 && (
+                  <Button type="button" variant="outline" size="sm"
+                    className="h-7 w-full text-[11px]"
+                    disabled={sendNow.isPending}
+                    onClick={copyHospAttToAll}>
+                    <Copy className="h-3 w-3 mr-1.5" /> Copy these to all {panelSelected.length} hospitals
+                  </Button>
+                )}
+              </div>
+            )}
             <div className="space-y-2">
               <div className="text-[10px] uppercase tracking-wider text-sidebar-foreground/60">Branded CV per doctor</div>
               <p className="text-[10.5px] leading-snug text-sidebar-foreground/55">
@@ -2464,26 +2519,50 @@ function BatchDialog({ target, onTargetChange, batches, initialKind, suggestedSp
             ))}
           />
         ) : (
-          <EditableEmailPreview
-            subject={editSubject}
-            html={displayHtml}
-            onSubjectChange={setEditSubject}
-            onHtmlChange={setEditHtml}
-            resetKey={`${previewResetTick}:${previewGreetId ?? "first"}`}
-            edited={batchEdited}
-            onReset={() => {
-              if (!emailPreview) return;
-              setEditSubject(emailPreview.subject);
-              setEditHtml(displayHtml);
-              setPreviewResetTick(t => t + 1);
-            }}
-            from={fromOverride ?? "Hospital Intro <hospitalintro@allocationassist.com>"}
-            cc={batchCc}
-            bcc={batchBcc}
-            attachments={batch?.attachments ?? []}
-            onAttachmentsChange={setAttachments}
-            className="min-h-0 flex-1 border-0 rounded-none shadow-none"
-          />
+          <div className="flex min-h-0 min-w-0 flex-1 flex-col">
+            {/* One tab per hospital — click to see the exact email THAT hospital
+                gets (its own greeting) and to point the attachments picker at it.
+                A paperclip marks a hospital with its own file override. */}
+            {panelSelected.length > 1 && (
+              <div className="flex shrink-0 items-center gap-1 overflow-x-auto border-b border-slate-200 bg-slate-50 px-2 py-1.5">
+                <span className="shrink-0 pr-1 text-[10px] uppercase tracking-wider text-slate-400">Hospital</span>
+                {panelSelected.map(h => {
+                  const isActive = h.id === activeHospId;
+                  return (
+                    <button key={h.id} type="button"
+                      onClick={() => setPreviewGreetId(h.id)}
+                      title={h.name}
+                      className={cn(
+                        "inline-flex shrink-0 items-center gap-1 rounded-full px-2.5 py-1 text-[11px] font-medium transition-colors",
+                        isActive ? "bg-teal-600 text-white" : "border border-slate-200 bg-white text-slate-600 hover:bg-slate-100")}>
+                      <span className="max-w-[130px] truncate">{h.name}</span>
+                      {h.id in perHospAtt && <Paperclip className={cn("h-2.5 w-2.5", isActive ? "text-white/90" : "text-teal-600")} />}
+                    </button>
+                  );
+                })}
+              </div>
+            )}
+            <EditableEmailPreview
+              subject={editSubject}
+              html={displayHtml}
+              onSubjectChange={setEditSubject}
+              onHtmlChange={setEditHtml}
+              resetKey={`${previewResetTick}:${previewGreetId ?? "first"}`}
+              edited={batchEdited}
+              onReset={() => {
+                if (!emailPreview) return;
+                setEditSubject(emailPreview.subject);
+                setEditHtml(displayHtml);
+                setPreviewResetTick(t => t + 1);
+              }}
+              from={fromOverride ?? "Hospital Intro <hospitalintro@allocationassist.com>"}
+              cc={batchCc}
+              bcc={batchBcc}
+              attachments={hospAttFor(activeHospId)}
+              onAttachmentsChange={next => setHospAtt(activeHospId, next)}
+              className="min-h-0 flex-1 border-0 rounded-none shadow-none"
+            />
+          </div>
         ),
       },
       ...(emailPreview.doctor_email && emailPreview.doctor_email.recipient_count > 0 ? [{
@@ -2612,6 +2691,21 @@ function BatchDialog({ target, onTargetChange, batches, initialKind, suggestedSp
                   ...(Object.keys(contactOverridesPayload).length ? { contactOverrides: contactOverridesPayload } : {}),
                   ...(Object.keys(greetOverridesPayload).length ? { greetOverrides: greetOverridesPayload } : {}),
                   ...(doctorAttachments.some(arr => arr?.length) ? { perDoctorAttachments: doctorAttachments.map(arr => (arr ?? []).map(a => ({ filename: a.filename, path: a.path }))) } : {}),
+                  // Per-hospital hospital-email attachments — keyed by recruiter
+                  // email so send-batch overrides only that hospital's files
+                  // (unlisted hospitals ride the default `attachments`). Only the
+                  // hospitals the team actually overrode are sent.
+                  ...(Object.keys(perHospAtt).length
+                    ? (() => {
+                        const map = Object.fromEntries(
+                          panelSelected
+                            .filter(h => h.id in perHospAtt)
+                            .map(h => [String(h.primary_recruiter_email ?? "").trim().toLowerCase(), (perHospAtt[h.id] ?? []).map(a => ({ filename: a.filename, path: a.path }))] as const)
+                            .filter(([email]) => email),
+                        );
+                        return Object.keys(map).length ? { perHospitalAttachments: map } : {};
+                      })()
+                    : {}),
                   // "Sending as" a person → override the hospital From (default team
                   // sender leaves it to send-batch's MAIL_FROM). Custom note → injected
                   // into the hospital body. Both no-op when untouched.
