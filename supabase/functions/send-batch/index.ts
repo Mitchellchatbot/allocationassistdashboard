@@ -119,6 +119,11 @@ Deno.serve(async (req: Request) => {
     // stored-flag logic. Applied in BOTH the dry-run preview and the real send so
     // the preview matches what's actually sent.
     greet_overrides?: Record<string, "contact" | "team">;
+    // Resolved greeting NAME per hospital (recruiter email lowercased → contact
+    // name), from the client's contact resolution. Used as the hospital's contact
+    // so "contact"/auto-name greetings name the picked person instead of falling
+    // back to "<Hospital> team" (the row's primary_contact_name is often blank).
+    greet_names?: Record<string, string>;
     // ── Ad-hoc mode (Bulk send from Profile Sent) ──────────────────────────
     // Send a tabular multi-doctor blast WITHOUT a scheduled_batch_sends row: the
     // caller passes the doctors + recipient hospitals directly. No DB row is
@@ -300,6 +305,13 @@ Deno.serve(async (req: Request) => {
     (body.contact_overrides && typeof body.contact_overrides === "object")
       ? body.contact_overrides as Record<string, string[]>
       : {};
+  // Resolved greeting name per hospital (recruiter email lowercased → contact
+  // name) — overrides the row's primary_contact_name so "Name" greets the picked
+  // person, matching the preview.
+  const greetNames: Record<string, string> =
+    (body.greet_names && typeof body.greet_names === "object")
+      ? body.greet_names as Record<string, string>
+      : {};
   const recipientHospitals = matchedHospitals
     .map(h => {
       const email = String(h.primary_recruiter_email ?? "").trim();
@@ -334,7 +346,7 @@ Deno.serve(async (req: Request) => {
       return {
         name:         String(h.name ?? "").trim(),
         email,
-        contact:      String(h.primary_contact_name ?? "").trim(),
+        contact:      (greetNames[email.toLowerCase()] ?? "").trim() || String(h.primary_contact_name ?? "").trim(),
         greetContact: h.greet_with_contact_name === true,
         city:         String(h.city ?? "").trim(),
         image_url:    String(h.image_url ?? "").trim(),

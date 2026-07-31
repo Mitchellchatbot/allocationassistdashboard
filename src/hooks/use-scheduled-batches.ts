@@ -349,6 +349,10 @@ export function useSendBatchNow() {
         // Per-hospital greeting choice from the preview's Auto / Name / Team control:
         // recruiter email (lowercased) → "contact" | "team". Non-auto entries only.
         greetOverrides?: Record<string, "contact" | "team">;
+        // Resolved greeting name per hospital (recruiter email lowercased → contact
+        // name). send-batch uses it as the hospital's contact so "Name" greets the
+        // picked person instead of falling back to "<Hospital> team".
+        greetNames?: Record<string, string>;
         // Files attached to the DOCTOR working-opportunity emails (send-now only).
         // Legacy: one global list applied to every doctor. Prefer perDoctorAttachments.
         doctorAttachments?: Array<{ filename: string; path: string }>;
@@ -387,6 +391,7 @@ export function useSendBatchNow() {
         ...(input.recipientEmailsOverride?.length ? { recipient_emails_override: input.recipientEmailsOverride } : {}),
         ...(input.contactOverrides && Object.keys(input.contactOverrides).length ? { contact_overrides: input.contactOverrides } : {}),
         ...(input.greetOverrides && Object.keys(input.greetOverrides).length ? { greet_overrides: input.greetOverrides } : {}),
+        ...(input.greetNames && Object.keys(input.greetNames).length ? { greet_names: input.greetNames } : {}),
         ...(input.doctorAttachments?.length ? { doctor_attachments: input.doctorAttachments } : {}),
         ...(input.perDoctorAttachments?.some(a => a?.length) ? { per_doctor_attachments: input.perDoctorAttachments } : {}),
         ...(input.perHospitalAttachments && Object.keys(input.perHospitalAttachments).length ? { per_hospital_attachments: input.perHospitalAttachments } : {}),

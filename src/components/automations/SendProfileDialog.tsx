@@ -1440,6 +1440,23 @@ function PreviewConfirm({
       : `Cleared files on all ${nH} hospitals for ${docName}`);
   };
 
+  // Resolve the greeting NAME for a hospital EXACTLY as the send does (buildRuns):
+  // the manually-picked contact → the routing-resolved primary → the hospital's
+  // stored primary_contact_name. Empty for 'all'/multi recipients (greet the team).
+  // The preview used only primary_contact_name (usually blank), so "Name" fell back
+  // to the hospital name — now it names whoever the email is actually addressed to.
+  const resolveGreetName = (hosp: Hospital): string => {
+    const contactsForH = hospitalContacts.forHospital(hosp.name);
+    const resolved = resolveRecipient(contactsForH, hosp);
+    const overrideEmail = recipientOverrides[hosp.id];
+    const overrideContact = overrideEmail
+      ? contactsForH.find(c => c.email?.toLowerCase() === overrideEmail.toLowerCase())
+      : undefined;
+    const isAllMode = !overrideEmail && (hosp.contact_mode ?? "primary") === "all";
+    const overrideIsMulti = !!overrideEmail && /[,;]/.test(overrideEmail);
+    if (isAllMode || overrideIsMulti) return "";
+    return (overrideContact?.name ?? resolved.contact?.name ?? hosp.primary_contact_name ?? "").trim();
+  };
   // Pure per-doctor token builder — the old single-doctor `vars` memo, now a
   // function of the doctor. Same shape as send-flow-email so the preview matches
   // the actual send. Reads the doctor's already-resolved WP/legacy tokens.
@@ -1463,9 +1480,9 @@ function PreviewConfirm({
       hospital_contact_name: (() => {
         // Feature 3: this hospital's own greeting mode drives the greeting.
         const gm = hosp ? (greetModeByHospital[hosp.id] ?? "auto") : "auto";
-        return ((gm === "contact" || (gm === "auto" && hosp?.greet_with_contact_name)) && hosp?.primary_contact_name?.trim())
-          ? hosp.primary_contact_name
-          : (hosp?.name ?? "Team");
+        const useName = gm === "contact" || (gm === "auto" && hosp?.greet_with_contact_name);
+        const contactName = (hosp && useName) ? resolveGreetName(hosp) : "";
+        return contactName || (hosp?.name ?? "Team");
       })(),
       city:               hosp?.city ?? "",
       country:            hosp?.country ?? "",

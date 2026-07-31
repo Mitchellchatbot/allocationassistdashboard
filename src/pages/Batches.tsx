@@ -1612,16 +1612,36 @@ function BatchDialog({ target, onTargetChange, batches, initialKind, suggestedSp
   const panelContactOverride = (hid: string, emails: string[] | null) =>
     setContactSel(prev => { const n = { ...prev }; if (emails && emails.length) n[hid] = emails; else delete n[hid]; return n; });
 
+  // Resolve the greeting NAME for a hospital: the manually-picked contact (from
+  // the recipient panel), else the routing-resolved primary, else the stored
+  // primary_contact_name. Empty for 'all'/multi recipients (greet the team). The
+  // preview used only primary_contact_name (usually blank), so "Name" fell back to
+  // "<Hospital> team" — now it names whoever the email is actually addressed to.
+  const batchGreetName = (h: Hospital): string => {
+    const contacts = hospitalContacts.forHospital(h.name);
+    const sel = contactSel[h.id];
+    if (sel && sel.length === 1) {
+      const c = contacts.find(x => x.email?.toLowerCase() === sel[0].toLowerCase());
+      return (c?.name ?? h.primary_contact_name ?? "").trim();
+    }
+    if (sel && sel.length > 1) return "";                       // multiple picked → greet team
+    if ((h.contact_mode ?? "primary") === "all") return "";     // all contacts → greet team
+    const r = resolveRecipient(contacts, h);
+    return (r.contact?.name ?? h.primary_contact_name ?? "").trim();
+  };
   // Personalised greeting per hospital (mirrors send-batch's greetingFor): the
   // hospital's contact person when it greets by contact, else "<Name> team".
-  const batchGreeting = (h?: { id: string; name: string; primary_contact_name: string | null; greet_with_contact_name: boolean }) => {
+  const batchGreeting = (h?: Hospital) => {
     if (!h) return "Team";
     const mode = greetModeByHospital[h.id] ?? "auto";
     // "Name" → greet the contact person (fall back to the team greeting);
     // "Team" → "<Hospital> team"; "Auto" → the hospital's stored-flag logic.
-    if (mode === "contact") return h.primary_contact_name?.trim() || `${h.name} team`;
-    if (mode === "team")    return `${h.name} team`;
-    return (h.greet_with_contact_name && h.primary_contact_name?.trim()) ? h.primary_contact_name.trim() : `${h.name} team`;
+    if (mode === "team") return `${h.name} team`;
+    if (mode === "contact" || (mode === "auto" && h.greet_with_contact_name)) {
+      const name = batchGreetName(h);
+      if (name) return name;
+    }
+    return `${h.name} team`;
   };
   // Which hospital's greeting the preview shows (defaults to the first). Clicking
   // a hospital swaps the "Hello …!" line so the preview matches the copy that
@@ -2693,6 +2713,19 @@ function BatchDialog({ target, onTargetChange, batches, initialKind, suggestedSp
                   ...(recipientOverrideEmails?.length ? { recipientEmailsOverride: recipientOverrideEmails } : {}),
                   ...(Object.keys(contactOverridesPayload).length ? { contactOverrides: contactOverridesPayload } : {}),
                   ...(Object.keys(greetOverridesPayload).length ? { greetOverrides: greetOverridesPayload } : {}),
+                  // Resolved greeting NAME per hospital (recruiter email → contact
+                  // name), so the SEND greets the picked contact — send-batch only
+                  // had primary_contact_name (often blank) and fell back to team.
+                  ...((() => {
+                    const out: Record<string, string> = {};
+                    for (const h of panelSelected) {
+                      const em = String(h.primary_recruiter_email ?? "").trim().toLowerCase();
+                      if (!em) continue;
+                      const name = batchGreetName(h);
+                      if (name) out[em] = name;
+                    }
+                    return Object.keys(out).length ? { greetNames: out } : {};
+                  })()),
                   ...(doctorAttachments.some(arr => arr?.length) ? { perDoctorAttachments: doctorAttachments.map(arr => (arr ?? []).map(a => ({ filename: a.filename, path: a.path }))) } : {}),
                   // Per-hospital hospital-email attachments — keyed by recruiter
                   // email so send-batch overrides only that hospital's files
