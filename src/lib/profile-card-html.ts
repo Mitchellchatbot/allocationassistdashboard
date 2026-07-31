@@ -23,6 +23,10 @@ function esc(s: string): string {
     .replace(/"/g, "&quot;")
     .replace(/'/g, "&#39;");
 }
+/** Escape a URL for CSS url('…') inside a double-quoted style attribute. */
+function cssUrl(s: string): string {
+  return String(s).replace(/["'()\\]/g, c => "%" + c.charCodeAt(0).toString(16).toUpperCase());
+}
 
 /** Flatten any stray HTML in a bio field to a single clean paragraph. */
 function toPlain(s: string): string {
@@ -61,8 +65,12 @@ export function buildProfileCardHtml(v: Record<string, string>): string {
   const bio     = bioRaw ? esc(toPlain(bioRaw)) : "";
 
   // Candidate headshot (WordPress profile photo) — shown in the hero when set.
+  // Rendered as a BACKGROUND image (background-size:cover), not an <img>:
+  // html2canvas (which rasterises this card) ignores object-fit and stretches an
+  // <img> to fill the box, distorting a non-square photo; background-size:cover
+  // is honoured and crops-to-fill cleanly instead.
   const photoImg = photo
-    ? `<img src="${esc(photo)}" alt="${esc(name)}" width="104" height="104" style="display:block;width:104px;height:104px;border-radius:16px;object-fit:cover;border:1px solid #e2e8f0;box-shadow:0 2px 8px rgba(15,23,42,0.10);" />`
+    ? `<div role="img" aria-label="${esc(name)}" style="width:104px;height:104px;border-radius:16px;background-image:url('${cssUrl(photo)}');background-size:cover;background-position:center center;background-repeat:no-repeat;background-color:#e2e8f0;border:1px solid #e2e8f0;box-shadow:0 2px 8px rgba(15,23,42,0.10);"></div>`
     : "";
 
   // The exact 8 facts SharedProfile shows, in the same order + icons. Area of

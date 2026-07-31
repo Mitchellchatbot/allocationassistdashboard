@@ -30,6 +30,11 @@ function esc(s: string): string {
     .replace(/"/g, "&quot;").replace(/'/g, "&#39;");
 }
 const val = (s: string | null | undefined): string => (s ?? "").toString().trim();
+/** Escape a URL for safe use inside CSS url('…') within a double-quoted style
+ *  attribute — percent-encode the few chars that would break the quoting. */
+function cssUrl(u: string): string {
+  return String(u).replace(/["'()\\]/g, c => "%" + c.charCodeAt(0).toString(16).toUpperCase());
+}
 
 const MONTHS = ["January","February","March","April","May","June","July","August","September","October","November","December"];
 function parseDate(iso: string | null | undefined): Date | null {
@@ -90,8 +95,11 @@ const STYLE = `
 .dpm *{box-sizing:border-box;}
 .dpm .side-col{width:274px;flex-shrink:0;}
 .dpm .profile-card{background:linear-gradient(180deg,#189F8A 0%,#1AC2A8 100%);border-radius:20px;padding:28px 26px 26px;color:#fff;text-align:center;}
-.dpm .avatar{width:170px;height:170px;border-radius:50%;overflow:hidden;margin:0 auto 16px;border:3px solid #ffffff;background:#0e7d6b;display:flex;align-items:center;justify-content:center;}
-.dpm .avatar img{width:100%;height:100%;object-fit:cover;display:block;}
+/* Photo is a BACKGROUND image (background-size:cover), NOT an <img>: html2canvas
+   ignores object-fit and stretches an <img> to fill the box, distorting a
+   non-square headshot; it DOES honour background-size:cover, which crops-to-fill
+   the circle cleanly. The initials fallback still centres via flex. */
+.dpm .avatar{width:170px;height:170px;border-radius:50%;overflow:hidden;margin:0 auto 16px;border:3px solid #ffffff;background-color:#0e7d6b;background-size:cover;background-position:center center;background-repeat:no-repeat;display:flex;align-items:center;justify-content:center;}
 .dpm .avatar .initials{font-size:60px;font-weight:600;color:#ffffff;}
 .dpm .profile-card h2{font-size:17px;margin:0 0 5px;font-weight:600;line-height:1.3;white-space:nowrap;}
 .dpm .profile-card .role{font-size:13px;opacity:0.95;margin:0 0 12px;font-weight:600;}
@@ -143,9 +151,10 @@ export function buildDoctorProfileHtml(c: WpCandidate): string {
   const dependents = c.has_dependents == null ? "" : (c.has_dependents ? "Yes" : "No");
 
   const initials = name.replace(/^dr\.?\s+/i, "").trim().split(/\s+/).map(w => w[0]).filter(Boolean).slice(0, 2).join("").toUpperCase();
-  const avatar = photo
-    ? `<img src="${esc(photo)}" alt="${esc(name)}" crossorigin="anonymous">`
-    : `<span class="initials">${esc(initials || "Dr")}</span>`;
+  // Photo rides on the avatar div as a background-image (see .avatar CSS) so
+  // html2canvas can't stretch it; no photo → centred initials.
+  const avatarStyle = photo ? ` style="background-image:url('${cssUrl(photo)}');"` : "";
+  const avatarInner = photo ? "" : `<span class="initials">${esc(initials || "Dr")}</span>`;
 
   const memberSince = fmtDate(c.wp_date);
   // Teal card = photo → name → role → badge → hr → age → phone → email. The three
@@ -153,7 +162,7 @@ export function buildDoctorProfileHtml(c: WpCandidate): string {
   const sideCard =
     `<div class="side-col">` +
       `<div class="profile-card">` +
-        `<div class="avatar">${avatar}</div>` +
+        `<div class="avatar"${avatarStyle}>${avatarInner}</div>` +
         (name ? `<h2>${esc(name)}</h2>` : "") +
         (role ? `<p class="role">${esc(role)}</p>` : "") +
         (memberSince ? `<span class="member-badge">Member Since: ${esc(memberSince)}</span>` : "") +
