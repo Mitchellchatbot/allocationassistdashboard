@@ -77,9 +77,11 @@ export function TriggerFlowDialog({ open, flowKey, onClose }: Props) {
   const qc = useQueryClient();
   const { user } = useAuth();
 
-  // Toggle: did the user click through to the unconstrained "all doctors"
-  // search, or are they still on the default "in-pipeline" view?
-  const [showSearchAll, setShowSearchAll] = useState(false);
+  // Whether the picker shows the unconstrained "all doctors" search or the
+  // predecessor-flow "in-pipeline" quick-list. Defaults to ALL doctors so any
+  // doctor can be marked at any stage — the pipeline list is just a convenience
+  // (it pre-fills the hospital) reachable via "Show pipeline doctors", NOT a gate.
+  const [showSearchAll, setShowSearchAll] = useState(true);
 
   // Reset on open / flow change.
   useEffect(() => {
@@ -91,7 +93,7 @@ export function TriggerFlowDialog({ open, flowKey, onClose }: Props) {
     setInterviewLink("");
     setJoiningDate("");
     setNote("");
-    setShowSearchAll(false);
+    setShowSearchAll(true);
   }, [open, flowKey]);
 
   // Fetch doctors currently in the predecessor flow — they're the ones who
@@ -204,7 +206,11 @@ export function TriggerFlowDialog({ open, flowKey, onClose }: Props) {
     (!flowConfig.needsInterview   || !!interviewDt) &&
     (!flowConfig.needsJoiningDate || !!joiningDate);
 
-  const handleConfirm = async () => {
+  // `sendEmail`: true → record the milestone/run AND open the send preview.
+  // false → "Mark only": record everything (run, events, placement milestone)
+  // but send NOTHING. The run is left at its send stage so the team can open it
+  // later and hit "Send now" to start the emails (with the profile card).
+  const handleConfirm = async (sendEmail: boolean) => {
     if (!doctor || !flowKey || !flowConfig) return;
     setSubmitting(true);
     try {
@@ -333,12 +339,17 @@ export function TriggerFlowDialog({ open, flowKey, onClose }: Props) {
       // ── First email: PREVIEW before sending ──────────────────────────────
       // For email-stage flows (onboarding/shortlist/interview) the run was
       // created at its send-stage; open a preview and send only on confirm
-      // instead of firing blind. second_payment has no trigger-time email (its
-      // first email fires 15 days post-join via the scheduler).
-      if (flowConfig.autoSend) {
+      // instead of firing blind. "Mark only" (sendEmail=false) skips the send
+      // entirely — the milestone + run are already recorded above. second_payment
+      // has no trigger-time email (its first email fires 15 days post-join).
+      if (flowConfig.autoSend && sendEmail) {
         setPendingPreview({ runId: runRow.id });  // preview dialog drives send + close
       } else {
-        toast.success(`${flow.name} scheduled for ${doctor.name}`);
+        toast.success(
+          sendEmail
+            ? `${flow.name} scheduled for ${doctor.name}`
+            : `Marked for ${doctor.name} — no email sent. Open the run any time to send it.`,
+        );
         onClose();
       }
     } catch (err) {
@@ -406,11 +417,11 @@ export function TriggerFlowDialog({ open, flowKey, onClose }: Props) {
           <div className="space-y-2">
             <div className="flex items-center justify-between">
               <Label className="text-[11px] uppercase tracking-wider text-muted-foreground">
-                {predFlow ? "All doctors" : "1. Pick doctor"}
+                {predFlow ? "Pick any doctor" : "1. Pick doctor"}
               </Label>
-              {predFlow && (
-                <Button size="sm" variant="ghost" className="h-6 text-[11px]" onClick={() => setShowSearchAll(false)}>
-                  <ChevronLeft className="h-3 w-3 mr-1" /> Back to pipeline
+              {predFlow && pipelineRuns.length > 0 && (
+                <Button size="sm" variant="ghost" className="h-6 text-[11px]" onClick={() => setShowSearchAll(false)} title="Quick-pick from doctors already in the previous stage (pre-fills their hospital)">
+                  <ChevronRight className="h-3 w-3 mr-1" /> Show pipeline doctors ({pipelineRuns.length})
                 </Button>
               )}
             </div>
@@ -550,10 +561,22 @@ export function TriggerFlowDialog({ open, flowKey, onClose }: Props) {
               />
             </div>
 
-            <DialogFooter>
+            <DialogFooter className="gap-2 sm:gap-2">
               <Button variant="outline" onClick={onClose} disabled={submitting}>Cancel</Button>
-              <Button onClick={handleConfirm} disabled={!canSubmit || submitting}>
-                {submitting ? "Triggering..." : flowConfig.confirmButtonLabel}
+              {/* "Mark only" — record the milestone with no email. Offered only
+                  for flows that would otherwise send at trigger time. */}
+              {flowConfig.autoSend && (
+                <Button
+                  variant="outline"
+                  onClick={() => handleConfirm(false)}
+                  disabled={!canSubmit || submitting}
+                  title="Record this milestone now without sending any email. You can open the run later and hit Send now to start the emails."
+                >
+                  {submitting ? "Working…" : "Mark only (no email)"}
+                </Button>
+              )}
+              <Button onClick={() => handleConfirm(true)} disabled={!canSubmit || submitting}>
+                {submitting ? "Working…" : flowConfig.confirmButtonLabel}
               </Button>
             </DialogFooter>
           </div>
