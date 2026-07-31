@@ -56,6 +56,14 @@ export function HospitalRecipientsPanel({
   const [country, setCountry] = useState("all");
   const [addOpen, setAddOpen] = useState(false);
   const [addQuery, setAddQuery] = useState("");
+  // Checklist add: tick several hospitals, then add them all at once.
+  const [addSel, setAddSel] = useState<Set<string>>(new Set());
+  const resetAdd = () => { setAddSel(new Set()); setAddQuery(""); };
+  const commitAdd = () => {
+    for (const id of addSel) onAddHospital(id);
+    resetAdd();
+    setAddOpen(false);
+  };
 
   const countries = useMemo(() => countryFilterOptions(pool.map(h => h.country)), [pool]);
 
@@ -95,12 +103,12 @@ export function HospitalRecipientsPanel({
             <option value="all">All countries</option>
             {countries.map(c => <option key={c.value} value={c.value}>{c.label}</option>)}
           </select>
-          <Popover open={addOpen} onOpenChange={setAddOpen}>
+          <Popover open={addOpen} onOpenChange={(o) => { setAddOpen(o); if (!o) resetAdd(); }}>
             <PopoverTrigger asChild>
               <button
                 type="button"
                 className="inline-flex items-center gap-1 rounded-md border border-teal-200 bg-teal-50 px-2 h-7 text-[11px] font-medium text-teal-700 hover:bg-teal-100"
-                title="Add another hospital to this send"
+                title="Add hospitals to this send"
               >
                 <Plus className="h-3 w-3" /> Add hospital
               </button>
@@ -116,26 +124,46 @@ export function HospitalRecipientsPanel({
                   className="pl-7 h-8 text-[12px]"
                 />
               </div>
-              <div className="max-h-56 overflow-y-auto divide-y">
+              {/* Checklist — tick several, then Add them all at once. */}
+              <div className="max-h-56 overflow-y-auto divide-y divide-slate-100">
                 {addable.length === 0 ? (
                   <div className="px-2 py-4 text-center text-[11px] text-muted-foreground">
                     {country === "all" ? "No more hospitals to add." : "None in this country."}
                   </div>
-                ) : addable.slice(0, 60).map(h => (
-                  <button
-                    key={h.id}
-                    type="button"
-                    onClick={() => { onAddHospital(h.id); setAddQuery(""); setAddOpen(false); }}
-                    className="flex w-full items-start gap-2 px-1.5 py-1.5 text-left hover:bg-slate-50"
-                  >
-                    <Plus className="h-3 w-3 mt-0.5 shrink-0 text-teal-600" />
-                    <div className="min-w-0">
-                      <div className="text-[12px] font-medium truncate text-slate-800">{h.name?.trim() || "Unnamed hospital"}</div>
-                      <div className="text-[10px] text-muted-foreground truncate">{[h.city, h.country].filter(Boolean).join(" · ") || "—"}</div>
-                    </div>
-                  </button>
-                ))}
+                ) : addable.slice(0, 80).map(h => {
+                  const checked = addSel.has(h.id);
+                  return (
+                    <label
+                      key={h.id}
+                      className="flex w-full cursor-pointer items-center gap-2 px-1.5 py-1.5 hover:bg-slate-50"
+                    >
+                      <input
+                        type="checkbox"
+                        checked={checked}
+                        onChange={() => setAddSel(prev => { const n = new Set(prev); if (n.has(h.id)) n.delete(h.id); else n.add(h.id); return n; })}
+                        className="h-3.5 w-3.5 shrink-0 accent-teal-600"
+                      />
+                      <div className="min-w-0">
+                        <div className="text-[12px] font-medium truncate text-slate-800">{h.name?.trim() || "Unnamed hospital"}</div>
+                        <div className="text-[10px] text-muted-foreground truncate">{[h.city, h.country].filter(Boolean).join(" · ") || "—"}</div>
+                      </div>
+                    </label>
+                  );
+                })}
               </div>
+              {addable.length > 0 && (
+                <div className="mt-1.5 flex items-center justify-between gap-2 border-t border-slate-100 pt-1.5">
+                  <span className="text-[10.5px] text-muted-foreground">{addSel.size} selected</span>
+                  <button
+                    type="button"
+                    disabled={addSel.size === 0}
+                    onClick={commitAdd}
+                    className="inline-flex items-center gap-1 rounded-md bg-teal-600 px-2.5 h-7 text-[11px] font-medium text-white hover:bg-teal-700 disabled:opacity-50"
+                  >
+                    <Plus className="h-3 w-3" /> Add{addSel.size ? ` ${addSel.size}` : ""}
+                  </button>
+                </div>
+              )}
             </PopoverContent>
           </Popover>
         </div>

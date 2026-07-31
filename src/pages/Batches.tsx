@@ -35,6 +35,7 @@ import { EmailPreviewStudio } from "@/components/EmailPreviewStudio";
 import { ProfileSubTabs } from "@/components/ProfileSubTabs";
 import { CcBccPicker, makeHospitalFlag } from "@/components/automations/CcBccPicker";
 import { AttachmentsPicker } from "@/components/automations/AttachmentsPicker";
+import { HospitalRecipientsPanel } from "@/components/automations/HospitalRecipientsPanel";
 import { CvStudioControl } from "@/components/automations/ProfileCardControls";
 import { AA_SENDERS, findSenderByEmail } from "@/lib/hi-team";
 import type { EmailAttachment } from "@/lib/email-attachments";
@@ -1447,25 +1448,6 @@ function BatchDialog({ target, onTargetChange, batches, initialKind, suggestedSp
     }
     return [...m.values()].sort((a, b) => a.label.localeCompare(b.label));
   }, [addableHospitals]);
-  // Add-hospital checklist: tick several hospitals then add them all at once.
-  const [addPickOpen, setAddPickOpen] = useState(false);
-  const [addPickSel,  setAddPickSel]  = useState<Set<string>>(new Set());
-  const [addPickQuery, setAddPickQuery] = useState("");
-  const addHospitalsBcc = (hospitalIds: string[]) => {
-    const emails = hospitalIds
-      .map(id => previewHospitals.find(x => x.id === id)?.primary_recruiter_email?.trim())
-      .filter((e): e is string => !!e);
-    if (emails.length === 0) return;
-    setBatchBcc(prev => {
-      const have = new Set(prev.map(e => e.toLowerCase()));
-      const add = emails.filter(e => !have.has(e.toLowerCase()));
-      return add.length ? [...prev, ...add] : prev;
-    });
-    toast.success(`Added ${emails.length} hospital${emails.length === 1 ? "" : "s"} to this send.`);
-    setAddPickSel(new Set());
-    setAddPickQuery("");
-    setAddPickOpen(false);
-  };
   // Send to ONLY one region — an explicit recipient list that REPLACES the whole
   // batch-country scope (not additive). Null = use the batch's country default.
   const [regionOnly, setRegionOnly] = useState<{ key: string; label: string; emails: string[] } | null>(null);
@@ -1583,6 +1565,36 @@ function BatchDialog({ target, onTargetChange, batches, initialKind, suggestedSp
   }, [greetModeByHospital, previewHospitals]);
   const removeHospitalBcc = (email: string) =>
     setBatchBcc(prev => prev.filter(e => e.trim().toLowerCase() !== email.trim().toLowerCase()));
+
+  // ── Shared HospitalRecipientsPanel adapter — SAME frontend as the personalized
+  // composer. Rows being emailed = the country/region hospitals (minus excluded)
+  // + the manually-added ones. Add/remove map onto the batch's exclude + BCC
+  // lists so the actual send is unchanged; only the UI is unified.
+  const panelSelected = useMemo<Hospital[]>(() => {
+    const base = displayHospitals.filter(h => !isExcluded(h.primary_recruiter_email));
+    return regionOnly ? base : [...base, ...addedHospitals];
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [displayHospitals, addedHospitals, regionOnly, excludedEmails]);
+  const panelAddHospital = (id: string) => {
+    const email = previewHospitals.find(x => x.id === id)?.primary_recruiter_email?.trim();
+    if (!email) return;
+    const el = email.toLowerCase();
+    if (eligibleEmails.has(el)) {
+      // A previously-removed country hospital → un-exclude it.
+      setExcludedEmails(prev => prev.filter(e => e.trim().toLowerCase() !== el));
+    } else {
+      // A different-country hospital → add it on top via the BCC list.
+      setBatchBcc(prev => prev.some(e => e.toLowerCase() === el) ? prev : [...prev, email]);
+    }
+  };
+  const panelRemoveHospital = (id: string) => {
+    const email = previewHospitals.find(x => x.id === id)?.primary_recruiter_email?.trim();
+    if (!email) return;
+    if (eligibleEmails.has(email.toLowerCase())) toggleExclude(email); // exclude a country hospital
+    else removeHospitalBcc(email);                                      // remove an added hospital
+  };
+  const panelContactOverride = (hid: string, emails: string[] | null) =>
+    setContactSel(prev => { const n = { ...prev }; if (emails && emails.length) n[hid] = emails; else delete n[hid]; return n; });
 
   // Personalised greeting per hospital (mirrors send-batch's greetingFor): the
   // hospital's contact person when it greets by contact, else "<Name> team".
@@ -2280,240 +2292,43 @@ function BatchDialog({ target, onTargetChange, batches, initialKind, suggestedSp
             {batch && (batch.attachments?.length ?? 0) > 0 && <div>{batch.attachments.length} attachment{batch.attachments.length === 1 ? "" : "s"} ride this send.</div>}
           </div>
 
-          {/* Recipient hospitals — the exact BCC list, with an add-more picker. */}
-          <div className="rounded-lg border border-sidebar-border/40 bg-white/95 p-2 shadow-sm">
-            <div className="mb-1.5 flex items-center gap-1.5 px-0.5 text-[10px] font-medium text-slate-600">
-              <Building2 className="h-3 w-3 text-teal-600" />
-              Sending to {sendingCount} hospital{sendingCount === 1 ? "" : "s"}
-              {regionOnly
-                ? <span className="font-medium text-teal-600">· {regionOnly.label} only</span>
-                : batch?.country ? <span className="font-normal text-slate-400">· {batch.country}</span> : null}
-              {excludedEmails.length > 0 && <span className="font-normal text-rose-400">· {excludedEmails.length} excluded</span>}
-            </div>
-            {regionOnly && (
-              <button type="button" onClick={clearRegionOnly}
-                className="mb-1.5 inline-flex items-center gap-1 rounded-full border border-teal-200 bg-teal-50 px-2 py-0.5 text-[10px] font-medium text-teal-700 hover:bg-teal-100">
-                <X className="h-2.5 w-2.5" /> Clear region — back to {batch?.country ?? "country"} hospitals
-              </button>
-            )}
-            <div className="max-h-36 overflow-y-auto rounded-md border border-slate-100 bg-slate-50/60 p-1">
-              {displayHospitals.length === 0 && (regionOnly || addedHospitals.length === 0) ? (
-                <div className="px-1 py-2 text-center text-[10px] text-slate-400">
-                  No hospitals with a recruiter email{regionOnly ? ` in ${regionOnly.label}` : batch?.country ? ` in ${batch.country}` : ""} yet.
-                </div>
-              ) : (
-                <>
-                  {displayHospitals.map(h => {
-                    const excluded = isExcluded(h.primary_recruiter_email);
-                    const shown = emailShownFor.has(h.id);
-                    return (
-                      <div key={h.id} className="group px-1 py-0.5 text-[10.5px]">
-                        <div className="flex items-center gap-1.5">
-                          <span className={`h-1 w-1 shrink-0 rounded-full ${excluded ? "bg-slate-300" : "bg-teal-500"}`} />
-                          <button
-                            type="button"
-                            onClick={() => { toggleEmailShown(h.id); setPreviewGreetId(h.id); }}
-                            title={`Preview ${h.name}'s email · ${h.primary_recruiter_email ?? "no recruiter email"}`}
-                            className={`flex-1 truncate text-left ${excluded ? "text-slate-400 line-through" : previewGreetId === h.id ? "font-medium text-teal-700" : "text-slate-700 hover:text-teal-700"}`}
-                          >
-                            {h.name}
-                          </button>
-                          <button
-                            type="button"
-                            className={`shrink-0 ${excluded ? "text-teal-600 hover:text-teal-700" : "text-slate-300 hover:text-rose-600"}`}
-                            title={excluded ? `Include ${h.name}` : `Exclude ${h.name} from this send`}
-                            onClick={() => toggleExclude(h.primary_recruiter_email)}
-                          >
-                            {excluded ? <Plus className="h-3 w-3" /> : <X className="h-3 w-3" />}
-                          </button>
-                        </div>
-                        {/* Greeting knob — Auto (stored setting) / Name (greet the
-                            contact person) / Team ("<Hospital> team"). Also selects
-                            this hospital for the previewed "Hello …" line. */}
-                        {!excluded && (
-                          <div className="ml-3 mt-0.5 flex items-center gap-1">
-                            <span className="text-[9px] uppercase tracking-wider text-slate-400">Greet</span>
-                            {([["auto", "Auto"], ["contact", "Name"], ["team", "Team"]] as const).map(([m, label]) => {
-                              const active = (greetModeByHospital[h.id] ?? "auto") === m;
-                              return (
-                                <button
-                                  key={m}
-                                  type="button"
-                                  onClick={() => { setGreetModeByHospital(prev => ({ ...prev, [h.id]: m })); setPreviewGreetId(h.id); }}
-                                  title={m === "auto" ? "Use the hospital's saved greeting setting" : m === "contact" ? "Greet the contact person by name" : "Greet the hospital team"}
-                                  className={`rounded px-1.5 py-[1px] text-[9px] border transition-colors ${active ? "border-teal-400 bg-teal-50 text-teal-700 font-medium" : "border-slate-200 bg-white text-slate-500 hover:text-teal-700"}`}
-                                >
-                                  {label}
-                                </button>
-                              );
-                            })}
-                          </div>
-                        )}
-                        {/* Pick which of this hospital's reps get the email (only
-                            when it actually has more than one contact). */}
-                        {!excluded && (() => {
-                          const contacts = contactsFor(h);
-                          if (contacts.length <= 1) return null;
-                          const to = effectiveTo(h);
-                          const open = !!contactOpen[h.id];
-                          const custom = !!contactSel[h.id];
-                          return (
-                            <div className="ml-3 mt-0.5">
-                              <button type="button"
-                                onClick={() => setContactOpen(p => ({ ...p, [h.id]: !open }))}
-                                className="inline-flex items-center gap-1 text-[10px] text-slate-500 hover:text-teal-700">
-                                {open ? <ChevronDown className="h-2.5 w-2.5" /> : <ChevronRight className="h-2.5 w-2.5" />}
-                                {to.length} of {contacts.length} recipient{contacts.length === 1 ? "" : "s"}
-                                {custom && <span className="text-teal-600">· custom</span>}
-                              </button>
-                              {open && (
-                                <div className="mt-0.5 space-y-0.5 rounded-md border border-slate-100 bg-white/70 p-1">
-                                  {contacts.map(c => {
-                                    const email = c.email!.trim();
-                                    const checked = to.some(e => e.toLowerCase() === email.toLowerCase());
-                                    return (
-                                      <label key={c.id + email} className="flex items-center gap-1.5 px-0.5 py-0.5 cursor-pointer">
-                                        <input type="checkbox" checked={checked}
-                                          onChange={() => toggleContact(h.id, email, to)}
-                                          className="h-3 w-3 accent-teal-600 shrink-0" />
-                                        <span className="min-w-0 flex-1 truncate text-[10px] text-slate-600">
-                                          {c.name ? <span className="text-slate-700">{c.name}</span> : null}
-                                          {c.title ? <span className="text-slate-400"> · {c.title}</span> : null}
-                                          <span className="text-teal-600"> {email}</span>
-                                        </span>
-                                      </label>
-                                    );
-                                  })}
-                                  {to.length === 0 && <div className="px-0.5 text-[9.5px] text-rose-500">Pick at least one — this hospital won't be emailed otherwise.</div>}
-                                  {custom && (
-                                    <button type="button" onClick={() => setContactSel(p => { const n = { ...p }; delete n[h.id]; return n; })}
-                                      className="px-0.5 text-[9.5px] text-slate-400 hover:text-teal-700">Reset to default</button>
-                                  )}
-                                </div>
-                              )}
-                            </div>
-                          );
-                        })()}
-                        {shown && (
-                          <button
-                            type="button"
-                            onClick={() => { if (h.primary_recruiter_email) { navigator.clipboard.writeText(h.primary_recruiter_email); toast.success("Email copied."); } }}
-                            title="Click to copy"
-                            className="ml-3 mt-0.5 block max-w-full truncate text-[10px] text-teal-600 hover:underline"
-                          >
-                            {h.primary_recruiter_email ?? "no recruiter email on file"}
-                          </button>
-                        )}
-                      </div>
-                    );
-                  })}
-                  {!regionOnly && addedHospitals.map(h => (
-                    <div key={h.id} className="flex items-center gap-1.5 px-1 py-0.5 text-[10.5px] text-emerald-700">
-                      <Plus className="h-2.5 w-2.5 shrink-0" />
-                      <span className="flex-1 truncate">{h.name}</span>
-                      <button
-                        type="button"
-                        className="shrink-0 text-slate-400 hover:text-rose-600"
-                        title={`Remove ${h.name}`}
-                        onClick={() => removeHospitalBcc(h.primary_recruiter_email!)}
-                      >
-                        <X className="h-3 w-3" />
-                      </button>
-                    </div>
-                  ))}
-                </>
+          {/* Send to ONLY one region — batch-only; REPLACES the whole list. */}
+          {addRegions.length > 0 && (
+            <div className="rounded-lg border border-sidebar-border/40 bg-white/95 p-2 shadow-sm space-y-1.5">
+              {regionOnly && (
+                <button type="button" onClick={clearRegionOnly}
+                  className="inline-flex items-center gap-1 rounded-full border border-teal-200 bg-teal-50 px-2 py-0.5 text-[10px] font-medium text-teal-700 hover:bg-teal-100">
+                  <X className="h-2.5 w-2.5" /> Clear region — back to {batch?.country ?? "country"} hospitals
+                </button>
               )}
+              <Select value={regionOnly?.key ?? ""} onValueChange={v => v === "__clear" ? clearRegionOnly() : selectRegionOnly(v)} disabled={sendNow.isPending}>
+                <SelectTrigger className="h-7 text-[11px] text-slate-700"><SelectValue placeholder="Send to only a region…" /></SelectTrigger>
+                <SelectContent>
+                  {regionOnly && <SelectItem value="__clear" className="text-[11px]">↩ Back to {batch?.country ?? "country"} hospitals</SelectItem>}
+                  <SelectItem value="__all" className="text-[11px]">Every addable hospital ({addableHospitals.length})</SelectItem>
+                  {addRegions.map(r => (
+                    <SelectItem key={r.key} value={r.key} className="text-[11px]">Only {r.label} ({r.count})</SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
             </div>
-            {addRegions.length > 0 && (
-              <div className="mt-1.5 space-y-1.5">
-                {/* Send to ONLY one region — REPLACES the whole recipient list. */}
-                <Select value={regionOnly?.key ?? ""} onValueChange={v => v === "__clear" ? clearRegionOnly() : selectRegionOnly(v)} disabled={sendNow.isPending}>
-                  <SelectTrigger className="h-7 text-[11px] text-slate-700"><SelectValue placeholder="Send to only a region…" /></SelectTrigger>
-                  <SelectContent>
-                    {regionOnly && <SelectItem value="__clear" className="text-[11px]">↩ Back to {batch?.country ?? "country"} hospitals</SelectItem>}
-                    <SelectItem value="__all" className="text-[11px]">Every addable hospital ({addableHospitals.length})</SelectItem>
-                    {addRegions.map(r => (
-                      <SelectItem key={r.key} value={r.key} className="text-[11px]">Only {r.label} ({r.count})</SelectItem>
-                    ))}
-                  </SelectContent>
-                </Select>
-                {/* Add hospitals on top of the current list — tick several in the
-                    checklist and add them all at once, optionally narrowed to one
-                    country (parity with the single composer). */}
-                {!regionOnly && addableHospitals.length > 0 && (
-                  <div className="flex items-center gap-1.5">
-                    <select
-                      value={addHospCountry}
-                      onChange={e => setAddHospCountry(e.target.value)}
-                      disabled={sendNow.isPending}
-                      className="shrink-0 rounded-md border border-input bg-white text-slate-700 text-[11px] px-1.5 h-7 max-w-[104px]"
-                    >
-                      <option value="all">All countries</option>
-                      {addHospCountries.map(c => <option key={c.value} value={c.value}>{c.label}</option>)}
-                    </select>
-                    <Popover open={addPickOpen} onOpenChange={(o) => { setAddPickOpen(o); if (!o) { setAddPickSel(new Set()); setAddPickQuery(""); } }}>
-                      <PopoverTrigger asChild>
-                        <button
-                          type="button"
-                          disabled={sendNow.isPending}
-                          className="inline-flex h-7 flex-1 items-center justify-center gap-1 rounded-md border border-teal-200 bg-teal-50 px-2 text-[11px] font-medium text-teal-700 hover:bg-teal-100 disabled:opacity-60"
-                        >
-                          <Plus className="h-3 w-3" /> Add hospital
-                        </button>
-                      </PopoverTrigger>
-                      <PopoverContent align="start" className="w-72 p-2">
-                        {(() => {
-                          const term = addPickQuery.trim().toLowerCase();
-                          const list = term
-                            ? filteredAddable.filter(h => `${h.name} ${h.city ?? ""} ${h.country ?? ""}`.toLowerCase().includes(term))
-                            : filteredAddable;
-                          return (
-                            <>
-                              <div className="relative mb-1.5">
-                                <Search className="absolute left-2 top-1/2 -translate-y-1/2 h-3.5 w-3.5 text-slate-400" />
-                                <input
-                                  autoFocus
-                                  value={addPickQuery}
-                                  onChange={e => setAddPickQuery(e.target.value)}
-                                  placeholder="Search hospitals…"
-                                  className="w-full rounded-md border border-input bg-white pl-7 pr-2 h-8 text-[12px] text-slate-800 outline-none focus:border-teal-400"
-                                />
-                              </div>
-                              <div className="max-h-56 overflow-y-auto divide-y divide-slate-100">
-                                {list.length === 0 ? (
-                                  <div className="px-2 py-4 text-center text-[11px] italic text-slate-400">No addable hospitals{addPickQuery ? " match" : " in this country"}.</div>
-                                ) : list.map(h => {
-                                  const checked = addPickSel.has(h.id);
-                                  return (
-                                    <label key={h.id} className="flex cursor-pointer items-center gap-2 px-1 py-1.5 hover:bg-slate-50">
-                                      <Checkbox
-                                        checked={checked}
-                                        onCheckedChange={() => setAddPickSel(prev => { const n = new Set(prev); if (n.has(h.id)) n.delete(h.id); else n.add(h.id); return n; })}
-                                      />
-                                      <span className="min-w-0 flex-1">
-                                        <span className="block truncate text-[12px] text-slate-800">{h.name}</span>
-                                        <span className="block truncate text-[10px] text-slate-400">{[h.city, h.country].filter(Boolean).join(" · ") || "—"}</span>
-                                      </span>
-                                    </label>
-                                  );
-                                })}
-                              </div>
-                              <div className="mt-1.5 flex items-center justify-between gap-2 border-t border-slate-100 pt-1.5">
-                                <span className="text-[10.5px] text-slate-500">{addPickSel.size} selected</span>
-                                <Button size="sm" className="h-7 text-[11px]" disabled={addPickSel.size === 0} onClick={() => addHospitalsBcc([...addPickSel])}>
-                                  <Plus className="h-3 w-3 mr-1" /> Add{addPickSel.size ? ` ${addPickSel.size}` : ""}
-                                </Button>
-                              </div>
-                            </>
-                          );
-                        })()}
-                      </PopoverContent>
-                    </Popover>
-                  </div>
-                )}
-              </div>
-            )}
-          </div>
+          )}
+
+          {/* Recipient hospitals — the SAME shared panel as the personalized composer. */}
+          <HospitalRecipientsPanel
+            selected={panelSelected}
+            pool={previewHospitals}
+            contacts={hospitalContacts}
+            contactOverrides={contactSel}
+            onContactOverride={panelContactOverride}
+            onRemoveHospital={panelRemoveHospital}
+            onAddHospital={panelAddHospital}
+            activeHospitalId={previewGreetId}
+            onSelectHospital={setPreviewGreetId}
+            heading={`Sending to ${sendingCount} hospital${sendingCount === 1 ? "" : "s"}`}
+            greetMode={greetModeByHospital}
+            onGreetMode={(hid, mode) => setGreetModeByHospital(prev => ({ ...prev, [hid]: mode }))}
+          />
 
           {/* Sending as — the From line the recipient hospital sees. Defaults to
               the generic AA team address (send-batch keeps its MAIL_FROM); pick a
