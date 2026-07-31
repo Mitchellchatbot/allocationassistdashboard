@@ -70,7 +70,7 @@ export function buildProfileCardHtml(v: Record<string, string>): string {
   // <img> to fill the box, distorting a non-square photo; background-size:cover
   // is honoured and crops-to-fill cleanly instead.
   const photoImg = photo
-    ? `<div role="img" aria-label="${esc(name)}" style="width:104px;height:104px;border-radius:16px;background-image:url('${cssUrl(photo)}');background-size:cover;background-position:center center;background-repeat:no-repeat;background-color:#e2e8f0;border:1px solid #e2e8f0;box-shadow:0 2px 8px rgba(15,23,42,0.10);"></div>`
+    ? `<div role="img" aria-label="${esc(name)}" style="width:104px;height:104px;border-radius:16px;background-image:url('${cssUrl(photo)}');background-size:cover;background-position:center 20%;background-repeat:no-repeat;background-color:#e2e8f0;border:1px solid #e2e8f0;box-shadow:0 2px 8px rgba(15,23,42,0.10);"></div>`
     : "";
 
   // The exact 8 facts SharedProfile shows, in the same order + icons. Area of

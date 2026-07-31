@@ -99,7 +99,10 @@ const STYLE = `
    ignores object-fit and stretches an <img> to fill the box, distorting a
    non-square headshot; it DOES honour background-size:cover, which crops-to-fill
    the circle cleanly. The initials fallback still centres via flex. */
-.dpm .avatar{width:170px;height:170px;border-radius:50%;overflow:hidden;margin:0 auto 16px;border:3px solid #ffffff;background-color:#0e7d6b;background-size:cover;background-position:center center;background-repeat:no-repeat;display:flex;align-items:center;justify-content:center;}
+/* background-position is biased UP (center 20%) so the face/head is kept in
+   frame — a head-and-shoulders photo cropped to the circle loses the body
+   below, not the top of the head. */
+.dpm .avatar{width:170px;height:170px;border-radius:50%;overflow:hidden;margin:0 auto 16px;border:3px solid #ffffff;background-color:#0e7d6b;background-size:cover;background-position:center 20%;background-repeat:no-repeat;display:flex;align-items:center;justify-content:center;}
 .dpm .avatar .initials{font-size:60px;font-weight:600;color:#ffffff;}
 .dpm .profile-card h2{font-size:17px;margin:0 0 5px;font-weight:600;line-height:1.3;white-space:nowrap;}
 .dpm .profile-card .role{font-size:13px;opacity:0.95;margin:0 0 12px;font-weight:600;}

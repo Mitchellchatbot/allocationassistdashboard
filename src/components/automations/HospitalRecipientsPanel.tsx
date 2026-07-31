@@ -150,12 +150,28 @@ export function HospitalRecipientsPanel({
             const resolved = resolveRecipient(hc, h).contact;
             const override = contactOverrides[h.id] ?? [];
             const selectedEmails = new Set(override.map(e => e.trim().toLowerCase()).filter(Boolean));
+            // Who Auto would actually email — so the checkbox reflects the real
+            // recipient BEFORE any manual override (every contact in 'all' mode,
+            // else the resolved primary/cycle pick). This is what makes the
+            // primary show ticked by default.
+            const autoEmails = new Set(
+              (h.contact_mode === "all" ? resolveAllRecipients(hc, h) : (resolved ? [resolved] : []))
+                .map(c => c.email?.toLowerCase()).filter(Boolean) as string[],
+            );
+            // Ticked set shown in the UI: the manual override if there is one,
+            // otherwise Auto's pick.
+            const checkedEmails = selectedEmails.size ? selectedEmails : autoEmails;
             const toggle = (email: string) => {
               const k = email.toLowerCase();
-              const next = new Set(selectedEmails);
+              // Start from what's currently ticked (Auto's pick when there's no
+              // override yet) so ticking a 2nd contact KEEPS the primary, and
+              // clearing back to exactly Auto's pick returns to Auto mode.
+              const next = new Set(checkedEmails);
               if (next.has(k)) next.delete(k); else next.add(k);
               const emails = hc.filter(c => c.email && next.has(c.email.toLowerCase())).map(c => c.email!);
-              onContactOverride(h.id, emails.length ? emails : null); // empty → back to Auto
+              const sameAsAuto = emails.length === autoEmails.size
+                && emails.every(e => autoEmails.has(e.toLowerCase()));
+              onContactOverride(h.id, (emails.length && !sameAsAuto) ? emails : null); // Auto pick / empty → back to Auto
             };
             const autoLabel = h.contact_mode === "all"
               ? `Auto (all ${resolveAllRecipients(hc, h).length})`
@@ -193,7 +209,7 @@ export function HospitalRecipientsPanel({
                     <div className="flex flex-wrap gap-x-3 gap-y-1">
                       {hc.filter(c => c.email).map(c => (
                         <label key={c.id} className="inline-flex items-center gap-1 cursor-pointer" title={c.email}>
-                          <input type="checkbox" checked={selectedEmails.has(c.email!.toLowerCase())} onChange={() => toggle(c.email!)} className="h-3 w-3 accent-teal-600" />
+                          <input type="checkbox" checked={checkedEmails.has(c.email!.toLowerCase())} onChange={() => toggle(c.email!)} className="h-3 w-3 accent-teal-600" />
                           <span className="truncate max-w-[150px] text-[11px] text-slate-700">{c.name || c.email}{c.isPrimary ? " · Primary" : ""}</span>
                         </label>
                       ))}
