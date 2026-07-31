@@ -12,6 +12,7 @@ import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription, Di
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Mailbox, Plus, Send, X, CheckCircle2, Calendar, ChevronRight, ChevronDown, RefreshCw, AlertCircle, AlertTriangle, TestTube, Sparkles, UserSquare, GripVertical, Wand2, Pencil, Building2, Search, Loader2, Users } from "lucide-react";
 import { Checkbox } from "@/components/ui/checkbox";
+import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
 import { toast } from "sonner";
 import { useScheduledBatches, useUpsertBatch, useUpdateBatch, useCancelBatch, useSendBatchNow, useBatchPreview,
   useSpecialtyRotation, useUpdateSpecialtyRotation,
@@ -1125,6 +1126,10 @@ function BatchDialog({ target, onTargetChange, batches, initialKind, suggestedSp
   // Which profile sub-tab is open under each top-level tab.
   const [hospitalTab, setHospitalTab] = useState(0);
   const [doctorTab,   setDoctorTab]   = useState(0);
+  // Which top-level email tab is open (hospital vs doctor). Controlled so the
+  // hospital-only rail panels (recipients, sender, CC, note) can hide on the
+  // Doctor tab — they're irrelevant there.
+  const [previewTab, setPreviewTab] = useState<"hospital" | "doctor">("hospital");
   // Editable-preview state: the team can tweak the subject/body before sending.
   // editSubject/editHtml are the live (possibly edited) values; emailPreview
   // holds the pristine template render so "Reset" + the edited-diff check work.
@@ -1442,12 +1447,24 @@ function BatchDialog({ target, onTargetChange, batches, initialKind, suggestedSp
     }
     return [...m.values()].sort((a, b) => a.label.localeCompare(b.label));
   }, [addableHospitals]);
-  const addHospitalBcc = (hospitalId: string) => {
-    const h = previewHospitals.find(x => x.id === hospitalId);
-    const email = h?.primary_recruiter_email?.trim();
-    if (!email) return;
-    setBatchBcc(prev => prev.some(e => e.toLowerCase() === email.toLowerCase()) ? prev : [...prev, email]);
-    toast.success(`Added ${h!.name} to this send.`);
+  // Add-hospital checklist: tick several hospitals then add them all at once.
+  const [addPickOpen, setAddPickOpen] = useState(false);
+  const [addPickSel,  setAddPickSel]  = useState<Set<string>>(new Set());
+  const [addPickQuery, setAddPickQuery] = useState("");
+  const addHospitalsBcc = (hospitalIds: string[]) => {
+    const emails = hospitalIds
+      .map(id => previewHospitals.find(x => x.id === id)?.primary_recruiter_email?.trim())
+      .filter((e): e is string => !!e);
+    if (emails.length === 0) return;
+    setBatchBcc(prev => {
+      const have = new Set(prev.map(e => e.toLowerCase()));
+      const add = emails.filter(e => !have.has(e.toLowerCase()));
+      return add.length ? [...prev, ...add] : prev;
+    });
+    toast.success(`Added ${emails.length} hospital${emails.length === 1 ? "" : "s"} to this send.`);
+    setAddPickSel(new Set());
+    setAddPickQuery("");
+    setAddPickOpen(false);
   };
   // Send to ONLY one region — an explicit recipient list that REPLACES the whole
   // batch-country scope (not additive). Null = use the batch's country default.
@@ -2234,6 +2251,8 @@ function BatchDialog({ target, onTargetChange, batches, initialKind, suggestedSp
     <EmailPreviewStudio
       open={!!emailPreview}
       onClose={() => setEmailPreview(null)}
+      activeKey={previewTab}
+      onActiveKeyChange={(k) => setPreviewTab(k === "doctor" ? "doctor" : "hospital")}
       title="Batch email preview"
       subtitle={regionOnly
         ? `${sendingCount} hospital${sendingCount === 1 ? "" : "s"} · ${regionOnly.label} only`
@@ -2249,6 +2268,9 @@ function BatchDialog({ target, onTargetChange, batches, initialKind, suggestedSp
             : <div className="rounded-lg border border-rose-300 bg-rose-50 p-2.5 text-[11px] text-rose-900 shadow-sm">
                 <span className="inline-flex items-start gap-1.5"><AlertTriangle className="h-3.5 w-3.5 mt-[1px] shrink-0" /><span><strong>LIVE mode.</strong> Clicking Send emails <strong>{emailPreview.bcc_count} real hospital{emailPreview.bcc_count === 1 ? "" : "s"}</strong>. There is no undo.</span></span>
               </div>)}
+          {/* Everything below is HOSPITAL-email routing (recipients, sender, CC,
+              note) — hidden on the Doctor tab, where none of it applies. */}
+          {previewTab === "hospital" && (<>
           <div className={`rounded-lg border p-2.5 text-[11px] space-y-1 shadow-sm ${batchEdited ? "border-amber-300 bg-amber-50 text-amber-900" : "border-sidebar-border/40 bg-white/95 text-slate-500"}`}>
             <div>
               {batchEdited
@@ -2415,8 +2437,9 @@ function BatchDialog({ target, onTargetChange, batches, initialKind, suggestedSp
                     ))}
                   </SelectContent>
                 </Select>
-                {/* …or add a single hospital on top of the current list, optionally
-                    narrowed to one country (parity with the single composer). */}
+                {/* Add hospitals on top of the current list — tick several in the
+                    checklist and add them all at once, optionally narrowed to one
+                    country (parity with the single composer). */}
                 {!regionOnly && addableHospitals.length > 0 && (
                   <div className="flex items-center gap-1.5">
                     <select
@@ -2428,18 +2451,64 @@ function BatchDialog({ target, onTargetChange, batches, initialKind, suggestedSp
                       <option value="all">All countries</option>
                       {addHospCountries.map(c => <option key={c.value} value={c.value}>{c.label}</option>)}
                     </select>
-                    <Select value="" onValueChange={addHospitalBcc} disabled={sendNow.isPending}>
-                      <SelectTrigger className="h-7 flex-1 text-[11px] text-slate-700"><SelectValue placeholder="+ Add a single hospital…" /></SelectTrigger>
-                      <SelectContent>
-                        {filteredAddable.length === 0 ? (
-                          <div className="px-2 py-1.5 text-[11px] italic text-slate-400">No addable hospitals in this country.</div>
-                        ) : filteredAddable.map(h => (
-                          <SelectItem key={h.id} value={h.id} className="text-[11px]">
-                            {h.name}{h.city ? ` · ${h.city}` : h.country ? ` · ${h.country}` : ""}
-                          </SelectItem>
-                        ))}
-                      </SelectContent>
-                    </Select>
+                    <Popover open={addPickOpen} onOpenChange={(o) => { setAddPickOpen(o); if (!o) { setAddPickSel(new Set()); setAddPickQuery(""); } }}>
+                      <PopoverTrigger asChild>
+                        <button
+                          type="button"
+                          disabled={sendNow.isPending}
+                          className="inline-flex h-7 flex-1 items-center justify-center gap-1 rounded-md border border-teal-200 bg-teal-50 px-2 text-[11px] font-medium text-teal-700 hover:bg-teal-100 disabled:opacity-60"
+                        >
+                          <Plus className="h-3 w-3" /> Add hospital
+                        </button>
+                      </PopoverTrigger>
+                      <PopoverContent align="start" className="w-72 p-2">
+                        {(() => {
+                          const term = addPickQuery.trim().toLowerCase();
+                          const list = term
+                            ? filteredAddable.filter(h => `${h.name} ${h.city ?? ""} ${h.country ?? ""}`.toLowerCase().includes(term))
+                            : filteredAddable;
+                          return (
+                            <>
+                              <div className="relative mb-1.5">
+                                <Search className="absolute left-2 top-1/2 -translate-y-1/2 h-3.5 w-3.5 text-slate-400" />
+                                <input
+                                  autoFocus
+                                  value={addPickQuery}
+                                  onChange={e => setAddPickQuery(e.target.value)}
+                                  placeholder="Search hospitals…"
+                                  className="w-full rounded-md border border-input bg-white pl-7 pr-2 h-8 text-[12px] text-slate-800 outline-none focus:border-teal-400"
+                                />
+                              </div>
+                              <div className="max-h-56 overflow-y-auto divide-y divide-slate-100">
+                                {list.length === 0 ? (
+                                  <div className="px-2 py-4 text-center text-[11px] italic text-slate-400">No addable hospitals{addPickQuery ? " match" : " in this country"}.</div>
+                                ) : list.map(h => {
+                                  const checked = addPickSel.has(h.id);
+                                  return (
+                                    <label key={h.id} className="flex cursor-pointer items-center gap-2 px-1 py-1.5 hover:bg-slate-50">
+                                      <Checkbox
+                                        checked={checked}
+                                        onCheckedChange={() => setAddPickSel(prev => { const n = new Set(prev); if (n.has(h.id)) n.delete(h.id); else n.add(h.id); return n; })}
+                                      />
+                                      <span className="min-w-0 flex-1">
+                                        <span className="block truncate text-[12px] text-slate-800">{h.name}</span>
+                                        <span className="block truncate text-[10px] text-slate-400">{[h.city, h.country].filter(Boolean).join(" · ") || "—"}</span>
+                                      </span>
+                                    </label>
+                                  );
+                                })}
+                              </div>
+                              <div className="mt-1.5 flex items-center justify-between gap-2 border-t border-slate-100 pt-1.5">
+                                <span className="text-[10.5px] text-slate-500">{addPickSel.size} selected</span>
+                                <Button size="sm" className="h-7 text-[11px]" disabled={addPickSel.size === 0} onClick={() => addHospitalsBcc([...addPickSel])}>
+                                  <Plus className="h-3 w-3 mr-1" /> Add{addPickSel.size ? ` ${addPickSel.size}` : ""}
+                                </Button>
+                              </div>
+                            </>
+                          );
+                        })()}
+                      </PopoverContent>
+                    </Popover>
                   </div>
                 )}
               </div>
@@ -2487,6 +2556,7 @@ function BatchDialog({ target, onTargetChange, batches, initialKind, suggestedSp
               placeholder="Anything to add above the doctors table — context, urgency, etc."
             />
           </div>
+          </>)}
         </div>
       }
       emails={emailPreview ? [
@@ -2502,19 +2572,32 @@ function BatchDialog({ target, onTargetChange, batches, initialKind, suggestedSp
         // queued doctors' WP candidates; doctors with no website profile show a
         // disabled note instead of the control (never crash).
         controls: (
-          <div className="space-y-2">
-            <div className="text-[10px] uppercase tracking-wider text-sidebar-foreground/60">Branded CV per doctor</div>
-            <p className="text-[10.5px] leading-snug text-sidebar-foreground/55">
-              Generate a doctor's branded CV and attach it to this hospital email.
-            </p>
-            {picked.map(d => (
-              <div key={d.id} className="flex items-center gap-2 min-w-0">
-                <span className="w-24 shrink-0 truncate text-[11px] font-medium text-sidebar-foreground/85" title={d.name}>{d.name}</span>
-                {d.wp
-                  ? <CvStudioControl doctor={d.wp} onAttach={attachBrandedCv} />
-                  : <span className="text-[10px] italic text-sidebar-foreground/45">No website profile — CV unavailable</span>}
-              </div>
-            ))}
+          <div className="space-y-3">
+            {/* Attachments on the HOSPITAL email — CV, logbook, etc. Rides every
+                hospital copy in this batch. Same list the full-screen editor
+                and the send use (batch.attachments). */}
+            <div className="rounded-md border border-sidebar-border/40 bg-white/95 p-2 shadow-sm">
+              <AttachmentsPicker
+                attachments={batch?.attachments ?? []}
+                onChange={setAttachments}
+                disabled={sendNow.isPending}
+                hint="ride on the hospital email — CV, logbook, etc. (goes to every hospital)"
+              />
+            </div>
+            <div className="space-y-2">
+              <div className="text-[10px] uppercase tracking-wider text-sidebar-foreground/60">Branded CV per doctor</div>
+              <p className="text-[10.5px] leading-snug text-sidebar-foreground/55">
+                Generate a doctor's branded CV and attach it to this hospital email.
+              </p>
+              {picked.map(d => (
+                <div key={d.id} className="flex items-center gap-2 min-w-0">
+                  <span className="w-24 shrink-0 truncate text-[11px] font-medium text-sidebar-foreground/85" title={d.name}>{d.name}</span>
+                  {d.wp
+                    ? <CvStudioControl doctor={d.wp} onAttach={attachBrandedCv} />
+                    : <span className="text-[10px] italic text-sidebar-foreground/45">No website profile — CV unavailable</span>}
+                </div>
+              ))}
+            </div>
           </div>
         ),
         preview: perDoctorList.length ? (
