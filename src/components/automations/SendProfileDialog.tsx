@@ -1521,9 +1521,16 @@ function PreviewConfirm({
       const hOv = hospitalOvByDoctor[doc.id] ?? null;
       const dOv = doctorOvByDoctor[doc.id] ?? null;
       const dEmail = (doctorEmailOvByDoctor[doc.id] ?? "").trim();
-      const hospitalOverride = hOv
-        ?? (isSingle && hospitalTemplateKey !== "profile_sent_hospital" && r
-              ? { subject_override: r.rHospSubj, html_override: r.hHtml } : null);
+      // Hospital-email override is SINGLE-HOSPITAL only. The hospital intro email
+      // is per-hospital (its greeting names the hospital), so a single previewed/
+      // edited copy must never be stamped onto every hospital's run — that baked
+      // the sample hospital's name into all of them ("all 3 said AlRajhi"). For a
+      // multi-hospital send each run is server-rendered against its own hospital;
+      // a per-hospital template pick still flows via metadata.template_overrides.
+      const hospitalOverride = isSingle
+        ? (hOv ?? (hospitalTemplateKey !== "profile_sent_hospital" && r
+              ? { subject_override: r.rHospSubj, html_override: r.hHtml } : null))
+        : null;
       const doctorOverride = dOv
         ?? (isSingle && doctorTemplateKey !== "profile_sent_doctor" && r
               ? { subject_override: r.rDocSubj, html_override: r.dHtml } : null);
@@ -1673,11 +1680,10 @@ function PreviewConfirm({
         {anyEdited
           ? <span className="text-emerald-300 font-medium">
               You've edited {anyHospitalEdited && anyDoctorEdited ? "both emails" : anyHospitalEdited ? "the hospital email" : "the doctor email"}{multiDoctor ? " (per doctor)" : ""} — your version sends instead of the template.
-              {!isSingle ? " Every hospital gets this exact copy, so the per-hospital greeting is replaced by the previewed one — Reset to keep personalised greetings." : ""}
             </span>
           : isSingle
             ? `Click into either email to tweak the wording before it sends.${multiDoctor ? " Edits are per doctor." : ""}`
-            : `Click into either email to edit. Your edit goes to all ${hospitals.length} hospitals (the per-hospital greeting is replaced) — leave it unedited to keep each greeting personalised.`}
+            : `Each of the ${hospitals.length} hospitals gets its own personalised intro email (greeted by name); the preview shows one as a sample. The doctor gets one consolidated working-opportunity email.`}
       </div>
 
       {/* Schedule details — only when "Schedule for later" is picked in the
@@ -1756,8 +1762,8 @@ function PreviewConfirm({
         onToChange={isSingle ? (v) => onOverrideRecipient(hospitals[0].id, v.trim() ? v.trim() : null) : undefined}
         cc={ccList}
         bcc={bccList}
-        editable
-        onChange={(ov) => setHospitalOvByDoctor(prev => ({ ...prev, [doc.id]: ov }))}
+        editable={isSingle}
+        onChange={isSingle ? (ov) => setHospitalOvByDoctor(prev => ({ ...prev, [doc.id]: ov })) : undefined}
         plainBody={r.rHospBody}
         attachments={hospitalAttByDoctor[doc.id] ?? EMPTY_ATTACHMENTS}
         onAttachmentsChange={(next) => setHospitalAttByDoctor(prev => ({ ...prev, [doc.id]: next }))}
