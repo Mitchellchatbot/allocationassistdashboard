@@ -52,6 +52,11 @@ const DOCTOR_DEFAULT_KEY   = "profile_sent_doctor";
 // the AttachmentsPicker props on every render.
 const EMPTY_ATTACHMENTS: EmailAttachment[] = [];
 
+// Key for a per-(doctor, hospital) hospital-intro edit. Each hospital's intro
+// email is edited independently (its greeting names that hospital), so a
+// hand-edit is stored against the doctor+hospital pair, never fanned across all.
+const pairKey = (doctorId: string, hospitalId: string) => `${doctorId}::${hospitalId}`;
+
 // Map a hospital → the WorkingOpHospital the consolidated doctor email groups by.
 // Country/city are normalised + backfilled so the location grouping doesn't
 // split: a hospital's own country wins (canonicalised so "KSA" ≡ "Saudi Arabia"),
@@ -501,11 +506,11 @@ function SendProfileDialogBody({ onClose, initial }: { onClose: () => void; init
   }, [hospitalTemplate, doctorTemplate, previewVars, customMessage, selectedHospitals, firstDoctor]);
 
   const handleConfirm = async (
-    // Per-doctor edit state keyed by doctor.id: hand-edited bodies (stageOverrides)
-    // + a retyped doctor "To". Card images ride separately in cardImageByDoctor
-    // (body state) so handleConfirm reads them directly. Everything else (opts) is
-    // GLOBAL — shared across every doctor in the send.
-    perDoctor: Record<string, { stageOverrides?: Record<string, SendOverrides>; doctorEmail?: string }>,
+    // Per-doctor edit state keyed by doctor.id: per-hospital hand-edited hospital
+    // intros (hospitalOverrides) + the doctor-email override + a retyped doctor
+    // "To". Card images ride separately in cardImageByDoctor (body state) so
+    // handleConfirm reads them directly. Everything else (opts) is GLOBAL.
+    perDoctor: Record<string, { hospitalOverrides?: Record<string, SendOverrides>; doctorOverride?: SendOverrides; doctorEmail?: string }>,
     opts: {
       // PER-DOCTOR attachments, keyed by doctor.id (hospital leg + doctor leg).
       attachments?: { hospital?: Record<string, EmailAttachment[]>; doctor?: Record<string, EmailAttachment[]> };
@@ -547,12 +552,23 @@ function SendProfileDialogBody({ onClose, initial }: { onClose: () => void; init
       const pd = perDoctor[doctor.id] ?? {};
       return {
         doctorEmailToUse: (pd.doctorEmail ?? "").trim() || doctor.email,
-        effectiveStageOverrides: pd.stageOverrides && Object.keys(pd.stageOverrides).length ? pd.stageOverrides : undefined,
+        // email_hospital override per hospitalId; email_doctor override per doctor.
+        hospitalOverrides: pd.hospitalOverrides ?? {},
+        doctorOverride:    pd.doctorOverride,
         cardImageUrl: cardImageByDoctor[doctor.id] ?? null,
         hospitalAttach: hospAttByDoctor[doctor.id] ?? [],
         doctorAttach:   docAttByDoctor[doctor.id] ?? [],
       };
     };
+    // Build the stage_overrides object for ONE (doctor, hospital) run — its own
+    // hospital-intro edit + the doctor-email edit.
+    const stageOverridesFor = (
+      d: { hospitalOverrides: Record<string, SendOverrides>; doctorOverride?: SendOverrides },
+      hospitalId: string,
+    ): Record<string, SendOverrides> => ({
+      ...(d.hospitalOverrides[hospitalId] ? { email_hospital: d.hospitalOverrides[hospitalId] } : {}),
+      ...(d.doctorOverride ? { email_doctor: d.doctorOverride } : {}),
+    });
 
     // ── Schedule-for-later branch (Amir #5) ─────────────────────────────────
     // Instead of creating runs + sending now, stash everything the send needs
@@ -577,7 +593,14 @@ function SendProfileDialogBody({ onClose, initial }: { onClose: () => void; init
         // One scheduled row per doctor (each row supports hospital_ids[] +
         // per-doctor stage_overrides / doctor_email). Global fields repeat per row.
         for (const doctor of selectedDoctors) {
-          const { doctorEmailToUse, effectiveStageOverrides, hospitalAttach, doctorAttach } = dataFor(doctor);
+          const { doctorEmailToUse, hospitalOverrides, doctorOverride, hospitalAttach, doctorAttach } = dataFor(doctor);
+          // A scheduled row carries ONE stage_overrides for all its hospital_ids.
+          // Single-hospital can include that hospital's intro edit; multi-hospital
+          // keeps only the doctor-email edit (each hospital is server-rendered
+          // per-hospital at fire time, so per-hospital intro edits aren't stored).
+          const scheduledStage = selectedHospitals.length === 1
+            ? stageOverridesFor({ hospitalOverrides, doctorOverride }, selectedHospitals[0].id)
+            : (doctorOverride ? { email_doctor: doctorOverride } : {});
           await scheduleProfileSend.mutateAsync({
             doctor_id:         doctor.id,
             doctor_name:       doctor.name,
@@ -589,7 +612,7 @@ function SendProfileDialogBody({ onClose, initial }: { onClose: () => void; init
             bcc_override:      bccList,
             cc_override:       ccList.length ? ccList : null,
             assigned_to:       senderAssignedTo,
-            stage_overrides:   effectiveStageOverrides ?? null,
+            stage_overrides:   Object.keys(scheduledStage).length ? scheduledStage : null,
             template_overrides: templateOverridesPayload,
             attachments:        hospitalAttach.map(a => ({ filename: a.filename, path: a.path })),
             attachments_doctor: doctorAttach.map(a => ({ filename: a.filename, path: a.path })),
@@ -676,10 +699,12 @@ function SendProfileDialogBody({ onClose, initial }: { onClose: () => void; init
         // One batch_id per DOCTOR — groups that doctor's hospital runs so the
         // BCC/consolidated nature stays queryable per doctor.
         const batchId = crypto.randomUUID();
-        const { doctorEmailToUse, effectiveStageOverrides, cardImageUrl, hospitalAttach, doctorAttach } = dataFor(doctor);
+        const { doctorEmailToUse, hospitalOverrides, doctorOverride, cardImageUrl, hospitalAttach, doctorAttach } = dataFor(doctor);
         for (const [hIndex, h] of selectedHospitals.entries()) {
           const routing = routingByHospital.get(h.id)!;
           const { recipientEmail, recipientName, runCc } = routing;
+          // This run's stage_overrides = THIS hospital's intro edit + the doctor edit.
+          const runStageOverrides = stageOverridesFor({ hospitalOverrides, doctorOverride }, h.id);
           const { data: runRow, error: runErr } = await supabase
             .from("automation_flow_runs")
             .insert({
@@ -712,11 +737,12 @@ function SendProfileDialogBody({ onClose, initial }: { onClose: () => void; init
                 // picked) is CC'd. send-flow-email reads bcc_override / cc_override.
                 bcc_override:       bccList,
                 ...(runCc.length ? { cc_override: runCc } : {}),
-                // Per-stage edits from the preview (email_hospital / email_doctor).
-                // send-flow-email reads stage_overrides[<stage>] when each email
-                // fires — including the doctor heads-up that auto-continues
-                // server-side — and ships that edited version verbatim. PER DOCTOR.
-                ...(effectiveStageOverrides ? { stage_overrides: effectiveStageOverrides } : {}),
+                // Per-stage edits from the preview. email_hospital is THIS
+                // hospital's own intro edit (each hospital edited independently);
+                // email_doctor is the doctor-email edit. send-flow-email reads
+                // stage_overrides[<stage>] when each email fires and ships that
+                // edited version verbatim.
+                ...(Object.keys(runStageOverrides).length ? { stage_overrides: runStageOverrides } : {}),
                 // CVs / logbooks attached in the preview — PER DOCTOR. Same files
                 // for every hospital of THIS doctor, but a doctor-specific file
                 // never fans onto another doctor's runs. send-flow-email reads
@@ -1220,7 +1246,16 @@ function HospitalPicker({
 /** Per-doctor resolved send data (WP candidate + merged tokens + completion). */
 type DoctorSendData = { wpCandidate: WpCandidate | null; mergedProfileTokens: Record<string, string>; completion: number };
 /** Per-doctor edit payload delivered to handleConfirm. */
-type PerDoctorSend = { stageOverrides?: Record<string, SendOverrides>; doctorEmail?: string };
+type PerDoctorSend = {
+  // email_hospital override keyed PER hospitalId — each hospital's intro email is
+  // edited independently (its greeting names that hospital), so an edit is
+  // stamped only onto that hospital's run, never fanned across all.
+  hospitalOverrides?: Record<string, SendOverrides>;
+  // email_doctor override (the single-hospital doctor email; the multi-hospital
+  // consolidated email is read-only so it has none). Per doctor.
+  doctorOverride?: SendOverrides;
+  doctorEmail?: string;
+};
 
 function PreviewConfirm({
   doctors, sendDataByDoctor, hospitals, customMessage, hospitalSubject, hospitalBody, doctorSubject, doctorBody,
@@ -1288,7 +1323,9 @@ function PreviewConfirm({
   const activeDoctor = doctors[Math.min(activeDoctorIdx, doctors.length - 1)] ?? doctors[0];
   // Per-DOCTOR edit state (keyed by doctor.id): hand-edited bodies + a retyped
   // doctor "To". null/absent = unedited. Each doctor pane owns its own entry.
-  const [hospitalOvByDoctor, setHospitalOvByDoctor] = useState<Record<string, SendOverrides | null>>({});
+  // Hospital-intro edits are keyed PER (doctor, hospital) — each hospital's intro
+  // is edited independently. Doctor-email edits stay per doctor (one email/doctor).
+  const [hospitalOvByPair, setHospitalOvByPair] = useState<Record<string, SendOverrides | null>>({});
   const [doctorOvByDoctor,   setDoctorOvByDoctor]   = useState<Record<string, SendOverrides | null>>({});
   const [doctorEmailOvByDoctor, setDoctorEmailOvByDoctor] = useState<Record<string, string>>({});
   // CVs / logbooks to attach — PER DOCTOR (keyed by doctor.id, per email leg).
@@ -1346,6 +1383,9 @@ function PreviewConfirm({
   const [combineDoctorEmails, setCombineDoctorEmails] = useState(true);
   // Feature 2: which hospital's per-hospital doctor email shows in Individual mode.
   const [doctorPreviewHospIdx, setDoctorPreviewHospIdx] = useState(0);
+  // Which hospital's intro email is showing on the Hospital-intro tab (its own
+  // hospital sub-tab row, so every hospital's intro is editable individually).
+  const [hospIntroHospIdx, setHospIntroHospIdx] = useState(0);
   useEffect(() => {
     if (!hospitals.some(h => h.id === previewHospitalId)) setPreviewHospitalId(hospitals[0]?.id ?? null);
   }, [hospitals, previewHospitalId]);
@@ -1424,6 +1464,15 @@ function PreviewConfirm({
   const activeRender = renderByDoctor.get(activeDoctor.id);
   const hospitalRecipient = isSingle ? (hospitals[0].primary_recruiter_email ?? "(no recruiter email)") : `preview: ${sampleHospital?.name ?? "hospital"} · ${hospitals.length} hospitals`;
 
+  // Render the HOSPITAL-intro email for one (doctor, hospital) pair — so every
+  // hospital's intro can be previewed AND edited individually (its own greeting/
+  // tokens), not just the sample hospital. Mirrors renderDoctorEmail.
+  const renderHospitalEmail = (doc: DoctorOption, hosp: Hospital) => {
+    const vars = varsFor(doc, hosp, cardImageByDoctor[doc.id] ?? null);
+    const plainBody = renderTemplate(hospitalBody, vars) + (customMessage ? `\n\n--- Custom note ---\n${customMessage}` : "");
+    return { subject: renderTemplate(hospitalSubject, vars), hHtml: wrapBodyForSend(plainBody), plainBody, vars };
+  };
+
   // Auto-attach the profile-card image PER DOCTOR for EVERY send (single- AND
   // multi-hospital) so the pixel-perfect flat image always ships in place of the
   // HTML card. Runs sequentially — one html2canvas capture at a time — so a batch
@@ -1453,7 +1502,7 @@ function PreviewConfirm({
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [autoCardBusyId, doctors, cardImageByDoctor, sendDataByDoctor]);
 
-  const anyHospitalEdited = doctors.some(d => hospitalOvByDoctor[d.id]);
+  const anyHospitalEdited = Object.values(hospitalOvByPair).some(Boolean);
   const anyDoctorEdited   = doctors.some(d => doctorOvByDoctor[d.id]);
   const anyEdited = anyHospitalEdited || anyDoctorEdited;
 
@@ -1465,7 +1514,7 @@ function PreviewConfirm({
   // still blocks while ANY doctor has left that leg unedited.
   const isPlaceholder = (key: string) =>
     (templates.find(t => t.key === key)?.body_text ?? "").trim().toUpperCase().startsWith("PLACEHOLDER");
-  const hospitalDraft = isPlaceholder(hospitalTemplateKey) && doctors.some(d => !hospitalOvByDoctor[d.id]);
+  const hospitalDraft = isPlaceholder(hospitalTemplateKey) && doctors.some(d => hospitals.some(h => !hospitalOvByPair[pairKey(d.id, h.id)]));
   const doctorDraft   = isPlaceholder(doctorTemplateKey)   && doctors.some(d => !doctorOvByDoctor[d.id]);
   const anyDraft = hospitalDraft || doctorDraft;
 
@@ -1480,11 +1529,12 @@ function PreviewConfirm({
     for (const doc of doctors) {
       const r = renderByDoctor.get(doc.id);
       if (!r) continue;
-      if (!hospitalOvByDoctor[doc.id]) for (const t of detectUnfilledVars(`${hospitalSubject}\n${hospitalBody}`, r.vars)) tokens.add(t);
+      // Single-hospital only (guarded above), so there's exactly one pair/doctor.
+      if (!hospitalOvByPair[pairKey(doc.id, hospitals[0].id)]) for (const t of detectUnfilledVars(`${hospitalSubject}\n${hospitalBody}`, r.vars)) tokens.add(t);
       if (!doctorOvByDoctor[doc.id])   for (const t of detectUnfilledVars(`${doctorSubject}\n${doctorBody}`, r.vars)) tokens.add(t);
     }
     return describeUnfilled([...tokens]);
-  }, [isSingle, doctors, renderByDoctor, hospitalOvByDoctor, doctorOvByDoctor, hospitalSubject, hospitalBody, doctorSubject, doctorBody]);
+  }, [isSingle, doctors, hospitals, renderByDoctor, hospitalOvByPair, doctorOvByDoctor, hospitalSubject, hospitalBody, doctorSubject, doctorBody]);
   const hasUnfilled = unfilledIssues.length > 0;
 
   // Single submit path shared by the footer button and the contextual
@@ -1511,35 +1561,40 @@ function PreviewConfirm({
         return;
       }
     }
-    // A non-default template pick ships as a stage override too (the rendered
-    // template), so single-hospital sends honour the pick with no deploy. Manual
-    // edits take precedence. Multi-hospital relies on metadata.template_overrides
-    // (per-hospital server render). Built PER DOCTOR.
+    // Each hospital's intro email is edited/overridden INDIVIDUALLY (its greeting
+    // names that hospital), so hospital overrides are collected PER hospital and
+    // stamped only onto that hospital's run — never fanned across all (the "every
+    // email said AlRajhi" bug). A non-default template pick still ships as a
+    // rendered stage override per hospital so the pick sends with no deploy;
+    // manual edits win. The doctor email override stays per doctor.
+    const templatePicked = hospitalTemplateKey !== "profile_sent_hospital";
     const perDoctor: Record<string, PerDoctorSend> = {};
     for (const doc of doctors) {
       const r = renderByDoctor.get(doc.id);
-      const hOv = hospitalOvByDoctor[doc.id] ?? null;
       const dOv = doctorOvByDoctor[doc.id] ?? null;
       const dEmail = (doctorEmailOvByDoctor[doc.id] ?? "").trim();
-      // Hospital-email override is SINGLE-HOSPITAL only. The hospital intro email
-      // is per-hospital (its greeting names the hospital), so a single previewed/
-      // edited copy must never be stamped onto every hospital's run — that baked
-      // the sample hospital's name into all of them ("all 3 said AlRajhi"). For a
-      // multi-hospital send each run is server-rendered against its own hospital;
-      // a per-hospital template pick still flows via metadata.template_overrides.
-      const hospitalOverride = isSingle
-        ? (hOv ?? (hospitalTemplateKey !== "profile_sent_hospital" && r
-              ? { subject_override: r.rHospSubj, html_override: r.hHtml } : null))
-        : null;
+
+      const hospitalOverrides: Record<string, SendOverrides> = {};
+      for (const h of hospitals) {
+        const hOv = hospitalOvByPair[pairKey(doc.id, h.id)] ?? null;
+        // A hand-edit always ships as this hospital's stage override. A non-default
+        // template PICK client-renders here only for a single-hospital send; for
+        // multi-hospital it flows via metadata.template_overrides (server render,
+        // which resolves every token per hospital), so we don't bake it here.
+        const picked = (isSingle && templatePicked)
+          ? (() => { const rr = renderHospitalEmail(doc, h); return { subject_override: rr.subject, html_override: rr.hHtml }; })()
+          : null;
+        const eff = hOv ?? picked;
+        if (eff) hospitalOverrides[h.id] = eff;
+      }
+
       const doctorOverride = dOv
         ?? (isSingle && doctorTemplateKey !== "profile_sent_doctor" && r
               ? { subject_override: r.rDocSubj, html_override: r.dHtml } : null);
-      const stageOverrides: Record<string, SendOverrides> = {
-        ...(hospitalOverride ? { email_hospital: hospitalOverride } : {}),
-        ...(doctorOverride   ? { email_doctor:   doctorOverride }   : {}),
-      };
+
       perDoctor[doc.id] = {
-        ...(Object.keys(stageOverrides).length ? { stageOverrides } : {}),
+        ...(Object.keys(hospitalOverrides).length ? { hospitalOverrides } : {}),
+        ...(doctorOverride ? { doctorOverride } : {}),
         ...(dEmail ? { doctorEmail: dEmail } : {}),
       };
     }
@@ -1683,7 +1738,7 @@ function PreviewConfirm({
             </span>
           : isSingle
             ? `Click into either email to tweak the wording before it sends.${multiDoctor ? " Edits are per doctor." : ""}`
-            : `Each of the ${hospitals.length} hospitals gets its own personalised intro email (greeted by name); the preview shows one as a sample. The doctor gets one consolidated working-opportunity email.`}
+            : `Each of the ${hospitals.length} hospitals gets its own personalised intro email — use the hospital tabs to preview and edit each one individually. The doctor gets one consolidated working-opportunity email.`}
       </div>
 
       {/* Schedule details — only when "Schedule for later" is picked in the
@@ -1739,32 +1794,26 @@ function PreviewConfirm({
   // ── Per-doctor pane builders. Kept mounted via ProfileSubTabs so an
   //    in-progress edit survives switching between doctors' sub-tabs. Single
   //    doctor renders the pane directly (no sub-tab bar) — unchanged view. ────
-  const hospitalPane = (doc: DoctorOption) => {
-    const r = renderByDoctor.get(doc.id);
-    if (!r) return null;
-    // While THIS doctor's card is auto-capturing, show the same spinner the
-    // single-doctor preview used (the section mounts once the capture lands).
-    if (autoCardBusyId === doc.id) {
-      return (
-        <div className="flex min-h-0 w-full flex-1 flex-col items-center justify-center gap-2 bg-white text-slate-500">
-          <Loader2 className="h-6 w-6 animate-spin text-teal-500" />
-          <span className="text-[12px]">Preparing the profile card image…</span>
-        </div>
-      );
-    }
+  // The editable hospital-intro email for ONE (doctor, hospital) pair. Its edit
+  // is stored against the doctor+hospital pair, so editing AlRajhi's intro never
+  // touches Amana's. Recipient (To) is per-hospital too.
+  const hospitalPaneForHospital = (doc: DoctorOption, hosp: Hospital) => {
+    const rr = renderHospitalEmail(doc, hosp);
+    const key = pairKey(doc.id, hosp.id);
+    const recip = recipientOverrides[hosp.id] ?? hosp.primary_recruiter_email ?? "";
     return (
       <EditableEmailSection
-        label={`To hospital · ${hospitalRecipient}`}
-        subject={r.rHospSubj}
-        html={r.hHtml}
+        label={`To hospital · ${hosp.name}${recip ? ` · ${recip}` : ""}`}
+        subject={rr.subject}
+        html={rr.hHtml}
         from={senderLine}
-        to={isSingle ? (recipientOverrides[hospitals[0].id] ?? hospitals[0].primary_recruiter_email ?? "") : undefined}
-        onToChange={isSingle ? (v) => onOverrideRecipient(hospitals[0].id, v.trim() ? v.trim() : null) : undefined}
+        to={recip || undefined}
+        onToChange={(v) => onOverrideRecipient(hosp.id, v.trim() ? v.trim() : null)}
         cc={ccList}
         bcc={bccList}
-        editable={isSingle}
-        onChange={isSingle ? (ov) => setHospitalOvByDoctor(prev => ({ ...prev, [doc.id]: ov })) : undefined}
-        plainBody={r.rHospBody}
+        editable
+        onChange={(ov) => setHospitalOvByPair(prev => ({ ...prev, [key]: ov }))}
+        plainBody={rr.plainBody}
         attachments={hospitalAttByDoctor[doc.id] ?? EMPTY_ATTACHMENTS}
         onAttachmentsChange={(next) => setHospitalAttByDoctor(prev => ({ ...prev, [doc.id]: next }))}
         templatePicker={
@@ -1773,13 +1822,37 @@ function PreviewConfirm({
             value={hospitalTemplateKey}
             onChange={setHospitalTemplateKey}
             defaultKey="profile_sent_hospital"
-            renderVars={r.vars}
+            renderVars={rr.vars}
             label="Hospital intro email template"
             flowFilter="profile_sent"
             audience="hospital"
             contentClassName="z-[200]"
           />
         }
+      />
+    );
+  };
+  const hospitalPane = (doc: DoctorOption) => {
+    // While THIS doctor's card is auto-capturing, show the spinner (the profile
+    // card image ships in the hospital email, so wait for it before previewing).
+    if (autoCardBusyId === doc.id) {
+      return (
+        <div className="flex min-h-0 w-full flex-1 flex-col items-center justify-center gap-2 bg-white text-slate-500">
+          <Loader2 className="h-6 w-6 animate-spin text-teal-500" />
+          <span className="text-[12px]">Preparing the profile card image…</span>
+        </div>
+      );
+    }
+    // Single hospital → one editable pane. Multi-hospital → a hospital sub-tab
+    // row so EVERY hospital's intro is previewed + edited individually.
+    if (hospitals.length === 1) return hospitalPaneForHospital(doc, hospitals[0]);
+    const idx = Math.min(hospIntroHospIdx, hospitals.length - 1);
+    return (
+      <ProfileSubTabs
+        names={hospitals.map(h => h.name)}
+        active={idx}
+        onSelect={setHospIntroHospIdx}
+        panes={hospitals.map(h => hospitalPaneForHospital(doc, h))}
       />
     );
   };
