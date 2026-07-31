@@ -2321,16 +2321,16 @@ function PreviewBlock({ label, subject, body }: { label: string; subject: string
       <div className="px-3 py-1.5 border-b bg-slate-50/50 text-[10px] uppercase tracking-wider text-muted-foreground flex items-center gap-1.5 shrink-0">
         <Eye className="h-3 w-3" /> {label}
       </div>
-      <div className="p-3 space-y-2 min-h-0 flex-1 overflow-y-auto">
-        <div>
+      <div className="flex min-h-0 flex-1 flex-col gap-2 p-3">
+        <div className="shrink-0">
           <div className="text-[10px] uppercase tracking-wider text-muted-foreground">Subject</div>
           <div className="text-[12px] font-medium">{subject}</div>
         </div>
-        <div>
-          <div className="text-[10px] uppercase tracking-wider text-muted-foreground mb-1">Body</div>
+        <div className="flex min-h-0 flex-1 flex-col">
+          <div className="text-[10px] uppercase tracking-wider text-muted-foreground mb-1 shrink-0">Body</div>
           {isHtml
             ? <HtmlPreview html={body} />
-            : <pre className="text-[11px] whitespace-pre-wrap font-mono text-slate-700 bg-slate-50/40 p-2 rounded border max-h-[160px] overflow-y-auto">
+            : <pre className="text-[11px] whitespace-pre-wrap font-mono text-slate-700 bg-slate-50/40 p-2 rounded border flex-1 min-h-0 overflow-y-auto">
                 {body || "(no body — set in the Email Templates tab)"}
               </pre>}
         </div>
@@ -2344,13 +2344,17 @@ function PreviewBlock({ label, subject, body }: { label: string; subject: string
  *  fight with Tailwind, and any stray scripts (admin-controlled but
  *  still — defense in depth) can't touch the parent page. */
 function HtmlPreview({ html }: { html: string }) {
+  // Fill the pane's available height (the email scrolls inside the frame) instead
+  // of capping at a short box that leaves the panel half-empty. The wrapper's
+  // flex-1/min-h-0 gives the frame a definite height to fill.
   return (
-    <EmailFrame
-      html={humanizePlaceholders(html)}
-      minHeight={140}
-      maxHeight={480}
-      style={{ border: "1px solid hsl(var(--border))", borderRadius: 6 }}
-    />
+    <div className="flex-1 min-h-0">
+      <EmailFrame
+        html={humanizePlaceholders(html)}
+        fill
+        style={{ border: "1px solid hsl(var(--border))", borderRadius: 6 }}
+      />
+    </div>
   );
 }
 

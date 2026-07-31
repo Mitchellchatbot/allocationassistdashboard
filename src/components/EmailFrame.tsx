@@ -43,6 +43,7 @@ export function EmailFrame({
   minHeight = 120,
   maxHeight,
   height,
+  fill = false,
   className,
   style,
   title = "Email preview",
@@ -57,6 +58,10 @@ export function EmailFrame({
   maxHeight?: number;
   /** Fixed height (px) — disables auto-sizing when set. */
   height?: number;
+  /** Fill the parent's height (100%) and scroll the email inside — for panes
+   *  that own a fixed viewport. Disables auto-sizing; parent must have a
+   *  definite height. */
+  fill?: boolean;
   className?: string;
   style?: CSSProperties;
   title?: string;
@@ -64,7 +69,7 @@ export function EmailFrame({
   const ref = useRef<HTMLIFrameElement | null>(null);
   const [measured, setMeasured] = useState(minHeight);
   const srcDoc = useMemo(() => buildEmailPreviewDoc(html, { showImages }), [html, showImages]);
-  const auto = height === undefined;
+  const auto = height === undefined && !fill;
 
   useEffect(() => {
     if (!auto) return;
@@ -105,7 +110,7 @@ export function EmailFrame({
       sandbox="allow-same-origin"
       srcDoc={srcDoc}
       className={className}
-      style={{ width: "100%", border: 0, background: "#ffffff", height: auto ? measured : height, ...style }}
+      style={{ width: "100%", border: 0, background: "#ffffff", height: fill ? "100%" : (auto ? measured : height), ...style }}
     />
   );
 }
