@@ -1623,13 +1623,20 @@ function BatchDialog({ target, onTargetChange, batches, initialKind, suggestedSp
   const greetSwap = (h: string) => (previewGreetHospital && h)
     ? h.replace(/Hello <strong>[^<]*<\/strong>!/, `Hello <strong>${batchGreeting(previewGreetHospital)}</strong>!`)
     : h;
+  // Compare bodies with the greeting line blanked out. Switching which hospital
+  // the preview shows rewrites "Hello …!" (greetSwap), and that alone must NOT
+  // count as a manual edit — otherwise a mere preview-hospital click ships an
+  // html_override baked to one hospital, and EVERY hospital gets that name (the
+  // "three copies to Child Fertility" bug). Real edits still differ once the
+  // greeting is normalised away.
+  const neutralizeGreet = (h: string) => h.replace(/Hello <strong>[^<]*<\/strong>!/, "Hello <strong></strong>!");
   const displayHtml = greetSwap(emailPreview?.html ?? "");
   // Daily Duo: each doctor is a separate email, so each has its own pristine
   // base + edited flag (a single html_override would send one doctor twice).
   const perDoctorList = emailPreview?.per_doctor ?? [];
   const perDoctorPristine = (i: number) => greetSwap(perDoctorList[i]?.html ?? "");
   const perDoctorEdited = (i: number) =>
-    !!perDoctor[i] && (perDoctor[i].html !== perDoctorPristine(i) || perDoctor[i].subject !== (perDoctorList[i]?.subject ?? ""));
+    !!perDoctor[i] && (neutralizeGreet(perDoctor[i].html) !== neutralizeGreet(perDoctorPristine(i)) || perDoctor[i].subject !== (perDoctorList[i]?.subject ?? ""));
   // The working-opportunity leg, one email per doctor (no greeting swap — it's
   // addressed to the doctor, not a hospital).
   const doctorNoteList = emailPreview?.doctor_emails ?? [];
@@ -1638,7 +1645,7 @@ function BatchDialog({ target, onTargetChange, batches, initialKind, suggestedSp
     !!perDoctorNote[i] && (perDoctorNote[i].html !== (doctorNoteList[i]?.html ?? "") || perDoctorNote[i].subject !== (doctorNoteList[i]?.subject ?? ""));
   // True once the team edited away from the (greeting-swapped) preview base —
   // gates the html_override on send and the "edited" hint.
-  const batchEdited = !!emailPreview && (editSubject !== emailPreview.subject || editHtml !== displayHtml);
+  const batchEdited = !!emailPreview && (editSubject !== emailPreview.subject || neutralizeGreet(editHtml) !== neutralizeGreet(displayHtml));
   const doctorEdited = !!emailPreview?.doctor_email && (editDoctorSubject !== emailPreview.doctor_email.subject || editDoctorHtml !== emailPreview.doctor_email.html);
   // id → DoctorOption lookup so resolving picked doctor_ids is O(picked)
   // instead of O(picked × allDoctors) on every render.

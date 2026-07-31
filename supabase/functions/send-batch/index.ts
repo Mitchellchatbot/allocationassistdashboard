@@ -806,11 +806,24 @@ Deno.serve(async (req: Request) => {
   const perDoctorSubjects: string[] = Array.isArray(body.per_doctor_subject_override)
     ? (body.per_doctor_subject_override as unknown[]).map(v => typeof v === "string" ? v.trim() : "")
     : [];
+  // An edited body (global html_override OR a per-doctor override) is baked from
+  // the ONE hospital that was showing in the preview when the edit was made, so
+  // its "Hello <strong>X team</strong>!" greeting names that single hospital. The
+  // same override then goes to EVERY hospital — which is why all N copies came
+  // out addressed to the first hospital ("three copies to Child Fertility").
+  // Re-swap the greeting line to THIS hospital's greeting so every recruiter is
+  // addressed by their own name. If the edit reshaped the greeting past this
+  // pattern, the override is left verbatim (best-effort, matches old behaviour).
+  const GREET_HTML_RE = /Hello\s*<strong>[^<]*<\/strong>\s*!/i;
+  const personalizeGreeting = (html: string, greet: string) =>
+    GREET_HTML_RE.test(html) ? html.replace(GREET_HTML_RE, `Hello <strong>${greet}</strong>!`) : html;
   const emails = targets.flatMap((h) =>
     sendBlocks.map((blk, di) => {
       // Preview edits: per-doctor mode carries one edited body per doctor (a
       // single html_override would send the SAME doctor to every slot).
-      const ov = perDoctorMode ? (perDoctorOverrides[di] ?? "") : editedHtml;
+      const ovRaw = perDoctorMode ? (perDoctorOverrides[di] ?? "") : editedHtml;
+      // Re-personalise the baked greeting for THIS hospital (see note above).
+      const ov = ovRaw ? personalizeGreeting(ovRaw, greetingWithOverride(h)) : ovRaw;
       const fresh = renderFor(greetingWithOverride(h), h.city, blk.html, blk.text);
       const subjOv = perDoctorMode ? (perDoctorSubjects[di] || editedSubject) : editedSubject;
       const rendered = (ov || subjOv)
