@@ -5,7 +5,7 @@ import { Label } from "@/components/ui/label";
 import { Textarea } from "@/components/ui/textarea";
 import { Badge } from "@/components/ui/badge";
 import { Checkbox } from "@/components/ui/checkbox";
-import { Search, Send, Eye, ChevronLeft, AlertTriangle, ChevronDown } from "lucide-react";
+import { Search, Send, Eye, ChevronLeft, AlertTriangle, ChevronDown, Copy } from "lucide-react";
 import { captureAndUploadCard } from "@/lib/card-screenshot";
 import { buildProfileCardHtml } from "@/lib/profile-card-html";
 import { buildDoctorProfileHtml, PROFILE_IMAGE_WIDTH } from "@/lib/doctor-profile-image";
@@ -532,11 +532,11 @@ function SendProfileDialogBody({ onClose, initial }: { onClose: () => void; init
     // Per-HOSPITAL greeting override (hospitalId → mode); "auto" keeps each
     // hospital's stored greet_with_contact_name flag. Empty = all auto.
     const greetModeByHospital = greeting ?? {};
-    // PER-DOCTOR attachments (keyed by doctor.id) — a doctor-specific CV goes
-    // only to that doctor's hospital + working-op emails, never fanning across
-    // the other doctors in a multi-doctor send.
-    const hospAttByDoctor = attachments?.hospital ?? {};
-    const docAttByDoctor  = attachments?.doctor ?? {};
+    // Hospital-leg attachments are keyed by pairKey(doctorId, hospitalId) so a
+    // file rides ONLY its exact (doctor × hospital) combo; doctor-leg attachments
+    // stay per doctor.id (one working-op email per doctor).
+    const hospAttByPair  = attachments?.hospital ?? {};
+    const docAttByDoctor = attachments?.doctor ?? {};
     if (selectedDoctors.length === 0 || selectedHospitals.length === 0) return;
     const templateOverridesPayload = templateKeys && (templateKeys.hospital !== HOSPITAL_DEFAULT_KEY || templateKeys.doctor !== DOCTOR_DEFAULT_KEY)
       ? {
@@ -556,7 +556,8 @@ function SendProfileDialogBody({ onClose, initial }: { onClose: () => void; init
         hospitalOverrides: pd.hospitalOverrides ?? {},
         doctorOverride:    pd.doctorOverride,
         cardImageUrl: cardImageByDoctor[doctor.id] ?? null,
-        hospitalAttach: hospAttByDoctor[doctor.id] ?? [],
+        // Hospital-leg files are resolved per (doctor × hospital) at each run
+        // below, not here — only the doctor-leg list is doctor-wide.
         doctorAttach:   docAttByDoctor[doctor.id] ?? [],
       };
     };
@@ -593,7 +594,12 @@ function SendProfileDialogBody({ onClose, initial }: { onClose: () => void; init
         // One scheduled row per doctor (each row supports hospital_ids[] +
         // per-doctor stage_overrides / doctor_email). Global fields repeat per row.
         for (const doctor of selectedDoctors) {
-          const { doctorEmailToUse, hospitalOverrides, doctorOverride, hospitalAttach, doctorAttach } = dataFor(doctor);
+          const { doctorEmailToUse, hospitalOverrides, doctorOverride, doctorAttach } = dataFor(doctor);
+          // A scheduled row is ONE per doctor across all its hospitals, so it can
+          // carry a single hospital-attachment list. Use this doctor's first
+          // hospital's combo (exact for a single-hospital schedule; multi-hospital
+          // schedules can't store per-hospital files, so the first combo's ride).
+          const hospitalAttach = hospAttByPair[pairKey(doctor.id, selectedHospitals[0].id)] ?? [];
           // A scheduled row carries ONE stage_overrides for all its hospital_ids.
           // Single-hospital can include that hospital's intro edit; multi-hospital
           // keeps only the doctor-email edit (each hospital is server-rendered
@@ -699,10 +705,12 @@ function SendProfileDialogBody({ onClose, initial }: { onClose: () => void; init
         // One batch_id per DOCTOR — groups that doctor's hospital runs so the
         // BCC/consolidated nature stays queryable per doctor.
         const batchId = crypto.randomUUID();
-        const { doctorEmailToUse, hospitalOverrides, doctorOverride, cardImageUrl, hospitalAttach, doctorAttach } = dataFor(doctor);
+        const { doctorEmailToUse, hospitalOverrides, doctorOverride, cardImageUrl, doctorAttach } = dataFor(doctor);
         for (const [hIndex, h] of selectedHospitals.entries()) {
           const routing = routingByHospital.get(h.id)!;
           const { recipientEmail, recipientName, runCc } = routing;
+          // Hospital-leg files for THIS exact (doctor × hospital) combo only.
+          const hospitalAttach = hospAttByPair[pairKey(doctor.id, h.id)] ?? [];
           // This run's stage_overrides = THIS hospital's intro edit + the doctor edit.
           const runStageOverrides = stageOverridesFor({ hospitalOverrides, doctorOverride }, h.id);
           const { data: runRow, error: runErr } = await supabase
@@ -743,9 +751,10 @@ function SendProfileDialogBody({ onClose, initial }: { onClose: () => void; init
                 // stage_overrides[<stage>] when each email fires and ships that
                 // edited version verbatim.
                 ...(Object.keys(runStageOverrides).length ? { stage_overrides: runStageOverrides } : {}),
-                // CVs / logbooks attached in the preview — PER DOCTOR. Same files
-                // for every hospital of THIS doctor, but a doctor-specific file
-                // never fans onto another doctor's runs. send-flow-email reads
+                // CVs / logbooks attached in the preview. The hospital-leg files
+                // are for THIS exact (doctor × hospital) combo only — they never
+                // ride the doctor's other hospitals or another doctor. The
+                // doctor-leg files are per doctor. send-flow-email reads
                 // `attachments` on the hospital stage and `attachments_doctor` on
                 // the doctor stage.
                 ...(hospitalAttach.length
@@ -1328,19 +1337,15 @@ function PreviewConfirm({
   const [hospitalOvByPair, setHospitalOvByPair] = useState<Record<string, SendOverrides | null>>({});
   const [doctorOvByDoctor,   setDoctorOvByDoctor]   = useState<Record<string, SendOverrides | null>>({});
   const [doctorEmailOvByDoctor, setDoctorEmailOvByDoctor] = useState<Record<string, string>>({});
-  // CVs / logbooks to attach — PER DOCTOR (keyed by doctor.id, per email leg).
-  // A doctor-specific CV must reach only that doctor's hospital + working-op
-  // emails, so attachments are keyed by doctor.id just like the edit maps above.
-  const [hospitalAttByDoctor, setHospitalAttByDoctor] = useState<Record<string, EmailAttachment[]>>({});
-  const [doctorAttByDoctor,   setDoctorAttByDoctor]   = useState<Record<string, EmailAttachment[]>>({});
-  // The active doctor's attachments + setters that update just this doctor's slot.
-  const hospitalAttachments = hospitalAttByDoctor[activeDoctor?.id ?? ""] ?? EMPTY_ATTACHMENTS;
-  const doctorAttachments   = doctorAttByDoctor[activeDoctor?.id ?? ""]   ?? EMPTY_ATTACHMENTS;
-  const setHospitalAttachments = (next: EmailAttachment[] | ((prev: EmailAttachment[]) => EmailAttachment[])) => {
-    const id = activeDoctor?.id;
-    if (!id) return;
-    setHospitalAttByDoctor(prev => ({ ...prev, [id]: typeof next === "function" ? next(prev[id] ?? []) : next }));
-  };
+  // CVs / logbooks to attach. DOCTOR-leg files stay PER DOCTOR (one working-op
+  // email per doctor). HOSPITAL-leg files are PER (doctor × hospital): each
+  // hospital email is its own send, so a file attached to one combo must NOT ride
+  // that doctor's OTHER hospitals (Aramco×Dr X ≠ Canadian×Dr X). Keyed by
+  // pairKey(doctorId, hospitalId); the active-pair accessors live below (they
+  // need the hospital sub-tab index defined later).
+  const [hospitalAttByPair, setHospitalAttByPair] = useState<Record<string, EmailAttachment[]>>({});
+  const [doctorAttByDoctor, setDoctorAttByDoctor] = useState<Record<string, EmailAttachment[]>>({});
+  const doctorAttachments = doctorAttByDoctor[activeDoctor?.id ?? ""] ?? EMPTY_ATTACHMENTS;
   const setDoctorAttachments = (next: EmailAttachment[] | ((prev: EmailAttachment[]) => EmailAttachment[])) => {
     const id = activeDoctor?.id;
     if (!id) return;
@@ -1390,6 +1395,29 @@ function PreviewConfirm({
     if (!hospitals.some(h => h.id === previewHospitalId)) setPreviewHospitalId(hospitals[0]?.id ?? null);
   }, [hospitals, previewHospitalId]);
   const sampleHospital = hospitals.find(h => h.id === previewHospitalId) ?? hospitals[0];
+
+  // Hospital-leg attachments belong to the ACTIVE (doctor × hospital) pair: the
+  // doctor sub-tab in view and the hospital sub-tab open on the Hospital-intro tab
+  // (single-hospital → that one hospital). Editing the picker only touches this
+  // combo, so a file never fans onto the doctor's other hospitals.
+  const activeHospIntroHosp = hospitals[Math.min(hospIntroHospIdx, Math.max(0, hospitals.length - 1))] ?? hospitals[0];
+  const activeHospPairKey = (activeDoctor && activeHospIntroHosp) ? pairKey(activeDoctor.id, activeHospIntroHosp.id) : "";
+  const hospitalAttachments = (activeHospPairKey && hospitalAttByPair[activeHospPairKey]) ? hospitalAttByPair[activeHospPairKey] : EMPTY_ATTACHMENTS;
+  const setHospitalAttachments = (next: EmailAttachment[] | ((prev: EmailAttachment[]) => EmailAttachment[])) => {
+    if (!activeHospPairKey) return;
+    setHospitalAttByPair(prev => ({ ...prev, [activeHospPairKey]: typeof next === "function" ? next(prev[activeHospPairKey] ?? []) : next }));
+  };
+  // Propagate the active combo's files to EVERY hospital for THIS doctor only —
+  // never touches another doctor, even at the same hospital.
+  const copyHospitalAttToDoctorHospitals = () => {
+    if (!activeDoctor || !activeHospPairKey) return;
+    const src = hospitalAttByPair[activeHospPairKey] ?? [];
+    setHospitalAttByPair(prev => {
+      const n = { ...prev };
+      for (const h of hospitals) n[pairKey(activeDoctor.id, h.id)] = src;
+      return n;
+    });
+  };
 
   // Pure per-doctor token builder — the old single-doctor `vars` memo, now a
   // function of the doctor. Same shape as send-flow-email so the preview matches
@@ -1599,10 +1627,11 @@ function PreviewConfirm({
       };
     }
     onConfirm(perDoctor, {
-      // Per-doctor attachment maps (keyed by doctor.id) — buildRuns stamps each
-      // doctor's runs with only that doctor's files. Drop empty slots.
+      // Attachment maps: hospital keyed by pairKey(doctorId, hospitalId) so each
+      // (doctor × hospital) combo carries only its own files; doctor keyed by
+      // doctor.id. Drop empty slots (buildRuns treats absent as "no files").
       attachments: {
-        hospital: pruneEmptyAttachments(hospitalAttByDoctor),
+        hospital: pruneEmptyAttachments(hospitalAttByPair),
         doctor:   pruneEmptyAttachments(doctorAttByDoctor),
       },
       templateKeys: { hospital: hospitalTemplateKey, doctor: doctorTemplateKey },
@@ -1814,8 +1843,8 @@ function PreviewConfirm({
         editable
         onChange={(ov) => setHospitalOvByPair(prev => ({ ...prev, [key]: ov }))}
         plainBody={rr.plainBody}
-        attachments={hospitalAttByDoctor[doc.id] ?? EMPTY_ATTACHMENTS}
-        onAttachmentsChange={(next) => setHospitalAttByDoctor(prev => ({ ...prev, [doc.id]: next }))}
+        attachments={hospitalAttByPair[key] ?? EMPTY_ATTACHMENTS}
+        onAttachmentsChange={(next) => setHospitalAttByPair(prev => ({ ...prev, [key]: next }))}
         templatePicker={
           <TemplatePicker
             templates={templates}
@@ -1965,12 +1994,27 @@ function PreviewConfirm({
             doctor={activeRender?.wpCandidate ?? null}
             onAttach={(att) => setHospitalAttachments(prev => [...prev, att])}
           />
+          {hospitals.length > 1 && (
+            <div className="text-[10px] uppercase tracking-wider text-sidebar-foreground/60">
+              Files · <strong className="text-sidebar-foreground/85">{activeDoctor.name}</strong> → <strong className="text-sidebar-foreground/85">{activeHospIntroHosp?.name ?? "this hospital"}</strong>
+            </div>
+          )}
           <AttachmentsPicker
             attachments={hospitalAttachments}
             onChange={setHospitalAttachments}
             disabled={submitting}
-            hint="ride on THIS hospital email — CV, logbook, etc."
+            hint={hospitals.length > 1
+              ? `ride ONLY on ${activeDoctor.name} → ${activeHospIntroHosp?.name ?? "this hospital"} — not this doctor's other hospitals`
+              : "ride on THIS hospital email — CV, logbook, etc."}
           />
+          {hospitals.length > 1 && (
+            <Button type="button" variant="outline" size="sm"
+              className="h-7 w-full border-slate-300 bg-white text-[11px] text-slate-700 hover:bg-slate-50 hover:text-slate-900"
+              disabled={submitting}
+              onClick={copyHospitalAttToDoctorHospitals}>
+              <Copy className="h-3 w-3 mr-1.5" /> Copy to all hospitals for {activeDoctor.name}
+            </Button>
+          )}
         </div>
       ),
       preview: multiDoctor
