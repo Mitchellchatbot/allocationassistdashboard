@@ -23,7 +23,7 @@ import { useWpCandidateForDoctor, usePublishedWpCandidates, useWpCandidates, wpC
 import { useZohoData, type ZohoDoctorOnBoard, type ZohoLead } from "@/hooks/use-zoho-data";
 import * as DialogPrimitive from "@radix-ui/react-dialog";
 import { EditableEmailPreview } from "@/components/EditableEmailPreview";
-import { humanizePlaceholders, stripPlaceholderPills } from "@/lib/humanize-placeholders";
+import { humanizePlaceholders, stripPlaceholderPills, blankUnfilledTokens, STRUCTURAL } from "@/lib/humanize-placeholders";
 import { EmailPreviewStudioLayout, type StudioEmail } from "@/components/EmailPreviewStudio";
 import { ProfileSubTabs } from "@/components/ProfileSubTabs";
 import { MailModeBanner } from "@/components/MailModeBanner";
@@ -85,6 +85,19 @@ function pruneEmptyAttachments(
     if (files && files.length) out[id] = files;
   }
   return Object.keys(out).length ? out : undefined;
+}
+// Build a DISPLAY-only var map: drop empty non-structural values so renderTemplate
+// leaves those tokens as {{token}} → humanizePlaceholders shows a red "empty field"
+// pill in the preview. The SENT copy is either server-rendered (multi-hospital) or
+// run through blankUnfilledTokens (single-hospital picks / hand-edits), so a raw
+// {{token}} never reaches a recipient. Structural tokens are kept (filled at send).
+function displayVarsOf(vars: Record<string, string>): Record<string, string> {
+  const out: Record<string, string> = {};
+  for (const [k, v] of Object.entries(vars)) {
+    if (v === "" && !STRUCTURAL.has(k)) continue;
+    out[k] = v;
+  }
+  return out;
 }
 function loadDefaultTemplate(which: "hospital" | "doctor"): string {
   try {
@@ -1481,11 +1494,14 @@ function PreviewConfirm({
     for (const doc of doctors) {
       const wpCandidate = sendDataByDoctor.get(doc.id)?.wpCandidate ?? null;
       const vars = varsFor(doc, sampleHospital, cardImageByDoctor[doc.id] ?? null);
+      // Bodies render with display vars (empties → red {{token}} pills); subjects
+      // keep full vars so the subject line never shows a stray pill.
+      const dispVars = displayVarsOf(vars);
       const rHospSubj = renderTemplate(hospitalSubject, vars);
-      const rHospBody = renderTemplate(hospitalBody, vars) + (customMessage ? `\n\n--- Custom note ---\n${customMessage}` : "");
+      const rHospBody = renderTemplate(hospitalBody, dispVars) + (customMessage ? `\n\n--- Custom note ---\n${customMessage}` : "");
       const hHtml = wrapBodyForSend(rHospBody);
       const rDocSubj = renderTemplate(doctorSubject, vars);
-      const dBody = renderTemplate(doctorBody, vars);
+      const dBody = renderTemplate(doctorBody, dispVars);
       const dHtml = wrapBodyForSend(dBody);
       // The doctor profile IMAGE that ships in the to-hospital email — rich 3:2
       // WordPress card when linked, else the compact fallback card.
@@ -1505,7 +1521,7 @@ function PreviewConfirm({
   // tokens), not just the sample hospital. Mirrors renderDoctorEmail.
   const renderHospitalEmail = (doc: DoctorOption, hosp: Hospital) => {
     const vars = varsFor(doc, hosp, cardImageByDoctor[doc.id] ?? null);
-    const plainBody = renderTemplate(hospitalBody, vars) + (customMessage ? `\n\n--- Custom note ---\n${customMessage}` : "");
+    const plainBody = renderTemplate(hospitalBody, displayVarsOf(vars)) + (customMessage ? `\n\n--- Custom note ---\n${customMessage}` : "");
     return { subject: renderTemplate(hospitalSubject, vars), hHtml: wrapBodyForSend(plainBody), plainBody, vars };
   };
 
@@ -1618,7 +1634,7 @@ function PreviewConfirm({
         // multi-hospital it flows via metadata.template_overrides (server render,
         // which resolves every token per hospital), so we don't bake it here.
         const picked = (isSingle && templatePicked)
-          ? (() => { const rr = renderHospitalEmail(doc, h); return { subject_override: rr.subject, html_override: rr.hHtml }; })()
+          ? (() => { const rr = renderHospitalEmail(doc, h); return { subject_override: rr.subject, html_override: blankUnfilledTokens(rr.hHtml) }; })()
           : null;
         const eff = hOv ?? picked;
         if (eff) hospitalOverrides[h.id] = eff;
@@ -1626,7 +1642,7 @@ function PreviewConfirm({
 
       const doctorOverride = dOv
         ?? (isSingle && doctorTemplateKey !== "profile_sent_doctor" && r
-              ? { subject_override: r.rDocSubj, html_override: r.dHtml } : null);
+              ? { subject_override: r.rDocSubj, html_override: blankUnfilledTokens(r.dHtml) } : null);
 
       perDoctor[doc.id] = {
         ...(Object.keys(hospitalOverrides).length ? { hospitalOverrides } : {}),
@@ -2435,7 +2451,9 @@ function EditableEmailSection({
 
   const report = (s: string, b: string) => {
     const cleanB = stripPlaceholderPills(b);
-    onChange((s !== subject || cleanB !== html) ? { subject_override: s, html_override: cleanB } : null);
+    // Edit detection compares the token-bearing body (cleanB vs html); the SENT
+    // override blanks any still-empty {{token}} so nothing raw ships.
+    onChange((s !== subject || cleanB !== html) ? { subject_override: s, html_override: blankUnfilledTokens(cleanB) } : null);
   };
   const edited = subj !== subject || body !== displayHtml;
 

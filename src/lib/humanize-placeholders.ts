@@ -50,10 +50,19 @@ function humanize(token: string): string {
 // leftover one in a preview isn't a mistake, so it keeps the calm blue pill even
 // in flag-unfilled mode. Everything else that's still a token in a SEND preview
 // is genuinely empty and would ship raw/blank, so it's flagged red.
-const STRUCTURAL = new Set([
+export const STRUCTURAL = new Set([
   "signature", "signature_text", "doctors_table_html", "doctor_card_html",
   "doctor_row_table_html", "logo_header", "hospital_image", "doctor_card_image_url",
 ]);
+
+/** Blank out non-structural `{{token}}` (an empty DATA field left visible as a red
+ *  pill in the preview) so it ships as nothing, never as raw template syntax.
+ *  Structural tokens are left alone (they're filled server-side). Run this on any
+ *  preview body BEFORE it becomes a send override. */
+export function blankUnfilledTokens(html: string): string {
+  if (!html) return html;
+  return html.replace(/\{\{\s*([a-zA-Z0-9_]+)\s*\}\}/g, (m, token: string) => STRUCTURAL.has(token) ? m : "");
+}
 
 const PILL_BLUE = "display:inline-block;background:#eef2ff;color:#4f46e5;border:1px dashed #c7d2fe;border-radius:7px;padding:0 7px;margin:0 1px;font-size:0.85em;font-weight:500;line-height:1.7;white-space:nowrap;vertical-align:baseline;";
 const PILL_RED  = "display:inline-block;background:#fee2e2;color:#b91c1c;border:1px solid #f87171;border-radius:6px;padding:0 6px;margin:0 1px;font-size:0.9em;font-weight:600;line-height:1.7;white-space:nowrap;vertical-align:baseline;";
