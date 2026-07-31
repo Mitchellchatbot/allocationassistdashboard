@@ -699,9 +699,12 @@ Deno.serve(async (req: Request) => {
     // optionally overridden PER SEND by metadata.greet_mode from the preview's
     // "refer by name / hospital team" control:
     //   "contact" → the chosen recipient's own name (metadata.hospital_contact_name),
-    //               falling back to primary_contact_name, then the hospital name.
-    //   "team"    → the hospital name ("Hello <hospital> team!").
+    //               falling back to primary_contact_name; else "" (greet the team).
+    //   "team"    → "" → the template's inverted section renders "<hospital> team".
     //   unset     → the hospital's stored greet_with_contact_name flag (default).
+    // Returns the person's NAME or "" — never the hospital name — so the template
+    // greets a named contact as "Hello <Name>!" (no "team") and an unnamed send as
+    // "Hello <hospital> team!" via {{^hospital_contact_name}}{{hospital_name}} team.
     hospital_contact_name: String(
       (() => {
         const greetMode = String((md as { greet_mode?: string }).greet_mode ?? "").trim();
@@ -710,9 +713,8 @@ Deno.serve(async (req: Request) => {
                         : !!hospital?.greet_with_contact_name;
         return byContact
           ? (String((md as { hospital_contact_name?: string }).hospital_contact_name ?? "").trim()
-             || String(hospital?.primary_contact_name ?? "").trim()
-             || (run.hospital ?? ""))
-          : (run.hospital ?? "");
+             || String(hospital?.primary_contact_name ?? "").trim())
+          : "";
       })(),
     ),
     city:               String(hospital?.city ?? md.city ?? ""),

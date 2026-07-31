@@ -1479,10 +1479,13 @@ function PreviewConfirm({
       hospital_name:      hosp?.name ?? "",
       hospital_contact_name: (() => {
         // Feature 3: this hospital's own greeting mode drives the greeting.
+        // Return the CONTACT name, or "" when greeting the team — the template's
+        // inverted section turns "" into "<hospital> team", so a named person is
+        // "Hello Annette!" (no trailing "team") and the generic case stays
+        // "Hello <hospital> team!".
         const gm = hosp ? (greetModeByHospital[hosp.id] ?? "auto") : "auto";
         const useName = gm === "contact" || (gm === "auto" && hosp?.greet_with_contact_name);
-        const contactName = (hosp && useName) ? resolveGreetName(hosp) : "";
-        return contactName || (hosp?.name ?? "Team");
+        return (hosp && useName) ? resolveGreetName(hosp) : "";
       })(),
       city:               hosp?.city ?? "",
       country:            hosp?.country ?? "",
