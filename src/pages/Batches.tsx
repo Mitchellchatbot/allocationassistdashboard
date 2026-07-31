@@ -2468,7 +2468,7 @@ function BatchDialog({ target, onTargetChange, batches, initialKind, suggestedSp
                 />
                 {panelSelected.length > 1 && (
                   <Button type="button" variant="outline" size="sm"
-                    className="h-7 w-full text-[11px]"
+                    className="h-7 w-full border-slate-300 bg-white text-[11px] text-slate-700 hover:bg-slate-50 hover:text-slate-900"
                     disabled={sendNow.isPending}
                     onClick={copyHospAttToAll}>
                     <Copy className="h-3 w-3 mr-1.5" /> Copy these to all {panelSelected.length} hospitals
@@ -2569,6 +2569,21 @@ function BatchDialog({ target, onTargetChange, batches, initialKind, suggestedSp
         key: "doctor",
         label: `Doctor email${batch?.include_doctor_email ? "" : " · off"}`,
         subLabel: `Working opportunity → ${emailPreview.doctor_email.recipient_count} doctor${emailPreview.doctor_email.recipient_count === 1 ? "" : "s"}`,
+        // Doctor-email attachments live in the LEFT RAIL — same place as the
+        // hospital email's, so both legs edit attachments in the same spot. The
+        // picker follows the active doctor tab (per-doctor CV/logbook).
+        controls: (
+          <div className="rounded-md border border-sidebar-border/40 bg-white/95 p-2 shadow-sm">
+            <AttachmentsPicker
+              attachments={doctorAttachments[activeDocIdx] ?? []}
+              onChange={next => setDocAtt(activeDocIdx, next)}
+              disabled={sendNow.isPending}
+              hint={doctorNoteList.length > 1
+                ? `CV, logbook, etc. for ${doctorNoteList[activeDocIdx]?.name ?? "this doctor"} — attached to THEIR working-opportunity email only (switch doctor tabs to set each one's)`
+                : "CV, logbook, etc. — attached to the doctor working-opportunity email (not the hospital email)"}
+            />
+          </div>
+        ),
         preview: (
           <div className="flex min-h-0 min-w-0 flex-1 flex-col">
             <label className="flex items-center gap-2 px-3 py-2 border-b border-slate-200 bg-slate-50 text-[12px] text-slate-700">
@@ -2577,19 +2592,6 @@ function BatchDialog({ target, onTargetChange, batches, initialKind, suggestedSp
                 className="h-3.5 w-3.5 accent-teal-600" />
               <span>Also send this to the <strong>{emailPreview.doctor_email.recipient_count}</strong> doctor{emailPreview.doctor_email.recipient_count === 1 ? "" : "s"} when the batch sends</span>
             </label>
-            {/* Doctor-email attachments — visible here (not just in full-screen) so
-                both legs' attachments are editable in the preview, matching the
-                single composer. Separate list from the hospital-email attachments. */}
-            <div className="border-b border-slate-200 bg-slate-50/60 px-3 py-2">
-              <AttachmentsPicker
-                attachments={doctorAttachments[activeDocIdx] ?? []}
-                onChange={next => setDocAtt(activeDocIdx, next)}
-                disabled={sendNow.isPending}
-                hint={doctorNoteList.length > 1
-                  ? `CV, logbook, etc. for ${doctorNoteList[activeDocIdx]?.name ?? "this doctor"} — attached to THEIR working-opportunity email only (switch doctor tabs below to set each one's)`
-                  : "CV, logbook, etc. — attached to the doctor working-opportunity email (not the hospital email)"}
-              />
-            </div>
             {doctorNoteList.length ? (
               <ProfileSubTabs
                 names={doctorNoteList.map(d => d.name)}
