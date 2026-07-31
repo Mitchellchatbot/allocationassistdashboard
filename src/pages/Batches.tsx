@@ -1300,9 +1300,18 @@ function BatchDialog({ target, onTargetChange, batches, initialKind, suggestedSp
           toast.error("Pick at least one doctor and one hospital for the one-off send.");
           setCreating(false); return;
         }
+        // A one-off is send-now, so kind/date/spec/country are all fixed —
+        // meaning two one-offs on the same day collide on the
+        // (kind, date, spec, country, time) unique constraint. Stamp a unique
+        // creation TIME (down to the millisecond) so each one-off is its own row.
+        // Cosmetic only — the list shows HH:MM and one-offs don't fire on a clock.
+        const now = new Date();
+        const p2 = (n: number) => String(n).padStart(2, "0");
+        const uniqueTime = `${p2(now.getHours())}:${p2(now.getMinutes())}:${p2(now.getSeconds())}.${String(now.getMilliseconds()).padStart(3, "0")}`;
         const created = await upsert.mutateAsync({
           kind: "one_off",
           scheduled_for: todayISO(),
+          scheduled_at_time: uniqueTime,
           country: null,
           recipient_emails: hospEmails,
           doctor_ids: docIds,
@@ -1877,7 +1886,13 @@ function BatchDialog({ target, onTargetChange, batches, initialKind, suggestedSp
   return (
     <>
     <Dialog open={open} onOpenChange={(v) => !v && close()}>
-      <DialogContent className={batch ? "sm:max-w-[680px] max-h-[88vh] overflow-y-auto" : "sm:max-w-[460px]"}>
+      <DialogContent className={
+        batch ? "sm:max-w-[680px] max-h-[88vh] overflow-y-auto"
+        // One-off shows the two-column doctor/hospital picker — needs real width
+        // so the search bars + hospital names aren't cramped/truncated.
+        : kind === "one_off" ? "sm:max-w-[760px] max-h-[90vh] overflow-y-auto"
+        : "sm:max-w-[460px]"
+      }>
         {!batch ? (
           // ─── Create form ─────────────────────────────────────────────
           <>
