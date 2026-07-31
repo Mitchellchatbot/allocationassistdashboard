@@ -46,14 +46,36 @@ function humanize(token: string): string {
   return LABELS[token] ?? token.replace(/_/g, " ").replace(/\b\w/g, c => c.toUpperCase());
 }
 
+// Structural / raw-HTML tokens the SENDER fills at send time (server-side) — a
+// leftover one in a preview isn't a mistake, so it keeps the calm blue pill even
+// in flag-unfilled mode. Everything else that's still a token in a SEND preview
+// is genuinely empty and would ship raw/blank, so it's flagged red.
+const STRUCTURAL = new Set([
+  "signature", "signature_text", "doctors_table_html", "doctor_card_html",
+  "doctor_row_table_html", "logo_header", "hospital_image", "doctor_card_image_url",
+]);
+
+const PILL_BLUE = "display:inline-block;background:#eef2ff;color:#4f46e5;border:1px dashed #c7d2fe;border-radius:7px;padding:0 7px;margin:0 1px;font-size:0.85em;font-weight:500;line-height:1.7;white-space:nowrap;vertical-align:baseline;";
+const PILL_RED  = "display:inline-block;background:#fee2e2;color:#b91c1c;border:1px solid #f87171;border-radius:6px;padding:0 6px;margin:0 1px;font-size:0.9em;font-weight:600;line-height:1.7;white-space:nowrap;vertical-align:baseline;";
+
 /** Replace `{{token}}` occurrences in already-rendered HTML with a labelled pill.
  *  The `data-ph="token"` marker lets stripPlaceholderPills() turn it back into the
- *  real token before anything is sent, so pills are strictly a display layer. */
-export function humanizePlaceholders(html: string): string {
+ *  real token before anything is sent, so pills are strictly a display layer.
+ *
+ *  `flagUnfilled` (SEND previews): a still-unfilled DATA token means it would ship
+ *  raw/blank, so render it as a RED `{{token}}` chip that stands out — the team
+ *  can spot and fix it before sending. Structural tokens stay blue; the template
+ *  editor (default, flag off) keeps every token blue since tokens are the point. */
+export function humanizePlaceholders(html: string, opts: { flagUnfilled?: boolean } = {}): string {
   if (!html) return html;
-  return html.replace(/\{\{\s*([a-zA-Z0-9_]+)\s*\}\}/g, (_m, token: string) =>
-    `<span data-ph="${token}" style="display:inline-block;background:#eef2ff;color:#4f46e5;border:1px dashed #c7d2fe;border-radius:7px;padding:0 7px;margin:0 1px;font-size:0.85em;font-weight:500;line-height:1.7;white-space:nowrap;vertical-align:baseline;">${humanize(token)}</span>`,
-  );
+  const flag = !!opts.flagUnfilled;
+  return html.replace(/\{\{\s*([a-zA-Z0-9_]+)\s*\}\}/g, (_m, token: string) => {
+    const red = flag && !STRUCTURAL.has(token);
+    const style = red ? PILL_RED : PILL_BLUE;
+    const inner = red ? `{{${token}}}` : humanize(token);
+    const title = red ? ' title="This field is empty — it will send exactly like this unless you fill it"' : "";
+    return `<span data-ph="${token}" style="${style}"${title}>${inner}</span>`;
+  });
 }
 
 /** Reverse of humanizePlaceholders — turn the placeholder pills back into their

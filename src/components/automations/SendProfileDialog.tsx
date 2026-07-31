@@ -490,12 +490,12 @@ function SendProfileDialogBody({ onClose, initial }: { onClose: () => void; init
       <div className="flex min-h-0 w-full flex-1 flex-col">
         <div className="shrink-0 border-b border-slate-100 px-5 py-3">
           <div className="truncate text-[14px] font-semibold text-slate-900">
-            {subject ? <span dangerouslySetInnerHTML={{ __html: humanizePlaceholders(subject) }} /> : <span className="italic text-slate-400">No subject</span>}
+            {subject ? <span dangerouslySetInnerHTML={{ __html: humanizePlaceholders(subject, { flagUnfilled: true }) }} /> : <span className="italic text-slate-400">No subject</span>}
           </div>
           <div className="mt-0.5 text-[10px] uppercase tracking-wider text-slate-400">Preview · not sent</div>
         </div>
         <div className="min-h-0 flex-1 overflow-auto bg-white">
-          <EmailFrame html={humanizePlaceholders(html)} />
+          <EmailFrame html={humanizePlaceholders(html, { flagUnfilled: true })} />
         </div>
       </div>
     );
@@ -2337,7 +2337,7 @@ function EditableEmailSection({
   // Show unfilled {{tokens}} as friendly placeholder pills in the preview, but
   // report clean {{tokens}} back up so the SENT email is byte-identical — the
   // pills never leave the display (stripPlaceholderPills is the exact reverse).
-  const displayHtml = useMemo(() => humanizePlaceholders(html), [html]);
+  const displayHtml = useMemo(() => humanizePlaceholders(html, { flagUnfilled: true }), [html]);
   const [subj, setSubj] = useState(subject);
   const [body, setBody] = useState(displayHtml);
   const [tick, setTick] = useState(0);
@@ -2429,7 +2429,7 @@ function HtmlPreview({ html }: { html: string }) {
   return (
     <div className="flex-1 min-h-0">
       <EmailFrame
-        html={humanizePlaceholders(html)}
+        html={humanizePlaceholders(html, { flagUnfilled: true })}
         fill
         style={{ border: "1px solid hsl(var(--border))", borderRadius: 6 }}
       />
