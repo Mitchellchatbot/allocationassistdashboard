@@ -32,6 +32,7 @@ const CATS_PER_GROUP = 6; // beyond this, a group's tail rolls into one "Other �
 
 const REVENUE_COLOR = "#2563eb";
 const PROFIT_COLOR  = "#10b981";
+const SPEND_COLOR   = "#475569"; // "Total spend" source when no revenue is booked in the range yet
 
 // Expense grouping (groupFor) is shared with the P&L banner + Marketing KPI
 // card so all three bucket categories identically — see src/lib/finance-groups.ts.
@@ -73,7 +74,7 @@ export function CompanyFinanceSankey({ dateRange }: {
     // marketing accounts, where Scaled AI is already booked correctly) flows in
     // as-is, so the graph's totals tie out to Zoho Books exactly.
     const breakdown = (data.expenseBreakdown ?? []).filter(c => c.amount > 0);
-    if (revenue <= 0 || breakdown.length === 0) return null;
+    if (breakdown.length === 0) return null;
     const groups = new Map<string, GroupBucket>();
     const catInfo = new Map<string, CatInfo>();
     for (const c of breakdown) {
@@ -84,12 +85,21 @@ export function CompanyFinanceSankey({ dateRange }: {
       catInfo.set(c.category, { amount: c.amount, count: c.count, txns: c.txns ?? [], color: g.color });
     }
     const totalExpenses = [...groups.values()].reduce((s, g) => s + g.total, 0);
-    return { revenue, totalExpenses, profit: revenue - totalExpenses, groups, catInfo };
+    if (totalExpenses <= 0) return null;
+    // Spend-only mode: no revenue booked in the range yet (e.g. the current
+    // month before invoices are raised). Show the pure expense flow — "where the
+    // money is going" — from a single Total-spend source, with no profit node,
+    // instead of hiding the whole graph. Scaling by max(revenue, expenses) keeps
+    // it from dividing by a zero revenue.
+    const spendMode = revenue <= 0;
+    return { revenue, totalExpenses, profit: revenue - totalExpenses, spendMode, groups, catInfo };
   }, [data]);
 
   const layout = useMemo(() => {
     if (!base) return null;
-    const ky = TARGET_REV_H / base.revenue;
+    // Scale by the taller side so a zero-revenue (spend-only) or loss month
+    // still fits and never divides by a zero revenue.
+    const ky = TARGET_REV_H / Math.max(base.revenue, base.totalExpenses);
     const hh = (v: number) => Math.max(v * ky, MIN_H);
     const groupList = [...base.groups.entries()].sort((a, b) => b[1].total - a[1].total)
       .map(([name, g]) => ({ name, color: g.color, total: g.total, cats: [...g.cats].sort((a, b) => b.amount - a.amount) }));
@@ -141,7 +151,12 @@ export function CompanyFinanceSankey({ dateRange }: {
     const revH = profitH + groups.reduce((s, g) => s + g.h, 0);
     const spanTop = Math.min(0, profit ? profit.y : 0, ...groups.map(g => g.y));
     const spanBot = Math.max(col2H, ...groups.map(g => g.y + g.h), profit ? profit.y + profit.h : 0);
-    const revenue: RNode = { name: "Revenue", color: REVENUE_COLOR, total: base.revenue, x: COL.rev, y: spanTop + (spanBot - spanTop - revH) / 2, h: revH };
+    const revenue: RNode = {
+      name:  base.spendMode ? "Total spend" : "Revenue",
+      color: base.spendMode ? SPEND_COLOR : REVENUE_COLOR,
+      total: base.spendMode ? base.totalExpenses : base.revenue,
+      x: COL.rev, y: spanTop + (spanBot - spanTop - revH) / 2, h: revH,
+    };
 
     // Normalise: shift so the topmost node sits at OUTER.
     const allNodes = [revenue, ...(profit ? [profit] : []), ...groups, ...cats];
@@ -303,7 +318,12 @@ export function CompanyFinanceSankey({ dateRange }: {
           </button>
         ) : (
           <p className="text-[11px] text-muted-foreground/80 mt-0.5">
-            {fmt(base.revenue)} revenue → <span className="text-emerald-700 font-medium">{base.profit > 0 ? `${fmt(base.profit)} profit` : `${fmt(Math.abs(base.profit))} loss`}</span> + expenses by group → category.
+            {base.spendMode ? (
+              <>{fmt(base.totalExpenses)} total spend by group → category{" "}
+              <span className="text-muted-foreground">· no revenue booked in this period yet</span>.</>
+            ) : (
+              <>{fmt(base.revenue)} revenue → <span className="text-emerald-700 font-medium">{base.profit > 0 ? `${fmt(base.profit)} profit` : `${fmt(Math.abs(base.profit))} loss`}</span> + expenses by group → category.</>
+            )}
             {" "}<span className="text-foreground/70">Click a group (›) to zoom in, or a category for its transactions.</span>
           </p>
         )}
