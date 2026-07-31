@@ -2503,7 +2503,7 @@ function BatchDialog({ target, onTargetChange, batches, initialKind, suggestedSp
                 html={perDoctorPristine(i)}
                 onSubjectChange={(s: string) => setPerDoctor(prev => prev.map((p, j) => j === i ? { ...p, subject: s } : p))}
                 onHtmlChange={(h: string) => setPerDoctor(prev => prev.map((p, j) => j === i ? { ...p, html: h } : p))}
-                resetKey={`${previewResetTick}:${previewGreetId ?? "first"}:${i}`}
+                resetKey={`${previewResetTick}:${previewGreetId ?? "first"}:${greetModeByHospital[previewGreetId ?? ""] ?? "auto"}:${i}`}
                 edited={perDoctorEdited(i)}
                 onReset={() => {
                   setPerDoctor(prev => prev.map((p, j) => j === i ? { subject: d.subject, html: perDoctorPristine(i) } : p));
@@ -2547,7 +2547,7 @@ function BatchDialog({ target, onTargetChange, batches, initialKind, suggestedSp
               html={displayHtml}
               onSubjectChange={setEditSubject}
               onHtmlChange={setEditHtml}
-              resetKey={`${previewResetTick}:${previewGreetId ?? "first"}`}
+              resetKey={`${previewResetTick}:${previewGreetId ?? "first"}:${greetModeByHospital[previewGreetId ?? ""] ?? "auto"}`}
               edited={batchEdited}
               onReset={() => {
                 if (!emailPreview) return;
@@ -2597,6 +2597,7 @@ function BatchDialog({ target, onTargetChange, batches, initialKind, suggestedSp
                 names={doctorNoteList.map(d => d.name)}
                 active={Math.min(doctorTab, doctorNoteList.length - 1)}
                 onSelect={setDoctorTab}
+                markers={doctorNoteList.map((_, i) => (doctorAttachments[i]?.length ?? 0) > 0)}
                 panes={doctorNoteList.map((d, i) => (
                   <EditableEmailPreview
                     subject={perDoctorNote[i]?.subject ?? d.subject}
