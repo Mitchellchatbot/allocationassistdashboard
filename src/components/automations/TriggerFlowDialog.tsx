@@ -375,7 +375,7 @@ export function TriggerFlowDialog({ open, flowKey, onClose }: Props) {
   return (
     <>
     <Dialog open={open} onOpenChange={(v) => !v && onClose()}>
-      <DialogContent className="sm:max-w-[560px] max-h-[88vh] overflow-y-auto">
+      <DialogContent className="sm:max-w-[640px] max-h-[88vh] overflow-y-auto overflow-x-hidden">
         <DialogHeader>
           <DialogTitle className="flex items-center gap-2">
             <Zap className="h-4 w-4 text-teal-600" /> {flowConfig.title}
@@ -561,7 +561,7 @@ export function TriggerFlowDialog({ open, flowKey, onClose }: Props) {
               />
             </div>
 
-            <DialogFooter className="gap-2 sm:gap-2">
+            <DialogFooter className="gap-2 flex-wrap">
               <Button variant="outline" onClick={onClose} disabled={submitting}>Cancel</Button>
               {/* "Mark only" — record the milestone with no email. Offered only
                   for flows that would otherwise send at trigger time. */}

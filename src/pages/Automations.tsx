@@ -555,6 +555,7 @@ function RunDetailSheet({ run, open, onClose }: { run: FlowRun | null; open: boo
   const [invLink,   setInvLink]   = useState<string>("");
   const [invNumber, setInvNumber] = useState<string>("");
   const [savingInv, setSavingInv] = useState(false);
+  const [markingStep, setMarkingStep] = useState(false);
   const addNote = useAddRunNote();
   const qc = useQueryClient();
 
@@ -761,6 +762,45 @@ function RunDetailSheet({ run, open, onClose }: { run: FlowRun | null; open: boo
     });
   };
 
+  // Mark the current step complete WITHOUT sending — advance to the next stage
+  // (or finish the run if this is the last). For a step handled outside the
+  // system, or a "mark only" run you don't want to email at all.
+  const doMarkStepComplete = async () => {
+    const label = currentStageDef?.label ?? run.current_stage;
+    if (!window.confirm(`Mark "${label}" complete without sending an email? The flow moves to the next step.`)) return;
+    setMarkingStep(true);
+    try {
+      const idx = getStageIndex(run.flow_key, run.current_stage);
+      const nextStage = flow.stages[idx + 1];
+      const nowIso = new Date().toISOString();
+      await supabase.from("automation_flow_events").insert({
+        run_id: run.id, stage_key: run.current_stage, event_type: "completed",
+        message: "Marked complete by the team — no email sent.",
+      });
+      if (nextStage) {
+        await supabase.from("automation_flow_runs")
+          .update({ current_stage: nextStage.key, last_event_at: nowIso })
+          .eq("id", run.id);
+        await supabase.from("automation_flow_events").insert({
+          run_id: run.id, stage_key: nextStage.key, event_type: "entered",
+          message: "Advanced here without sending (previous step marked complete).",
+        });
+        toast.success(`Step marked complete — advanced to "${nextStage.label}".`);
+      } else {
+        await supabase.from("automation_flow_runs")
+          .update({ status: "completed", completed_at: nowIso, last_event_at: nowIso })
+          .eq("id", run.id);
+        toast.success("Final step marked complete — run finished.");
+      }
+      qc.invalidateQueries({ queryKey: ["automation-flow-runs"] });
+      qc.invalidateQueries({ queryKey: ["automation-flow-events", run.id] });
+    } catch (e) {
+      toast.error(e instanceof Error ? e.message : "Couldn't mark step complete");
+    } finally {
+      setMarkingStep(false);
+    }
+  };
+
   return (
     <Sheet open={open} onOpenChange={(v) => !v && onClose()}>
       <SheetContent side="right" className="w-full sm:max-w-[920px] overflow-y-auto">
@@ -809,15 +849,27 @@ function RunDetailSheet({ run, open, onClose }: { run: FlowRun | null; open: boo
                 </Button>
               )}
               {isSendable && (
-                <Button
-                  size="sm"
-                  onClick={() => handleSendNow()}
-                  variant={alreadySent ? "outline" : "default"}
-                  title={alreadySent ? "An email has already been sent for this stage. Click to preview & send again." : `Preview & send "${currentStageDef?.label}" email`}
-                >
-                  <Send className="h-3.5 w-3.5 mr-1.5" />
-                  {alreadySent ? "Resend email" : "Send now"}
-                </Button>
+                <>
+                  <Button
+                    size="sm"
+                    variant="outline"
+                    onClick={doMarkStepComplete}
+                    disabled={markingStep}
+                    title={`Mark "${currentStageDef?.label}" complete WITHOUT sending an email, and move the flow to the next step.`}
+                  >
+                    <CheckCircle2 className="h-3.5 w-3.5 mr-1.5 text-emerald-600" />
+                    {markingStep ? "Marking…" : "Mark step done"}
+                  </Button>
+                  <Button
+                    size="sm"
+                    onClick={() => handleSendNow()}
+                    variant={alreadySent ? "outline" : "default"}
+                    title={alreadySent ? "An email has already been sent for this stage. Click to preview & send again." : `Preview & send "${currentStageDef?.label}" email`}
+                  >
+                    <Send className="h-3.5 w-3.5 mr-1.5" />
+                    {alreadySent ? "Resend email" : "Send now"}
+                  </Button>
+                </>
               )}
             </div>
           </div>
