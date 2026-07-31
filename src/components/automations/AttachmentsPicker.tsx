@@ -87,7 +87,9 @@ export function AttachmentsPicker({
       onDragLeave={(e) => { e.preventDefault(); setDragging(false); }}
       onDrop={(e) => { e.preventDefault(); setDragging(false); if (!disabled) handleFiles(e.dataTransfer.files); }}
       className={cn(
-        "rounded-lg border border-slate-200 bg-white p-2.5 space-y-2 shadow-sm transition-colors",
+        // text-slate-700 so text/buttons don't inherit a light rail foreground
+        // (the green sidebar) and read white-on-white.
+        "rounded-lg border border-slate-200 bg-white p-2.5 space-y-2 shadow-sm transition-colors text-slate-700",
         dragging && "border-teal-400 border-dashed bg-teal-50",
       )}
     >
