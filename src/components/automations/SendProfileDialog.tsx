@@ -1737,6 +1737,30 @@ function PreviewConfirm({
             flagHospital={makeHospitalFlag(hospitals)}
           />
 
+          {/* Auto-CC preview: each hospital's OWN saved cc_emails ride ITS email
+              (send-flow-email stamps them on top of the CC typed above). Read-only
+              so the dispatcher can SEE who else is copied. Grouped by hospital
+              since each hospital's email carries its own list. Dropped in test
+              mode — live sends only. */}
+          {(() => {
+            const withCc = hospitals
+              .map(h => ({ name: h.name, ccs: [...new Set((h.cc_emails ?? []).map(e => e.trim()).filter(isEmail))] }))
+              .filter(h => h.ccs.length);
+            if (!withCc.length) return null;
+            return (
+              <div className="rounded-md border border-slate-200 bg-slate-50/70 p-2 space-y-1">
+                <div className="text-[10px] uppercase tracking-wider text-slate-500">Also auto-CC'd — from each hospital's saved contacts</div>
+                {withCc.map(h => (
+                  <div key={h.name} className="text-[10.5px] leading-snug text-slate-600">
+                    <span className="font-medium text-slate-700">{h.name}:</span>{" "}
+                    {h.ccs.map((e, i) => <span key={e}>{i ? ", " : ""}<span className="font-mono">{e}</span></span>)}
+                  </div>
+                ))}
+                <div className="text-[10px] text-slate-400">Rides each hospital's own email on live sends (dropped in test mode).</div>
+              </div>
+            );
+          })()}
+
           {sender ? (
             <div className="text-[10.5px] text-emerald-700">
               Replies land in <span className="font-mono">{sender.email}</span>.
