@@ -34,15 +34,15 @@ export function ZohoBooksFreshness({ dateRange }: { dateRange: { from: Date; to:
 
   const pending  = busy || isFetching;
   const syncedAt = books.synced_at;
-  // Categorisation self-check: every top-level Zoho P&L section should be
-  // recognised. `unmatched` is money that would be left out of the totals — it
-  // should always be empty; if it isn't, flag it loudly.
-  const sections  = books.pnlSections;
-  const unmatched = sections?.unmatched ?? [];
-  const coverageNote = sections
-    ? unmatched.length
-      ? `⚠ ${unmatched.length} P&L section(s) not categorised: ${unmatched.map(u => u.name).join(", ")} — these are NOT in the totals.`
-      : `All ${sections.income.length + sections.expense.length} income/expense sections from Zoho's P&L are categorised into the totals.`
+  // Accuracy self-check: our income − expenses should equal Zoho's OWN reported
+  // net profit. When it does, the figures pulled are provably complete; when it
+  // doesn't, some P&L amount is being missed — flag it with the AED gap.
+  const check    = books.pnlCheck;
+  const mismatch = !!(check && check.reportedNet != null && !check.reconciles);
+  const coverageNote = check && check.reportedNet != null
+    ? check.reconciles
+      ? "Reconciled: income − expenses matches Zoho's own reported net profit to the AED."
+      : `⚠ Off by AED ${Math.abs(check.difference).toLocaleString(undefined, { maximumFractionDigits: 0 })} vs Zoho's reported net profit — some P&L amounts may be missing.`
     : null;
 
   const onRefresh = async () => {
@@ -88,14 +88,14 @@ export function ZohoBooksFreshness({ dateRange }: { dateRange: { from: Date; to:
         </TooltipContent>
       </Tooltip>
 
-      {/* Coverage flag — only appears if Zoho ever emits a P&L section we don't
-          recognise, i.e. money that would be left out of the totals. */}
-      {unmatched.length > 0 && (
+      {/* Reconciliation flag — only appears if our totals stop matching Zoho's
+          own reported net profit, i.e. some P&L amount is being missed. */}
+      {mismatch && (
         <Tooltip>
           <TooltipTrigger asChild>
             <span className="flex items-center gap-1 h-7 px-2 text-[11px] font-medium rounded-full border border-amber-200 bg-amber-50 text-amber-700">
               <AlertTriangle className="h-3 w-3 shrink-0" />
-              {unmatched.length} uncategorised
+              doesn&rsquo;t reconcile
             </span>
           </TooltipTrigger>
           <TooltipContent side="bottom" className="text-[10px] max-w-[260px]">

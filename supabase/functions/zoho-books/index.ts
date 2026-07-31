@@ -127,22 +127,27 @@ async function getAccessToken(): Promise<string | null> {
 interface PLNode { name?: string; total?: number; account_transactions?: PLNode[] }
 interface PLAccount { name: string; total: number }
 
-// Known TOP-LEVEL P&L section names. Income + expense groups get SUMMED into the
-// headline totals; the subtotal rows are figures Zoho computes for us and must
-// be IGNORED (summing "Gross Profit" etc. would double-count). Any top-level
-// section matching NONE of these is reported back as `unmatched` — so a section
-// Zoho renames or newly emits can never be silently left out of the totals.
+// P&L section names we SUM (income + expense groups). `findPLNode` searches the
+// report recursively, so these are matched wherever they sit — this org nests
+// them INSIDE the Gross/Operating/Net-Profit subtotal rows rather than at the
+// top level, and the recursive search finds them either way.
 const PNL_INCOME_SECTIONS  = ["Operating Income", "Non Operating Income", "Other Income"];
 const PNL_EXPENSE_SECTIONS = ["Cost of Goods Sold", "Operating Expense", "Non Operating Expense", "Other Expense"];
-const PNL_SUBTOTAL_SECTIONS = [
-  "Gross Profit", "Operating Profit", "Net Profit/Loss", "Net Profit / Loss",
-  "Net Profit", "Net Loss", "Net Income", "Taxable Profit",
-  "Earning Before Interest And Tax (EBIT)", "Earnings Before Interest and Taxes (EBIT)",
-];
+// Zoho's own bottom-line subtotal — the number our (income − expenses) is
+// reconciled against. First match wins.
+const PNL_NET_PROFIT_SECTIONS = ["Net Profit/Loss", "Net Profit / Loss", "Net Profit/(Loss)", "Net Profit", "Net Loss", "Net Income"];
 
-/** Which top-level sections were counted / ignored / not recognised — the
- *  self-check that proves nothing fell through the categorisation. */
-interface PnLSections { income: string[]; expense: string[]; ignored: string[]; unmatched: { name: string; total: number }[] }
+/** Accuracy self-check for a P&L range. `reconciles` true means our summed
+ *  income − expenses equals Zoho's OWN reported net profit to the AED — i.e. we
+ *  captured exactly what Zoho did, no matter how the report is nested. */
+interface PnLCheck {
+  countedIncome:  string[];      // income sections that were found + summed
+  countedExpense: string[];      // expense sections that were found + summed
+  reportedNet:    number | null; // Zoho's own bottom-line net profit
+  computedNet:    number;        // our income − expenses
+  difference:     number;        // computedNet − reportedNet (≈ 0 when complete)
+  reconciles:     boolean;       // |difference| < 1 AED
+}
 
 function findPLNode(nodes: PLNode[], name: string): PLNode | null {
   for (const n of nodes) {
@@ -152,42 +157,44 @@ function findPLNode(nodes: PLNode[], name: string): PLNode | null {
   return null;
 }
 
-async function fetchPnL(token: string, from: string, to: string): Promise<{ revenue: number; expenses: number; expenseAccounts: PLAccount[]; sections: PnLSections } | null> {
+async function fetchPnL(token: string, from: string, to: string): Promise<{ revenue: number; expenses: number; expenseAccounts: PLAccount[]; check: PnLCheck } | null> {
   const url = `${API_BASE}/reports/profitandloss?organization_id=${ORG}&from_date=${from}&to_date=${to}`;
   const res = await fetch(url, { headers: { Authorization: `Zoho-oauthtoken ${token}` } });
   if (!res.ok) { console.error("[zoho-books] P&L report failed:", res.status, await res.text()); return null; }
   const j = await res.json() as { profit_and_loss?: PLNode[] };
   const pl = j.profit_and_loss ?? [];
+  const countedIncome: string[] = [];
   let revenue = 0;
   for (const nm of PNL_INCOME_SECTIONS) {
-    const n = findPLNode(pl, nm); if (n) revenue += num(n.total);
+    const n = findPLNode(pl, nm); if (n) { revenue += num(n.total); countedIncome.push(nm); }
   }
+  const countedExpense: string[] = [];
   let expenses = 0;
   const expenseAccounts: PLAccount[] = [];
   for (const nm of PNL_EXPENSE_SECTIONS) {
     const n = findPLNode(pl, nm);
     if (!n) continue;
     expenses += num(n.total);
+    countedExpense.push(nm);
     for (const a of n.account_transactions ?? []) if (a.name) expenseAccounts.push({ name: String(a.name), total: num(a.total) });
   }
 
-  // Coverage self-check: classify EVERY top-level section. Anything we don't
-  // recognise is money the sums above would skip — surface it loudly (payload +
-  // logs) rather than dropping it silently.
-  const sections: PnLSections = { income: [], expense: [], ignored: [], unmatched: [] };
-  for (const n of pl) {
-    const name = String(n.name ?? "").trim();
-    if (!name) continue;
-    if (PNL_INCOME_SECTIONS.includes(name))        sections.income.push(name);
-    else if (PNL_EXPENSE_SECTIONS.includes(name))  sections.expense.push(name);
-    else if (PNL_SUBTOTAL_SECTIONS.includes(name)) sections.ignored.push(name);
-    else sections.unmatched.push({ name, total: num(n.total) });
+  // Accuracy self-check — reconcile OUR sums against Zoho's own reported net
+  // profit. This is structure-independent: if the two match, we've captured
+  // exactly the income + expenses Zoho did (nothing missing, nothing
+  // double-counted), regardless of how the report is nested. The real proof the
+  // numbers are complete — far stronger than name-matching top-level sections.
+  let reportedNet: number | null = null;
+  for (const nm of PNL_NET_PROFIT_SECTIONS) { const n = findPLNode(pl, nm); if (n) { reportedNet = num(n.total); break; } }
+  const computedNet = +(revenue - expenses).toFixed(2);
+  const difference  = reportedNet == null ? 0 : +(computedNet - reportedNet).toFixed(2);
+  const reconciles  = reportedNet != null && Math.abs(difference) < 1;
+  if (reportedNet != null && !reconciles) {
+    console.error(`[zoho-books] P&L does NOT reconcile: computed ${computedNet} vs Zoho net ${reportedNet} (off by ${difference})`);
   }
-  if (sections.unmatched.length) {
-    console.error("[zoho-books] UNMATCHED top-level P&L sections (NOT counted!):", JSON.stringify(sections.unmatched));
-  }
+  const check: PnLCheck = { countedIncome, countedExpense, reportedNet, computedNet, difference, reconciles };
 
-  return { revenue: +revenue.toFixed(2), expenses: +expenses.toFixed(2), expenseAccounts, sections };
+  return { revenue: +revenue.toFixed(2), expenses: +expenses.toFixed(2), expenseAccounts, check };
 }
 
 /** Page through a Zoho Books list endpoint and return every row of `listKey`. */
@@ -217,7 +224,22 @@ serve(async (req) => {
   try { body = await req.json(); } catch { body = {}; }
 
   const token = await getAccessToken();
-  if (!token) return json({ configured: true, ok: false, error: "Could not authenticate with Zoho Books (check the refresh token / client credentials / data center)." }, 502);
+  if (!token) {
+    // Token refresh failed — usually a transient Zoho token-generation throttle,
+    // not a real outage. DON'T collapse the whole Finance page to the rough
+    // estimate (which reads as "spend = 0"): if we hold a cached result for this
+    // range, serve THAT (clearly marked stale) so the dashboard stays on real
+    // Books actuals. Only the main P&L request has a cache to fall back to; the
+    // drill-down actions (invoices/accounttxns/bills) return the auth error.
+    if (!body.action) {
+      const f = ymd(body.from ?? ""), t = ymd(body.to ?? "");
+      if (f && t) {
+        const lastGood = await readCache(`${f}_${t}`);
+        if (lastGood) return json({ ...lastGood.data, configured: true, ok: true, synced_at: lastGood.synced_at, stale: true });
+      }
+    }
+    return json({ configured: true, ok: false, error: "Could not authenticate with Zoho Books (check the refresh token / client credentials / data center)." }, 502);
+  }
 
   // ── action=invoices: flat list of ALL invoices (all-time) with customer
   //    info, so the dashboard can map each doctor (customer) to their billing.
@@ -575,11 +597,10 @@ serve(async (req) => {
       expenseBreakdown,
       marketingTxns,
       scaledAiCorrection: scaledCut, // suspect Scaled-AI excess removed from expenses
-      // Categorisation self-check for the whole range: which top-level P&L
-      // sections were counted, ignored (subtotals), or NOT recognised. `unmatched`
-      // should always be empty — a non-empty list means a section is being left
-      // out of revenue/expenses and needs adding to the lists above.
-      pnlSections: pnl?.sections ?? null,
+      // Accuracy self-check: our summed income − expenses vs Zoho's OWN reported
+      // net profit. `reconciles: true` proves the figures pulled from Zoho are
+      // complete (before our one deliberate Scaled-AI adjustment above).
+      pnlCheck: pnl?.check ?? null,
     };
 
     // Complete result → write it to the shared cache so every other viewer (and
