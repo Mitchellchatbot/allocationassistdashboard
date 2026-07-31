@@ -115,7 +115,7 @@ const STYLE = `
 .dpm .contact-row{display:flex;align-items:center;justify-content:center;gap:9px;font-size:12.5px;margin-bottom:11px;word-break:break-word;}
 .dpm .contact-icon{width:24px;height:24px;border-radius:50%;background:#fff;display:flex;align-items:center;justify-content:center;flex-shrink:0;}
 .dpm .contact-icon svg{width:13px;height:13px;stroke:var(--teal);}
-.dpm .btn{display:block;width:100%;text-align:center;padding:11px 0 19px;border-radius:10px;font-size:14px;font-weight:600;margin-top:14px;border:none;line-height:1.4;}
+.dpm .btn{display:block;width:100%;text-align:center;padding:7px 0 23px;border-radius:10px;font-size:14px;font-weight:600;margin-top:14px;border:none;line-height:1.4;}
 .dpm .btn-gray{background:linear-gradient(180deg,#f2f2f2,#e3e3e3);color:#333;}
 .dpm .btn-outline{background:#fff;color:var(--teal);border:1.5px solid var(--teal);}
 .dpm .btn-black{background:#111111;color:#fff;}

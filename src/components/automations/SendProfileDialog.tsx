@@ -5,7 +5,7 @@ import { Label } from "@/components/ui/label";
 import { Textarea } from "@/components/ui/textarea";
 import { Badge } from "@/components/ui/badge";
 import { Checkbox } from "@/components/ui/checkbox";
-import { Search, Send, Eye, ChevronLeft, AlertTriangle, ChevronDown, Copy } from "lucide-react";
+import { Search, Send, Eye, ChevronLeft, AlertTriangle, ChevronDown, Copy, Check } from "lucide-react";
 import { captureAndUploadCard } from "@/lib/card-screenshot";
 import { buildProfileCardHtml } from "@/lib/profile-card-html";
 import { buildDoctorProfileHtml, PROFILE_IMAGE_WIDTH } from "@/lib/doctor-profile-image";
@@ -1408,7 +1408,9 @@ function PreviewConfirm({
     setHospitalAttByPair(prev => ({ ...prev, [activeHospPairKey]: typeof next === "function" ? next(prev[activeHospPairKey] ?? []) : next }));
   };
   // Propagate the active combo's files to EVERY hospital for THIS doctor only —
-  // never touches another doctor, even at the same hospital.
+  // never touches another doctor, even at the same hospital. Flags the doctor as
+  // just-copied (transient) so the button can confirm it happened, plus a toast.
+  const [attCopiedDoctorId, setAttCopiedDoctorId] = useState<string | null>(null);
   const copyHospitalAttToDoctorHospitals = () => {
     if (!activeDoctor || !activeHospPairKey) return;
     const src = hospitalAttByPair[activeHospPairKey] ?? [];
@@ -1417,6 +1419,12 @@ function PreviewConfirm({
       for (const h of hospitals) n[pairKey(activeDoctor.id, h.id)] = src;
       return n;
     });
+    const docId = activeDoctor.id, docName = activeDoctor.name, nH = hospitals.length;
+    setAttCopiedDoctorId(docId);
+    window.setTimeout(() => setAttCopiedDoctorId(cur => (cur === docId ? null : cur)), 2200);
+    toast.success(src.length
+      ? `${src.length} file${src.length === 1 ? "" : "s"} now on all ${nH} hospitals for ${docName}`
+      : `Cleared files on all ${nH} hospitals for ${docName}`);
   };
 
   // Pure per-doctor token builder — the old single-doctor `vars` memo, now a
@@ -2009,10 +2017,14 @@ function PreviewConfirm({
           />
           {hospitals.length > 1 && (
             <Button type="button" variant="outline" size="sm"
-              className="h-7 w-full border-slate-300 bg-white text-[11px] text-slate-700 hover:bg-slate-50 hover:text-slate-900"
+              className={`h-7 w-full text-[11px] transition-colors ${attCopiedDoctorId === activeDoctor.id
+                ? "border-teal-300 bg-teal-50 text-teal-700 hover:bg-teal-50 hover:text-teal-700"
+                : "border-slate-300 bg-white text-slate-700 hover:bg-slate-50 hover:text-slate-900"}`}
               disabled={submitting}
               onClick={copyHospitalAttToDoctorHospitals}>
-              <Copy className="h-3 w-3 mr-1.5" /> Copy to all hospitals for {activeDoctor.name}
+              {attCopiedDoctorId === activeDoctor.id
+                ? <><Check className="h-3 w-3 mr-1.5" /> Copied to all {hospitals.length} hospitals</>
+                : <><Copy className="h-3 w-3 mr-1.5" /> Copy to all hospitals for {activeDoctor.name}</>}
             </Button>
           )}
         </div>
