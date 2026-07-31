@@ -34,6 +34,16 @@ export function ZohoBooksFreshness({ dateRange }: { dateRange: { from: Date; to:
 
   const pending  = busy || isFetching;
   const syncedAt = books.synced_at;
+  // Categorisation self-check: every top-level Zoho P&L section should be
+  // recognised. `unmatched` is money that would be left out of the totals — it
+  // should always be empty; if it isn't, flag it loudly.
+  const sections  = books.pnlSections;
+  const unmatched = sections?.unmatched ?? [];
+  const coverageNote = sections
+    ? unmatched.length
+      ? `⚠ ${unmatched.length} P&L section(s) not categorised: ${unmatched.map(u => u.name).join(", ")} — these are NOT in the totals.`
+      : `All ${sections.income.length + sections.expense.length} income/expense sections from Zoho's P&L are categorised into the totals.`
+    : null;
 
   const onRefresh = async () => {
     setBusy(true);
@@ -49,31 +59,50 @@ export function ZohoBooksFreshness({ dateRange }: { dateRange: { from: Date; to:
   };
 
   return (
-    <Tooltip>
-      <TooltipTrigger asChild>
-        <button
-          type="button"
-          onClick={() => !pending && onRefresh()}
-          disabled={pending}
-          className="flex items-center gap-1.5 h-7 px-2.5 text-[11px] font-medium rounded-full border border-border/40 bg-white/70 text-muted-foreground hover:text-foreground hover:bg-white transition-all disabled:opacity-60"
-        >
+    <div className="flex items-center gap-1.5">
+      <Tooltip>
+        <TooltipTrigger asChild>
+          <button
+            type="button"
+            onClick={() => !pending && onRefresh()}
+            disabled={pending}
+            className="flex items-center gap-1.5 h-7 px-2.5 text-[11px] font-medium rounded-full border border-border/40 bg-white/70 text-muted-foreground hover:text-foreground hover:bg-white transition-all disabled:opacity-60"
+          >
+            {books.stale
+              ? <AlertTriangle className="h-3 w-3 shrink-0 text-amber-500" />
+              : <RefreshCw className={`h-3 w-3 shrink-0 ${pending ? "animate-spin" : ""}`} />}
+            {pending
+              ? "Refreshing…"
+              : syncedAt
+                ? <>Synced {rel(syncedAt)}{books.stale ? <span className="text-amber-600"> · offline copy</span> : null}</>
+                : "Refresh"}
+          </button>
+        </TooltipTrigger>
+        <TooltipContent side="bottom" className="text-[10px] max-w-[260px]">
           {books.stale
-            ? <AlertTriangle className="h-3 w-3 shrink-0 text-amber-500" />
-            : <RefreshCw className={`h-3 w-3 shrink-0 ${pending ? "animate-spin" : ""}`} />}
-          {pending
-            ? "Refreshing…"
+            ? "Zoho Books was briefly unreachable — showing the last figures that synced. Click to try a live pull."
             : syncedAt
-              ? <>Synced {rel(syncedAt)}{books.stale ? <span className="text-amber-600"> · offline copy</span> : null}</>
-              : "Refresh"}
-        </button>
-      </TooltipTrigger>
-      <TooltipContent side="bottom" className="text-[10px] max-w-[240px]">
-        {books.stale
-          ? "Zoho Books was briefly unreachable — showing the last figures that synced. Click to try a live pull."
-          : syncedAt
-            ? `Zoho Books figures as of ${new Date(syncedAt).toLocaleTimeString("en-GB", { hour: "2-digit", minute: "2-digit" })}. Everyone sees this same cached result; click to pull live.`
-            : "Click to pull live Zoho Books figures."}
-      </TooltipContent>
-    </Tooltip>
+              ? `Zoho Books figures as of ${new Date(syncedAt).toLocaleTimeString("en-GB", { hour: "2-digit", minute: "2-digit" })}. Everyone sees this same cached result; click to pull live.`
+              : "Click to pull live Zoho Books figures."}
+          {coverageNote && <div className="mt-1 pt-1 border-t border-border/40">{coverageNote}</div>}
+        </TooltipContent>
+      </Tooltip>
+
+      {/* Coverage flag — only appears if Zoho ever emits a P&L section we don't
+          recognise, i.e. money that would be left out of the totals. */}
+      {unmatched.length > 0 && (
+        <Tooltip>
+          <TooltipTrigger asChild>
+            <span className="flex items-center gap-1 h-7 px-2 text-[11px] font-medium rounded-full border border-amber-200 bg-amber-50 text-amber-700">
+              <AlertTriangle className="h-3 w-3 shrink-0" />
+              {unmatched.length} uncategorised
+            </span>
+          </TooltipTrigger>
+          <TooltipContent side="bottom" className="text-[10px] max-w-[260px]">
+            {coverageNote}
+          </TooltipContent>
+        </Tooltip>
+      )}
+    </div>
   );
 }

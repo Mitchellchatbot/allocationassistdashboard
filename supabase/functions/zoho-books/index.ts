@@ -127,6 +127,23 @@ async function getAccessToken(): Promise<string | null> {
 interface PLNode { name?: string; total?: number; account_transactions?: PLNode[] }
 interface PLAccount { name: string; total: number }
 
+// Known TOP-LEVEL P&L section names. Income + expense groups get SUMMED into the
+// headline totals; the subtotal rows are figures Zoho computes for us and must
+// be IGNORED (summing "Gross Profit" etc. would double-count). Any top-level
+// section matching NONE of these is reported back as `unmatched` — so a section
+// Zoho renames or newly emits can never be silently left out of the totals.
+const PNL_INCOME_SECTIONS  = ["Operating Income", "Non Operating Income", "Other Income"];
+const PNL_EXPENSE_SECTIONS = ["Cost of Goods Sold", "Operating Expense", "Non Operating Expense", "Other Expense"];
+const PNL_SUBTOTAL_SECTIONS = [
+  "Gross Profit", "Operating Profit", "Net Profit/Loss", "Net Profit / Loss",
+  "Net Profit", "Net Loss", "Net Income", "Taxable Profit",
+  "Earning Before Interest And Tax (EBIT)", "Earnings Before Interest and Taxes (EBIT)",
+];
+
+/** Which top-level sections were counted / ignored / not recognised — the
+ *  self-check that proves nothing fell through the categorisation. */
+interface PnLSections { income: string[]; expense: string[]; ignored: string[]; unmatched: { name: string; total: number }[] }
+
 function findPLNode(nodes: PLNode[], name: string): PLNode | null {
   for (const n of nodes) {
     if (n.name === name) return n;
@@ -135,25 +152,42 @@ function findPLNode(nodes: PLNode[], name: string): PLNode | null {
   return null;
 }
 
-async function fetchPnL(token: string, from: string, to: string): Promise<{ revenue: number; expenses: number; expenseAccounts: PLAccount[] } | null> {
+async function fetchPnL(token: string, from: string, to: string): Promise<{ revenue: number; expenses: number; expenseAccounts: PLAccount[]; sections: PnLSections } | null> {
   const url = `${API_BASE}/reports/profitandloss?organization_id=${ORG}&from_date=${from}&to_date=${to}`;
   const res = await fetch(url, { headers: { Authorization: `Zoho-oauthtoken ${token}` } });
   if (!res.ok) { console.error("[zoho-books] P&L report failed:", res.status, await res.text()); return null; }
   const j = await res.json() as { profit_and_loss?: PLNode[] };
   const pl = j.profit_and_loss ?? [];
   let revenue = 0;
-  for (const nm of ["Operating Income", "Non Operating Income", "Other Income"]) {
+  for (const nm of PNL_INCOME_SECTIONS) {
     const n = findPLNode(pl, nm); if (n) revenue += num(n.total);
   }
   let expenses = 0;
   const expenseAccounts: PLAccount[] = [];
-  for (const nm of ["Cost of Goods Sold", "Operating Expense", "Non Operating Expense", "Other Expense"]) {
+  for (const nm of PNL_EXPENSE_SECTIONS) {
     const n = findPLNode(pl, nm);
     if (!n) continue;
     expenses += num(n.total);
     for (const a of n.account_transactions ?? []) if (a.name) expenseAccounts.push({ name: String(a.name), total: num(a.total) });
   }
-  return { revenue: +revenue.toFixed(2), expenses: +expenses.toFixed(2), expenseAccounts };
+
+  // Coverage self-check: classify EVERY top-level section. Anything we don't
+  // recognise is money the sums above would skip — surface it loudly (payload +
+  // logs) rather than dropping it silently.
+  const sections: PnLSections = { income: [], expense: [], ignored: [], unmatched: [] };
+  for (const n of pl) {
+    const name = String(n.name ?? "").trim();
+    if (!name) continue;
+    if (PNL_INCOME_SECTIONS.includes(name))        sections.income.push(name);
+    else if (PNL_EXPENSE_SECTIONS.includes(name))  sections.expense.push(name);
+    else if (PNL_SUBTOTAL_SECTIONS.includes(name)) sections.ignored.push(name);
+    else sections.unmatched.push({ name, total: num(n.total) });
+  }
+  if (sections.unmatched.length) {
+    console.error("[zoho-books] UNMATCHED top-level P&L sections (NOT counted!):", JSON.stringify(sections.unmatched));
+  }
+
+  return { revenue: +revenue.toFixed(2), expenses: +expenses.toFixed(2), expenseAccounts, sections };
 }
 
 /** Page through a Zoho Books list endpoint and return every row of `listKey`. */
@@ -512,7 +546,12 @@ serve(async (req) => {
       for (const m of byMonthArr) {
         const rec = recMonth[m.month]; const days = daysOf[m.month];
         if (!days?.length || !rec) continue;
+        // Revenue: scale records to the month's P&L revenue; if the month had
+        // P&L income but ZERO invoice records (income booked via journals), spread
+        // it evenly across the month's days so the daily/weekly digest still
+        // reflects it (previously it showed 0 for those days).
         if (rec.revenue > 0) { const f = m.revenue / rec.revenue; for (const d of days) d.revenue = +(d.revenue * f).toFixed(2); }
+        else if (m.revenue > 0) { const per = +(m.revenue / days.length).toFixed(2); for (const d of days) d.revenue = per; }
         if (rec.expenses > 0) { const f = m.expenses / rec.expenses; for (const d of days) d.expenses = +(d.expenses * f).toFixed(2); }
         else if (m.expenses > 0) { const per = +(m.expenses / days.length).toFixed(2); for (const d of days) d.expenses = per; }
       }
@@ -536,6 +575,11 @@ serve(async (req) => {
       expenseBreakdown,
       marketingTxns,
       scaledAiCorrection: scaledCut, // suspect Scaled-AI excess removed from expenses
+      // Categorisation self-check for the whole range: which top-level P&L
+      // sections were counted, ignored (subtotals), or NOT recognised. `unmatched`
+      // should always be empty — a non-empty list means a section is being left
+      // out of revenue/expenses and needs adding to the lists above.
+      pnlSections: pnl?.sections ?? null,
     };
 
     // Complete result → write it to the shared cache so every other viewer (and

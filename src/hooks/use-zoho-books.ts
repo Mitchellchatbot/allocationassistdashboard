@@ -36,6 +36,16 @@ export interface ZohoBooksData {
   marketingTxns?: { date: string; amount: number; text: string }[];
   /** Suspect non-retainer Scaled AI billing removed from `expenses`. */
   scaledAiCorrection?: number;
+  /** Categorisation self-check: which top-level Zoho P&L sections were counted
+   *  into revenue/expenses, which were ignored (subtotals Zoho computes), and
+   *  any that weren't recognised. `unmatched` should ALWAYS be empty — a
+   *  non-empty list means real money is being left out of the totals. */
+  pnlSections?: {
+    income:    string[];
+    expense:   string[];
+    ignored:   string[];
+    unmatched: { name: string; total: number }[];
+  } | null;
   /** ISO time the shared server cache for this range was last computed — drives
    *  the "Synced Xm ago" freshness chip. Present on every ok:true response. */
   synced_at?: string;
