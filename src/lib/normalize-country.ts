@@ -36,6 +36,15 @@ const CANONICAL_LABEL: Record<string, string> = {
   "bahrain": "Bahrain",
 };
 
+/** Canonical display label for a raw country value ("KSA" → "Saudi Arabia",
+ *  "united arab emirates" → "UAE"). Empty string when there's no country. Used
+ *  to keep the working-op email's location groupings from splitting on aliases. */
+export function canonicalCountryLabel(c: string | null | undefined): string {
+  const key = normCountry(c);
+  if (!key) return "";
+  return CANONICAL_LABEL[key] ?? (c ?? "").trim().replace(/\b\w/g, m => m.toUpperCase());
+}
+
 /** Build the deduped country options for a filter dropdown from a list of raw
  *  hospital country labels. Returns `{ value, label }` where `value` is the
  *  normalised key (feed it straight to `normCountry(h.country) === value`) and

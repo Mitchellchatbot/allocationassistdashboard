@@ -31,7 +31,8 @@ import { EmailFrame } from "@/components/EmailFrame";
 import { wrapBodyForSend } from "@/lib/email-preview";
 import { buildWorkingOpBody, buildWorkingOpSubject, type WorkingOpHospital } from "@/lib/doctor-working-op";
 import { type EmailAttachment } from "@/lib/email-attachments";
-import { normCountry, countryFilterOptions } from "@/lib/normalize-country";
+import { normCountry, countryFilterOptions, canonicalCountryLabel } from "@/lib/normalize-country";
+import { resolveHospitalRegion } from "@/lib/hospital-region";
 import { AttachmentsPicker } from "@/components/automations/AttachmentsPicker";
 import { CardScreenshotControl, CvStudioControl } from "@/components/automations/ProfileCardControls";
 import { HospitalRecipientsPanel } from "@/components/automations/HospitalRecipientsPanel";
@@ -50,6 +51,25 @@ const DOCTOR_DEFAULT_KEY   = "profile_sent_doctor";
 // Stable empty-array reference so the per-doctor attachment default doesn't churn
 // the AttachmentsPicker props on every render.
 const EMPTY_ATTACHMENTS: EmailAttachment[] = [];
+
+// Map a hospital → the WorkingOpHospital the consolidated doctor email groups by.
+// Country/city are normalised + backfilled so the location grouping doesn't
+// split: a hospital's own country wins (canonicalised so "KSA" ≡ "Saudi Arabia"),
+// else the region resolver infers it from the name (so a hospital with a blank
+// country doesn't fall into the "In these locations:" catch-all). Used for BOTH
+// the preview and the stamped send-metadata so they render identically.
+function toWorkingOpHospital(h: {
+  name: string; city?: string | null; country?: string | null; image_url?: string | null; website?: string | null;
+}): WorkingOpHospital {
+  const reg = resolveHospitalRegion(h.name);
+  return {
+    name:      h.name,
+    city:      (h.city?.trim() || reg.city || null),
+    country:   (canonicalCountryLabel(h.country) || reg.country || null),
+    image_url: h.image_url ?? null,
+    link:      h.website ?? null,
+  };
+}
 // Drop doctors with no files from a per-doctor attachment map; returns undefined
 // when nobody attached anything (buildRuns treats that as "no attachments").
 function pruneEmptyAttachments(
@@ -641,10 +661,7 @@ function SendProfileDialogBody({ onClose, initial }: { onClose: () => void; init
       // builds it from batch_hospitals via the shared composer). Mark exactly one
       // run per doctor (their first) as the doctor-email sender.
       const isMultiHospital = selectedHospitals.length > 1;
-      const batchHospitalsMeta = selectedHospitals.map(hh => ({
-        name: hh.name, city: hh.city ?? null, country: hh.country ?? null, image_url: hh.image_url ?? null,
-        link: hh.website ?? null,
-      }));
+      const batchHospitalsMeta = selectedHospitals.map(toWorkingOpHospital);
       // Feature 1: only consolidate when the user kept "Combined" AND it's a
       // multi-hospital send. Individual mode (or single-hospital) → no
       // consolidation, so each run auto-continues to its own doctor email.
@@ -1804,9 +1821,7 @@ function PreviewConfirm({
   // ships. Individual → the per-hospital doctor template, one hospital sub-tab at
   // a time. Single-hospital keeps the editable doctorPane above (unchanged).
   const combinedDoctorPane = (doc: DoctorOption) => {
-    const hospWO: WorkingOpHospital[] = hospitals.map(h => ({
-      name: h.name, city: h.city, country: h.country, image_url: h.image_url, link: h.website,
-    }));
+    const hospWO: WorkingOpHospital[] = hospitals.map(toWorkingOpHospital);
     const subject = buildWorkingOpSubject(hospWO);
     const body = wrapBodyForSend(buildWorkingOpBody(doc.name, hospWO, PREVIEW_SIGNATURE_HTML));
     return <PreviewBlock label={`Consolidated · ${hospitals.length} hospitals`} subject={subject} body={body} />;

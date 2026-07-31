@@ -76,6 +76,7 @@ function chainInfo(n: string): Chain | null {
   if (/\bnmc\b/.test(n)) return { name: "NMC", country: "UAE" };
   if (/\bbmc\b/.test(n)) return { name: "BMC", country: "UAE" };
   if (/burjeel/.test(n)) return { name: "Burjeel", country: "UAE" };
+  if (/amana/.test(n)) return { name: "Amana Healthcare", country: "UAE" };
   if (/\bstmc\b/.test(n)) return { name: "STMC", country: "UAE", city: "Abu Dhabi" };
   if (/\bahd\b/.test(n)) return { name: "American Hospital (Dubai)", country: "UAE", city: "Dubai" };
   if (/\bah\b|american/.test(n)) return { name: "American Hospital", country: "UAE", city: "Dubai" };
