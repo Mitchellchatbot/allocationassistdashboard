@@ -68,6 +68,12 @@ const TEST_OVERRIDE      = TEST_OVERRIDE_LIST[0] ?? "";
 // Ammar left the team — never email him. He's stripped from every test
 // recipient list below even if he's still named in MAIL_TEST_RECIPIENT_OVERRIDE.
 const EXCLUDED_RECIPIENT = "ammar@allocationassist.com";
+// In test mode, CC every EXTRA override address (everything after the first,
+// which is the To) so the whole team sees each test email as it goes out —
+// mirrors send-flow-email. Empty when the override is unset (going live) or has
+// a single address. Ammar + the To itself are stripped so nobody's double-listed.
+const TEST_CC = [...new Set(TEST_OVERRIDE_LIST.slice(1))]
+  .filter(a => a && a.toLowerCase() !== EXCLUDED_RECIPIENT && a.toLowerCase() !== TEST_OVERRIDE.toLowerCase());
 
 const CORS = {
   "Access-Control-Allow-Origin":  "*",
@@ -875,6 +881,10 @@ Deno.serve(async (req: Request) => {
             const lc = e.toLowerCase();
             return lc !== EXCLUDED_RECIPIENT && !excludeSet.has(lc) && !toLc.has(lc);
           });
+      // In test mode the To is redirected to the test inbox, so CC the extra
+      // override addresses (TEST_CC, e.g. Amir) on EVERY copy so the team sees
+      // each test email — like send-flow-email. TEST_CC is empty when live.
+      const emailCc = [...new Set([...hospCc, ...TEST_CC])];
       // Per-hospital attachments override the default for THIS hospital's email;
       // fall back to the shared builtAttachments when this hospital wasn't given
       // its own list.
@@ -886,7 +896,7 @@ Deno.serve(async (req: Request) => {
         html:    rendered.html,
         text:    rendered.text,
         headers: { "X-AA-Batch-Id": String(batch.id), "X-AA-Batch-Kind": String(batch.kind) },
-        ...(hospCc.length ? { cc: hospCc } : {}),
+        ...(emailCc.length ? { cc: emailCc } : {}),
         ...(hospAtt.length ? { attachments: hospAtt } : {}),
       };
     })
@@ -995,6 +1005,8 @@ Deno.serve(async (req: Request) => {
             html:    finalDoctorHtml,
             text:    stripHtml(finalDoctorHtml),
             headers: { "X-AA-Batch-Id": String(batch.id), "X-AA-Kind": "doctor_working_op" },
+            // Test mode → CC the team (Amir) so they see the doctor copies too.
+            ...(TEST_CC.length ? { cc: TEST_CC } : {}),
             ...(docAtt.length ? { attachments: docAtt } : {}),
           }),
         });

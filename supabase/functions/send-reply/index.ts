@@ -17,7 +17,12 @@ import { createClient } from "https://esm.sh/@supabase/supabase-js@2.45.0";
 const RESEND_API_KEY    = Deno.env.get("RESEND_API_KEY") ?? "";
 const MAIL_FROM         = Deno.env.get("MAIL_REPLY_FROM") ?? "Allocation Assist Team <hello@allocationassist.com>";
 const MAIL_REPLY_DOMAIN = Deno.env.get("MAIL_REPLY_DOMAIN") ?? "reply.allocationassist.com";
-const TEST_OVERRIDE     = (Deno.env.get("MAIL_TEST_RECIPIENT_OVERRIDE") ?? "").split(",").map(s => s.trim()).filter(Boolean)[0] ?? "";
+const TEST_OVERRIDE_LIST = (Deno.env.get("MAIL_TEST_RECIPIENT_OVERRIDE") ?? "").split(",").map(s => s.trim()).filter(Boolean);
+const TEST_OVERRIDE     = TEST_OVERRIDE_LIST[0] ?? "";
+// Extra override addresses (after the To) → CC in test mode, so the team sees
+// reply sends too. Ammar left the team — never loop him in.
+const TEST_CC           = [...new Set(TEST_OVERRIDE_LIST.slice(1))]
+  .filter(a => a && a.toLowerCase() !== "ammar@allocationassist.com" && a.toLowerCase() !== TEST_OVERRIDE.toLowerCase());
 
 const CORS = {
   "Access-Control-Allow-Origin":  "*",
@@ -117,10 +122,11 @@ Deno.serve(async (req) => {
 
   const attachments = await buildAttachments(body.attachments);
 
-  // TEST-mode: redirect the whole send to the test inbox; drop cc/bcc so nobody
-  // real is looped in while the training wheels are on.
+  // TEST-mode: redirect the whole send to the test inbox and drop the REAL
+  // cc/bcc so nobody real is looped in — but CC the team's own override extras
+  // (TEST_CC, e.g. Amir) so they still see the reply going out.
   const liveTo  = TEST_OVERRIDE ? [TEST_OVERRIDE] : to;
-  const liveCc  = TEST_OVERRIDE ? [] : cc;
+  const liveCc  = TEST_OVERRIDE ? TEST_CC : cc;
   const liveBcc = TEST_OVERRIDE ? [] : bcc;
 
   const headers: Record<string, string> = { "X-AA-Reply-Action": action };
