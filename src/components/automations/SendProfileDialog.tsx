@@ -99,6 +99,28 @@ function displayVarsOf(vars: Record<string, string>): Record<string, string> {
   }
   return out;
 }
+// Turn a RENDERED (hand-edited) email back into a {{token}} template by swapping
+// THIS pair's concrete values for their tokens — so the same wording can be
+// re-rendered for a DIFFERENT doctor/hospital WITHOUT carrying the first one's
+// details over (that's the "clone edit to all, don't garble" button). Longest
+// values first (so "Dr. Feras Ali" is swapped before "Feras"), and values under
+// 4 chars are skipped so a stray "UAE"/"Oman" in prose isn't mangled. The big
+// raw-HTML tokens (doctor_card_html, doctor_row_table_html, hospital_image) are
+// unique blocks, so swapping them cleanly re-cards each email for its own doctor.
+// The first "Hello …!" / "Hello …," greeting line — used to keep each pair's own
+// greeting when cloning a body edit across pairs.
+const GREETING_RE = /Hello[\s\S]{0,140}?[!,]/i;
+function retokenizeEmail(html: string, vars: Record<string, string | number | null | undefined>): string {
+  const entries = Object.entries(vars)
+    .map(([k, v]) => [k, typeof v === "string" ? v : (v == null ? "" : String(v))] as const)
+    .filter(([, v]) => v.trim().length >= 4)
+    .sort((a, b) => b[1].length - a[1].length);
+  let out = html;
+  for (const [token, value] of entries) {
+    if (out.includes(value)) out = out.split(value).join(`{{${token}}}`);
+  }
+  return out;
+}
 function loadDefaultTemplate(which: "hospital" | "doctor"): string {
   try {
     const v = localStorage.getItem(`aa.profileSend.default.${which}`);
@@ -1349,6 +1371,9 @@ function PreviewConfirm({
   // is edited independently. Doctor-email edits stay per doctor (one email/doctor).
   const [hospitalOvByPair, setHospitalOvByPair] = useState<Record<string, SendOverrides | null>>({});
   const [doctorOvByDoctor,   setDoctorOvByDoctor]   = useState<Record<string, SendOverrides | null>>({});
+  // Bumped by "clone this edit to all" so every hospital pane re-seeds from its
+  // freshly-cloned override (see EditableEmailSection.seedSignal).
+  const [cloneTick, setCloneTick] = useState(0);
   const [doctorEmailOvByDoctor, setDoctorEmailOvByDoctor] = useState<Record<string, string>>({});
   // CVs / logbooks to attach. DOCTOR-leg files stay PER DOCTOR (one working-op
   // email per doctor). HOSPITAL-leg files are PER (doctor × hospital): each
@@ -1894,15 +1919,72 @@ function PreviewConfirm({
   // The editable hospital-intro email for ONE (doctor, hospital) pair. Its edit
   // is stored against the doctor+hospital pair, so editing AlRajhi's intro never
   // touches Amana's. Recipient (To) is per-hospital too.
+  // Clone the ACTIVE hospital email's hand-edit to every OTHER (doctor × hospital)
+  // pair — re-rendered per pair so each keeps its OWN doctor & hospital details.
+  // Turns the edited email back into a token template (retokenizeEmail) using the
+  // source pair's values, then renders it for each other pair with THAT pair's
+  // values. The source keeps its exact edit. Bumps cloneTick so every pane's
+  // editor re-seeds to show the result.
+  const cloneHospitalEditToAll = (srcDoc: DoctorOption, srcHosp: Hospital) => {
+    const srcKey = pairKey(srcDoc.id, srcHosp.id);
+    const ov = hospitalOvByPair[srcKey];
+    if (!ov?.html_override) return;
+    const srcVars = varsFor(srcDoc, srcHosp, cardImageByDoctor[srcDoc.id] ?? null);
+    const srcBase = renderHospitalEmail(srcDoc, srcHosp);
+    const tmplHtml = retokenizeEmail(ov.html_override, srcVars);
+    const editedSubj = (ov.subject_override ?? "").trim();
+    const tmplSubj = editedSubj && editedSubj !== srcBase.subject ? retokenizeEmail(editedSubj, srcVars) : null;
+    let count = 0;
+    setHospitalOvByPair(prev => {
+      const next = { ...prev };
+      for (const d of doctors) for (const h of hospitals) {
+        const k = pairKey(d.id, h.id);
+        if (k === srcKey) continue;   // the source keeps its exact edit
+        const v = varsFor(d, h, cardImageByDoctor[d.id] ?? null);
+        const base = renderHospitalEmail(d, h);
+        let html = renderTemplate(tmplHtml, v, { html: true });
+        // Keep THIS pair's own greeting — retokenising flattens the conditional
+        // "Hello {{#contact}}…{{^contact}}{{hospital}} team{{/}}!", so a target
+        // with no named contact would otherwise render "Hello !". Swap the first
+        // greeting line for the pair's pristine one.
+        const ownGreeting = base.hHtml.match(GREETING_RE)?.[0];
+        if (ownGreeting) html = html.replace(GREETING_RE, ownGreeting);
+        next[k] = { subject_override: tmplSubj ? renderTemplate(tmplSubj, v) : base.subject, html_override: blankUnfilledTokens(html) };
+        count++;
+      }
+      return next;
+    });
+    setCloneTick(t => t + 1);
+    toast.success(count
+      ? `Wording applied to ${count} other email${count === 1 ? "" : "s"} — each keeps its own doctor & hospital details.`
+      : "No other emails to update.");
+  };
   const hospitalPaneForHospital = (doc: DoctorOption, hosp: Hospital) => {
     const rr = renderHospitalEmail(doc, hosp);
     const key = pairKey(doc.id, hosp.id);
     const recip = recipientOverrides[hosp.id] ?? hosp.primary_recruiter_email ?? "";
+    const ov = hospitalOvByPair[key];
+    const multi = doctors.length * hospitals.length > 1;
     return (
+      <div className="flex min-h-0 w-full flex-1 flex-col">
+        {ov?.html_override && multi && (
+          <div className="flex shrink-0 items-center justify-between gap-2 border-b border-amber-200 bg-amber-50 px-3 py-1.5">
+            <span className="text-[11px] leading-snug text-amber-800">
+              You edited this email. Apply the same wording to the other {doctors.length * hospitals.length - 1} email{doctors.length * hospitals.length - 1 === 1 ? "" : "s"}? Each keeps its own doctor &amp; hospital details.
+            </span>
+            <Button type="button" size="sm"
+              className="h-7 shrink-0 bg-amber-600 text-[11px] text-white hover:bg-amber-700"
+              onClick={() => cloneHospitalEditToAll(doc, hosp)}>
+              <Copy className="mr-1.5 h-3 w-3" /> Apply to all
+            </Button>
+          </div>
+        )}
       <EditableEmailSection
         label={`To hospital · ${hosp.name}${recip ? ` · ${recip}` : ""}`}
         subject={rr.subject}
         html={rr.hHtml}
+        seedOverride={ov?.html_override ? { subject: ov.subject_override, html: ov.html_override } : null}
+        seedSignal={cloneTick}
         from={senderLine}
         to={recip || undefined}
         onToChange={(v) => onOverrideRecipient(hosp.id, v.trim() ? v.trim() : null)}
@@ -1927,6 +2009,7 @@ function PreviewConfirm({
           />
         }
       />
+      </div>
     );
   };
   const hospitalPane = (doc: DoctorOption) => {
@@ -2427,7 +2510,7 @@ function looksLikeHtml(s: string): boolean {
  *  doctor email so either can be edited before sending. */
 function EditableEmailSection({
   label, subject, html, plainBody, from, to, onToChange, cc, bcc, editable, onChange,
-  attachments, onAttachmentsChange, templatePicker,
+  attachments, onAttachmentsChange, templatePicker, seedOverride, seedSignal,
 }: {
   label:     string;
   subject:   string;   // pristine rendered subject
@@ -2449,6 +2532,11 @@ function EditableEmailSection({
   /** Optional template picker forwarded to the full-screen editor (doctor
    *  email only) so the template can be swapped from full screen too. */
   templatePicker?:     React.ReactNode;
+  /** Programmatic edit to display instead of the pristine render (the "clone
+   *  edit to all" button injects one per pair). Applied ONLY when seedSignal
+   *  changes — never on every render — so it doesn't fight live typing. */
+  seedOverride?: { subject?: string; html: string } | null;
+  seedSignal?:   number;
 }) {
   // Show unfilled {{tokens}} as friendly placeholder pills in the preview, but
   // report clean {{tokens}} back up so the SENT email is byte-identical — the
@@ -2459,15 +2547,24 @@ function EditableEmailSection({
   const [tick, setTick] = useState(0);
 
   // Re-seed from the pristine render when it changes (profile data finished
-  // loading, hospital changed). Settles before the user interacts, so it won't
-  // clobber a real edit. Runs only when the actual string changes.
+  // loading, hospital changed) OR when a seedOverride is injected (clone-to-all,
+  // signalled by seedSignal). seedOverride is READ, not a dep, so live typing
+  // (which updates the stored override) never re-triggers a re-seed / cursor
+  // jump — only a pristine change or an explicit seedSignal bump does.
   useEffect(() => {
-    setSubj(subject);
-    setBody(displayHtml);
-    setTick(t => t + 1);
-    onChange(null);
+    if (seedOverride) {
+      // Keep the injected override as the current edit — do NOT onChange(null).
+      setSubj(seedOverride.subject ?? subject);
+      setBody(humanizePlaceholders(seedOverride.html, { flagUnfilled: true }));
+      setTick(t => t + 1);
+    } else {
+      setSubj(subject);
+      setBody(displayHtml);
+      setTick(t => t + 1);
+      onChange(null);
+    }
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [subject, displayHtml]);
+  }, [subject, displayHtml, seedSignal]);
 
   const report = (s: string, b: string) => {
     const cleanB = stripPlaceholderPills(b);

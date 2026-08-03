@@ -99,9 +99,23 @@ export function useReportingMetrics(filters: ReportingFilters): ReportingBundle 
     staleTime: 60_000,
   });
 
+  // Every hospital on file — so the filter dropdown lists ALL of them (incl.
+  // Saudi/Qatar and any with no recorded sends yet), not just the ones that
+  // happen to have automation_flow_runs. Picking a 0-activity hospital shows an
+  // empty report, which is itself the useful answer ("nothing sent here yet").
+  const { data: allHospitalNames = [] } = useQuery({
+    queryKey: ["reporting-hospital-names"],
+    queryFn: async (): Promise<string[]> => {
+      const { data, error } = await supabase.from("hospitals").select("name").order("name");
+      if (error) throw error;
+      return (data ?? []).map((h: { name: string }) => h.name).filter(Boolean);
+    },
+    staleTime: 60_000,
+  });
+
   return useMemo<ReportingBundle>(() => {
     const options = {
-      hospitals:   distinct(runs.map(r => r.hospital).filter(Boolean) as string[]).sort(),
+      hospitals:   distinct([...(runs.map(r => r.hospital).filter(Boolean) as string[]), ...allHospitalNames]).sort(),
       teamMembers: distinct(runs.map(r => r.created_by).filter(Boolean) as string[]).sort(),
       specialties: distinct(
         runs.map(r => (r.metadata as Record<string, unknown> | null)?.doctor_speciality as string | undefined).filter(Boolean) as string[],
@@ -120,7 +134,7 @@ export function useReportingMetrics(filters: ReportingFilters): ReportingBundle 
       rawLifecycles: lifecycles,
       filters,
     };
-  }, [runs, lifecycles, vacancies, filters, runsLoading, lifeLoading, vacLoading]);
+  }, [runs, lifecycles, vacancies, allHospitalNames, filters, runsLoading, lifeLoading, vacLoading]);
 }
 
 function distinct<T>(xs: T[]): T[] {
