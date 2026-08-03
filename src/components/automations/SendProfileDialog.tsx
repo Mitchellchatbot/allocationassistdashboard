@@ -5,7 +5,7 @@ import { Label } from "@/components/ui/label";
 import { Textarea } from "@/components/ui/textarea";
 import { Badge } from "@/components/ui/badge";
 import { Checkbox } from "@/components/ui/checkbox";
-import { Search, Send, Eye, ChevronLeft, AlertTriangle, ChevronDown, Copy, Check } from "lucide-react";
+import { Search, Send, Eye, ChevronLeft, AlertTriangle, ChevronDown, Copy, Check, Sparkles } from "lucide-react";
 import { captureAndUploadCard } from "@/lib/card-screenshot";
 import { buildProfileCardHtml } from "@/lib/profile-card-html";
 import { buildDoctorProfileHtml, PROFILE_IMAGE_WIDTH } from "@/lib/doctor-profile-image";
@@ -1371,9 +1371,11 @@ function PreviewConfirm({
   // is edited independently. Doctor-email edits stay per doctor (one email/doctor).
   const [hospitalOvByPair, setHospitalOvByPair] = useState<Record<string, SendOverrides | null>>({});
   const [doctorOvByDoctor,   setDoctorOvByDoctor]   = useState<Record<string, SendOverrides | null>>({});
-  // Bumped by "clone this edit to all" so every hospital pane re-seeds from its
-  // freshly-cloned override (see EditableEmailSection.seedSignal).
+  // Bumped by "clone this edit to all" so every hospital/doctor pane re-seeds
+  // from its freshly-cloned override (see EditableEmailSection.seedSignal).
   const [cloneTick, setCloneTick] = useState(0);
+  // Which leg (if any) is mid AI-apply — disables its buttons + shows a spinner.
+  const [aiCloning, setAiCloning] = useState<"hospital" | "doctor" | null>(null);
   const [doctorEmailOvByDoctor, setDoctorEmailOvByDoctor] = useState<Record<string, string>>({});
   // CVs / logbooks to attach. DOCTOR-leg files stay PER DOCTOR (one working-op
   // email per doctor). HOSPITAL-leg files are PER (doctor × hospital): each
@@ -1959,6 +1961,105 @@ function PreviewConfirm({
       ? `Wording applied to ${count} other email${count === 1 ? "" : "s"} — each keeps its own doctor & hospital details.`
       : "No other emails to update.");
   };
+  // AI version — sends the source's before/after + each other email to Claude,
+  // which applies ONLY the wording change and keeps each recipient's own details
+  // (name, description, hospital). Slower but safe when the edit touched
+  // doctor-specific prose the regex clone can't tell apart. Hospital leg.
+  const cloneHospitalEditWithAI = async (srcDoc: DoctorOption, srcHosp: Hospital) => {
+    const srcKey = pairKey(srcDoc.id, srcHosp.id);
+    const ov = hospitalOvByPair[srcKey];
+    if (!ov?.html_override) return;
+    const original = renderHospitalEmail(srcDoc, srcHosp).hHtml;
+    const targets: { id: string; html: string }[] = [];
+    const subjById: Record<string, string> = {};
+    for (const d of doctors) for (const h of hospitals) {
+      const k = pairKey(d.id, h.id);
+      if (k === srcKey) continue;
+      const base = renderHospitalEmail(d, h);
+      targets.push({ id: k, html: base.hHtml });
+      subjById[k] = base.subject;
+    }
+    if (!targets.length) return;
+    setAiCloning("hospital");
+    try {
+      const { data, error } = await supabase.functions.invoke<{ results: { id: string; html: string }[]; failures?: unknown[] }>(
+        "smart-apply-edit", { body: { original, edited: ov.html_override, targets } });
+      if (error) throw new Error(error.message || "AI apply failed");
+      const results = data?.results ?? [];
+      if (!results.length) throw new Error("AI returned nothing");
+      setHospitalOvByPair(prev => {
+        const next = { ...prev };
+        for (const r of results) next[r.id] = { subject_override: subjById[r.id], html_override: blankUnfilledTokens(r.html) };
+        return next;
+      });
+      setCloneTick(t => t + 1);
+      const failed = data?.failures?.length ?? 0;
+      toast.success(`AI applied your wording to ${results.length} email${results.length === 1 ? "" : "s"}${failed ? ` (${failed} couldn't be done)` : ""} — each kept its own details.`);
+    } catch (e) {
+      toast.error(e instanceof Error ? e.message : "AI apply failed");
+    } finally { setAiCloning(null); }
+  };
+  // Instant (regex) clone for the DOCTOR working-opportunity emails — propagates a
+  // doctor-email edit to every OTHER doctor, re-rendered with their own details.
+  const cloneDoctorEditToAll = (srcDoc: DoctorOption) => {
+    const ov = doctorOvByDoctor[srcDoc.id];
+    const srcR = renderByDoctor.get(srcDoc.id);
+    if (!ov?.html_override || !srcR) return;
+    const tmplHtml = retokenizeEmail(ov.html_override, srcR.vars);
+    const editedSubj = (ov.subject_override ?? "").trim();
+    const tmplSubj = editedSubj && editedSubj !== srcR.rDocSubj ? retokenizeEmail(editedSubj, srcR.vars) : null;
+    let count = 0;
+    setDoctorOvByDoctor(prev => {
+      const next = { ...prev };
+      for (const d of doctors) {
+        if (d.id === srcDoc.id) continue;
+        const r = renderByDoctor.get(d.id);
+        if (!r) continue;
+        let html = renderTemplate(tmplHtml, r.vars, { html: true });
+        const ownGreeting = r.dHtml.match(GREETING_RE)?.[0];
+        if (ownGreeting) html = html.replace(GREETING_RE, ownGreeting);
+        next[d.id] = { subject_override: tmplSubj ? renderTemplate(tmplSubj, r.vars) : r.rDocSubj, html_override: blankUnfilledTokens(html) };
+        count++;
+      }
+      return next;
+    });
+    setCloneTick(t => t + 1);
+    toast.success(count ? `Wording applied to ${count} other doctor email${count === 1 ? "" : "s"} — each keeps its own details.` : "No other doctor emails to update.");
+  };
+  // AI version for the DOCTOR leg.
+  const cloneDoctorEditWithAI = async (srcDoc: DoctorOption) => {
+    const ov = doctorOvByDoctor[srcDoc.id];
+    const srcR = renderByDoctor.get(srcDoc.id);
+    if (!ov?.html_override || !srcR) return;
+    const targets: { id: string; html: string }[] = [];
+    const subjById: Record<string, string> = {};
+    for (const d of doctors) {
+      if (d.id === srcDoc.id) continue;
+      const r = renderByDoctor.get(d.id);
+      if (!r) continue;
+      targets.push({ id: d.id, html: r.dHtml });
+      subjById[d.id] = r.rDocSubj;
+    }
+    if (!targets.length) return;
+    setAiCloning("doctor");
+    try {
+      const { data, error } = await supabase.functions.invoke<{ results: { id: string; html: string }[]; failures?: unknown[] }>(
+        "smart-apply-edit", { body: { original: srcR.dHtml, edited: ov.html_override, targets } });
+      if (error) throw new Error(error.message || "AI apply failed");
+      const results = data?.results ?? [];
+      if (!results.length) throw new Error("AI returned nothing");
+      setDoctorOvByDoctor(prev => {
+        const next = { ...prev };
+        for (const r of results) next[r.id] = { subject_override: subjById[r.id], html_override: blankUnfilledTokens(r.html) };
+        return next;
+      });
+      setCloneTick(t => t + 1);
+      const failed = data?.failures?.length ?? 0;
+      toast.success(`AI applied your wording to ${results.length} doctor email${results.length === 1 ? "" : "s"}${failed ? ` (${failed} couldn't be done)` : ""} — each kept its own details.`);
+    } catch (e) {
+      toast.error(e instanceof Error ? e.message : "AI apply failed");
+    } finally { setAiCloning(null); }
+  };
   const hospitalPaneForHospital = (doc: DoctorOption, hosp: Hospital) => {
     const rr = renderHospitalEmail(doc, hosp);
     const key = pairKey(doc.id, hosp.id);
@@ -1972,11 +2073,22 @@ function PreviewConfirm({
             <span className="text-[11px] leading-snug text-amber-800">
               You edited this email. Apply the same wording to the other {doctors.length * hospitals.length - 1} email{doctors.length * hospitals.length - 1 === 1 ? "" : "s"}? Each keeps its own doctor &amp; hospital details.
             </span>
-            <Button type="button" size="sm"
-              className="h-7 shrink-0 bg-amber-600 text-[11px] text-white hover:bg-amber-700"
-              onClick={() => cloneHospitalEditToAll(doc, hosp)}>
-              <Copy className="mr-1.5 h-3 w-3" /> Apply to all
-            </Button>
+            <div className="flex shrink-0 items-center gap-1.5">
+              <Button type="button" size="sm" title="Instant — re-renders your wording per hospital"
+                className="h-7 bg-amber-600 text-[11px] text-white hover:bg-amber-700"
+                disabled={aiCloning !== null}
+                onClick={() => cloneHospitalEditToAll(doc, hosp)}>
+                <Copy className="mr-1.5 h-3 w-3" /> Apply to all
+              </Button>
+              <Button type="button" size="sm" variant="outline" title="AI — safe when you edited doctor-specific wording"
+                className="h-7 border-violet-300 bg-white text-[11px] text-violet-700 hover:bg-violet-50 hover:text-violet-800"
+                disabled={aiCloning !== null}
+                onClick={() => cloneHospitalEditWithAI(doc, hosp)}>
+                {aiCloning === "hospital"
+                  ? <><Loader2 className="mr-1.5 h-3 w-3 animate-spin" /> Applying…</>
+                  : <><Sparkles className="mr-1.5 h-3 w-3" /> Apply with AI</>}
+              </Button>
+            </div>
           </div>
         )}
       <EditableEmailSection
@@ -2040,18 +2152,46 @@ function PreviewConfirm({
     const r = renderByDoctor.get(doc.id);
     if (!r) return null;
     const dEmailOv = doctorEmailOvByDoctor[doc.id] ?? "";
+    const ov = doctorOvByDoctor[doc.id];
+    const multiDoc = doctors.length > 1;
     return (
+      <div className="flex min-h-0 w-full flex-1 flex-col">
+      {ov?.html_override && multiDoc && (
+        <div className="flex shrink-0 items-center justify-between gap-2 border-b border-amber-200 bg-amber-50 px-3 py-1.5">
+          <span className="text-[11px] leading-snug text-amber-800">
+            You edited this email. Apply the same wording to the other {doctors.length - 1} doctor email{doctors.length - 1 === 1 ? "" : "s"}? Each keeps its own details.
+          </span>
+          <div className="flex shrink-0 items-center gap-1.5">
+            <Button type="button" size="sm" title="Instant — re-renders your wording per doctor"
+              className="h-7 bg-amber-600 text-[11px] text-white hover:bg-amber-700"
+              disabled={aiCloning !== null}
+              onClick={() => cloneDoctorEditToAll(doc)}>
+              <Copy className="mr-1.5 h-3 w-3" /> Apply to all
+            </Button>
+            <Button type="button" size="sm" variant="outline" title="AI — safe when you edited doctor-specific wording"
+              className="h-7 border-violet-300 bg-white text-[11px] text-violet-700 hover:bg-violet-50 hover:text-violet-800"
+              disabled={aiCloning !== null}
+              onClick={() => cloneDoctorEditWithAI(doc)}>
+              {aiCloning === "doctor"
+                ? <><Loader2 className="mr-1.5 h-3 w-3 animate-spin" /> Applying…</>
+                : <><Sparkles className="mr-1.5 h-3 w-3" /> Apply with AI</>}
+            </Button>
+          </div>
+        </div>
+      )}
       <EditableEmailSection
         label={`To doctor · ${dEmailOv || doc.email || "(no email)"}`}
         subject={r.rDocSubj}
         html={r.dHtml}
+        seedOverride={ov?.html_override ? { subject: ov.subject_override, html: ov.html_override } : null}
+        seedSignal={cloneTick}
         from={senderLine}
         to={isSingle ? (dEmailOv || doc.email || "") : (doc.email ?? undefined)}
         onToChange={isSingle ? (v) => setDoctorEmailOvByDoctor(prev => ({ ...prev, [doc.id]: v })) : undefined}
         cc={ccList}
         bcc={bccList}
         editable
-        onChange={(ov) => setDoctorOvByDoctor(prev => ({ ...prev, [doc.id]: ov }))}
+        onChange={(nextOv) => setDoctorOvByDoctor(prev => ({ ...prev, [doc.id]: nextOv }))}
         plainBody={r.dBody}
         attachments={doctorAttByDoctor[doc.id] ?? EMPTY_ATTACHMENTS}
         onAttachmentsChange={(next) => setDoctorAttByDoctor(prev => ({ ...prev, [doc.id]: next }))}
@@ -2072,6 +2212,7 @@ function PreviewConfirm({
           />
         }
       />
+      </div>
     );
   };
   // ── Feature 2: multi-hospital doctor-email preview (READ-ONLY). ─────────────
