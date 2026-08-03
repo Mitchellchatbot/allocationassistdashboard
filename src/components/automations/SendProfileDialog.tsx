@@ -2586,7 +2586,12 @@ function EditableEmailSection({
       </div>
       <EditableEmailPreview
         subject={subj}
-        html={displayHtml}
+        // Seed the editor from `body` (which the re-seed effect drives — pristine,
+        // a data-load re-render, or an injected clone override) rather than the
+        // always-pristine displayHtml, so "Apply to all" actually shows the clone
+        // instead of reverting. `body` only changes the DOM on a resetKey (tick)
+        // bump, so live typing is untouched.
+        html={body}
         onSubjectChange={(v) => { setSubj(v); report(v, body); }}
         onHtmlChange={(v) => { setBody(v); report(subj, v); }}
         resetKey={tick}
