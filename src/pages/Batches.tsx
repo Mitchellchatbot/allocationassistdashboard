@@ -2274,13 +2274,18 @@ function BatchDialog({ target, onTargetChange, batches, initialKind, suggestedSp
                   the preview modal, from which the user actually sends. */}
               <Button
                 onClick={async () => {
-                  if (picked.length === 0) { toast.error("Queue at least one doctor to preview."); return; }
+                  // Gate on the batch's OWN doctor_ids, not the client-resolved
+                  // `picked` — a daily_duo's rotation ids may not be in the loaded
+                  // allDoctors pool, which used to leave picked empty and the
+                  // button dead even though the server renders fine from the ids.
+                  if ((batch?.doctor_ids.length ?? 0) === 0) { toast.error("Queue at least one doctor to preview."); return; }
                   try {
                     // Make sure every Daily-Duo card image exists BEFORE we build
                     // the preview — otherwise a resend (or a batch opened without
                     // re-adding doctors) falls back to the HTML card, which is not
-                    // what a Profile Sent looks like.
-                    await ensureCardImages();
+                    // what a Profile Sent looks like. Best-effort: a card-gen
+                    // failure must NOT block the preview (server falls back).
+                    try { await ensureCardImages(); } catch { /* server renders its own card */ }
                     const p = await previewMut.mutateAsync(batch.status === "sent" ? { batchId: batch.id, force: true } : batch.id);
                     setEmailPreview({ subject: p.subject, html: p.html, text: p.text, bcc_count: p.bcc_count, doctor_email: p.doctor_email, per_doctor: p.per_doctor ?? [], doctor_emails: p.doctor_emails ?? [], test_mode: p.test_mode, test_recipient: p.test_recipient });
                     // Seed the exclusion list from the batch so a previously-saved
@@ -2309,7 +2314,8 @@ function BatchDialog({ target, onTargetChange, batches, initialKind, suggestedSp
                     toast.error(e instanceof Error ? e.message : "Preview failed");
                   }
                 }}
-                disabled={previewMut.isPending || picked.length === 0}
+                disabled={previewMut.isPending || (batch?.doctor_ids.length ?? 0) === 0}
+                title={(batch?.doctor_ids.length ?? 0) === 0 ? "Queue at least one doctor first" : undefined}
               >
                 {previewMut.isPending
                   ? <><RefreshCw className="h-3.5 w-3.5 mr-1.5 animate-spin" /> Building preview…</>
