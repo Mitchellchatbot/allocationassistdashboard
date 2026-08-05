@@ -1,10 +1,7 @@
 import { useState } from "react";
-import { Camera, Image as ImageIcon, FileText, Loader2 } from "lucide-react";
+import { Camera, Image as ImageIcon, Loader2 } from "lucide-react";
 import { toast } from "sonner";
 import { captureAndUploadCard } from "@/lib/card-screenshot";
-import { CvStudioDialog } from "@/components/cv/CvStudioDialog";
-import { type EmailAttachment } from "@/lib/email-attachments";
-import { type WpCandidate } from "@/hooks/use-wp-candidates";
 
 /**
  * Shared profile-card + branded-CV controls for any send preview.
@@ -103,32 +100,3 @@ export function CardScreenshotControl({
   );
 }
 
-/**
- * "Generate branded CV" — build the doctor's Allocation-Assist-branded CV from
- * their CV on file (form-response upload), view + edit it, and attach the PDF to
- * this email. Falls back to manual upload inside the dialog when there's no CV
- * on file. Reuses the same studio as the Doctors → Convert CV tab.
- */
-export function CvStudioControl({ doctor, onAttach }: { doctor: WpCandidate | null; onAttach: (att: EmailAttachment) => void }) {
-  const [open, setOpen] = useState(false);
-  return (
-    <>
-      <button
-        type="button"
-        onClick={() => setOpen(true)}
-        className="inline-flex max-w-full items-center gap-1.5 rounded-md border border-teal-200 bg-teal-50 px-2.5 py-1.5 text-[11px] font-medium text-teal-700 transition-colors hover:bg-teal-100"
-        title="Build the doctor's branded CV from their CV on file, edit it, and attach it to this email"
-      >
-        <FileText className="h-3.5 w-3.5 shrink-0" />
-        <span className="truncate">Generate &amp; attach branded CV</span>
-      </button>
-      <CvStudioDialog
-        open={open}
-        onOpenChange={setOpen}
-        doctor={doctor}
-        cvSourceUrl={doctor?.cv_url}
-        onAttach={onAttach}
-      />
-    </>
-  );
-}

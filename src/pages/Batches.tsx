@@ -36,7 +36,6 @@ import { ProfileSubTabs } from "@/components/ProfileSubTabs";
 import { CcBccPicker, makeHospitalFlag } from "@/components/automations/CcBccPicker";
 import { AttachmentsPicker } from "@/components/automations/AttachmentsPicker";
 import { HospitalRecipientsPanel } from "@/components/automations/HospitalRecipientsPanel";
-import { CvStudioControl } from "@/components/automations/ProfileCardControls";
 import { AA_SENDERS, findSenderByEmail } from "@/lib/hi-team";
 import type { EmailAttachment } from "@/lib/email-attachments";
 import { normCountry, countryFilterOptions } from "@/lib/normalize-country";
@@ -1888,14 +1887,6 @@ function BatchDialog({ target, onTargetChange, batches, initialKind, suggestedSp
     ? `${senderMember.name} <${senderMember.email}>`
     : `Allocation Assist Team <${AA_TEAM_EMAIL}>`;
   const fromOverride = senderMember ? senderLine : undefined;
-  // Append a generated branded CV to the batch's HOSPITAL-email attachments
-  // (persisted via the existing update path). Deduped so re-generating the same
-  // file doesn't attach it twice.
-  const attachBrandedCv = (att: EmailAttachment) => {
-    const current = batch?.attachments ?? [];
-    if (current.some(a => a.path === att.path && a.filename === att.filename)) return;
-    void setAttachments([...current, att]);
-  };
   // Dedupe guard: doctor_ids comes from the query cache, so a fast double-
   // click before the refetch lands could otherwise queue the same doctor
   // twice (→ two identical cards in the send).
@@ -2525,20 +2516,6 @@ function BatchDialog({ target, onTargetChange, batches, initialKind, suggestedSp
                 )}
               </div>
             )}
-            <div className="space-y-2">
-              <div className="text-[10px] uppercase tracking-wider text-sidebar-foreground/60">Branded CV per doctor</div>
-              <p className="text-[10.5px] leading-snug text-sidebar-foreground/55">
-                Generate a doctor's branded CV and attach it to this hospital email.
-              </p>
-              {picked.map(d => (
-                <div key={d.id} className="flex items-center gap-2 min-w-0">
-                  <span className="w-24 shrink-0 truncate text-[11px] font-medium text-sidebar-foreground/85" title={d.name}>{d.name}</span>
-                  {d.wp
-                    ? <CvStudioControl doctor={d.wp} onAttach={attachBrandedCv} />
-                    : <span className="text-[10px] italic text-sidebar-foreground/45">No website profile — CV unavailable</span>}
-                </div>
-              ))}
-            </div>
           </div>
         ),
         preview: perDoctorList.length ? (

@@ -5,7 +5,7 @@ import { Label } from "@/components/ui/label";
 import { Textarea } from "@/components/ui/textarea";
 import { Badge } from "@/components/ui/badge";
 import { Checkbox } from "@/components/ui/checkbox";
-import { Search, Send, Eye, ChevronLeft, AlertTriangle, ChevronDown, Copy, Check, Sparkles } from "lucide-react";
+import { Search, Send, Eye, ChevronLeft, AlertTriangle, ChevronDown, Copy, Check, Sparkles, X } from "lucide-react";
 import { captureAndUploadCard } from "@/lib/card-screenshot";
 import { buildProfileCardHtml } from "@/lib/profile-card-html";
 import { buildDoctorProfileHtml, PROFILE_IMAGE_WIDTH } from "@/lib/doctor-profile-image";
@@ -34,7 +34,7 @@ import { type EmailAttachment } from "@/lib/email-attachments";
 import { normCountry, countryFilterOptions, canonicalCountryLabel } from "@/lib/normalize-country";
 import { resolveHospitalRegion } from "@/lib/hospital-region";
 import { AttachmentsPicker } from "@/components/automations/AttachmentsPicker";
-import { CardScreenshotControl, CvStudioControl } from "@/components/automations/ProfileCardControls";
+import { CardScreenshotControl } from "@/components/automations/ProfileCardControls";
 import { HospitalRecipientsPanel } from "@/components/automations/HospitalRecipientsPanel";
 import { TemplatePicker } from "@/components/automations/TemplatePicker";
 import { CcBccPicker, isEmail, makeHospitalFlag } from "@/components/automations/CcBccPicker";
@@ -120,6 +120,22 @@ function retokenizeEmail(html: string, vars: Record<string, string | number | nu
     if (out.includes(value)) out = out.split(value).join(`{{${token}}}`);
   }
   return out;
+}
+// Tiny inline input to add a CC email to a hospital's per-send CC list. Adds on
+// Enter or blur when the value is a valid email.
+function CcAddInput({ onAdd }: { onAdd: (email: string) => void }) {
+  const [v, setV] = useState("");
+  const commit = () => { const e = v.trim(); if (e && isEmail(e)) { onAdd(e); setV(""); } };
+  return (
+    <input
+      value={v}
+      onChange={e => setV(e.target.value)}
+      onKeyDown={e => { if (e.key === "Enter") { e.preventDefault(); commit(); } }}
+      onBlur={commit}
+      placeholder="+ CC email"
+      className="w-20 rounded border border-dashed border-slate-300 bg-white px-1.5 py-0.5 font-mono text-[10px] text-slate-700 outline-none transition-all focus:w-40 focus:border-teal-400"
+    />
+  );
 }
 function loadDefaultTemplate(which: "hospital" | "doctor"): string {
   try {
@@ -556,13 +572,16 @@ function SendProfileDialogBody({ onClose, initial }: { onClose: () => void; init
       greeting?:    Record<string, "auto" | "contact" | "team">;
       /** Explicit "greet by name" pick per hospital (hospitalId → contact email). */
       greetNames?:  Record<string, string>;
+      /** Per-hospital CC override (hospitalId → cc list) — replaces cc_emails. */
+      ccOverrides?: Record<string, string[]>;
       // Feature 1: Combined (one consolidated doctor email per doctor) vs
       // Individual (one doctor email per doctor per hospital). Multi-hospital only.
       combineDoctorEmails?: boolean;
     } = {},
   ) => {
-    const { attachments, templateKeys, schedule, sender, greeting, greetNames, combineDoctorEmails } = opts;
+    const { attachments, templateKeys, schedule, sender, greeting, greetNames, ccOverrides, combineDoctorEmails } = opts;
     const greetNameByHospital = greetNames ?? {};
+    const ccOverrideByHospital = ccOverrides ?? {};
     // Explicit sender pick from the dialog. When set it's written to each run's
     // assigned_to so send-flow-email's pickSender uses it as the From line;
     // null → leave assigned_to unset so the hospital-owner trigger decides.
@@ -722,7 +741,8 @@ function SendProfileDialogBody({ onClose, initial }: { onClose: () => void; init
             ? ""
             : (overrideContact?.name ?? resolved.contact?.name ?? h.primary_contact_name ?? "").trim());
         // Auto-CC (send-state): the hospital's configured cc_emails ride the send.
-        const runCc = [...new Set([...ccList, ...(h.cc_emails ?? [])].map(e => e.trim()).filter(Boolean))];
+        const hospCc = ccOverrideByHospital[h.id] ?? h.cc_emails ?? [];
+        const runCc = [...new Set([...ccList, ...hospCc].map(e => e.trim()).filter(Boolean))];
         // Only advance the cursor when we actually used the cycle rotation
         // (no override, cycle mode, real matched contacts). Once per hospital.
         if (!overrideEmail && (h.contact_mode ?? "primary") === "cycle" && !resolved.fromHospitalRow && resolved.nextCursor !== (h.cycle_cursor ?? 0)) {
@@ -1344,6 +1364,7 @@ function PreviewConfirm({
       sender?:      { assignedTo: string | null };
       greeting?:    Record<string, "auto" | "contact" | "team">;
       greetNames?:  Record<string, string>;
+      ccOverrides?: Record<string, string[]>;
       combineDoctorEmails?: boolean;
     },
   ) => void;
@@ -1437,6 +1458,20 @@ function PreviewConfirm({
   // Explicit "greet by name" pick per hospital (hospitalId → contact email),
   // decoupled from who's emailed. Empty = auto (the routing-resolved primary).
   const [greetNameByHospital, setGreetNameByHospital] = useState<Record<string, string>>({});
+  // Per-hospital CC override (hospitalId → cc list). Absent = the hospital's own
+  // saved cc_emails. Lets the dispatcher edit exactly who's CC'd on each email.
+  const [hospitalCcOverride, setHospitalCcOverride] = useState<Record<string, string[]>>({});
+  const ccForHospital = (h: Hospital): string[] =>
+    hospitalCcOverride[h.id] ?? [...new Set((h.cc_emails ?? []).map(e => e.trim()).filter(isEmail))];
+  // Resolved To recipient(s) for a hospital — matches what buildRuns sends.
+  const toForHospital = (h: Hospital): string => {
+    const hc = hospitalContacts.forHospital(h.name);
+    const ov = recipientOverrides[h.id];
+    if (ov) return ov;
+    if ((h.contact_mode ?? "primary") === "all")
+      return resolveAllRecipients(hc, h).join(", ") || h.primary_recruiter_email || "";
+    return resolveRecipient(hc, h).contact?.email ?? h.primary_recruiter_email ?? "";
+  };
   // Feature 1: Combined (one consolidated doctor email per doctor, listing all
   // hospitals) vs Individual (one doctor email per doctor per hospital). Only
   // meaningful for multi-hospital sends; the toggle is hidden when single.
@@ -1731,6 +1766,7 @@ function PreviewConfirm({
       sender: { assignedTo: senderAssignedTo },
       greeting: greetModeByHospital,
       greetNames: greetNameByHospital,
+      ccOverrides: hospitalCcOverride,
       combineDoctorEmails,
     });
   };
@@ -1824,29 +1860,43 @@ function PreviewConfirm({
             flagHospital={makeHospitalFlag(hospitals)}
           />
 
-          {/* Auto-CC preview: each hospital's OWN saved cc_emails ride ITS email
-              (send-flow-email stamps them on top of the CC typed above). Read-only
-              so the dispatcher can SEE who else is copied. Grouped by hospital
-              since each hospital's email carries its own list. Dropped in test
-              mode — live sends only. */}
-          {(() => {
-            const withCc = hospitals
-              .map(h => ({ name: h.name, ccs: [...new Set((h.cc_emails ?? []).map(e => e.trim()).filter(isEmail))] }))
-              .filter(h => h.ccs.length);
-            if (!withCc.length) return null;
-            return (
-              <div className="rounded-md border border-slate-200 bg-slate-50/70 p-2 space-y-1">
-                <div className="text-[10px] uppercase tracking-wider text-slate-500">Also auto-CC'd — from each hospital's saved contacts</div>
-                {withCc.map(h => (
-                  <div key={h.name} className="text-[10.5px] leading-snug text-slate-600">
-                    <span className="font-medium text-slate-700">{h.name}:</span>{" "}
-                    {h.ccs.map((e, i) => <span key={e}>{i ? ", " : ""}<span className="font-mono">{e}</span></span>)}
+          {/* Per-hospital recipients — the explicit To + editable CC for each
+              hospital's own email. To is the resolved recipient; the CC starts
+              from the hospital's saved cc_emails and can be edited per send.
+              (Test mode redirects the To to the test inbox — see the banner.) */}
+          {hospitals.length > 0 && (
+            <div className="rounded-md border border-slate-200 bg-slate-50/70 p-2 space-y-2">
+              <div className="text-[10px] uppercase tracking-wider text-slate-500">Recipients — per hospital</div>
+              {hospitals.map(h => {
+                const to = toForHospital(h);
+                const ccs = ccForHospital(h);
+                return (
+                  <div key={h.id} className="space-y-1 border-t border-slate-100 pt-1.5 first:border-t-0 first:pt-0">
+                    <div className="text-[10.5px] font-medium text-slate-700 truncate">{h.name}</div>
+                    <div className="flex items-baseline gap-1.5">
+                      <span className="w-7 shrink-0 text-[9px] uppercase tracking-wider text-slate-400">To</span>
+                      <span className="min-w-0 break-all font-mono text-[10.5px] text-slate-700">{to || <span className="font-sans italic text-slate-400">no recipient on file</span>}</span>
+                    </div>
+                    <div className="flex items-start gap-1.5">
+                      <span className="w-7 shrink-0 pt-1 text-[9px] uppercase tracking-wider text-slate-400">CC</span>
+                      <div className="flex min-w-0 flex-1 flex-wrap items-center gap-1">
+                        {ccs.map(e => (
+                          <span key={e} className="inline-flex items-center gap-1 rounded-full border border-slate-200 bg-white pl-2 pr-1 py-0.5 font-mono text-[10px] text-slate-700">
+                            <span className="max-w-[150px] truncate">{e}</span>
+                            <button type="button" title={`Remove ${e}`} onClick={() => setHospitalCcOverride(prev => ({ ...prev, [h.id]: ccs.filter(x => x !== e) }))} className="rounded-full p-0.5 text-slate-400 hover:bg-slate-100 hover:text-rose-600">
+                              <X className="h-2.5 w-2.5" />
+                            </button>
+                          </span>
+                        ))}
+                        <CcAddInput onAdd={(email) => { if (!ccs.some(x => x.toLowerCase() === email.toLowerCase())) setHospitalCcOverride(prev => ({ ...prev, [h.id]: [...ccs, email] })); }} />
+                      </div>
+                    </div>
                   </div>
-                ))}
-                <div className="text-[10px] text-slate-400">Rides each hospital's own email on live sends (dropped in test mode).</div>
-              </div>
-            );
-          })()}
+                );
+              })}
+              <div className="text-[10px] text-slate-400">CC rides each hospital's own email on live sends (dropped in test mode).</div>
+            </div>
+          )}
 
           {sender ? (
             <div className="text-[10.5px] text-emerald-700">
@@ -2305,10 +2355,6 @@ function PreviewConfirm({
             cardImageUrl={cardImageByDoctor[activeDoctor.id] ?? null}
             onSetCardImage={(url) => onSetCardImage(activeDoctor.id, url)}
             autoBusy={autoCardBusyId === activeDoctor.id}
-          />
-          <CvStudioControl
-            doctor={activeRender?.wpCandidate ?? null}
-            onAttach={(att) => setHospitalAttachments(prev => [...prev, att])}
           />
           {hospitals.length > 1 && (
             <div className="text-[10px] uppercase tracking-wider text-sidebar-foreground/60">
