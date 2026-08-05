@@ -1650,6 +1650,17 @@ function BatchDialog({ target, onTargetChange, batches, initialKind, suggestedSp
   const greetSwap = (h: string) => (previewGreetHospital && h)
     ? h.replace(/Hello <strong>[^<]*<\/strong>!/, `Hello <strong>${batchGreeting(previewGreetHospital)}</strong>!`)
     : h;
+  // EXPLICIT recipients for the ACTIVE hospital's email — surfaced in the preview
+  // header so the team sees exactly who each email goes to + who's copied (Amir).
+  // These are the LIVE recipients (in test mode the To is still redirected to the
+  // test inbox — the mode banner above says so).
+  const activeRecipTo = previewGreetHospital ? effectiveTo(previewGreetHospital).join(", ") : "";
+  const activeRecipCc = previewGreetHospital
+    ? [...new Set([
+        ...((previewGreetHospital.cc_emails ?? []).map(e => e.trim()).filter(e => e && e.includes("@"))),
+        ...batchCc,
+      ])]
+    : batchCc;
   // Compare bodies with the greeting line blanked out. Switching which hospital
   // the preview shows rewrites "Hello …!" (greetSwap), and that alone must NOT
   // count as a manual edit — otherwise a mere preview-hospital click ships an
@@ -2536,7 +2547,8 @@ function BatchDialog({ target, onTargetChange, batches, initialKind, suggestedSp
                   setPreviewResetTick(t => t + 1);
                 }}
                 from={fromOverride ?? "Hospital Intro <hospitalintro@allocationassist.com>"}
-                cc={batchCc}
+                to={activeRecipTo}
+                cc={activeRecipCc}
                 bcc={batchBcc}
                 attachments={batch?.attachments ?? []}
                 onAttachmentsChange={setAttachments}
@@ -2582,7 +2594,8 @@ function BatchDialog({ target, onTargetChange, batches, initialKind, suggestedSp
                 setPreviewResetTick(t => t + 1);
               }}
               from={fromOverride ?? "Hospital Intro <hospitalintro@allocationassist.com>"}
-              cc={batchCc}
+              to={activeRecipTo}
+              cc={activeRecipCc}
               bcc={batchBcc}
               attachments={hospAttFor(activeHospId)}
               onAttachmentsChange={next => setHospAtt(activeHospId, next)}
@@ -2637,6 +2650,7 @@ function BatchDialog({ target, onTargetChange, batches, initialKind, suggestedSp
                       setPreviewResetTick(t => t + 1);
                     }}
                     from="Allocation Assist Team <hello@allocationassist.com>"
+                    to={d.email ?? ""}
                     attachments={doctorAttachments[i] ?? []}
                     onAttachmentsChange={next => setDocAtt(i, next)}
                     className="min-h-0 flex-1 border-0 rounded-none shadow-none"
