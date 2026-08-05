@@ -49,7 +49,7 @@ export function makeHospitalFlag(
  * genuinely intend it), it just makes an accidental hospital CC obvious.
  */
 export function CcBccPicker({
-  cc, bcc, onCcChange, onBccChange, ccRoster = [], bccRoster = [], flagHospital, disabled,
+  cc, bcc, onCcChange, onBccChange, ccRoster = [], bccRoster = [], flagHospital, disabled, hideCc,
 }: {
   cc:  string[];
   bcc: string[];
@@ -59,13 +59,30 @@ export function CcBccPicker({
   bccRoster?: Array<{ name: string; email: string }>;
   flagHospital?: (email: string) => string | null;
   disabled?: boolean;
+  /** Hide the CC field (BCC-only) — used where CC is managed elsewhere (the
+   *  per-hospital recipients panel) so there aren't two CC sections. */
+  hideCc?: boolean;
 }) {
   return (
     <div className="space-y-1.5">
-      <Field label="CC"  values={cc}  onChange={onCcChange}  roster={ccRoster}  flagHospital={flagHospital} placeholder="Add a CC email…"  disabled={disabled} />
+      {!hideCc && <Field label="CC" values={cc} onChange={onCcChange} roster={ccRoster} flagHospital={flagHospital} placeholder="Add a CC email…" disabled={disabled} />}
       <Field label="BCC" values={bcc} onChange={onBccChange} roster={bccRoster} flagHospital={flagHospital} placeholder="Add a BCC email…" disabled={disabled} />
     </div>
   );
+}
+
+/** Standalone reusable CC/BCC row (exported so callers can compose a single
+ *  CC field elsewhere — e.g. a "CC everyone" row inside a recipients panel). */
+export function EmailChipField(props: {
+  label: string;
+  values: string[];
+  onChange: (next: string[]) => void;
+  roster?: Array<{ name: string; email: string }>;
+  flagHospital?: (email: string) => string | null;
+  placeholder: string;
+  disabled?: boolean;
+}) {
+  return <Field {...props} roster={props.roster ?? []} />;
 }
 
 function Field({ label, values, onChange, roster, flagHospital, placeholder, disabled }: {

@@ -37,7 +37,7 @@ import { AttachmentsPicker } from "@/components/automations/AttachmentsPicker";
 import { CardScreenshotControl } from "@/components/automations/ProfileCardControls";
 import { HospitalRecipientsPanel } from "@/components/automations/HospitalRecipientsPanel";
 import { TemplatePicker } from "@/components/automations/TemplatePicker";
-import { CcBccPicker, isEmail, makeHospitalFlag } from "@/components/automations/CcBccPicker";
+import { CcBccPicker, EmailChipField, isEmail, makeHospitalFlag } from "@/components/automations/CcBccPicker";
 import { detectUnfilledVars, describeUnfilled } from "@/lib/email-validation";
 import { useScheduleProfileSend } from "@/hooks/use-scheduled-profile-sends";
 import { GulfClock, composeLocalDateTime, localToGulfParts, localDateInDays } from "@/components/GulfClock";
@@ -1848,16 +1848,18 @@ function PreviewConfirm({
             Goes out as <span className="font-medium text-slate-700">{senderLine}</span>
           </div>
 
-          {/* CC + BCC — free-form on every send; AA team offered as BCC quick-adds
-              and Amir as a CC quick-add. Defaults to BCC'ing the sender. */}
+          {/* BCC only — CC is managed in the per-hospital Recipients panel below
+              (both an "everyone" row and per-hospital rows), so there aren't two
+              CC sections. AA team offered as BCC quick-adds; defaults to BCC'ing
+              the sender. */}
           <CcBccPicker
             cc={ccList}
             bcc={bccList}
             onCcChange={setCcList}
             onBccChange={setBccList}
             bccRoster={AA_SENDERS.map(s => ({ name: s.name, email: s.email }))}
-            ccRoster={[{ name: "Amir", email: CC_AMIR_EMAIL }]}
             flagHospital={makeHospitalFlag(hospitals)}
+            hideCc
           />
 
           {/* Per-hospital recipients — the explicit To + editable CC for each
@@ -1866,7 +1868,19 @@ function PreviewConfirm({
               (Test mode redirects the To to the test inbox — see the banner.) */}
           {hospitals.length > 0 && (
             <div className="rounded-md border border-slate-200 bg-slate-50/70 p-2 space-y-2">
-              <div className="text-[10px] uppercase tracking-wider text-slate-500">Recipients — per hospital</div>
+              <div className="text-[10px] uppercase tracking-wider text-slate-500">Recipients &amp; CC</div>
+              {/* CC on EVERY email (the old global CC, incl. the Amir quick-add).
+                  Lives here so there's a single CC place, split into "everyone"
+                  (this row) and per-hospital (below). */}
+              <EmailChipField
+                label="CC all"
+                values={ccList}
+                onChange={setCcList}
+                roster={[{ name: "Amir", email: CC_AMIR_EMAIL }]}
+                flagHospital={makeHospitalFlag(hospitals)}
+                placeholder="CC on every email…"
+              />
+              <div className="text-[9px] leading-snug text-slate-400">Above: CC'd on <strong>every</strong> hospital's email. Below: each hospital's <strong>own</strong> To + CC.</div>
               {hospitals.map(h => {
                 const to = toForHospital(h);
                 const ccs = ccForHospital(h);
