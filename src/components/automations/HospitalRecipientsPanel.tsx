@@ -30,6 +30,7 @@ export function HospitalRecipientsPanel({
   activeHospitalId, onSelectHospital,
   heading,
   greetMode, onGreetMode,
+  greetName, onGreetName,
 }: {
   /** Hospitals currently being emailed. */
   selected: Hospital[];
@@ -52,6 +53,12 @@ export function HospitalRecipientsPanel({
    *  Callers that don't pass these (e.g. the batch flow) render without it. */
   greetMode?: Record<string, "auto" | "contact" | "team">;
   onGreetMode?: (hospitalId: string, mode: "auto" | "contact" | "team") => void;
+  /** Optional: which contact's NAME to greet by (hospitalId → contact email),
+   *  decoupled from who's emailed — so you can email several people but greet
+   *  one by name. Only shown when the greeting mode is "Name". "" = auto (the
+   *  primary). Requires greetMode/onGreetMode too. */
+  greetName?: Record<string, string>;
+  onGreetName?: (hospitalId: string, contactEmail: string) => void;
 }) {
   const [country, setCountry] = useState("all");
   const [addOpen, setAddOpen] = useState(false);
@@ -245,7 +252,7 @@ export function HospitalRecipientsPanel({
                   </div>
                 )}
                 {greetMode && onGreetMode && (
-                  <div className="mt-1 pl-3 flex items-center gap-1">
+                  <div className="mt-1 pl-3 flex items-center gap-1 flex-wrap">
                     <span className="text-[9px] uppercase tracking-wider text-muted-foreground mr-0.5">Greeting</span>
                     {([["auto", "Auto"], ["contact", "Name"], ["team", "Team"]] as const).map(([k, l]) => (
                       <button
@@ -258,6 +265,21 @@ export function HospitalRecipientsPanel({
                         {l}
                       </button>
                     ))}
+                    {/* Whose NAME to greet by — decoupled from who's emailed. Only
+                        relevant when greeting by Name. */}
+                    {greetName && onGreetName && (greetMode[h.id] ?? "auto") === "contact" && hc.filter(c => c.email && c.name).length > 0 && (
+                      <select
+                        value={greetName[h.id] ?? ""}
+                        onChange={e => onGreetName(h.id, e.target.value)}
+                        title="Whose name to greet by"
+                        className="ml-1 rounded border border-slate-200 bg-white px-1 py-0.5 text-[9.5px] text-slate-700 max-w-[140px]"
+                      >
+                        <option value="">Auto — {resolved?.name || resolved?.email || "primary"}</option>
+                        {hc.filter(c => c.email && c.name).map(c => (
+                          <option key={c.id} value={c.email!}>{c.name}</option>
+                        ))}
+                      </select>
+                    )}
                   </div>
                 )}
               </div>

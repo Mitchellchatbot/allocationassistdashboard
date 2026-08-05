@@ -1555,6 +1555,9 @@ function BatchDialog({ target, onTargetChange, batches, initialKind, suggestedSp
   // contact person) | "team" ("<Hospital> team"). Absent = "auto". Reset each
   // fresh preview so a new target starts from the stored defaults.
   const [greetModeByHospital, setGreetModeByHospital] = useState<Record<string, "auto" | "contact" | "team">>({});
+  // Explicit "greet by name" pick per hospital (hospitalId → contact email),
+  // decoupled from who's emailed. Empty = auto (the routing-resolved primary).
+  const [greetNameByHospital, setGreetNameByHospital] = useState<Record<string, string>>({});
   const effectiveTo = (h: { id: string } & Parameters<typeof defaultToFor>[0]): string[] =>
     contactSel[h.id] ?? defaultToFor(h);
   const toggleContact = (hId: string, email: string, current: string[]) => {
@@ -1619,6 +1622,12 @@ function BatchDialog({ target, onTargetChange, batches, initialKind, suggestedSp
   // "<Hospital> team" — now it names whoever the email is actually addressed to.
   const batchGreetName = (h: Hospital): string => {
     const contacts = hospitalContacts.forHospital(h.name);
+    // An explicit "greet by name" pick wins — decoupled from who's emailed.
+    const picked = greetNameByHospital[h.id];
+    if (picked) {
+      const c = contacts.find(x => x.email?.toLowerCase() === picked.toLowerCase());
+      if (c?.name) return c.name.trim();
+    }
     const sel = contactSel[h.id];
     if (sel && sel.length === 1) {
       const c = contacts.find(x => x.email?.toLowerCase() === sel[0].toLowerCase());
@@ -2315,6 +2324,7 @@ function BatchDialog({ target, onTargetChange, batches, initialKind, suggestedSp
                     setRegionOnly(null);   // each preview starts from the batch's country scope
                     setContactSel({}); setContactOpen({});
                     setGreetModeByHospital({});   // fresh preview → stored greeting defaults
+                    setGreetNameByHospital({});
                     setAddHospCountry("all");
                     setDoctorAttachments([]);
                     setPerHospAtt({});   // fresh preview → every hospital rides the shared default again
@@ -2410,6 +2420,8 @@ function BatchDialog({ target, onTargetChange, batches, initialKind, suggestedSp
             heading={`Sending to ${sendingCount} hospital${sendingCount === 1 ? "" : "s"}`}
             greetMode={greetModeByHospital}
             onGreetMode={(hid, mode) => setGreetModeByHospital(prev => ({ ...prev, [hid]: mode }))}
+            greetName={greetNameByHospital}
+            onGreetName={(hid, email) => setGreetNameByHospital(prev => { const n = { ...prev }; if (email) n[hid] = email; else delete n[hid]; return n; })}
           />
 
           {/* Sending as — the From line the recipient hospital sees. Defaults to

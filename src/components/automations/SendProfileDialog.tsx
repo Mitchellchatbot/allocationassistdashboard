@@ -554,12 +554,15 @@ function SendProfileDialogBody({ onClose, initial }: { onClose: () => void; init
       sender?:      { assignedTo: string | null };
       // Feature 3: per-HOSPITAL greeting (hospitalId → mode); absent key = "auto".
       greeting?:    Record<string, "auto" | "contact" | "team">;
+      /** Explicit "greet by name" pick per hospital (hospitalId → contact email). */
+      greetNames?:  Record<string, string>;
       // Feature 1: Combined (one consolidated doctor email per doctor) vs
       // Individual (one doctor email per doctor per hospital). Multi-hospital only.
       combineDoctorEmails?: boolean;
     } = {},
   ) => {
-    const { attachments, templateKeys, schedule, sender, greeting, combineDoctorEmails } = opts;
+    const { attachments, templateKeys, schedule, sender, greeting, greetNames, combineDoctorEmails } = opts;
+    const greetNameByHospital = greetNames ?? {};
     // Explicit sender pick from the dialog. When set it's written to each run's
     // assigned_to so send-flow-email's pickSender uses it as the From line;
     // null → leave assigned_to unset so the hospital-owner trigger decides.
@@ -707,9 +710,17 @@ function SendProfileDialogBody({ onClose, initial }: { onClose: () => void; init
         // Going to everyone (or multiple manual recipients) → greet with the
         // hospital name (blank contact name), since no single contact owns it.
         const overrideIsMulti = !!overrideEmail && /[,;]/.test(overrideEmail);
-        const recipientName  = (isAllMode || overrideIsMulti)
-          ? ""
-          : (overrideContact?.name ?? resolved.contact?.name ?? h.primary_contact_name ?? "").trim();
+        // recipientName is the GREETING name (stamped as hospital_contact_name),
+        // separate from the To. An explicit "greet by name" pick wins; else greet
+        // the single recipient, or the team for all/multi sends.
+        const greetPick = greetNameByHospital[h.id];
+        const greetPickName = greetPick
+          ? (contactsForH.find(c => c.email?.toLowerCase() === greetPick.toLowerCase())?.name ?? "").trim()
+          : "";
+        const recipientName  = greetPickName
+          || ((isAllMode || overrideIsMulti)
+            ? ""
+            : (overrideContact?.name ?? resolved.contact?.name ?? h.primary_contact_name ?? "").trim());
         // Auto-CC (send-state): the hospital's configured cc_emails ride the send.
         const runCc = [...new Set([...ccList, ...(h.cc_emails ?? [])].map(e => e.trim()).filter(Boolean))];
         // Only advance the cursor when we actually used the cycle rotation
@@ -1332,6 +1343,7 @@ function PreviewConfirm({
       schedule?:    { date: string; time: string };
       sender?:      { assignedTo: string | null };
       greeting?:    Record<string, "auto" | "contact" | "team">;
+      greetNames?:  Record<string, string>;
       combineDoctorEmails?: boolean;
     },
   ) => void;
@@ -1422,6 +1434,9 @@ function PreviewConfirm({
   // "auto" (keep the hospital's stored setting). "contact" greets the named
   // recipient, "team" greets the hospital team. Selected per row in the panel.
   const [greetModeByHospital, setGreetModeByHospital] = useState<Record<string, "auto" | "contact" | "team">>({});
+  // Explicit "greet by name" pick per hospital (hospitalId → contact email),
+  // decoupled from who's emailed. Empty = auto (the routing-resolved primary).
+  const [greetNameByHospital, setGreetNameByHospital] = useState<Record<string, string>>({});
   // Feature 1: Combined (one consolidated doctor email per doctor, listing all
   // hospitals) vs Individual (one doctor email per doctor per hospital). Only
   // meaningful for multi-hospital sends; the toggle is hidden when single.
@@ -1474,6 +1489,12 @@ function PreviewConfirm({
   // to the hospital name — now it names whoever the email is actually addressed to.
   const resolveGreetName = (hosp: Hospital): string => {
     const contactsForH = hospitalContacts.forHospital(hosp.name);
+    // An explicit "greet by name" pick wins — decoupled from who's emailed.
+    const picked = greetNameByHospital[hosp.id];
+    if (picked) {
+      const c = contactsForH.find(x => x.email?.toLowerCase() === picked.toLowerCase());
+      if (c?.name) return c.name.trim();
+    }
     const resolved = resolveRecipient(contactsForH, hosp);
     const overrideEmail = recipientOverrides[hosp.id];
     const overrideContact = overrideEmail
@@ -1709,6 +1730,7 @@ function PreviewConfirm({
       schedule: sendMode === "later" ? { date: schedDate, time: schedTime } : undefined,
       sender: { assignedTo: senderAssignedTo },
       greeting: greetModeByHospital,
+      greetNames: greetNameByHospital,
       combineDoctorEmails,
     });
   };
@@ -1740,6 +1762,8 @@ function PreviewConfirm({
         onSelectHospital={setPreviewHospitalId}
         greetMode={greetModeByHospital}
         onGreetMode={(id, mode) => setGreetModeByHospital(prev => ({ ...prev, [id]: mode }))}
+        greetName={greetNameByHospital}
+        onGreetName={(id, email) => setGreetNameByHospital(prev => { const n = { ...prev }; if (email) n[id] = email; else delete n[id]; return n; })}
       />
       {!isSingle && (
         <div className="rounded-lg border border-teal-200 bg-teal-50 p-2.5 text-[11px] text-teal-900">
