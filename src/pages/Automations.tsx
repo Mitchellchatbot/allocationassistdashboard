@@ -30,6 +30,7 @@ import {
 import { toast } from "sonner";
 import { useQueryClient } from "@tanstack/react-query";
 import { supabase } from "@/lib/supabase";
+import { useAuth } from "@/hooks/use-auth";
 import { ApprovalQueues } from "@/components/automations/ApprovalQueues";
 import { ReassignButton } from "@/components/automations/ReassignButton";
 import { TriggerFlowDialog } from "@/components/automations/TriggerFlowDialog";
@@ -1293,6 +1294,7 @@ interface ProposedTime { iso: string; label: string; format: "in_person" | "vide
  *  Hidden when the run has no `proposed_interview_times` metadata.
  *  Re-renders the picker if a NEW reply arrives with revised times. */
 function InterviewTimePicker({ run }: { run: FlowRun }) {
+  const { user } = useAuth();
   const md = (run.metadata as Record<string, unknown>) ?? {};
   const proposed = (md.proposed_interview_times as ProposedTime[] | undefined) ?? [];
   const [pickedIso, setPickedIso] = useState<string | null>(null);
@@ -1339,6 +1341,9 @@ function InterviewTimePicker({ run }: { run: FlowRun }) {
           hospital:      run.hospital,
           current_stage: "send_interview_email",
           status:        "active",
+          // Who cleared this stage — see the note on the shortlist insert.
+          // Without it, interviews logged from this picker counted for nobody.
+          created_by:    user?.email ?? null,
           metadata: {
             triggered_via:        "hospital_proposed_time_picker",
             source_profile_run:   run.id,
@@ -1479,6 +1484,7 @@ function InterviewTimePicker({ run }: { run: FlowRun }) {
  * "Dismiss" just clears the flag — the run keeps awaiting_response.
  * ──────────────────────────────────────────────────────────────────── */
 function ShortlistSuggestion({ run }: { run: FlowRun }) {
+  const { user } = useAuth();
   const md = (run.metadata as Record<string, unknown>) ?? {};
   const suggested = md.shortlist_suggested === true;
   const summary   = (md.shortlist_suggestion_text as string | undefined) ?? "";
@@ -1516,6 +1522,11 @@ function ShortlistSuggestion({ run }: { run: FlowRun }) {
           hospital:      run.hospital,
           current_stage: "send_shortlist_email",
           status:        "active",
+          // Who cleared this stage. Reports → By team member skips runs with
+          // no created_by, so omitting it here meant every shortlist confirmed
+          // from this card was counted for nobody (the trigger-dialog path set
+          // it, this one didn't — same work, different credit).
+          created_by:    user?.email ?? null,
           metadata: {
             triggered_via:           "shortlist_suggestion_confirm",
             source_profile_sent_run: run.id,
@@ -1638,6 +1649,7 @@ function ShortlistSuggestion({ run }: { run: FlowRun }) {
  * relocation start.
  * ──────────────────────────────────────────────────────────────────── */
 function ContractCheckinAction({ run }: { run: FlowRun }) {
+  const { user } = useAuth();
   const [working, setWorking] = useState(false);
   const [signedDate, setSignedDate] = useState<string>(new Date().toISOString().slice(0, 10));
   const qc = useQueryClient();
@@ -1665,18 +1677,25 @@ function ContractCheckinAction({ run }: { run: FlowRun }) {
           }, { onConflict: "doctor_id,hospital_name" });
       }
 
-      // 2. Complete the run.
+      // 2. Complete the run, stamping WHO closed it. Nothing recorded the
+      //    closer before, so Reports credited every signing to whoever sent
+      //    the original profile. computeTeamRows now prefers this value and
+      //    falls back to the old behaviour for signings that predate it.
+      //    Rides `metadata` (existing jsonb) — no schema change.
       const nowIso = new Date().toISOString();
+      const closer = user?.email ?? null;
       await supabase.from("automation_flow_runs").update({
         current_stage: "contract_signed",
         status:        "completed",
         completed_at:  nowIso,
         last_event_at: nowIso,
+        metadata:      { ...(run.metadata ?? {}), signed_by: closer, signed_at: iso },
       }).eq("id", run.id);
 
       await supabase.from("automation_flow_events").insert({
         run_id: run.id, stage_key: "contract_signed", event_type: "completed",
-        message: `Team confirmed signature on ${signedDate}. Relocation flow can start now.`,
+        message: `Team confirmed signature on ${signedDate}${closer ? ` (logged by ${closer})` : ""}. Relocation flow can start now.`,
+        payload: { kind: "contract_signed", signed_by: closer, signed_at: iso },
       });
 
       // 3. Fire the Relocation flow run (HI-confirmed signature is the

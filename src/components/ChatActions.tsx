@@ -222,11 +222,41 @@ async function dispatch(a: ActionSpec, navigate: (to: string) => void): Promise<
       const runId   = String(p.runId ?? "");
       const toEmail = String(p.toEmail ?? "");
       if (!runId || !toEmail) throw new Error("missing runId or toEmail");
+      // Read the current owner first so the timeline note can say where the
+      // run came from, matching what useReassignRun writes from the UI.
+      const { data: before } = await supabase
+        .from("automation_flow_runs")
+        .select("assigned_to")
+        .eq("id", runId)
+        .maybeSingle();
+      const actor = (await supabase.auth.getUser()).data.user?.email ?? null;
       const { error } = await supabase
         .from("automation_flow_runs")
-        .update({ assigned_to: toEmail, reassigned_at: new Date().toISOString() })
+        .update({
+          assigned_to:   toEmail,
+          reassigned_at: new Date().toISOString(),
+          // Was missing: an assistant-driven reassignment left no actor on the
+          // row, so it was indistinguishable from a system change.
+          reassigned_by: actor,
+        })
         .eq("id", runId);
       if (error) throw error;
+      // Was missing entirely: without this event, reassignments made through
+      // the assistant never appeared in the run's timeline.
+      await supabase.from("automation_flow_events").insert({
+        run_id:     runId,
+        stage_key:  "reassign",
+        event_type: "note",
+        message:
+          `Reassigned to ${toEmail}${actor ? ` by ${actor}` : ""} via the AI assistant`,
+        payload: {
+          kind:   "reassign",
+          from:   (before as { assigned_to: string | null } | null)?.assigned_to ?? null,
+          to:     toEmail,
+          actor,
+          source: "ai_assistant",
+        },
+      });
       toast.success(`Reassigned to ${toEmail}`);
       return;
     }
