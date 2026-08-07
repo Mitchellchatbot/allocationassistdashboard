@@ -373,6 +373,13 @@ Deno.serve(async (req: Request) => {
   const digestActs = await runFormDigestSweep(supabase, now);
   for (const a of digestActs) actions.push(a);
 
+  // ── Temporary-handoff auto-return ────────────────────────────────────────
+  // A temporary handoff (HandoffDialog) parks runs with a covering teammate
+  // and stamps metadata.handoff.ends_at. When that date passes, ownership
+  // goes back on its own — the handing-back step is the one people forget.
+  const handoffActs = await runHandoffReturnSweep(supabase, now);
+  for (const a of handoffActs) actions.push(a);
+
   const summary = {
     inspected:  runs?.length ?? 0,
     sent:       actions.filter(a => a.result === "sent").length,
@@ -548,6 +555,112 @@ async function runInterviewFollowupSweep(
     }
   } catch (e) {
     console.error("[tick-scheduler] interview_followup sweep failed:", e);
+  }
+  return acts;
+}
+
+// ── Temporary-handoff auto-return ──────────────────────────────────────────
+// Reverts runs parked with a covering teammate once metadata.handoff.ends_at
+// has passed. Deliberately conservative: if the run has since been reassigned
+// to someone OTHER than the coverer, that newer decision wins and we only
+// clear the handoff state — we never yank a run away from whoever holds it now.
+//
+// No schema involved: metadata is the existing per-run jsonb blob, and the
+// handoff key is written by useBulkHandoff (src/hooks/use-automation-flows).
+async function runHandoffReturnSweep(
+  supabase: ReturnType<typeof createClient>,
+  now: Date,
+): Promise<TickAction[]> {
+  const acts: TickAction[] = [];
+  try {
+    const { data: rows, error } = await supabase
+      .from("automation_flow_runs")
+      .select("id, doctor_name, hospital, flow_key, assigned_to, metadata")
+      .eq("status", "active")
+      .not("metadata->handoff", "is", null);
+    if (error) throw error;
+
+    for (const r of (rows ?? []) as Array<{
+      id: string; doctor_name: string; hospital: string | null; flow_key: string;
+      assigned_to: string | null; metadata: Record<string, unknown> | null;
+    }>) {
+      const h = (r.metadata?.handoff ?? null) as {
+        original_owner?: string | null; covering?: string | null;
+        ends_at?: string | null; batch_id?: string | null;
+      } | null;
+      if (!h?.ends_at) continue;
+
+      // ends_at is a plain YYYY-MM-DD from the dialog's date input. Return on
+      // the day AFTER it, so cover lasts through the whole final day.
+      const endsMs = new Date(`${h.ends_at}T23:59:59Z`).getTime();
+      if (Number.isNaN(endsMs) || now.getTime() < endsMs) continue;
+
+      const meta = { ...(r.metadata ?? {}) };
+      delete (meta as Record<string, unknown>).handoff;
+
+      const stillCovering =
+        (r.assigned_to ?? "").toLowerCase() === (h.covering ?? "").toLowerCase();
+
+      if (!stillCovering) {
+        // Someone moved it again during cover — respect that and just drop
+        // the expired handoff state so this row stops being inspected.
+        await supabase.from("automation_flow_runs")
+          .update({ metadata: meta }).eq("id", r.id);
+        acts.push({
+          run_id: r.id, doctor: r.doctor_name,
+          flow: r.flow_key, stage: "handoff_return",
+          reason: `cover ended ${h.ends_at}, but the run had moved on`,
+          result: "skipped",
+          detail: r.assigned_to ?? "",
+        });
+        continue;
+      }
+
+      const back = h.original_owner ?? null;
+      const { error: updErr } = await supabase
+        .from("automation_flow_runs")
+        .update({
+          assigned_to:   back,
+          reassigned_at: now.toISOString(),
+          reassigned_by: "system:handoff-return",
+          metadata:      meta,
+        })
+        .eq("id", r.id);
+      if (updErr) {
+        acts.push({
+          run_id: r.id, doctor: r.doctor_name, flow: r.flow_key,
+          stage: "handoff_return", reason: String(updErr.message ?? updErr),
+          result: "error",
+        });
+        continue;
+      }
+
+      await supabase.from("automation_flow_events").insert({
+        run_id:     r.id,
+        stage_key:  "handoff",
+        event_type: "note",
+        message:    `Temporary handoff ended — returned to ${back ?? "unassigned"} from ${h.covering ?? "cover"}`,
+        payload: {
+          kind:     "handoff_return",
+          batch_id: h.batch_id ?? null,
+          from:     h.covering ?? null,
+          to:       back,
+          ends_at:  h.ends_at,
+          actor:    "system",
+        },
+      });
+
+      console.log(`[tick-scheduler] handoff_return · ${r.doctor_name} → ${back}`);
+      acts.push({
+        run_id: r.id, doctor: r.doctor_name,
+        flow: r.flow_key, stage: "handoff_return",
+        reason: `cover ended ${h.ends_at}`,
+        result: "advanced",
+        detail: `${h.covering ?? "?"} → ${back ?? "unassigned"}`,
+      });
+    }
+  } catch (e) {
+    console.error("[tick-scheduler] handoff_return sweep failed:", e);
   }
   return acts;
 }

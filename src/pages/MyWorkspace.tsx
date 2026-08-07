@@ -15,7 +15,7 @@
  * Admins land here too if they navigate to it manually — the page falls
  * back to team-wide data so it doubles as a command center.
  */
-import { useMemo } from "react";
+import { useMemo, useState } from "react";
 import { useNavigate } from "react-router-dom";
 import { DashboardLayout } from "@/components/layout/DashboardLayout";
 import { DocLink } from "@/components/DocLink";
@@ -30,7 +30,8 @@ import { findHiMemberByEmail } from "@/lib/hi-team";
 import { groupRunsIntoBuckets } from "@/lib/flow-buckets";
 import { FLOW_DEFINITIONS, type FlowKey } from "@/lib/automation-flows";
 import type { FlowRun } from "@/hooks/use-automation-flows";
-import { Inbox, UserSquare, Sparkles, ChevronRight, Mail, FileSignature, MapPin, Bell, Workflow, CalendarCheck, ArrowRight } from "lucide-react";
+import { Inbox, UserSquare, Sparkles, ChevronRight, Mail, FileSignature, MapPin, Bell, Workflow, CalendarCheck, ArrowRight, ArrowLeftRight } from "lucide-react";
+import { HandoffDialog } from "@/components/automations/HandoffDialog";
 import { useTour, hasSeenTour } from "@/components/OnboardingTour";
 import { HI_TOUR_ID, HI_TOUR_STEPS } from "@/lib/hi-onboarding-tour";
 import { LeadsToContactCard } from "@/components/workspace/LeadsToContactCard";
@@ -76,6 +77,7 @@ export default function MyWorkspace() {
 
   const buckets = useMemo(() => groupRunsIntoBuckets(tasks), [tasks]);
   const action  = buckets.find(b => b.key === "action")?.runs.length ?? 0;
+  const [handoffOpen, setHandoffOpen] = useState(false);
 
   // Hero counters now span the whole pipeline, not three slices of one
   // table. "Action now" = flow runs waiting on a manual step; the rest
@@ -117,10 +119,23 @@ export default function MyWorkspace() {
                   : "All active work across the team. Use the filters on each page to narrow down."}
               </p>
             </div>
-            <div className="flex items-center gap-2 flex-wrap">
-              <HeroStat label="Action now"      value={action}         tone={action > 0 ? "rose" : "default"}        hint="Flow runs assigned to you waiting on a manual step right now (send profile, schedule interview, pick city, etc.)." />
-              <HeroStat label="Follow-ups due"  value={followUpsDue}   tone={followUpsDue > 0 ? "amber" : "default"} hint="Leads you own whose follow-up date is now in the past." />
-              <HeroStat label="Leads to contact" value={leadsToContact} tone={leadsToContact > 0 ? "teal" : "default"} hint="Uncontacted leads + overdue follow-ups assigned to you (paid leads pinned on top)." />
+            <div className="flex flex-col items-end gap-2">
+              <div className="flex items-center gap-2 flex-wrap">
+                <HeroStat label="Action now"      value={action}         tone={action > 0 ? "rose" : "default"}        hint="Flow runs assigned to you waiting on a manual step right now (send profile, schedule interview, pick city, etc.)." />
+                <HeroStat label="Follow-ups due"  value={followUpsDue}   tone={followUpsDue > 0 ? "amber" : "default"} hint="Leads you own whose follow-up date is now in the past." />
+                <HeroStat label="Leads to contact" value={leadsToContact} tone={leadsToContact > 0 ? "teal" : "default"} hint="Uncontacted leads + overdue follow-ups assigned to you (paid leads pinned on top)." />
+              </div>
+              {/* Going on leave? Move the whole queue in one action rather
+                  than reassigning run by run from the detail sheet. */}
+              <Button
+                variant="outline"
+                size="sm"
+                className="h-7 text-[11px] gap-1.5"
+                onClick={() => setHandoffOpen(true)}
+              >
+                <ArrowLeftRight className="h-3 w-3" />
+                {scoped ? "Hand off my work" : "Hand off work"}
+              </Button>
             </div>
           </div>
           {scoped && !hasSeenTour(HI_TOUR_ID) && (
@@ -249,6 +264,11 @@ export default function MyWorkspace() {
         <ActivityTimelineCard events={events} />
       </div>
 
+      <HandoffDialog
+        open={handoffOpen}
+        onClose={() => setHandoffOpen(false)}
+        initialFrom={myEmail}
+      />
     </DashboardLayout>
   );
 }

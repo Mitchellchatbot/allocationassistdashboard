@@ -171,8 +171,17 @@ export function computeTeamRows(runs: FlowRun[], lifecycles: DoctorLifecycle[], 
   // filtered run regardless of range, so a signing dated outside the run's
   // range still credits the right person.
   const doctorOwner = new Map<string, string>();
+  // doctor_id → whoever actually closed the deal, read from the contract run's
+  // metadata.signed_by (stamped by ContractCheckinAction's "Mark signed").
+  // Signings from before that stamp existed have no entry here and fall back
+  // to doctorOwner below, so historical numbers are unchanged.
+  const doctorCloser = new Map<string, string>();
 
   for (const r of runs) {
+    if (isOfferRun(r) && r.doctor_id && !doctorCloser.has(r.doctor_id)) {
+      const signedBy = (r.metadata as Record<string, unknown> | null)?.signed_by;
+      if (typeof signedBy === "string" && signedBy) doctorCloser.set(r.doctor_id, signedBy);
+    }
     if (!r.created_by) continue;
     if (!passesFilters(r, filters)) continue;
     if (r.doctor_id && (isProfileSendRun(r) || !doctorOwner.has(r.doctor_id))) {
@@ -189,10 +198,12 @@ export function computeTeamRows(runs: FlowRun[], lifecycles: DoctorLifecycle[], 
     map.set(r.created_by, row);
   }
 
-  // Attribute each in-range signing to the doctor's owning member.
+  // Attribute each in-range signing to whoever CLOSED it, falling back to the
+  // doctor's owning member (the profile sender) when no closer was recorded —
+  // which is every signing logged before "Mark signed" started stamping one.
   for (const l of lifecycles) {
     if (!inRange(l.signed_at, filters.range)) continue;
-    const owner = doctorOwner.get(l.doctor_id);
+    const owner = doctorCloser.get(l.doctor_id) ?? doctorOwner.get(l.doctor_id);
     if (!owner) continue;
     const row = map.get(owner) ?? blank(owner);
     row.signed++;
