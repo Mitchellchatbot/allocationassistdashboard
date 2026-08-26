@@ -1099,6 +1099,16 @@ function DoctorPicker({ options, isLoading, selectedIds, onToggle, onSetSelected
   onSetSelected: (ids: string[]) => void;
 }) {
   const [q, setQ] = useState("");
+  // Explicit "filter by specialty" control (feedback #1): a dropdown of the
+  // distinct specialties present in the option set, so the team can narrow to a
+  // category without having to guess the exact search term. Combined (AND) with
+  // the free-text search below.
+  const [specialty, setSpecialty] = useState("all");
+  const specialtyOptions = useMemo(
+    () => [...new Set(options.map(o => o.speciality).filter((s): s is string => !!s && s.trim() !== ""))]
+      .sort((a, b) => a.localeCompare(b)),
+    [options],
+  );
   // Defer only the filter term: the <Input> stays controlled by the raw `q`
   // (instant typing), while the options.filter runs against the deferred value
   // so a large list stays responsive. Final filtered options/order are
@@ -1106,13 +1116,16 @@ function DoctorPicker({ options, isLoading, selectedIds, onToggle, onSetSelected
   const deferredQ = useDeferredValue(q);
   const filtered = useMemo(() => {
     const term = deferredQ.trim().toLowerCase();
-    if (!term) return options.slice(0, 50);
-    return options.filter(o =>
+    const bySpecialty = specialty === "all"
+      ? options
+      : options.filter(o => o.speciality === specialty);
+    if (!term) return bySpecialty.slice(0, 50);
+    return bySpecialty.filter(o =>
       o.name.toLowerCase().includes(term) ||
       o.email?.toLowerCase().includes(term) ||
       o.speciality?.toLowerCase().includes(term),
     ).slice(0, 100);
-  }, [options, deferredQ]);
+  }, [options, deferredQ, specialty]);
 
   // "Select all" acts on whatever's currently filtered (so a search narrows it),
   // mirroring the HospitalPicker's multi-select pattern.
@@ -1128,15 +1141,26 @@ function DoctorPicker({ options, isLoading, selectedIds, onToggle, onSetSelected
 
   return (
     <div className="flex h-full min-h-0 flex-col gap-2.5">
-      <div className="relative shrink-0">
-        <Search className="absolute left-2 top-1/2 -translate-y-1/2 h-3.5 w-3.5 text-muted-foreground" />
-        <Input
-          autoFocus
-          value={q}
-          onChange={e => setQ(e.target.value)}
-          placeholder={isLoading ? "Loading doctors..." : "Search by name, email, or speciality..."}
-          className="pl-7 text-[12px] bg-white text-slate-800"
-        />
+      <div className="flex shrink-0 gap-2">
+        <div className="relative flex-1">
+          <Search className="absolute left-2 top-1/2 -translate-y-1/2 h-3.5 w-3.5 text-muted-foreground" />
+          <Input
+            autoFocus
+            value={q}
+            onChange={e => setQ(e.target.value)}
+            placeholder={isLoading ? "Loading doctors..." : "Search by name, email, or speciality..."}
+            className="pl-7 text-[12px] bg-white text-slate-800"
+          />
+        </div>
+        <select
+          value={specialty}
+          onChange={e => setSpecialty(e.target.value)}
+          title="Filter by specialty / category"
+          className="shrink-0 rounded-md border border-input bg-white text-slate-800 text-[12px] px-2 h-9 max-w-[160px]"
+        >
+          <option value="all">All specialties</option>
+          {specialtyOptions.map(s => <option key={s} value={s}>{s}</option>)}
+        </select>
       </div>
       <div className="flex shrink-0 items-center justify-between text-[11px]">
         <div className="flex items-center gap-2">
@@ -1146,7 +1170,7 @@ function DoctorPicker({ options, isLoading, selectedIds, onToggle, onSetSelected
             disabled={filtered.length === 0}
             className="inline-flex items-center gap-1 rounded-md border border-sidebar-border/50 bg-white/10 px-2 py-1 text-[11px] font-medium text-sidebar-foreground/85 hover:bg-white/20 hover:text-white transition-colors disabled:opacity-40"
           >
-            {allFilteredSelected ? "Deselect all" : `Select all${q ? " (filtered)" : ""}`}
+            {allFilteredSelected ? "Deselect all" : `Select all${(q || specialty !== "all") ? " (filtered)" : ""}`}
             {!allFilteredSelected && <span className="text-sidebar-foreground/55">· {filtered.length}</span>}
           </button>
           <span className="text-sidebar-foreground/70">{selectedIds.length} selected</span>
