@@ -876,22 +876,15 @@ Deno.serve(async (req: Request) => {
       // eligible contact for an 'all'-mode hospital), minus any batch-excluded /
       // Ammar addresses. Test mode still funnels every copy to the test inbox.
       const liveTo = h.toEmails.filter(e => !excludeSet.has(e.toLowerCase()) && e.toLowerCase() !== EXCLUDED_RECIPIENT);
-      // This hospital's OWN cc_emails ride its OWN email — but NEVER in test mode.
-      // Training wheels: the To is redirected to the test inbox, so the real CC
-      // contacts MUST be dropped too, or they'd receive the "test" send. (A
-      // dispatcher-typed extraCc is a deliberate team copy and still rides — it's
-      // merged below.) Exclude the To, Ammar, and any batch-excluded address.
-      const toLc = new Set((TEST_OVERRIDE_LIST.length ? [] : (liveTo.length ? liveTo : [h.email])).map(x => x.toLowerCase()));
-      const hospCc = TEST_OVERRIDE_LIST.length
-        ? []
-        : h.ccEmails.filter(e => {
-            const lc = e.toLowerCase();
-            return lc !== EXCLUDED_RECIPIENT && !excludeSet.has(lc) && !toLc.has(lc);
-          });
+      // Feedback #12: a hospital's saved cc_emails are NO LONGER auto-attached to
+      // the send. The team wanted CC to be a deliberate, manual choice — so the
+      // only CC that rides now is what the dispatcher explicitly typed (extraCc,
+      // merged below) plus the test-mode team copy (TEST_CC). h.ccEmails is kept
+      // on the record (still editable in the Hospitals tab) but never auto-selected.
       // In test mode the To is redirected to the test inbox, so CC the extra
       // override addresses (TEST_CC, e.g. Amir) on EVERY copy so the team sees
       // each test email — like send-flow-email. TEST_CC is empty when live.
-      const emailCc = [...new Set([...hospCc, ...TEST_CC])];
+      const emailCc = [...new Set([...TEST_CC])];
       // Per-hospital attachments override the default for THIS hospital's email;
       // fall back to the shared builtAttachments when this hospital wasn't given
       // its own list.

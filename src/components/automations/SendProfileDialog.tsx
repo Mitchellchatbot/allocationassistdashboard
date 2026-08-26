@@ -747,8 +747,9 @@ function SendProfileDialogBody({ onClose, initial }: { onClose: () => void; init
           || ((isAllMode || overrideIsMulti)
             ? ""
             : (overrideContact?.name ?? resolved.contact?.name ?? h.primary_contact_name ?? "").trim());
-        // Auto-CC (send-state): the hospital's configured cc_emails ride the send.
-        const hospCc = ccOverrideByHospital[h.id] ?? h.cc_emails ?? [];
+        // Feedback #12: a hospital's saved cc_emails are no longer auto-attached.
+        // Only a CC the dispatcher explicitly added for this hospital rides now.
+        const hospCc = ccOverrideByHospital[h.id] ?? [];
         const runCc = [...new Set([...ccList, ...hospCc].map(e => e.trim()).filter(Boolean))];
         // Only advance the cursor when we actually used the cycle rotation
         // (no override, cycle mode, real matched contacts). Once per hospital.
@@ -1489,11 +1490,11 @@ function PreviewConfirm({
   // Explicit "greet by name" pick per hospital (hospitalId → contact email),
   // decoupled from who's emailed. Empty = auto (the routing-resolved primary).
   const [greetNameByHospital, setGreetNameByHospital] = useState<Record<string, string>>({});
-  // Per-hospital CC override (hospitalId → cc list). Absent = the hospital's own
-  // saved cc_emails. Lets the dispatcher edit exactly who's CC'd on each email.
+  // Per-hospital CC override (hospitalId → cc list). Feedback #12: CC is no longer
+  // auto-seeded from the hospital's saved cc_emails — absent = no CC. The dispatcher
+  // adds exactly who's CC'd on each email manually (paste-multiple supported).
   const [hospitalCcOverride, setHospitalCcOverride] = useState<Record<string, string[]>>({});
-  const ccForHospital = (h: Hospital): string[] =>
-    hospitalCcOverride[h.id] ?? [...new Set((h.cc_emails ?? []).map(e => e.trim()).filter(isEmail))];
+  const ccForHospital = (h: Hospital): string[] => hospitalCcOverride[h.id] ?? [];
   // Resolved To recipient(s) for a hospital — matches what buildRuns sends.
   const toForHospital = (h: Hospital): string => {
     const hc = hospitalContacts.forHospital(h.name);

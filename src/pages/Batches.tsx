@@ -1614,12 +1614,9 @@ function BatchDialog({ target, onTargetChange, batches, initialKind, suggestedSp
   // These are the LIVE recipients (in test mode the To is still redirected to the
   // test inbox — the mode banner above says so).
   const activeRecipTo = previewGreetHospital ? effectiveTo(previewGreetHospital).join(", ") : "";
-  const activeRecipCc = previewGreetHospital
-    ? [...new Set([
-        ...((previewGreetHospital.cc_emails ?? []).map(e => e.trim()).filter(e => e && e.includes("@"))),
-        ...batchCc,
-      ])]
-    : batchCc;
+  // Feedback #12: a hospital's saved cc_emails are no longer auto-attached — CC is
+  // now only what the dispatcher explicitly typed (batchCc). Mirrors send-batch.
+  const activeRecipCc = batchCc;
   // Compare bodies with the greeting line blanked out. Switching which hospital
   // the preview shows rewrites "Hello …!" (greetSwap), and that alone must NOT
   // count as a manual edit — otherwise a mere preview-hospital click ships an
