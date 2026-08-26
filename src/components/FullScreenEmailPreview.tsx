@@ -4,6 +4,7 @@ import {
   X, Monitor, Tablet, Smartphone, Mail as MailIcon, ZoomIn, ZoomOut,
   Code2, FileText, Copy, Check, Download, Image as ImageIcon, Sun, Moon,
   Bold, Italic, Underline, List, ListOrdered, Link2, Pencil, Table2,
+  Undo2, Redo2,
 } from "lucide-react";
 import { toast } from "sonner";
 import { cn } from "@/lib/utils";
@@ -249,6 +250,8 @@ export function FullScreenEmailPreview(props: FullScreenEmailPreviewProps) {
             {editable && (
               <ToolGroup>
                 <IconBtn onMouseDown={(e) => e.preventDefault()} onClick={() => { saveSelection(); setTableOpen(true); }} title="Insert table"><Table2 className="h-3.5 w-3.5" /></IconBtn>
+                <IconBtn onMouseDown={(e) => e.preventDefault()} onClick={() => exec("undo")} title="Undo (Ctrl/Cmd+Z)"><Undo2 className="h-3.5 w-3.5" /></IconBtn>
+                <IconBtn onMouseDown={(e) => e.preventDefault()} onClick={() => exec("redo")} title="Redo (Ctrl/Cmd+Shift+Z)"><Redo2 className="h-3.5 w-3.5" /></IconBtn>
                 <IconBtn onMouseDown={(e) => e.preventDefault()} onClick={() => exec("bold")}          title="Bold"><Bold className="h-3.5 w-3.5" /></IconBtn>
                 <IconBtn onMouseDown={(e) => e.preventDefault()} onClick={() => exec("italic")}        title="Italic"><Italic className="h-3.5 w-3.5" /></IconBtn>
                 <IconBtn onMouseDown={(e) => e.preventDefault()} onClick={() => exec("underline")}     title="Underline"><Underline className="h-3.5 w-3.5" /></IconBtn>

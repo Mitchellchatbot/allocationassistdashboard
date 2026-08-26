@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from "react";
-import { Pencil, RotateCcw, Bold, Italic, Underline, List, ListOrdered, Link2, Table2, Maximize2, Image as ImageIcon, AlignLeft, AlignCenter, AlignRight, AlignJustify, AlignVerticalJustifyStart, AlignVerticalJustifyCenter, AlignVerticalJustifyEnd, Trash2, Crop, Check, X } from "lucide-react";
+import { Pencil, RotateCcw, Undo2, Redo2, Bold, Italic, Underline, List, ListOrdered, Link2, Table2, Maximize2, Image as ImageIcon, AlignLeft, AlignCenter, AlignRight, AlignJustify, AlignVerticalJustifyStart, AlignVerticalJustifyCenter, AlignVerticalJustifyEnd, Trash2, Crop, Check, X } from "lucide-react";
 import { toast } from "sonner";
 import { uploadEmailAttachment } from "@/lib/email-attachments";
 import { cn } from "@/lib/utils";
@@ -712,6 +712,9 @@ export function EditableEmailPreview({
           <ToolBtn onClick={() => setTableOpen(true)} title="Insert table (Top 15 / specialty lists)" primary>
             <Table2 className="h-3.5 w-3.5" /> <span className="text-[11px] font-medium">Table</span>
           </ToolBtn>
+          <Divider />
+          <ToolBtn onClick={() => exec("undo")} title="Undo (Ctrl/Cmd+Z)"><Undo2 className="h-3.5 w-3.5" /></ToolBtn>
+          <ToolBtn onClick={() => exec("redo")} title="Redo (Ctrl/Cmd+Shift+Z)"><Redo2 className="h-3.5 w-3.5" /></ToolBtn>
           <Divider />
           <ToolBtn onClick={() => exec("bold")}          title="Bold"><Bold className="h-3.5 w-3.5" /></ToolBtn>
           <ToolBtn onClick={() => exec("italic")}        title="Italic"><Italic className="h-3.5 w-3.5" /></ToolBtn>
