@@ -18,7 +18,67 @@ export function useFilteredData() {
   // "Cost per Doctor" KPI (spend ÷ DoBs onboarded in the same window).
   const { total: spendInWindow } = useMarketingExpenses();
 
-  return useMemo(() => {
+  // Delegate to a shared, cached pure function (below). currency stays in the
+  // dep list so a currency switch re-derives money KPIs, even though the body
+  // reads it only through fmtMoney (whose identity already tracks currency).
+  return useMemo(
+    () => getFilteredData(preset, dateRange, zoho, zohoLoading, zohoError, fmtMoney),
+    [preset, dateRange, zoho, zohoLoading, zohoError, currency, fmtMoney],
+  );
+}
+
+// ── Shared single-entry cache ───────────────────────────────────────────────
+// useFilteredData is called by DashboardLayout (mounted on EVERY page) AND by
+// several page/card components at the same time (Index + GeographyCard +
+// SalesActivity all mount on the dashboard). Each call site owns its own
+// useMemo, so on a single filter change they'd EACH re-run the ~680-line
+// aggregate pass over ~28k leads. This module-level single-entry cache, keyed
+// by the exact inputs the computation depends on, lets the 2nd..Nth caller
+// reuse the first's result object instead of recomputing. computeFilteredData
+// is a pure function of its inputs, so sharing the result is safe.
+type Filters = ReturnType<typeof useFilters>;
+type ZohoQuery = ReturnType<typeof useZohoData>;
+type FilteredData = ReturnType<typeof computeFilteredData>;
+
+let fdCache: {
+  zoho: ZohoQuery["data"]; preset: Filters["preset"]; fromMs: number; toMs: number;
+  fmtMoney: (v: number) => string; zohoLoading: boolean; zohoError: ZohoQuery["error"];
+  result: FilteredData;
+} | null = null;
+
+function getFilteredData(
+  preset: Filters["preset"],
+  dateRange: Filters["dateRange"],
+  zoho: ZohoQuery["data"],
+  zohoLoading: boolean,
+  zohoError: ZohoQuery["error"],
+  fmtMoney: (v: number) => string,
+): FilteredData {
+  const fromMs = dateRange.from.getTime();
+  const toMs   = dateRange.to.getTime();
+  if (fdCache
+      && fdCache.zoho === zoho
+      && fdCache.preset === preset
+      && fdCache.fromMs === fromMs
+      && fdCache.toMs === toMs
+      && fdCache.fmtMoney === fmtMoney
+      && fdCache.zohoLoading === zohoLoading
+      && fdCache.zohoError === zohoError) {
+    return fdCache.result;
+  }
+  const result = computeFilteredData(preset, dateRange, zoho, zohoLoading, zohoError, fmtMoney);
+  fdCache = { zoho, preset, fromMs, toMs, fmtMoney, zohoLoading, zohoError, result };
+  return result;
+}
+
+function computeFilteredData(
+  preset: Filters["preset"],
+  dateRange: Filters["dateRange"],
+  zoho: ZohoQuery["data"],
+  zohoLoading: boolean,
+  zohoError: ZohoQuery["error"],
+  fmtMoney: (v: number) => string,
+) {
     const timeLabel = getTimeLabel(preset, dateRange);
 
     // How many months to show in the time-series chart
@@ -305,5 +365,4 @@ export function useFilteredData() {
       zohoError,
       isLive: true,
     };
-  }, [preset, dateRange, zoho, zohoLoading, zohoError, currency, fmtMoney]);
 }
