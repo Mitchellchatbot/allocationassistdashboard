@@ -6,6 +6,26 @@ export function isEmail(s: string): boolean {
   return /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(s.trim());
 }
 
+/** Split a pasted blob (a spreadsheet column, a comma list, "Name <a@b.com>"
+ *  pairs…) into individual email addresses. Separators: commas, semicolons,
+ *  whitespace, tabs, newlines. Angle-bracket display-name forms are unwrapped.
+ *  Returns only the tokens that look like emails, de-duped, order preserved. */
+export function splitEmails(raw: string): string[] {
+  const out: string[] = [];
+  const seen = new Set<string>();
+  for (const tok of raw.split(/[\s,;]+/)) {
+    // Unwrap "Display Name <addr@x.com>" → addr@x.com.
+    const m = tok.match(/<([^>]+)>/);
+    const e = (m ? m[1] : tok).trim().replace(/^["']|["']$/g, "");
+    if (!isEmail(e)) continue;
+    const key = e.toLowerCase();
+    if (seen.has(key)) continue;
+    seen.add(key);
+    out.push(e);
+  }
+  return out;
+}
+
 /**
  * Build a "does this look like a HOSPITAL address?" check from the hospitals
  * list. A CC/BCC here rides the send (a manager copy), so flagging a hospital
@@ -97,9 +117,13 @@ function Field({ label, values, onChange, roster, flagHospital, placeholder, dis
   const [draft, setDraft] = useState("");
   const has = (e: string) => values.some(v => v.toLowerCase() === e.trim().toLowerCase());
   const add = (email: string) => {
-    const e = email.trim();
-    if (!isEmail(e) || has(e)) { setDraft(""); return; }
-    onChange([...values, e]);
+    // A single token may itself be a paste of many (spreadsheet cell, comma
+    // list) — always run it through splitEmails so multi-add "just works".
+    const emails = splitEmails(email);
+    if (emails.length === 0) { setDraft(""); return; }
+    const next = [...values];
+    for (const e of emails) if (!next.some(v => v.toLowerCase() === e.toLowerCase())) next.push(e);
+    if (next.length !== values.length) onChange(next);
     setDraft("");
   };
   const remove = (e: string) => onChange(values.filter(v => v !== e));
@@ -136,6 +160,11 @@ function Field({ label, values, onChange, roster, flagHospital, placeholder, dis
           disabled={disabled}
           onChange={e => setDraft(e.target.value)}
           onKeyDown={e => { if (e.key === "Enter" || e.key === ",") { e.preventDefault(); add(draft); } }}
+          onPaste={e => {
+            // Paste a whole spreadsheet column / comma list at once → chips.
+            const text = e.clipboardData.getData("text");
+            if (text && /[\s,;]/.test(text.trim())) { e.preventDefault(); add(text); }
+          }}
           onBlur={() => { if (draft) add(draft); }}
           placeholder={values.length ? "" : placeholder}
           className="min-w-[110px] flex-1 bg-transparent py-0.5 text-[11px] text-slate-800 outline-none placeholder:text-slate-400 disabled:opacity-50"

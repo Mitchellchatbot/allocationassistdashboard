@@ -37,7 +37,7 @@ import { AttachmentsPicker } from "@/components/automations/AttachmentsPicker";
 import { CardScreenshotControl } from "@/components/automations/ProfileCardControls";
 import { HospitalRecipientsPanel } from "@/components/automations/HospitalRecipientsPanel";
 import { TemplatePicker } from "@/components/automations/TemplatePicker";
-import { CcBccPicker, EmailChipField, isEmail, makeHospitalFlag } from "@/components/automations/CcBccPicker";
+import { CcBccPicker, EmailChipField, isEmail, makeHospitalFlag, splitEmails } from "@/components/automations/CcBccPicker";
 import { detectUnfilledVars, describeUnfilled } from "@/lib/email-validation";
 import { useScheduleProfileSend } from "@/hooks/use-scheduled-profile-sends";
 import { GulfClock, composeLocalDateTime, localToGulfParts, localDateInDays } from "@/components/GulfClock";
@@ -126,12 +126,18 @@ function retokenizeEmail(html: string, vars: Record<string, string | number | nu
 // Enter or blur when the value is a valid email.
 function CcAddInput({ onAdd }: { onAdd: (email: string) => void }) {
   const [v, setV] = useState("");
-  const commit = () => { const e = v.trim(); if (e && isEmail(e)) { onAdd(e); setV(""); } };
+  // A single entry may itself be a paste of many (spreadsheet cell, comma list)
+  // — run it through splitEmails so multi-add "just works" here too.
+  const commit = () => { for (const e of splitEmails(v)) onAdd(e); setV(""); };
   return (
     <input
       value={v}
       onChange={e => setV(e.target.value)}
-      onKeyDown={e => { if (e.key === "Enter") { e.preventDefault(); commit(); } }}
+      onKeyDown={e => { if (e.key === "Enter" || e.key === ",") { e.preventDefault(); commit(); } }}
+      onPaste={e => {
+        const text = e.clipboardData.getData("text");
+        if (text && /[\s,;]/.test(text.trim())) { e.preventDefault(); for (const em of splitEmails(text)) onAdd(em); setV(""); }
+      }}
       onBlur={commit}
       placeholder="+ CC email"
       className="w-20 rounded border border-dashed border-slate-300 bg-white px-1.5 py-0.5 font-mono text-[10px] text-slate-700 outline-none transition-all focus:w-40 focus:border-teal-400"
