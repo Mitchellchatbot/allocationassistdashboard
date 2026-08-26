@@ -14,6 +14,7 @@ import { useDoctorLifecycleMap } from "@/hooks/use-doctor-lifecycle";
 import { useAuth } from "@/hooks/use-auth";
 import { AA_SENDERS, findSenderByEmail } from "@/lib/hi-team";
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
+import { Command, CommandInput, CommandList, CommandEmpty, CommandGroup, CommandItem } from "@/components/ui/command";
 import { supabase } from "@/lib/supabase";
 import { useHospitals, useUpdateHospital, isHospitalPaused, hospitalAllowsSpecialty, type Hospital } from "@/hooks/use-hospitals";
 import { useHospitalContacts, resolveRecipient, resolveAllRecipients, type HospitalContact } from "@/hooks/use-hospital-contacts";
@@ -1159,15 +1160,7 @@ function DoctorPicker({ options, isLoading, selectedIds, onToggle, onSetSelected
             className="pl-7 text-[12px] bg-white text-slate-800"
           />
         </div>
-        <select
-          value={specialty}
-          onChange={e => setSpecialty(e.target.value)}
-          title="Filter by specialty / category"
-          className="shrink-0 rounded-md border border-input bg-white text-slate-800 text-[12px] px-2 h-9 max-w-[160px]"
-        >
-          <option value="all">All specialties</option>
-          {specialtyOptions.map(s => <option key={s} value={s}>{s}</option>)}
-        </select>
+        <SpecialtyFilterCombobox value={specialty} onChange={setSpecialty} options={specialtyOptions} />
       </div>
       <div className="flex shrink-0 items-center justify-between text-[11px]">
         <div className="flex items-center gap-2">
@@ -1213,6 +1206,56 @@ function DoctorPicker({ options, isLoading, selectedIds, onToggle, onSetSelected
         Showing {filtered.length} of {options.length}. Each doctor gets their own personalized email(s).
       </div>
     </div>
+  );
+}
+
+/**
+ * Searchable specialty filter (feedback): the "All specialties" control doubles
+ * as a search box — type to filter the specialty list instead of scrolling a
+ * long native <select>. `value` is "all" (no filter) or an exact specialty from
+ * `options` (the distinct specialties present in the current doctor set, so a
+ * pick always returns matches). Mirrors the SpecialtyCombobox in Batches.tsx.
+ */
+function SpecialtyFilterCombobox({ value, onChange, options }: {
+  value: string; onChange: (v: string) => void; options: string[];
+}) {
+  const [open, setOpen]     = useState(false);
+  const [search, setSearch] = useState("");
+  const pick = (v: string) => { onChange(v); setSearch(""); setOpen(false); };
+  const label = value === "all" ? "All specialties" : value;
+  return (
+    <Popover open={open} onOpenChange={setOpen}>
+      <PopoverTrigger asChild>
+        <button
+          type="button"
+          title="Search / filter by specialty"
+          className="flex h-9 w-[160px] shrink-0 items-center justify-between gap-1 rounded-md border border-input bg-white px-2.5 text-[12px] text-left text-slate-800"
+        >
+          <span className={`truncate ${value === "all" ? "text-muted-foreground" : ""}`}>{label}</span>
+          <ChevronDown className="h-3.5 w-3.5 opacity-50 shrink-0" />
+        </button>
+      </PopoverTrigger>
+      <PopoverContent className="p-0 w-[--radix-popover-trigger-width] min-w-[220px]" align="end">
+        <Command>
+          <CommandInput placeholder="Search specialties…" value={search} onValueChange={setSearch} className="text-[12px]" />
+          <CommandList>
+            <CommandEmpty className="py-3 px-3 text-[11px] text-muted-foreground">No specialties match.</CommandEmpty>
+            <CommandGroup>
+              <CommandItem value="All specialties" onSelect={() => pick("all")} className="text-[12px]">
+                <Check className={`mr-2 h-3.5 w-3.5 ${value === "all" ? "opacity-100" : "opacity-0"}`} />
+                All specialties
+              </CommandItem>
+              {options.map(o => (
+                <CommandItem key={o} value={o} onSelect={() => pick(o)} className="text-[12px]">
+                  <Check className={`mr-2 h-3.5 w-3.5 ${value === o ? "opacity-100" : "opacity-0"}`} />
+                  {o}
+                </CommandItem>
+              ))}
+            </CommandGroup>
+          </CommandList>
+        </Command>
+      </PopoverContent>
+    </Popover>
   );
 }
 
