@@ -71,7 +71,10 @@ export function useNotifications(): {
       return (data ?? []) as AppNotification[];
     },
     staleTime: 30_000,
-    refetchInterval: 60_000,
+    // Realtime (below) is the primary freshness path — a new notification pushes
+    // an invalidation instantly. This poll is only a fallback for a dropped
+    // realtime socket, so 5 min is plenty; a 60s poll was redundant churn.
+    refetchInterval: 5 * 60_000,
   });
 
   useTableSubscription("notifications", useCallback(() => {
