@@ -43,6 +43,7 @@ import { detectUnfilledVars, describeUnfilled } from "@/lib/email-validation";
 import { useScheduleProfileSend } from "@/hooks/use-scheduled-profile-sends";
 import { GulfClock, composeLocalDateTime, localToGulfParts, localDateInDays } from "@/components/GulfClock";
 import { Clock, Loader2 } from "lucide-react";
+import { listCanonicalSpecialties, groupSpecialty, rollupSpecialty } from "@/lib/specialty-groups";
 import { useNavigate } from "react-router-dom";
 import { useQueryClient } from "@tanstack/react-query";
 
@@ -1112,11 +1113,12 @@ function DoctorPicker({ options, isLoading, selectedIds, onToggle, onSetSelected
   // category without having to guess the exact search term. Combined (AND) with
   // the free-text search below.
   const [specialty, setSpecialty] = useState("all");
-  const specialtyOptions = useMemo(
-    () => [...new Set(options.map(o => o.speciality).filter((s): s is string => !!s && s.trim() !== ""))]
-      .sort((a, b) => a.localeCompare(b)),
-    [options],
-  );
+  // The category list is the canonical AA-website / WordPress specialty taxonomy
+  // (the same source the Batches specialty picker uses), NOT the raw Zoho
+  // specialty strings on the doctor rows — so the categories here match exactly
+  // what the team sees on WordPress. A doctor's free-text specialty is mapped
+  // onto this taxonomy (groupSpecialty / rollupSpecialty) when filtering below.
+  const specialtyOptions = useMemo(() => listCanonicalSpecialties(), []);
   // Defer only the filter term: the <Input> stays controlled by the raw `q`
   // (instant typing), while the options.filter runs against the deferred value
   // so a large list stays responsive. Final filtered options/order are
@@ -1124,9 +1126,12 @@ function DoctorPicker({ options, isLoading, selectedIds, onToggle, onSetSelected
   const deferredQ = useDeferredValue(q);
   const filtered = useMemo(() => {
     const term = deferredQ.trim().toLowerCase();
+    // Map each doctor's raw specialty onto the canonical taxonomy and match the
+    // exact category OR its parent rollup — so picking a parent (e.g.
+    // "Cardiology") also catches its sub-specialties (e.g. "Pediatric Cardiology").
     const bySpecialty = specialty === "all"
       ? options
-      : options.filter(o => o.speciality === specialty);
+      : options.filter(o => groupSpecialty(o.speciality) === specialty || rollupSpecialty(o.speciality) === specialty);
     if (!term) return bySpecialty.slice(0, 50);
     return bySpecialty.filter(o =>
       o.name.toLowerCase().includes(term) ||
