@@ -17,24 +17,26 @@ import { EmailPreview } from "@/components/EmailPreview";
 import { FullScreenEmailPreview } from "@/components/FullScreenEmailPreview";
 import { useHospitals } from "@/hooks/use-hospitals";
 import { TemplateStudio } from "@/components/automations/HospitalTemplatesManager";
+import { EMAIL_FONT_STACK } from "@/lib/email-preview";
 
 // Preview tokens used to render templates in the editor. Use the
 // production app origin so previews read like the real thing — not
 // 'aa.example'. These are PREVIEW-ONLY; send-flow-email mints the
 // real tokens at send time.
 
-// Mirror of send-flow-email's signatureHtml() with the AA hands+heart
-// icon embedded above the "Allocation Assist" line, in the AA sans-serif stack.
-// Kept here so the template editor preview shows the same closing
-// block recipients see — not a literal {{signature}} token.
+// Mirror of send-flow-email's signatureHtml() — Garamond serif, teal 16px /
+// grey 15px, line-height 1.45, exactly as delivered. Kept here so the template
+// editor preview shows the same closing block recipients see (not a literal
+// {{signature}} token). Previously rendered in a 13–14px sans stack, which made
+// the signature visibly change font + size after sending (feedback #6).
 const PREVIEW_LOGO_URL = `${import.meta.env.VITE_SUPABASE_URL}/storage/v1/object/public/email-assets/logo.png`;
-const PREVIEW_SANS    = `-apple-system, BlinkMacSystemFont, 'Segoe UI', Helvetica, Arial, sans-serif`;
+const PREVIEW_SIG_FONT = EMAIL_FONT_STACK;
 const PREVIEW_SIGNATURE_HTML = `
-<p style="margin:24px 0 0;font-family:${PREVIEW_SANS};font-size:14px;color:#1a2332;line-height:1.5;">&nbsp;</p>
-<p style="color:#14b8a6;font-weight:700;font-size:14px;margin:0 0 2px;line-height:1.45;font-family:${PREVIEW_SANS};">Warmest Regards,</p>
-<p style="color:#14b8a6;font-weight:700;font-size:14px;margin:0 0 2px;line-height:1.45;font-family:${PREVIEW_SANS};">The Allocation Assist team</p>
-<p style="color:#475569;font-size:13px;margin:6px 0 2px;line-height:1.45;font-family:${PREVIEW_SANS};"><span style="color:#14b8a6;">&#x1F4CD;</span> Jumeirah Lakes Towers, Dubai, UAE</p>
-<p style="font-size:13px;margin:2px 0 16px;line-height:1.45;font-family:${PREVIEW_SANS};"><a href="https://www.allocationassist.com" style="color:#1d4ed8;text-decoration:underline;">www.allocationassist.com</a></p>
+<p style="margin:14px 0 0;font-family:${PREVIEW_SIG_FONT};font-size:16px;color:#1a2332;line-height:1.45;">&nbsp;</p>
+<p style="color:#14b8a6;font-weight:700;font-size:16px;margin:0 0 2px;line-height:1.45;font-family:${PREVIEW_SIG_FONT};">Warmest Regards,</p>
+<p style="color:#14b8a6;font-weight:700;font-size:16px;margin:0 0 2px;line-height:1.45;font-family:${PREVIEW_SIG_FONT};">The Allocation Assist team</p>
+<p style="color:#475569;font-size:15px;margin:6px 0 2px;line-height:1.45;font-family:${PREVIEW_SIG_FONT};"><span style="color:#14b8a6;">&#x1F4CD;</span> Jumeirah Lakes Towers, Dubai, UAE</p>
+<p style="font-size:15px;margin:2px 0 16px;line-height:1.45;font-family:${PREVIEW_SIG_FONT};"><a href="https://www.allocationassist.com" style="color:#1d4ed8;text-decoration:underline;">www.allocationassist.com</a></p>
 <table role="presentation" cellpadding="0" cellspacing="0" style="border-collapse:collapse;margin:8px 0 0;">
   <tr>
     <td style="padding:0;">
