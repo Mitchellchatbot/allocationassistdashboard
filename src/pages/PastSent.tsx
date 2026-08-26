@@ -105,8 +105,15 @@ export function PastSentPanel({ query, onQueryChange }: { query?: string; onQuer
   };
 
   const exportCsv = () => {
-    const header = ["Doctor", "Specialty", "Sent type", "Slot", "Hospital", "Country", "Sent at"];
-    const rows = sorted.map(r => [r.doctorName, r.specialty ?? "", SENT_KIND_LABEL[r.sentKind], r.slot, r.hospital ?? "", r.country ?? "", r.sentAt ?? ""]);
+    // Include the recipient hospital email(s) + the template used so the export
+    // matches the on-screen "complete details of previous emails" (#11).
+    const header = ["Doctor", "Specialty", "Sent type", "Slot", "Hospital", "Country", "Recipient emails", "Template", "Sent at"];
+    const rows = sorted.map(r => [
+      r.doctorName, r.specialty ?? "", SENT_KIND_LABEL[r.sentKind], r.slot,
+      r.hospital ?? "", r.country ?? "",
+      r.recipients?.join("; ") ?? (r.country ? `All hospitals · ${r.country}` : "All hospitals"),
+      r.template ?? "", r.sentAt ?? "",
+    ]);
     const csv = [header, ...rows].map(row => row.map(csvCell).join(",")).join("\n");
     const blob = new Blob([csv], { type: "text/csv;charset=utf-8" });
     const url = URL.createObjectURL(blob);
