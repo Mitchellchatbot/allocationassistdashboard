@@ -22,7 +22,9 @@ import { useHospitals, isHospitalPaused, type Hospital } from "@/hooks/use-hospi
 import { useHospitalContacts, resolveAllRecipients, resolveRecipient, type HospitalContact } from "@/hooks/use-hospital-contacts";
 import { useZohoData, type ZohoLead, type ZohoDoctorOnBoard } from "@/hooks/use-zoho-data";
 import { useDoctorLifecycleMap } from "@/hooks/use-doctor-lifecycle";
-import { groupSpecialty } from "@/lib/specialty-groups";
+import { groupSpecialty, listCanonicalSpecialties } from "@/lib/specialty-groups";
+import { Command, CommandInput, CommandList, CommandEmpty, CommandGroup, CommandItem } from "@/components/ui/command";
+import { Check } from "lucide-react";
 import { scoreCandidate, type MatchScore } from "@/lib/match-score";
 import { useWpCandidates, usePublishedWpCandidates, wpCandidateProfileText, wpCandidateToTokens, type WpCandidate } from "@/hooks/use-wp-candidates";
 import { buildProfileCardHtml } from "@/lib/profile-card-html";
@@ -1445,49 +1447,13 @@ function BatchDialog({ target, onTargetChange, batches, initialKind, suggestedSp
     () => addHospCountry === "all" ? addableHospitals : addableHospitals.filter(h => normCountry(h.country) === addHospCountry),
     [addableHospitals, addHospCountry],
   );
-  // Regions present among the addable (not-yet-sending) hospitals — for the
-  // "add a whole region at once" picker below.
-  const REGION_SEP = "‖";
-  const regionKeyOf = (h: { city: string | null; country: string | null }) =>
-    `${(h.city ?? "").trim()}${REGION_SEP}${(h.country ?? "").trim()}`;
-  const addRegions = useMemo(() => {
-    const m = new Map<string, { key: string; label: string; count: number }>();
-    for (const h of addableHospitals) {
-      const city = (h.city ?? "").trim();
-      if (!city) continue;
-      const country = (h.country ?? "").trim();
-      const key = regionKeyOf(h);
-      const label = country && country.toLowerCase() !== city.toLowerCase() ? `${city} · ${country}` : city;
-      const e = m.get(key) ?? { key, label, count: 0 };
-      e.count++; m.set(key, e);
-    }
-    return [...m.values()].sort((a, b) => a.label.localeCompare(b.label));
-  }, [addableHospitals]);
-  // Send to ONLY one region — an explicit recipient list that REPLACES the whole
-  // batch-country scope (not additive). Null = use the batch's country default.
-  const [regionOnly, setRegionOnly] = useState<{ key: string; label: string; emails: string[] } | null>(null);
-  const selectRegionOnly = (regionKey: string) => {
-    const inRegion = regionKey === "__all"
-      ? addableHospitals
-      : addableHospitals.filter(h => regionKeyOf(h) === regionKey);
-    const emails = inRegion.map(h => h.primary_recruiter_email?.trim()).filter((e): e is string => !!e);
-    if (emails.length === 0) { toast.error("No hospitals with a recruiter email in that region."); return; }
-    const label = regionKey === "__all" ? "all addable regions" : (addRegions.find(r => r.key === regionKey)?.label ?? "this region");
-    setRegionOnly({ key: regionKey, label, emails });
-    setBatchBcc([]);            // region override replaces any manual additions
-    setExcludedEmails([]);      // start fresh — nothing excluded within the region
-    if (inRegion[0]?.id) setPreviewGreetId(inRegion[0].id);  // greet a region hospital in the sample
-    void repreviewWith(emails);   // re-render so bcc_count + subject/city match the region
-    toast.success(`Now sending to only ${label} (${emails.length} hospital${emails.length === 1 ? "" : "s"}).`);
-  };
-  const clearRegionOnly = () => { setRegionOnly(null); void repreviewWith(null); toast.message("Back to the batch's country hospitals."); };
-  // Re-run the dry-run preview with (or without) a region recipient override so
-  // the previewed subject/city + bcc_count reflect what actually sends. Re-seeds
-  // the editable panes; region is normally picked before hand-editing.
-  const repreviewWith = async (overrideEmails: string[] | null) => {
+  // Re-run the dry-run preview so the previewed subject/city + bcc_count reflect
+  // what actually sends. Re-seeds the editable panes. Used when the custom note
+  // settles (see the debounced effect below).
+  const repreviewWith = async () => {
     if (!batch) return;
     try {
-      const p = await previewMut.mutateAsync({ batchId: batch.id, force: batch.status === "sent", recipientEmailsOverride: overrideEmails ?? undefined, ...(Object.keys(greetOverridesPayload).length ? { greetOverrides: greetOverridesPayload } : {}), ...(customNote.trim() ? { customMessage: customNote.trim() } : {}) });
+      const p = await previewMut.mutateAsync({ batchId: batch.id, force: batch.status === "sent", ...(Object.keys(greetOverridesPayload).length ? { greetOverrides: greetOverridesPayload } : {}), ...(customNote.trim() ? { customMessage: customNote.trim() } : {}) });
       setEmailPreview(prev => prev ? { ...prev, subject: p.subject, html: p.html, text: p.text, bcc_count: p.bcc_count, per_doctor: p.per_doctor ?? [], doctor_emails: p.doctor_emails ?? [], test_mode: p.test_mode, test_recipient: p.test_recipient } : prev);
       setEditSubject(p.subject); setEditHtml(p.html);
       setEditDoctorSubject(p.doctor_email?.subject ?? ""); setEditDoctorHtml(p.doctor_email?.html ?? "");
@@ -1497,34 +1463,19 @@ function BatchDialog({ target, onTargetChange, batches, initialKind, suggestedSp
       setPreviewResetTick(t => t + 1);
     } catch (e) { toast.error(e instanceof Error ? e.message : "Preview failed"); }
   };
-  // The recipient list actually going out (before per-hospital exclusions): the
-  // region override when set, else the batch-country eligible hospitals.
-  const recipientOverrideEmails = regionOnly
-    ? regionOnly.emails.filter(e => !isExcluded(e))
-    : null;
   // Re-render the previewed body when the custom note settles, so the note shows
   // in the same spot (after the greeting, before the table) that send-batch will
-  // inject it — keeping preview == send. Only while a preview is open; the sender
-  // doesn't change the body (it's reflected client-side via the From label), so
-  // it isn't a dependency here.
+  // inject it — keeping preview == send. Only while a preview is open.
   const debouncedNote = useDebounce(customNote, 500);
   useEffect(() => {
     if (!emailPreview || !batch) return;
-    void repreviewWith(recipientOverrideEmails);
+    void repreviewWith();
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [debouncedNote]);
-  // Hospitals shown in the "Sending to…" list: the region's hospitals when a
-  // region override is active, else the batch-country eligible ones. Region
-  // override REPLACES the send, so manual single-adds are hidden while it's on.
-  const regionHospitals = useMemo(
-    () => regionOnly
-      ? previewHospitals.filter(h => regionOnly.emails.includes((h.primary_recruiter_email ?? "").trim()))
-      : [],
-    [regionOnly, previewHospitals],
-  );
-  const displayHospitals = regionOnly ? regionHospitals : eligibleHospitals;
+  // Hospitals shown in the "Sending to…" list: the batch-country eligible ones.
+  const displayHospitals = eligibleHospitals;
   const sendingCount = displayHospitals.filter(h => !isExcluded(h.primary_recruiter_email)).length
-    + (regionOnly ? 0 : addedHospitals.length);
+    + addedHospitals.length;
 
   // ── Per-hospital recipient (contact) selection ─────────────────────────
   // A hospital can have several reps (Zoho contacts). Let the team pick exactly
@@ -1590,9 +1541,9 @@ function BatchDialog({ target, onTargetChange, batches, initialKind, suggestedSp
   // lists so the actual send is unchanged; only the UI is unified.
   const panelSelected = useMemo<Hospital[]>(() => {
     const base = displayHospitals.filter(h => !isExcluded(h.primary_recruiter_email));
-    return regionOnly ? base : [...base, ...addedHospitals];
+    return [...base, ...addedHospitals];
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [displayHospitals, addedHospitals, regionOnly, excludedEmails]);
+  }, [displayHospitals, addedHospitals, excludedEmails]);
   const panelAddHospital = (id: string) => {
     const email = previewHospitals.find(x => x.id === id)?.primary_recruiter_email?.trim();
     if (!email) return;
@@ -2061,11 +2012,10 @@ function BatchDialog({ target, onTargetChange, batches, initialKind, suggestedSp
               {kind === "specialty_of_day" && (
                 <div className="space-y-1">
                   <Label className="text-[11px]">Specialty</Label>
-                  <Input
+                  <SpecialtyCombobox
                     value={specialty}
-                    onChange={e => setSpecialty(e.target.value)}
-                    placeholder={suggestedSpecialty ? `Default: ${suggestedSpecialty}` : "e.g. Cardiology"}
-                    className="h-9 text-[12px]"
+                    onChange={setSpecialty}
+                    placeholder={suggestedSpecialty ? `Default: ${suggestedSpecialty}` : "Search all specialties…"}
                   />
                   {suggestedSpecialty && (
                     <p className="text-[10px] text-muted-foreground">
@@ -2312,7 +2262,6 @@ function BatchDialog({ target, onTargetChange, batches, initialKind, suggestedSp
                     setPerDoctor((p.per_doctor ?? []).map(d => ({ subject: d.subject, html: d.html })));
                     setPerDoctorNote((p.doctor_emails ?? []).map(d => ({ subject: d.subject, html: d.html })));
                     setHospitalTab(0); setDoctorTab(0);
-                    setRegionOnly(null);   // each preview starts from the batch's country scope
                     setContactSel({}); setContactOpen({});
                     setGreetModeByHospital({});   // fresh preview → stored greeting defaults
                     setGreetNameByHospital({});
@@ -2349,9 +2298,7 @@ function BatchDialog({ target, onTargetChange, batches, initialKind, suggestedSp
       activeKey={previewTab}
       onActiveKeyChange={(k) => setPreviewTab(k === "doctor" ? "doctor" : "hospital")}
       title="Batch email preview"
-      subtitle={regionOnly
-        ? `${sendingCount} hospital${sendingCount === 1 ? "" : "s"} · ${regionOnly.label} only`
-        : typeof emailPreview?.bcc_count === "number" ? `BCC to ${emailPreview.bcc_count} hospital${emailPreview.bcc_count === 1 ? "" : "s"}` : undefined}
+      subtitle={typeof emailPreview?.bcc_count === "number" ? `BCC to ${emailPreview.bcc_count} hospital${emailPreview.bcc_count === 1 ? "" : "s"}` : undefined}
       headerExtra={
         <div className="space-y-2">
           {/* Where a send actually lands — the single most important thing to
@@ -2374,28 +2321,6 @@ function BatchDialog({ target, onTargetChange, batches, initialKind, suggestedSp
             </div>
             {batch && (batch.attachments?.length ?? 0) > 0 && <div>{batch.attachments.length} attachment{batch.attachments.length === 1 ? "" : "s"} ride this send.</div>}
           </div>
-
-          {/* Send to ONLY one region — batch-only; REPLACES the whole list. */}
-          {addRegions.length > 0 && (
-            <div className="rounded-lg border border-sidebar-border/40 bg-white/95 p-2 shadow-sm space-y-1.5">
-              {regionOnly && (
-                <button type="button" onClick={clearRegionOnly}
-                  className="inline-flex items-center gap-1 rounded-full border border-teal-200 bg-teal-50 px-2 py-0.5 text-[10px] font-medium text-teal-700 hover:bg-teal-100">
-                  <X className="h-2.5 w-2.5" /> Clear region — back to {batch?.country ?? "country"} hospitals
-                </button>
-              )}
-              <Select value={regionOnly?.key ?? ""} onValueChange={v => v === "__clear" ? clearRegionOnly() : selectRegionOnly(v)} disabled={sendNow.isPending}>
-                <SelectTrigger className="h-7 text-[11px] text-slate-700"><SelectValue placeholder="Send to only a region…" /></SelectTrigger>
-                <SelectContent>
-                  {regionOnly && <SelectItem value="__clear" className="text-[11px]">↩ Back to {batch?.country ?? "country"} hospitals</SelectItem>}
-                  <SelectItem value="__all" className="text-[11px]">Every addable hospital ({addableHospitals.length})</SelectItem>
-                  {addRegions.map(r => (
-                    <SelectItem key={r.key} value={r.key} className="text-[11px]">Only {r.label} ({r.count})</SelectItem>
-                  ))}
-                </SelectContent>
-              </Select>
-            </div>
-          )}
 
           {/* Recipient hospitals — the SAME shared panel as the personalized composer. */}
           <HospitalRecipientsPanel
@@ -2676,15 +2601,13 @@ function BatchDialog({ target, onTargetChange, batches, initialKind, suggestedSp
               // exactly where it lands: the test inbox in test mode, else the real
               // hospitals, so nobody sends to 86 hospitals thinking they're still
               // reviewing.
-              // Region override sends to exactly those hospitals, so count them —
-              // not the preview's country-default bcc_count.
-              const hospCount = regionOnly ? sendingCount : (emailPreview?.bcc_count ?? picked.length);
+              const hospCount = emailPreview?.bcc_count ?? picked.length;
               const emailCount = emailPreview?.per_doctor?.length
                 ? hospCount * emailPreview.per_doctor.length
                 : hospCount;
               const dest = emailPreview?.test_mode
                 ? `the TEST inbox (${emailPreview.test_recipient ?? "test recipient"}) — NOT real hospitals`
-                : `${hospCount} REAL hospital recruiter inbox${hospCount === 1 ? "" : "es"}${regionOnly ? ` in ${regionOnly.label}` : ""}`;
+                : `${hospCount} REAL hospital recruiter inbox${hospCount === 1 ? "" : "es"}`;
               const verb = batch.status === "sent" ? "Resend" : "Send";
               if (!confirm(`${verb} now?\n\n${emailCount} email${emailCount === 1 ? "" : "s"} will go to ${dest}.`)) return;
               try {
@@ -2719,7 +2642,6 @@ function BatchDialog({ target, onTargetChange, batches, initialKind, suggestedSp
                   ...(batchCc.length  ? { ccOverride:  batchCc }  : {}),
                   ...(batchBcc.length ? { bccOverride: batchBcc } : {}),
                   ...(excludedEmails.length ? { excludeOverride: excludedEmails } : {}),
-                  ...(recipientOverrideEmails?.length ? { recipientEmailsOverride: recipientOverrideEmails } : {}),
                   ...(Object.keys(contactOverridesPayload).length ? { contactOverrides: contactOverridesPayload } : {}),
                   ...(Object.keys(greetOverridesPayload).length ? { greetOverrides: greetOverridesPayload } : {}),
                   // Resolved greeting NAME per hospital (recruiter email → contact
@@ -3047,6 +2969,61 @@ async function cardImageForOption(opt: DoctorOption): Promise<string> {
     doctor_years_experience: opt.years_experience != null ? String(opt.years_experience) : "",
   };
   return captureAndUploadCard(buildProfileCardHtml(vars));
+}
+
+/** Searchable specialty picker for the Specialty-of-the-day batch. Lists every
+ *  canonical specialty (listCanonicalSpecialties) with type-to-filter search, so
+ *  ALL specialties/categories are searchable here (team feedback), while still
+ *  allowing a custom value that isn't in the canonical list. */
+function SpecialtyCombobox({ value, onChange, placeholder }: {
+  value: string; onChange: (v: string) => void; placeholder?: string;
+}) {
+  const [open, setOpen]     = useState(false);
+  const [search, setSearch] = useState("");
+  const options = useMemo(() => listCanonicalSpecialties(), []);
+  const q = search.trim();
+  const hasExact = q ? options.some(o => o.toLowerCase() === q.toLowerCase()) : true;
+  const pick = (v: string) => { onChange(v); setSearch(""); setOpen(false); };
+  return (
+    <Popover open={open} onOpenChange={setOpen}>
+      <PopoverTrigger asChild>
+        <button
+          type="button"
+          className="flex h-9 w-full items-center justify-between rounded-md border border-input bg-background px-3 text-[12px] text-left"
+        >
+          <span className={value ? "" : "text-muted-foreground"}>{value || placeholder || "Search all specialties…"}</span>
+          <ChevronDown className="h-3.5 w-3.5 opacity-50 shrink-0" />
+        </button>
+      </PopoverTrigger>
+      <PopoverContent className="p-0 w-[--radix-popover-trigger-width] min-w-[240px]" align="start">
+        <Command>
+          <CommandInput placeholder="Search specialties…" value={search} onValueChange={setSearch} className="text-[12px]" />
+          <CommandList>
+            <CommandEmpty className="py-3 px-3 text-[11px] text-muted-foreground">
+              {q ? "No canonical match — press below to use it as typed." : "No specialties."}
+            </CommandEmpty>
+            {/* Custom value that isn't in the canonical list — never block a real
+                specialty just because it's not been catalogued yet. */}
+            {q && !hasExact && (
+              <CommandGroup heading="Custom">
+                <CommandItem value={`__custom_${q}`} onSelect={() => pick(q)} className="text-[12px]">
+                  Use "{q}"
+                </CommandItem>
+              </CommandGroup>
+            )}
+            <CommandGroup heading="All specialties">
+              {options.map(o => (
+                <CommandItem key={o} value={o} onSelect={() => pick(o)} className="text-[12px]">
+                  <Check className={`mr-2 h-3.5 w-3.5 ${value === o ? "opacity-100" : "opacity-0"}`} />
+                  {o}
+                </CommandItem>
+              ))}
+            </CommandGroup>
+          </CommandList>
+        </Command>
+      </PopoverContent>
+    </Popover>
+  );
 }
 
 function todayISO(): string {

@@ -64,15 +64,16 @@ const pairKey = (doctorId: string, hospitalId: string) => `${doctorId}::${hospit
 // country doesn't fall into the "In these locations:" catch-all). Used for BOTH
 // the preview and the stamped send-metadata so they render identically.
 function toWorkingOpHospital(h: {
-  name: string; city?: string | null; country?: string | null; image_url?: string | null; website?: string | null;
+  name: string; city?: string | null; country?: string | null; image_url?: string | null; website?: string | null; description?: string | null;
 }): WorkingOpHospital {
   const reg = resolveHospitalRegion(h.name);
   return {
-    name:      h.name,
-    city:      (h.city?.trim() || reg.city || null),
-    country:   (canonicalCountryLabel(h.country) || reg.country || null),
-    image_url: h.image_url ?? null,
-    link:      h.website ?? null,
+    name:        h.name,
+    city:        (h.city?.trim() || reg.city || null),
+    country:     (canonicalCountryLabel(h.country) || reg.country || null),
+    image_url:   h.image_url ?? null,
+    link:        h.website ?? null,
+    description: h.description ?? null,
   };
 }
 // Drop doctors with no files from a per-doctor attachment map; returns undefined
@@ -2521,7 +2522,7 @@ const PREVIEW_LOGO_URL = `${import.meta.env.VITE_SUPABASE_URL}/storage/v1/object
 // reads exactly like the sent email. Keep in sync with send-flow-email.
 const PREVIEW_FONT    = `Garamond, 'EB Garamond', Georgia, 'Times New Roman', serif`;
 const PREVIEW_SIGNATURE_HTML = `
-<p style="margin:24px 0 0;font-family:${PREVIEW_FONT};font-size:16px;color:#1a2332;line-height:1.5;">&nbsp;</p>
+<p style="margin:14px 0 0;font-family:${PREVIEW_FONT};font-size:16px;color:#1a2332;line-height:1.45;">&nbsp;</p>
 <p style="color:#14b8a6;font-weight:700;font-size:16px;margin:0 0 2px;line-height:1.45;font-family:${PREVIEW_FONT};">Warmest Regards,</p>
 <p style="color:#14b8a6;font-weight:700;font-size:16px;margin:0 0 2px;line-height:1.45;font-family:${PREVIEW_FONT};">The Allocation Assist team</p>
 <p style="color:#475569;font-size:15px;margin:6px 0 2px;line-height:1.45;font-family:${PREVIEW_FONT};"><span style="color:#14b8a6;">&#x1F4CD;</span> Jumeirah Lakes Towers, Dubai, UAE</p>

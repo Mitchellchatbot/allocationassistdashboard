@@ -27,6 +27,10 @@ export interface SentRecord {
   source:     "batch" | "flow";
   refId:      string;          // batchId or runId
   route:      string;          // where to open it
+  // "Complete details of previous emails" (team feedback): the hospital email
+  // address(es) a send went to, and the template it used.
+  recipients: string[] | null; // hospital email(s); null = country-scoped broadcast (all hospitals in `country`)
+  template:   string | null;   // template key / label used for the send
 }
 
 /** Human label for a batch kind. */
@@ -79,6 +83,9 @@ export function useSentHistory(): {
     // ── Batch sends (status sent) → one record per (doctor, batch) ──────────
     for (const b of batches) {
       if (b.status !== "sent") continue;
+      // One-off batches target explicit recruiter emails; the recurring kinds
+      // broadcast to every hospital in the batch's country (no explicit list).
+      const batchRecipients = (b.recipient_emails ?? []).filter(e => e.includes("@"));
       (b.doctor_ids ?? []).forEach((did, i) => {
         const resolved = nameOf.get(did);
         records.push({
@@ -94,6 +101,8 @@ export function useSentHistory(): {
           source:     "batch",
           refId:      b.id,
           route:      "/batches",
+          recipients: batchRecipients.length ? batchRecipients : null,
+          template:   "Working opportunity (standard batch)",
         });
       });
     }
@@ -102,6 +111,15 @@ export function useSentHistory(): {
     for (const r of runs) {
       if (r.flow_key !== "profile_sent") continue;
       const resolved = r.doctor_id ? nameOf.get(r.doctor_id) : undefined;
+      // Recipient hospital email(s) + the template used are stamped on the run
+      // metadata by the Send Profile dialog (hospital_email + template_overrides).
+      const md = r.metadata ?? {};
+      const hospEmail = typeof md.hospital_email === "string" ? md.hospital_email : "";
+      const recipients = hospEmail
+        ? hospEmail.split(",").map(s => s.trim()).filter(e => e.includes("@"))
+        : [];
+      const tmplOv = md.template_overrides as { email_hospital?: string } | undefined;
+      const template = tmplOv?.email_hospital ?? "profile_sent_hospital (default)";
       records.push({
         id:         `sent:run:${r.id}`,
         doctorId:   r.doctor_id,
@@ -115,6 +133,8 @@ export function useSentHistory(): {
         source:     "flow",
         refId:      r.id,
         route:      `/automations?flow=profile_sent`,
+        recipients: recipients.length ? recipients : null,
+        template,
       });
     }
 

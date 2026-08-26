@@ -55,8 +55,12 @@ export function FinanceDigest() {
         // Monthly view: exact per-month P&L from Zoho's report (incl. bills +
         // journals) so it ties out to Zoho.
         for (const m of books!.byMonth ?? []) {
-          const d = parseDate(`${m.month}-01`);
-          if (!d) continue;
+          // Build from LOCAL parts — parseDate("YYYY-MM-01") is UTC-midnight and
+          // bucketKey() reads local getMonth(), rolling back a month in
+          // negative-offset timezones (P&L showed one month behind).
+          const [my, mm] = m.month.split("-").map(Number);
+          const d = new Date(my, mm - 1, 1);
+          if (isNaN(d.getTime())) continue;
           const r = get(bucketKey(d, gran));
           r.revenue += m.revenue;
           r.spend   += m.expenses;

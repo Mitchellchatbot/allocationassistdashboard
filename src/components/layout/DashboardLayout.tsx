@@ -25,8 +25,6 @@ import { useFilteredData } from "@/hooks/use-filtered-data";
 import { useState, useEffect, useRef, useCallback, useMemo, useContext, createContext, KeyboardEvent } from "react";
 import { Link, useLocation } from "react-router-dom";
 import { useZohoData } from "@/hooks/use-zoho-data";
-import ReactMarkdown from "react-markdown";
-import remarkGfm from "remark-gfm";
 import { useMutation, useQueryClient } from "@tanstack/react-query";
 import { zohoSync } from "@/lib/zoho";
 import { WEEKLY_SALES_QUERY_KEY, fetchWeeklySalesRaw } from "@/hooks/use-weekly-sales";

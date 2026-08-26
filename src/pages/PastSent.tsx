@@ -182,6 +182,8 @@ export function PastSentPanel({ query, onQueryChange }: { query?: string; onQuer
                       <Th label="Sent type" onClick={() => toggleSort("sentKind")} active={sortKey === "sentKind"} />
                       <th className="py-2 px-3 font-semibold text-muted-foreground uppercase text-[10px] tracking-wide">Slot</th>
                       <Th label="Hospital" onClick={() => toggleSort("hospital")} active={sortKey === "hospital"} />
+                      <th className="py-2 px-3 font-semibold text-muted-foreground uppercase text-[10px] tracking-wide">Recipient emails</th>
+                      <th className="py-2 px-3 font-semibold text-muted-foreground uppercase text-[10px] tracking-wide">Template</th>
                       <Th label="Sent" onClick={() => toggleSort("sentAt")} active={sortKey === "sentAt"} />
                       <th className="py-2 px-3"></th>
                     </tr>
@@ -194,6 +196,14 @@ export function PastSentPanel({ query, onQueryChange }: { query?: string; onQuer
                         <td className="py-2 px-3"><Badge variant="outline" className="text-[9px] bg-teal-50 text-teal-700 border-teal-200">{SENT_KIND_LABEL[r.sentKind]}</Badge></td>
                         <td className="py-2 px-3">{r.slot}</td>
                         <td className="py-2 px-3 text-muted-foreground">{r.hospital ?? (r.country ? `All · ${r.country}` : "All hospitals")}</td>
+                        <td className="py-2 px-3 text-muted-foreground max-w-[220px]">
+                          {r.recipients
+                            ? <span className="block truncate" title={r.recipients.join(", ")}>{r.recipients.join(", ")}</span>
+                            : <span className="italic text-muted-foreground/70">{r.country ? `All hospitals in ${r.country}` : "All hospitals"}</span>}
+                        </td>
+                        <td className="py-2 px-3 text-muted-foreground max-w-[180px]">
+                          <span className="block truncate" title={r.template ?? ""}>{r.template ?? "—"}</span>
+                        </td>
                         <td className="py-2 px-3 tabular-nums text-muted-foreground">{fmtDate(r.sentAt)}</td>
                         <td className="py-2 px-3 text-right">
                           <button onClick={() => navigate(r.route)} className="inline-flex items-center gap-1 text-teal-600 hover:underline text-[11px]" title="Open">

@@ -376,6 +376,7 @@ export function HospitalDialog({
     recruiter_phone:         initial.recruiter_phone ?? "",
     image_url:               initial.image_url ?? "",
     website:                 initial.website ?? "",
+    description:             initial.description ?? "",
     template_key:            initial.template_key ?? "",
     notes:                   initial.notes ?? "",
     active:                  initial.active ?? true,
@@ -412,6 +413,8 @@ export function HospitalDialog({
       greet_with_contact_name: initial.greet_with_contact_name ?? false,
       recruiter_phone:         initial.recruiter_phone ?? "",
       image_url:               initial.image_url ?? "",
+      website:                 initial.website ?? "",
+      description:             initial.description ?? "",
       template_key:            initial.template_key ?? "",
       notes:                   initial.notes ?? "",
       active:                  initial.active ?? true,
@@ -515,6 +518,15 @@ export function HospitalDialog({
                     className="absolute top-2 right-2 rounded-full bg-white/90 px-2 py-0.5 text-[11px] text-rose-600 hover:bg-white shadow-sm">Remove</button>
                 </div>
               )}
+            </div>
+            <div className="space-y-1">
+              <Label className="text-[11px]">About / description (shown per-hospital in working-opportunity emails)</Label>
+              <Textarea
+                value={form.description ?? ""}
+                onChange={e => setForm(f => ({ ...f, description: e.target.value }))}
+                placeholder="A short 'About Us' blurb — e.g. a leading multi-specialty hospital in Riyadh, JCI-accredited…"
+                className="text-[12px] min-h-[70px]"
+              />
             </div>
             <Field label="Template key (override)" placeholder="e.g. profile_sent_american_hospital"
               value={form.template_key ?? ""} onChange={v => setForm(f => ({ ...f, template_key: v }))} />

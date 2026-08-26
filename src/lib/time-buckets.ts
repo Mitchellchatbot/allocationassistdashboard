@@ -37,9 +37,16 @@ export function bucketLabel(key: string, g: Granularity): string {
   return g === "week" ? `${MONTHS[m - 1]} ${day}` : `${MONTHS[m - 1]} ${day}`;
 }
 
-/** Parse a Zoho/ISO timestamp safely → Date, or null when missing/invalid. */
+/** Parse a Zoho/ISO timestamp safely → Date, or null when missing/invalid.
+ *  Date-only strings ("YYYY-MM-DD") are built from LOCAL parts — otherwise
+ *  new Date("YYYY-MM-DD") is UTC-midnight and bucketKey()'s local getDate()/
+ *  getMonth() rolls back a day (and can roll back a month) in negative-offset
+ *  timezones. Full timestamps (with a time component) keep native parsing. */
 export function parseDate(s: string | null | undefined): Date | null {
   if (!s) return null;
-  const d = new Date(s);
+  const dateOnly = /^(\d{4})-(\d{2})-(\d{2})$/.exec(s);
+  const d = dateOnly
+    ? new Date(Number(dateOnly[1]), Number(dateOnly[2]) - 1, Number(dateOnly[3]))
+    : new Date(s);
   return isNaN(d.getTime()) ? null : d;
 }

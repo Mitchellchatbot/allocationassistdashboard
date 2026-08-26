@@ -205,7 +205,7 @@ function signatureHtml(first: string, last: string, title: string, phone: string
   const grey     = `color:#475569;font-size:15px;margin:6px 0 2px;line-height:1.45;font-family:${FONT_STACK};`;
   const linkLine = `font-size:15px;margin:2px 0 16px;line-height:1.45;font-family:${FONT_STACK};`;
   return `
-<p style="margin:24px 0 0;font-family:${FONT_STACK};font-size:16px;color:#1a2332;line-height:1.5;">&nbsp;</p>
+<p style="margin:14px 0 0;font-family:${FONT_STACK};font-size:16px;color:#1a2332;line-height:1.45;">&nbsp;</p>
 <p style="${teal}">Warmest Regards,</p>
 <p style="${teal}">${escapeHtml(fullName)}</p>
 ${title ? `<p style="${teal}">${escapeHtml(title)}</p>` : ""}

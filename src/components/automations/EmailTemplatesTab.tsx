@@ -89,6 +89,7 @@ const SAMPLE_VARS: Record<string, string> = {
 function categoryOf(t: { key: string; flow_key: string | null }): { id: string; label: string } {
   const k = t.key;
   if ((t.flow_key ?? "") === "profile_sent") {
+    if (k.startsWith("doctor_city_"))           return { id: "ps_city", label: "Profile Sent · Working Opportunity (by city)" };
     if (k.startsWith("doctor_bmh_"))            return { id: "ps_bmh",  label: "Profile Sent · Best-matched hospitals (by specialty)" };
     if (/^profile_sent_hospital_.+/.test(k))    return { id: "ps_hosp", label: "Profile Sent · Hospital email (per hospital)" };
     if (/^profile_sent_doctor_.+/.test(k))      return { id: "ps_wo",   label: "Profile Sent · Working Opportunity (per hospital)" };
@@ -100,13 +101,14 @@ function categoryOf(t: { key: string; flow_key: string | null }): { id: string; 
     : (FLOW_DEFINITIONS[flow as keyof typeof FLOW_DEFINITIONS]?.name ?? flow);
   return { id: flow, label };
 }
-const CAT_ORDER = ["ps_core", "ps_wo", "ps_bmh", "ps_hosp", "shortlist", "interview", "contract_signing", "relocation", "second_payment", "onboarding", "other"];
+const CAT_ORDER = ["ps_core", "ps_city", "ps_wo", "ps_bmh", "ps_hosp", "shortlist", "interview", "contract_signing", "relocation", "second_payment", "onboarding", "other"];
 
 // Short labels for the tab chips — the full category labels are too long to sit
 // in a pill, so each category id gets a compact name. Anything not listed falls
 // back to the group's full label.
 const CAT_SHORT: Record<string, string> = {
   ps_core:          "Core",
+  ps_city:          "By city",
   ps_wo:            "Working Opp.",
   ps_bmh:           "Best matched",
   ps_hosp:          "Hospital email",

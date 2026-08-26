@@ -11,11 +11,14 @@
 // to its site, big hospital photos under each group, and a warm sign-off.
 
 export interface WorkingOpHospital {
-  name:       string;
-  city?:      string | null;
-  country?:   string | null;
-  image_url?: string | null;
-  link?:      string | null;
+  name:         string;
+  city?:        string | null;
+  country?:     string | null;
+  image_url?:   string | null;
+  link?:        string | null;
+  /** Short "About Us" blurb shown under the hospital name in the doctor email.
+   *  Optional; omitted cleanly when a hospital has none on file. */
+  description?: string | null;
 }
 
 function esc(s: unknown): string {
@@ -93,18 +96,27 @@ export function buildDoctorHospitalsHtml(hospitals: WorkingOpHospital[]): string
       ? joinAnd(cities)
       : (country !== "Other" ? country : (cities[0] ?? "these locations"));
 
-    const names = hs.map(h => {
+    // One self-contained block per hospital: name (linked) + "About us" link,
+    // the description blurb, then the photo — so each opportunity carries its own
+    // detail (team: "for each working opportunity … Hospital description, About
+    // Us link, Hospital photo").
+    const items = hs.map(h => {
       const nameHtml = h.link
-        ? `<a href="${esc(h.link)}" style="color:#0f766e;text-decoration:underline;">${esc(h.name)}</a>`
-        : esc(h.name);
-      return `<li style="margin:0 0 6px;">${nameHtml}</li>`;
+        ? `<a href="${esc(h.link)}" style="color:#0f766e;text-decoration:underline;font-weight:700;">${esc(h.name)}</a>`
+        : `<span style="font-weight:700;">${esc(h.name)}</span>`;
+      const about = h.link
+        ? ` <a href="${esc(h.link)}" style="color:#1d4ed8;text-decoration:underline;font-size:14px;">About us &raquo;</a>`
+        : "";
+      const desc = String(h.description ?? "").trim()
+        ? `<p style="margin:2px 0 8px;color:#475569;font-size:15px;line-height:1.5;">${esc(h.description).replace(/\n/g, "<br>")}</p>`
+        : "";
+      const img = h.image_url
+        ? `<div style="margin:4px 0 0;"><img src="${esc(h.image_url)}" alt="${esc(h.name)}" width="500" style="display:block;width:100%;max-width:500px;height:auto;border-radius:12px;border:0;" /></div>`
+        : "";
+      return `<div style="margin:0 0 18px;"><p style="margin:0 0 2px;">${nameHtml}${about}</p>${desc}${img}</div>`;
     }).join("");
 
-    const imgs = hs.filter(h => h.image_url).map(h =>
-      `<div style="margin:6px 0 16px;"><img src="${esc(h.image_url)}" alt="${esc(h.name)}" width="500" style="display:block;width:100%;max-width:500px;height:auto;border-radius:12px;border:0;" /></div>`
-    ).join("");
-
-    blocks.push(`<p style="font-weight:700;margin:14px 0 4px;">In ${esc(label)}:</p><ul style="margin:0 0 10px;padding-left:22px;">${names}</ul>${imgs}`);
+    blocks.push(`<p style="font-weight:700;margin:14px 0 6px;">In ${esc(label)}:</p>${items}`);
   }
   return blocks.join("");
 }
@@ -119,11 +131,15 @@ export function doctorGreeting(name: string): string {
  *  sign-off). `signatureHtml` is supplied by the caller (the shared "Warmest
  *  Regards … Allocation Assist" block). */
 export function buildWorkingOpBody(name: string, hospitals: WorkingOpHospital[], signatureHtml: string): string {
-  return `<p>${esc(doctorGreeting(name))}</p>
-<p>I hope you're doing well 😊</p>
-<p>We are currently discussing your profile with the hospitals below; please let us know if you hear from any of them through email, phone call, or LinkedIn. We will also let you know as soon as we receive feedback.</p>
-<p>We will help you negotiate the salary and allowance to secure your best offer.</p>
+  // Tight paragraph margins (10px) instead of the mail client's ~1em default —
+  // team feedback "there is too much spacing in the email body". Inline so the
+  // delivered mail matches the preview (Gmail strips <style>).
+  const p = `margin:0 0 10px;`;
+  return `<p style="${p}">${esc(doctorGreeting(name))}</p>
+<p style="${p}">I hope you're doing well 😊</p>
+<p style="${p}">We are currently discussing your profile with the hospitals below; please let us know if you hear from any of them through email, phone call, or LinkedIn. We will also let you know as soon as we receive feedback.</p>
+<p style="${p}">We will help you negotiate the salary and allowance to secure your best offer.</p>
 ${buildDoctorHospitalsHtml(hospitals)}
-<p>We wish you a wonderful day!</p>
+<p style="${p}">We wish you a wonderful day!</p>
 ${signatureHtml}`;
 }

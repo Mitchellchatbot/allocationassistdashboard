@@ -27,6 +27,8 @@ export interface Hospital {
   image_url:               string | null;
   /** Hospital website URL — the hospital's link in the doctor working-opportunity email. */
   website:                 string | null;
+  /** Short "About Us" blurb shown per-hospital in the doctor working-opportunity email. */
+  description:             string | null;
   /** Template used for the to-hospital "profile sent" email (email_hospital stage). */
   template_key:            string | null;
   /** Template used for the doctor "working opportunity" email about THIS hospital

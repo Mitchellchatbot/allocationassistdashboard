@@ -40,12 +40,17 @@ const FONT_STACK = "Garamond, 'EB Garamond', Georgia, 'Times New Roman', serif";
 const CARD_FONT   = "'Poppins', 'Helvetica Neue', Helvetica, Arial, sans-serif";
 const FONT_IMPORT = `<style>@import url('https://fonts.googleapis.com/css2?family=Poppins:wght@400;500;600;700&display=swap');</style>`;
 const LOGO_URL   = `${Deno.env.get("SUPABASE_URL") ?? ""}/storage/v1/object/public/email-assets/logo.png`;
+// Sizes kept in lockstep with send-flow-email + the client preview
+// (SendProfileDialog PREVIEW_SIGNATURE_HTML): 16px teal lines, 15px grey/link.
+// Batch sends used to render this block at 14/13px, which made the signature
+// visibly shrink vs the preview after a batch went out (team feedback:
+// "the font and font size change significantly after the email is sent").
 const SIGNATURE_HTML = `
-<p style="margin:24px 0 0;font-family:${FONT_STACK};font-size:14px;color:#1a2332;line-height:1.5;">&nbsp;</p>
-<p style="color:#14b8a6;font-weight:700;font-size:14px;margin:0 0 2px;line-height:1.45;font-family:${FONT_STACK};">Warmest Regards,</p>
-<p style="color:#14b8a6;font-weight:700;font-size:14px;margin:0 0 2px;line-height:1.45;font-family:${FONT_STACK};">The Allocation Assist team</p>
-<p style="color:#475569;font-size:13px;margin:6px 0 2px;line-height:1.45;font-family:${FONT_STACK};"><span style="color:#14b8a6;">&#x1F4CD;</span> Jumeirah Lakes Towers, Dubai, UAE</p>
-<p style="font-size:13px;margin:2px 0 16px;line-height:1.45;font-family:${FONT_STACK};"><a href="https://www.allocationassist.com" style="color:#1d4ed8;text-decoration:underline;">www.allocationassist.com</a></p>
+<p style="margin:14px 0 0;font-family:${FONT_STACK};font-size:16px;color:#1a2332;line-height:1.45;">&nbsp;</p>
+<p style="color:#14b8a6;font-weight:700;font-size:16px;margin:0 0 2px;line-height:1.45;font-family:${FONT_STACK};">Warmest Regards,</p>
+<p style="color:#14b8a6;font-weight:700;font-size:16px;margin:0 0 2px;line-height:1.45;font-family:${FONT_STACK};">The Allocation Assist team</p>
+<p style="color:#475569;font-size:15px;margin:6px 0 2px;line-height:1.45;font-family:${FONT_STACK};"><span style="color:#14b8a6;">&#x1F4CD;</span> Jumeirah Lakes Towers, Dubai, UAE</p>
+<p style="font-size:15px;margin:2px 0 16px;line-height:1.45;font-family:${FONT_STACK};"><a href="https://www.allocationassist.com" style="color:#1d4ed8;text-decoration:underline;">www.allocationassist.com</a></p>
 <table role="presentation" cellpadding="0" cellspacing="0" style="border-collapse:collapse;margin:8px 0 0;">
   <tr><td style="padding:0;"><img src="${LOGO_URL}" alt="Allocation Assist — The source of workforce" width="180" height="119" style="display:block;border:0;outline:none;max-width:180px;width:180px;height:auto;" /></td></tr>
 </table>`;
@@ -247,7 +252,7 @@ Deno.serve(async (req: Request) => {
   // send. Normalising both sides makes label drift harmless.
   const { data: hospitals, error: hospErr } = await supabase
     .from("hospitals")
-    .select("id, name, primary_contact_name, primary_recruiter_email, greet_with_contact_name, country, city, image_url, website, contact_mode, excluded_contact_emails, cc_emails, active")
+    .select("id, name, primary_contact_name, primary_recruiter_email, greet_with_contact_name, country, city, image_url, website, description, contact_mode, excluded_contact_emails, cc_emails, active")
     .not("primary_recruiter_email", "is", null);
   if (hospErr) return json({ ok: false, error: "Hospital fetch failed", detail: hospErr.message }, 500);
   const wantCountry = batchCountry ? normCountry(batchCountry) : null;
@@ -357,6 +362,8 @@ Deno.serve(async (req: Request) => {
         city:         String(h.city ?? "").trim(),
         image_url:    String(h.image_url ?? "").trim(),
         link:         String(h.website ?? "").trim() || null,   // hospital website → link in the doctor email
+        description:  String(h.description ?? "").trim() || null, // "About Us" blurb in the doctor email
+
         toEmails,
         // This hospital's OWN configured extra CC recipients (hospitals.cc_emails).
         // Ride only this hospital's own email, and only in production (see below).

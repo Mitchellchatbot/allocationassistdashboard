@@ -36,7 +36,11 @@ export interface TopTransaction {
 }
 
 function fmtMonth(key: string): string {
-  return new Date(key + "-01").toLocaleDateString("en-GB", { month: "short", year: "2-digit" });
+  // Parse from LOCAL parts, not new Date("YYYY-MM-01") which is UTC-midnight and
+  // rolls back a month when rendered in a negative-offset timezone (e.g. the US),
+  // making every label appear one month behind.
+  const [y, m] = key.split("-").map(Number);
+  return new Date(y, m - 1, 1).toLocaleDateString("en-GB", { month: "short", year: "2-digit" });
 }
 
 // Format a Date as YYYY-MM-DD using LOCAL timezone parts (not toISOString(),
