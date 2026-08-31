@@ -138,16 +138,29 @@ export function useAuth() {
   }
 
   useEffect(() => {
-    supabase.auth.getSession().then(async ({ data }) => {
-      try {
-        const s = data.session;
-        setSession(s);
-        setUser(s?.user ?? null);
-        if (s?.user) await fetchProfile(s.user);
-      } finally {
-        setLoading(false);
-      }
-    });
+    // getSession() is not guaranteed to settle. When GoTrue is unreachable it
+    // retries the token refresh behind a Web Lock, so the promise can hang
+    // indefinitely; a hard network failure rejects it instead. In both cases a
+    // bare .then() never runs and setLoading(false) never fires, which strands
+    // the app on ProtectedRoute's spinner. Race a timeout and swallow the
+    // rejection so we always fall through to the login screen.
+    type SessionResult = { data: { session: Session | null } };
+    const sessionTimeout = new Promise<SessionResult>(resolve =>
+      setTimeout(() => resolve({ data: { session: null } }), 8000)
+    );
+
+    Promise.race<SessionResult>([supabase.auth.getSession(), sessionTimeout])
+      .catch(() => ({ data: { session: null } }))
+      .then(async ({ data }) => {
+        try {
+          const s = data.session;
+          setSession(s);
+          setUser(s?.user ?? null);
+          if (s?.user) await fetchProfile(s.user);
+        } finally {
+          setLoading(false);
+        }
+      });
 
     const { data: { subscription } } = supabase.auth.onAuthStateChange(async (_event, newSession) => {
       setSession(newSession);
