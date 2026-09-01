@@ -170,7 +170,12 @@ export function DashboardLayout({ children, title: pageTitle, subtitle: pageSubt
   const [subtitle, setSubtitleState] = useState<string | undefined>(pageSubtitle);
   const [docSlug, setDocSlugState]   = useState<string | undefined>(pageDocSlug);
 
-  const { alerts: rawAlerts, filteredLeads, filteredDeals } = useFilteredData();
+  // The app chrome only needs `alerts` (for the notification bell). We
+  // deliberately DON'T destructure filteredLeads/filteredDeals here — they were
+  // dead reads. `useFilteredData()` is already guarded by a module-level
+  // single-entry cache (fdCache), so this call reuses the dashboard's result
+  // rather than re-running the ~680-line aggregate over ~28k leads.
+  const { alerts: rawAlerts } = useFilteredData();
   const [readIdxs, setReadIdxs] = useState<number[]>([]);
   // Universal search dialog
   const [searchOpen, setSearchOpen] = useState(false);

@@ -1,5 +1,6 @@
-import { useMemo, useState } from "react";
-import { Mail, X, Plus, Search, Eye } from "lucide-react";
+import { useMemo, useState, useRef, useLayoutEffect } from "react";
+import { createPortal } from "react-dom";
+import { Mail, X, Plus, Search, Eye, Check } from "lucide-react";
 import { Input } from "@/components/ui/input";
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
 import {
@@ -8,6 +9,7 @@ import {
 import {
   resolveRecipient, resolveAllRecipients, type HospitalContact,
 } from "@/hooks/use-hospital-contacts";
+import { useCustomContacts } from "@/hooks/use-custom-contacts";
 import { normCountry, countryFilterOptions } from "@/lib/normalize-country";
 
 /**
@@ -22,6 +24,230 @@ import { normCountry, countryFilterOptions } from "@/lib/normalize-country";
  * ticked contact emails). A caller storing a comma-joined string adapts at the
  * boundary.
  */
+// Pull every email-looking token out of arbitrary pasted text. Robust to
+// spreadsheet paste (tabs / newlines / "Name <email>" / "Name\temail" columns)
+// so the team can copy a block of cells and drop them straight in.
+const EMAIL_TOKEN_RE = /[^\s,;<>()"']+@[^\s,;<>()"']+\.[^\s,;<>()"']+/g;
+function extractEmails(raw: string): string[] {
+  return (raw.match(EMAIL_TOKEN_RE) ?? [])
+    .map(s => s.replace(/[.,;]+$/, "").trim())
+    .filter(Boolean);
+}
+function dedupeEmails(list: string[]): string[] {
+  const seen = new Set<string>();
+  const out: string[] = [];
+  for (const e of list) {
+    const k = e.toLowerCase();
+    if (k && !seen.has(k)) { seen.add(k); out.push(e); }
+  }
+  return out;
+}
+
+/**
+ * Manually-editable "To" for one hospital (team feedback #10: "Remove the
+ * automatic email selection — enter addresses manually, with the ability to
+ * paste multiple from our spreadsheet"). Starts EMPTY — no auto-selected
+ * recipients — and offers the hospital's saved contacts as autocomplete
+ * suggestions only. Recipients render as removable chips; `onChange` gets the
+ * explicit list, or `null` when empty (server then falls back to the hospital's
+ * primary so a send is never left with no recipient).
+ */
+function ToField({
+  hc, primary, allContacts, value, onChange, fallbackHint,
+}: {
+  /** This hospital's own synced contacts. */
+  hc: HospitalContact[];
+  /** The hospital row's primary recruiter (not a synced contact) — offered
+   *  first so a hospital with no Zoho contacts still autocompletes. */
+  primary: { email: string; name: string } | null;
+  /** Every synced contact across all hospitals — searched once the user types. */
+  allContacts: HospitalContact[];
+  value: string[] | null;
+  onChange: (emails: string[] | null) => void;
+  fallbackHint: string;
+}) {
+  const emails = value ?? [];
+  const [draft, setDraft] = useState("");
+  const [open, setOpen] = useState(false);
+  // Persistent manual address book — recorded custom recipients autocomplete in
+  // every send and let us greet them by name.
+  const { list: customContacts, save: saveCustom, nameFor } = useCustomContacts();
+  // Draft names for custom emails that aren't recorded yet (email → typed name),
+  // so the user can label a freshly-added address and save it for all sends.
+  const [nameDrafts, setNameDrafts] = useState<Record<string, string>>({});
+  // The chip box is inside a scrollable, overflow-clipped panel, so the
+  // suggestions list is portalled to <body> and fixed-positioned under the box
+  // — otherwise it gets clipped by the panel's max-h/overflow.
+  const boxRef = useRef<HTMLDivElement>(null);
+  const [rect, setRect] = useState<{ left: number; top: number; width: number } | null>(null);
+  useLayoutEffect(() => {
+    if (!open) return;
+    const measure = () => {
+      const r = boxRef.current?.getBoundingClientRect();
+      if (r) setRect({ left: r.left, top: r.bottom + 2, width: r.width });
+    };
+    measure();
+    window.addEventListener("scroll", measure, true);
+    window.addEventListener("resize", measure);
+    return () => {
+      window.removeEventListener("scroll", measure, true);
+      window.removeEventListener("resize", measure);
+    };
+  }, [open, emails.length, draft]);
+
+  // Ship the explicit list; empty → null so the backend's primary-contact
+  // fallback keeps the send from going out with no recipient at all.
+  const push = (next: string[]) => {
+    const cleaned = dedupeEmails(next.map(e => e.trim()).filter(Boolean));
+    onChange(cleaned.length ? cleaned : null);
+  };
+  const addRaw = (raw: string): boolean => {
+    const found = extractEmails(raw);
+    if (!found.length) return false;
+    push([...emails, ...found]);
+    setDraft("");
+    return true;
+  };
+  const removeEmail = (email: string) =>
+    push(emails.filter(e => e.toLowerCase() !== email.toLowerCase()));
+
+  // Suggestions: the hospital's primary recruiter + its own contacts show on
+  // focus; once the user types, the whole contact DB is searched too so any
+  // known address surfaces. Deduped against what's already added.
+  const suggestions = useMemo(() => {
+    const term = draft.trim().toLowerCase();
+    const seen = new Set(emails.map(e => e.toLowerCase()));
+    const out: HospitalContact[] = [];
+    const add = (c: HospitalContact) => {
+      const k = c.email?.toLowerCase();
+      if (!k || seen.has(k)) return;
+      if (term && !(k.includes(term) || (c.name ?? "").toLowerCase().includes(term))) return;
+      seen.add(k);
+      out.push(c);
+    };
+    if (primary?.email) {
+      add({ id: "hospital-row", name: primary.name || "", title: null, email: primary.email, phone: null, type: "Primary", isPrimary: true });
+    }
+    for (const c of hc) { if (out.length >= 8) break; add(c); }
+    // Recorded manual recipients — surfaced in every send.
+    for (const c of customContacts) {
+      if (out.length >= 8) break;
+      add({ id: `custom:${c.email}`, name: c.name, title: "Saved", email: c.email, phone: null, type: "Saved", isPrimary: false });
+    }
+    if (term) for (const c of allContacts) { if (out.length >= 8) break; add(c); }
+    return out.slice(0, 8);
+  }, [hc, primary, allContacts, customContacts, emails, draft]);
+
+  // Added addresses we don't have a name for yet (not a synced contact, not this
+  // hospital's primary, not already recorded) — offer to name + record them.
+  const unnamed = useMemo(() => {
+    const known = new Set<string>();
+    for (const c of hc) if (c.email) known.add(c.email.toLowerCase());
+    for (const c of allContacts) if (c.email) known.add(c.email.toLowerCase());
+    for (const c of customContacts) known.add(c.email.toLowerCase());
+    if (primary?.email) known.add(primary.email.toLowerCase());
+    return emails.filter(e => !known.has(e.toLowerCase()));
+  }, [emails, hc, allContacts, customContacts, primary]);
+
+  return (
+    <div className="space-y-1">
+      <div className="flex items-center gap-1.5">
+        <span className="text-[9px] uppercase tracking-wider text-muted-foreground">To</span>
+        {emails.length
+          ? <span className="text-[10px] font-medium text-teal-700">{emails.length} recipient{emails.length === 1 ? "" : "s"}</span>
+          : <span className="truncate text-[10px] text-muted-foreground">Add recipients — or leave empty to use {fallbackHint}.</span>}
+        {emails.length > 0 && (
+          <button type="button" onClick={() => onChange(null)} className="text-[9.5px] text-slate-400 underline hover:text-rose-600">clear</button>
+        )}
+      </div>
+      <div className="relative">
+        <div ref={boxRef} className="flex flex-wrap items-center gap-1 rounded-md border border-slate-200 bg-white px-1.5 py-1 focus-within:border-teal-300">
+          {emails.map(e => (
+            <span
+              key={e}
+              className="inline-flex items-center gap-1 rounded bg-teal-50 px-1.5 py-0.5 text-[11px] text-teal-700"
+              title={e}
+            >
+              <span className="truncate max-w-[180px]">{e}</span>
+              <button type="button" onClick={() => removeEmail(e)} className="text-slate-400 hover:text-rose-600"><X className="h-3 w-3" /></button>
+            </span>
+          ))}
+          <input
+            value={draft}
+            onChange={e => { setDraft(e.target.value); setOpen(true); }}
+            onFocus={() => setOpen(true)}
+            onBlur={() => { if (draft.trim()) addRaw(draft); setTimeout(() => setOpen(false), 120); }}
+            onKeyDown={e => {
+              if (e.key === "Enter" || e.key === "," || e.key === ";") {
+                if (draft.trim() && addRaw(draft)) e.preventDefault();
+              } else if (e.key === "Backspace" && !draft && emails.length) {
+                removeEmail(emails[emails.length - 1]);
+              }
+            }}
+            onPaste={e => {
+              const text = e.clipboardData.getData("text");
+              if (extractEmails(text).length) { e.preventDefault(); addRaw(text); }
+            }}
+            placeholder={emails.length ? "Add or paste more…" : "Type or paste email addresses…"}
+            className="min-w-[130px] flex-1 border-0 bg-transparent text-[11px] text-slate-700 outline-none placeholder:text-slate-300"
+          />
+        </div>
+        {open && suggestions.length > 0 && rect && createPortal(
+          <div
+            className="fixed z-[9999] max-h-52 overflow-y-auto rounded-md border border-slate-200 bg-white py-1 shadow-xl"
+            style={{ left: rect.left, top: rect.top, width: rect.width }}
+          >
+            <div className="px-2 pb-1 text-[9px] uppercase tracking-wider text-muted-foreground">Suggestions</div>
+            {suggestions.map(c => (
+              <button
+                key={c.id}
+                type="button"
+                onMouseDown={e => { e.preventDefault(); push([...emails, c.email!]); setDraft(""); }}
+                className="flex w-full items-center gap-2 px-2 py-1 text-left hover:bg-teal-50"
+              >
+                <Mail className="h-3 w-3 shrink-0 text-slate-400" />
+                <span className="min-w-0">
+                  <span className="block truncate text-[11px] text-slate-700">{c.name || c.email}{c.isPrimary ? " · Primary" : c.type === "Saved" ? " · Saved" : ""}</span>
+                  {c.name && <span className="block truncate text-[10px] text-muted-foreground">{c.email}</span>}
+                </span>
+              </button>
+            ))}
+          </div>,
+          document.body,
+        )}
+      </div>
+
+      {/* Name + record any custom address so it autocompletes — and greets by
+          name — in every future send. */}
+      {unnamed.map(email => {
+        const nm = nameDrafts[email] ?? "";
+        const saved = () => { if (nm.trim()) { saveCustom(email, nm.trim()); setNameDrafts(d => { const n = { ...d }; delete n[email]; return n; }); } };
+        return (
+          <div key={email} className="flex items-center gap-1.5 rounded-md border border-dashed border-amber-300 bg-amber-50/60 px-1.5 py-1">
+            <span className="truncate max-w-[150px] text-[10px] font-mono text-amber-800" title={email}>{email}</span>
+            <input
+              value={nm}
+              onChange={e => setNameDrafts(d => ({ ...d, [email]: e.target.value }))}
+              onKeyDown={e => { if (e.key === "Enter") { e.preventDefault(); saved(); } }}
+              placeholder="Name this recipient…"
+              className="min-w-0 flex-1 rounded border border-amber-200 bg-white px-1.5 py-0.5 text-[11px] text-slate-700 outline-none placeholder:text-slate-300 focus:border-teal-400"
+            />
+            <button
+              type="button"
+              onClick={saved}
+              disabled={!nm.trim()}
+              title="Save this name — applied to all future emails"
+              className="inline-flex items-center gap-1 rounded bg-teal-600 px-1.5 py-0.5 text-[10px] font-medium text-white hover:bg-teal-700 disabled:opacity-40"
+            >
+              <Check className="h-3 w-3" /> Save
+            </button>
+          </div>
+        );
+      })}
+    </div>
+  );
+}
+
 export function HospitalRecipientsPanel({
   selected, pool, contacts,
   contactOverrides, onContactOverride,
@@ -30,13 +256,12 @@ export function HospitalRecipientsPanel({
   activeHospitalId, onSelectHospital,
   heading,
   greetMode, onGreetMode,
-  greetName, onGreetName,
 }: {
   /** Hospitals currently being emailed. */
   selected: Hospital[];
   /** Full hospital pool — feeds the country options + the add picker. */
   pool: Hospital[];
-  contacts: { forHospital: (name: string) => HospitalContact[] };
+  contacts: { forHospital: (name: string) => HospitalContact[]; all?: HospitalContact[] };
   /** hospitalId → ticked contact emails (empty/absent = auto-pick). */
   contactOverrides: Record<string, string[]>;
   onContactOverride: (hospitalId: string, emails: string[] | null) => void;
@@ -184,33 +409,18 @@ export function HospitalRecipientsPanel({
             const hc = contacts.forHospital(h.name);
             const resolved = resolveRecipient(hc, h).contact;
             const override = contactOverrides[h.id] ?? [];
-            const selectedEmails = new Set(override.map(e => e.trim().toLowerCase()).filter(Boolean));
-            // Who Auto would actually email — so the checkbox reflects the real
-            // recipient BEFORE any manual override (every contact in 'all' mode,
-            // else the resolved primary/cycle pick). This is what makes the
-            // primary show ticked by default.
-            const autoEmails = new Set(
-              (h.contact_mode === "all" ? resolveAllRecipients(hc, h) : (resolved ? [resolved] : []))
-                .map(c => c.email?.toLowerCase()).filter(Boolean) as string[],
-            );
-            // Ticked set shown in the UI: the manual override if there is one,
-            // otherwise Auto's pick.
-            const checkedEmails = selectedEmails.size ? selectedEmails : autoEmails;
-            const toggle = (email: string) => {
-              const k = email.toLowerCase();
-              // Start from what's currently ticked (Auto's pick when there's no
-              // override yet) so ticking a 2nd contact KEEPS the primary, and
-              // clearing back to exactly Auto's pick returns to Auto mode.
-              const next = new Set(checkedEmails);
-              if (next.has(k)) next.delete(k); else next.add(k);
-              const emails = hc.filter(c => c.email && next.has(c.email.toLowerCase())).map(c => c.email!);
-              const sameAsAuto = emails.length === autoEmails.size
-                && emails.every(e => autoEmails.has(e.toLowerCase()));
-              onContactOverride(h.id, (emails.length && !sameAsAuto) ? emails : null); // Auto pick / empty → back to Auto
-            };
+            // What Auto WOULD email — used only to seed the manual To field and to
+            // detect "back to the suggested default". Original casing preserved
+            // for display. (Team feedback #10: no more checkbox auto-selection —
+            // the To is a manually editable, paste-friendly field.)
+            const autoContacts = h.contact_mode === "all"
+              ? resolveAllRecipients(hc, h)
+              : (resolved ? [resolved] : []);
+            let autoEmailList = autoContacts.map(c => c.email!).filter(Boolean);
+            if (!autoEmailList.length && h.primary_recruiter_email) autoEmailList = [h.primary_recruiter_email];
             const autoLabel = h.contact_mode === "all"
-              ? `Auto (all ${resolveAllRecipients(hc, h).length})`
-              : `Auto (${h.contact_mode === "cycle" ? "cycle" : "primary"}) → ${resolved?.name || resolved?.email || "—"}`;
+              ? `Auto (all ${autoEmailList.length})`
+              : (resolved?.name || resolved?.email || autoEmailList[0] || "no saved recipient");
             const isActive = activeHospitalId === h.id;
             return (
               <div key={h.id} className={`rounded-md border px-2 py-1.5 ${isActive ? "border-teal-300 bg-teal-50/60" : "border-slate-200 bg-white"}`}>
@@ -234,52 +444,30 @@ export function HospitalRecipientsPanel({
                     <X className="h-3.5 w-3.5" />
                   </button>
                 </div>
-                {hc.length === 0 ? (
-                  <div className="mt-0.5 pl-3 text-[10px] text-muted-foreground italic truncate">{h.primary_recruiter_email ?? "no recipient"}</div>
-                ) : (
-                  <div className="mt-1 pl-3 space-y-1">
-                    <div className="text-[10px] text-muted-foreground">
-                      {selectedEmails.size ? <span className="text-amber-600 font-medium">{selectedEmails.size} selected — overriding auto</span> : autoLabel}
-                    </div>
-                    <div className="flex flex-wrap gap-x-3 gap-y-1">
-                      {hc.filter(c => c.email).map(c => (
-                        <label key={c.id} className="inline-flex items-center gap-1 cursor-pointer" title={c.email}>
-                          <input type="checkbox" checked={checkedEmails.has(c.email!.toLowerCase())} onChange={() => toggle(c.email!)} className="h-3 w-3 accent-teal-600" />
-                          <span className="truncate max-w-[150px] text-[11px] text-slate-700">{c.name || c.email}{c.isPrimary ? " · Primary" : ""}</span>
-                        </label>
-                      ))}
-                    </div>
-                  </div>
-                )}
+                <div className="mt-1 pl-3">
+                  <ToField
+                    hc={hc}
+                    primary={h.primary_recruiter_email ? { email: h.primary_recruiter_email, name: h.primary_contact_name ?? "" } : null}
+                    allContacts={contacts.all ?? []}
+                    value={override.length ? override : null}
+                    onChange={(emails) => onContactOverride(h.id, emails)}
+                    fallbackHint={autoLabel}
+                  />
+                </div>
                 {greetMode && onGreetMode && (
                   <div className="mt-1 pl-3 flex items-center gap-1 flex-wrap">
                     <span className="text-[9px] uppercase tracking-wider text-muted-foreground mr-0.5">Greeting</span>
-                    {([["auto", "Auto"], ["contact", "Name"], ["team", "Team"]] as const).map(([k, l]) => (
+                    {([["contact", "Name"], ["team", "Team"]] as const).map(([k, l]) => (
                       <button
                         key={k}
                         type="button"
                         onClick={() => onGreetMode(h.id, k)}
-                        title={k === "auto" ? "Use this hospital's saved greeting preference" : k === "contact" ? "Greet the named recipient (e.g. 'Hello Ms. Sandra')" : "Greet the hospital team (e.g. 'Hello City Hospital team')"}
-                        className={`rounded px-1.5 py-0.5 text-[9.5px] font-medium transition ${(greetMode[h.id] ?? "auto") === k ? "bg-teal-600 text-white shadow-sm" : "bg-slate-100 text-slate-600 hover:bg-slate-200"}`}
+                        title={k === "contact" ? "Greet the named recipient (e.g. 'Hello Ms. Sandra')" : "Greet the hospital team (e.g. 'Hello City Hospital team')"}
+                        className={`rounded px-1.5 py-0.5 text-[9.5px] font-medium transition ${(greetMode[h.id] ?? "contact") === k ? "bg-teal-600 text-white shadow-sm" : "bg-slate-100 text-slate-600 hover:bg-slate-200"}`}
                       >
                         {l}
                       </button>
                     ))}
-                    {/* Whose NAME to greet by — decoupled from who's emailed. Only
-                        relevant when greeting by Name. */}
-                    {greetName && onGreetName && (greetMode[h.id] ?? "auto") === "contact" && hc.filter(c => c.email && c.name).length > 0 && (
-                      <select
-                        value={greetName[h.id] ?? ""}
-                        onChange={e => onGreetName(h.id, e.target.value)}
-                        title="Whose name to greet by"
-                        className="ml-1 rounded border border-slate-200 bg-white px-1 py-0.5 text-[9.5px] text-slate-700 max-w-[140px]"
-                      >
-                        <option value="">Auto — {resolved?.name || resolved?.email || "primary"}</option>
-                        {hc.filter(c => c.email && c.name).map(c => (
-                          <option key={c.id} value={c.email!}>{c.name}</option>
-                        ))}
-                      </select>
-                    )}
                   </div>
                 )}
               </div>

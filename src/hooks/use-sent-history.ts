@@ -18,6 +18,12 @@ export interface SentRecord {
   id:         string;          // stable key
   doctorId:   string | null;
   doctorName: string;
+  // Doctor contact identity carried from the run metadata — lets the Sent
+  // reader resolve the WordPress profile (to regenerate the card image) by
+  // phone/email even when doctorId is a Zoho-prefixed id that never matches a
+  // WP doctor_id. Null for batch sends (no per-doctor metadata).
+  doctorEmail: string | null;
+  doctorPhone: string | null;
   specialty:  string | null;
   sentKind:   SentKind;        // daily_duo | tuesday_top_15 | specialty_of_day | individual
   slot:       string;          // "1st profile" | "2nd profile" | "top 15 · #3" | "daily specialty" | "individual"
@@ -92,6 +98,8 @@ export function useSentHistory(): {
           id:         `sent:batch:${b.id}:${i}`,
           doctorId:   did,
           doctorName: resolved?.name ?? did,
+          doctorEmail: null,
+          doctorPhone: null,
           specialty:  b.specialty ?? resolved?.specialty ?? null,
           sentKind:   b.kind,
           slot:       slotLabel(b.kind, i),
@@ -124,6 +132,8 @@ export function useSentHistory(): {
         id:         `sent:run:${r.id}`,
         doctorId:   r.doctor_id,
         doctorName: r.doctor_name || resolved?.name || "—",
+        doctorEmail: (typeof md.doctor_email === "string" ? md.doctor_email : "") || null,
+        doctorPhone: (typeof md.doctor_phone === "string" ? md.doctor_phone : "") || null,
         specialty:  (r.metadata?.doctor_speciality as string | undefined) ?? resolved?.specialty ?? null,
         sentKind:   "individual",
         slot:       "individual",

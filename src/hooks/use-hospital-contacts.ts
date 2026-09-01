@@ -57,8 +57,23 @@ export function useHospitalContacts() {
       arr.sort((a, b) => (b.isPrimary ? 1 : 0) - (a.isPrimary ? 1 : 0) || a.name.localeCompare(b.name));
     }
     const total = Array.from(byCore.values()).reduce((n, a) => n + a.length, 0);
+    // Flat, deduped-by-email list of every synced contact — the global pool the
+    // recipient autocomplete searches once the user starts typing (so a known
+    // email surfaces even if it lives on another hospital).
+    const all: HospitalContact[] = [];
+    const seenEmail = new Set<string>();
+    for (const arr of byCore.values()) {
+      for (const c of arr) {
+        const k = (c.email ?? "").toLowerCase();
+        if (!k || seenEmail.has(k)) continue;
+        seenEmail.add(k);
+        all.push(c);
+      }
+    }
+    all.sort((a, b) => a.name.localeCompare(b.name));
     return {
       total,
+      all,
       forHospital(name: string): HospitalContact[] {
         const k = core(name);
         if (!k) return [];

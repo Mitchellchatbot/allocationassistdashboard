@@ -75,6 +75,7 @@ const Reports         = lazy(() => import("./pages/Reports"));
 // Sent) are now tabs inside the unified /sends page. Their old routes redirect
 // into the matching tab (see RedirectToSends below).
 const Sends           = lazy(() => import("./pages/Sends"));
+const Mail            = lazy(() => import("./pages/Mail"));
 const FeatureLab      = lazy(() => import("./pages/FeatureLab"));
 const MyWorkspace     = lazy(() => import("./pages/MyWorkspace"));
 const BulkImport      = lazy(() => import("./pages/BulkImport"));
@@ -172,6 +173,8 @@ function requiredPageForPath(pathname: string): string {
   if (pathname === "/import" || pathname === "/contracts" || pathname === "/import-bulk" || pathname === "/connections") return "/";
   // Legacy doctor URLs gate on /doctors (the page they redirect into)
   if (pathname === "/leads-pipeline" || pathname === "/doctor-profiles" || pathname === "/wp-candidates") return "/doctors";
+  // Mail is a companion view of the outbound workflow — gate it on /sends.
+  if (pathname === "/mail") return "/sends";
   return pathname;
 }
 
@@ -265,6 +268,7 @@ const App = () => {
                 <Route path="/chatbot"        element={<Chatbot />} />
                 <Route path="/my-workspace"   element={<MyWorkspace />} />
                 <Route path="/sends"          element={<Sends />} />
+                <Route path="/mail"           element={<Mail />} />
                 {/* Legacy send routes → the matching tab of the unified /sends
                     page, preserving any deep-link query params (?flow=, ?compose=, ?run=). */}
                 <Route path="/automations"    element={<RedirectToSends tab="email-chain" />} />

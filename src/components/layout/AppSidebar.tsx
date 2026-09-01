@@ -8,6 +8,7 @@ import {
   ClipboardList,
   BarChart3,
   Mailbox,
+  Mail,
   Link2,
   Image,
   LogOut,
@@ -98,6 +99,7 @@ const NAV_SECTIONS: NavSection[] = [
       { title: "Templates & Hospitals", url: "/information", icon: Library },
       { title: "Vacancies",       url: "/vacancies",       icon: ClipboardList },
       { title: "Sends",           url: "/sends",           icon: Send, badge: (c) => c.unreadReplies },
+      { title: "Mail",            url: "/mail",            icon: Mail, badge: (c) => c.unreadReplies },
       { title: "Feature Lab",     url: "/feature-lab",     icon: FlaskConical },
       { title: "Reports",         url: "/reports",         icon: BarChart3 },
     ],
@@ -188,7 +190,8 @@ export function AppSidebar() {
   const visibleSections: NavSection[] = (role === "admin"
     ? NAV_SECTIONS
     : NAV_SECTIONS
-        .map(s => ({ ...s, items: s.items.filter(it => it.url === "/docs" || allowedPages.includes(it.url)) })))
+        // /mail is a companion of /sends — anyone who can see Sends sees Mail.
+        .map(s => ({ ...s, items: s.items.filter(it => it.url === "/docs" || allowedPages.includes(it.url) || (it.url === "/mail" && allowedPages.includes("/sends"))) })))
     // Finance is allowlist-only — strip it for anyone not on the list, even
     // admins (mirrors the hard gate in ProtectedRoute).
     .map(s => ({ ...s, items: s.items.filter(it => it.url !== "/finance" || canSeeFinance(user?.email)) }))

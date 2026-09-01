@@ -13,6 +13,7 @@
 import { Fragment, memo, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useSearchParams } from "react-router-dom";
 import { supabase } from "@/lib/supabase";
+import { groupSpecialty } from "@/lib/specialty-groups";
 import { DashboardLayout } from "@/components/layout/DashboardLayout";
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
@@ -149,7 +150,34 @@ export default function WpCandidates({ embedded }: WpCandidatesProps = {}) {
   const search = useDebounce(searchRaw, 120);
   const [statusFilter, setStatusFilter] = useState<"all" | "publish" | "private" | "draft">("all");
   const [licenseFilter, setLicenseFilter] = useState<"all" | "DHA" | "DOH" | "MOH" | "SCFHS" | "QCHP">("all");
+  // Specialty filter — mirrors the allocationassist.com Candidate Filter's
+  // specialty dropdown (team feedback #20/#21). Each candidate's raw specialty
+  // is collapsed to the SAME canonical bucket the website uses (groupSpecialty),
+  // so picking "Cardiology" here returns the same set the site would — the
+  // "same search, same results" parity ask. "all" = no specialty filter.
+  const [specialtyFilter, setSpecialtyFilter] = useState<string>("all");
   const [page, setPage] = useState(1);
+
+  // Canonical specialty of each candidate (memoised alongside the corpus).
+  // Falls back to subspecialty / job title when the primary field is blank, so
+  // a doctor still lands in a bucket the way the website would place them.
+  const candidateSpecialtyGroup = useMemo(
+    () => candidates.map(c => groupSpecialty(c.specialty) ?? groupSpecialty(c.subspecialty) ?? groupSpecialty(c.job_title)),
+    [candidates],
+  );
+  // The specialty dropdown options: every canonical bucket actually present in
+  // the pool, with its candidate count, most-populated first (matches the
+  // rotation picker's ordering so both surfaces read consistently).
+  const specialtyOptions = useMemo(() => {
+    const counts = new Map<string, number>();
+    for (const g of candidateSpecialtyGroup) {
+      if (!g) continue;
+      counts.set(g, (counts.get(g) ?? 0) + 1);
+    }
+    return Array.from(counts.entries())
+      .sort((a, b) => b[1] - a[1] || a[0].localeCompare(b[0]))
+      .map(([name, count]) => ({ value: name, label: `${name} (${count})` }));
+  }, [candidateSpecialtyGroup]);
   const searchRef = useRef<HTMLInputElement | null>(null);
 
   // Pre-build search corpus once per data refresh. Per-keystroke
@@ -171,13 +199,14 @@ export default function WpCandidates({ embedded }: WpCandidatesProps = {}) {
     return candidates.filter((c, i) => {
       if (statusFilter !== "all" && c.status !== statusFilter) return false;
       if (licenseFilter !== "all" && !(c.license_types ?? []).some(l => l?.toUpperCase().includes(licenseFilter))) return false;
+      if (specialtyFilter !== "all" && candidateSpecialtyGroup[i] !== specialtyFilter) return false;
       if (tokens.length === 0) return true;
       const hay = corpus[i];
       return tokens.every(t => hay.includes(t));
     });
-  }, [candidates, corpus, search, statusFilter, licenseFilter]);
+  }, [candidates, corpus, search, statusFilter, licenseFilter, specialtyFilter, candidateSpecialtyGroup]);
 
-  useEffect(() => { setPage(1); }, [search, statusFilter, licenseFilter]);
+  useEffect(() => { setPage(1); }, [search, statusFilter, licenseFilter, specialtyFilter]);
 
   const totalPages = Math.max(1, Math.ceil(filtered.length / PAGE_SIZE));
   const safePage = Math.min(page, totalPages);
@@ -319,6 +348,22 @@ export default function WpCandidates({ embedded }: WpCandidatesProps = {}) {
                   { value: "QCHP",  label: "QCHP" },
                 ]}
               />
+              {specialtyOptions.length > 0 && (
+                <>
+                  <span className="text-muted-foreground/40">·</span>
+                  <Select value={specialtyFilter} onValueChange={setSpecialtyFilter}>
+                    <SelectTrigger className="h-7 w-[220px] text-[11px] bg-white">
+                      <SelectValue placeholder="Any specialty" />
+                    </SelectTrigger>
+                    <SelectContent className="max-h-[320px]">
+                      <SelectItem value="all">Any specialty</SelectItem>
+                      {specialtyOptions.map(o => (
+                        <SelectItem key={o.value} value={o.value}>{o.label}</SelectItem>
+                      ))}
+                    </SelectContent>
+                  </Select>
+                </>
+              )}
               <span className="ml-auto text-[11px] text-muted-foreground tabular-nums">
                 {filtered.length === candidates.length ? `${candidates.length} candidates` : `${filtered.length} of ${candidates.length}`}
               </span>
@@ -348,7 +393,7 @@ export default function WpCandidates({ embedded }: WpCandidatesProps = {}) {
               <div className="rounded-md border border-dashed py-8 text-center">
                 <Search className="h-5 w-5 mx-auto mb-2 text-muted-foreground/60" />
                 <p className="text-[12px] text-muted-foreground">No matches.</p>
-                <button onClick={() => { setSearchRaw(""); setStatusFilter("all"); setLicenseFilter("all"); }} className="text-[11px] text-teal-700 hover:underline mt-1">
+                <button onClick={() => { setSearchRaw(""); setStatusFilter("all"); setLicenseFilter("all"); setSpecialtyFilter("all"); }} className="text-[11px] text-teal-700 hover:underline mt-1">
                   Clear filters
                 </button>
               </div>

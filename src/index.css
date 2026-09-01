@@ -116,6 +116,32 @@
   height: 0;
 }
 
+/* Always-visible slim horizontal scrollbar. macOS hides overlay scrollbars
+   until you actively scroll, which makes a constant-width, horizontally-
+   scrollable panel (e.g. the Gmail-style sent-email canvas) look like it's just
+   clipping content with no way to reach the rest. Forcing a styled track makes
+   the scroll affordance obvious. */
+.aa-hscroll {
+  scrollbar-width: thin;                        /* Firefox */
+  scrollbar-color: #cbd5e1 transparent;
+}
+.aa-hscroll::-webkit-scrollbar {
+  height: 10px;
+  -webkit-appearance: none;                     /* opt out of overlay style */
+}
+.aa-hscroll::-webkit-scrollbar-track {
+  background: #f1f5f9;
+  border-radius: 0 0 8px 8px;
+}
+.aa-hscroll::-webkit-scrollbar-thumb {
+  background: #cbd5e1;
+  border-radius: 999px;
+  border: 2px solid #f1f5f9;
+}
+.aa-hscroll::-webkit-scrollbar-thumb:hover {
+  background: #94a3b8;
+}
+
 /* Floating-sidebar 'frosted glass' treatment.
  *
  * Stack (back to front):
