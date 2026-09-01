@@ -185,8 +185,51 @@ serve(async (req) => {
 
   // Hospitals that have a website to scrape.
   const { data: hospitals, error: hErr } = await supabase
-    .from("hospitals").select("id, name, website, image_url, description");
+    .from("hospitals").select("id, name, website, image_url, description, city, country");
   if (hErr) return json({ ok: false, error: `hospitals read failed: ${hErr.message}` }, 500);
+
+  // ── list_missing_website mode: return the hospitals with no website, with
+  //    city/country so an operator (or the agent) can search for their site.
+  if (body.list_missing_website === true) {
+    const missing = (hospitals ?? [])
+      .filter(h => !normWebsite(String(h.website ?? "")))
+      .map(h => ({ id: String(h.id), name: String(h.name ?? ""), city: h.city ?? null, country: h.country ?? null }));
+    return json({ ok: true, mode: "list_missing_website", count: missing.length, hospitals: missing });
+  }
+
+  // ── set_websites mode: write website onto specific hospitals by id. Used to
+  //    persist websites found by external search. Dry-run by default; validates
+  //    each URL through normWebsite and only fills BLANK rows unless overwrite.
+  //    body.set = [{ id, website }, ...]
+  if (Array.isArray(body.set)) {
+    const byId = new Map((hospitals ?? []).map(h => [String(h.id), h]));
+    const toSet: Array<{ id: string; name: string; to: string }> = [];
+    const rejected: Array<{ id: string; website: string; reason: string }> = [];
+    for (const item of body.set as Array<Record<string, unknown>>) {
+      const id = String(item.id ?? "");
+      const h = byId.get(id);
+      if (!h) { rejected.push({ id, website: String(item.website ?? ""), reason: "unknown id" }); continue; }
+      if (!overwrite && normWebsite(String(h.website ?? ""))) { rejected.push({ id, website: String(item.website ?? ""), reason: "already has website" }); continue; }
+      const w = normWebsite(String(item.website ?? ""));
+      if (!w) { rejected.push({ id, website: String(item.website ?? ""), reason: "invalid url" }); continue; }
+      toSet.push({ id, name: String(h.name ?? ""), to: w });
+    }
+    let updated = 0;
+    const failures: Array<{ name: string; error: string }> = [];
+    if (apply) {
+      for (const u of toSet) {
+        const { error } = await supabase.from("hospitals")
+          .update({ website: u.to, updated_at: new Date().toISOString() }).eq("id", u.id);
+        if (error) failures.push({ name: u.name, error: error.message });
+        else updated++;
+      }
+    }
+    return json({
+      ok: true, dry_run: !apply, mode: "set_websites",
+      summary: { would_set: toSet.length, rejected: rejected.length, ...(apply ? { updated, failed: failures.length } : {}) },
+      to_set: toSet, rejected, ...(apply && failures.length ? { failures } : {}),
+    });
+  }
 
   // ── fix_encoded mode: repair descriptions that carry a leaked HTML entity
   //    (e.g. "King&#x27;s") by re-decoding IN PLACE. No website fetch, and it
