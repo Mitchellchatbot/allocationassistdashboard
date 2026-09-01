@@ -6,6 +6,7 @@ import { Textarea } from "@/components/ui/textarea";
 import { Badge } from "@/components/ui/badge";
 import { Checkbox } from "@/components/ui/checkbox";
 import { Search, Send, Eye, ChevronLeft, AlertTriangle, ChevronDown, Copy, Check, Sparkles, X } from "lucide-react";
+import { matchDoctorTemplate } from "@/lib/template-match";
 import { captureAndUploadCard } from "@/lib/card-screenshot";
 import { buildProfileCardHtml } from "@/lib/profile-card-html";
 import { buildDoctorProfileHtml, PROFILE_IMAGE_WIDTH } from "@/lib/doctor-profile-image";
@@ -37,6 +38,7 @@ import { resolveHospitalRegion } from "@/lib/hospital-region";
 import { AttachmentsPicker } from "@/components/automations/AttachmentsPicker";
 import { CardScreenshotControl } from "@/components/automations/ProfileCardControls";
 import { HospitalRecipientsPanel } from "@/components/automations/HospitalRecipientsPanel";
+import { useCustomContacts } from "@/hooks/use-custom-contacts";
 import { TemplatePicker } from "@/components/automations/TemplatePicker";
 import { CcBccPicker, EmailChipField, isEmail, makeHospitalFlag, splitEmails } from "@/components/automations/CcBccPicker";
 import { detectUnfilledVars, describeUnfilled } from "@/lib/email-validation";
@@ -288,6 +290,7 @@ function SendProfileDialogBody({ onClose, initial }: { onClose: () => void; init
   const { data: templates = [] } = useEmailTemplates();
   const { user } = useAuth();
   const hospitalContacts = useHospitalContacts();
+  const { nameFor: customNameFor } = useCustomContacts();
   const updateHospital = useUpdateHospital();
   const scheduleProfileSend = useScheduleProfileSend();
   const navigate = useNavigate();
@@ -478,6 +481,19 @@ function SendProfileDialogBody({ onClose, initial }: { onClose: () => void; init
     else setStep("pick-hospitals");
     setInitialApplied(true);
   }, [initial, initialApplied, doctorOptions, hospitals, zohoLoading, wpLoading]);
+
+  // Self-heal: if we're past step 1 but the doctor selection has evaporated
+  // (e.g. a picked doctor became ineligible once completion/lifecycle data
+  // settled), bounce back to the picker instead of stranding the user on a
+  // blank step 2 with an all-placeholder preview. Gated on data being settled
+  // so a transient empty roster during load doesn't wrongly kick them back, and
+  // skipped while a vacancy pre-fill is still resolving.
+  useEffect(() => {
+    if (step === "pick-hospitals" && completionReady && !zohoLoading && !resolvingInitial && selectedDoctors.length === 0) {
+      setStep("pick-doctor");
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [step, completionReady, zohoLoading, selectedDoctors.length]);
 
   // While a vacancy-launched send is still resolving its pre-filled doctor +
   // hospital (doctorOptions load async), show a loading panel instead of the
@@ -748,7 +764,9 @@ function SendProfileDialogBody({ onClose, initial }: { onClose: () => void; init
         const recipientName  = greetPickName
           || ((isAllMode || overrideIsMulti)
             ? ""
-            : (overrideContact?.name ?? resolved.contact?.name ?? h.primary_contact_name ?? "").trim());
+            : (overrideContact?.name
+               || (overrideEmail ? customNameFor(overrideEmail) : "")
+               || resolved.contact?.name || h.primary_contact_name || "").trim());
         // Feedback #12: a hospital's saved cc_emails are no longer auto-attached.
         // Only a CC the dispatcher explicitly added for this hospital rides now.
         const hospCc = ccOverrideByHospital[h.id] ?? [];
@@ -867,7 +885,9 @@ function SendProfileDialogBody({ onClose, initial }: { onClose: () => void; init
                   : {}),
                 // Feature 3: per-hospital greeting choice — send-flow-email honours
                 // greet_mode over the hospital's stored greet_with_contact_name flag.
-                ...((greetModeByHospital[h.id] ?? "auto") !== "auto" ? { greet_mode: greetModeByHospital[h.id] } : {}),
+                // "Auto" was removed, so we always send an explicit mode (Name by
+                // default; the recipient/primary name is resolved above).
+                greet_mode: greetModeByHospital[h.id] ?? "contact",
               },
             })
             .select("id")
@@ -1187,7 +1207,12 @@ function DoctorPicker({ options, isLoading, selectedIds, onToggle, onSetSelected
         {!isLoading && filtered.length === 0 && (
           <div className="px-4 py-6 text-[12px] text-muted-foreground text-center">No doctors match.</div>
         )}
-        {filtered.map(d => {
+        {/* Only render the selectable list once completion/eligibility data has
+            loaded. While loading, doctorOptions is UNfiltered (the completion>0
+            filter is skipped), so a 0%-complete doctor would be selectable here
+            and then silently vanish from the roster the instant data settles —
+            leaving step 2 with no doctor and an all-placeholder preview. */}
+        {!isLoading && filtered.map(d => {
           const checked = selectedIds.includes(d.id);
           return (
             <label key={d.id} className="flex items-center gap-3 px-3 py-2 hover:bg-teal-50/60 cursor-pointer transition-colors">
@@ -1473,6 +1498,41 @@ function PreviewConfirm({
   // doctor pane below.
   const isSingle = hospitals.length === 1;
   const multiDoctor = doctors.length > 1;
+
+  // ── #22 template library: auto-match the doctor "working opportunity" template
+  // to the send, with an Auto/Manual toggle so the team can override. Auto picks
+  // (in priority) a city-specific template when every hospital shares one city,
+  // else the best-matched-by-specialty template for the doctors' shared
+  // specialty. Manual = whatever the picker below is set to. Defaults to Auto so
+  // a single-city or single-specialty send lands on the right copy with no clicks.
+  const [templateMode, setTemplateMode] = useState<"auto" | "manual">("auto");
+  const templateSuggestion = useMemo(() => {
+    // Only match on specialty/job-title when ALL selected doctors agree — a mixed
+    // send can't honestly use one specialty template.
+    const specs = [...new Set(doctors.map(d => (d.speciality ?? "").trim().toLowerCase()).filter(Boolean))];
+    const sharedSpecialty = specs.length === 1
+      ? (doctors.find(d => (d.speciality ?? "").trim())?.speciality ?? "")
+      : "";
+    return matchDoctorTemplate({
+      templates,
+      cities:    hospitals.map(h => h.city),
+      specialty: sharedSpecialty,          // exact slug match (doctor_bmh_<slug>)
+      jobTitle:  sharedSpecialty,          // + phrase fallback ("Consultant Cardiac Surgeon" → cardiac_surgeon)
+    });
+  }, [templates, hospitals, doctors]);
+  // In Auto mode, keep the doctor template locked to the suggestion (or the core
+  // default when nothing matches). Guarded so it only writes on a real change.
+  useEffect(() => {
+    if (templateMode !== "auto") return;
+    const want = templateSuggestion?.key ?? "profile_sent_doctor";
+    if (want !== doctorTemplateKey) setDoctorTemplateKey(want);
+  }, [templateMode, templateSuggestion, doctorTemplateKey, setDoctorTemplateKey]);
+  // Picking a template by hand drops out of Auto so the manual choice sticks.
+  const pickDoctorTemplateManually = useCallback((k: string) => {
+    setTemplateMode("manual");
+    setDoctorTemplateKey(k);
+  }, [setDoctorTemplateKey]);
+
   // Which doctor's sub-tab is active (shared by the Hospital + Doctor top-tabs
   // so switching top-tab keeps you on the same doctor). No tab bar renders for a
   // single doctor, so the view is unchanged there.
@@ -1522,6 +1582,9 @@ function PreviewConfirm({
     return s ? `${s.name} <${s.email}>` : "Allocation Assist Team <hello@allocationassist.com>";
   };
   const senderLine = describeSender(senderOverride);
+  // Recorded manual-recipient names — so the preview greets a named custom
+  // address exactly as the send does.
+  const { nameFor: customNameFor } = useCustomContacts();
   // The roster member when a specific person is picked (drives the "replies land
   // in X" note); null for the generic Allocation Assist Team default.
   const sender = findSenderByEmail(senderOverride);
@@ -1618,7 +1681,9 @@ function PreviewConfirm({
     const isAllMode = !overrideEmail && (hosp.contact_mode ?? "primary") === "all";
     const overrideIsMulti = !!overrideEmail && /[,;]/.test(overrideEmail);
     if (isAllMode || overrideIsMulti) return "";
-    return (overrideContact?.name ?? resolved.contact?.name ?? hosp.primary_contact_name ?? "").trim();
+    return (overrideContact?.name
+      || (overrideEmail ? customNameFor(overrideEmail) : "")
+      || resolved.contact?.name || hosp.primary_contact_name || "").trim();
   };
   // Pure per-doctor token builder — the old single-doctor `vars` memo, now a
   // function of the doctor. Same shape as send-flow-email so the preview matches
@@ -1646,15 +1711,18 @@ function PreviewConfirm({
         // inverted section turns "" into "<hospital> team", so a named person is
         // "Hello Annette!" (no trailing "team") and the generic case stays
         // "Hello <hospital> team!".
-        const gm = hosp ? (greetModeByHospital[hosp.id] ?? "auto") : "auto";
+        const gm = hosp ? (greetModeByHospital[hosp.id] ?? "contact") : "contact";
         const useName = gm === "contact" || (gm === "auto" && hosp?.greet_with_contact_name);
         return (hosp && useName) ? resolveGreetName(hosp) : "";
       })(),
       city:               hosp?.city ?? "",
       country:            hosp?.country ?? "",
       profile_link:       `https://allocationassist.com/shared-profile/${doctor.id}`,
-      signature:          PREVIEW_SIGNATURE_HTML,
-      signature_text:     PREVIEW_SIGNATURE_TEXT,
+      // Feedback #5: sign off as the picked sender (not the generic team). This
+      // signature is baked into the html_override that ships verbatim for
+      // single-hospital / edited sends, so it must reflect senderOverride.
+      signature:          previewSignatureHtmlFor(senderOverride),
+      signature_text:     previewSignatureTextFor(senderOverride),
     };
     v.doctor_card_html      = previewDoctorCardHtml(v);
     v.doctor_row_table_html = previewDoctorRowTableHtml(v);
@@ -1694,7 +1762,7 @@ function PreviewConfirm({
     }
     return m;
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [doctors, sendDataByDoctor, sampleHospital, cardImageByDoctor, greetModeByHospital, customMessage, hospitalSubject, hospitalBody, doctorSubject, doctorBody]);
+  }, [doctors, sendDataByDoctor, sampleHospital, cardImageByDoctor, greetModeByHospital, customMessage, hospitalSubject, hospitalBody, doctorSubject, doctorBody, senderOverride]);
 
   const activeRender = renderByDoctor.get(activeDoctor.id);
   const hospitalRecipient = isSingle ? (hospitals[0].primary_recruiter_email ?? "(no recruiter email)") : `preview: ${sampleHospital?.name ?? "hospital"} · ${hospitals.length} hospitals`;
@@ -2370,7 +2438,7 @@ function PreviewConfirm({
           <TemplatePicker
             templates={templates}
             value={doctorTemplateKey}
-            onChange={setDoctorTemplateKey}
+            onChange={pickDoctorTemplateManually}
             defaultKey="profile_sent_doctor"
             renderVars={r.vars}
             label="Doctor 'working opportunity' email template"
@@ -2391,7 +2459,7 @@ function PreviewConfirm({
   const combinedDoctorPane = (doc: DoctorOption) => {
     const hospWO: WorkingOpHospital[] = hospitals.map(toWorkingOpHospital);
     const subject = buildWorkingOpSubject(hospWO);
-    const body = wrapBodyForSend(buildWorkingOpBody(doc.name, hospWO, PREVIEW_SIGNATURE_HTML));
+    const body = wrapBodyForSend(buildWorkingOpBody(doc.name, hospWO, previewSignatureHtmlFor(senderOverride)));
     return <PreviewBlock label={`Consolidated · ${hospitals.length} hospitals`} subject={subject} body={body} />;
   };
   // Render the per-hospital doctor email for one (doctor, hospital) pair — same
@@ -2512,9 +2580,36 @@ function PreviewConfirm({
               </div>
             </div>
           )}
+          {/* #22 Auto/Manual template toggle. Auto matches the send to the best
+              template (city-specific, then by specialty); Manual = pick your own. */}
+          <div className="flex items-center justify-between gap-2">
+            <div className="inline-flex rounded-md border border-sidebar-border/50 bg-white/5 p-0.5 text-[10px]">
+              <button
+                type="button"
+                onClick={() => setTemplateMode("auto")}
+                className={`rounded px-2 py-0.5 font-medium transition-colors ${templateMode === "auto" ? "bg-teal-600 text-white" : "text-sidebar-foreground/70 hover:text-sidebar-foreground"}`}
+              >
+                Auto-match
+              </button>
+              <button
+                type="button"
+                onClick={() => setTemplateMode("manual")}
+                className={`rounded px-2 py-0.5 font-medium transition-colors ${templateMode === "manual" ? "bg-teal-600 text-white" : "text-sidebar-foreground/70 hover:text-sidebar-foreground"}`}
+              >
+                Manual
+              </button>
+            </div>
+            {templateMode === "auto" && (
+              <span className="text-[9.5px] text-sidebar-foreground/60 truncate">
+                {templateSuggestion
+                  ? <>Matched {templateSuggestion.kind === "city" ? "city" : "specialty"}: <strong className="text-sidebar-foreground/85">{templateSuggestion.reason}</strong></>
+                  : "No specific match — using the standard template"}
+              </span>
+            )}
+          </div>
           <div className="flex items-start justify-between gap-2">
             <div className="flex-1 min-w-0">
-              <TemplatePicker templates={templates} value={doctorTemplateKey} onChange={setDoctorTemplateKey} defaultKey="profile_sent_doctor" renderVars={activeRender?.vars ?? {}} label="Doctor 'working opportunity' email template" flowFilter="profile_sent" audience="doctor" />
+              <TemplatePicker templates={templates} value={doctorTemplateKey} onChange={pickDoctorTemplateManually} defaultKey="profile_sent_doctor" renderVars={activeRender?.vars ?? {}} label="Doctor 'working opportunity' email template" flowFilter="profile_sent" audience="doctor" />
             </div>
             {doctorTemplateKey !== "profile_sent_doctor" && (
               <button type="button" onClick={() => { onSaveDefault("doctor", doctorTemplateKey); toast.success("Saved as your default doctor template"); }} className="text-[10px] text-sidebar-foreground/60 hover:text-sidebar-foreground hover:underline whitespace-nowrap mt-4">Save as my default</button>
@@ -2600,12 +2695,41 @@ const PREVIEW_LOGO_URL = `${import.meta.env.VITE_SUPABASE_URL}/storage/v1/object
 // Mirrors the server's FONT_STACK (Garamond) + bumped sizes so the preview
 // reads exactly like the sent email. Keep in sync with send-flow-email.
 const PREVIEW_FONT    = `Garamond, 'EB Garamond', Georgia, 'Times New Roman', serif`;
-const PREVIEW_SIGNATURE_HTML = `
+// Per-sender signature (feedback #5: "selecting the sender should insert their
+// signature"). MIRRORS the SENDERS registry + signatureHtml/signatureText in
+// supabase/functions/send-flow-email/index.ts — keep in lockstep. This is the
+// signature baked into the client-rendered html_override that ships verbatim
+// for single-hospital / hand-edited sends, so it MUST match what the server's
+// pickSender would produce for the same assigned_to.
+interface PreviewSender { first: string; last: string; title: string; phone: string; }
+const PREVIEW_SENDERS: Record<string, PreviewSender> = {
+  "rodaina@allocationassist.com":        { first: "Rodaina", last: "Thabit",  title: "Hospital Introduction Officer", phone: "" },
+  "mohamed.othman@allocationassist.com": { first: "Mohamed", last: "Othman",  title: "Hospital Introduction Officer", phone: "" },
+  "sohaila@allocationassist.com":        { first: "Sohaila", last: "Mohamed", title: "Hospital Introduction Officer", phone: "" },
+  "ishak@allocationassist.com":          { first: "Ishak",   last: "Boulaat", title: "Hospital Introduction Officer", phone: "" },
+  "ammar@allocationassist.com":          { first: "Ammar",   last: "",        title: "Founder",                       phone: "" },
+  // Generic company sender — signs off as the team (server: hello@ → team).
+  "hello@allocationassist.com":          { first: "The Allocation Assist", last: "team", title: "", phone: "" },
+};
+/** Resolve a sender email → signature name/title/phone. Unknown/empty falls
+ *  back to the generic Allocation Assist team, matching server pickSender(). */
+function previewSenderProfile(email: string | null | undefined): PreviewSender {
+  const key = (email ?? "").trim().toLowerCase();
+  return PREVIEW_SENDERS[key] ?? { first: "The Allocation Assist", last: "team", title: "", phone: "" };
+}
+function previewSignatureHtml(first: string, last: string, title: string, phone: string): string {
+  const fullName = [first, last].filter(Boolean).join(" ") || "Allocation Assist";
+  const teal     = `color:#14b8a6;font-weight:700;font-size:16px;margin:0 0 2px;line-height:1.45;font-family:${PREVIEW_FONT};`;
+  const grey     = `color:#475569;font-size:15px;margin:6px 0 2px;line-height:1.45;font-family:${PREVIEW_FONT};`;
+  const linkLine = `font-size:15px;margin:2px 0 16px;line-height:1.45;font-family:${PREVIEW_FONT};`;
+  return `
 <p style="margin:14px 0 0;font-family:${PREVIEW_FONT};font-size:16px;color:#1a2332;line-height:1.45;">&nbsp;</p>
-<p style="color:#14b8a6;font-weight:700;font-size:16px;margin:0 0 2px;line-height:1.45;font-family:${PREVIEW_FONT};">Warmest Regards,</p>
-<p style="color:#14b8a6;font-weight:700;font-size:16px;margin:0 0 2px;line-height:1.45;font-family:${PREVIEW_FONT};">The Allocation Assist team</p>
-<p style="color:#475569;font-size:15px;margin:6px 0 2px;line-height:1.45;font-family:${PREVIEW_FONT};"><span style="color:#14b8a6;">&#x1F4CD;</span> Jumeirah Lakes Towers, Dubai, UAE</p>
-<p style="font-size:15px;margin:2px 0 16px;line-height:1.45;font-family:${PREVIEW_FONT};"><a href="https://www.allocationassist.com" style="color:#1d4ed8;text-decoration:underline;">www.allocationassist.com</a></p>
+<p style="${teal}">Warmest Regards,</p>
+<p style="${teal}">${escPreview(fullName)}</p>
+${title ? `<p style="${teal}">${escPreview(title)}</p>` : ""}
+${phone ? `<p style="${teal}">${escPreview(phone)}</p>` : ""}
+<p style="${grey}"><span style="color:#14b8a6;">&#x1F4CD;</span> Jumeirah Lakes Towers, Dubai, UAE</p>
+<p style="${linkLine}"><a href="https://www.allocationassist.com" style="color:#1d4ed8;text-decoration:underline;">www.allocationassist.com</a></p>
 <table role="presentation" cellpadding="0" cellspacing="0" style="border-collapse:collapse;margin:8px 0 0;">
   <tr>
     <td style="padding:0;">
@@ -2613,15 +2737,26 @@ const PREVIEW_SIGNATURE_HTML = `
     </td>
   </tr>
 </table>`;
-const PREVIEW_SIGNATURE_TEXT = `
-
-Warmest Regards,
-The Allocation Assist team
-
-Jumeirah Lakes Towers, Dubai, UAE
-www.allocationassist.com
-
-`;
+}
+function previewSignatureText(first: string, last: string, title: string, phone: string): string {
+  const fullName = [first, last].filter(Boolean).join(" ") || "Allocation Assist";
+  return ["", "", "Warmest Regards,", fullName, title || "", phone || "",
+    "Jumeirah Lakes Towers, Dubai, UAE", "www.allocationassist.com", "", ""].join("\n");
+}
+/** Sender-aware signature for a From email — used by the preview AND the
+ *  verbatim html_override so the sign-off matches the picked sender. */
+function previewSignatureHtmlFor(email: string | null | undefined): string {
+  const p = previewSenderProfile(email);
+  return previewSignatureHtml(p.first, p.last, p.title, p.phone);
+}
+function previewSignatureTextFor(email: string | null | undefined): string {
+  const p = previewSenderProfile(email);
+  return previewSignatureText(p.first, p.last, p.title, p.phone);
+}
+// Generic team default — used by the step 1/2 wizard preview (before a sender
+// is picked) and anywhere a specific sender isn't in scope.
+const PREVIEW_SIGNATURE_HTML = previewSignatureHtmlFor(null);
+const PREVIEW_SIGNATURE_TEXT = previewSignatureTextFor(null);
 
 function escPreview(s: string): string {
   return s.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;").replace(/"/g, "&quot;").replace(/'/g, "&#39;");
