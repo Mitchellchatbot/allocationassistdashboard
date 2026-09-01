@@ -84,12 +84,22 @@ function linkImageSrc(html: string): string {
   return "";
 }
 
-/** Decode the handful of HTML entities that show up in URL attributes. */
+/** Decode HTML entities that show up in URL attributes and meta text: the
+ *  common named ones, plus ALL numeric character references — decimal (&#39;)
+ *  and hex (&#x27;) — so nothing like "King&#x27;s" leaks into the email. */
 function decodeEntities(s: string): string {
   return s
-    .replace(/&amp;/g, "&").replace(/&#38;/g, "&")
-    .replace(/&#x2F;/gi, "/").replace(/&#47;/g, "/")
-    .replace(/&quot;/g, '"').replace(/&#39;/g, "'");
+    // Numeric refs first (covers &#38; &#39; &#x2F; &#x27; …).
+    .replace(/&#x([0-9a-f]+);/gi, (_, h) => safeFromCode(parseInt(h, 16)))
+    .replace(/&#(\d+);/g, (_, d) => safeFromCode(parseInt(d, 10)))
+    // Named refs (do &amp; last so it can't re-introduce an entity).
+    .replace(/&quot;/g, '"').replace(/&apos;/g, "'")
+    .replace(/&lt;/g, "<").replace(/&gt;/g, ">")
+    .replace(/&nbsp;/g, " ").replace(/&amp;/g, "&");
+}
+function safeFromCode(cp: number): string {
+  if (!Number.isFinite(cp) || cp <= 0 || cp > 0x10ffff) return "";
+  try { return String.fromCodePoint(cp); } catch { return ""; }
 }
 
 /** Resolve a possibly-relative image URL against the page it came from. */
@@ -177,6 +187,36 @@ serve(async (req) => {
   const { data: hospitals, error: hErr } = await supabase
     .from("hospitals").select("id, name, website, image_url, description");
   if (hErr) return json({ ok: false, error: `hospitals read failed: ${hErr.message}` }, 500);
+
+  // ── fix_encoded mode: repair descriptions that carry a leaked HTML entity
+  //    (e.g. "King&#x27;s") by re-decoding IN PLACE. No website fetch, and it
+  //    only touches rows whose stored description actually changes when decoded
+  //    — so manually-curated blurbs without entities are left untouched. This
+  //    corrects rows written before decodeEntities handled hex/numeric refs.
+  if (body.fix_encoded === true) {
+    const fixes: Array<{ id: string; name: string; from: string; to: string }> = [];
+    for (const h of hospitals ?? []) {
+      const cur = String(h.description ?? "");
+      if (!cur.includes("&#") && !/&(amp|quot|apos|lt|gt|nbsp);/i.test(cur)) continue;
+      const decoded = decodeEntities(cur).replace(/\s+/g, " ").trim();
+      if (decoded && decoded !== cur) fixes.push({ id: String(h.id), name: String(h.name ?? ""), from: cur, to: decoded });
+    }
+    let fixed = 0;
+    const failures: Array<{ name: string; error: string }> = [];
+    if (apply) {
+      for (const f of fixes) {
+        const { error } = await supabase.from("hospitals")
+          .update({ description: f.to, updated_at: new Date().toISOString() }).eq("id", f.id);
+        if (error) failures.push({ name: f.name, error: error.message });
+        else fixed++;
+      }
+    }
+    return json({
+      ok: true, dry_run: !apply, mode: "fix_encoded",
+      summary: { would_fix: fixes.length, ...(apply ? { fixed, failed: failures.length } : {}) },
+      fixes, ...(apply && failures.length ? { failures } : {}),
+    });
+  }
 
   const hasImg  = (h: Record<string, unknown>) => String(h.image_url ?? "").trim().length > 0;
   const hasDesc = (h: Record<string, unknown>) => String(h.description ?? "").trim().length > 0;
