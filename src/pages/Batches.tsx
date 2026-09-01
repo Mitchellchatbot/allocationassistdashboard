@@ -38,6 +38,8 @@ import { ProfileSubTabs } from "@/components/ProfileSubTabs";
 import { CcBccPicker, makeHospitalFlag } from "@/components/automations/CcBccPicker";
 import { AttachmentsPicker } from "@/components/automations/AttachmentsPicker";
 import { HospitalRecipientsPanel } from "@/components/automations/HospitalRecipientsPanel";
+import { SendProfileDialog } from "@/components/automations/SendProfileDialog";
+import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger, DropdownMenuSeparator } from "@/components/ui/dropdown-menu";
 import { AA_SENDERS, findSenderByEmail } from "@/lib/hi-team";
 import type { EmailAttachment } from "@/lib/email-attachments";
 import { normCountry, countryFilterOptions } from "@/lib/normalize-country";
@@ -80,6 +82,10 @@ export function BatchesPanel({ query = "" }: { query?: string } = {}) {
   // "One-off send" button presets it to one_off so the unified dialog shows the
   // doctor + hospital pickers straight away (absorbs the old OneOffBatchDialog).
   const [newBatchKind, setNewBatchKind] = useState<BatchKind>("daily_duo");
+  // Personalized send (single doctor → matched hospitals) launched from the same
+  // send menu as the batch sends — team feedback #8: "add the Personalized Send
+  // option under the Batch Send dropdown menu".
+  const [personalizedOpen, setPersonalizedOpen] = useState(false);
 
   // Deep-link: arriving from Profile Sent → "Batch send" (?compose=oneoff) opens
   // the one-off (bulk) composer straight away, so bulk-sending doctors is one
@@ -131,12 +137,29 @@ export function BatchesPanel({ query = "" }: { query?: string } = {}) {
             <Badge variant="outline" className="text-[10px] bg-slate-50">
               {eligibleRecipients} hospital{eligibleRecipients === 1 ? "" : "s"} with recruiter email
             </Badge>
-            <Button size="sm" variant="outline" onClick={() => { setNewBatchKind("one_off"); setDialogTarget("new"); }}>
-              <Send className="h-3.5 w-3.5 mr-1.5" /> One-off send
-            </Button>
-            <Button size="sm" onClick={() => { setNewBatchKind("daily_duo"); setDialogTarget("new"); }}>
-              <Plus className="h-3.5 w-3.5 mr-1.5" /> New batch
-            </Button>
+            <DropdownMenu>
+              <DropdownMenuTrigger asChild>
+                <Button size="sm">
+                  <Plus className="h-3.5 w-3.5 mr-1.5" /> New send
+                  <ChevronDown className="h-3.5 w-3.5 ml-1.5 opacity-80" />
+                </Button>
+              </DropdownMenuTrigger>
+              <DropdownMenuContent align="end" className="w-64">
+                <DropdownMenuItem onSelect={() => setPersonalizedOpen(true)} className="flex flex-col items-start gap-0.5 py-2">
+                  <span className="flex items-center gap-2 font-medium"><UserSquare className="h-3.5 w-3.5 text-teal-600" /> Personalized send</span>
+                  <span className="text-[11px] text-muted-foreground pl-5">One doctor → matched hospitals, tailored per hospital.</span>
+                </DropdownMenuItem>
+                <DropdownMenuSeparator />
+                <DropdownMenuItem onSelect={() => { setNewBatchKind("daily_duo"); setDialogTarget("new"); }} className="flex flex-col items-start gap-0.5 py-2">
+                  <span className="flex items-center gap-2 font-medium"><Plus className="h-3.5 w-3.5 text-indigo-600" /> New batch</span>
+                  <span className="text-[11px] text-muted-foreground pl-5">Daily / Tuesday / specialty blast to all hospital recruiters.</span>
+                </DropdownMenuItem>
+                <DropdownMenuItem onSelect={() => { setNewBatchKind("one_off"); setDialogTarget("new"); }} className="flex flex-col items-start gap-0.5 py-2">
+                  <span className="flex items-center gap-2 font-medium"><Send className="h-3.5 w-3.5 text-amber-600" /> One-off send</span>
+                  <span className="text-[11px] text-muted-foreground pl-5">Ad-hoc send to a custom recipient list you choose.</span>
+                </DropdownMenuItem>
+              </DropdownMenuContent>
+            </DropdownMenu>
           </div>
         </div>
 
@@ -190,7 +213,40 @@ export function BatchesPanel({ query = "" }: { query?: string } = {}) {
         initialKind={newBatchKind}
         suggestedSpecialty={rotation?.queue?.length ? rotation.queue[rotation.effective_cursor_index] ?? null : null}
       />
+
+      <SendProfileDialog open={personalizedOpen} onClose={() => setPersonalizedOpen(false)} />
     </>
+  );
+}
+
+/**
+ * Self-contained batch / bulk composer — the same `BatchDialog` the Batch Sends
+ * tab drives, but wrapping its own state + data so it can be dropped anywhere
+ * (e.g. the Mail page's Compose chooser) without navigating away. `initialKind`
+ * decides which composer it opens on: "one_off" = the bulk one-off composer,
+ * anything else = a scheduled batch (daily_duo etc.).
+ */
+export function BatchComposeDialog({ open, onClose, initialKind = "daily_duo" }: {
+  open: boolean;
+  onClose: () => void;
+  initialKind?: BatchKind;
+}) {
+  const { data: batches = [] } = useScheduledBatches();
+  const { data: rotation } = useSpecialtyRotation();
+  // "new" while open → the create-then-pick flow; null → closed.
+  const [target, setTarget] = useState<"new" | string | null>(open ? "new" : null);
+
+  useEffect(() => { setTarget(open ? "new" : null); }, [open]);
+
+  if (!open) return null;
+  return (
+    <BatchDialog
+      target={target}
+      onTargetChange={(t) => { setTarget(t); if (t === null) onClose(); }}
+      batches={batches}
+      initialKind={initialKind}
+      suggestedSpecialty={rotation?.queue?.length ? rotation.queue[rotation.effective_cursor_index] ?? null : null}
+    />
   );
 }
 
@@ -494,6 +550,30 @@ function SpecialtyRotationCard({ rotation }: { rotation: ReturnType<typeof useSp
     return { groups, unmapped, unmappedTop };
   }, [zoho]);
 
+  // Full picker list = the Zoho-stocked buckets (most-populated first) PLUS
+  // every remaining canonical specialty from the AA website list (shown with a
+  // 0-doctor badge). Team feedback #19: "ensure that ALL specialities/categories
+  // are searchable under Speciality of the Day" — previously only specialties
+  // that already had a Zoho doctor appeared, so empty-but-valid specialties
+  // couldn't be added to the rotation.
+  const allPickerGroups = useMemoReact(() => {
+    const present = new Set(zohoSpecialties.groups.map(g => g.name.toLowerCase()));
+    const extras = listCanonicalSpecialties()
+      .filter(name => !present.has(name.toLowerCase()))
+      .map(name => ({ name, doctorCount: 0, sources: [] as Array<{ raw: string; count: number }> }));
+    return [...zohoSpecialties.groups, ...extras];
+  }, [zohoSpecialties.groups]);
+
+  const [groupSearch, setGroupSearch] = useState("");
+  const filteredPickerGroups = useMemoReact(() => {
+    const t = groupSearch.trim().toLowerCase();
+    if (!t) return allPickerGroups;
+    return allPickerGroups.filter(g =>
+      g.name.toLowerCase().includes(t) ||
+      g.sources.some(s => s.raw.toLowerCase().includes(t)),
+    );
+  }, [allPickerGroups, groupSearch]);
+
   // Today's-pick ranking — re-scoring the full rankable roster is expensive,
   // so memoize on the exact inputs the computation reads (queue position +
   // roster + specialty groups). Output/order identical to the inline IIFE.
@@ -633,13 +713,25 @@ function SpecialtyRotationCard({ rotation }: { rotation: ReturnType<typeof useSp
                 placeholder={`Cardiology\nPediatrics\nUrology\nDermatology\n...`}
               />
             ) : (
+              <div>
+              <div className="relative mb-2">
+                <Search className="absolute left-2.5 top-1/2 -translate-y-1/2 h-3.5 w-3.5 text-slate-400" />
+                <Input
+                  value={groupSearch}
+                  onChange={e => setGroupSearch(e.target.value)}
+                  placeholder={`Search all ${allPickerGroups.length} specialties…`}
+                  className="h-8 pl-8 text-[12px]"
+                />
+              </div>
               <div className="rounded-md border max-h-[420px] overflow-y-auto divide-y bg-white">
-                {zohoSpecialties.groups.length === 0 && (
+                {filteredPickerGroups.length === 0 && (
                   <div className="px-3 py-6 text-center text-[11px] text-muted-foreground italic">
-                    No Zoho data loaded yet. Use the Raw text mode to type a list manually.
+                    {groupSearch.trim()
+                      ? `No specialty matches “${groupSearch.trim()}”.`
+                      : "No specialties available. Use the Raw text mode to type a list manually."}
                   </div>
                 )}
-                {zohoSpecialties.groups.map(g => {
+                {filteredPickerGroups.map(g => {
                   const checked  = selectedGroups.has(g.name.toLowerCase());
                   const expanded = expandedGroup === g.name;
                   return (
@@ -730,6 +822,7 @@ function SpecialtyRotationCard({ rotation }: { rotation: ReturnType<typeof useSp
                     )}
                   </div>
                 )}
+              </div>
               </div>
             )}
 
@@ -2246,9 +2339,19 @@ function BatchDialog({ target, onTargetChange, batches, initialKind, suggestedSp
                     try { await ensureCardImages(); } catch { /* server renders its own card */ }
                     const p = await previewMut.mutateAsync(batch.status === "sent" ? { batchId: batch.id, force: true } : batch.id);
                     setEmailPreview({ subject: p.subject, html: p.html, text: p.text, bcc_count: p.bcc_count, doctor_email: p.doctor_email, per_doctor: p.per_doctor ?? [], doctor_emails: p.doctor_emails ?? [], test_mode: p.test_mode, test_recipient: p.test_recipient });
-                    // Seed the exclusion list from the batch so a previously-saved
-                    // (e.g. scheduled) exclusion shows pre-unchecked.
-                    setExcludedEmails(batch.excluded_emails ?? []);
+                    // Seed the exclusion list. Team feedback (#12): for the
+                    // recurring kinds (Daily Duo / Top 15 / Specialty of the day)
+                    // hospital emails must NOT be auto-selected — the team adds
+                    // them by hand from the left rail. So we start those kinds
+                    // with EVERY eligible recruiter email excluded (panel empty);
+                    // "Add all in {country}" clears it in one click. A saved
+                    // exclusion on the batch still wins if present. one_off keeps
+                    // its explicit recipient list pre-selected.
+                    if (batch.kind !== "one_off" && (batch.excluded_emails ?? []).length === 0) {
+                      setExcludedEmails(eligibleHospitals.map(h => h.primary_recruiter_email!.trim().toLowerCase()));
+                    } else {
+                      setExcludedEmails(batch.excluded_emails ?? []);
+                    }
                     setPreviewGreetId(null);
                     setBatchCc([]); setBatchBcc([]);
                     setEditSubject(p.subject);
@@ -2318,6 +2421,29 @@ function BatchDialog({ target, onTargetChange, batches, initialKind, suggestedSp
             </div>
             {batch && (batch.attachments?.length ?? 0) > 0 && <div>{batch.attachments.length} attachment{batch.attachments.length === 1 ? "" : "s"} ride this send.</div>}
           </div>
+
+          {/* #12: recurring kinds start with NO hospital pre-selected — the team
+              adds them by hand. These shortcuts flip the whole eligible pool on
+              or off in one click without hunting through "Add hospital". */}
+          {batch && batch.kind !== "one_off" && eligibleHospitals.length > 0 && (
+            <div className="flex flex-wrap items-center gap-1.5 rounded-lg border border-sidebar-border/40 bg-white/95 p-2 text-[11px] text-slate-600 shadow-sm">
+              <span className="font-medium">Hospital emails are not auto-selected.</span>
+              <button
+                type="button"
+                className="rounded border border-sidebar-border/60 bg-white px-2 py-0.5 font-medium text-slate-700 hover:bg-slate-50"
+                onClick={() => setExcludedEmails([])}
+              >
+                Add all{batch.country ? ` in ${batch.country}` : ""} ({eligibleHospitals.length})
+              </button>
+              <button
+                type="button"
+                className="rounded border border-sidebar-border/60 bg-white px-2 py-0.5 font-medium text-slate-700 hover:bg-slate-50"
+                onClick={() => setExcludedEmails(eligibleHospitals.map(h => h.primary_recruiter_email!.trim().toLowerCase()))}
+              >
+                Clear all
+              </button>
+            </div>
+          )}
 
           {/* Recipient hospitals — the SAME shared panel as the personalized composer. */}
           <HospitalRecipientsPanel
