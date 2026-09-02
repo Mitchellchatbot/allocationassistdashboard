@@ -2645,11 +2645,11 @@ function PreviewConfirm({
             <Clock className="h-4 w-4" />
           </Button>
         </PopoverTrigger>
-        <PopoverContent align="end" side="top" sideOffset={8} className="w-[300px] p-3 space-y-2 text-slate-700">
+        <PopoverContent align="end" side="top" sideOffset={8} className="w-[340px] p-3 space-y-2 text-slate-700">
           <div className="flex items-center gap-1.5 text-[11px] font-medium text-teal-700"><Clock className="h-3.5 w-3.5" /> Schedule this send</div>
-          <div className="flex items-end gap-2 flex-wrap">
-            <div className="space-y-1"><span className="text-[10px] uppercase tracking-wider text-muted-foreground">Date</span><Input type="date" value={schedDate} onChange={e => setSchedDate(e.target.value)} className="h-8 text-[12px] w-[140px] bg-white text-slate-800" /></div>
-            <div className="space-y-1"><span className="text-[10px] uppercase tracking-wider text-muted-foreground">Time (your local time)</span><Input type="time" value={schedTime} onChange={e => setSchedTime(e.target.value)} className="h-8 text-[12px] w-[110px] bg-white text-slate-800" /></div>
+          <div className="flex items-end gap-2">
+            <div className="space-y-1 flex-1 min-w-0"><span className="text-[10px] uppercase tracking-wider text-muted-foreground">Date</span><Input type="date" value={schedDate} onChange={e => setSchedDate(e.target.value)} className="h-8 text-[12px] w-full bg-white text-slate-800" /></div>
+            <div className="space-y-1 flex-1 min-w-0"><span className="text-[10px] uppercase tracking-wider text-muted-foreground">Time (local)</span><Input type="time" value={schedTime} onChange={e => setSchedTime(e.target.value)} className="h-8 text-[12px] w-full bg-white text-slate-800" /></div>
           </div>
           <div>{schedValid ? <GulfClock when={schedWhen} /> : <span className="text-[10px] text-rose-600">Enter a valid date &amp; time</span>}</div>
           <p className="text-[10px] text-teal-700">Lands in the scheduled queue and sends automatically at the time you picked (your local time, checked every ~5 min). Manage it any time under <strong>Batches → Scheduled profile sends</strong>.</p>
