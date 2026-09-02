@@ -825,9 +825,11 @@ export function EditableEmailPreview({
                     style={{ left: c.cx, top: c.cy, cursor: c.cursor }}
                   />
                 ))}
-                {/* Apply / cancel the crop. */}
+                {/* Apply / cancel the crop. Drop below the image when it's near
+                    the top of the scroll area so the toolbar isn't clipped. */}
                 <div
-                  className="pointer-events-auto absolute -top-9 left-0 z-30 flex items-center gap-0.5 rounded-md border border-slate-200 bg-white px-1 py-0.5 shadow-md"
+                  className="pointer-events-auto absolute left-0 z-30 flex items-center gap-0.5 rounded-md border border-slate-200 bg-white px-1 py-0.5 shadow-md"
+                  style={{ top: imgBox.top < 40 ? imgBox.h + 6 : -36 }}
                   onMouseDown={(e) => e.preventDefault()}
                 >
                   <button type="button" title="Apply crop" onClick={applyCrop} className="rounded p-1 text-teal-600 hover:bg-teal-50"><Check className="h-3.5 w-3.5" /></button>
@@ -853,10 +855,14 @@ export function EditableEmailPreview({
                     style={{ ...c.style, cursor: c.cursor }}
                   />
                 ))}
-                {/* Align + crop + delete toolbar — only for a SELECTED (clicked) image. */}
+                {/* Align + crop + delete toolbar — only for a SELECTED (clicked) image.
+                    Sits above the image, but for an image near the top of the
+                    scroll area (e.g. the WO hero) that would be clipped by the
+                    container's overflow — so drop it BELOW the image instead. */}
                 {pinned && (
                   <div
-                    className="pointer-events-auto absolute -top-9 left-0 z-30 flex items-center gap-0.5 rounded-md border border-slate-200 bg-white px-1 py-0.5 shadow-md"
+                    className="pointer-events-auto absolute left-0 z-30 flex items-center gap-0.5 rounded-md border border-slate-200 bg-white px-1 py-0.5 shadow-md"
+                    style={{ top: imgBox.top < 40 ? imgBox.h + 6 : -36 }}
                     onMouseDown={(e) => e.preventDefault()}   // keep the image selected/focused
                   >
                     <button type="button" title="Align left"  onClick={() => activeImgRef.current && alignImage(activeImgRef.current, "left")}   className="rounded p-1 text-slate-600 hover:bg-slate-100"><AlignLeft className="h-3.5 w-3.5" /></button>
