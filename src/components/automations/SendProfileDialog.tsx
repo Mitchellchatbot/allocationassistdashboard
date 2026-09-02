@@ -676,7 +676,7 @@ function SendProfileDialogBody({ onClose, initial }: { onClose: () => void; init
         // One scheduled row per doctor (each row supports hospital_ids[] +
         // per-doctor stage_overrides / doctor_email). Global fields repeat per row.
         for (const doctor of selectedDoctors) {
-          const { doctorEmailToUse, hospitalOverrides, doctorOverride, doctorAttach } = dataFor(doctor);
+          const { doctorEmailToUse, hospitalOverrides, doctorOverride, cardImageUrl, doctorAttach } = dataFor(doctor);
           // A scheduled row is ONE per doctor across all its hospitals, so it can
           // carry a single hospital-attachment list. Use this doctor's first
           // hospital's combo (exact for a single-hospital schedule; multi-hospital
@@ -704,6 +704,10 @@ function SendProfileDialogBody({ onClose, initial }: { onClose: () => void; init
             template_overrides: templateOverridesPayload,
             attachments:        hospitalAttach.map(a => ({ filename: a.filename, path: a.path })),
             attachments_doctor: doctorAttach.map(a => ({ filename: a.filename, path: a.path })),
+            // Snapshot the captured card PNG so the fired email embeds the photo
+            // (matches an immediate send). The image lives in the persistent
+            // email-card-images bucket, so its URL is still valid at fire time.
+            card_image_url:    cardImageUrl,
             scheduled_for:     gulf.date,
             scheduled_at_time: gulf.time,
             timezone:          "Asia/Dubai",

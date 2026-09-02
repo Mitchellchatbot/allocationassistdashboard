@@ -1083,7 +1083,7 @@ interface ProfileSendRow {
   custom_message: string | null; bcc_override: string[] | null; cc_override: string[] | null;
   stage_overrides: Record<string, unknown> | null; template_overrides: Record<string, string> | null;
   attachments: unknown; attachments_doctor: unknown; scheduled_for: string; scheduled_at_time: string | null; created_by: string | null;
-  assigned_to: string | null;
+  assigned_to: string | null; card_image_url: string | null;
 }
 
 /** Fire scheduled Send-Profile campaigns (Amir #5). Replays exactly what
@@ -1142,6 +1142,10 @@ async function runScheduledProfileSweep(
             ...(s.template_overrides ? { template_overrides: s.template_overrides } : {}),
             ...(Array.isArray(s.attachments) && s.attachments.length ? { attachments: s.attachments } : {}),
             ...(Array.isArray(s.attachments_doctor) && s.attachments_doctor.length ? { attachments_doctor: s.attachments_doctor } : {}),
+            // Captured profile-card PNG snapshotted at schedule time → the fired
+            // email embeds the photo card (send-flow-email reads
+            // metadata.doctor_card_image_url). Absent ⇒ server HTML-card fallback.
+            ...(s.card_image_url ? { doctor_card_image_url: s.card_image_url } : {}),
           },
         }).select("id").single();
         if (runErr || !runRow) { failed++; lastErr = runErr?.message ?? "run insert failed"; continue; }

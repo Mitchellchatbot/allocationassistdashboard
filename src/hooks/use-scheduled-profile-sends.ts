@@ -24,6 +24,11 @@ export interface ScheduledProfileSend {
   template_overrides: Record<string, string> | null;
   attachments:        Array<{ filename: string; path: string }>;
   attachments_doctor: Array<{ filename: string; path: string }>;
+  /** Captured profile-card PNG URL (email-card-images bucket), snapshotted at
+   *  schedule time. The scheduler stamps it onto the run as
+   *  metadata.doctor_card_image_url so the fired email embeds the photo card —
+   *  matching an immediate Send Profile. Empty/null ⇒ server HTML-card fallback. */
+  card_image_url:     string | null;
   /** Explicit sender override chosen in the dialog. When set, the scheduler
    *  stamps it onto the run's assigned_to so the From line matches what the
    *  dispatcher picked; null → the hospital-owner default applies. */
@@ -52,6 +57,7 @@ export interface ScheduleProfileSendInput {
   template_overrides?: Record<string, string> | null;
   attachments?:       Array<{ filename: string; path: string }>;
   attachments_doctor?: Array<{ filename: string; path: string }>;
+  card_image_url?:    string | null;
   assigned_to?:       string | null;
   scheduled_for:      string;
   scheduled_at_time?: string | null;
@@ -94,6 +100,7 @@ export function useScheduleProfileSend() {
           ...input,
           attachments:        input.attachments ?? [],
           attachments_doctor: input.attachments_doctor ?? [],
+          card_image_url:     input.card_image_url ?? null,
           assigned_to:        input.assigned_to ?? null,
           recurrence:  input.recurrence ?? { freq: "none" },
           timezone:    input.timezone ?? "Asia/Dubai",
