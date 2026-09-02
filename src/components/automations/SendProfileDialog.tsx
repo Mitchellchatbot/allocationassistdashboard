@@ -1565,7 +1565,10 @@ function PreviewConfirm({
     setDoctorAttByDoctor(prev => ({ ...prev, [id]: typeof next === "function" ? next(prev[id] ?? []) : next }));
   };
   // Send now vs schedule for later (Amir #5).
-  const [sendMode, setSendMode] = useState<"now" | "later">("now");
+  // Scheduling is picked in a small popover anchored to the footer clock — the
+  // footer buttons never swap around; opening the popover just reveals the
+  // date/time pickers right there, and confirming inside it fires submit("later").
+  const [schedOpen, setSchedOpen] = useState(false);
   const [schedDate, setSchedDate] = useState<string>(() => localDateInDays(1));
   const [schedTime, setSchedTime] = useState<string>("09:00");
   // Who's on the From line. Allocation Assist is a referral agency — it isn't
@@ -1843,7 +1846,7 @@ function PreviewConfirm({
   // Single submit path shared by the footer button and the contextual
   // "Schedule" button inside the schedule card — so the schedule action is
   // reachable right where the team picks the time, not only at the far bottom.
-  const submit = () => {
+  const submit = (mode: "now" | "later" = "now") => {
     if (hasUnfilled) {
       toast.error("Some variables are still empty — fill them (or edit the email) before sending.");
       return;
@@ -1910,7 +1913,7 @@ function PreviewConfirm({
         doctor:   pruneEmptyAttachments(doctorAttByDoctor),
       },
       templateKeys: { hospital: hospitalTemplateKey, doctor: doctorTemplateKey },
-      schedule: sendMode === "later" ? { date: schedDate, time: schedTime } : undefined,
+      schedule: mode === "later" ? { date: schedDate, time: schedTime } : undefined,
       sender: { assignedTo: senderAssignedTo },
       greeting: greetModeByHospital,
       greetNames: greetNameByHospital,
@@ -2100,20 +2103,6 @@ function PreviewConfirm({
             ? `Click into either email to tweak the wording before it sends.${multiDoctor ? " Edits are per doctor." : ""}`
             : `Each of the ${hospitals.length} hospitals gets its own personalised intro email — use the hospital tabs to preview and edit each one individually. The doctor gets one consolidated working-opportunity email.`}
       </div>
-
-      {/* Schedule details — only when "Schedule for later" is picked in the
-          footer action; the now-vs-later choice itself lives in the footer. */}
-      {sendMode === "later" && (
-        <div className="rounded-lg border border-sidebar-border/40 bg-white/95 p-2.5 space-y-2 shadow-sm text-slate-700">
-          <div className="flex items-center gap-1.5 text-[11px] font-medium text-teal-700"><Clock className="h-3.5 w-3.5" /> Schedule this send</div>
-          <div className="flex items-end gap-2 flex-wrap">
-            <div className="space-y-1"><span className="text-[10px] uppercase tracking-wider text-muted-foreground">Date</span><Input type="date" value={schedDate} onChange={e => setSchedDate(e.target.value)} className="h-8 text-[12px] w-[150px] bg-white text-slate-800" /></div>
-            <div className="space-y-1"><span className="text-[10px] uppercase tracking-wider text-muted-foreground">Time (your local time)</span><Input type="time" value={schedTime} onChange={e => setSchedTime(e.target.value)} className="h-8 text-[12px] w-[120px] bg-white text-slate-800" /></div>
-            <div className="pb-1.5">{schedValid ? <GulfClock when={schedWhen} /> : <span className="text-[10px] text-rose-600">Enter a valid date &amp; time</span>}</div>
-          </div>
-          <p className="text-[10px] text-teal-700">Lands in the scheduled queue and sends automatically at the time you picked (your local time, checked every ~5 min). Manage it any time under <strong>Batches → Scheduled profile sends</strong>.</p>
-        </div>
-      )}
 
       {hospitals.some(h => !h.primary_recruiter_email) && (
         <div className="rounded-md border border-amber-200 bg-amber-50 p-2 text-[11px] text-amber-900">
@@ -2639,35 +2628,39 @@ function PreviewConfirm({
     },
   ];
 
-  // The now-vs-schedule choice IS the send action (no separate Queue button):
-  // in the default state, "Schedule for later" flips to scheduling mode
-  // (revealing the date/time card) and "Send now" fires immediately; once
-  // scheduling, the primary becomes "Schedule N sends" with a way back.
+  // Icon-only actions that never move: clock opens a schedule popover right
+  // above the button (date + time + confirm, all in place), paper-plane sends
+  // now. No mode-switch, no buttons swapping sides.
   const totalSends = doctors.length * hospitals.length;
   const sendCount = `${totalSends} send${totalSends === 1 ? "" : "s"}`;
-  // Icon-only actions: clock = schedule, paper-plane = send now.
-  const footer = sendMode === "later" ? (
+  const footer = (
     <>
       <Button variant="outline" onClick={onBack} disabled={submitting} className="mr-auto">
         <ChevronLeft className="h-3.5 w-3.5 mr-1" /> Back
       </Button>
-      <Button variant="ghost" size="icon" onClick={() => setSendMode("now")} disabled={submitting} className="text-slate-600 hover:text-slate-800" title={`Send now instead · ${sendCount}`}>
-        <Send className="h-4 w-4" />
-      </Button>
-      <Button size="icon" onClick={submit} disabled={submitting || anyDraft || hasUnfilled || !schedValid}
-        title={anyDraft ? "Pick a finished template or edit the copy first." : hasUnfilled ? "Fill the blank variables below (or edit the email) before scheduling." : !schedValid ? "Enter a valid date and time first." : `Schedule ${sendCount}`}>
-        {submitting ? <Loader2 className="h-4 w-4 animate-spin" /> : <Clock className="h-4 w-4" />}
-      </Button>
-    </>
-  ) : (
-    <>
-      <Button variant="outline" onClick={onBack} disabled={submitting} className="mr-auto">
-        <ChevronLeft className="h-3.5 w-3.5 mr-1" /> Back
-      </Button>
-      <Button variant="outline" size="icon" onClick={() => setSendMode("later")} disabled={submitting} title="Schedule for later">
-        <Clock className="h-4 w-4" />
-      </Button>
-      <Button size="icon" onClick={submit} disabled={submitting || anyDraft || hasUnfilled}
+      <Popover open={schedOpen} onOpenChange={setSchedOpen}>
+        <PopoverTrigger asChild>
+          <Button variant="outline" size="icon" disabled={submitting || anyDraft || hasUnfilled}
+            title={anyDraft ? "Pick a finished template or edit the copy first." : hasUnfilled ? "Fill the blank variables below (or edit the email) before scheduling." : "Schedule for later"}>
+            <Clock className="h-4 w-4" />
+          </Button>
+        </PopoverTrigger>
+        <PopoverContent align="end" side="top" sideOffset={8} className="w-[300px] p-3 space-y-2 text-slate-700">
+          <div className="flex items-center gap-1.5 text-[11px] font-medium text-teal-700"><Clock className="h-3.5 w-3.5" /> Schedule this send</div>
+          <div className="flex items-end gap-2 flex-wrap">
+            <div className="space-y-1"><span className="text-[10px] uppercase tracking-wider text-muted-foreground">Date</span><Input type="date" value={schedDate} onChange={e => setSchedDate(e.target.value)} className="h-8 text-[12px] w-[140px] bg-white text-slate-800" /></div>
+            <div className="space-y-1"><span className="text-[10px] uppercase tracking-wider text-muted-foreground">Time (your local time)</span><Input type="time" value={schedTime} onChange={e => setSchedTime(e.target.value)} className="h-8 text-[12px] w-[110px] bg-white text-slate-800" /></div>
+          </div>
+          <div>{schedValid ? <GulfClock when={schedWhen} /> : <span className="text-[10px] text-rose-600">Enter a valid date &amp; time</span>}</div>
+          <p className="text-[10px] text-teal-700">Lands in the scheduled queue and sends automatically at the time you picked (your local time, checked every ~5 min). Manage it any time under <strong>Batches → Scheduled profile sends</strong>.</p>
+          <Button size="sm" className="w-full" disabled={submitting || anyDraft || hasUnfilled || !schedValid}
+            onClick={() => { setSchedOpen(false); submit("later"); }}
+            title={!schedValid ? "Enter a valid date and time first." : `Schedule ${sendCount}`}>
+            {submitting ? <Loader2 className="h-4 w-4 animate-spin mr-1" /> : <Clock className="h-3.5 w-3.5 mr-1" />} Schedule {sendCount}
+          </Button>
+        </PopoverContent>
+      </Popover>
+      <Button size="icon" onClick={() => submit("now")} disabled={submitting || anyDraft || hasUnfilled}
         title={anyDraft ? "Pick a finished template or edit the copy first — the selected template still has placeholder text." : hasUnfilled ? "Fill the blank variables below (or edit the email) before sending." : `Send now · ${sendCount}`}>
         {submitting ? <Loader2 className="h-4 w-4 animate-spin" /> : <Send className="h-4 w-4" />}
       </Button>
