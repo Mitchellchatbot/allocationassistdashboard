@@ -6,7 +6,7 @@ import {
   Loader2, Image as ImageIcon, UserSquare, Trash2,
 } from "lucide-react";
 import { useSentHistory, SENT_KIND_LABEL, type SentRecord } from "@/hooks/use-sent-history";
-import { useScheduledBatches, type ScheduledBatch } from "@/hooks/use-scheduled-batches";
+import { useScheduledBatches, useBatchPreview, type ScheduledBatch, type BatchPreviewResult } from "@/hooks/use-scheduled-batches";
 import { useScheduledProfileSends, useCancelScheduledProfileSend, type ScheduledProfileSend } from "@/hooks/use-scheduled-profile-sends";
 import {
   useRepliesPage, useMarkReplyRead, useMarkReplyHandled,
@@ -959,24 +959,116 @@ function ScheduledProfileReader({ send, onOpen }: { send: ScheduledProfileSend; 
   );
 }
 
+/** One viewable email inside a scheduled batch — the hospital-facing email(s)
+ *  and each optional doctor working-opportunity email. Flattened from the batch
+ *  dry-run preview so the reader can page through them with a single selector. */
+interface BatchEmailView { group: "hospital" | "doctor"; label: string; subject: string; html: string }
+
+/** Flatten a batch preview into the individual emails it will send. A simple
+ *  one-off batch is a single hospital email; Daily Duo sends one hospital email
+ *  per queued doctor; and when include_doctor_email is on, each doctor also gets
+ *  a working-opportunity email. */
+function flattenBatchPreview(p: BatchPreviewResult): BatchEmailView[] {
+  const out: BatchEmailView[] = [];
+  if (p.per_doctor && p.per_doctor.length) {
+    p.per_doctor.forEach((d, i) => out.push({ group: "hospital", label: d.name || `Hospital email ${i + 1}`, subject: d.subject, html: d.html }));
+  } else {
+    out.push({ group: "hospital", label: "Hospital email", subject: p.subject, html: p.html });
+  }
+  (p.doctor_emails ?? []).forEach((d, i) => out.push({ group: "doctor", label: d.name || `Doctor email ${i + 1}`, subject: d.subject, html: d.html }));
+  return out;
+}
+
 function ScheduledReader({ batch, onOpen }: { batch: ScheduledBatch; onOpen: () => void }) {
+  const previewMut = useBatchPreview();
+  const [emails, setEmails] = useState<BatchEmailView[] | null>(null);
+  const [active, setActive] = useState(0);
+  const [err, setErr] = useState<string | null>(null);
+  const [showDetails, setShowDetails] = useState(false);
+  const { mutateAsync } = previewMut;
+
+  // Render the ACTUAL email(s) this batch will send by asking send-batch for a
+  // dry-run — the same server renderer that fires the real send, so the team
+  // sees exactly what hospitals (and, if enabled, doctors) will receive rather
+  // than a metadata card. Re-runs when a different batch is selected.
+  useEffect(() => {
+    let alive = true;
+    setEmails(null); setErr(null); setActive(0);
+    mutateAsync({ batchId: batch.id })
+      .then(p => { if (alive) setEmails(flattenBatchPreview(p)); })
+      .catch((e: unknown) => { if (alive) setErr(e instanceof Error ? e.message : "Couldn't render this batch's email."); });
+    return () => { alive = false; };
+  }, [batch.id, mutateAsync]);
+
+  const current = emails?.[active] ?? null;
+
   return (
     <ReaderShell
-      title={SENT_KIND_LABEL[batch.kind] ?? "Scheduled send"}
+      title={current?.subject || SENT_KIND_LABEL[batch.kind] || "Scheduled send"}
       meta={<span className="flex items-center gap-2"><CalendarClock className="h-3 w-3" />Next run {fmtFull(batch.next_run_at || batch.scheduled_for)}</span>}
     >
-      <div className="mb-3"><OpenInButton label="Open in Batch Sends" onClick={onOpen} /></div>
-      <div className="divide-y divide-border/40">
-        <Row label="Kind" value={SENT_KIND_LABEL[batch.kind]} />
-        <Row label="Specialty" value={batch.specialty} />
-        <Row label="Country" value={batch.country ?? "All hospitals"} />
-        <Row label="Doctors queued" value={String(batch.doctor_ids?.length ?? 0)} />
-        <Row label="Scheduled for" value={fmtFull(batch.scheduled_for)} />
-        <Row label="Time" value={batch.scheduled_at_time ? `${batch.scheduled_at_time} ${batch.timezone ?? "Asia/Dubai"}` : null} />
-        <Row label="Recipients" value={batch.recipient_emails?.length ? batch.recipient_emails.join(", ") : null} />
-        <Row label="Doctor email" value={batch.include_doctor_email ? "Yes — doctors also emailed" : "No"} />
-        <Row label="Notes" value={batch.notes} />
+      <div className="mb-3 flex flex-wrap items-center gap-2">
+        <OpenInButton label="Open in Batch Sends" onClick={onOpen} />
+        <button
+          type="button"
+          onClick={() => setShowDetails(v => !v)}
+          className="inline-flex items-center gap-1.5 rounded-md border border-slate-200 px-2.5 py-1 text-[11px] font-medium text-slate-600 hover:bg-slate-50"
+        >
+          {showDetails ? "Hide details" : "Show details"}
+        </button>
       </div>
+
+      {/* Email selector — a batch fans out into one hospital email (or one per
+          doctor for Daily Duo) plus each optional doctor working-op email. */}
+      {emails && emails.length > 1 && (
+        <div className="mb-3 flex flex-wrap gap-1.5">
+          {emails.map((e, i) => (
+            <button
+              key={i}
+              type="button"
+              onClick={() => setActive(i)}
+              className={`inline-flex items-center gap-1.5 rounded-full border px-2.5 py-1 text-[11px] font-medium ${
+                i === active ? "border-teal-300 bg-teal-50 text-teal-700" : "border-slate-200 text-slate-600 hover:bg-slate-50"
+              }`}
+            >
+              {e.group === "doctor" ? <UserSquare className="h-3 w-3" /> : <Building2 className="h-3 w-3" />}
+              {e.label}
+            </button>
+          ))}
+        </div>
+      )}
+
+      {/* The rendered email, exactly as it will send. */}
+      {previewMut.isPending || (!emails && !err) ? (
+        <div className="flex items-center gap-2 py-8 text-[12px] text-muted-foreground">
+          <Loader2 className="h-4 w-4 animate-spin text-teal-600" /> Rendering the email…
+        </div>
+      ) : current ? (
+        <div className="aa-hscroll overflow-x-auto rounded-lg border border-border/60">
+          <div style={{ width: EMAIL_CANVAS_WIDTH }} className="px-4 py-4">
+            <DeliveredEmail html={current.html} />
+          </div>
+        </div>
+      ) : (
+        <div className="flex items-start gap-2 rounded-lg border border-dashed border-slate-200 px-4 py-6 text-[12px] text-muted-foreground">
+          <ImageIcon className="mt-0.5 h-4 w-4 shrink-0" />
+          <span>{err ?? "The email preview isn't available for this batch."} Use “Show details” below or open it in Batch Sends.</span>
+        </div>
+      )}
+
+      {showDetails && (
+        <div className="mt-4 divide-y divide-border/40">
+          <Row label="Kind" value={SENT_KIND_LABEL[batch.kind]} />
+          <Row label="Specialty" value={batch.specialty} />
+          <Row label="Country" value={batch.country ?? "All hospitals"} />
+          <Row label="Doctors queued" value={String(batch.doctor_ids?.length ?? 0)} />
+          <Row label="Scheduled for" value={fmtFull(batch.scheduled_for)} />
+          <Row label="Time" value={batch.scheduled_at_time ? `${batch.scheduled_at_time} ${batch.timezone ?? "Asia/Dubai"}` : null} />
+          <Row label="Recipients" value={batch.recipient_emails?.length ? batch.recipient_emails.join(", ") : null} />
+          <Row label="Doctor email" value={batch.include_doctor_email ? "Yes — doctors also emailed" : "No"} />
+          <Row label="Notes" value={batch.notes} />
+        </div>
+      )}
     </ReaderShell>
   );
 }
