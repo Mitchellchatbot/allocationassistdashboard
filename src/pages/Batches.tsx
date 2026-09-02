@@ -212,6 +212,7 @@ export function BatchesPanel({ query = "" }: { query?: string } = {}) {
         batches={batches}
         initialKind={newBatchKind}
         suggestedSpecialty={rotation?.queue?.length ? rotation.queue[rotation.effective_cursor_index] ?? null : null}
+        onOpenPersonalized={() => { setDialogTarget(null); setPersonalizedOpen(true); }}
       />
 
       <SendProfileDialog open={personalizedOpen} onClose={() => setPersonalizedOpen(false)} />
@@ -235,18 +236,26 @@ export function BatchComposeDialog({ open, onClose, initialKind = "daily_duo" }:
   const { data: rotation } = useSpecialtyRotation();
   // "new" while open → the create-then-pick flow; null → closed.
   const [target, setTarget] = useState<"new" | string | null>(open ? "new" : null);
+  // Personalized send reached via the Kind dropdown inside the batch dialog.
+  const [personalizedOpen, setPersonalizedOpen] = useState(false);
 
   useEffect(() => { setTarget(open ? "new" : null); }, [open]);
 
-  if (!open) return null;
+  if (!open && !personalizedOpen) return null;
   return (
-    <BatchDialog
-      target={target}
-      onTargetChange={(t) => { setTarget(t); if (t === null) onClose(); }}
-      batches={batches}
-      initialKind={initialKind}
-      suggestedSpecialty={rotation?.queue?.length ? rotation.queue[rotation.effective_cursor_index] ?? null : null}
-    />
+    <>
+      {open && (
+        <BatchDialog
+          target={target}
+          onTargetChange={(t) => { setTarget(t); if (t === null) onClose(); }}
+          batches={batches}
+          initialKind={initialKind}
+          suggestedSpecialty={rotation?.queue?.length ? rotation.queue[rotation.effective_cursor_index] ?? null : null}
+          onOpenPersonalized={() => { setTarget(null); onClose(); setPersonalizedOpen(true); }}
+        />
+      )}
+      <SendProfileDialog open={personalizedOpen} onClose={() => setPersonalizedOpen(false)} />
+    </>
   );
 }
 
@@ -1197,12 +1206,16 @@ function OneOffCreateFields({
 // create mode; on submit, we swap the body in place to the doctor picker
 // using the newly-created row's id — no close + reopen popup hop.
 
-function BatchDialog({ target, onTargetChange, batches, initialKind, suggestedSpecialty }: {
+function BatchDialog({ target, onTargetChange, batches, initialKind, suggestedSpecialty, onOpenPersonalized }: {
   target: "new" | string | null;
   onTargetChange: (next: "new" | string | null) => void;
   batches: ScheduledBatch[];
   initialKind: BatchKind;
   suggestedSpecialty: string | null;
+  /** Team ask: expose "Personalized send" as a Kind here even though it's a
+   *  separate flow. Selecting it closes this dialog and opens the personalized
+   *  (1..N doctors → matched hospitals) composer instead of creating a batch. */
+  onOpenPersonalized: () => void;
 }) {
   const open = target !== null;
   const editingBatch = target && target !== "new" ? batches.find(b => b.id === target) ?? null : null;
@@ -2007,6 +2020,9 @@ function BatchDialog({ target, onTargetChange, batches, initialKind, suggestedSp
               <div className="space-y-1">
                 <Label className="text-[11px]">Kind</Label>
                 <Select value={kind} onValueChange={(v) => {
+                  // "personalized" isn't a real batch kind — it's a shortcut into
+                  // the separate personalized composer. Intercept before setKind.
+                  if (v === "personalized") { onOpenPersonalized(); return; }
                   const k = v as BatchKind;
                   setKind(k);
                   // The Subject-header selector only exists for Top 15; clear any
@@ -2019,6 +2035,7 @@ function BatchDialog({ target, onTargetChange, batches, initialKind, suggestedSp
                     <SelectItem value="tuesday_top_15">Tuesday top 15</SelectItem>
                     <SelectItem value="specialty_of_day">Specialty of the day (Wed-Fri)</SelectItem>
                     <SelectItem value="one_off">One-off (pick doctors + hospitals, send now)</SelectItem>
+                    <SelectItem value="personalized">Personalized send (1 or many doctors → matched hospitals)</SelectItem>
                   </SelectContent>
                 </Select>
               </div>
