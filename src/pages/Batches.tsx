@@ -146,8 +146,8 @@ export function BatchesPanel({ query = "" }: { query?: string } = {}) {
               </DropdownMenuTrigger>
               <DropdownMenuContent align="end" className="w-64">
                 <DropdownMenuItem onSelect={() => setPersonalizedOpen(true)} className="flex flex-col items-start gap-0.5 py-2">
-                  <span className="flex items-center gap-2 font-medium"><UserSquare className="h-3.5 w-3.5 text-teal-600" /> Personalized send</span>
-                  <span className="text-[11px] text-muted-foreground pl-5">One doctor → matched hospitals, tailored per hospital.</span>
+                  <span className="flex items-center gap-2 font-medium"><UserSquare className="h-3.5 w-3.5 text-teal-600" /> Personalized send <span className="text-[10px] font-normal text-teal-700 bg-teal-50 rounded px-1 py-px">1 or many</span></span>
+                  <span className="text-[11px] text-muted-foreground pl-5">Pick one <em>or several</em> doctors — each gets their own email, tailored per matched hospital.</span>
                 </DropdownMenuItem>
                 <DropdownMenuSeparator />
                 <DropdownMenuItem onSelect={() => { setNewBatchKind("daily_duo"); setDialogTarget("new"); }} className="flex flex-col items-start gap-0.5 py-2">
