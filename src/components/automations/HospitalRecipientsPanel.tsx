@@ -195,7 +195,10 @@ function ToField({
         {open && suggestions.length > 0 && rect && createPortal(
           <div
             className="fixed z-[9999] max-h-52 overflow-y-auto rounded-md border border-slate-200 bg-white py-1 shadow-xl"
-            style={{ left: rect.left, top: rect.top, width: rect.width }}
+            // Portalled to <body>, which Radix sets to `pointer-events: none`
+            // while a Dialog is open — restore pointer events so hover cursor
+            // and click (onMouseDown) actually register on the suggestions.
+            style={{ left: rect.left, top: rect.top, width: rect.width, pointerEvents: "auto" }}
           >
             <div className="px-2 pb-1 text-[9px] uppercase tracking-wider text-muted-foreground">Suggestions</div>
             {suggestions.map(c => (
