@@ -26,6 +26,16 @@
  *     only      — optional list of hospital ids to restrict the run to.
  *     fields    — which columns to backfill (default both). A hospital is a
  *                 candidate if ANY requested field is blank (or overwrite).
+ *     image_source — "website" (default, scrape og:image → often a LOGO) or
+ *                 "wikipedia" (the hospital's Wikipedia article lead image, a
+ *                 real BUILDING photo; no website needed, left untouched when
+ *                 the hospital has no article).
+ *
+ * Extra modes (each dry-run by default, apply:true to write):
+ *   set_images — apply curated PHOTOS by hospital-name match:
+ *     body.set_images = [{ match, image_url?, data_base64?, filename? }]. A
+ *     data_base64 payload is uploaded to the public email-card-images bucket and
+ *     its public URL stored; match must hit exactly one hospital.
  *
  * Non-destructive, idempotent (re-running skips already-filled columns unless
  * overwrite), and fetches only public hospital websites.
@@ -156,6 +166,72 @@ function extractImage(html: string, pageUrl: string): string {
   return abs;
 }
 
+/** Normalise a name/title for token comparison: lowercase, strip punctuation. */
+function normName(s: string): string {
+  return (s || "").toLowerCase().replace(/[^a-z0-9\s]/g, " ").replace(/\s+/g, " ").trim();
+}
+/** Facility words — a Wikipedia article we accept as "a hospital photo" must be
+ *  ABOUT a facility, not a person/place that merely shares a name (the reason a
+ *  naive search returned businessmen, founders, even a bombing photo). */
+const FACILITY_RE = /\b(hospital|clinic|medical|medicine|centre|center|healthcare|health|institute|city|university|college|polyclinic|infirmary|sanatorium)\b/;
+const NAME_STOP = new Set(["hospital","clinic","medical","medicine","centre","center","healthcare","health","care","group","city","the","and","of","for","llc","ltd","dubai","abu","dhabi","uae","emirates","ksa","saudi","arabia","qatar","doha","riyadh","jeddah"]);
+/** Does a candidate article title plausibly denote THIS hospital? Requires the
+ *  title to be facility-typed AND to contain the hospital's distinctive tokens
+ *  (brand words like "cleveland", "zulekha", "burjeel"), so "Naif Al-Rajhi"
+ *  (a person) is rejected for "AlRajhi Hospital" while "Cleveland Clinic Abu
+ *  Dhabi" is accepted for "Cleveland Clinic Abu Dhabi". */
+function titleMatchesHospital(hospitalName: string, title: string): boolean {
+  const t = normName(title);
+  if (!FACILITY_RE.test(t)) return false;
+  const h = normName(hospitalName);
+  if (t.includes(h) || h.includes(t)) return true;
+  const distinctive = h.split(" ").filter(w => w.length > 2 && !NAME_STOP.has(w));
+  if (!distinctive.length) return false;
+  const hits = distinctive.filter(w => t.includes(w)).length;
+  // Need the brand tokens present: at least 2 (or all, if fewer) and ≥60%.
+  return hits >= Math.min(distinctive.length, 2) && hits / distinctive.length >= 0.6;
+}
+
+/** A real hospital BUILDING photo from Wikipedia, not a scraped og:image logo.
+ *  We search Wikipedia for the hospital, then accept the lead image ONLY of a
+ *  candidate article whose TITLE actually denotes this hospital (see
+ *  titleMatchesHospital) — iterating past higher-ranked but irrelevant hits
+ *  (people/places with a similar name). Returns "" when nothing verifies, so
+ *  the caller leaves the existing image untouched rather than risking a wrong
+ *  or offensive photo. origin=* keeps the API CORS-happy. */
+async function wikipediaImage(name: string, city: string, country: string, timeoutMs: number): Promise<string> {
+  const base = (name || "").trim();
+  if (!base) return "";
+  const api = "https://en.wikipedia.org/w/api.php?" + new URLSearchParams({
+    action: "query", format: "json", prop: "pageimages", piprop: "thumbnail",
+    pithumbsize: "900", generator: "search",
+    gsrsearch: [base, city, country].filter(Boolean).join(" ").trim(), gsrlimit: "8", origin: "*",
+  }).toString();
+  const ctrl = new AbortController();
+  const t = setTimeout(() => ctrl.abort(), timeoutMs);
+  try {
+    const res = await fetch(api, { signal: ctrl.signal, headers: { "User-Agent": "AllocationAssistBot/1.0 (+https://allocationassist.com)" } });
+    if (!res.ok) return "";
+    const data = await res.json();
+    const pages: Array<Record<string, unknown>> = Object.values(data?.query?.pages ?? {});
+    if (!pages.length) return "";
+    pages.sort((a, b) => Number(a.index ?? 999) - Number(b.index ?? 999));
+    for (const p of pages) {
+      const title = String(p.title ?? "");
+      if (!titleMatchesHospital(base, title)) continue;
+      const thumb = (p.thumbnail as Record<string, unknown> | undefined)?.source;
+      if (typeof thumb !== "string" || !/^https?:\/\//i.test(thumb)) continue;
+      if (/[/_-]logo[._-]/i.test(thumb)) continue; // a logo is no better than what we have
+      return thumb;
+    }
+    return "";
+  } catch {
+    return "";
+  } finally {
+    clearTimeout(t);
+  }
+}
+
 /** Best "About Us" blurb for a page: og:description → twitter:description →
  *  <meta name="description">. Whitespace-collapsed and length-capped so a
  *  runaway meta tag can't bloat the email. Empty = nothing usable found. */
@@ -182,6 +258,10 @@ serve(async (req) => {
   const fieldsReq = Array.isArray(body.fields) ? body.fields.map(String) : ["image", "description"];
   const doImage = fieldsReq.includes("image");
   const doDesc  = fieldsReq.includes("description");
+  // Where hero images come from: "website" = scrape og:image (fast, but often a
+  // LOGO); "wikipedia" = the hospital's Wikipedia article lead image (a real
+  // BUILDING photo when the hospital is notable enough to have an article).
+  const imageSource = String(body.image_source ?? "website").toLowerCase() === "wikipedia" ? "wikipedia" : "website";
 
   // Hospitals that have a website to scrape.
   const { data: hospitals, error: hErr } = await supabase
@@ -231,6 +311,78 @@ serve(async (req) => {
     });
   }
 
+  // ── set_images mode: apply curated hospital PHOTOS by name match. This is how
+  //    real building photos (recovered from the delegation-doer "out" folder or
+  //    supplied by hand) get onto hospitals whose scraped og:image was just a
+  //    logo. Each item:
+  //      { match: "name substring", image_url?, data_base64?, filename? }
+  //    • data_base64 (a PNG/JPG) → uploaded to the PUBLIC email-card-images
+  //      bucket under hospital-photos/, and its public URL is stored. Otherwise
+  //      image_url is used verbatim (must already be a public URL).
+  //    • match is case-insensitive name-contains and MUST hit exactly ONE
+  //      hospital, else the item is rejected (never guess between two).
+  //    Dry-run by default; only fills a BLANK image_url unless overwrite. The
+  //    public URL is deterministic, so the dry run shows exactly what it will be.
+  if (Array.isArray(body.set_images)) {
+    const IMG_BUCKET = "email-card-images";
+    const norm = (s: string) => s.toLowerCase().replace(/\s+/g, " ").trim();
+    const slug = (s: string) => norm(s).replace(/[^a-z0-9]+/g, "-").replace(/^-+|-+$/g, "").slice(0, 60) || "hospital";
+    const publicUrl = (path: string) => `${SUPABASE_URL}/storage/v1/object/public/${IMG_BUCKET}/${path}`;
+
+    const toSet: Array<{ id: string; name: string; to: string; upload?: { path: string; bytes: number; contentType: string; b64: string } }> = [];
+    const rejected: Array<{ match: string; reason: string }> = [];
+    for (const item of body.set_images as Array<Record<string, unknown>>) {
+      const rawMatch = String(item.match ?? "");
+      const match = norm(rawMatch);
+      if (!match) { rejected.push({ match: rawMatch, reason: "empty match" }); continue; }
+      const hits = (hospitals ?? []).filter(h => norm(String(h.name ?? "")).includes(match));
+      if (hits.length === 0) { rejected.push({ match: rawMatch, reason: "no hospital matched" }); continue; }
+      if (hits.length > 1) { rejected.push({ match: rawMatch, reason: `ambiguous — ${hits.length} matched: ${hits.map(h => h.name).join(", ")}` }); continue; }
+      const h = hits[0];
+      if (!overwrite && String(h.image_url ?? "").trim()) { rejected.push({ match: rawMatch, reason: `already has image (${h.name})` }); continue; }
+
+      const b64 = typeof item.data_base64 === "string" ? item.data_base64.replace(/^data:[^,]+,/, "") : "";
+      if (b64) {
+        const filename = String(item.filename ?? "photo.png");
+        const ext = (filename.split(".").pop() || "png").toLowerCase();
+        const contentType = ext === "jpg" || ext === "jpeg" ? "image/jpeg" : "image/png";
+        const path = `hospital-photos/${slug(String(h.name ?? "hospital"))}-${crypto.randomUUID().slice(0, 8)}.${ext === "jpeg" ? "jpg" : ext}`;
+        let bytes = 0;
+        try { bytes = atob(b64).length; } catch { rejected.push({ match: rawMatch, reason: "invalid base64" }); continue; }
+        toSet.push({ id: String(h.id), name: String(h.name ?? ""), to: publicUrl(path), upload: { path, bytes, contentType, b64 } });
+      } else {
+        const url = String(item.image_url ?? "").trim();
+        if (!/^https?:\/\//i.test(url)) { rejected.push({ match: rawMatch, reason: "no data_base64 and image_url is not a public http(s) URL" }); continue; }
+        toSet.push({ id: String(h.id), name: String(h.name ?? ""), to: url });
+      }
+    }
+
+    let updated = 0;
+    const failures: Array<{ name: string; error: string }> = [];
+    if (apply) {
+      for (const u of toSet) {
+        if (u.upload) {
+          const raw = atob(u.upload.b64);
+          const arr = new Uint8Array(raw.length);
+          for (let i = 0; i < raw.length; i++) arr[i] = raw.charCodeAt(i);
+          const { error: upErr } = await supabase.storage.from(IMG_BUCKET)
+            .upload(u.upload.path, arr, { contentType: u.upload.contentType, upsert: true });
+          if (upErr) { failures.push({ name: u.name, error: `upload: ${upErr.message}` }); continue; }
+        }
+        const { error } = await supabase.from("hospitals")
+          .update({ image_url: u.to, updated_at: new Date().toISOString() }).eq("id", u.id);
+        if (error) failures.push({ name: u.name, error: error.message });
+        else updated++;
+      }
+    }
+    return json({
+      ok: true, dry_run: !apply, mode: "set_images",
+      summary: { would_set: toSet.length, rejected: rejected.length, ...(apply ? { updated, failed: failures.length } : {}) },
+      to_set: toSet.map(u => ({ id: u.id, name: u.name, image_url: u.to, ...(u.upload ? { uploads: `${(u.upload.bytes / 1024).toFixed(0)}KB → ${u.upload.path}` } : {}) })),
+      rejected, ...(apply && failures.length ? { failures } : {}),
+    });
+  }
+
   // ── fix_encoded mode: repair descriptions that carry a leaked HTML entity
   //    (e.g. "King&#x27;s") by re-decoding IN PLACE. No website fetch, and it
   //    only touches rows whose stored description actually changes when decoded
@@ -263,16 +415,20 @@ serve(async (req) => {
 
   const hasImg  = (h: Record<string, unknown>) => String(h.image_url ?? "").trim().length > 0;
   const hasDesc = (h: Record<string, unknown>) => String(h.description ?? "").trim().length > 0;
-  // A hospital needs a fetch if any REQUESTED field is fillable.
-  const needsFill = (h: Record<string, unknown>) =>
-    (doImage && (overwrite || !hasImg(h))) || (doDesc && (overwrite || !hasDesc(h)));
+  // Fillable = requested AND (blank or overwrite). Image via Wikipedia needs no
+  // website; image via website scrape and ALL description work need a website.
+  const wantImg  = (h: Record<string, unknown>) => doImage && (overwrite || !hasImg(h));
+  const wantDesc = (h: Record<string, unknown>) => doDesc  && (overwrite || !hasDesc(h));
 
-  // Candidates: website present, at least one requested field fillable,
-  // optionally restricted to `only` ids.
+  // Candidates: at least one requested field is actually obtainable for this
+  // hospital, optionally restricted to `only` ids. In wikipedia mode an image
+  // is obtainable without a website; description always needs one.
   const candidates = (hospitals ?? []).filter((h) => {
     if (only && !only.includes(String(h.id))) return false;
-    if (!normWebsite(String(h.website ?? ""))) return false;
-    return needsFill(h);
+    const hasWeb = !!normWebsite(String(h.website ?? ""));
+    const canImg  = wantImg(h)  && (imageSource === "wikipedia" || hasWeb);
+    const canDesc = wantDesc(h) && hasWeb;
+    return canImg || canDesc;
   });
 
   const toUpdate: Array<{
@@ -281,24 +437,31 @@ serve(async (req) => {
     description?: { from: string | null; to: string };
   }> = [];
   const nothingFound: Array<{ name: string; website: string }> = [];
-  const skippedNoWebsite = (hospitals ?? []).filter(h => !normWebsite(String(h.website ?? ""))).length;
+  const skippedNoWebsite = imageSource === "website"
+    ? (hospitals ?? []).filter(h => !normWebsite(String(h.website ?? ""))).length
+    : 0;
 
   let fetched = 0;
   for (const h of candidates) {
     if (fetched >= limit) break;
     fetched++;
     const website = normWebsite(String(h.website ?? ""));
-    const { html, finalUrl } = await fetchHtml(website, 8000);
-    if (!html) { nothingFound.push({ name: String(h.name ?? ""), website }); continue; }
+    // Only fetch the website when we actually need it: for descriptions, or for
+    // image scraping in "website" mode. Wikipedia-only image runs skip it.
+    const needHtml = (wantDesc(h) && !!website) || (imageSource === "website" && wantImg(h) && !!website);
+    let html = "", finalUrl = website;
+    if (needHtml) { const r = await fetchHtml(website, 8000); html = r.html; finalUrl = r.finalUrl; }
 
     const patch: { image?: { from: string | null; to: string }; description?: { from: string | null; to: string } } = {};
 
-    if (doImage && (overwrite || !hasImg(h))) {
-      const image = extractImage(html, finalUrl);
+    if (wantImg(h)) {
+      const image = imageSource === "wikipedia"
+        ? await wikipediaImage(String(h.name ?? ""), String(h.city ?? ""), String(h.country ?? ""), 8000)
+        : (html ? extractImage(html, finalUrl) : "");
       const cur = String(h.image_url ?? "").trim();
       if (image && image !== cur) patch.image = { from: cur || null, to: image };
     }
-    if (doDesc && (overwrite || !hasDesc(h))) {
+    if (wantDesc(h) && html) {
       const desc = extractDescription(html);
       const cur = String(h.description ?? "").trim();
       if (desc && desc !== cur) patch.description = { from: cur || null, to: desc };

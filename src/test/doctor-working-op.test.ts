@@ -21,8 +21,14 @@ const FAKEEH: WorkingOpHospital = { name: "Fakeeh Care Group",  city: "Jeddah", 
 const VIEW:   WorkingOpHospital = { name: "The View Hospital",  city: "Doha",   country: "Qatar", link: "https://www.theviewhospital.com" };
 const AMNM:   WorkingOpHospital = { name: "Al Fardan Medical (AMNM)", city: "Doha", country: "Qatar" }; // no link, no image
 
-/** How many hospital <li> rows the grouped list renders (one per hospital). */
-const countLi = (html: string) => (html.match(/<li/g) ?? []).length;
+/** How many hospital rows the grouped list renders — one hospital-name line
+ *  (`<p style="margin:0 0 2px">`) per hospital block, independent of that
+ *  block's optional About-us link, description blurb, or photo. This is the
+ *  "listed once" signal the regression suite guards on. The markup moved from
+ *  `<ul><li>` to a per-hospital block that carries the description + About Us
+ *  link + photo (the "detail per working opportunity" feature), so the row
+ *  count keys off the name line rather than a now-absent `<li>`. */
+const countHospitals = (html: string) => (html.match(/margin:0 0 2px;/g) ?? []).length;
 /** How many "In X:" location group headings. */
 const countGroups = (html: string) => (html.match(/>In [^<]+:</g) ?? []).length;
 
@@ -61,7 +67,7 @@ describe("doctorGreeting", () => {
 describe("hospital list grouping", () => {
   it("single hospital, single city → heading uses the country, listed once, linked", () => {
     const html = buildDoctorHospitalsHtml([VIEW]);
-    expect(countLi(html)).toBe(1);
+    expect(countHospitals(html)).toBe(1);
     expect(html).toContain(">In Qatar:<");
     expect(html).toContain('href="https://www.theviewhospital.com"');
     expect(html).toContain("The View Hospital");
@@ -71,7 +77,7 @@ describe("hospital list grouping", () => {
     const html = buildDoctorHospitalsHtml([MNGHA, FAKEEH]);
     expect(countGroups(html)).toBe(1);
     expect(html).toContain(">In Riyadh and Jeddah:<");
-    expect(countLi(html)).toBe(2);
+    expect(countHospitals(html)).toBe(2);
   });
 
   it("two hospitals, different countries → two groups, each hospital once", () => {
@@ -79,7 +85,7 @@ describe("hospital list grouping", () => {
     expect(countGroups(html)).toBe(2);
     expect(html).toContain(">In Saudi Arabia:<");   // Saudi has one city here → country label
     expect(html).toContain(">In Qatar:<");
-    expect(countLi(html)).toBe(2);
+    expect(countHospitals(html)).toBe(2);
   });
 
   it("hospital with no link renders plain text (no <a>)", () => {
@@ -97,15 +103,17 @@ describe("hospital list grouping", () => {
 describe("REGRESSION: a hospital must never be listed twice", () => {
   it("duplicate hospital in the list is rendered exactly once", () => {
     const html = buildDoctorHospitalsHtml([MNGHA, MNGHA]);
-    expect(countLi(html)).toBe(1);
+    expect(countHospitals(html)).toBe(1);
   });
 
   it("doctor → two hospitals lists BOTH, each exactly once (the old A-twice bug)", () => {
     const html = buildDoctorHospitalsHtml([MNGHA, VIEW]);
-    expect(countLi(html)).toBe(2);
-    // Each hospital's linked name appears exactly once.
-    expect((html.match(/mngha\.med\.sa/g) ?? []).length).toBe(1);
-    expect((html.match(/theviewhospital\.com/g) ?? []).length).toBe(1);
+    expect(countHospitals(html)).toBe(2);
+    // Both hospitals' links are present. Each hospital's URL now appears twice —
+    // once on the name and once on its "About us »" link — so the "listed once"
+    // guarantee is the countHospitals()===2 row count above, not a URL count.
+    expect(html).toContain("mngha.med.sa");
+    expect(html).toContain("theviewhospital.com");
   });
 
   it("dedupeHospitals: exact dup collapses, distinct kept, same-name/diff-city kept, nameless dropped", () => {
@@ -128,17 +136,18 @@ describe("full body", () => {
     expect(body).toContain("We will help you negotiate the salary and allowance to secure your best offer.");
     expect(body).toContain("We wish you a wonderful day!");
     expect(body).toContain(SIG);
-    expect(countLi(body)).toBe(2);
+    expect(countHospitals(body)).toBe(2);
   });
 
   it("the two-hospital body lists each hospital exactly once", () => {
     const body = buildWorkingOpBody("Dr. Manish", [MNGHA, VIEW], SIG);
-    expect((body.match(/mngha\.med\.sa/g) ?? []).length).toBe(1);
-    expect((body.match(/theviewhospital\.com/g) ?? []).length).toBe(1);
+    expect(countHospitals(body)).toBe(2);   // one row per hospital — no "A twice"
+    expect(body).toContain("mngha.med.sa");
+    expect(body).toContain("theviewhospital.com");
   });
 
   it("a doubled batch_hospitals list still lists the hospital once", () => {
     const body = buildWorkingOpBody("Dr. X", [MNGHA, MNGHA], SIG);
-    expect(countLi(body)).toBe(1);
+    expect(countHospitals(body)).toBe(1);
   });
 });

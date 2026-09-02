@@ -50,6 +50,17 @@ const EXCLUDE_FIRST_KEY = new Set<string>([
   // shows a brief skeleton, then the shared cached number (identical for everyone).
   "zoho-books",
   "zoho-accounttxns",
+  // Mail render-blobs: these hold fully-rendered email HTML / rasterised PNG data
+  // URLs, not source data. A single Scheduled folder can hold dozens of them at
+  // hundreds of KB each — persisting them used to blow the whole-snapshot size
+  // budget, which (all-or-nothing) silently disabled persistence for the ENTIRE
+  // app, so every reload cold-started everything (incl. Mail). They're re-derived
+  // on demand behind a 5-min staleTime, so excluding them costs nothing and keeps
+  // the snapshot small enough that the real data (replies, sends, dashboards)
+  // always paints instantly on reload.
+  "batch-preview",   // send-batch dry-run render (full email HTML per batch)
+  "sent-email",      // re-rendered sent email HTML
+  "profile-image",   // captureCardPng() → PNG data URL (can be 100s of KB)
 ]);
 
 /** JSON.stringify turns Set/Map into `{}`, which hydrates as a plain object and
@@ -100,10 +111,31 @@ export function startQueryPersist(qc: QueryClient): () => void {
     try {
       if (typeof localStorage === "undefined") return;
       const state = dehydrate(qc, { shouldDehydrateQuery: shouldPersist });
-      const payload = JSON.stringify({ t: Date.now(), state });
-      // All-or-nothing size guard — if the snapshot is too big, skip this write
-      // rather than risk a QuotaExceededError mid-set.
-      if (payload.length > MAX_CHARS) return;
+      let payload = JSON.stringify({ t: Date.now(), state });
+      // Size guard. Over-budget used to skip the ENTIRE snapshot — a single big
+      // query (e.g. a heavy list) would then disable persistence app-wide, making
+      // every reload cold-start. Instead, degrade gracefully: keep as many of the
+      // SMALLEST queries as fit under budget and drop the largest. A partial
+      // snapshot still paints most of the app instantly; the dropped queries just
+      // cold-start like before.
+      if (payload.length > MAX_CHARS) {
+        const queries = (state.queries ?? []) as Array<Record<string, unknown>>;
+        const sized = queries
+          .map(q => ({ q, size: JSON.stringify(q).length + 1 }))
+          .sort((a, b) => a.size - b.size); // smallest first
+        // Fixed overhead for the wrapper + mutations array so we don't overshoot.
+        const base = JSON.stringify({ t: Date.now(), state: { ...state, queries: [] } }).length;
+        const kept: Array<Record<string, unknown>> = [];
+        let total = base;
+        for (const { q, size } of sized) {
+          if (total + size > MAX_CHARS) break;
+          kept.push(q);
+          total += size;
+        }
+        if (!kept.length) return; // nothing fits — skip rather than write junk
+        payload = JSON.stringify({ t: Date.now(), state: { ...state, queries: kept } });
+        if (payload.length > MAX_CHARS) return; // safety: still too big, bail
+      }
       localStorage.setItem(STORAGE_KEY, payload);
     } catch {
       // Quota or serialisation error — drop the snapshot and carry on.
