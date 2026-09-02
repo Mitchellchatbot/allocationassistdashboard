@@ -203,8 +203,10 @@ export function MailPanel({ query }: { query: string }) {
       unread: false,
       accent: "bg-teal-100 text-teal-700",
     }));
-    // Soonest first across both kinds.
-    return [...batchItems, ...profileItems].sort((a, b) => String(a.when ?? "").localeCompare(String(b.when ?? "")));
+    // Most-recent / furthest-out schedule first across both kinds, so a send you
+    // just queued lands at the TOP of the list instead of buried under months of
+    // older scheduled rows.
+    return [...batchItems, ...profileItems].sort((a, b) => String(b.when ?? "").localeCompare(String(a.when ?? "")));
   }, [folder, inboundReplies, filteredSent, filteredScheduled, filteredScheduledProfiles]);
 
   // Keep a valid selection as the folder / list changes.
