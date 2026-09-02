@@ -19,6 +19,9 @@ import { supabase } from "@/lib/supabase";
 import { useWpCandidateForDoctor, type WpCandidate } from "@/hooks/use-wp-candidates";
 import { buildDoctorProfileHtml, PROFILE_IMAGE_WIDTH } from "@/lib/doctor-profile-image";
 import { captureCardPng } from "@/lib/card-screenshot";
+import { useHospitals } from "@/hooks/use-hospitals";
+import { buildWorkingOpBody, buildWorkingOpSubject, type WorkingOpHospital } from "@/lib/doctor-working-op";
+import { previewSignatureHtmlFor } from "@/lib/email-signature";
 
 /**
  * Mail — a Gmail-style, three-pane home for the outbound email workflow (team
@@ -854,13 +857,46 @@ function scheduledProfileWhen(s: ScheduledProfileSend): string {
 
 function ScheduledProfileReader({ send, onOpen }: { send: ScheduledProfileSend; onOpen: () => void }) {
   const cancel = useCancelScheduledProfileSend();
+  const [showDetails, setShowDetails] = useState(false);
+  const hospitalsQ = useHospitals();
+
+  // Reproduce the doctor-facing Working Opportunity email this scheduled send
+  // will deliver — greeting, each matched hospital (photo + "About us" link +
+  // description), and the sender's sign-off — using the SAME client builders the
+  // personalized composer previews with, so the team can see the whole email
+  // before it fires. Hospitals are resolved from the row's hospital_ids.
+  const preview = useMemo(() => {
+    const all = hospitalsQ.data;
+    if (!all) return null;
+    const byId = new Map(all.map(h => [h.id, h]));
+    const wo: WorkingOpHospital[] = (send.hospital_ids ?? [])
+      .map(id => byId.get(id))
+      .filter((h): h is NonNullable<typeof h> => !!h)
+      .map(h => ({
+        name: h.name, city: h.city, country: h.country,
+        image_url: h.image_url, link: h.website, description: h.description,
+      }));
+    if (!wo.length) return null;
+    return {
+      subject: buildWorkingOpSubject(wo, send.doctor_speciality),
+      html: buildWorkingOpBody(send.doctor_name || "Doctor", wo, previewSignatureHtmlFor(send.assigned_to)),
+    };
+  }, [hospitalsQ.data, send.hospital_ids, send.doctor_name, send.doctor_speciality, send.assigned_to]);
+
   return (
     <ReaderShell
-      title={`${(send.doctor_name || "—").replace(/^\s*Dr\.?\s+/i, "")} — Personalized send`}
+      title={preview?.subject || `${(send.doctor_name || "—").replace(/^\s*Dr\.?\s+/i, "")} — Personalized send`}
       meta={<span className="flex items-center gap-2"><CalendarClock className="h-3 w-3" />Scheduled for {fmtFull(scheduledProfileWhen(send))}</span>}
     >
-      <div className="mb-3 flex items-center gap-2">
+      <div className="mb-3 flex flex-wrap items-center gap-2">
         <OpenInButton label="Open in Batch Sends" onClick={onOpen} />
+        <button
+          type="button"
+          onClick={() => setShowDetails(v => !v)}
+          className="inline-flex items-center gap-1.5 rounded-md border border-slate-200 px-2.5 py-1 text-[11px] font-medium text-slate-600 hover:bg-slate-50"
+        >
+          {showDetails ? "Hide details" : "Show details"}
+        </button>
         <button
           type="button"
           disabled={cancel.isPending}
@@ -873,18 +909,52 @@ function ScheduledProfileReader({ send, onOpen }: { send: ScheduledProfileSend; 
           <Trash2 className="h-3 w-3" /> Cancel send
         </button>
       </div>
-      <div className="divide-y divide-border/40">
-        <Row label="Doctor" value={send.doctor_name} />
-        <Row label="Specialty" value={send.doctor_speciality} />
-        <Row label="Doctor email" value={send.doctor_email} />
-        <Row label="Hospitals" value={`${send.hospital_ids?.length ?? 0} hospital${(send.hospital_ids?.length ?? 0) === 1 ? "" : "s"}`} />
-        <Row label="Scheduled for" value={fmtFull(send.scheduled_for)} />
-        <Row label="Time" value={send.scheduled_at_time ? `${send.scheduled_at_time.slice(0, 5)} ${send.timezone ?? "Asia/Dubai"}` : null} />
-        <Row label="Sender" value={send.assigned_to} />
-        <Row label="Custom template" value={send.template_overrides ? "Yes" : "No"} />
-        <Row label="Attachments" value={(send.attachments?.length ?? 0) > 0 ? `${send.attachments.length} file${send.attachments.length === 1 ? "" : "s"}` : null} />
-        <Row label="Status" value={send.status} />
+
+      {/* From / To header — the doctor is the recipient of this WO email. */}
+      <div className="mb-4 flex items-center gap-3 rounded-lg border border-border/60 px-4 py-3">
+        <span className="flex h-9 w-9 shrink-0 items-center justify-center rounded-full bg-teal-100 text-teal-700">
+          <UserSquare className="h-4 w-4" />
+        </span>
+        <div className="min-w-0 flex-1 text-[12px]">
+          <div className="truncate"><span className="text-slate-400">From </span><span className="font-medium text-slate-700">{send.assigned_to || "Allocation Assist"}</span></div>
+          <div className="truncate"><span className="text-slate-400">To </span><span className="font-medium text-slate-700">{send.doctor_email || send.doctor_name || "—"}</span></div>
+        </div>
+        <span className="shrink-0 text-[11px] text-slate-400">Scheduled</span>
       </div>
+
+      {/* The whole doctor Working Opportunity email, rendered exactly as it will
+          send. Batch/hospital-intro copy is server-templated and shown at fire
+          time; this reproduces the doctor-facing WO email faithfully here. */}
+      {hospitalsQ.isLoading ? (
+        <div className="flex items-center gap-2 py-8 text-[12px] text-muted-foreground">
+          <Loader2 className="h-4 w-4 animate-spin text-teal-600" /> Rendering the email…
+        </div>
+      ) : preview ? (
+        <div className="aa-hscroll overflow-x-auto rounded-lg border border-border/60">
+          <div style={{ width: EMAIL_CANVAS_WIDTH }} className="px-4 py-4">
+            <DeliveredEmail html={preview.html} />
+          </div>
+        </div>
+      ) : (
+        <div className="flex items-center gap-2 rounded-lg border border-dashed border-slate-200 px-4 py-8 text-[12px] text-muted-foreground">
+          <ImageIcon className="h-4 w-4" /> Couldn't resolve this send's hospitals, so the email preview isn't available. Use “Show details” or open it in Batch Sends.
+        </div>
+      )}
+
+      {showDetails && (
+        <div className="mt-4 divide-y divide-border/40">
+          <Row label="Doctor" value={send.doctor_name} />
+          <Row label="Specialty" value={send.doctor_speciality} />
+          <Row label="Doctor email" value={send.doctor_email} />
+          <Row label="Hospitals" value={`${send.hospital_ids?.length ?? 0} hospital${(send.hospital_ids?.length ?? 0) === 1 ? "" : "s"}`} />
+          <Row label="Scheduled for" value={fmtFull(send.scheduled_for)} />
+          <Row label="Time" value={send.scheduled_at_time ? `${send.scheduled_at_time.slice(0, 5)} ${send.timezone ?? "Asia/Dubai"}` : null} />
+          <Row label="Sender" value={send.assigned_to} />
+          <Row label="Custom template" value={send.template_overrides ? "Yes" : "No"} />
+          <Row label="Attachments" value={(send.attachments?.length ?? 0) > 0 ? `${send.attachments.length} file${send.attachments.length === 1 ? "" : "s"}` : null} />
+          <Row label="Status" value={send.status} />
+        </div>
+      )}
     </ReaderShell>
   );
 }
