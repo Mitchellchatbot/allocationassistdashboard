@@ -6,7 +6,7 @@ import {
   Loader2, Image as ImageIcon, UserSquare, Trash2,
 } from "lucide-react";
 import { useSentHistory, SENT_KIND_LABEL, type SentRecord } from "@/hooks/use-sent-history";
-import { useScheduledBatches, useBatchPreview, type ScheduledBatch, type BatchPreviewResult } from "@/hooks/use-scheduled-batches";
+import { useScheduledBatches, useBatchPreviewQuery, fetchBatchPreview, batchPreviewQueryKey, type ScheduledBatch, type BatchPreviewResult } from "@/hooks/use-scheduled-batches";
 import { useScheduledProfileSends, useCancelScheduledProfileSend, type ScheduledProfileSend } from "@/hooks/use-scheduled-profile-sends";
 import {
   useRepliesPage, useMarkReplyRead, useMarkReplyHandled,
@@ -14,7 +14,7 @@ import {
 } from "@/hooks/use-replies";
 import { SendProfileDialog } from "@/components/automations/SendProfileDialog";
 import { BatchComposeDialog } from "./Batches";
-import { useQuery } from "@tanstack/react-query";
+import { useQuery, useQueries } from "@tanstack/react-query";
 import { supabase } from "@/lib/supabase";
 import { useWpCandidateForDoctor, type WpCandidate } from "@/hooks/use-wp-candidates";
 import { buildDoctorProfileHtml, PROFILE_IMAGE_WIDTH } from "@/lib/doctor-profile-image";
@@ -159,8 +159,39 @@ export function MailPanel({ query }: { query: string }) {
     );
   }, [scheduledProfiles, q]);
 
-  // Total in the Scheduled folder = batch drafts + pending profile sends.
-  const scheduledCount = filteredScheduled.length + filteredScheduledProfiles.length;
+  // Empty batches ("0 doctors queued") send nothing meaningful, so they're
+  // hidden from the Scheduled folder (they still live in Batch Sends). Only
+  // batches that will actually produce emails remain.
+  const nonEmptyBatches = useMemo(
+    () => filteredScheduled.filter(b => (b.doctor_ids?.length ?? 0) > 0),
+    [filteredScheduled],
+  );
+
+  // Render each remaining batch into its ACTUAL emails by asking send-batch for
+  // a dry-run (the same server render the reader + real send use), cached 5 min
+  // and shared with the reader so opening a row is instant. Only runs while the
+  // Scheduled folder is active. Each batch expands into one hospital email (or
+  // one per doctor for Daily Duo) plus each optional doctor working-op email.
+  const batchPreviewResults = useQueries({
+    queries: nonEmptyBatches.map(b => ({
+      queryKey: batchPreviewQueryKey(b.id),
+      queryFn: () => fetchBatchPreview(b.id),
+      enabled: folder === "scheduled",
+      staleTime: 5 * 60_000,
+      retry: false,
+    })),
+  });
+  const previewByBatch = useMemo(() => {
+    const m = new Map<string, { data?: BatchPreviewResult; isLoading: boolean; isError: boolean }>();
+    nonEmptyBatches.forEach((b, i) => {
+      const r = batchPreviewResults[i];
+      m.set(b.id, { data: r?.data, isLoading: !!r?.isLoading || !!r?.isPending, isError: !!r?.isError });
+    });
+    return m;
+  }, [nonEmptyBatches, batchPreviewResults]);
+
+  // Total in the Scheduled folder = non-empty batch sends + pending profile sends.
+  const scheduledCount = nonEmptyBatches.length + filteredScheduledProfiles.length;
 
   // ── Build the list items for the active folder ─────────────────────────────
   const items: MailItem[] = useMemo(() => {
@@ -186,15 +217,39 @@ export function MailPanel({ query }: { query: string }) {
         accent: "bg-indigo-100 text-indigo-700",
       }));
     }
-    const batchItems: MailItem[] = filteredScheduled.map(b => ({
-      id: b.id,
-      title: SENT_KIND_LABEL[b.kind] ?? "Scheduled send",
-      subtitle: [b.specialty, b.country].filter(Boolean).join(" · ") || "All hospitals",
-      snippet: `${b.doctor_ids?.length ?? 0} doctor${(b.doctor_ids?.length ?? 0) === 1 ? "" : "s"} queued`,
-      when: b.next_run_at || b.scheduled_for,
-      unread: false,
-      accent: "bg-amber-100 text-amber-700",
-    }));
+    // Each batch expands into one row PER EMAIL it will send (hospital email(s)
+    // + each doctor working-op email), so the list reads like a mailbox rather
+    // than a list of batch configs. While a batch's preview is still loading (or
+    // failed), it shows a single summary row so it stays visible/selectable.
+    const batchItems: MailItem[] = [];
+    for (const b of nonEmptyBatches) {
+      const pv = previewByBatch.get(b.id);
+      const when = b.next_run_at || b.scheduled_for;
+      if (pv?.data) {
+        const emails = flattenBatchPreview(pv.data);
+        emails.forEach((e, idx) => batchItems.push({
+          id: `b:${b.id}#${idx}`,
+          title: e.subject || (e.group === "doctor" ? "Working opportunity" : SENT_KIND_LABEL[b.kind] || "Scheduled send"),
+          subtitle: `To ${e.to}`,
+          snippet: e.group === "doctor"
+            ? `Working opportunity · ${e.label}`
+            : (emails.filter(x => x.group === "hospital").length > 1 ? `Featuring ${e.label}` : `${[b.specialty, b.country].filter(Boolean).join(" · ") || "all hospitals"}`),
+          when,
+          unread: false,
+          accent: e.group === "doctor" ? "bg-teal-100 text-teal-700" : "bg-amber-100 text-amber-700",
+        }));
+      } else {
+        batchItems.push({
+          id: `b:${b.id}#0`,
+          title: SENT_KIND_LABEL[b.kind] ?? "Scheduled send",
+          subtitle: [b.specialty, b.country].filter(Boolean).join(" · ") || "All hospitals",
+          snippet: pv?.isError ? "Preview unavailable — open to view" : "Rendering email…",
+          when,
+          unread: false,
+          accent: "bg-amber-100 text-amber-700",
+        });
+      }
+    }
     // Profile sends carry a `pss:` id prefix so selection can tell them apart
     // from batch rows (both are uuids).
     const profileItems: MailItem[] = filteredScheduledProfiles.map(s => ({
@@ -210,7 +265,7 @@ export function MailPanel({ query }: { query: string }) {
     // just queued lands at the TOP of the list instead of buried under months of
     // older scheduled rows.
     return [...batchItems, ...profileItems].sort((a, b) => String(b.when ?? "").localeCompare(String(a.when ?? "")));
-  }, [folder, inboundReplies, filteredSent, filteredScheduled, filteredScheduledProfiles]);
+  }, [folder, inboundReplies, filteredSent, nonEmptyBatches, previewByBatch, filteredScheduledProfiles]);
 
   // Keep a valid selection as the folder / list changes.
   useEffect(() => {
@@ -220,8 +275,15 @@ export function MailPanel({ query }: { query: string }) {
 
   const selectedReply  = folder === "inbox"     ? inboundReplies.find(r => r.id === selectedId) ?? null : null;
   const selectedSent   = folder === "sent"      ? filteredSent.find(r => r.id === selectedId) ?? null : null;
-  const selectedBatch  = folder === "scheduled" && !selectedId?.startsWith("pss:")
-    ? filteredScheduled.find(b => b.id === selectedId) ?? null : null;
+  // Batch rows are `b:<batchId>#<emailIndex>` — the index preselects the exact
+  // email in the reader's selector, so clicking a specific expanded row opens it.
+  const batchSel = folder === "scheduled" && selectedId?.startsWith("b:")
+    ? (() => {
+        const [bid, idx] = selectedId.slice(2).split("#");
+        return { batchId: bid, index: Number(idx) || 0 };
+      })()
+    : null;
+  const selectedBatch  = batchSel ? nonEmptyBatches.find(b => b.id === batchSel.batchId) ?? null : null;
   const selectedProfile = folder === "scheduled" && selectedId?.startsWith("pss:")
     ? filteredScheduledProfiles.find(s => `pss:${s.id}` === selectedId) ?? null : null;
 
@@ -335,7 +397,7 @@ export function MailPanel({ query }: { query: string }) {
         ) : selectedSent ? (
           <SentReader rec={selectedSent} onOpen={() => goTab("past-sent")} />
         ) : selectedBatch ? (
-          <ScheduledReader batch={selectedBatch} onOpen={() => goTab("batch-sends")} />
+          <ScheduledReader batch={selectedBatch} initialIndex={batchSel?.index ?? 0} onOpen={() => goTab("batch-sends")} />
         ) : selectedProfile ? (
           <ScheduledProfileReader send={selectedProfile} onOpen={() => goTab("batch-sends")} />
         ) : (
@@ -961,46 +1023,52 @@ function ScheduledProfileReader({ send, onOpen }: { send: ScheduledProfileSend; 
 
 /** One viewable email inside a scheduled batch — the hospital-facing email(s)
  *  and each optional doctor working-opportunity email. Flattened from the batch
- *  dry-run preview so the reader can page through them with a single selector. */
-interface BatchEmailView { group: "hospital" | "doctor"; label: string; subject: string; html: string }
+ *  dry-run preview so both the Mail list and the reader treat each send as its
+ *  own message (real subject + recipient), not a batch summary. */
+interface BatchEmailView {
+  group: "hospital" | "doctor";
+  /** Short chip/snippet label — the featured doctor (hospital email) or the
+   *  recipient doctor (doctor email). */
+  label: string;
+  /** Human recipient line — "N hospitals" for a hospital email, the doctor's
+   *  address/name for a working-opportunity email. */
+  to: string;
+  subject: string;
+  html: string;
+}
 
 /** Flatten a batch preview into the individual emails it will send. A simple
- *  one-off batch is a single hospital email; Daily Duo sends one hospital email
- *  per queued doctor; and when include_doctor_email is on, each doctor also gets
- *  a working-opportunity email. */
+ *  one-off / Top-15 batch is a single hospital email (one table BCC'd to every
+ *  hospital); Daily Duo sends one hospital email per queued doctor; and when
+ *  include_doctor_email is on, each doctor also gets a working-opportunity email. */
 function flattenBatchPreview(p: BatchPreviewResult): BatchEmailView[] {
   const out: BatchEmailView[] = [];
+  const hospTo = p.test_mode && p.test_recipient
+    ? `test inbox (${p.test_recipient})`
+    : `${p.bcc_count ?? 0} hospital${(p.bcc_count ?? 0) === 1 ? "" : "s"}`;
   if (p.per_doctor && p.per_doctor.length) {
-    p.per_doctor.forEach((d, i) => out.push({ group: "hospital", label: d.name || `Hospital email ${i + 1}`, subject: d.subject, html: d.html }));
+    // Daily Duo: one hospital email per featured doctor.
+    p.per_doctor.forEach((d, i) => out.push({ group: "hospital", label: d.name || `Doctor ${i + 1}`, to: hospTo, subject: d.subject, html: d.html }));
   } else {
-    out.push({ group: "hospital", label: "Hospital email", subject: p.subject, html: p.html });
+    out.push({ group: "hospital", label: "Available doctors", to: hospTo, subject: p.subject, html: p.html });
   }
-  (p.doctor_emails ?? []).forEach((d, i) => out.push({ group: "doctor", label: d.name || `Doctor email ${i + 1}`, subject: d.subject, html: d.html }));
+  (p.doctor_emails ?? []).forEach((d, i) => out.push({ group: "doctor", label: d.name || `Doctor ${i + 1}`, to: d.email || d.name || `Doctor ${i + 1}`, subject: d.subject, html: d.html }));
   return out;
 }
 
-function ScheduledReader({ batch, onOpen }: { batch: ScheduledBatch; onOpen: () => void }) {
-  const previewMut = useBatchPreview();
-  const [emails, setEmails] = useState<BatchEmailView[] | null>(null);
-  const [active, setActive] = useState(0);
-  const [err, setErr] = useState<string | null>(null);
+function ScheduledReader({ batch, initialIndex = 0, onOpen }: { batch: ScheduledBatch; initialIndex?: number; onOpen: () => void }) {
   const [showDetails, setShowDetails] = useState(false);
-  const { mutateAsync } = previewMut;
+  // Shared cached dry-run — the SAME render the Mail list expanded this batch
+  // with, so opening a row is instant (no re-fetch) and byte-identical to send.
+  const previewQ = useBatchPreviewQuery(batch.id);
+  const emails = useMemo(() => previewQ.data ? flattenBatchPreview(previewQ.data) : null, [previewQ.data]);
+  const [active, setActive] = useState(initialIndex);
+  // Follow the row the user clicked (a specific expanded email) + reset when a
+  // different batch is opened.
+  useEffect(() => { setActive(initialIndex); }, [initialIndex, batch.id]);
 
-  // Render the ACTUAL email(s) this batch will send by asking send-batch for a
-  // dry-run — the same server renderer that fires the real send, so the team
-  // sees exactly what hospitals (and, if enabled, doctors) will receive rather
-  // than a metadata card. Re-runs when a different batch is selected.
-  useEffect(() => {
-    let alive = true;
-    setEmails(null); setErr(null); setActive(0);
-    mutateAsync({ batchId: batch.id })
-      .then(p => { if (alive) setEmails(flattenBatchPreview(p)); })
-      .catch((e: unknown) => { if (alive) setErr(e instanceof Error ? e.message : "Couldn't render this batch's email."); });
-    return () => { alive = false; };
-  }, [batch.id, mutateAsync]);
-
-  const current = emails?.[active] ?? null;
+  const err = previewQ.isError ? (previewQ.error instanceof Error ? previewQ.error.message : "Couldn't render this batch's email.") : null;
+  const current = emails ? (emails[active] ?? emails[0] ?? null) : null;
 
   return (
     <ReaderShell
@@ -1039,7 +1107,7 @@ function ScheduledReader({ batch, onOpen }: { batch: ScheduledBatch; onOpen: () 
       )}
 
       {/* The rendered email, exactly as it will send. */}
-      {previewMut.isPending || (!emails && !err) ? (
+      {previewQ.isLoading || (!emails && !err) ? (
         <div className="flex items-center gap-2 py-8 text-[12px] text-muted-foreground">
           <Loader2 className="h-4 w-4 animate-spin text-teal-600" /> Rendering the email…
         </div>
