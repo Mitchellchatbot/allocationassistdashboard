@@ -31,7 +31,7 @@ import { ProfileSubTabs } from "@/components/ProfileSubTabs";
 import { MailModeBanner } from "@/components/MailModeBanner";
 import { EmailFrame } from "@/components/EmailFrame";
 import { wrapBodyForSend } from "@/lib/email-preview";
-import { buildWorkingOpBody, buildWorkingOpSubject, type WorkingOpHospital } from "@/lib/doctor-working-op";
+import { buildWorkingOpBody, buildWorkingOpSubject, buildDoctorHospitalsHtml, ensureHospitalImageToken, type WorkingOpHospital } from "@/lib/doctor-working-op";
 import { type EmailAttachment } from "@/lib/email-attachments";
 import { normCountry, countryFilterOptions, canonicalCountryLabel } from "@/lib/normalize-country";
 import { resolveHospitalRegion } from "@/lib/hospital-region";
@@ -1510,19 +1510,32 @@ function PreviewConfirm({
   // specialty. Manual = whatever the picker below is set to. Defaults to Auto so
   // a single-city or single-specialty send lands on the right copy with no clicks.
   const [templateMode, setTemplateMode] = useState<"auto" | "manual">("auto");
-  const templateSuggestion = useMemo(() => {
+  // The auto-match, plus the human reason it did NOT fire. Explaining a miss
+  // matters as much as a hit: a bare "no specific match" reads like a broken
+  // toggle when the real cause is a two-city send or two doctors whose
+  // specialties disagree — both of which are deliberate refusals to match.
+  const { suggestion: templateSuggestion, missReason } = useMemo(() => {
     // Only match on specialty/job-title when ALL selected doctors agree — a mixed
     // send can't honestly use one specialty template.
     const specs = [...new Set(doctors.map(d => (d.speciality ?? "").trim().toLowerCase()).filter(Boolean))];
     const sharedSpecialty = specs.length === 1
       ? (doctors.find(d => (d.speciality ?? "").trim())?.speciality ?? "")
       : "";
-    return matchDoctorTemplate({
+    const suggestion = matchDoctorTemplate({
       templates,
       cities:    hospitals.map(h => h.city),
       specialty: sharedSpecialty,          // exact slug match (doctor_bmh_<slug>)
       jobTitle:  sharedSpecialty,          // + phrase fallback ("Consultant Cardiac Surgeon" → cardiac_surgeon)
     });
+    if (suggestion) return { suggestion, missReason: "" };
+    const cities = [...new Set(hospitals.map(h => (h.city ?? "").trim().toLowerCase()).filter(Boolean))];
+    return {
+      suggestion: null,
+      missReason: cities.length > 1  ? `hospitals span ${cities.length} cities`
+                : specs.length > 1   ? "doctors have different specialties"
+                : !sharedSpecialty   ? "no specialty on file"
+                : `no template for ${sharedSpecialty}`,
+    };
   }, [templates, hospitals, doctors]);
   // In Auto mode, keep the doctor template locked to the suggestion (or the core
   // default when nothing matches). Guarded so it only writes on a real change.
@@ -2445,15 +2458,39 @@ function PreviewConfirm({
     );
   };
   // ── Feature 2: multi-hospital doctor-email preview (READ-ONLY). ─────────────
-  // Combined → the consolidated "working opportunity" email per doctor, built
-  // with the shared buildWorkingOp* composer so it matches what send-flow-email
-  // ships. Individual → the per-hospital doctor template, one hospital sub-tab at
+  // Combined → the consolidated "working opportunity" email per doctor.
+  // Individual → the per-hospital doctor template, one hospital sub-tab at
   // a time. Single-hospital keeps the editable doctorPane above (unchanged).
+  //
+  // Mirrors send-flow-email's consolidated branch: a picked/auto-matched doctor
+  // template supplies the COPY and receives the grouped hospital blocks in its
+  // {{hospital_image}} slot; with no pick the hardcoded composer writes the
+  // whole email. Keep the two in lockstep — this preview is what the team
+  // approves before the send goes out.
   const combinedDoctorPane = (doc: DoctorOption) => {
     const hospWO: WorkingOpHospital[] = hospitals.map(toWorkingOpHospital);
-    const subject = buildWorkingOpSubject(hospWO);
-    const body = wrapBodyForSend(buildWorkingOpBody(doc.name, hospWO, previewSignatureHtmlFor(senderOverride)));
-    return <PreviewBlock label={`Consolidated · ${hospitals.length} hospitals`} subject={subject} body={body} />;
+    const sig = previewSignatureHtmlFor(senderOverride);
+    if (doctorTemplateKey !== DOCTOR_DEFAULT_KEY) {
+      const vars = {
+        ...(renderByDoctor.get(doc.id)?.vars ?? {}),
+        hospital_image: buildDoctorHospitalsHtml(hospWO),
+        signature:      sig,
+      };
+      return (
+        <PreviewBlock
+          label={`Consolidated · ${hospitals.length} hospitals · ${doctorTemplateKey}`}
+          subject={renderTemplate(doctorSubject, vars)}
+          body={wrapBodyForSend(renderTemplate(ensureHospitalImageToken(doctorBody), displayVarsOf(vars)))}
+        />
+      );
+    }
+    return (
+      <PreviewBlock
+        label={`Consolidated · ${hospitals.length} hospitals`}
+        subject={buildWorkingOpSubject(hospWO)}
+        body={wrapBodyForSend(buildWorkingOpBody(doc.name, hospWO, sig))}
+      />
+    );
   };
   // Render the per-hospital doctor email for one (doctor, hospital) pair — same
   // pipeline renderByDoctor uses, but for the chosen hospital, not only sampleHospital.
@@ -2573,31 +2610,40 @@ function PreviewConfirm({
               </div>
             </div>
           )}
-          {/* #22 Auto/Manual template toggle. Auto matches the send to the best
-              template (city-specific, then by specialty); Manual = pick your own. */}
-          <div className="flex items-center justify-between gap-2">
-            <div className="inline-flex rounded-md border border-sidebar-border/50 bg-white/5 p-0.5 text-[10px]">
-              <button
-                type="button"
-                onClick={() => setTemplateMode("auto")}
-                className={`rounded px-2 py-0.5 font-medium transition-colors ${templateMode === "auto" ? "bg-teal-600 text-white" : "text-sidebar-foreground/70 hover:text-sidebar-foreground"}`}
+          {/* #22 template auto-match status line. There is deliberately NO idle
+              "Manual" button: choosing from the picker below already switches to
+              manual, so a Manual button could only ever re-set state the pick had
+              just set — it looked like a mode switch that did nothing. What IS
+              needed is a way BACK, so "Auto-match" renders only while a hand-picked
+              template is in force, where pressing it visibly re-matches. */}
+          <div className="flex items-center justify-between gap-2 min-h-[16px]">
+            {templateMode === "auto" ? (
+              <span
+                className="min-w-0 flex-1 truncate text-[9.5px] text-sidebar-foreground/60"
+                title={templateSuggestion
+                  ? `Auto-matched ${templateSuggestion.kind.replace("_", " ")}: ${templateSuggestion.reason}`
+                  : `Auto-match found no specific template — ${missReason}. Using the standard one.`}
               >
-                Auto-match
-              </button>
-              <button
-                type="button"
-                onClick={() => setTemplateMode("manual")}
-                className={`rounded px-2 py-0.5 font-medium transition-colors ${templateMode === "manual" ? "bg-teal-600 text-white" : "text-sidebar-foreground/70 hover:text-sidebar-foreground"}`}
-              >
-                Manual
-              </button>
-            </div>
-            {templateMode === "auto" && (
-              <span className="text-[9.5px] text-sidebar-foreground/60 truncate">
                 {templateSuggestion
-                  ? <>Matched {templateSuggestion.kind === "city" ? "city" : "specialty"}: <strong className="text-sidebar-foreground/85">{templateSuggestion.reason}</strong></>
-                  : "No specific match — using the standard template"}
+                  ? <>Auto-matched {templateSuggestion.kind === "city" ? "city" : templateSuggestion.kind === "specialty" ? "specialty" : "job title"}: <strong className="text-sidebar-foreground/85">{templateSuggestion.reason}</strong></>
+                  : <>Auto: standard template — {missReason}</>}
               </span>
+            ) : (
+              <>
+                <span className="min-w-0 flex-1 truncate text-[9.5px] text-sidebar-foreground/60">
+                  Template picked by hand
+                </span>
+                <button
+                  type="button"
+                  onClick={() => setTemplateMode("auto")}
+                  className="whitespace-nowrap text-[10px] font-medium text-teal-500 transition-colors hover:text-teal-400 hover:underline"
+                  title={templateSuggestion
+                    ? `Go back to the auto-matched template (${templateSuggestion.reason})`
+                    : `Go back to the standard template — ${missReason}`}
+                >
+                  Auto-match
+                </button>
+              </>
             )}
           </div>
           <div className="flex items-start justify-between gap-2">

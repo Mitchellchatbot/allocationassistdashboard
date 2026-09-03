@@ -30,7 +30,7 @@
  */
 
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2";
-import { buildWorkingOpBody, buildWorkingOpSubject, type WorkingOpHospital } from "../_shared/doctor-working-op.ts";
+import { buildWorkingOpBody, buildWorkingOpSubject, buildDoctorHospitalsHtml, ensureHospitalImageToken, type WorkingOpHospital } from "../_shared/doctor-working-op.ts";
 
 // ── Stage → Template + next-stage routing ──────────────────────────────────
 // Hardcoded here (also defined in src/lib/automation-flows.ts) because the
@@ -406,6 +406,11 @@ Deno.serve(async (req: Request) => {
     console.log("[send-flow-email] using per-send template override:", tplOverrides[run.current_stage]);
     templateKey = String(tplOverrides[run.current_stage]);
   }
+  // Did THIS send explicitly pick (or auto-match) the doctor template, rather
+  // than inherit the route/hospital default? The consolidated working-op path
+  // below honours only an explicit pick, so a hospital's stored
+  // doctor_template_key keeps its long-standing composer behaviour.
+  const doctorTemplatePicked = Boolean(tplOverrides?.email_doctor);
 
   const { data: tpl, error: tplErr } = await supabase
     .from("email_templates")
@@ -688,6 +693,18 @@ Deno.serve(async (req: Request) => {
 
   // ── Build token vars ──────────────────────────────────────────────────────
   const md = (run.metadata ?? {}) as Record<string, unknown>;
+  // ── Consolidated doctor "working opportunity" email ───────────────────────
+  // This doctor went to MORE THAN ONE hospital in the same send, so the flow
+  // ships ONE location-grouped email listing every hospital (with photos)
+  // instead of a per-hospital note. SendProfileDialog stamps the full hospital
+  // list on metadata.batch_hospitals and marks a single run as the one that
+  // sends the doctor leg. When the send also picked a doctor template (the
+  // Auto-match/Manual control), that template supplies the COPY and the
+  // composer fills its {{hospital_image}} slot with the grouped blocks;
+  // otherwise the fully hardcoded composer runs, as it always has.
+  const batchHospitals = Array.isArray(md.batch_hospitals) ? (md.batch_hospitals as WorkingOpHospital[]) : [];
+  const consolidated = run.current_stage === "email_doctor" && batchHospitals.length > 1;
+  const consolidatedFromTemplate = consolidated && doctorTemplatePicked;
   const vars: Record<string, string> = {
     ...profileTokens,
     doctor_name:        String(run.doctor_name ?? ""),
@@ -741,11 +758,16 @@ Deno.serve(async (req: Request) => {
     hospital_description:  String(md.hospital_description ?? ""),
     // Hospital photo (RAW <img>) for working-opportunity emails — from the
     // hospital row's image_url; empty when the hospital has no photo on file, so
-    // the {{hospital_image}} block simply disappears.
-    hospital_image: (() => {
-      const u = String((hospital as Record<string, unknown> | null)?.image_url ?? "").trim();
-      return u ? `<img src="${u}" alt="${escapeHtml(String(run.hospital ?? "Hospital"))}" width="560" style="display:block;width:100%;max-width:560px;height:auto;border-radius:12px;margin:18px 0;border:0;" />` : "";
-    })(),
+    // the {{hospital_image}} block simply disappears. On a CONSOLIDATED send the
+    // same slot instead carries EVERY hospital in the send (name, About-us link,
+    // blurb, photo), grouped by location — that's what makes a city/specialty
+    // template render the full opportunity list rather than one stray photo.
+    hospital_image: consolidated
+      ? buildDoctorHospitalsHtml(batchHospitals)
+      : (() => {
+          const u = String((hospital as Record<string, unknown> | null)?.image_url ?? "").trim();
+          return u ? `<img src="${u}" alt="${escapeHtml(String(run.hospital ?? "Hospital"))}" width="560" style="display:block;width:100%;max-width:560px;height:auto;border-radius:12px;margin:18px 0;border:0;" />` : "";
+        })(),
     // Second-payment fee: fixed at AED 10,500 (Ammar 2026-06-11) unless a
     // per-run override is set. invoice_number / payment_link stay blank until
     // we have a source for them.
@@ -798,7 +820,14 @@ Deno.serve(async (req: Request) => {
   // (buttons / cards / coloured pills) BEFORE we splice in the signature.
   // The signature itself has to keep its own inline styles (teal sign-off,
   // logo block) so plainify runs only on the body source.
-  const rawBody       = positionHospitalImage(tpl.body_html || wrapHtml(tpl.body_text));
+  // positionHospitalImage re-homes the photo next to the per-hospital link, which
+  // is right for a single-hospital note but wrong for a consolidated send: there
+  // the token holds the whole grouped list and the template author already chose
+  // where it sits, so only guarantee the slot exists.
+  const tplBodySource = tpl.body_html || wrapHtml(tpl.body_text);
+  const rawBody       = consolidatedFromTemplate
+    ? ensureHospitalImageToken(tplBodySource)
+    : positionHospitalImage(tplBodySource);
   const plainBody     = plainifyBody(rawBody);
   const renderedBody  = collapseDoubledDr(render(plainBody, vars, true));
   // Wrap the rendered body in a serif container so every <p>/<table>
@@ -807,17 +836,16 @@ Deno.serve(async (req: Request) => {
   // its teal-bold weight, link colour, etc.).
   let html            = `${FONT_IMPORT}<div style="font-family:${FONT_STACK};font-size:17px;color:#1a2332;line-height:1.55;">${renderedBody}</div>`;
   let text            = collapseDoubledDr(render(tpl.body_text ?? "", vars));
+  // The city/specialty templates carry {{hospital_image}} in their HTML body
+  // only, so their stored body_text would ship a text part listing no hospitals
+  // at all. Derive it from the rendered HTML instead.
+  if (consolidatedFromTemplate) text = htmlToText(renderedBody);
 
-  // ── Consolidated doctor "working opportunity" email ───────────────────────
-  // When a doctor was sent to MORE THAN ONE hospital in the same send, the
-  // singular flow ships ONE location-grouped email listing every hospital (with
-  // photos), instead of one per-hospital note. SendProfileDialog stamps the full
-  // hospital list on metadata.batch_hospitals (and marks a single run as the one
-  // that sends the doctor leg via send_doctor_email). The shared composer keeps
-  // this identical to the batch flow's doctor email. Single-hospital sends keep
-  // the per-hospital DB template (incl. hospitals.doctor_template_key overrides).
-  const batchHospitals = Array.isArray(md.batch_hospitals) ? (md.batch_hospitals as WorkingOpHospital[]) : [];
-  if (run.current_stage === "email_doctor" && batchHospitals.length > 1) {
+  // No template was picked for this consolidated send, so the fully hardcoded
+  // composer writes the whole email — the long-standing default, kept identical
+  // to the batch flow's doctor email. A picked template has already rendered
+  // above with the grouped hospital list in its {{hospital_image}} slot.
+  if (consolidated && !consolidatedFromTemplate) {
     subject = buildWorkingOpSubject(batchHospitals);
     const workingOpHtml = buildWorkingOpBody(String(run.doctor_name ?? ""), batchHospitals, String(vars.signature ?? ""));
     html = `${FONT_IMPORT}<div style="font-family:${FONT_STACK};font-size:17px;color:#1a2332;line-height:1.55;">${workingOpHtml}</div>`;

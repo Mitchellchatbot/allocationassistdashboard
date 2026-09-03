@@ -143,3 +143,16 @@ ${buildDoctorHospitalsHtml(hospitals)}
 <p style="${p}">We wish you a wonderful day!</p>
 ${signatureHtml}`;
 }
+
+/** Guarantee a template body has a {{hospital_image}} slot for the grouped
+ *  hospital blocks. City/specialty templates ship with the token, but a
+ *  hand-written one may not — without this the hospital list would silently
+ *  vanish from a consolidated send. Inserts before {{signature}} so the list
+ *  still lands above the sign-off. */
+export function ensureHospitalImageToken(bodyHtml: string): string {
+  if (bodyHtml.includes("{{hospital_image}}")) return bodyHtml;
+  const sig = bodyHtml.indexOf("{{signature}}");
+  return sig === -1
+    ? `${bodyHtml}\n{{hospital_image}}`
+    : `${bodyHtml.slice(0, sig)}{{hospital_image}}\n${bodyHtml.slice(sig)}`;
+}

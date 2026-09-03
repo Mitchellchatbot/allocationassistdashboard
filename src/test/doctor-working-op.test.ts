@@ -3,6 +3,7 @@ import {
   buildWorkingOpSubject,
   buildWorkingOpBody,
   buildDoctorHospitalsHtml,
+  ensureHospitalImageToken,
   workingOpCountries,
   doctorGreeting,
   dedupeHospitals,
@@ -149,5 +150,58 @@ describe("full body", () => {
   it("a doubled batch_hospitals list still lists the hospital once", () => {
     const body = buildWorkingOpBody("Dr. X", [MNGHA, MNGHA], SIG);
     expect(countHospitals(body)).toBe(1);
+  });
+});
+
+// A city/specialty template drives the copy of a consolidated send while the
+// composer fills its {{hospital_image}} slot with the grouped hospital blocks.
+// The slot is the whole seam between the two, so guard that it survives.
+describe("ensureHospitalImageToken", () => {
+  it("leaves a template that already has the slot untouched", () => {
+    const tpl = "<p>Hi</p>{{hospital_image}}<p>Bye</p>{{signature}}";
+    expect(ensureHospitalImageToken(tpl)).toBe(tpl);
+  });
+
+  it("inserts the slot before the signature when a template lacks it", () => {
+    const out = ensureHospitalImageToken("<p>Hi</p><p>Bye</p>{{signature}}");
+    expect(out).toContain("{{hospital_image}}");
+    expect(out.indexOf("{{hospital_image}}")).toBeLessThan(out.indexOf("{{signature}}"));
+  });
+
+  it("appends the slot when there is no signature token either", () => {
+    const out = ensureHospitalImageToken("<p>Hi</p>");
+    expect(out.startsWith("<p>Hi</p>")).toBe(true);
+    expect(out).toContain("{{hospital_image}}");
+  });
+
+  it("the slot carries every hospital, so a template send lists them all", () => {
+    const tpl = ensureHospitalImageToken("<p>Opportunities in Doha</p>{{signature}}");
+    const rendered = tpl.replace("{{hospital_image}}", buildDoctorHospitalsHtml([VIEW, AMNM]));
+    expect(countHospitals(rendered)).toBe(2);
+    expect(countGroups(rendered)).toBe(1);       // both in Qatar → one heading
+    expect(rendered).toContain("The View Hospital");
+    expect(rendered).toContain("Al Fardan Medical (AMNM)");
+  });
+
+  // The real doctor_city_* body from migration 20260825010000. If that shape
+  // ever drifts away from carrying the slot, a city send would quietly lose its
+  // hospital list — which is exactly the bug this feature exists to fix.
+  it("the shipped city template keeps its city copy AND gains the hospital list", () => {
+    const cityTemplate =
+      '<p style="margin:0 0 10px;">Hi Dr. {{doctor_name}},</p>' +
+      '<p style="margin:0 0 10px;">I hope you are doing well 😊</p>' +
+      '<p style="margin:0 0 10px;">Based on your profile and training, we have recommended you to leading hospitals in <strong>Doha</strong>. These are among the most relevant employers in the area for your specialty.</p>' +
+      '{{hospital_image}}' +
+      '<p style="margin:0 0 10px;">We wish you a wonderful day!</p>' +
+      '{{signature}}';
+    expect(ensureHospitalImageToken(cityTemplate)).toBe(cityTemplate);  // slot already there
+    const rendered = cityTemplate
+      .replace("{{hospital_image}}", buildDoctorHospitalsHtml([VIEW, AMNM]))
+      .replace("{{doctor_name}}", "Manish")
+      .replace("{{signature}}", SIG);
+    expect(rendered).toContain("leading hospitals in <strong>Doha</strong>");  // template copy survives
+    expect(countHospitals(rendered)).toBe(2);                                  // composer blocks spliced in
+    expect(rendered).toContain(SIG);
+    expect(rendered).not.toContain("{{");                                      // no stray tokens ship
   });
 });

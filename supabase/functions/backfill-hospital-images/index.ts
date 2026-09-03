@@ -36,6 +36,12 @@
  *     body.set_images = [{ match, image_url?, data_base64?, filename? }]. A
  *     data_base64 payload is uploaded to the public email-card-images bucket and
  *     its public URL stored; match must hit exactly one hospital.
+ *   list_images — READ-ONLY: list every hospital that has an image_url, as
+ *     { id, name, image_url, city, country }. For reviewing the current photo
+ *     set to spot logos/placeholders/non-photos to remove.
+ *   clear_images — NULL out image_url on hospitals by id (dry-run by default):
+ *     body.clear_images = [id, ...]. Removes logo/placeholder images so the WO
+ *     email omits the hero photo rather than showing a logo.
  *
  * Non-destructive, idempotent (re-running skips already-filled columns unless
  * overwrite), and fetches only public hospital websites.
@@ -275,6 +281,54 @@ serve(async (req) => {
       .filter(h => !normWebsite(String(h.website ?? "")))
       .map(h => ({ id: String(h.id), name: String(h.name ?? ""), city: h.city ?? null, country: h.country ?? null }));
     return json({ ok: true, mode: "list_missing_website", count: missing.length, hospitals: missing });
+  }
+
+  // ── list_images mode: return every hospital that currently has an image_url,
+  //    as { id, name, image_url, city, country }. Read-only — used to review the
+  //    current photo set so an operator (or the agent) can spot which images are
+  //    logos / placeholders / non-photos to remove (see clear_images below).
+  if (body.list_images === true) {
+    const withImg = (hospitals ?? [])
+      .filter(h => String(h.image_url ?? "").trim().length > 0)
+      .map(h => ({
+        id: String(h.id), name: String(h.name ?? ""),
+        image_url: String(h.image_url), city: h.city ?? null, country: h.country ?? null,
+      }));
+    return json({ ok: true, mode: "list_images", count: withImg.length, hospitals: withImg });
+  }
+
+  // ── clear_images mode: NULL out image_url on specific hospitals by id — used to
+  //    remove logo / placeholder / non-photo images so the WO email simply omits
+  //    the hero <img> rather than showing a logo. Dry-run by default; apply:true
+  //    to write. Only clears the DB column (the storage object, if any, is left
+  //    as a harmless orphan). body.clear_images = [id, ...] (array of hospital ids)
+  if (Array.isArray(body.clear_images)) {
+    const byId = new Map((hospitals ?? []).map(h => [String(h.id), h]));
+    const toClear: Array<{ id: string; name: string; from: string }> = [];
+    const rejected: Array<{ id: string; reason: string }> = [];
+    for (const raw of body.clear_images as unknown[]) {
+      const id = String(raw ?? "");
+      const h = byId.get(id);
+      if (!h) { rejected.push({ id, reason: "unknown id" }); continue; }
+      const cur = String(h.image_url ?? "").trim();
+      if (!cur) { rejected.push({ id, reason: `already blank (${h.name})` }); continue; }
+      toClear.push({ id, name: String(h.name ?? ""), from: cur });
+    }
+    let cleared = 0;
+    const failures: Array<{ name: string; error: string }> = [];
+    if (apply) {
+      for (const c of toClear) {
+        const { error } = await supabase.from("hospitals")
+          .update({ image_url: null, updated_at: new Date().toISOString() }).eq("id", c.id);
+        if (error) failures.push({ name: c.name, error: error.message });
+        else cleared++;
+      }
+    }
+    return json({
+      ok: true, dry_run: !apply, mode: "clear_images",
+      summary: { would_clear: toClear.length, rejected: rejected.length, ...(apply ? { cleared, failed: failures.length } : {}) },
+      to_clear: toClear, rejected, ...(apply && failures.length ? { failures } : {}),
+    });
   }
 
   // ── set_websites mode: write website onto specific hospitals by id. Used to
