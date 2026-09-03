@@ -586,7 +586,7 @@ function SendProfileDialogBody({ onClose, initial }: { onClose: () => void; init
     // intros (hospitalOverrides) + the doctor-email override + a retyped doctor
     // "To". Card images ride separately in cardImageByDoctor (body state) so
     // handleConfirm reads them directly. Everything else (opts) is GLOBAL.
-    perDoctor: Record<string, { hospitalOverrides?: Record<string, SendOverrides>; doctorOverride?: SendOverrides; doctorEmail?: string }>,
+    perDoctor: Record<string, { hospitalOverrides?: Record<string, SendOverrides>; doctorOverride?: SendOverrides; doctorOverrides?: Record<string, SendOverrides>; doctorEmail?: string }>,
     opts: {
       // PER-DOCTOR attachments, keyed by doctor.id (hospital leg + doctor leg).
       attachments?: { hospital?: Record<string, EmailAttachment[]>; doctor?: Record<string, EmailAttachment[]> };
@@ -634,9 +634,11 @@ function SendProfileDialogBody({ onClose, initial }: { onClose: () => void; init
       const pd = perDoctor[doctor.id] ?? {};
       return {
         doctorEmailToUse: (pd.doctorEmail ?? "").trim() || doctor.email,
-        // email_hospital override per hospitalId; email_doctor override per doctor.
+        // email_hospital override per hospitalId; email_doctor either per doctor
+        // (single/Combined — one email) or per hospitalId (Individual — one each).
         hospitalOverrides: pd.hospitalOverrides ?? {},
         doctorOverride:    pd.doctorOverride,
+        doctorOverrides:   pd.doctorOverrides ?? {},
         cardImageUrl: cardImageByDoctor[doctor.id] ?? null,
         // Hospital-leg files are resolved per (doctor × hospital) at each run
         // below, not here — only the doctor-leg list is doctor-wide.
@@ -645,13 +647,22 @@ function SendProfileDialogBody({ onClose, initial }: { onClose: () => void; init
     };
     // Build the stage_overrides object for ONE (doctor, hospital) run — its own
     // hospital-intro edit + the doctor-email edit.
+    // A per-hospital doctor edit (Individual mode) wins over the doctor-wide one,
+    // so each hospital's run carries the copy that was edited on ITS tab.
     const stageOverridesFor = (
-      d: { hospitalOverrides: Record<string, SendOverrides>; doctorOverride?: SendOverrides },
+      d: {
+        hospitalOverrides: Record<string, SendOverrides>;
+        doctorOverride?: SendOverrides;
+        doctorOverrides?: Record<string, SendOverrides>;
+      },
       hospitalId: string,
-    ): Record<string, SendOverrides> => ({
-      ...(d.hospitalOverrides[hospitalId] ? { email_hospital: d.hospitalOverrides[hospitalId] } : {}),
-      ...(d.doctorOverride ? { email_doctor: d.doctorOverride } : {}),
-    });
+    ): Record<string, SendOverrides> => {
+      const docOv = d.doctorOverrides?.[hospitalId] ?? d.doctorOverride;
+      return {
+        ...(d.hospitalOverrides[hospitalId] ? { email_hospital: d.hospitalOverrides[hospitalId] } : {}),
+        ...(docOv ? { email_doctor: docOv } : {}),
+      };
+    };
 
     // ── Schedule-for-later branch (Amir #5) ─────────────────────────────────
     // Instead of creating runs + sending now, stash everything the send needs
@@ -676,7 +687,7 @@ function SendProfileDialogBody({ onClose, initial }: { onClose: () => void; init
         // One scheduled row per doctor (each row supports hospital_ids[] +
         // per-doctor stage_overrides / doctor_email). Global fields repeat per row.
         for (const doctor of selectedDoctors) {
-          const { doctorEmailToUse, hospitalOverrides, doctorOverride, cardImageUrl, doctorAttach } = dataFor(doctor);
+          const { doctorEmailToUse, hospitalOverrides, doctorOverride, doctorOverrides, cardImageUrl, doctorAttach } = dataFor(doctor);
           // A scheduled row is ONE per doctor across all its hospitals, so it can
           // carry a single hospital-attachment list. Use this doctor's first
           // hospital's combo (exact for a single-hospital schedule; multi-hospital
@@ -687,7 +698,7 @@ function SendProfileDialogBody({ onClose, initial }: { onClose: () => void; init
           // keeps only the doctor-email edit (each hospital is server-rendered
           // per-hospital at fire time, so per-hospital intro edits aren't stored).
           const scheduledStage = selectedHospitals.length === 1
-            ? stageOverridesFor({ hospitalOverrides, doctorOverride }, selectedHospitals[0].id)
+            ? stageOverridesFor({ hospitalOverrides, doctorOverride, doctorOverrides }, selectedHospitals[0].id)
             : (doctorOverride ? { email_doctor: doctorOverride } : {});
           await scheduleProfileSend.mutateAsync({
             doctor_id:         doctor.id,
@@ -803,14 +814,14 @@ function SendProfileDialogBody({ onClose, initial }: { onClose: () => void; init
         // One batch_id per DOCTOR — groups that doctor's hospital runs so the
         // BCC/consolidated nature stays queryable per doctor.
         const batchId = crypto.randomUUID();
-        const { doctorEmailToUse, hospitalOverrides, doctorOverride, cardImageUrl, doctorAttach } = dataFor(doctor);
+        const { doctorEmailToUse, hospitalOverrides, doctorOverride, doctorOverrides, cardImageUrl, doctorAttach } = dataFor(doctor);
         for (const [hIndex, h] of selectedHospitals.entries()) {
           const routing = routingByHospital.get(h.id)!;
           const { recipientEmail, recipientName, runCc } = routing;
           // Hospital-leg files for THIS exact (doctor × hospital) combo only.
           const hospitalAttach = hospAttByPair[pairKey(doctor.id, h.id)] ?? [];
           // This run's stage_overrides = THIS hospital's intro edit + the doctor edit.
-          const runStageOverrides = stageOverridesFor({ hospitalOverrides, doctorOverride }, h.id);
+          const runStageOverrides = stageOverridesFor({ hospitalOverrides, doctorOverride, doctorOverrides }, h.id);
           const { data: runRow, error: runErr } = await supabase
             .from("automation_flow_runs")
             .insert({
@@ -1435,9 +1446,14 @@ type PerDoctorSend = {
   // edited independently (its greeting names that hospital), so an edit is
   // stamped only onto that hospital's run, never fanned across all.
   hospitalOverrides?: Record<string, SendOverrides>;
-  // email_doctor override (the single-hospital doctor email; the multi-hospital
-  // consolidated email is read-only so it has none). Per doctor.
+  // email_doctor override for the ONE email a doctor gets across the whole send:
+  // the single-hospital doctor email, or the multi-hospital CONSOLIDATED email.
+  // Per doctor, because that's how many emails there are.
   doctorOverride?: SendOverrides;
+  // email_doctor override keyed PER hospitalId, for Individual mode — there the
+  // doctor gets a SEPARATE email per hospital, each naming that hospital, so an
+  // edit must land only on its own run. Takes precedence over doctorOverride.
+  doctorOverrides?: Record<string, SendOverrides>;
   doctorEmail?: string;
 };
 
@@ -1561,6 +1577,10 @@ function PreviewConfirm({
   // is edited independently. Doctor-email edits stay per doctor (one email/doctor).
   const [hospitalOvByPair, setHospitalOvByPair] = useState<Record<string, SendOverrides | null>>({});
   const [doctorOvByDoctor,   setDoctorOvByDoctor]   = useState<Record<string, SendOverrides | null>>({});
+  // Individual mode gives the doctor one email PER hospital, so those edits key
+  // per (doctor, hospital) like the hospital intros — a single per-doctor slot
+  // would fan hospital A's edited copy (naming A) onto B's email.
+  const [doctorOvByPair,     setDoctorOvByPair]     = useState<Record<string, SendOverrides | null>>({});
   // Bumped by "clone this edit to all" so every hospital/doctor pane re-seeds
   // from its freshly-cloned override (see EditableEmailSection.seedSignal).
   const [cloneTick, setCloneTick] = useState(0);
@@ -1915,9 +1935,21 @@ function PreviewConfirm({
         ?? (isSingle && doctorTemplateKey !== "profile_sent_doctor" && r
               ? { subject_override: r.rDocSubj, html_override: blankUnfilledTokens(r.dHtml) } : null);
 
+      // Individual mode fans out one doctor email PER hospital, each edited on its
+      // own sub-tab, so those edits ship keyed by hospital and never cross over.
+      // Combined/single send exactly one doctor email, so they use doctorOverride.
+      const doctorOverrides: Record<string, SendOverrides> = {};
+      if (!isSingle && !combineDoctorEmails) {
+        for (const h of hospitals) {
+          const dpOv = doctorOvByPair[pairKey(doc.id, h.id)];
+          if (dpOv) doctorOverrides[h.id] = dpOv;
+        }
+      }
+
       perDoctor[doc.id] = {
         ...(Object.keys(hospitalOverrides).length ? { hospitalOverrides } : {}),
         ...(doctorOverride ? { doctorOverride } : {}),
+        ...(Object.keys(doctorOverrides).length ? { doctorOverrides } : {}),
         ...(dEmail ? { doctorEmail: dEmail } : {}),
       };
     }
@@ -2457,7 +2489,7 @@ function PreviewConfirm({
       </div>
     );
   };
-  // ── Feature 2: multi-hospital doctor-email preview (READ-ONLY). ─────────────
+  // ── Feature 2: multi-hospital doctor-email preview (EDITABLE). ──────────────
   // Combined → the consolidated "working opportunity" email per doctor.
   // Individual → the per-hospital doctor template, one hospital sub-tab at
   // a time. Single-hospital keeps the editable doctorPane above (unchanged).
@@ -2467,45 +2499,93 @@ function PreviewConfirm({
   // {{hospital_image}} slot; with no pick the hardcoded composer writes the
   // whole email. Keep the two in lockstep — this preview is what the team
   // approves before the send goes out.
+  //
+  // The edit ships as stage_overrides.email_doctor, which send-flow-email applies
+  // AFTER its consolidated branch — so a hand-edit always wins over whatever the
+  // template or the composer produced.
   const combinedDoctorPane = (doc: DoctorOption) => {
     const hospWO: WorkingOpHospital[] = hospitals.map(toWorkingOpHospital);
     const sig = previewSignatureHtmlFor(senderOverride);
-    if (doctorTemplateKey !== DOCTOR_DEFAULT_KEY) {
-      const vars = {
-        ...(renderByDoctor.get(doc.id)?.vars ?? {}),
-        hospital_image: buildDoctorHospitalsHtml(hospWO),
-        signature:      sig,
-      };
-      return (
-        <PreviewBlock
-          label={`Consolidated · ${hospitals.length} hospitals · ${doctorTemplateKey}`}
-          subject={renderTemplate(doctorSubject, vars)}
-          body={wrapBodyForSend(renderTemplate(ensureHospitalImageToken(doctorBody), displayVarsOf(vars)))}
-        />
-      );
-    }
+    const templated = doctorTemplateKey !== DOCTOR_DEFAULT_KEY;
+    const vars = templated
+      ? { ...(renderByDoctor.get(doc.id)?.vars ?? {}), hospital_image: buildDoctorHospitalsHtml(hospWO), signature: sig }
+      : null;
+    const label   = `Consolidated · ${hospitals.length} hospitals${templated ? ` · ${doctorTemplateKey}` : ""}`;
+    const subject = vars ? renderTemplate(doctorSubject, vars) : buildWorkingOpSubject(hospWO);
+    const body    = vars
+      ? renderTemplate(ensureHospitalImageToken(doctorBody), displayVarsOf(vars))
+      : buildWorkingOpBody(doc.name, hospWO, sig);
+    const ov = doctorOvByDoctor[doc.id];
     return (
-      <PreviewBlock
-        label={`Consolidated · ${hospitals.length} hospitals`}
-        subject={buildWorkingOpSubject(hospWO)}
-        body={wrapBodyForSend(buildWorkingOpBody(doc.name, hospWO, sig))}
+      <EditableEmailSection
+        label={label}
+        subject={subject}
+        html={wrapBodyForSend(body)}
+        plainBody={body}
+        seedOverride={ov?.html_override ? { subject: ov.subject_override, html: ov.html_override } : null}
+        seedSignal={cloneTick}
+        from={senderLine}
+        to={doc.email ?? undefined}
+        cc={ccList}
+        bcc={bccList}
+        editable
+        onChange={(nextOv) => setDoctorOvByDoctor(prev => ({ ...prev, [doc.id]: nextOv }))}
+        attachments={doctorAttByDoctor[doc.id] ?? EMPTY_ATTACHMENTS}
+        onAttachmentsChange={(next) => setDoctorAttByDoctor(prev => ({ ...prev, [doc.id]: next }))}
+        templatePicker={
+          <TemplatePicker
+            templates={templates}
+            value={doctorTemplateKey}
+            onChange={pickDoctorTemplateManually}
+            defaultKey="profile_sent_doctor"
+            renderVars={renderByDoctor.get(doc.id)?.vars ?? {}}
+            label="Doctor 'working opportunity' email template"
+            flowFilter="profile_sent"
+            audience="doctor"
+            contentClassName="z-[200]"
+          />
+        }
       />
     );
   };
   // Render the per-hospital doctor email for one (doctor, hospital) pair — same
   // pipeline renderByDoctor uses, but for the chosen hospital, not only sampleHospital.
   const renderDoctorEmail = (doc: DoctorOption, hosp: Hospital) => {
-    const vars = varsFor(doc, hosp, cardImageByDoctor[doc.id] ?? null);
+    const vars  = varsFor(doc, hosp, cardImageByDoctor[doc.id] ?? null);
+    const plain = renderTemplate(doctorBody, vars);
     return {
       subject: renderTemplate(doctorSubject, vars),
-      body:    wrapBodyForSend(renderTemplate(doctorBody, vars)),
+      body:    wrapBodyForSend(plain),
+      plain,
     };
   };
   const individualDoctorPane = (doc: DoctorOption) => {
     const activeHospIdx = Math.min(doctorPreviewHospIdx, hospitals.length - 1);
     const panes = hospitals.map(h => {
-      const { subject, body } = renderDoctorEmail(doc, h);
-      return <PreviewBlock key={h.id} label={`To doctor · ${doc.email ?? "(no email)"} · ${h.name}`} subject={subject} body={body} />;
+      const { subject, body, plain } = renderDoctorEmail(doc, h);
+      // Each hospital's doctor email is its own send, so its edit is stored under
+      // that (doctor, hospital) pair and stamped only onto that hospital's run.
+      const key = pairKey(doc.id, h.id);
+      const ov  = doctorOvByPair[key];
+      return (
+        <EditableEmailSection
+          key={h.id}
+          label={`To doctor · ${doc.email ?? "(no email)"} · ${h.name}`}
+          subject={subject}
+          html={body}
+          plainBody={plain}
+          seedOverride={ov?.html_override ? { subject: ov.subject_override, html: ov.html_override } : null}
+          seedSignal={cloneTick}
+          from={senderLine}
+          to={doc.email ?? undefined}
+          cc={ccList}
+          bcc={bccList}
+          editable
+          onChange={(nextOv) => setDoctorOvByPair(prev => ({ ...prev, [key]: nextOv }))}
+          attachments={doctorAttByDoctor[doc.id] ?? EMPTY_ATTACHMENTS}
+          onAttachmentsChange={(next) => setDoctorAttByDoctor(prev => ({ ...prev, [doc.id]: next }))}
+        />
+      );
     });
     return (
       <ProfileSubTabs
