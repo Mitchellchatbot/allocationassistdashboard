@@ -120,7 +120,21 @@ export function EditableEmailPreview({
       setImgBox(null);
       setPinned(false);
       setCropRect(null);
+      // A fresh preview / Reset is a new baseline: undo must not walk back into
+      // the PREVIOUS template's edits, which no longer exist on screen.
+      // Seed from the DOM's OWN serialization, not the raw `html` prop: the
+      // parser normalizes markup on assignment (`<img … />` → `<img …>`, attr
+      // order, entities), so the prop string would never compare equal to a
+      // later snapshot. That mismatch made the first snapshot() push a second,
+      // identical-looking baseline — a dead undo step that left the button
+      // enabled at the bottom of the stack and, if used, re-wrote the body with
+      // the un-normalized markup.
+      resetHistory(bodyRef.current.innerHTML);
     }
+    // resetHistory is intentionally omitted: it's re-created every render, so
+    // depending on it would re-run this effect constantly. The guard above means
+    // it only fires when the body actually re-seeds.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [html, resetKey]);
 
   // If a fresh template render arrives (e.g. the template was swapped via the
@@ -143,7 +157,128 @@ export function EditableEmailPreview({
     }
   };
 
-  const flush = () => { if (bodyRef.current) onHtmlChange(bodyRef.current.innerHTML); };
+  // ── Undo / redo history ─────────────────────────────────────────────────────
+  // The browser's own contentEditable undo stack only records what IT performed:
+  // typing and execCommand formatting. Everything we do by hand — resizing or
+  // cropping an image, aligning/deleting one, dragging a table column — is a
+  // direct DOM mutation it never sees, so a native Ctrl+Z would skip the resize
+  // and silently revert an EARLIER text edit instead. That made undo feel broken
+  // and, worse, destructive.
+  //
+  // So we keep our own stack of body-HTML snapshots and never call the native
+  // undo (the key handler preventDefaults it, or both stacks would fire and
+  // fight). Every discrete operation ends in flush(), which commits the result;
+  // snapshot() records the BEFORE state ahead of a mutation. Typing is coalesced
+  // by a short idle timer so a sentence is one undo step, not one per keystroke.
+  const HISTORY_MAX = 120;
+  const TYPING_COALESCE_MS = 450;
+  type Snap = { html: string; caret: number | null };
+  const histRef      = useRef<Snap[]>([]);
+  const histIdxRef   = useRef(-1);
+  const typingTimer  = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const restoringRef = useRef(false);   // set while we write innerHTML back
+  const [histAt, setHistAt] = useState({ idx: -1, len: 0 });  // drives button enablement
+
+  /** Caret as a character offset into the body's text, so it can be re-found
+   *  after innerHTML is replaced (the nodes it pointed at are gone). */
+  const caretOffset = (): number | null => {
+    const body = bodyRef.current;
+    const sel  = window.getSelection();
+    if (!body || !sel || sel.rangeCount === 0 || !body.contains(sel.anchorNode)) return null;
+    const r   = sel.getRangeAt(0);
+    const pre = document.createRange();
+    pre.selectNodeContents(body);
+    try { pre.setEnd(r.endContainer, r.endOffset); } catch { return null; }
+    return pre.toString().length;
+  };
+  const restoreCaret = (offset: number | null) => {
+    const body = bodyRef.current;
+    if (!body || offset == null) return;
+    const walker = document.createTreeWalker(body, NodeFilter.SHOW_TEXT);
+    let seen = 0;
+    let node: Node | null = walker.nextNode();
+    while (node) {
+      const len = node.textContent?.length ?? 0;
+      if (seen + len >= offset) {
+        const r = document.createRange();
+        r.setStart(node, Math.max(0, Math.min(len, offset - seen)));
+        r.collapse(true);
+        const sel = window.getSelection();
+        sel?.removeAllRanges(); sel?.addRange(r);
+        return;
+      }
+      seen += len;
+      node = walker.nextNode();
+    }
+  };
+
+  const syncHistState = () => setHistAt({ idx: histIdxRef.current, len: histRef.current.length });
+
+  // Don't let a pending typing-coalesce timer fire after unmount.
+  useEffect(() => () => { if (typingTimer.current) clearTimeout(typingTimer.current); }, []);
+
+  /** Record the body's current HTML as an undo step. No-op while restoring, and
+   *  deduped so an operation that changed nothing doesn't add a dead step. */
+  const commit = () => {
+    const body = bodyRef.current;
+    if (!body || restoringRef.current) return;
+    const html = body.innerHTML;
+    const stack = histRef.current;
+    if (stack[histIdxRef.current]?.html === html) return;
+    stack.splice(histIdxRef.current + 1);              // a new edit clears the redo tail
+    stack.push({ html, caret: caretOffset() });
+    if (stack.length > HISTORY_MAX) stack.shift();
+    histIdxRef.current = stack.length - 1;
+    syncHistState();
+  };
+
+  /** Call BEFORE a hand-rolled DOM mutation so its pre-state is undoable. Also
+   *  lands any typing still waiting on the coalesce timer, so "type then resize"
+   *  is two undo steps rather than one merged blob. */
+  const snapshot = () => {
+    if (typingTimer.current) { clearTimeout(typingTimer.current); typingTimer.current = null; }
+    commit();
+  };
+
+  const resetHistory = (html: string) => {
+    if (typingTimer.current) { clearTimeout(typingTimer.current); typingTimer.current = null; }
+    histRef.current    = [{ html, caret: null }];
+    histIdxRef.current = 0;
+    syncHistState();
+  };
+
+  const travel = (to: number) => {
+    const body  = bodyRef.current;
+    const stack = histRef.current;
+    if (!body || to < 0 || to >= stack.length) return;
+    if (typingTimer.current) { clearTimeout(typingTimer.current); typingTimer.current = null; }
+    const snap = stack[to];
+    restoringRef.current = true;
+    body.innerHTML = snap.html;
+    restoringRef.current = false;
+    histIdxRef.current = to;
+    // The old image nodes are gone — drop any selection pointing at them.
+    activeImgRef.current = null;
+    setImgBox(null); setPinned(false); setCropRect(null);
+    body.focus();
+    restoreCaret(snap.caret);
+    savedRange.current = null;
+    syncHistState();
+    onHtmlChange(snap.html);
+  };
+  const undo = () => travel(histIdxRef.current - 1);
+  const redo = () => travel(histIdxRef.current + 1);
+  const canUndo = histAt.idx > 0;
+  const canRedo = histAt.idx >= 0 && histAt.idx < histAt.len - 1;
+
+  // Push the body upward AND close the current undo step. Every discrete
+  // operation (resize, crop, align, delete, column drag, insert, format) ends
+  // here, so each becomes exactly one Ctrl+Z.
+  const flush = () => {
+    if (!bodyRef.current) return;
+    onHtmlChange(bodyRef.current.innerHTML);
+    commit();
+  };
 
   // ── Drag-to-resize table columns ────────────────────────────────────────────
   // Grab a header/cell's right edge and drag to set that column's width. We
@@ -192,6 +327,7 @@ export function EditableEmailPreview({
   // count as leaving the image and make the handles vanish under the cursor.
   // Align a block image via auto margins (email-client safe). flush() bakes it in.
   const alignImage = (img: HTMLImageElement, how: "left" | "center" | "right") => {
+    snapshot();
     img.style.display = "block";
     img.style.marginLeft  = how === "left"  ? "0" : "auto";
     img.style.marginRight = how === "right" ? "0" : "auto";
@@ -200,6 +336,7 @@ export function EditableEmailPreview({
   };
   const deleteImage = (img: HTMLImageElement | null) => {
     if (!img) return;
+    snapshot();
     img.remove();
     activeImgRef.current = null;
     setImgBox(null);
@@ -241,6 +378,7 @@ export function EditableEmailPreview({
   };
   // Shared by the in-body corner/edge grab AND the visible corner squares.
   const beginImgResize = (img: HTMLImageElement, startX: number, fromLeft: boolean) => {
+    snapshot();                              // pre-drag size is the undo target
     const startW  = img.getBoundingClientRect().width;
     const parentW = img.parentElement?.getBoundingClientRect().width || 640;
     const dir     = fromLeft ? -1 : 1;       // left-side corners grow leftwards
@@ -326,6 +464,10 @@ export function EditableEmailPreview({
       const blob = await new Promise<Blob | null>(res => canvas.toBlob(res, "image/png"));
       if (!blob) throw new Error("blob");
       const att = await uploadEmailAttachment(new File([blob], "cropped.png", { type: "image/png" }));
+      // Snapshot the UNcropped image here, not before the upload: a crop that
+      // fails (tainted canvas, upload error) changes nothing and must not leave
+      // a dead undo step behind.
+      snapshot();
       img.setAttribute("src", att.path);
       const newW = Math.round(cropRect.w);
       img.style.width = `${newW}px`;
@@ -366,6 +508,7 @@ export function EditableEmailPreview({
     const headRow = table?.tHead?.rows[0] ?? table?.rows[0];
     if (!table || !headRow) return;
     e.preventDefault();                      // don't start a text selection
+    snapshot();                              // pre-drag column widths are the undo target
     table.style.tableLayout = "fixed";
     table.style.width = `${Math.round(table.getBoundingClientRect().width)}px`;
     // Pin every column's current width (and let headers wrap) so fixed layout
@@ -400,6 +543,7 @@ export function EditableEmailPreview({
   // a contentEditable; the failure mode is a no-op, never a crash.
   const exec = (command: string, value?: string) => {
     const body = bodyRef.current; if (!body) return;
+    snapshot();     // formatting joins OUR stack — the native one is never replayed
     body.focus();
     if (savedRange.current && body.contains(savedRange.current.commonAncestorContainer)) {
       const sel = window.getSelection();
@@ -437,6 +581,7 @@ export function EditableEmailPreview({
   // `<span style="font-family:…">`, which survives in the sent HTML).
   const applyFontFamily = (family: string) => {
     if (!family || !bodyRef.current) return;
+    snapshot();
     restoreOrSelectAll();
     try {
       document.execCommand("styleWithCSS", false, "true");
@@ -451,6 +596,7 @@ export function EditableEmailPreview({
   // work-around for arbitrary sizes.
   const applyFontSize = (px: string) => {
     const body = bodyRef.current; if (!px || !body) return;
+    snapshot();
     restoreOrSelectAll();
     try {
       document.execCommand("styleWithCSS", false, "false");
@@ -499,19 +645,24 @@ export function EditableEmailPreview({
   };
   const applyTableAlign = (align: "left" | "center" | "right" | "justify") => {
     const cells = targetTableCells();
+    if (!cells.length) return;
+    snapshot();
     cells.forEach((c) => { c.style.textAlign = align; });
-    if (cells.length) flush();
+    flush();
   };
   const applyTableVAlign = (valign: "top" | "middle" | "bottom") => {
     const cells = targetTableCells();
+    if (!cells.length) return;
+    snapshot();
     cells.forEach((c) => { c.style.verticalAlign = valign; });
-    if (cells.length) flush();
+    flush();
   };
 
   // Insert arbitrary HTML (a built table) at the saved caret, or append to the
   // end if the caret was never placed inside the body.
   const insertHtml = (snippet: string) => {
     const body = bodyRef.current; if (!body) return;
+    snapshot();     // inserting a table / image / pasted grid is one undo step
     body.focus();
     const sel = window.getSelection();
     let range = savedRange.current;
@@ -713,8 +864,8 @@ export function EditableEmailPreview({
             <Table2 className="h-3.5 w-3.5" /> <span className="text-[11px] font-medium">Table</span>
           </ToolBtn>
           <Divider />
-          <ToolBtn onClick={() => exec("undo")} title="Undo (Ctrl/Cmd+Z)"><Undo2 className="h-3.5 w-3.5" /></ToolBtn>
-          <ToolBtn onClick={() => exec("redo")} title="Redo (Ctrl/Cmd+Shift+Z)"><Redo2 className="h-3.5 w-3.5" /></ToolBtn>
+          <ToolBtn onClick={undo} disabled={!canUndo} title="Undo (Ctrl/Cmd+Z) — includes image resize, crop, align, delete and column widths"><Undo2 className="h-3.5 w-3.5" /></ToolBtn>
+          <ToolBtn onClick={redo} disabled={!canRedo} title="Redo (Ctrl/Cmd+Shift+Z)"><Redo2 className="h-3.5 w-3.5" /></ToolBtn>
           <Divider />
           <ToolBtn onClick={() => exec("bold")}          title="Bold"><Bold className="h-3.5 w-3.5" /></ToolBtn>
           <ToolBtn onClick={() => exec("italic")}        title="Italic"><Italic className="h-3.5 w-3.5" /></ToolBtn>
@@ -882,9 +1033,25 @@ export function EditableEmailPreview({
           ref={bodyRef}
           contentEditable
           suppressContentEditableWarning
-          onInput={(e) => onHtmlChange((e.target as HTMLDivElement).innerHTML)}
+          onInput={(e) => {
+            onHtmlChange((e.target as HTMLDivElement).innerHTML);
+            // Coalesce a typing burst into ONE undo step: restart the idle timer
+            // on every keystroke and only commit once they pause.
+            if (typingTimer.current) clearTimeout(typingTimer.current);
+            typingTimer.current = setTimeout(() => { typingTimer.current = null; commit(); }, TYPING_COALESCE_MS);
+          }}
           onPaste={onPaste}
           onKeyDown={(e) => {
+            // Our own history owns undo/redo — the native stack knows nothing of
+            // image resize/crop/delete or column drags, so letting it run too
+            // would revert the wrong thing. preventDefault keeps it out.
+            const mod = e.metaKey || e.ctrlKey;
+            if (mod && (e.key === "z" || e.key === "Z")) {
+              e.preventDefault();
+              if (e.shiftKey) redo(); else undo();
+              return;
+            }
+            if (mod && (e.key === "y" || e.key === "Y")) { e.preventDefault(); redo(); return; }
             // A selected image: Delete/Backspace removes it, Escape deselects.
             if (pinned && activeImgRef.current) {
               if (e.key === "Delete" || e.key === "Backspace") { e.preventDefault(); deleteImage(activeImgRef.current); return; }
@@ -916,7 +1083,11 @@ export function EditableEmailPreview({
         // Editable full-screen: subject + body edits sync straight back to the
         // inline editor (DOM + onHtmlChange), so closing keeps every change.
         onSubjectChange={onSubjectChange}
-        onHtmlChange={(v) => { if (bodyRef.current && bodyRef.current.innerHTML !== v) bodyRef.current.innerHTML = v; onHtmlChange(v); }}
+        onHtmlChange={(v) => {
+          if (bodyRef.current && bodyRef.current.innerHTML !== v) bodyRef.current.innerHTML = v;
+          onHtmlChange(v);
+          commit();   // full-screen edits are undoable back here too
+        }}
         edited={edited}
         onReset={onReset ? () => { onReset(); setFsHtml(html); } : undefined}
         attachmentItems={attachments}
@@ -927,16 +1098,18 @@ export function EditableEmailPreview({
   );
 }
 
-function ToolBtn({ children, onClick, title, primary, className }: { children: React.ReactNode; onClick: () => void; title: string; primary?: boolean; className?: string }) {
+function ToolBtn({ children, onClick, title, primary, className, disabled }: { children: React.ReactNode; onClick: () => void; title: string; primary?: boolean; className?: string; disabled?: boolean }) {
   return (
     <button
       type="button"
       title={title}
+      disabled={disabled}
       onMouseDown={(e) => e.preventDefault()}  // keep the editor selection while clicking
       onClick={onClick}
       className={cn(
         "inline-flex items-center gap-1 rounded-md px-2 py-1 transition-colors",
         primary ? "text-teal-700 hover:bg-teal-50 border border-teal-200" : "text-slate-600 hover:bg-slate-100",
+        disabled && "opacity-35 pointer-events-none",
         className,
       )}
     >
