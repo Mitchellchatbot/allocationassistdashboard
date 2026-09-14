@@ -52,7 +52,8 @@ export const SPECIALTY_GROUPS: SpecialtyGroup[] = [
   // ── Pediatrics sub-specialties (must come BEFORE plain pediatric tags) ─
   { name: "Pediatric Cardiothoracic Surgeon", parent: "Cardiothoracic Surgery", keywords: kws("pediatric cardiothoracic", "paediatric cardiothoracic") },
   { name: "Pediatric Cardiovascular Surgeon", parent: "Cardiovascular Surgery", keywords: kws("pediatric cardiovascular", "paediatric cardiovascular") },
-  { name: "Pediatric Critical Care", parent: "Critical Care Medicine",          keywords: kws("pediatric critical care", "paediatric critical care", /\bpicu\b/) },
+  { name: "Pediatric Critical Care", parent: "Critical Care Medicine",          keywords: kws("pediatric critical care", "paediatric critical care") },
+  { name: "PICU",                  parent: "Pediatric Critical Care",           keywords: kws(/\bpicu\b/, "pediatric intensive", "paediatric intensive") },
   { name: "Pediatric Cardiology",  parent: "Cardiology",                        keywords: kws("pediatric cardio", "paediatric cardio") },
   { name: "Pediatric Endocrinology", parent: "Endocrinology",                   keywords: kws("pediatric endocrin", "paediatric endocrin") },
   { name: "Pediatric ENT Surgeon", parent: "ENT",                               keywords: kws("pediatric ent surg", "paediatric ent surg") },
@@ -84,12 +85,15 @@ export const SPECIALTY_GROUPS: SpecialtyGroup[] = [
   // ── Cardiology sub-specialties (before parent) ────────────────────────
   { name: "Interventional Cardiologist", parent: "Cardiology",                  keywords: kws("interventional cardio", "cath lab", "angioplast") },
   { name: "Electrophysiology", parent: "Cardiology",                            keywords: kws("electrophysiolog", /\bep\b\s*cardio/, "arrhyth") },
-  { name: "Cardiology", parent: null,                                           keywords: kws("cardiolog", "cardiac", /\bheart\b/) },
 
   // ── Cardiothoracic / Cardiovascular / Cardiac Surgery ────────────────
+  // Ahead of Cardiology: its "cardiac" keyword would otherwise swallow
+  // "cardiac surgeon" and file a surgeon under the medical specialty.
   { name: "Cardiothoracic Surgery", parent: null,                               keywords: kws("cardiothoracic", "cardio thoracic", /\bcvts?\b/) },
   { name: "Cardiovascular Surgery", parent: null,                               keywords: kws("cardiovascular surg") },
-  { name: "Cardiac Surgery",        parent: null,                               keywords: kws("cardiac surger", "heart surger") },
+  { name: "Cardiac Surgery",        parent: null,                               keywords: kws(/\bcardiac\s*surg/, /\bheart\s*surg/) },
+
+  { name: "Cardiology", parent: null,                                           keywords: kws("cardiolog", "cardiac", /\bheart\b/) },
 
   // ── Neuro family ──────────────────────────────────────────────────────
   { name: "Interventional Neuroradiologist", parent: "Neuroradiology",         keywords: kws("interventional neuro radio") },
@@ -104,13 +108,15 @@ export const SPECIALTY_GROUPS: SpecialtyGroup[] = [
 
   // ── Critical / Intensive Care family ──────────────────────────────────
   { name: "Surgical Critical Care", parent: "Critical Care Medicine",           keywords: kws("surgical critical") },
+  { name: "Pulmonology Intensivist", parent: "Pulmonology",                     keywords: kws("pulmonology intensiv") },
   { name: "Intensivist",           parent: "Intensive Care Medicine",           keywords: kws("intensivist") },
   { name: "Intensive Care Medicine", parent: null,                              keywords: kws("intensive care", /\bicu\b/) },
   { name: "Critical Care Medicine", parent: null,                               keywords: kws("critical care") },
-  { name: "Pulmonology Intensivist", parent: "Pulmonology",                     keywords: kws("pulmonology intensiv") },
 
   // ── ENT / Head & Neck ─────────────────────────────────────────────────
-  { name: "Head & Neck Surgery",   parent: "ENT",                               keywords: kws("head and neck", "head & neck") },
+  // Written as a literal regex because kw() flattens punctuation to \s*,
+  // which would turn "head & neck" into "head\s*neck" and never match.
+  { name: "Head & Neck Surgery",   parent: "ENT",                               keywords: kws(/\bhead\s*(?:and|&)\s*neck/) },
   { name: "ENT",                   parent: null,                                keywords: kws(/\bent\b/, "otolaryng") },
 
   // ── Ophthalmology family ──────────────────────────────────────────────
@@ -121,9 +127,9 @@ export const SPECIALTY_GROUPS: SpecialtyGroup[] = [
   { name: "Hematology Oncology",   parent: "Hematology",                        keywords: kws("haematology oncology", "hematology oncology", "haem onc", "hem onc") },
   { name: "Surgical Oncology",     parent: "Oncology",                          keywords: kws("surgical oncolog") },
   { name: "Radiation Oncology",    parent: "Oncology",                          keywords: kws("radiation oncolog", "radiotherap") },
-  { name: "Medical Oncology",      parent: "Oncology",                          keywords: kws("medical oncolog") },
   { name: "Medical Oncologist",    parent: "Oncology",                          keywords: kws("medical oncologist") },
-  { name: "Gynecological Oncology", parent: "Oncology",                         keywords: kws("gyna?ecological oncolog", "gyn onc") },
+  { name: "Medical Oncology",      parent: "Oncology",                          keywords: kws("medical oncolog") },
+  { name: "Gynecological Oncology", parent: "Oncology",                         keywords: kws(/\bgyna?ecological\s*oncolog/, "gyn onc") },
   { name: "Oncology",              parent: null,                                keywords: kws("oncolog", "cancer") },
 
   // ── Obs/Gyn family ────────────────────────────────────────────────────
@@ -131,13 +137,15 @@ export const SPECIALTY_GROUPS: SpecialtyGroup[] = [
   { name: "Urogynaecology",        parent: "Obstetrics and Gynecology",         keywords: kws("urogyn") },
   { name: "Midwife",               parent: "Obstetrics and Gynecology",         keywords: kws("midwife", "midwifer") },
   { name: "IVF",                   parent: "Obstetrics and Gynecology",         keywords: kws(/\bivf\b/, "fertilit", "reproductive medic") },
-  { name: "Obstetrics and Gynecology", parent: null,                            keywords: kws("obstetric", "gyna?ecolog", /\bobs?[-\s/]?gyn/, /\bog\b/) },
+  // "gyna?ecolog" must stay a literal regex — as a plain string kw() would
+  // strip the "?" and only ever match the British spelling.
+  { name: "Obstetrics and Gynecology", parent: null,                            keywords: kws("obstetric", /\bgyna?ecolog/, /\bobs?[-\s/]?gyn/, /\bog\b/) },
 
   // ── Surgery sub-specialties (before plain Surgery) ───────────────────
   { name: "Endovascular Surgery",  parent: "Vascular Surgery",                  keywords: kws("endovascular") },
   { name: "Vascular Surgery",      parent: null,                                keywords: kws("vascular surg") },
   { name: "Endourological surgery", parent: "Urology",                          keywords: kws("endourolog") },
-  { name: "Visceral Surgery",      parent: "Visceral Surgeon",                  keywords: kws("visceral surg") },
+  { name: "Visceral Surgery",      parent: "Visceral Surgeon",                  keywords: kws(/\bvisceral\s*surger/) },
   { name: "Visceral Surgeon",      parent: null,                                keywords: kws("visceral") },
   { name: "Hand Surgery",          parent: "Orthopaedic",                       keywords: kws("hand surg") },
   { name: "Shoulders",             parent: "Orthopaedic",                       keywords: kws("shoulder") },
@@ -155,6 +163,13 @@ export const SPECIALTY_GROUPS: SpecialtyGroup[] = [
   { name: "Breast Surgery",        parent: null,                                keywords: kws("breast surg") },
   { name: "Minimally Invasive",    parent: null,                                keywords: kws("minimally invasive", /\bmis\b/) },
   { name: "Orthopaedic",           parent: null,                                keywords: kws("orthop", /\bortho\b/) },
+
+  // ── Dental ────────────────────────────────────────────────────────────
+  // Ahead of General Surgery, whose bare /\bsurgeon\b/ catch-all would
+  // otherwise claim "Dental Surgeon".
+  { name: "Dental Surgeon",        parent: null,                                keywords: kws("dental surg") },
+  { name: "Dentist",               parent: null,                                keywords: kws("dentist", "orthodont", "periodont", "endodont", "dent") },
+
   { name: "General Surgery",       parent: null,                                keywords: kws("general surger", /\bgen\.?\s*surg/, /\bsurgeon\b/, /\bsurgery\b/) },
 
   // ── Pathology / Radiology / Diagnostics ──────────────────────────────
@@ -187,8 +202,8 @@ export const SPECIALTY_GROUPS: SpecialtyGroup[] = [
   { name: "Nephrology",            parent: null,                                keywords: kws("nephrolog", "renal") },
   { name: "Rheumatologist",        parent: null,                                keywords: kws("rheumat") },
   { name: "Dermatology",           parent: null,                                keywords: kws("dermatolog", "skin") },
-  { name: "Allergist",             parent: null,                                keywords: kws("allergist", "allergolog") },
   { name: "Allergology",           parent: "Allergist",                         keywords: kws("allergolog") },
+  { name: "Allergist",             parent: null,                                keywords: kws("allergist") },
   { name: "Clinical Immunology",   parent: null,                                keywords: kws("immunolog") },
 
   // ── Anesthesia + pain ────────────────────────────────────────────────
@@ -206,22 +221,17 @@ export const SPECIALTY_GROUPS: SpecialtyGroup[] = [
   { name: "Psychiatry",            parent: null,                                keywords: kws("psychiat") },
   { name: "Psychology",            parent: null,                                keywords: kws("psycholog") },
 
-  // ── Dental ────────────────────────────────────────────────────────────
-  { name: "Dental Surgeon",        parent: null,                                keywords: kws("dental surg") },
-  { name: "Dentist",               parent: null,                                keywords: kws("dentist", "dent") },
-
   // ── Rehab / Therapy / Misc ───────────────────────────────────────────
   { name: "Occupational Therapy",  parent: null,                                keywords: kws("occupational therap") },
   { name: "Occupational Medicine", parent: null,                                keywords: kws("occupational medic") },
-  { name: "Physical Medicine and Rehabilitation", parent: null,                 keywords: kws("physical medicine and rehab", "physiatr", "rehab") },
   { name: "Physiatrist",           parent: "Physical Medicine and Rehabilitation", keywords: kws("physiatrist") },
+  { name: "Physical Medicine and Rehabilitation", parent: null,                 keywords: kws("physical medicine and rehab", "physiatr", "rehab") },
   { name: "Sports Medicine",       parent: null,                                keywords: kws("sports medic") },
   { name: "NICU",                  parent: "Neonatology",                       keywords: kws(/\bnicu\b/, "neonatal intensive") },
-  { name: "PICU",                  parent: "Pediatrics",                        keywords: kws(/\bpicu\b/, "pediatric intensive", "paediatric intensive") },
   { name: "Neonatology",           parent: null,                                keywords: kws("neonatolog", "neonatal") },
   { name: "Nurses",                parent: null,                                keywords: kws("nurse", "nursing") },
-  { name: "Medical Genetics",      parent: null,                                keywords: kws("genetic") },
   { name: "Molecular Genetic",     parent: "Medical Genetics",                  keywords: kws("molecular genetic") },
+  { name: "Medical Genetics",      parent: null,                                keywords: kws("genetic") },
   { name: "Medical Physicist",     parent: null,                                keywords: kws("medical physic") },
   { name: "Microbiologist",        parent: null,                                keywords: kws("microbiolog") },
   { name: "Urology",               parent: null,                                keywords: kws("urolog") },

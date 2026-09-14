@@ -4,6 +4,7 @@ import {
   rollupSpecialty,
   asSubspecialty,
   textMentionsSpecialty,
+  listCanonicalSpecialties,
 } from "@/lib/specialty-groups";
 
 /**
@@ -33,6 +34,55 @@ describe("specialty grouping — stem matching", () => {
     expect(rollupSpecialty("Electrophysiology")).toBe("Cardiology");
     expect(rollupSpecialty("Pediatric Cardiology")).toBe("Cardiology");
     expect(rollupSpecialty("Cardiology")).toBe("Cardiology");
+  });
+});
+
+/**
+ * The single invariant that catches the whole "an entry sits below something
+ * broader that swallows it" bug class. listCanonicalSpecialties() feeds the
+ * Specialty-of-the-day rotation picker, so an entry that doesn't resolve to
+ * itself means picking it queues a DIFFERENT specialty's doctors. This has
+ * bitten eleven entries at once — "Cardiac Surgery" resolved to "Cardiology"
+ * (via its "cardiac" keyword) and "Dental Surgeon" to "General Surgery" (via
+ * its bare /\bsurgeon\b/ catch-all).
+ */
+describe("every canonical specialty resolves to itself", () => {
+  it.each(listCanonicalSpecialties())("%s", name => {
+    expect(groupSpecialty(name)).toBe(name);
+  });
+});
+
+/**
+ * kw() flattens every non-alphanumeric run to "\s*", so a string keyword
+ * carrying regex syntax is silently corrupted: "gyna?ecolog" became
+ * "gyna\s*ecolog" (British spelling only, American returned null) and
+ * "head & neck" became "head\s*neck" (never matched, so the entry fell
+ * through to General Surgery). Both are literal regexes now.
+ */
+describe("spellings and punctuation that kw() used to mangle", () => {
+  it("matches both the American and British gynaecology spellings", () => {
+    expect(groupSpecialty("Gynecology")).toBe("Obstetrics and Gynecology");
+    expect(groupSpecialty("Gynaecology")).toBe("Obstetrics and Gynecology");
+    expect(groupSpecialty("Gynecological Oncology")).toBe("Gynecological Oncology");
+    expect(groupSpecialty("Gynaecological Oncology")).toBe("Gynecological Oncology");
+  });
+
+  it("matches head & neck written with an ampersand or the word", () => {
+    expect(groupSpecialty("Head & Neck Surgery")).toBe("Head & Neck Surgery");
+    expect(groupSpecialty("Head and Neck Surgery")).toBe("Head & Neck Surgery");
+  });
+
+  it("keeps surgeons out of the matching medical specialty", () => {
+    expect(groupSpecialty("Cardiac Surgeon")).toBe("Cardiac Surgery");
+    expect(groupSpecialty("Dental Surgeon")).toBe("Dental Surgeon");
+    // …without dragging the medical specialty along with them
+    expect(groupSpecialty("Cardiology")).toBe("Cardiology");
+  });
+
+  it("buckets the dental sub-specialties the JotForm offers", () => {
+    for (const s of ["Orthodontics", "Periodontics", "Endodontics"]) {
+      expect(groupSpecialty(s)).toBe("Dentist");
+    }
   });
 });
 

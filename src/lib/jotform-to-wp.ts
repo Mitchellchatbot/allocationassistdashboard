@@ -21,6 +21,51 @@ export interface MappedProfile {
 
 const norm = (s: string) => s.toLowerCase().replace(/[^a-z]/g, "");
 
+// ── Value-pattern lookup lists ────────────────────────────────────────
+// JotForm question labels arrive as generic stems ("Type A", "What Is"),
+// so specialty/nationality/language are detected from the VALUES instead.
+// These MUST equal the server master in
+// supabase/functions/_shared/jotform-extract.ts — the same submission is
+// mapped by both (webhook server-side, Forms page client-side), so any
+// divergence makes one path detect a specialty the other misses.
+// src/test/jotform-extract-parity.test.ts enforces the equality.
+export const SPECIALTIES = [
+  "Cardiology", "Cardiologist", "Anaesthesiology", "Anesthesiology", "Anaesthesia", "Anesthesia",
+  "Dermatology", "Endocrinology", "Gastroenterology", "Hematology", "Haematology",
+  "Nephrology", "Neurology", "Oncology", "Pulmonology", "Respiratory Medicine",
+  "Rheumatology", "Urology", "Orthopaedic", "Orthopedic", "Orthopaedics", "Orthopedics",
+  "Plastic Surgery", "Vascular Surgery", "General Surgery", "Surgery",
+  "Pediatric", "Paediatric", "Pediatrics", "Paediatrics", "Neonatology",
+  "Obstetric", "Gynecology", "Gynaecology", "Obstetrics", "OBGYN", "OB-GYN",
+  "Psychiatry", "Family Medicine", "Internal Medicine", "Emergency Medicine",
+  "Radiology", "Radiologist", "Pathology", "Pathologist", "ENT", "Otolaryngology",
+  "Ophthalmology", "Opthalmology", "Ophthalmologist", "Dentistry", "Dentist",
+  "Orthodontics", "Periodontics", "Endodontics",
+  "Electrophysiology", "Interventional Cardiology", "Interventional Radiology",
+  "Critical Care", "Intensive Care", "ICU", "Pulmonary", "Cardiothoracic",
+  "Bariatric", "Colorectal", "Hepatology", "Maxillofacial",
+];
+export const COUNTRIES = [
+  "Egypt", "Sudan", "Syria", "Jordan", "Lebanon", "Iraq", "Yemen", "Palestine",
+  "Saudi Arabia", "UAE", "United Arab Emirates", "Kuwait", "Bahrain", "Qatar", "Oman",
+  "Pakistan", "India", "Bangladesh", "Sri Lanka", "Nepal", "Afghanistan",
+  "Philippines", "Indonesia", "Malaysia", "Singapore", "Thailand",
+  "United Kingdom", "UK", "Ireland", "Germany", "France", "Italy", "Spain",
+  "Netherlands", "Belgium", "Sweden", "Denmark", "Norway", "Finland", "Switzerland",
+  "Russia", "Ukraine", "Poland", "Romania", "Hungary", "Bulgaria", "Greece",
+  "Turkey", "Iran",
+  "USA", "United States", "Canada", "Mexico", "Brazil", "Argentina",
+  "Nigeria", "Kenya", "Ethiopia", "Tunisia", "Morocco", "Algeria", "Libya",
+  "China", "Japan", "South Korea", "Korea", "Vietnam", "Taiwan",
+  "Australia", "New Zealand",
+];
+export const LANGUAGES = [
+  "English", "Arabic", "French", "Spanish", "German", "Italian", "Portuguese",
+  "Russian", "Mandarin", "Chinese", "Cantonese", "Hindi", "Urdu", "Bengali",
+  "Tagalog", "Filipino", "Indonesian", "Malay", "Persian", "Farsi", "Turkish",
+  "Dutch", "Swedish", "Norwegian", "Danish", "Polish", "Greek", "Hebrew",
+];
+
 /** JotForm's phone control is a {area, phone} object; once flattened it can
  *  land as that object's raw JSON string. Coerce to a plain "+area phone"
  *  so it never reaches WordPress (or the staging editor) as JSON. */
@@ -212,43 +257,6 @@ export function mapAnswersToWp(flat: Record<string, string>): MappedProfile {
     }
   }
 
-  // ── Value-pattern medical / personal-info detection ──────────────
-  // JotForm question labels arrive as generic stems ("Type A", "What
-  // Is", etc.) so we match on the VALUES the doctor entered. Compact
-  // lists below — extend over time as we see misses. See the server
-  // module supabase/functions/_shared/jotform-extract.ts for the
-  // master copy of these heuristics (the two stay in lockstep).
-  const SPECIALTIES = [
-    "Cardiology", "Cardiologist", "Anaesthesiology", "Anesthesiology", "Anaesthesia", "Anesthesia",
-    "Dermatology", "Endocrinology", "Gastroenterology", "Hematology", "Haematology",
-    "Nephrology", "Neurology", "Oncology", "Pulmonology", "Respiratory Medicine",
-    "Rheumatology", "Urology", "Orthopaedic", "Orthopedic", "Orthopaedics", "Orthopedics",
-    "Plastic Surgery", "Vascular Surgery", "General Surgery", "Surgery",
-    "Pediatric", "Paediatric", "Pediatrics", "Paediatrics", "Neonatology",
-    "Obstetric", "Gynecology", "Gynaecology", "Obstetrics", "OBGYN", "OB-GYN",
-    "Psychiatry", "Family Medicine", "Internal Medicine", "Emergency Medicine",
-    "Radiology", "Radiologist", "Pathology", "Pathologist", "ENT", "Otolaryngology",
-    "Ophthalmology", "Opthalmology", "Ophthalmologist", "Dentistry", "Dentist",
-    "Electrophysiology", "Interventional Cardiology", "Critical Care", "Intensive Care", "ICU",
-  ];
-  const COUNTRIES = [
-    "Egypt", "Sudan", "Syria", "Jordan", "Lebanon", "Iraq", "Yemen", "Palestine",
-    "Saudi Arabia", "UAE", "United Arab Emirates", "Kuwait", "Bahrain", "Qatar", "Oman",
-    "Pakistan", "India", "Bangladesh", "Sri Lanka", "Nepal",
-    "Philippines", "Indonesia", "Malaysia", "Singapore", "Thailand",
-    "United Kingdom", "UK", "Ireland", "Germany", "France", "Italy", "Spain",
-    "Netherlands", "Belgium", "Sweden", "Denmark", "Norway", "Finland", "Switzerland",
-    "Russia", "Ukraine", "Poland", "Greece", "Turkey", "Iran",
-    "USA", "United States", "Canada", "Mexico", "Brazil",
-    "Nigeria", "Kenya", "Tunisia", "Morocco", "Algeria",
-    "China", "Japan", "South Korea", "Korea",
-    "Australia", "New Zealand",
-  ];
-  const LANGUAGES = [
-    "English", "Arabic", "French", "Spanish", "German", "Italian", "Portuguese",
-    "Russian", "Mandarin", "Chinese", "Hindi", "Urdu", "Bengali", "Tagalog",
-    "Filipino", "Indonesian", "Malay", "Persian", "Farsi", "Turkish", "Greek", "Hebrew",
-  ];
   const findIn = (s: string, list: string[]) => {
     const v = s.toLowerCase();
     return list.find(it => v.includes(it.toLowerCase())) ?? null;

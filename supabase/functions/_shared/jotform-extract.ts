@@ -114,7 +114,10 @@ function stringifyValue(v: unknown): string {
 // purpose — only the high-frequency entries — to keep the heuristic
 // tight. Extend over time as we see misses.
 
-const MEDICAL_SPECIALTIES = [
+// Exported so src/test/jotform-extract-parity.test.ts can assert the client
+// port (src/lib/jotform-to-wp.ts) still carries an identical copy — the same
+// submission is mapped by both paths and used to silently disagree.
+export const MEDICAL_SPECIALTIES = [
   "Cardiology", "Cardiologist", "Anaesthesiology", "Anesthesiology", "Anaesthesia", "Anesthesia",
   "Dermatology", "Endocrinology", "Gastroenterology", "Hematology", "Haematology",
   "Nephrology", "Neurology", "Oncology", "Pulmonology", "Respiratory Medicine",
@@ -130,7 +133,7 @@ const MEDICAL_SPECIALTIES = [
   "Critical Care", "Intensive Care", "ICU", "Pulmonary", "Cardiothoracic",
   "Bariatric", "Colorectal", "Hepatology", "Maxillofacial",
 ];
-const COUNTRIES = [
+export const COUNTRIES = [
   "Egypt", "Sudan", "Syria", "Jordan", "Lebanon", "Iraq", "Yemen", "Palestine",
   "Saudi Arabia", "UAE", "United Arab Emirates", "Kuwait", "Bahrain", "Qatar", "Oman",
   "Pakistan", "India", "Bangladesh", "Sri Lanka", "Nepal", "Afghanistan",
@@ -144,7 +147,7 @@ const COUNTRIES = [
   "China", "Japan", "South Korea", "Korea", "Vietnam", "Taiwan",
   "Australia", "New Zealand",
 ];
-const LANGUAGES = [
+export const LANGUAGES = [
   "English", "Arabic", "French", "Spanish", "German", "Italian", "Portuguese",
   "Russian", "Mandarin", "Chinese", "Cantonese", "Hindi", "Urdu", "Bengali",
   "Tagalog", "Filipino", "Indonesian", "Malay", "Persian", "Farsi", "Turkish",
