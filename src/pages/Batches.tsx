@@ -1084,6 +1084,57 @@ function workWeekdays(country: string | null | undefined): number[] {
     : [1, 2, 3, 4, 5];  // Mon–Fri
 }
 
+// ── Who gets emailed ─────────────────────────────────────────────────────
+//
+// A batch has two legs: the hospital line-up email and each doctor's
+// working-opportunity note. They're stored as two booleans on the row, but the
+// team thinks of it as one choice — and "neither" is never a valid batch — so
+// the UI is a single three-way control that can't reach the empty state.
+
+type SendMode = "hospital" | "doctor" | "both";
+
+const SEND_MODES: Array<{ value: SendMode; label: string; hint: string }> = [
+  { value: "hospital", label: "Hospital only",  hint: "Hospitals get the doctor line-up. Doctors get nothing." },
+  { value: "doctor",   label: "Doctor WO only", hint: "Each doctor gets their working-opportunity note. Hospitals get nothing." },
+  { value: "both",     label: "Both",           hint: "Hospitals get the line-up and each doctor gets their working-opportunity note." },
+];
+
+function toSendMode(hospital: boolean, doctor: boolean): SendMode {
+  if (hospital && doctor) return "both";
+  return doctor ? "doctor" : "hospital";
+}
+
+function fromSendMode(mode: SendMode): { include_hospital_email: boolean; include_doctor_email: boolean } {
+  return { include_hospital_email: mode !== "doctor", include_doctor_email: mode !== "hospital" };
+}
+
+function SendModePicker({ value, onChange, disabled }: {
+  value: SendMode; onChange: (m: SendMode) => void; disabled?: boolean;
+}) {
+  return (
+    <div className="rounded-lg border border-sidebar-border/40 bg-white/95 p-2 shadow-sm">
+      <div className="mb-1 px-0.5 text-[10px] uppercase tracking-wider text-slate-400">Who gets emailed</div>
+      <div className="inline-flex rounded-md border border-slate-200 bg-slate-50 p-0.5">
+        {SEND_MODES.map(o => (
+          <button
+            key={o.value}
+            type="button"
+            disabled={disabled}
+            title={o.hint}
+            onClick={() => onChange(o.value)}
+            className={cn(
+              "rounded px-2.5 py-1 text-[11px] font-medium transition-colors disabled:opacity-50",
+              value === o.value ? "bg-teal-600 text-white shadow-sm" : "text-slate-600 hover:bg-white")}
+          >
+            {o.label}
+          </button>
+        ))}
+      </div>
+      <div className="mt-1 px-0.5 text-[10px] text-slate-500">{SEND_MODES.find(o => o.value === value)?.hint}</div>
+    </div>
+  );
+}
+
 // One-off create form — pick specific doctors + specific hospitals for an
 // ad-hoc tabular send (kind === "one_off"). Doctors come from the SAME
 // `allDoctors` pool the scheduled picker uses (so the persisted doctor_ids
@@ -1094,7 +1145,7 @@ function workWeekdays(country: string | null | undefined): number[] {
 function OneOffCreateFields({
   allDoctors, hospitals, docIds, setDocIds, hospIds, setHospIds,
   docQuery, setDocQuery, hospQuery, setHospQuery, hospCountry, setHospCountry,
-  includeDoctorEmail, setIncludeDoctorEmail,
+  sendMode, setSendMode,
 }: {
   allDoctors: Array<{ id: string; name: string; speciality?: string | null; email?: string | null }>;
   hospitals: Hospital[];
@@ -1103,7 +1154,7 @@ function OneOffCreateFields({
   docQuery: string; setDocQuery: (v: string) => void;
   hospQuery: string; setHospQuery: (v: string) => void;
   hospCountry: string; setHospCountry: (v: string) => void;
-  includeDoctorEmail: boolean; setIncludeDoctorEmail: (v: boolean) => void;
+  sendMode: SendMode; setSendMode: (v: SendMode) => void;
 }) {
   const hospCountries = useMemo(() => countryFilterOptions(hospitals.filter(h => h.primary_recruiter_email).map(h => h.country)), [hospitals]);
   const hospPool = useMemo(() => {
@@ -1191,10 +1242,7 @@ function OneOffCreateFields({
           </div>
         </div>
       </div>
-      <label className="flex items-center gap-2 text-[12px] cursor-pointer">
-        <Checkbox checked={includeDoctorEmail} onCheckedChange={(v) => setIncludeDoctorEmail(!!v)} />
-        Also email each doctor a working-opportunity note (individually editable in the preview)
-      </label>
+      <SendModePicker value={sendMode} onChange={setSendMode} />
     </div>
   );
 }
@@ -1224,7 +1272,7 @@ function BatchDialog({ target, onTargetChange, batches, initialKind, suggestedSp
   const update = useUpdateBatch();
   const sendNow = useSendBatchNow();
   const previewMut = useBatchPreview();
-  const [emailPreview, setEmailPreview] = useState<{ subject: string; html: string; text: string; bcc_count: number; doctor_email?: BatchDoctorPreview; per_doctor?: BatchPerDoctorPreview[]; doctor_emails?: BatchPerDoctorPreview[]; test_mode?: boolean; test_recipient?: string | null } | null>(null);
+  const [emailPreview, setEmailPreview] = useState<{ subject: string; html: string; text: string; bcc_count: number; doctor_email?: BatchDoctorPreview; per_doctor?: BatchPerDoctorPreview[]; doctor_emails?: BatchPerDoctorPreview[]; test_mode?: boolean; test_recipient?: string | null; missing_recipients?: string[] } | null>(null);
   // Daily Duo sends a SEPARATE profile-sent email per doctor, so each gets its
   // own editable pane. Index-aligned with emailPreview.per_doctor.
   const [perDoctor, setPerDoctor] = useState<Array<{ subject: string; html: string }>>([]);
@@ -1333,7 +1381,7 @@ function BatchDialog({ target, onTargetChange, batches, initialKind, suggestedSp
   const [oneOffDocQuery,  setOneOffDocQuery]  = useState("");
   const [oneOffHospQuery, setOneOffHospQuery] = useState("");
   const [oneOffHospCountry, setOneOffHospCountry] = useState("all");
-  const [oneOffIncludeDoctorEmail, setOneOffIncludeDoctorEmail] = useState(true);
+  const [oneOffSendMode, setOneOffSendMode] = useState<SendMode>("both");
 
   // Editor-only state.
   const [search, setSearch] = useState("");
@@ -1429,7 +1477,7 @@ function BatchDialog({ target, onTargetChange, batches, initialKind, suggestedSp
           country: null,
           recipient_emails: hospEmails,
           doctor_ids: docIds,
-          include_doctor_email: oneOffIncludeDoctorEmail,
+          ...fromSendMode(oneOffSendMode),
         });
         toast.success("One-off batch created — review & send below.");
         onTargetChange(created.id);
@@ -1560,7 +1608,7 @@ function BatchDialog({ target, onTargetChange, batches, initialKind, suggestedSp
     if (!batch) return;
     try {
       const p = await previewMut.mutateAsync({ batchId: batch.id, force: batch.status === "sent", ...(Object.keys(greetOverridesPayload).length ? { greetOverrides: greetOverridesPayload } : {}), ...(customNote.trim() ? { customMessage: customNote.trim() } : {}) });
-      setEmailPreview(prev => prev ? { ...prev, subject: p.subject, html: p.html, text: p.text, bcc_count: p.bcc_count, per_doctor: p.per_doctor ?? [], doctor_emails: p.doctor_emails ?? [], test_mode: p.test_mode, test_recipient: p.test_recipient } : prev);
+      setEmailPreview(prev => prev ? { ...prev, subject: p.subject, html: p.html, text: p.text, bcc_count: p.bcc_count, per_doctor: p.per_doctor ?? [], doctor_emails: p.doctor_emails ?? [], test_mode: p.test_mode, test_recipient: p.test_recipient, missing_recipients: p.missing_recipients ?? [] } : prev);
       setEditSubject(p.subject); setEditHtml(p.html);
       setEditDoctorSubject(p.doctor_email?.subject ?? ""); setEditDoctorHtml(p.doctor_email?.html ?? "");
       setPerDoctor((p.per_doctor ?? []).map(d => ({ subject: d.subject, html: d.html })));
@@ -1698,6 +1746,10 @@ function BatchDialog({ target, onTargetChange, batches, initialKind, suggestedSp
   // hospital's contact person when it greets by contact, else "<Name> team".
   const batchGreeting = (h?: Hospital) => {
     if (!h) return "Team";
+    // No To address for this hospital → nobody to name, whatever the mode says.
+    // Such a send is blocked outright, but the preview renders from here too, so
+    // it must not promise "Hello Sandra!" for an email addressed to no one.
+    if (effectiveTo(h).length === 0) return h.name ? `${h.name} team` : "Team";
     const mode = greetModeByHospital[h.id] ?? "auto";
     // "Name" → greet the contact person (fall back to the team greeting);
     // "Team" → "<Hospital> team"; "Auto" → the hospital's stored-flag logic.
@@ -2048,7 +2100,7 @@ function BatchDialog({ target, onTargetChange, batches, initialKind, suggestedSp
                   docQuery={oneOffDocQuery} setDocQuery={setOneOffDocQuery}
                   hospQuery={oneOffHospQuery} setHospQuery={setOneOffHospQuery}
                   hospCountry={oneOffHospCountry} setHospCountry={setOneOffHospCountry}
-                  includeDoctorEmail={oneOffIncludeDoctorEmail} setIncludeDoctorEmail={setOneOffIncludeDoctorEmail}
+                  sendMode={oneOffSendMode} setSendMode={setOneOffSendMode}
                 />
               )}
               {kind !== "one_off" && (<>
@@ -2355,7 +2407,7 @@ function BatchDialog({ target, onTargetChange, batches, initialKind, suggestedSp
                     // failure must NOT block the preview (server falls back).
                     try { await ensureCardImages(); } catch { /* server renders its own card */ }
                     const p = await previewMut.mutateAsync(batch.status === "sent" ? { batchId: batch.id, force: true } : batch.id);
-                    setEmailPreview({ subject: p.subject, html: p.html, text: p.text, bcc_count: p.bcc_count, doctor_email: p.doctor_email, per_doctor: p.per_doctor ?? [], doctor_emails: p.doctor_emails ?? [], test_mode: p.test_mode, test_recipient: p.test_recipient });
+                    setEmailPreview({ subject: p.subject, html: p.html, text: p.text, bcc_count: p.bcc_count, doctor_email: p.doctor_email, per_doctor: p.per_doctor ?? [], doctor_emails: p.doctor_emails ?? [], test_mode: p.test_mode, test_recipient: p.test_recipient, missing_recipients: p.missing_recipients ?? [] });
                     // Seed the exclusion list. Team feedback (#12): for the
                     // recurring kinds (Daily Duo / Top 15 / Specialty of the day)
                     // hospital emails must NOT be auto-selected — the team adds
@@ -2427,6 +2479,22 @@ function BatchDialog({ target, onTargetChange, batches, initialKind, suggestedSp
             : <div className="rounded-lg border border-rose-300 bg-rose-50 p-2.5 text-[11px] text-rose-900 shadow-sm">
                 <span className="inline-flex items-start gap-1.5"><AlertTriangle className="h-3.5 w-3.5 mt-[1px] shrink-0" /><span><strong>LIVE mode.</strong> Clicking Send emails <strong>{emailPreview.bcc_count} real hospital{emailPreview.bcc_count === 1 ? "" : "s"}</strong>. There is no undo.</span></span>
               </div>)}
+          {/* Blank To. Surfaced here rather than only on click, so it's fixable
+              while reviewing — a send with any of these is refused outright. */}
+          {!!emailPreview?.missing_recipients?.length && (
+            <div className="rounded-lg border border-rose-300 bg-rose-50 p-2.5 text-[11px] text-rose-900 shadow-sm">
+              <span className="inline-flex items-start gap-1.5"><AlertTriangle className="h-3.5 w-3.5 mt-[1px] shrink-0" /><span><strong>No email address for {emailPreview.missing_recipients.join(", ")}.</strong> Sending is blocked until each has a To address — fill it in below, or remove them from this batch.</span></span>
+            </div>
+          )}
+          {/* Governs BOTH legs, so it stays visible on both tabs. */}
+          {batch && (
+            <SendModePicker
+              value={toSendMode(batch.include_hospital_email !== false, !!batch.include_doctor_email)}
+              disabled={sendNow.isPending || update.isPending}
+              onChange={m => update.mutate({ id: batch.id, patch: fromSendMode(m) })}
+            />
+          )}
+
           {/* Everything below is HOSPITAL-email routing (recipients, sender, CC,
               note) — hidden on the Doctor tab, where none of it applies. */}
           {previewTab === "hospital" && (<>
@@ -2530,7 +2598,7 @@ function BatchDialog({ target, onTargetChange, batches, initialKind, suggestedSp
       // per doctor on BOTH legs.
       {
         key: "hospital",
-        label: "Hospital email",
+        label: `Hospital email${batch?.include_hospital_email === false ? " · off" : ""}`,
         subLabel: fromOverride ?? "Hospital Intro <hospitalintro@allocationassist.com>",
         // Branded CV per doctor — generate a doctor's Allocation-Assist CV and
         // attach it to THIS hospital email (batch.attachments). Resolved from the
@@ -2679,12 +2747,12 @@ function BatchDialog({ target, onTargetChange, batches, initialKind, suggestedSp
         ),
         preview: (
           <div className="flex min-h-0 min-w-0 flex-1 flex-col">
-            <label className="flex items-center gap-2 px-3 py-2 border-b border-slate-200 bg-slate-50 text-[12px] text-slate-700">
-              <input type="checkbox" checked={!!batch?.include_doctor_email}
-                onChange={e => batch && update.mutate({ id: batch.id, patch: { include_doctor_email: e.target.checked } })}
-                className="h-3.5 w-3.5 accent-teal-600" />
-              <span>Also send this to the <strong>{emailPreview.doctor_email.recipient_count}</strong> doctor{emailPreview.doctor_email.recipient_count === 1 ? "" : "s"} when the batch sends</span>
-            </label>
+            <div className={cn("border-b px-3 py-2 text-[12px]",
+              batch?.include_doctor_email ? "border-slate-200 bg-slate-50 text-slate-700" : "border-amber-200 bg-amber-50 text-amber-900")}>
+              {batch?.include_doctor_email
+                ? <>This goes to the <strong>{emailPreview.doctor_email.recipient_count}</strong> doctor{emailPreview.doctor_email.recipient_count === 1 ? "" : "s"} when the batch sends.</>
+                : <>This email <strong>won't be sent</strong> — switch "Who gets emailed" to <strong>Doctor WO only</strong> or <strong>Both</strong> to include it.</>}
+            </div>
             {doctorNoteList.length ? (
               <ProfileSubTabs
                 names={doctorNoteList.map(d => d.name)}
@@ -2736,20 +2804,38 @@ function BatchDialog({ target, onTargetChange, batches, initialKind, suggestedSp
           <Button
             onClick={async () => {
               if (!batch) return;
+              const sendsHospital = batch.include_hospital_email !== false;
+              const sendsDoctor   = !!batch.include_doctor_email;
+              // Guardrail: never send without a To. A hospital whose recipient box
+              // is empty has no address to mail — it used to be dropped silently
+              // mid-send, so the batch reported success while that recruiter got
+              // nothing. Block the WHOLE send and name who needs an address.
+              const missingTo = sendsHospital
+                ? panelSelected.filter(h => effectiveTo(h).length === 0).map(h => h.name)
+                : [];
+              if (missingTo.length) {
+                toast.error(
+                  `No email address for ${missingTo.join(", ")}. Fill in the To box for each (or remove them) before sending.`,
+                );
+                return;
+              }
               // Always confirm before firing — this is the real, irreversible send
               // (drafts used to go out on a single click with no prompt). Spell out
               // exactly where it lands: the test inbox in test mode, else the real
               // hospitals, so nobody sends to 86 hospitals thinking they're still
               // reviewing.
               const hospCount = emailPreview?.bcc_count ?? picked.length;
-              const emailCount = emailPreview?.per_doctor?.length
-                ? hospCount * emailPreview.per_doctor.length
-                : hospCount;
-              const dest = emailPreview?.test_mode
-                ? `the TEST inbox (${emailPreview.test_recipient ?? "test recipient"}) — NOT real hospitals`
-                : `${hospCount} REAL hospital recruiter inbox${hospCount === 1 ? "" : "es"}`;
+              const perHosp = emailPreview?.per_doctor?.length || 1;
+              const docCount = emailPreview?.doctor_email?.recipient_count ?? 0;
+              const legs: string[] = [];
+              if (sendsHospital) {
+                legs.push(emailPreview?.test_mode
+                  ? `${hospCount * perHosp} hospital email${hospCount * perHosp === 1 ? "" : "s"} → the TEST inbox (${emailPreview.test_recipient ?? "test recipient"}), NOT real hospitals`
+                  : `${hospCount * perHosp} hospital email${hospCount * perHosp === 1 ? "" : "s"} → ${hospCount} REAL hospital recruiter inbox${hospCount === 1 ? "" : "es"}`);
+              }
+              if (sendsDoctor) legs.push(`${docCount} working-opportunity email${docCount === 1 ? "" : "s"} → the queued doctors`);
               const verb = batch.status === "sent" ? "Resend" : "Send";
-              if (!confirm(`${verb} now?\n\n${emailCount} email${emailCount === 1 ? "" : "s"} will go to ${dest}.`)) return;
+              if (!confirm(`${verb} now?\n\n${legs.map(l => `• ${l}`).join("\n")}`)) return;
               try {
                 const overrides = {
                   // Per-doctor mode ships one body per doctor; a single

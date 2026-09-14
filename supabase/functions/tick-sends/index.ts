@@ -129,6 +129,9 @@ interface ProfileSendRow {
   custom_message: string | null; bcc_override: string[] | null; cc_override: string[] | null;
   stage_overrides: Record<string, unknown> | null; template_overrides: Record<string, string> | null;
   attachments: unknown; attachments_doctor: unknown; scheduled_for: string; scheduled_at_time: string | null; created_by: string | null;
+  /** Which legs fire. Rows written before the column read as undefined, which
+   *  falls back to "both" — exactly how they behaved before it existed. */
+  send_mode: "both" | "hospital" | "doctor" | null;
 }
 
 /** Fire due scheduled Send-Profile campaigns. Mirrors SendProfileDialog.handleConfirm. */
@@ -157,6 +160,14 @@ async function runScheduledProfileSweep(supabase: DB, now: Date, g: GulfNow): Pr
       // of one per hospital — send_doctor_email true on the first run only,
       // batch_hospitals is the full list send-flow-email renders.
       const consolidate = ids.length > 1;
+      // Mirror SendProfileDialog's three-way picker. "hospital" stamps
+      // send_doctor_email:false so send-flow-email stops after the intro;
+      // "doctor" opens the run straight at the doctor stage so the
+      // working-opportunity note goes out alone, with no intro to the hospital.
+      const sendMode = s.send_mode ?? "both";
+      const sendsHospital = sendMode !== "doctor";
+      const sendsDoctor   = sendMode !== "hospital";
+      const doctorOnly    = !sendsHospital;
       const batchHospitalsMeta = ids
         .map(hid => hmap.get(hid) as { name: string; city: string | null; country: string | null; image_url: string | null; website: string | null; description: string | null } | undefined)
         .filter((h): h is NonNullable<typeof h> => !!h)
@@ -169,7 +180,7 @@ async function runScheduledProfileSweep(supabase: DB, now: Date, g: GulfNow): Pr
         const { data: runRow, error: runErr } = await supabase.from("automation_flow_runs").insert({
           flow_key: "profile_sent", doctor_id: s.doctor_id, doctor_name: s.doctor_name,
           doctor_email: s.doctor_email, doctor_phone: s.doctor_phone, hospital: h.name,
-          current_stage: "email_hospital", status: "active", created_by: s.created_by,
+          current_stage: doctorOnly ? "email_doctor" : "email_hospital", status: "active", created_by: s.created_by,
           metadata: {
             batch_id: batchId, hospital_id: h.id, hospital_email: h.primary_recruiter_email,
             bcc: ids.length > 1, total_in_batch: ids.length,
@@ -181,12 +192,22 @@ async function runScheduledProfileSweep(supabase: DB, now: Date, g: GulfNow): Pr
             ...(s.template_overrides ? { template_overrides: s.template_overrides } : {}),
             ...(Array.isArray(s.attachments) && s.attachments.length ? { attachments: s.attachments } : {}),
             ...(Array.isArray(s.attachments_doctor) && s.attachments_doctor.length ? { attachments_doctor: s.attachments_doctor } : {}),
-            ...(consolidate ? { send_doctor_email: hIndex === 0, batch_hospitals: batchHospitalsMeta } : {}),
+            ...(consolidate
+              ? { send_doctor_email: doctorOnly || hIndex === 0, batch_hospitals: batchHospitalsMeta }
+              : {}),
+            // Hospital-only: send-flow-email reads send_doctor_email===false on
+            // the email_hospital stage and stops there instead of auto-continuing.
+            ...(sendsDoctor ? {} : { send_doctor_email: false }),
+            send_mode: sendMode,
           },
         }).select("id").single();
         if (runErr || !runRow) { failed++; lastErr = runErr?.message ?? "run insert failed"; continue; }
         const res = await invokeSendFlow((runRow as { id: string }).id);
         if (res.ok) sent++; else { failed++; lastErr = res.detail ?? "send failed"; }
+        // Doctor-only + multi-hospital = ONE consolidated working-opportunity
+        // email covering every hospital, so the first run is the whole send;
+        // looping on would just duplicate it once per hospital.
+        if (doctorOnly && consolidate) break;
       }
 
       await supabase.from("scheduled_profile_sends").update({

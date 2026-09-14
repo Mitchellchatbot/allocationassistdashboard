@@ -33,6 +33,11 @@ export interface ScheduledProfileSend {
    *  stamps it onto the run's assigned_to so the From line matches what the
    *  dispatcher picked; null → the hospital-owner default applies. */
   assigned_to:        string | null;
+  /** Which legs fire when this send goes out — "both" (hospital intro + the
+   *  doctor's working-opportunity email), "hospital" (intro only) or "doctor"
+   *  (working-opportunity only). Rows created before the column read as
+   *  "both", which is what they always did. */
+  send_mode:          "both" | "hospital" | "doctor";
   scheduled_for:      string;
   scheduled_at_time:  string | null;
   timezone:           string | null;
@@ -59,6 +64,7 @@ export interface ScheduleProfileSendInput {
   attachments_doctor?: Array<{ filename: string; path: string }>;
   card_image_url?:    string | null;
   assigned_to?:       string | null;
+  send_mode?:         "both" | "hospital" | "doctor";
   scheduled_for:      string;
   scheduled_at_time?: string | null;
   timezone?:          string | null;

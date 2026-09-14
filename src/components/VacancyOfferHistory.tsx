@@ -266,7 +266,7 @@ export function VacancyOfferHistory() {
                     </td>
                     <td className="py-2 px-3 text-right">
                       <button
-                        onClick={() => navigate("/automations?flow=profile_sent")}
+                        onClick={() => navigate("/sends?tab=email-chain&flow=profile_sent")}
                         className="inline-flex items-center gap-1 text-teal-600 hover:underline text-[11px]"
                         title="Open this send in Automations"
                       >

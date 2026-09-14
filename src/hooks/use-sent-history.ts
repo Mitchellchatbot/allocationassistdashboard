@@ -142,7 +142,7 @@ export function useSentHistory(): {
         sentAt:     r.last_event_at ?? r.started_at ?? null,
         source:     "flow",
         refId:      r.id,
-        route:      `/automations?flow=profile_sent`,
+        route:      `/sends?tab=email-chain&flow=profile_sent`,
         recipients: recipients.length ? recipients : null,
         template,
       });

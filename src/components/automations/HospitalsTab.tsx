@@ -6,6 +6,7 @@ import { Label } from "@/components/ui/label";
 import { Textarea } from "@/components/ui/textarea";
 import { Badge } from "@/components/ui/badge";
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription, DialogFooter } from "@/components/ui/dialog";
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import { Hospital as HospitalIcon, Plus, Pencil, Trash2, Search, Save, ChevronRight, ChevronDown } from "lucide-react";
 import { toast } from "sonner";
@@ -15,6 +16,11 @@ import {
 } from "@/hooks/use-hospitals";
 import { useHospitalContacts, eligibleRecipients, resolveRecipient, resolveAllRecipients, type HospitalContact } from "@/hooks/use-hospital-contacts";
 import { uploadEmailAttachment } from "@/lib/email-attachments";
+import { HI_TEAM_MEMBERS } from "@/lib/hi-team";
+
+// Radix Select treats "" as "no value shown", so an explicit sentinel is needed
+// for the option that clears the representative.
+const NO_OWNER = "__none__";
 
 const BLANK: HospitalInput = {
   name: "", city: "", country: "", primary_recruiter_email: "",
@@ -410,6 +416,7 @@ export function HospitalDialog({
       country:                 initial.country ?? "",
       primary_recruiter_email: initial.primary_recruiter_email ?? "",
       primary_contact_name:    initial.primary_contact_name ?? "",
+      owner_email:             initial.owner_email ?? null,
       greet_with_contact_name: initial.greet_with_contact_name ?? false,
       recruiter_phone:         initial.recruiter_phone ?? "",
       image_url:               initial.image_url ?? "",
@@ -463,6 +470,24 @@ export function HospitalDialog({
                 value={form.city ?? ""} onChange={v => setForm(f => ({ ...f, city: v }))} />
               <Field label="Country"
                 value={form.country ?? ""} onChange={v => setForm(f => ({ ...f, country: v }))} />
+            </div>
+            <div className="space-y-1">
+              <Label className="text-[11px] uppercase tracking-wider text-muted-foreground">Representative</Label>
+              <Select
+                value={form.owner_email || NO_OWNER}
+                onValueChange={v => setForm(f => ({ ...f, owner_email: v === NO_OWNER ? null : v }))}
+              >
+                <SelectTrigger className="mt-1 text-[12px]"><SelectValue placeholder="Nobody yet" /></SelectTrigger>
+                <SelectContent>
+                  <SelectItem value={NO_OWNER} className="text-[12px]">Nobody yet</SelectItem>
+                  {HI_TEAM_MEMBERS.map(m => (
+                    <SelectItem key={m.email} value={m.email} className="text-[12px]">{m.name}</SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+              <p className="text-[10px] text-muted-foreground">
+                Owns this hospital: every stage a doctor reaches here is credited to them, and new flow runs are assigned to them automatically.
+              </p>
             </div>
             <Field label="Recruiter email" type="email"
               value={form.primary_recruiter_email ?? ""} onChange={v => setForm(f => ({ ...f, primary_recruiter_email: v }))} />

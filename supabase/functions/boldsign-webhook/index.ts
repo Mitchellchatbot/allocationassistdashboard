@@ -26,6 +26,7 @@
 
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2";
 import { notify } from "../_shared/notify.ts";
+import { toRecipientList } from "../_shared/recipients.ts";
 
 const BOLDSIGN_WEBHOOK_SECRET = Deno.env.get("BOLDSIGN_WEBHOOK_SECRET") ?? "";
 const ZOHO_CLIENT_ID          = Deno.env.get("ZOHO_CLIENT_ID")!;
@@ -201,7 +202,7 @@ async function getAdminEmails(): Promise<string[]> {
   if (set.size === 0 && Deno.env.get("BOLDSIGN_SENDER_EMAIL")) {
     set.add(Deno.env.get("BOLDSIGN_SENDER_EMAIL")!.trim().toLowerCase());
   }
-  return Array.from(set);
+  return toRecipientList(Array.from(set));
 }
 
 async function notifyAdminsOfSigning(row: {

@@ -207,7 +207,7 @@ async function dispatch(a: ActionSpec, navigate: (to: string) => void): Promise<
       return;
     }
     case "open_run": {
-      navigate(`/automations?run=${encodeURIComponent(String(p.runId ?? ""))}`);
+      navigate(`/sends?tab=email-chain&run=${encodeURIComponent(String(p.runId ?? ""))}`);
       return;
     }
     case "update_lead_status": {
@@ -276,7 +276,7 @@ async function dispatch(a: ActionSpec, navigate: (to: string) => void): Promise<
       // The dialog is opened from the Automations page; deep-link with a
       // pre-fill query param so the page knows which doctor to focus on.
       const doctorId = encodeURIComponent(String(p.doctorId ?? ""));
-      navigate(`/automations?flow=profile_sent&new=${doctorId}`);
+      navigate(`/sends?tab=email-chain&flow=profile_sent&new=${doctorId}`);
       return;
     }
     case "link_to_vacancy": {

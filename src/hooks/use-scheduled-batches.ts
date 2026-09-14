@@ -78,9 +78,13 @@ export interface ScheduledBatch {
    *  "<Specialty> available - … Excited to work in <city>"; null → legacy
    *  template subject. <city> = the recipient hospital's city. */
   header_mode:      "recap" | "specialty" | null;
-  /** When true, the batch also emails each queued doctor a "working opportunity"
+  /** When true, the batch emails each queued doctor a "working opportunity"
    *  note listing the hospitals it's recommending them to (with photos). */
   include_doctor_email: boolean;
+  /** When true, the batch emails the hospital recruiters the doctor line-up.
+   *  Together with include_doctor_email this is the three-way send choice:
+   *  hospital only / doctor WO only / both. At least one must be true. */
+  include_hospital_email: boolean;
   status:           BatchStatus;
   doctor_ids:       string[];
   /** One-off batches only: the explicit hospital recruiter emails this send
@@ -201,6 +205,7 @@ export interface UpsertBatchInput {
   country?:       string | null;
   header_mode?:   "recap" | "specialty" | null;
   include_doctor_email?: boolean;
+  include_hospital_email?: boolean;
   doctor_ids?:    string[];
   notes?:         string | null;
   excluded_emails?: string[];
@@ -225,6 +230,7 @@ export function useUpsertBatch() {
         country:       input.country   ?? null,
         ...(input.header_mode !== undefined ? { header_mode: input.header_mode } : {}),
         ...(input.include_doctor_email !== undefined ? { include_doctor_email: input.include_doctor_email } : {}),
+        ...(input.include_hospital_email !== undefined ? { include_hospital_email: input.include_hospital_email } : {}),
         doctor_ids:    input.doctor_ids ?? [],
         notes:         input.notes ?? null,
         ...(input.excluded_emails !== undefined ? { excluded_emails: input.excluded_emails } : {}),
@@ -432,6 +438,9 @@ export interface BatchPreviewResult {
    *  the test inbox instead of the real hospital recruiters. */
   test_mode?: boolean;
   test_recipient?: string | null;
+  /** Hospitals the server resolved NO To address for. A real send with any of
+   *  these is refused outright, so the preview warns while there's still time. */
+  missing_recipients?: string[];
 }
 /** Shared dry-run fetch — the send-batch preview render used BOTH by the
  *  interactive composer (via useBatchPreview) and by cached read-only previews
@@ -447,10 +456,11 @@ export async function fetchBatchPreview(
   // So the previewed body matches the real send when a note / sender is set.
   const fromOverride  = typeof input === "string" ? undefined : input.fromOverride;
   const customMessage = typeof input === "string" ? undefined : input.customMessage;
-  type Raw = { ok: boolean; preview?: Omit<BatchPreviewResult, "doctor_email" | "per_doctor" | "doctor_emails" | "email_count" | "test_mode" | "test_recipient">;
+  type Raw = { ok: boolean; preview?: Omit<BatchPreviewResult, "doctor_email" | "per_doctor" | "doctor_emails" | "email_count" | "test_mode" | "test_recipient" | "missing_recipients">;
                doctor_email?: BatchDoctorPreview; per_doctor?: BatchPerDoctorPreview[];
                doctor_emails?: BatchPerDoctorPreview[]; email_count?: number;
-               test_mode?: boolean; test_recipient?: string | null; error?: string };
+               test_mode?: boolean; test_recipient?: string | null;
+               missing_recipients?: string[]; error?: string };
   const { data, error } = await invokeWithTimeout<Raw>(
     "send-batch", { batch_id: batchId, dry_run: true, force, ...(recipientEmailsOverride?.length ? { recipient_emails_override: recipientEmailsOverride } : {}), ...(greetOverrides && Object.keys(greetOverrides).length ? { greet_overrides: greetOverrides } : {}), ...(fromOverride ? { from_override: fromOverride } : {}), ...(customMessage ? { custom_message: customMessage } : {}) }, 60_000);
   if (error) throw new Error(await fnErrorMessage(error, "Preview failed"));
@@ -464,6 +474,7 @@ export async function fetchBatchPreview(
     email_count:   res.email_count,
     test_mode:     res.test_mode,
     test_recipient: res.test_recipient,
+    missing_recipients: res.missing_recipients ?? [],
   };
 }
 

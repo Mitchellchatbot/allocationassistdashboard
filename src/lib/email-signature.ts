@@ -22,7 +22,7 @@ export const PREVIEW_SENDERS: Record<string, PreviewSender> = {
   "ishak@allocationassist.com":          { first: "Ishak",   last: "Boulaat", title: "Hospital Introduction Officer", phone: "" },
   "ammar@allocationassist.com":          { first: "Ammar",   last: "",        title: "Founder",                       phone: "" },
   // Generic company sender — signs off as the team (server: hello@ → team).
-  "hello@allocationassist.com":          { first: "The Allocation Assist", last: "team", title: "", phone: "" },
+  "hello@allocationassist.com":          { first: "Allocation Assist", last: "team", title: "", phone: "" },
 };
 
 function esc(s: string): string {
@@ -33,7 +33,7 @@ function esc(s: string): string {
  *  back to the generic Allocation Assist team, matching server pickSender(). */
 export function previewSenderProfile(email: string | null | undefined): PreviewSender {
   const key = (email ?? "").trim().toLowerCase();
-  return PREVIEW_SENDERS[key] ?? { first: "The Allocation Assist", last: "team", title: "", phone: "" };
+  return PREVIEW_SENDERS[key] ?? { first: "Allocation Assist", last: "team", title: "", phone: "" };
 }
 
 export function previewSignatureHtml(first: string, last: string, title: string, phone: string): string {

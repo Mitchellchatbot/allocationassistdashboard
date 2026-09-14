@@ -88,7 +88,7 @@ export default function MyWorkspace() {
   const openRun = (run: FlowRun) => {
     // Deep-link into Automations with the run id so it auto-opens the
     // detail sheet there (single source of truth for the sheet UI).
-    navigate(`/automations?flow=${run.flow_key}&run=${run.id}`);
+    navigate(`/sends?tab=email-chain&flow=${run.flow_key}&run=${run.id}`);
   };
 
   // Deep-link a doctor row to that specific record on the Profiles hub.
@@ -169,8 +169,8 @@ export default function MyWorkspace() {
                   Pipeline rows where you're the bottleneck — pick a city, confirm a shortlist, chase a contract.
                 </CardDescription>
               </div>
-              <Button size="sm" variant="outline" onClick={() => navigate("/automations")}>
-                Open automations <ArrowRight className="h-3 w-3 ml-1" />
+              <Button size="sm" variant="outline" onClick={() => navigate("/sends?tab=email-chain")}>
+                Open Email Chain <ArrowRight className="h-3 w-3 ml-1" />
               </Button>
             </div>
           </CardHeader>
@@ -200,10 +200,10 @@ export default function MyWorkspace() {
                   ))}
                   {b.runs.length > 10 && (
                     <button
-                      onClick={() => navigate("/automations")}
+                      onClick={() => navigate("/sends?tab=email-chain")}
                       className="w-full px-3 py-1.5 text-[10px] text-muted-foreground bg-white/30 hover:bg-white/60 text-left transition-colors"
                     >
-                      +{b.runs.length - 10} more — open Automations to see all →
+                      +{b.runs.length - 10} more — open Email Chain to see all →
                     </button>
                   )}
                 </div>

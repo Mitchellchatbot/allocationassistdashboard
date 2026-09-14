@@ -13,6 +13,7 @@
  * can send. Uses the service-role client only to read the source row + stamp it.
  */
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2.45.0";
+import { toRecipientList } from "../_shared/recipients.ts";
 
 const RESEND_API_KEY    = Deno.env.get("RESEND_API_KEY") ?? "";
 const MAIL_FROM         = Deno.env.get("MAIL_REPLY_FROM") ?? "Allocation Assist Team <hello@allocationassist.com>";
@@ -46,15 +47,7 @@ function jwtEmail(authHeader: string | null): string {
 }
 
 /** Accept a comma/semicolon string or an array → deduped list of valid emails. */
-function addrs(v: unknown): string[] {
-  const raw = Array.isArray(v) ? v : String(v ?? "").split(/[,;]/);
-  const out: string[] = [];
-  for (const item of raw) {
-    const e = String(item ?? "").trim();
-    if (e.includes("@") && !out.some(x => x.toLowerCase() === e.toLowerCase())) out.push(e);
-  }
-  return out;
-}
+const addrs = toRecipientList;
 
 /** Base64-inline attachments by URL (skip anything that fails — never fail the
  *  send over one bad file). Mirrors send-batch's hardened builder. */

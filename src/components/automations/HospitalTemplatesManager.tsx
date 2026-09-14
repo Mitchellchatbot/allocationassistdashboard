@@ -13,6 +13,7 @@ import { toast } from "sonner";
 import { useHospitals, useCreateHospital, useUpdateHospital, useDeleteHospital, type Hospital, type HospitalInput } from "@/hooks/use-hospitals";
 import { useHospitalContacts } from "@/hooks/use-hospital-contacts";
 import { HospitalDialog, HospitalContactsPanel } from "@/components/automations/HospitalsTab";
+import { findHiMemberByEmail } from "@/lib/hi-team";
 import { Dialog as UiDialog, DialogContent as UiDialogContent, DialogHeader as UiDialogHeader, DialogTitle as UiDialogTitle } from "@/components/ui/dialog";
 import {
   useEmailTemplates, useCreateEmailTemplate, useUpdateEmailTemplate, useDeleteEmailTemplate,
@@ -43,13 +44,13 @@ const PREVIEW_SIG_FONT = EMAIL_FONT_STACK;
 const FULL_SIGNATURE_HTML = `
 <p style="margin:14px 0 0;font-family:${PREVIEW_SIG_FONT};font-size:16px;color:#1a2332;line-height:1.45;">&nbsp;</p>
 <p style="color:#14b8a6;font-weight:700;font-size:16px;margin:0 0 2px;line-height:1.45;font-family:${PREVIEW_SIG_FONT};">Warmest Regards,</p>
-<p style="color:#14b8a6;font-weight:700;font-size:16px;margin:0 0 2px;line-height:1.45;font-family:${PREVIEW_SIG_FONT};">The Allocation Assist team</p>
+<p style="color:#14b8a6;font-weight:700;font-size:16px;margin:0 0 2px;line-height:1.45;font-family:${PREVIEW_SIG_FONT};">Allocation Assist team</p>
 <p style="color:#475569;font-size:15px;margin:6px 0 2px;line-height:1.45;font-family:${PREVIEW_SIG_FONT};"><span style="color:#14b8a6;">&#x1F4CD;</span> Jumeirah Lakes Towers, Dubai, UAE</p>
 <p style="font-size:15px;margin:2px 0 16px;line-height:1.45;font-family:${PREVIEW_SIG_FONT};"><a href="https://www.allocationassist.com" style="color:#1d4ed8;text-decoration:underline;">www.allocationassist.com</a></p>
 <table role="presentation" cellpadding="0" cellspacing="0" style="border-collapse:collapse;margin:8px 0 0;">
   <tr><td style="padding:0;"><img src="${PREVIEW_LOGO_URL}" alt="Allocation Assist" width="180" height="119" style="display:block;border:0;outline:none;max-width:180px;width:180px;height:auto;" /></td></tr>
 </table>`;
-const FULL_SIGNATURE_TEXT = `\n\nWarmest Regards,\nThe Allocation Assist team\n\nJumeirah Lakes Towers, Dubai, UAE\nwww.allocationassist.com\n`;
+const FULL_SIGNATURE_TEXT = `\n\nWarmest Regards,\nAllocation Assist team\n\nJumeirah Lakes Towers, Dubai, UAE\nwww.allocationassist.com\n`;
 
 // Concrete values people type in a draft → the token they become.
 const KNOWN_FIELDS: Array<{ token: string; label: string; sample: string }> = [
@@ -175,6 +176,7 @@ export function HospitalTemplatesManager() {
             h.name.toLowerCase().includes(q) ||
             h.city?.toLowerCase().includes(q) ||
             h.country?.toLowerCase().includes(q) ||
+            findHiMemberByEmail(h.owner_email)?.name.toLowerCase().includes(q) ||
             h.primary_recruiter_email?.toLowerCase().includes(q))
         : hospitals;
     return [...base].sort((a, b) => rank(b) - rank(a));
@@ -259,6 +261,7 @@ export function HospitalTemplatesManager() {
             </button>
             {filtered.map(h => {
               const contactCount = contactsIdx.forHospital(h.name).length;
+              const rep = findHiMemberByEmail(h.owner_email);
               return (
                 <div key={h.id} className="group rounded-lg border border-slate-200 bg-white overflow-hidden hover:border-teal-300 hover:shadow-sm transition-all flex flex-col">
                   <button onClick={() => setEditingEmail(h)} className="text-left" title="Edit email & photo">
@@ -284,6 +287,11 @@ export function HospitalTemplatesManager() {
                       <div className="text-[11.5px] font-medium text-slate-800 truncate">{h.name}</div>
                       <div className="text-[10px] text-muted-foreground truncate">{[h.city, h.country].filter(Boolean).join(" · ") || "No location"}</div>
                       <div className="text-[10px] text-muted-foreground truncate mt-0.5">{h.primary_recruiter_email || <span className="italic text-slate-300">no recruiter email</span>}</div>
+                      <div className="text-[9.5px] truncate mt-0.5">
+                        {rep
+                          ? <span className="text-indigo-700">Rep: {rep.name}</span>
+                          : <span className="italic text-slate-300">no rep</span>}
+                      </div>
                     </div>
                   </button>
                   <div className="mt-auto flex border-t border-slate-100 divide-x divide-slate-100 text-[10px] text-slate-500">

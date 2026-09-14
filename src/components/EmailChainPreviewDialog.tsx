@@ -135,7 +135,7 @@ function buildChainVars(profile: StagedProfile): Record<string, string> {
   const SIGNATURE_HTML = `
 <p style="margin:14px 0 0;font-family:${PREVIEW_SIG_FONT};font-size:16px;color:#1a2332;line-height:1.45;">&nbsp;</p>
 <p style="color:#14b8a6;font-weight:700;font-size:16px;margin:0 0 2px;line-height:1.45;font-family:${PREVIEW_SIG_FONT};">Warmest Regards,</p>
-<p style="color:#14b8a6;font-weight:700;font-size:16px;margin:0 0 2px;line-height:1.45;font-family:${PREVIEW_SIG_FONT};">The Allocation Assist team</p>
+<p style="color:#14b8a6;font-weight:700;font-size:16px;margin:0 0 2px;line-height:1.45;font-family:${PREVIEW_SIG_FONT};">Allocation Assist team</p>
 <p style="color:#475569;font-size:15px;margin:6px 0 2px;line-height:1.45;font-family:${PREVIEW_SIG_FONT};"><span style="color:#14b8a6;">&#x1F4CD;</span> Jumeirah Lakes Towers, Dubai, UAE</p>
 <p style="font-size:15px;margin:2px 0 16px;line-height:1.45;font-family:${PREVIEW_SIG_FONT};"><a href="https://www.allocationassist.com" style="color:#1d4ed8;text-decoration:underline;">www.allocationassist.com</a></p>
 <table role="presentation" cellpadding="0" cellspacing="0" style="border-collapse:collapse;margin:8px 0 0;">
@@ -143,7 +143,7 @@ function buildChainVars(profile: StagedProfile): Record<string, string> {
 </table>`;
   const SIGNATURE_TEXT = `
 Warmest Regards,
-The Allocation Assist team
+Allocation Assist team
 
 Jumeirah Lakes Towers, Dubai, UAE
 www.allocationassist.com

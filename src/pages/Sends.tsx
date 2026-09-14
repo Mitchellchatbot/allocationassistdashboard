@@ -14,6 +14,9 @@ import { PastSentPanel } from "./PastSent";
 /**
  * Sends — one home for the whole outbound workflow, replacing five separate
  * sidebar items (Profile Sent, Automations, Batch Sends, Replies, Past Sent).
+ * The Email Chain tab here and the /processing page started from the same
+ * panel but are separate components now (Automations.tsx vs ProcessingPanel
+ * .tsx) and are expected to drift apart.
  *
  * Modelled on /doctors: a shared search bar sits above an underline tab strip,
  * and the query lives in `?q=` so it carries across tab switches — type once

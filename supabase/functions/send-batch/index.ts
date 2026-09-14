@@ -21,6 +21,8 @@
 
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2";
 import { buildWorkingOpBody, buildWorkingOpSubject } from "../_shared/doctor-working-op.ts";
+import { toRecipientList, missingRecipientError } from "../_shared/recipients.ts";
+import { FONT_STACK, withBodyShell } from "../_shared/email-shell.ts";
 
 const SUPABASE_URL              = Deno.env.get("SUPABASE_URL") ?? "";
 const SUPABASE_SERVICE_ROLE_KEY = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY") ?? "";
@@ -32,13 +34,9 @@ const MAIL_FROM                 = Deno.env.get("MAIL_FROM") ?? "Hospital Intro <
 // workforce" lines are baked into the AA logo image (uploaded to
 // email-assets/logo.png), so the signature ends with that image
 // instead of duplicating the text below it.
-// Garamond serif stack (team preference 2026-06-12 — "all emails Garamond,
-// large"). Matches send-flow-email so batch + individual sends read alike.
-const FONT_STACK = "Garamond, 'EB Garamond', Georgia, 'Times New Roman', serif";
 // Poppins (the website's font) scoped to the doctor CARDS only — the rest of
 // the batch email stays Garamond. Matches send-flow-email.
 const CARD_FONT   = "'Poppins', 'Helvetica Neue', Helvetica, Arial, sans-serif";
-const FONT_IMPORT = `<style>@import url('https://fonts.googleapis.com/css2?family=Poppins:wght@400;500;600;700&display=swap');</style>`;
 const LOGO_URL   = `${Deno.env.get("SUPABASE_URL") ?? ""}/storage/v1/object/public/email-assets/logo.png`;
 // Sizes kept in lockstep with send-flow-email + the client preview
 // (SendProfileDialog PREVIEW_SIGNATURE_HTML): 16px teal lines, 15px grey/link.
@@ -48,7 +46,7 @@ const LOGO_URL   = `${Deno.env.get("SUPABASE_URL") ?? ""}/storage/v1/object/publ
 const SIGNATURE_HTML = `
 <p style="margin:14px 0 0;font-family:${FONT_STACK};font-size:16px;color:#1a2332;line-height:1.45;">&nbsp;</p>
 <p style="color:#14b8a6;font-weight:700;font-size:16px;margin:0 0 2px;line-height:1.45;font-family:${FONT_STACK};">Warmest Regards,</p>
-<p style="color:#14b8a6;font-weight:700;font-size:16px;margin:0 0 2px;line-height:1.45;font-family:${FONT_STACK};">The Allocation Assist team</p>
+<p style="color:#14b8a6;font-weight:700;font-size:16px;margin:0 0 2px;line-height:1.45;font-family:${FONT_STACK};">Allocation Assist team</p>
 <p style="color:#475569;font-size:15px;margin:6px 0 2px;line-height:1.45;font-family:${FONT_STACK};"><span style="color:#14b8a6;">&#x1F4CD;</span> Jumeirah Lakes Towers, Dubai, UAE</p>
 <p style="font-size:15px;margin:2px 0 16px;line-height:1.45;font-family:${FONT_STACK};"><a href="https://www.allocationassist.com" style="color:#1d4ed8;text-decoration:underline;">www.allocationassist.com</a></p>
 <table role="presentation" cellpadding="0" cellspacing="0" style="border-collapse:collapse;margin:8px 0 0;">
@@ -58,7 +56,7 @@ const SIGNATURE_HTML = `
 const SIGNATURE_TEXT = `
 
 Warmest Regards,
-The Allocation Assist team
+Allocation Assist team
 
 Jumeirah Lakes Towers, Dubai, UAE
 www.allocationassist.com
@@ -239,6 +237,16 @@ Deno.serve(async (req: Request) => {
   const doctorIds: string[] = batch.doctor_ids ?? [];
   if (doctorIds.length === 0) return await failAndReturn("No doctors queued for this batch.");
 
+  // ── Which legs go out ─────────────────────────────────────────────────
+  // A batch can email the hospitals (the doctor line-up), the doctors (their
+  // working-opportunity note), or both. Rows predating include_hospital_email
+  // read as undefined → treated as on, which is what they did before.
+  const includeHospitalEmail = (batch as Record<string, unknown>).include_hospital_email !== false;
+  const includeDoctorEmail   = (batch as Record<string, unknown>).include_doctor_email === true;
+  if (!includeHospitalEmail && !includeDoctorEmail) {
+    return await failAndReturn("This batch has both email legs switched off — pick who gets emailed before sending.");
+  }
+
   // ── Load hospitals (recipients) ────────────────────────────────────────
   // batch.country (added 2026-06-03) scopes the send to one country.
   // Ammar's spec: 'two profiles to UAE, two to KSA, two to Qatar' — one
@@ -364,16 +372,27 @@ Deno.serve(async (req: Request) => {
         link:         String(h.website ?? "").trim() || null,   // hospital website → link in the doctor email
         description:  String(h.description ?? "").trim() || null, // "About Us" blurb in the doctor email
 
-        toEmails,
+        toEmails: toRecipientList(toEmails),
         // This hospital's OWN configured extra CC recipients (hospitals.cc_emails).
         // Ride only this hospital's own email, and only in production (see below).
         ccEmails:     Array.isArray(h.cc_emails)
           ? (h.cc_emails as unknown[]).map(e => String(e).trim()).filter(e => e.includes("@"))
           : [],
       };
-    })
-    .filter(h => h.email);
-  const recipients = recipientHospitals.map(h => h.email);
+    });
+  // Guardrail: never ship an email with a blank To. Hospitals whose To came out
+  // empty used to be filtered away silently, so a batch reported success while
+  // those recruiters got nothing. Name them and block the WHOLE send instead.
+  const hospitalsMissingTo = recipientHospitals
+    .filter(h => h.toEmails.length === 0)
+    .map(h => h.name || "(unnamed hospital)");
+  // Only blocking when we're actually mailing the hospitals — a doctor-only
+  // batch still needs the hospital rows (they're the content of the WO note),
+  // but a missing recruiter address can't break a send that never reaches them.
+  if (hospitalsMissingTo.length && !dryRun && includeHospitalEmail) {
+    return await failAndReturn(missingRecipientError(hospitalsMissingTo, "hospital"));
+  }
+  const recipients = recipientHospitals.filter(h => h.toEmails.length).map(h => h.email);
   // Fire even in TEST mode: a test send still needs at least one real recipient
   // to build (redirected) copies from — zero recipients means nothing to send,
   // so surface the clear reason rather than proceeding to "No emails sent".
@@ -631,8 +650,7 @@ Deno.serve(async (req: Request) => {
   // Render the email for ONE greeting. Each hospital gets its own copy so the
   // intro reads "Hello <hospital> team!" instead of a generic "Hello Team!".
   // Body is wrapped in the same Garamond shell send-flow-email uses.
-  const wrapHtml = (bodyHtml: string) =>
-    `${FONT_IMPORT}<div style="font-family:${FONT_STACK};font-size:17px;color:#1a2332;line-height:1.55;">${bodyHtml}</div>`;
+  const wrapHtml = withBodyShell;
   // Subject "header mode" (Hasan 2026-07-20): recap vs specialty framing, with
   // the RECIPIENT HOSPITAL's city as the location (falls back to the batch
   // country, then drops the "Excited to work in …" tail if neither is known).
@@ -657,8 +675,13 @@ Deno.serve(async (req: Request) => {
   });
   // A hospital's greeting: its contact person (when it greets by contact), else
   // "<Hospital name> team".
-  const greetingFor = (h: { name: string; contact: string; greetContact: boolean }) =>
-    (h.greetContact && h.contact) ? h.contact : (h.name ? `${h.name} team` : "Team");
+  const teamGreeting = (h: { name: string }) => h.name ? `${h.name} team` : "Team";
+  // Only address a person by name when there IS a To address for them. A blank
+  // To means nobody was named for this hospital, so greeting "Hello Sandra!" is
+  // wrong — it opens "Hello <Hospital> team!" instead.
+  const namedRecipient = (h: { toEmails?: string[] }) => (h.toEmails?.length ?? 0) > 0;
+  const greetingFor = (h: { name: string; contact: string; greetContact: boolean; toEmails?: string[] }) =>
+    (namedRecipient(h) && h.greetContact && h.contact) ? h.contact : teamGreeting(h);
   // Per-hospital greeting override from the preview's Auto / Name / Team control,
   // keyed by the hospital's recruiter email (lowercased). "contact" greets the
   // contact person (falling back to "<Hospital> team"), "team" forces the team
@@ -667,10 +690,12 @@ Deno.serve(async (req: Request) => {
     (body.greet_overrides && typeof body.greet_overrides === "object")
       ? body.greet_overrides as Record<string, string>
       : {};
-  const greetingWithOverride = (h: { name: string; contact: string; greetContact: boolean; email: string }): string => {
+  const greetingWithOverride = (h: { name: string; contact: string; greetContact: boolean; email: string; toEmails?: string[] }): string => {
     const ov = greetOverrides[String(h.email ?? "").trim().toLowerCase()];
-    if (ov === "contact") return h.contact || `${h.name} team`;
-    if (ov === "team")    return h.name ? `${h.name} team` : "Team";
+    // Even an explicit "greet by name" defers to the team greeting when there's
+    // no To address to name.
+    if (ov === "contact") return (namedRecipient(h) && h.contact) || teamGreeting(h);
+    if (ov === "team")    return teamGreeting(h);
     return greetingFor(h);
   };
 
@@ -679,7 +704,6 @@ Deno.serve(async (req: Request) => {
   // the hospitals they're being recommended to (grouped by city, with photos).
   // Greets generically ("Hello Dr.") like the team's real template, so ONE body
   // serves every doctor and the edited preview can be sent verbatim.
-  const includeDoctorEmail = (batch as Record<string, unknown>).include_doctor_email === true;
   // The consolidated doctor email is built by the SHARED composer
   // (_shared/doctor-working-op.ts) so the singular flow (send-flow-email)
   // produces an identical email. Subject is country-titled ("Working opportunity
@@ -708,6 +732,9 @@ Deno.serve(async (req: Request) => {
       // real hospitals (or, if off, that it WILL) before anyone clicks send.
       test_mode: TEST_OVERRIDE_LIST.length > 0,
       test_recipient: TEST_OVERRIDE_LIST[0] ?? null,
+      // Hospitals with a blank To. The preview warns and disables Send — a real
+      // send with any of these is blocked outright (see hospitalsMissingTo).
+      missing_recipients: hospitalsMissingTo,
       preview: { from: hospitalFrom, bcc_count: recipients.length, subject: sample.subject, html: sample.html, text: sample.text },
       // Daily Duo: one pane per doctor — each is a separately-sent email, so the
       // team edits each one on its own.
@@ -717,7 +744,8 @@ Deno.serve(async (req: Request) => {
             return { name: blk.name, subject: r.subject, html: r.html, text: r.text };
           })
         : [],
-      email_count: recipientHospitals.length * sendBlocks.length,
+      email_count: includeHospitalEmail ? recipientHospitals.length * sendBlocks.length : 0,
+      hospital_email: { included: includeHospitalEmail },
       doctor_email: {
         included: includeDoctorEmail,
         subject:  doctorSubjectFresh,
@@ -832,8 +860,28 @@ Deno.serve(async (req: Request) => {
   // greetings can be verified safely before real hospitals get them).
   const targets = recipientHospitals.filter(h =>
     h.email.toLowerCase() !== EXCLUDED_RECIPIENT && !excludeSet.has(h.email.toLowerCase()));
-  if (targets.length === 0) {
+  if (targets.length === 0 && includeHospitalEmail) {
     return await failAndReturn("No hospitals left to send to — every recipient was excluded for this send.");
+  }
+  // A hospital's live To: its resolved list minus the batch-excluded / Ammar
+  // addresses. Exclusions can empty it, which used to fall back to h.email —
+  // mailing the very address the dispatcher excluded. Block the send instead.
+  const liveToFor = (h: { toEmails: string[] }) =>
+    h.toEmails.filter(e => !excludeSet.has(e.toLowerCase()) && e.toLowerCase() !== EXCLUDED_RECIPIENT);
+  if (!TEST_OVERRIDE_LIST.length) {
+    const emptied = includeHospitalEmail
+      ? targets.filter(h => liveToFor(h).length === 0).map(h => h.name || h.email)
+      : [];
+    if (emptied.length) return await failAndReturn(missingRecipientError(emptied, "hospital"));
+    // Same rule for the doctor leg, checked BEFORE any hospital email ships so a
+    // blocked send is a clean no-op rather than a half-delivered batch. Doctors
+    // with no address used to be skipped silently partway through.
+    if (includeDoctorEmail) {
+      const doctorsMissingTo = doctorBlocks
+        .filter(d => toRecipientList(d.email).length === 0)
+        .map(d => d.name || "(unnamed doctor)");
+      if (doctorsMissingTo.length) return await failAndReturn(missingRecipientError(doctorsMissingTo, "doctor"));
+    }
   }
 
   // One personalised email per hospital — times one per doctor in per-doctor
@@ -860,7 +908,7 @@ Deno.serve(async (req: Request) => {
   const GREET_HTML_RE = /Hello\s*<strong>[^<]*<\/strong>\s*!/i;
   const personalizeGreeting = (html: string, greet: string) =>
     GREET_HTML_RE.test(html) ? html.replace(GREET_HTML_RE, `Hello <strong>${greet}</strong>!`) : html;
-  const emails = targets.flatMap((h) =>
+  const emails = (includeHospitalEmail ? targets : []).flatMap((h) =>
     sendBlocks.map((blk, di) => {
       // Preview edits: per-doctor mode carries one edited body per doctor (a
       // single html_override would send the SAME doctor to every slot).
@@ -875,7 +923,7 @@ Deno.serve(async (req: Request) => {
       // Live To = this hospital's resolved list (one recruiter email, or EVERY
       // eligible contact for an 'all'-mode hospital), minus any batch-excluded /
       // Ammar addresses. Test mode still funnels every copy to the test inbox.
-      const liveTo = h.toEmails.filter(e => !excludeSet.has(e.toLowerCase()) && e.toLowerCase() !== EXCLUDED_RECIPIENT);
+      const liveTo = liveToFor(h);
       // Feedback #12: a hospital's saved cc_emails are NO LONGER auto-attached to
       // the send. The team wanted CC to be a deliberate, manual choice — so the
       // only CC that rides now is what the dispatcher explicitly typed (extraCc,
@@ -891,7 +939,7 @@ Deno.serve(async (req: Request) => {
       const hospAtt = builtAttachmentsByHospital[h.email.toLowerCase()] ?? builtAttachments;
       return {
         from: hospitalFrom,
-        to:   TEST_OVERRIDE_LIST.length ? [TEST_OVERRIDE_LIST[0]] : (liveTo.length ? liveTo : [h.email]),
+        to:   TEST_OVERRIDE_LIST.length ? [TEST_OVERRIDE_LIST[0]] : liveTo,
         subject: rendered.subject,
         html:    rendered.html,
         text:    rendered.text,
@@ -963,7 +1011,9 @@ Deno.serve(async (req: Request) => {
     return json({ ok: false, error: "Network error reaching Resend", detail: String(e) }, 502);
   }
 
-  if (sentCount === 0) {
+  // Only a hospital-leg send can fail here; a doctor-only batch legitimately
+  // ships zero hospital emails and is judged on its own leg further down.
+  if (sentCount === 0 && includeHospitalEmail) {
     if (!adhoc) await supabase.from("scheduled_batch_sends")
       .update({ status: "failed", error: lastError || "No emails sent", updated_at: new Date().toISOString() })
       .eq("id", batch.id);
@@ -987,7 +1037,7 @@ Deno.serve(async (req: Request) => {
       : [];
     for (let i = 0; i < doctorBlocks.length; i++) {
       const blk = doctorBlocks[i];
-      const de  = blk.email;
+      const de  = toRecipientList(blk.email)[0] ?? "";
       if (!de || de.toLowerCase() === EXCLUDED_RECIPIENT || excludeSet.has(de.toLowerCase())) continue;
       const finalDoctorHtml = wrapHtml(docOverrides[i] || legacyOverride || blk.html);
       const finalSubject    = docSubjects[i] || legacySubject || blk.subject || doctorSubjectFresh;
@@ -1014,6 +1064,18 @@ Deno.serve(async (req: Request) => {
       } catch { doctorFailed++; }
       await new Promise(r => setTimeout(r, 120));
     }
+  }
+
+  // A doctor-only batch lives or dies on its own leg — with no hospital emails
+  // to carry it, "0 sent" is a failure, not a quiet success.
+  if (!includeHospitalEmail && doctorSent === 0) {
+    const detail = doctorFailed > 0
+      ? `All ${doctorFailed} working-opportunity emails failed to send.`
+      : "No queued doctor had a usable email address.";
+    if (!adhoc) await supabase.from("scheduled_batch_sends")
+      .update({ status: "failed", error: detail, updated_at: new Date().toISOString() })
+      .eq("id", batch.id);
+    return json({ ok: false, error: "Batch failed to send", detail }, 502);
   }
 
   // Ad-hoc sends own no DB row and never touch the rotation.

@@ -31,6 +31,8 @@
 
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2";
 import { buildWorkingOpBody, buildWorkingOpSubject, buildDoctorHospitalsHtml, ensureHospitalImageToken, type WorkingOpHospital } from "../_shared/doctor-working-op.ts";
+import { toRecipientList } from "../_shared/recipients.ts";
+import { FONT_STACK, withBodyShell } from "../_shared/email-shell.ts";
 
 // ── Stage → Template + next-stage routing ──────────────────────────────────
 // Hardcoded here (also defined in src/lib/automation-flows.ts) because the
@@ -125,7 +127,7 @@ const SENDERS: Record<string, SenderProfile> = {
   "ammar@allocationassist.com":          { displayName: "Ammar",            firstName: "Ammar",   lastName: "",        email: "ammar@allocationassist.com",          title: "Founder",                       phone: "" },
   // Generic company sender — Allocation Assist is a referral agency, so profile
   // sends default to this rather than a specific person. Signs off as the team.
-  "hello@allocationassist.com":          { displayName: "Allocation Assist Team", firstName: "The Allocation Assist", lastName: "team", email: "hello@allocationassist.com", title: "", phone: "" },
+  "hello@allocationassist.com":          { displayName: "Allocation Assist Team", firstName: "Allocation Assist", lastName: "team", email: "hello@allocationassist.com", title: "", phone: "" },
 };
 
 /** Resolve the From line + signature variant from a run's assigned_to. */
@@ -153,9 +155,11 @@ function pickSender(assignedTo: string | null | undefined): { fromHeader: string
   return {
     fromHeader: MAIL_FROM,
     replyHint:  "",
-    first:      "The Allocation Assist team",
-    last:       "",
-    title:      "Allocation Assist",
+    first:      "Allocation Assist",
+    last:       "team",
+    // No title line: the preview's fallback sender has none, and an extra teal
+    // "Allocation Assist" line here showed up only in delivered mail.
+    title:      "",
     phone:      "",
   };
 }
@@ -166,20 +170,11 @@ function pickSender(assignedTo: string | null | undefined): { fromHeader: string
  *  blue website link → bottom teal "Allocation Assist" + grey tagline.
  *  No box, no logo image, no card frame — just a plain text-only block
  *  that lands looking identical to Plinky's manual sends. */
-// Email body + signature font: Garamond ("all emails Garamond, Large"). This
-// governs every paragraph (plainifyBody strips the DB template's own styling,
-// so the wrapper font is what's inherited).
-const FONT_STACK  = "Garamond, 'EB Garamond', Georgia, 'Times New Roman', serif";
 // CARD font: Poppins — the allocationassist.com website's body font. Scoped to
 // the profile card ONLY (team 2026-06-12: "use the website font just for the
 // website html, not all of it") so the card reads like their website while the
 // rest of the email stays Garamond.
 const CARD_FONT   = "'Poppins', 'Helvetica Neue', Helvetica, Arial, sans-serif";
-// Web-font link prepended to the email HTML so clients that support it (Apple
-// Mail + the dashboard previews) render real Poppins in the card. Stripped
-// harmlessly by clients that don't support <style>/@import (they use the
-// Helvetica/Arial fallback). Gmail/Outlook won't load it — expected.
-const FONT_IMPORT = `<style>@import url('https://fonts.googleapis.com/css2?family=Poppins:wght@400;500;600;700&display=swap');</style>`;
 
 // Public URL for the logo image (uploaded to the email-assets bucket,
 // migration 20260608000004). Lives on Supabase Storage so email clients
@@ -239,7 +234,7 @@ function signatureText(first: string, last: string, title: string, phone: string
 // address with pin icon, website link, logo at bottom). The block is now
 // generated per-sender by signatureHtml() / signatureText() above —
 // the first line picks up the actual sender's name instead of the
-// generic 'The Allocation Assist team'.
+// generic 'Allocation Assist team'.
 
 console.log("[send-flow-email] booted.",
   "Has Resend key:", !!RESEND_API_KEY,
@@ -705,6 +700,16 @@ Deno.serve(async (req: Request) => {
   const batchHospitals = Array.isArray(md.batch_hospitals) ? (md.batch_hospitals as WorkingOpHospital[]) : [];
   const consolidated = run.current_stage === "email_doctor" && batchHospitals.length > 1;
   const consolidatedFromTemplate = consolidated && doctorTemplatePicked;
+  // Where this hospital send's To will come from (resolved identically below:
+  // a typed To override → routedHospitalEmail → the hospital row's recruiter
+  // email). Needed HERE because the greeting is chosen before the recipient
+  // block runs, and with no To address there's nobody to name — the greeting
+  // has to fall back to "<hospital> team".
+  const hospitalToAddresses = toRecipientList(
+    (typeof body.to_override === "string" ? body.to_override : "").trim()
+      || String(md.hospital_email ?? "").trim()
+      || String(hospital?.primary_recruiter_email ?? ""),
+  );
   const vars: Record<string, string> = {
     ...profileTokens,
     doctor_name:        String(run.doctor_name ?? ""),
@@ -724,6 +729,8 @@ Deno.serve(async (req: Request) => {
     // "Hello <hospital> team!" via {{^hospital_contact_name}}{{hospital_name}} team.
     hospital_contact_name: String(
       (() => {
+        // No To address → nobody to greet by name, whatever the mode says.
+        if (!hospitalToAddresses.length) return "";
         const greetMode = String((md as { greet_mode?: string }).greet_mode ?? "").trim();
         const byContact = greetMode === "contact" ? true
                         : greetMode === "team"    ? false
@@ -834,7 +841,7 @@ Deno.serve(async (req: Request) => {
   // inherits the sans-serif look from the user's reference email.
   // Inline styles on individual elements still win (signature keeps
   // its teal-bold weight, link colour, etc.).
-  let html            = `${FONT_IMPORT}<div style="font-family:${FONT_STACK};font-size:17px;color:#1a2332;line-height:1.55;">${renderedBody}</div>`;
+  let html            = withBodyShell(renderedBody);
   let text            = collapseDoubledDr(render(tpl.body_text ?? "", vars));
   // The city/specialty templates carry {{hospital_image}} in their HTML body
   // only, so their stored body_text would ship a text part listing no hospitals
@@ -848,7 +855,7 @@ Deno.serve(async (req: Request) => {
   if (consolidated && !consolidatedFromTemplate) {
     subject = buildWorkingOpSubject(batchHospitals);
     const workingOpHtml = buildWorkingOpBody(String(run.doctor_name ?? ""), batchHospitals, String(vars.signature ?? ""));
-    html = `${FONT_IMPORT}<div style="font-family:${FONT_STACK};font-size:17px;color:#1a2332;line-height:1.55;">${workingOpHtml}</div>`;
+    html = withBodyShell(workingOpHtml);
     text = htmlToText(workingOpHtml);
   }
 
@@ -887,9 +894,12 @@ Deno.serve(async (req: Request) => {
   const effectiveTo = TEST_OVERRIDE || toOverride || actualRecipient;
   // effectiveTo may carry several comma/semicolon-separated addresses ('all'
   // mode) — split into the real To array. toSet dedups CC/BCC against every To.
-  const toList = effectiveTo.split(/[,;]+/).map(s => s.trim()).filter(s => s.includes("@"));
+  const toList = toRecipientList(effectiveTo);
   const toSet  = new Set(toList.map(s => s.toLowerCase()));
-  if (!effectiveTo) {
+  // Guard on the PARSED list, not the raw string: a non-empty but address-less
+  // value ("n/a", a stray comma) used to clear this check and then get mailed
+  // verbatim by the To fallback that used to sit on the Resend payload.
+  if (!toList.length) {
     return json({
       ok: false,
       error: `No recipient resolved. ${run.current_stage === "email_hospital" ? "Hospital has no recruiter email." : "Doctor has no email."} Set MAIL_TEST_RECIPIENT_OVERRIDE or populate the contact.`,
@@ -927,7 +937,14 @@ Deno.serve(async (req: Request) => {
                   : (metaOverride?.html_override ?? "").trim() ? String(metaOverride!.html_override)
                   : "";
   const finalSubject = ovSubject || subject;
-  const finalHtml    = ovHtml    || html;
+  // An edited body arrives as the composer's raw innerHTML — the preview's
+  // font shell lives on the editor's wrapper div, which is NOT part of what
+  // flush() reads back. Shipping it bare made every edited email inherit the
+  // mail client's default font while the signature (whose inline Garamond does
+  // survive) kept the intended one, so touching the composer at all — e.g. to
+  // change a font size — silently repainted the body and split it from the
+  // signature. Re-apply the same shell the template path uses.
+  const finalHtml    = ovHtml ? withBodyShell(ovHtml) : html;
   const finalText    = (body.text_override ?? "").trim() ? String(body.text_override)
                      : ovHtml ? htmlToText(ovHtml)
                      : text;
@@ -1116,7 +1133,7 @@ Deno.serve(async (req: Request) => {
       },
       body: JSON.stringify({
         from:     sender.fromHeader,
-        to:       toList.length ? toList : [effectiveTo],
+        to:       toList,
         cc:       ccList,
         bcc:      bccList,
         reply_to: replyToAddress,

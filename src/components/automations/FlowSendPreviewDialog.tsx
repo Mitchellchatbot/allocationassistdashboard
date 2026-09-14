@@ -24,7 +24,7 @@ import { EditableEmailPreview } from "@/components/EditableEmailPreview";
 import { EmailPreviewStudio, type StudioEmail } from "@/components/EmailPreviewStudio";
 import { MailModeBanner } from "@/components/MailModeBanner";
 import { AttachmentsPicker } from "@/components/automations/AttachmentsPicker";
-import { CcBccPicker, isEmail } from "@/components/automations/CcBccPicker";
+import { CcBccPicker, splitEmails } from "@/components/automations/CcBccPicker";
 import type { EmailAttachment } from "@/lib/email-attachments";
 
 interface FlowPreview { from: string; to: string; subject: string; html: string; text?: string }
@@ -129,8 +129,15 @@ export function FlowSendPreviewDialog({
 
   const handleSend = async () => {
     const trimmedTo = editTo.trim();
-    if (toChanged && !isEmail(trimmedTo)) {
-      toast.error("The recipient (To) doesn't look like a valid email address.");
+    // Never send without a To. Validate the EFFECTIVE recipient, not just an
+    // edited one — a preview that resolved no recipient sailed through this
+    // check (toChanged is false) and only failed later, at the sender.
+    // splitEmails, not isEmail: an 'all'-mode To is a comma-joined list, which a
+    // single-address check rejected outright.
+    if (splitEmails(trimmedTo).length === 0) {
+      toast.error(trimmedTo
+        ? "The recipient (To) doesn't look like a valid email address."
+        : "Add a To address before sending — this email has no recipient.");
       return;
     }
     setSending(true);

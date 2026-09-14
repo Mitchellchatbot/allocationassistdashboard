@@ -130,7 +130,7 @@ export function PendingActionsCard() {
           <BucketSection
             key={bucket.key}
             bucket={bucket}
-            onJump={(flowKey) => navigate(`/automations?flow=${flowKey}`)}
+            onJump={(flowKey) => navigate(`/sends?tab=email-chain&flow=${flowKey}`)}
           />
         ))}
         {staleVacancies.length > 0 && (

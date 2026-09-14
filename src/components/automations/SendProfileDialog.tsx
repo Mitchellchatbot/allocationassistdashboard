@@ -183,6 +183,13 @@ export interface SendProfileInitial {
 
 type Step = "pick-doctor" | "pick-hospitals" | "preview-confirm";
 
+/** Which of the two emails a send actually fires. "hospital" stamps
+ *  send_doctor_email:false so send-flow-email stops after the intro;
+ *  "doctor" opens each run straight at the email_doctor stage so the
+ *  working-opportunity note goes out on its own, with no intro to the
+ *  hospital. Mirrors the picker on the Batches page. */
+type SendMode = "hospital" | "doctor" | "both";
+
 interface DoctorOption {
   id:         string;
   name:       string;
@@ -602,9 +609,16 @@ function SendProfileDialogBody({ onClose, initial }: { onClose: () => void; init
       // Feature 1: Combined (one consolidated doctor email per doctor) vs
       // Individual (one doctor email per doctor per hospital). Multi-hospital only.
       combineDoctorEmails?: boolean;
+      /** Which legs actually go out — the hospital intro, the doctor
+       *  "working opportunity" note, or both. Same three-way choice the
+       *  Batches page offers. Absent = "both", the long-standing behaviour. */
+      sendMode?: SendMode;
     } = {},
   ) => {
     const { attachments, templateKeys, schedule, sender, greeting, greetNames, ccOverrides, combineDoctorEmails } = opts;
+    const sendMode: SendMode = opts.sendMode ?? "both";
+    const sendsHospital = sendMode !== "doctor";
+    const sendsDoctor   = sendMode !== "hospital";
     const greetNameByHospital = greetNames ?? {};
     const ccOverrideByHospital = ccOverrides ?? {};
     // Explicit sender pick from the dialog. When set it's written to each run's
@@ -664,6 +678,79 @@ function SendProfileDialogBody({ onClose, initial }: { onClose: () => void; init
       };
     };
 
+    // Resolve ONE hospital's recipient + greeting name. Pure — the cycle-cursor
+    // side effect stays at the call site so the pre-send guard below can run this
+    // for every hospital without over-rotating anyone's rotation.
+    const resolveHospitalRouting = (h: Hospital) => {
+      // Resolve THIS hospital's recipient from its Zoho contacts + routing mode
+      // (primary vs cycle), honouring a manual override. Falls back to the
+      // hospital row's primary_recruiter_email if nothing matched.
+      const contactsForH = hospitalContacts.forHospital(h.name);
+      const resolved = resolveRecipient(contactsForH, h);
+      const overrideEmail = recipientOverrides[h.id];
+      const overrideContact = overrideEmail
+        ? contactsForH.find(c => c.email?.toLowerCase() === overrideEmail.toLowerCase())
+        : undefined;
+      // 'all' mode (no manual override) → every eligible contact in the To
+      // field, comma-joined; send-flow-email splits it into the To array.
+      const isAllMode = !overrideEmail && (h.contact_mode ?? "primary") === "all";
+      const allEmails = isAllMode ? resolveAllRecipients(contactsForH, h) : [];
+      const recipientEmail = isAllMode
+        ? (allEmails.join(", ") || h.primary_recruiter_email || null)
+        : (overrideEmail ?? resolved.contact?.email ?? h.primary_recruiter_email ?? null);
+      // Going to everyone (or multiple manual recipients) → greet with the
+      // hospital name (blank contact name), since no single contact owns it.
+      const overrideIsMulti = !!overrideEmail && /[,;]/.test(overrideEmail);
+      // No usable To at all → nobody to address by name, so force the team
+      // greeting ("Hello <Hospital> team!") rather than naming a contact we
+      // aren't actually emailing. Such a send is blocked outright below, but the
+      // preview renders from this too, so it must not show "Hello Sandra!".
+      const hasTo = splitEmails(String(recipientEmail ?? "")).length > 0;
+      // recipientName is the GREETING name (stamped as hospital_contact_name),
+      // separate from the To. An explicit "greet by name" pick wins; else greet
+      // the single recipient, or the team for all/multi sends.
+      const greetPick = greetNameByHospital[h.id];
+      const greetPickName = greetPick
+        ? (contactsForH.find(c => c.email?.toLowerCase() === greetPick.toLowerCase())?.name ?? "").trim()
+        : "";
+      const recipientName = !hasTo ? "" : (greetPickName
+        || ((isAllMode || overrideIsMulti)
+          ? ""
+          : (overrideContact?.name
+             || (overrideEmail ? customNameFor(overrideEmail) : "")
+             || resolved.contact?.name || h.primary_contact_name || "").trim()));
+      // Feedback #12: a hospital's saved cc_emails are no longer auto-attached.
+      // Only a CC the dispatcher explicitly added for this hospital rides now.
+      const hospCc = ccOverrideByHospital[h.id] ?? [];
+      const runCc = [...new Set([...ccList, ...hospCc].map(e => e.trim()).filter(Boolean))];
+      return { recipientEmail, recipientName, runCc, resolved, overrideEmail, hasTo };
+    };
+
+    // ── Guardrail: never send without a To ──────────────────────────────────
+    // Applies to schedule-for-later too — a hospital with no address today still
+    // has none when the scheduler fires, so it would fail silently in the queue.
+    // Block the WHOLE send and name who needs an address. Each leg is only
+    // checked when that leg is actually being sent: a doctor-only send doesn't
+    // care that a hospital lacks a recruiter address, and blocking on it would
+    // make the send impossible for no reason.
+    const hospitalsMissingTo = !sendsHospital ? [] : selectedHospitals
+      .filter(h => !resolveHospitalRouting(h).hasTo)
+      .map(h => h.name);
+    if (hospitalsMissingTo.length) {
+      toast.error(
+        `No email address for ${hospitalsMissingTo.join(", ")}. Add a To address in the recipient box (or set the hospital's recruiter email) before sending.`,
+      );
+      return;
+    }
+    // The doctor leg goes to the doctor's own address — same rule.
+    const doctorsMissingTo = !sendsDoctor ? [] : selectedDoctors
+      .filter(d => splitEmails(dataFor(d).doctorEmailToUse ?? "").length === 0)
+      .map(d => d.name);
+    if (doctorsMissingTo.length) {
+      toast.error(`No email address for ${doctorsMissingTo.join(", ")}. Add a To address before sending.`);
+      return;
+    }
+
     // ── Schedule-for-later branch (Amir #5) ─────────────────────────────────
     // Instead of creating runs + sending now, stash everything the send needs
     // in a scheduled_profile_sends row — ONE per doctor. A deployed scheduler
@@ -719,6 +806,10 @@ function SendProfileDialogBody({ onClose, initial }: { onClose: () => void; init
             // (matches an immediate send). The image lives in the persistent
             // email-card-images bucket, so its URL is still valid at fire time.
             card_image_url:    cardImageUrl,
+            // Carry the dispatcher's send-mode pick onto the row so tick-sends
+            // replays exactly what was chosen. Without it a scheduled
+            // "hospital only" / "doctor only" send would silently fire as both.
+            send_mode:         sendMode,
             scheduled_for:     gulf.date,
             scheduled_at_time: gulf.time,
             timezone:          "Asia/Dubai",
@@ -750,42 +841,7 @@ function SendProfileDialogBody({ onClose, initial }: { onClose: () => void; init
       const cursorAdvances: { id: string; name: string; next: number }[] = [];
       const routingByHospital = new Map<string, { recipientEmail: string | null; recipientName: string; runCc: string[] }>();
       for (const h of selectedHospitals) {
-        // Resolve THIS hospital's recipient from its Zoho contacts + routing mode
-        // (primary vs cycle), honouring a manual override. Falls back to the
-        // hospital row's primary_recruiter_email if nothing matched.
-        const contactsForH = hospitalContacts.forHospital(h.name);
-        const resolved = resolveRecipient(contactsForH, h);
-        const overrideEmail = recipientOverrides[h.id];
-        const overrideContact = overrideEmail
-          ? contactsForH.find(c => c.email?.toLowerCase() === overrideEmail.toLowerCase())
-          : undefined;
-        // 'all' mode (no manual override) → every eligible contact in the To
-        // field, comma-joined; send-flow-email splits it into the To array.
-        const isAllMode = !overrideEmail && (h.contact_mode ?? "primary") === "all";
-        const allEmails = isAllMode ? resolveAllRecipients(contactsForH, h) : [];
-        const recipientEmail = isAllMode
-          ? (allEmails.join(", ") || h.primary_recruiter_email || null)
-          : (overrideEmail ?? resolved.contact?.email ?? h.primary_recruiter_email ?? null);
-        // Going to everyone (or multiple manual recipients) → greet with the
-        // hospital name (blank contact name), since no single contact owns it.
-        const overrideIsMulti = !!overrideEmail && /[,;]/.test(overrideEmail);
-        // recipientName is the GREETING name (stamped as hospital_contact_name),
-        // separate from the To. An explicit "greet by name" pick wins; else greet
-        // the single recipient, or the team for all/multi sends.
-        const greetPick = greetNameByHospital[h.id];
-        const greetPickName = greetPick
-          ? (contactsForH.find(c => c.email?.toLowerCase() === greetPick.toLowerCase())?.name ?? "").trim()
-          : "";
-        const recipientName  = greetPickName
-          || ((isAllMode || overrideIsMulti)
-            ? ""
-            : (overrideContact?.name
-               || (overrideEmail ? customNameFor(overrideEmail) : "")
-               || resolved.contact?.name || h.primary_contact_name || "").trim());
-        // Feedback #12: a hospital's saved cc_emails are no longer auto-attached.
-        // Only a CC the dispatcher explicitly added for this hospital rides now.
-        const hospCc = ccOverrideByHospital[h.id] ?? [];
-        const runCc = [...new Set([...ccList, ...hospCc].map(e => e.trim()).filter(Boolean))];
+        const { recipientEmail, recipientName, runCc, resolved, overrideEmail } = resolveHospitalRouting(h);
         // Only advance the cursor when we actually used the cycle rotation
         // (no override, cycle mode, real matched contacts). Once per hospital.
         if (!overrideEmail && (h.contact_mode ?? "primary") === "cycle" && !resolved.fromHospitalRow && resolved.nextCursor !== (h.cycle_cursor ?? 0)) {
@@ -804,6 +860,12 @@ function SendProfileDialogBody({ onClose, initial }: { onClose: () => void; init
       // multi-hospital send. Individual mode (or single-hospital) → no
       // consolidation, so each run auto-continues to its own doctor email.
       const consolidate = (combineDoctorEmails ?? true) && isMultiHospital;
+      // Doctor-only: there is no intro to send, so the run opens at the doctor
+      // stage instead of email_hospital. Consolidating then means ONE run per
+      // doctor (not one per hospital that stops after the first), so the
+      // hospital loop below breaks out after hIndex 0.
+      const doctorOnly = !sendsHospital;
+      const openingStage = doctorOnly ? "email_doctor" : "email_hospital";
 
       // Collect the ids the inserts return, flattened across the whole
       // doctor × hospital matrix — so we send exactly the runs we created.
@@ -831,7 +893,7 @@ function SendProfileDialogBody({ onClose, initial }: { onClose: () => void; init
               doctor_email:  doctorEmailToUse,
               doctor_phone:  doctor.phone,
               hospital:      h.name,
-              current_stage: "email_hospital",
+              current_stage: openingStage,
               status:        "active",
               created_by:    user?.email ?? null,
               // Explicit sender pick → stamp assigned_to so pickSender uses it as
@@ -896,8 +958,13 @@ function SendProfileDialogBody({ onClose, initial }: { onClose: () => void; init
                 // mode OR single-hospital stamps NEITHER → every run auto-continues
                 // to its own per-hospital doctor email (incl. doctor_template_key).
                 ...(consolidate
-                  ? { send_doctor_email: hIndex === 0, batch_hospitals: batchHospitalsMeta }
+                  ? { send_doctor_email: doctorOnly || hIndex === 0, batch_hospitals: batchHospitalsMeta }
                   : {}),
+                // Hospital-only: send-flow-email reads send_doctor_email===false
+                // on the email_hospital stage and stops there instead of
+                // auto-continuing to the working-opportunity note.
+                ...(sendsDoctor ? {} : { send_doctor_email: false }),
+                send_mode: sendMode,
                 // Feature 3: per-hospital greeting choice — send-flow-email honours
                 // greet_mode over the hospital's stored greet_with_contact_name flag.
                 // "Auto" was removed, so we always send an explicit mode (Name by
@@ -916,22 +983,30 @@ function SendProfileDialogBody({ onClose, initial }: { onClose: () => void; init
           // Marked `event_type='entered'` rather than `email_sent` until the
           // real sender confirms delivery — the sender will append a follow-up
           // event when it actually ships.
+          const openingTemplate = doctorOnly
+            ? (h.doctor_template_key ?? "profile_sent_doctor")
+            : (h.template_key ?? "profile_sent_hospital");
           await supabase.from("automation_flow_events").insert([
             {
               run_id:     runId,
               stage_key:  "trigger_send_clicked",
               event_type: "entered",
-              message:    `Send requested for ${doctor.name} → ${h.name}${selectedHospitals.length > 1 ? ` (BCC batch of ${selectedHospitals.length})` : ""}.`,
-              payload:    { batch_id: batchId, hospital_id: h.id },
+              message:    doctorOnly
+                ? `Working-opportunity email requested for ${doctor.name}${consolidate ? ` (${selectedHospitals.length} hospitals in one email)` : ` → ${h.name}`}.`
+                : `Send requested for ${doctor.name} → ${h.name}${selectedHospitals.length > 1 ? ` (BCC batch of ${selectedHospitals.length})` : ""}.`,
+              payload:    { batch_id: batchId, hospital_id: h.id, send_mode: sendMode },
             },
             {
               run_id:     runId,
-              stage_key:  "email_hospital",
+              stage_key:  openingStage,
               event_type: "entered",
-              message:    `Queued for sending. Template: ${h.template_key ?? "profile_sent_hospital"}.`,
-              payload:    { template_key: h.template_key ?? "profile_sent_hospital", recipient: recipientEmail },
+              message:    `Queued for sending. Template: ${openingTemplate}.`,
+              payload:    { template_key: openingTemplate, recipient: doctorOnly ? doctorEmailToUse : recipientEmail },
             },
           ]);
+          // Doctor-only + Combined = one consolidated email per doctor, so the
+          // first hospital's run is the whole send; the rest would duplicate it.
+          if (doctorOnly && consolidate) break;
         }
       }
 
@@ -939,7 +1014,9 @@ function SendProfileDialogBody({ onClose, initial }: { onClose: () => void; init
 
       // Advance each cycle-mode hospital's cursor ONCE so the NEXT send rotates
       // to its next contact. Non-fatal — a failure just repeats a contact.
-      for (const adv of cursorAdvances) {
+      // Skipped for a doctor-only send: no hospital was emailed, so rotating
+      // would burn a contact's turn on a send they never received.
+      for (const adv of sendsHospital ? cursorAdvances : []) {
         try { await updateHospital.mutateAsync({ id: adv.id, name: adv.name, cycle_cursor: adv.next }); }
         catch { /* ignore — rotation retries next time */ }
       }
@@ -973,7 +1050,11 @@ function SendProfileDialogBody({ onClose, initial }: { onClose: () => void; init
       const nD = selectedDoctors.length, nH = selectedHospitals.length;
       if (failed === 0) {
         toast.success(
-          nD === 1 && nH === 1
+          doctorOnly
+            ? (nD === 1
+                ? `Sent ${selectedDoctors[0].name} their working-opportunity email`
+                : `Sent ${sent} working-opportunity email${sent === 1 ? "" : "s"} to ${nD} doctors`)
+          : nD === 1 && nH === 1
             ? `Sent ${selectedDoctors[0].name} → ${selectedHospitals[0].name}`
             : nD === 1
               ? `Sent ${selectedDoctors[0].name} → ${nH} hospitals (BCC)`
@@ -1491,6 +1572,7 @@ function PreviewConfirm({
       greetNames?:  Record<string, string>;
       ccOverrides?: Record<string, string[]>;
       combineDoctorEmails?: boolean;
+      sendMode?: SendMode;
     },
   ) => void;
   submitting: boolean;
@@ -1659,6 +1741,16 @@ function PreviewConfirm({
   // hospitals) vs Individual (one doctor email per doctor per hospital). Only
   // meaningful for multi-hospital sends; the toggle is hidden when single.
   const [combineDoctorEmails, setCombineDoctorEmails] = useState(true);
+  // Which legs go out. Defaults to "both" — the behaviour this dialog has
+  // always had — so nothing changes unless the sender deliberately narrows it.
+  const [sendMode, setSendMode] = useState<SendMode>("both");
+  const sendsHospital = sendMode !== "doctor";
+  const sendsDoctor   = sendMode !== "hospital";
+  // Doctors with nowhere to send the working-opportunity email (counting a
+  // hand-typed override as an address). Only fatal in doctor-only mode.
+  const doctorsMissingEmail = doctors
+    .filter(d => !((doctorEmailOvByDoctor[d.id] ?? "").trim() || d.email))
+    .map(d => d.name);
   // Feature 2: which hospital's per-hospital doctor email shows in Individual mode.
   const [doctorPreviewHospIdx, setDoctorPreviewHospIdx] = useState(0);
   // Which hospital's intro email is showing on the Hospital-intro tab (its own
@@ -1857,8 +1949,11 @@ function PreviewConfirm({
   // still blocks while ANY doctor has left that leg unedited.
   const isPlaceholder = (key: string) =>
     (templates.find(t => t.key === key)?.body_text ?? "").trim().toUpperCase().startsWith("PLACEHOLDER");
-  const hospitalDraft = isPlaceholder(hospitalTemplateKey) && doctors.some(d => hospitals.some(h => !hospitalOvByPair[pairKey(d.id, h.id)]));
-  const doctorDraft   = isPlaceholder(doctorTemplateKey)   && doctors.some(d => !doctorOvByDoctor[d.id]);
+  // Only the legs being sent can block the send — a placeholder hospital
+  // template is irrelevant to a doctor-only send, and blocking on it would
+  // make the send button dead with no way to clear it.
+  const hospitalDraft = sendsHospital && isPlaceholder(hospitalTemplateKey) && doctors.some(d => hospitals.some(h => !hospitalOvByPair[pairKey(d.id, h.id)]));
+  const doctorDraft   = sendsDoctor   && isPlaceholder(doctorTemplateKey)   && doctors.some(d => !doctorOvByDoctor[d.id]);
   const anyDraft = hospitalDraft || doctorDraft;
 
   // Unfilled-variable guard: any {{token}} that would render BLANK (e.g. {{city}}
@@ -1873,11 +1968,11 @@ function PreviewConfirm({
       const r = renderByDoctor.get(doc.id);
       if (!r) continue;
       // Single-hospital only (guarded above), so there's exactly one pair/doctor.
-      if (!hospitalOvByPair[pairKey(doc.id, hospitals[0].id)]) for (const t of detectUnfilledVars(`${hospitalSubject}\n${hospitalBody}`, r.vars)) tokens.add(t);
-      if (!doctorOvByDoctor[doc.id])   for (const t of detectUnfilledVars(`${doctorSubject}\n${doctorBody}`, r.vars)) tokens.add(t);
+      if (sendsHospital && !hospitalOvByPair[pairKey(doc.id, hospitals[0].id)]) for (const t of detectUnfilledVars(`${hospitalSubject}\n${hospitalBody}`, r.vars)) tokens.add(t);
+      if (sendsDoctor   && !doctorOvByDoctor[doc.id])   for (const t of detectUnfilledVars(`${doctorSubject}\n${doctorBody}`, r.vars)) tokens.add(t);
     }
     return describeUnfilled([...tokens]);
-  }, [isSingle, doctors, hospitals, renderByDoctor, hospitalOvByPair, doctorOvByDoctor, hospitalSubject, hospitalBody, doctorSubject, doctorBody]);
+  }, [isSingle, doctors, hospitals, renderByDoctor, hospitalOvByPair, doctorOvByDoctor, hospitalSubject, hospitalBody, doctorSubject, doctorBody, sendsHospital, sendsDoctor]);
   const hasUnfilled = unfilledIssues.length > 0;
 
   // Single submit path shared by the footer button and the contextual
@@ -1968,6 +2063,7 @@ function PreviewConfirm({
       greetNames: greetNameByHospital,
       ccOverrides: hospitalCcOverride,
       combineDoctorEmails,
+      sendMode,
     });
   };
   // Human-readable local label of the chosen slot, for the schedule button.
@@ -2001,7 +2097,49 @@ function PreviewConfirm({
         greetName={greetNameByHospital}
         onGreetName={(id, email) => setGreetNameByHospital(prev => { const n = { ...prev }; if (email) n[id] = email; else delete n[id]; return n; })}
       />
-      {!isSingle && (
+      {/* Which of the two emails actually goes out. The doctor
+          "working opportunity" note used to be unconditional — this is the
+          way to send it on its own, or to hold it back entirely. */}
+      <div className="rounded-lg border border-sidebar-border/40 bg-white/95 p-3 shadow-sm">
+        <div className="mb-1.5 text-[10px] uppercase tracking-wider text-slate-500">What gets sent</div>
+        <div className="grid grid-cols-3 gap-1">
+          {([
+            ["both",     "Both",          "Hospitals get the intro and each doctor gets their working-opportunity email."],
+            ["hospital", "Hospital only", "Only the hospital intro goes out. No working-opportunity email to the doctor."],
+            ["doctor",   "Doctor only",   "Only the doctor's working-opportunity email goes out. Hospitals get nothing."],
+          ] as const).map(([k, label, hint]) => (
+            <button
+              key={k}
+              type="button"
+              onClick={() => setSendMode(k)}
+              disabled={submitting}
+              title={hint}
+              className={`rounded-md px-2 py-1 text-[10.5px] font-medium transition disabled:opacity-60 ${
+                sendMode === k ? "bg-teal-600 text-white shadow-sm" : "bg-slate-100 text-slate-600 hover:bg-slate-200"
+              }`}
+            >
+              {label}
+            </button>
+          ))}
+        </div>
+        <div className="mt-1.5 text-[9.5px] leading-relaxed text-slate-500">
+          {sendMode === "both"     && "Hospitals get the intro and each doctor gets their working-opportunity email."}
+          {sendMode === "hospital" && "Only the hospital intro goes out — no working-opportunity email to the doctor."}
+          {sendMode === "doctor"   && "Only the working-opportunity email goes out — the hospitals are not contacted."}
+        </div>
+        {/* On a doctor-only send the doctor's address is the ONLY address, so
+            a missing one means that doctor gets nothing at all — worth saying
+            up front rather than after a failed send. */}
+        {!sendsHospital && doctorsMissingEmail.length > 0 && (
+          <div className="mt-2 rounded-md border border-amber-300 bg-amber-50 px-2 py-1.5 text-[10px] leading-relaxed text-amber-900">
+            <strong>{doctorsMissingEmail.length === 1 ? doctorsMissingEmail[0] : `${doctorsMissingEmail.length} doctors`}</strong>
+            {doctorsMissingEmail.length === 1 ? " has" : " have"} no email address, so
+            {doctorsMissingEmail.length === 1 ? " that send" : " those sends"} will fail. Add
+            {doctorsMissingEmail.length === 1 ? " an address" : " addresses"} on the Doctor-email tab first.
+          </div>
+        )}
+      </div>
+      {!isSingle && sendsDoctor && (
         <div className="rounded-lg border border-teal-200 bg-teal-50 p-2.5 text-[11px] text-teal-900">
           {combineDoctorEmails
             ? (multiDoctor
@@ -2019,11 +2157,18 @@ function PreviewConfirm({
         </div>
         <div className="text-[11px] text-muted-foreground">
           {(() => {
-            const hosp = doctors.length * hospitals.length;
             const consolidate = (combineDoctorEmails ?? true) && hospitals.length > 1;
-            const doc = consolidate ? doctors.length : doctors.length * hospitals.length;
+            const hosp = sendsHospital ? doctors.length * hospitals.length : 0;
+            const doc  = !sendsDoctor ? 0 : consolidate ? doctors.length : doctors.length * hospitals.length;
+            const legs = [
+              hosp ? <strong key="h" className="text-slate-700">{hosp} hospital email{hosp === 1 ? "" : "s"}</strong> : null,
+              doc  ? <strong key="d" className="text-slate-700">{doc} doctor email{doc === 1 ? "" : "s"}</strong>   : null,
+            ].filter(Boolean);
             return (
-              <>On confirm, fires <strong className="text-slate-700">{hosp} hospital email{hosp === 1 ? "" : "s"}</strong> + <strong className="text-slate-700">{doc} doctor email{doc === 1 ? "" : "s"}</strong> <span className="text-slate-400">({hosp + doc} total)</span> automatically.</>
+              <>
+                On confirm, fires {legs.map((l, i) => <span key={i}>{i > 0 && " + "}{l}</span>)}
+                {legs.length > 1 && <span className="text-slate-400"> ({hosp + doc} total)</span>} automatically.
+              </>
             );
           })()}
         </div>
@@ -2149,11 +2294,15 @@ function PreviewConfirm({
               You've edited {anyHospitalEdited && anyDoctorEdited ? "both emails" : anyHospitalEdited ? "the hospital email" : "the doctor email"}{multiDoctor ? " (per doctor)" : ""} — your version sends instead of the template.
             </span>
           : isSingle
-            ? `Click into either email to tweak the wording before it sends.${multiDoctor ? " Edits are per doctor." : ""}`
-            : `Each of the ${hospitals.length} hospitals gets its own personalised intro email — use the hospital tabs to preview and edit each one individually. The doctor gets one consolidated working-opportunity email.`}
+            ? `Click into the email${sendMode === "both" ? "s" : ""} to tweak the wording before it sends.${multiDoctor ? " Edits are per doctor." : ""}`
+            : !sendsHospital
+              ? `Only the working-opportunity email is going out — ${combineDoctorEmails ? `one per doctor, listing all ${hospitals.length} hospitals` : `one per doctor per hospital`}. The hospitals are not contacted.`
+              : `Each of the ${hospitals.length} hospitals gets its own personalised intro email — use the hospital tabs to preview and edit each one individually.${sendsDoctor ? " The doctor gets one consolidated working-opportunity email." : " No working-opportunity email goes to the doctor."}`}
       </div>
 
-      {hospitals.some(h => !h.primary_recruiter_email) && (
+      {/* Irrelevant on a doctor-only send — no hospital is being emailed, so a
+          missing recruiter address costs nothing. */}
+      {sendsHospital && hospitals.some(h => !h.primary_recruiter_email) && (
         <div className="rounded-md border border-amber-200 bg-amber-50 p-2 text-[11px] text-amber-900">
           <strong>Warning:</strong> {hospitals.filter(h => !h.primary_recruiter_email).length} of the selected hospitals don't have a recruiter email on file. Those runs will be queued but won't send until the email is added in the Hospitals tab.
         </div>
@@ -2600,7 +2749,9 @@ function PreviewConfirm({
 
   // ── The two emails: switcher label + left-rail controls + right-pane preview.
   //    Left-rail card/CV controls follow the ACTIVE doctor's sub-tab.
-  const emails: StudioEmail[] = [
+  // Only the legs that will actually be sent get a tab — previewing and
+  // hand-editing an email that the send mode is suppressing is a trap.
+  const emails: StudioEmail[] = ([
     {
       key: "hospital",
       label: "Hospital intro",
@@ -2756,12 +2907,16 @@ function PreviewConfirm({
             panes={doctors.map(combineDoctorEmails ? combinedDoctorPane : individualDoctorPane)}
           />,
     },
-  ];
+  ] as StudioEmail[]).filter(e => (e.key === "hospital" ? sendsHospital : sendsDoctor));
 
   // Icon-only actions that never move: clock opens a schedule popover right
   // above the button (date + time + confirm, all in place), paper-plane sends
   // now. No mode-switch, no buttons swapping sides.
-  const totalSends = doctors.length * hospitals.length;
+  // A doctor-only Combined send is ONE email per doctor covering every
+  // hospital, so the count is per doctor rather than the full matrix.
+  const totalSends = (!sendsHospital && combineDoctorEmails && hospitals.length > 1)
+    ? doctors.length
+    : doctors.length * hospitals.length;
   const sendCount = `${totalSends} send${totalSends === 1 ? "" : "s"}`;
   const footer = (
     <>
@@ -2832,13 +2987,13 @@ const PREVIEW_SENDERS: Record<string, PreviewSender> = {
   "ishak@allocationassist.com":          { first: "Ishak",   last: "Boulaat", title: "Hospital Introduction Officer", phone: "" },
   "ammar@allocationassist.com":          { first: "Ammar",   last: "",        title: "Founder",                       phone: "" },
   // Generic company sender — signs off as the team (server: hello@ → team).
-  "hello@allocationassist.com":          { first: "The Allocation Assist", last: "team", title: "", phone: "" },
+  "hello@allocationassist.com":          { first: "Allocation Assist", last: "team", title: "", phone: "" },
 };
 /** Resolve a sender email → signature name/title/phone. Unknown/empty falls
  *  back to the generic Allocation Assist team, matching server pickSender(). */
 function previewSenderProfile(email: string | null | undefined): PreviewSender {
   const key = (email ?? "").trim().toLowerCase();
-  return PREVIEW_SENDERS[key] ?? { first: "The Allocation Assist", last: "team", title: "", phone: "" };
+  return PREVIEW_SENDERS[key] ?? { first: "Allocation Assist", last: "team", title: "", phone: "" };
 }
 function previewSignatureHtml(first: string, last: string, title: string, phone: string): string {
   const fullName = [first, last].filter(Boolean).join(" ") || "Allocation Assist";
