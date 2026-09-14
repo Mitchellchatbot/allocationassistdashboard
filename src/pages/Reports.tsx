@@ -8,7 +8,7 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue, SelectGroup, SelectLabel, SelectSeparator } from "@/components/ui/select";
 import { HI_TEAM_MEMBERS, findHiMemberByEmail } from "@/lib/hi-team";
-import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
+import { Table, TableBody, TableCell, TableHeader, TableRow } from "@/components/ui/table";
 import {
   BarChart3, Users, Building2, TrendingUp, TrendingDown, Minus,
   AlertCircle, Calendar, Activity, Sparkles, Send, UserCheck,
@@ -30,6 +30,10 @@ import { DataGate } from "@/components/reports/AwaitingData";
 import { PlacementBreakdowns } from "@/components/reports/PlacementBreakdowns";
 import { VacanciesSummary } from "@/components/reports/VacanciesSummary";
 import { DataQualityCard } from "@/components/reports/DataQualityCard";
+import { ChartSkeleton, TableRowsSkeleton } from "@/components/reports/Skeletons";
+import { TeamPerformance } from "@/components/reports/TeamPerformance";
+import { HospitalPerformance } from "@/components/reports/HospitalPerformance";
+import { useSort, SortHead } from "@/components/reports/sortable";
 import { TopOfFunnelContent, useTopOfFunnelStats } from "@/components/reports/TopOfFunnelCard";
 import { OperationsContent, useOperationsSummary } from "@/components/reports/OperationsCard";
 
@@ -64,6 +68,11 @@ export default function Reports() {
     if (val === def) next.delete(key); else next.set(key, val);
     return next;
   }, { replace: true });
+  // Which of the four views is showing. Also a URL param so a link can point
+  // straight at "Team" — and, just as importantly, so only the active view's
+  // components mount (the page used to build all 16 sections on every paint).
+  const view = (searchParams.get("view") ?? "overview") as ViewKey;
+  const setView       = (v: string) => setParam("view", v, "overview");
   const setRangeDays  = (n: number) => setParam("range", String(n), "365");
   const setHospital   = (v: string) => setParam("hospital", v, "__all");
   const setTeamMember = (v: string) => setParam("team", v, "__all");
@@ -94,6 +103,15 @@ export default function Reports() {
   const hospitalFilter  = hospital  === "__all" ? null : hospital;
   const specialtyFilter = specialty === "__all" ? null : specialty;
 
+  // hospital name → open vacancies, folded into the By-hospital table so an
+  // account that's hiring but idle is obvious at a glance.
+  const vacancyByHospital = useMemo(
+    () => new Map(bundle.hospitals.map(h => [h.hospital, h.openVacancies])),
+    [bundle.hospitals],
+  );
+
+  const rangeWord = rangeDays >= 3650 ? "all time" : rangeDays >= 365 ? "the last year" : `the last ${rangeDays} days`;
+
   return (
     <DashboardLayout>
       <div className="space-y-6">
@@ -105,7 +123,7 @@ export default function Reports() {
               <DocLink slug="hospital-introduction/reports" />
             </h1>
             <p className="text-sm text-muted-foreground mt-1">
-              Hospital Introduction Department metrics for {rangeDays >= 3650 ? "all time" : rangeDays >= 365 ? "the last year" : `the last ${rangeDays} days`}. Filter by hospital, team member, or specialty.
+              {VIEWS.find(v => v.key === view)?.blurb.replace("{range}", rangeWord)}
             </p>
           </div>
           <FilterBar
@@ -117,53 +135,105 @@ export default function Reports() {
           />
         </div>
 
-        {/* ── CEO summary — answer-first hero: a plain-English headline + a
-            Weekly/Monthly outcome scoreboard (distinct doctors, one consistent
-            source). This is the "are we okay?" layer; everything below it is
-            progressively more detail. ─────────────────────────────────────── */}
-        <CeoSummary hospital={hospitalFilter} specialty={specialtyFilter} />
+        {/* ── One question per view ────────────────────────────────────────
+            The page used to stack 16 sections in a single scroll. Same
+            content, now split by the question being asked: how are we doing
+            (Overview), who's delivering (Team), which accounts (Hospitals),
+            and everything operational (Detail). Only the active view mounts. */}
+        <ViewTabs view={view} setView={setView} />
 
-        {/* ── At-a-glance health line — the one chart a CEO reads without
-            expanding anything. Kept visible, full width. ──────────────────── */}
-        <Card>
-          <CardHeader className="pb-2">
-            <CardTitle className="text-base flex items-center gap-2">
-              <Activity className="h-4 w-4 text-teal-600" />
-              Trend
-            </CardTitle>
-            <CardDescription className="text-[11px]">
-              Shortlists, interviews, and signs over time — switch between by week and by month. Helps catch dropoffs early.
-            </CardDescription>
-          </CardHeader>
-          <CardContent>
-            <Suspense fallback={<div className="h-[296px] w-full" />}>
-              <ReportsTrendChart trend={bundle.trend} />
-            </Suspense>
-          </CardContent>
-        </Card>
-
-        {/* ── Where the wins are — the segment layer: which region, which
-            specialties, which hospitals, how long the journey takes, and what
-            we're recruiting for. Kept visible so the CEO sees WHERE results
-            come from without digging. ─────────────────────────────────────── */}
-        <div className="pt-1">
-          <h2 className="text-[11px] font-semibold uppercase tracking-wider text-muted-foreground mb-3">
-            Where the wins are
-          </h2>
+        {view === "overview" && (
           <div className="space-y-6">
-            <PlacementBreakdowns range={filters.range} hospital={hospitalFilter} specialty={specialtyFilter} />
-            <VacanciesSummary />
-          </div>
-        </div>
+            {/* Answer-first hero: a plain-English headline + a Weekly/Monthly
+                outcome scoreboard (distinct doctors, one consistent source). */}
+            <CeoSummary hospital={hospitalFilter} specialty={specialtyFilter} />
 
-        {/* ── Operational detail — the depth layer. Everything the team needs
-            but a CEO shouldn't scroll past: full range metrics, funnel, chase
-            list, per-person / per-hospital / per-doctor tables, ops machinery.
-            All collapsed by default. ──────────────────────────────────────── */}
-        <div className="pt-1">
-          <h2 className="text-[11px] font-semibold uppercase tracking-wider text-muted-foreground mb-3">
-            Operational detail
-          </h2>
+            {/* The one chart that's worth reading without expanding anything. */}
+            <Card>
+              <CardHeader className="pb-2">
+                <CardTitle className="text-base flex items-center gap-2">
+                  <Activity className="h-4 w-4 text-teal-600" />
+                  Trend
+                </CardTitle>
+                <CardDescription className="text-[11px]">
+                  Shortlists, interviews, and signs over time — switch between by week and by month. Helps catch dropoffs early.
+                </CardDescription>
+              </CardHeader>
+              <CardContent>
+                <Suspense fallback={<ChartSkeleton />}>
+                  <ReportsTrendChart trend={bundle.trend} loading={bundle.isLoading} />
+                </Suspense>
+              </CardContent>
+            </Card>
+
+            {/* Where the wins are — region, specialties, lifecycle. The
+                per-hospital ranking is suppressed here; the Hospitals tab
+                owns that view. */}
+            <SectionLabel>Where the wins are</SectionLabel>
+            <PlacementBreakdowns range={filters.range} hospital={hospitalFilter} specialty={specialtyFilter} hideHospitals />
+          </div>
+        )}
+
+        {view === "team" && (
+          <div className="space-y-6">
+            {/* Credit follows the hospital's representative — same source as
+                the Overview scoreboard, so the numbers reconcile. */}
+            <TeamPerformance range={filters.range} hospital={hospitalFilter} specialty={specialtyFilter} />
+
+            {/* The older roll-up: who TRIGGERED the flows, not who owns the
+                account. Different question, kept but demoted. */}
+            <CollapsibleSection
+              title="By flow activity"
+              icon={<Users className="h-4 w-4 text-slate-600" />}
+              description="Rolls up flow actions by whoever triggered them in the dashboard, rather than by the hospital's representative."
+              summary={<SummaryBadge loading={bundle.isLoading} value={bundle.team.length} label="members" />}
+              open={!!open.team}
+              onOpenChange={toggle("team")}
+              flush
+            >
+              <DataGate
+                has={bundle.team.length > 0}
+                loading={bundle.isLoading}
+                title="No per-person results yet"
+                note="This fills in as your team marks doctors (shortlist / interview / offer / sign / relocate) in the dashboard — each marking is attributed to whoever recorded it. The imported historical placements have no owner, so they aren't counted per person here."
+              >
+                <TeamTable rows={bundle.team} loading={bundle.isLoading} />
+              </DataGate>
+            </CollapsibleSection>
+          </div>
+        )}
+
+        {view === "hospitals" && (
+          <div className="space-y-6">
+            <HospitalPerformance
+              range={filters.range}
+              hospital={hospitalFilter}
+              specialty={specialtyFilter}
+              vacancies={vacancyByHospital}
+            />
+            <VacanciesSummary />
+
+            {/* Relationship health — "is this account going cold?". Reads
+                doctor_lifecycle, so it can differ from the table above. */}
+            <CollapsibleSection
+              title="Relationship health"
+              icon={<Building2 className="h-4 w-4 text-slate-600" />}
+              description={`Warming/cooling vs the prior ${rangeDays}-day window, with a health score per account.`}
+              summary={<SummaryBadge loading={bundle.isLoading} value={bundle.hospitals.length} label="hospitals" />}
+              open={!!open.hospital}
+              onOpenChange={toggle("hospital")}
+              flush
+            >
+              <HospitalTable rows={bundle.hospitals} loading={bundle.isLoading} />
+            </CollapsibleSection>
+
+            {/* Surfaces unclassified hospital regions to fix (only renders
+                when there's something to clean up). */}
+            <DataQualityCard />
+          </div>
+        )}
+
+        {view === "detail" && (
           <div className="space-y-6">
             {/* Full absolute totals over the custom range + per-tile drill-downs
                 — the analyst's scoreboard, demoted below the CEO summary. */}
@@ -240,44 +310,6 @@ export default function Reports() {
               <OperationsContent />
             </CollapsibleSection>
 
-            {/* Data quality — surfaces unclassified hospital regions to fix
-                (only renders when there's something to clean up). */}
-            <DataQualityCard />
-
-            {/* By team */}
-            <CollapsibleSection
-              title="By team member"
-              icon={<Users className="h-4 w-4 text-violet-600" />}
-              description="Rolls up flow actions by whoever triggered them. Signed counts will populate as new contracts are completed under this version."
-              summary={<SummaryBadge loading={bundle.isLoading} value={bundle.team.length} label="members" />}
-              open={!!open.team}
-              onOpenChange={toggle("team")}
-              flush
-            >
-              <DataGate
-                has={bundle.team.length > 0}
-                loading={bundle.isLoading}
-                title="No per-person results yet"
-                note="This fills in as your team marks doctors (shortlist / interview / offer / sign / relocate) in the dashboard — each marking is attributed to whoever recorded it. The imported historical placements have no owner, so they aren't counted per person here."
-              >
-                <TeamTable rows={bundle.team} loading={bundle.isLoading} />
-              </DataGate>
-            </CollapsibleSection>
-
-            {/* By hospital — surfaced above the per-doctor table so the team
-                scans accounts first (who's warming / cooling). */}
-            <CollapsibleSection
-              title="By hospital"
-              icon={<Building2 className="h-4 w-4 text-sky-600" />}
-              description={`Open vacancies + activity + relationship health. Warming/cooling vs the prior ${rangeDays}-day window.`}
-              summary={<SummaryBadge loading={bundle.isLoading} value={bundle.hospitals.length} label="hospitals" />}
-              open={!!open.hospital}
-              onOpenChange={toggle("hospital")}
-              flush
-            >
-              <HospitalTable rows={bundle.hospitals} loading={bundle.isLoading} />
-            </CollapsibleSection>
-
             {/* Placements (Ammar 2026-06-03) — replaces the Hammad sheet.
                 Per-(doctor, hospital) milestones + 45-day payment clock.
                 Carries its own action header + its own 5-row window, so it
@@ -301,9 +333,56 @@ export default function Reports() {
               onOpenChange={toggle("doctors")}
             />
           </div>
-        </div>
+        )}
       </div>
     </DashboardLayout>
+  );
+}
+
+/** The four questions the page answers, in the order you'd ask them. */
+type ViewKey = "overview" | "team" | "hospitals" | "detail";
+const VIEWS: Array<{ key: ViewKey; label: string; icon: typeof BarChart3; blurb: string }> = [
+  { key: "overview",  label: "Overview",  icon: Activity,
+    blurb: "How the Hospital Introduction department is doing over {range} — results, trend, and where the wins come from." },
+  { key: "team",      label: "Team",      icon: Users,
+    blurb: "Who's delivering over {range}. Every stage is credited to the representative who owns the hospital." },
+  { key: "hospitals", label: "Hospitals", icon: Building2,
+    blurb: "Which accounts are moving over {range} — activity, open roles, and relationship health." },
+  { key: "detail",    label: "Detail",    icon: ServerCog,
+    blurb: "The operational layer for {range}: full metrics, funnel, chase list, placements, and per-doctor rows." },
+];
+
+/** Segmented view switcher. Same visual language as the range picker in the
+ *  filter bar, so the page reads as one control surface. */
+function ViewTabs({ view, setView }: { view: ViewKey; setView: (v: string) => void }) {
+  return (
+    <div className="inline-flex rounded-lg border bg-white p-0.5 shadow-sm">
+      {VIEWS.map(v => {
+        const Icon = v.icon;
+        const active = view === v.key;
+        return (
+          <button
+            key={v.key}
+            onClick={() => setView(v.key)}
+            className={`inline-flex items-center gap-1.5 px-3.5 py-1.5 rounded-md text-[12px] font-medium transition-colors ${
+              active ? "bg-teal-600 text-white shadow-sm" : "text-slate-600 hover:bg-slate-50"
+            }`}
+          >
+            <Icon className={`h-3.5 w-3.5 ${active ? "text-white" : "text-slate-400"}`} />
+            {v.label}
+          </button>
+        );
+      })}
+    </div>
+  );
+}
+
+/** Small uppercase divider used between blocks inside a view. */
+function SectionLabel({ children }: { children: React.ReactNode }) {
+  return (
+    <h2 className="text-[11px] font-semibold uppercase tracking-wider text-muted-foreground pt-1">
+      {children}
+    </h2>
   );
 }
 
@@ -470,8 +549,8 @@ function KpiStrip({ bundle }: { bundle: ReturnType<typeof useReportingMetrics> }
       color: "text-slate-600",  bg: "bg-card", group: "pipeline",
       meaning: "Doctor profiles emailed to a hospital recruiter in the selected window.",
       source:  "automation_flow_runs · flow_key=profile_sent",
-      onClickThrough: () => navigate("/automations?flow=profile_sent"),
-      drilldown: <RunsList rows={drilldowns.profile_sent} kind="hospital" emptyCta="profile_sent" onJump={() => navigate(`/automations?flow=profile_sent`)} />,
+      onClickThrough: () => navigate("/sends?tab=email-chain&flow=profile_sent"),
+      drilldown: <RunsList rows={drilldowns.profile_sent} kind="hospital" emptyCta="profile_sent" onJump={() => navigate(`/sends?tab=email-chain&flow=profile_sent`)} />,
     },
     {
       label: "Shortlisted",     value: bundle.kpis.shortlisted, icon: UserCheck,
@@ -668,19 +747,6 @@ const LifecycleList = memo(function LifecycleList({ rows, milestone, onJump }: {
   );
 });
 
-function TableSkeleton({ rows, cols }: { rows: number; cols: number }) {
-  return (
-    <div className="px-4 py-3 space-y-2">
-      {Array.from({ length: rows }).map((_, r) => (
-        <div key={r} className="flex items-center gap-3">
-          {Array.from({ length: cols }).map((_, c) => (
-            <Skeleton key={c} className={`h-4 ${c === 0 ? "w-[28%]" : "w-[8%]"}`} />
-          ))}
-        </div>
-      ))}
-    </div>
-  );
-}
 
 function relativeShort(iso: string | null | undefined): string {
   if (!iso) return "—";
@@ -697,8 +763,15 @@ function relativeShort(iso: string | null | undefined): string {
   catch { return iso; }
 }
 
+type TeamSortKey = "member" | "profilesSent" | "shortlisted" | "interviews" | "offered" | "signed" | "total";
+
 function TeamTable({ rows, loading }: { rows: ReturnType<typeof useReportingMetrics>["team"]; loading: boolean }) {
-  if (loading) return <TableSkeleton rows={4} cols={7} />;
+  const sort = useSort<TeamSortKey>("total");
+  const sorted = useMemo(() => sort.sort(rows, (r, key) =>
+    key === "member" ? (findHiMemberByEmail(r.email)?.name ?? r.email) : r[key],
+  ), [rows, sort]);
+
+  if (loading) return <TableRowsSkeleton rows={4} cols={7} />;
   if (rows.length === 0) {
     return (
       <div className="px-4 py-12 text-center text-[12px] text-muted-foreground">
@@ -710,17 +783,17 @@ function TeamTable({ rows, loading }: { rows: ReturnType<typeof useReportingMetr
     <Table>
       <TableHeader>
         <TableRow>
-          <TableHead className="text-[11px]">Team member</TableHead>
-          <TableHead className="text-[11px] text-right">Profile sends</TableHead>
-          <TableHead className="text-[11px] text-right">Shortlisted</TableHead>
-          <TableHead className="text-[11px] text-right">Interviews</TableHead>
-          <TableHead className="text-[11px] text-right">Offered</TableHead>
-          <TableHead className="text-[11px] text-right">Signed</TableHead>
-          <TableHead className="text-[11px] text-right">Total</TableHead>
+          <SortHead sort={sort} sortKey="member" numeric={false}>Team member</SortHead>
+          <SortHead sort={sort} sortKey="profilesSent">Profile sends</SortHead>
+          <SortHead sort={sort} sortKey="shortlisted">Shortlisted</SortHead>
+          <SortHead sort={sort} sortKey="interviews">Interviews</SortHead>
+          <SortHead sort={sort} sortKey="offered">Offered</SortHead>
+          <SortHead sort={sort} sortKey="signed">Signed</SortHead>
+          <SortHead sort={sort} sortKey="total">Total</SortHead>
         </TableRow>
       </TableHeader>
       <TableBody>
-        {rows.map(r => (
+        {sorted.map(r => (
           <TableRow key={r.email}>
             <TableCell className="text-[12px] font-medium">{findHiMemberByEmail(r.email)?.name ?? r.email}</TableCell>
             <TableCell className="text-[12px] text-right tabular-nums">{r.profilesSent}</TableCell>
@@ -736,8 +809,26 @@ function TeamTable({ rows, loading }: { rows: ReturnType<typeof useReportingMetr
   );
 }
 
+type HospSortKey = "hospital" | "openVacancies" | "shortlisted" | "interviews" | "signed" | "last" | "trend" | "health";
+
+// Warming → steady → cooling is an ordering, not three unrelated labels, so
+// the Trend column sorts on that scale rather than alphabetically.
+const TREND_RANK = { warming: 2, steady: 1, cooling: 0 } as const;
+
 function HospitalTable({ rows, loading }: { rows: ReturnType<typeof useReportingMetrics>["hospitals"]; loading: boolean }) {
-  if (loading) return <TableSkeleton rows={6} cols={8} />;
+  const sort = useSort<HospSortKey>("signed");
+  const sorted = useMemo(() => sort.sort(rows, (r, key) => {
+    switch (key) {
+      case "hospital": return r.hospital;
+      // Most-recently-touched first when descending: fewer days = more recent,
+      // so negate rather than showing the stalest accounts under "Last activity ▼".
+      case "last":     return r.daysSinceLastInteraction == null ? null : -r.daysSinceLastInteraction;
+      case "trend":    return TREND_RANK[r.trend];
+      default:         return r[key];
+    }
+  }), [rows, sort]);
+
+  if (loading) return <TableRowsSkeleton rows={6} cols={8} />;
   if (rows.length === 0) {
     return (
       <div className="px-4 py-12 text-center text-[12px] text-muted-foreground">
@@ -749,18 +840,18 @@ function HospitalTable({ rows, loading }: { rows: ReturnType<typeof useReporting
     <Table>
       <TableHeader>
         <TableRow>
-          <TableHead className="text-[11px]">Hospital</TableHead>
-          <TableHead className="text-[11px] text-right">Open vacancies</TableHead>
-          <TableHead className="text-[11px] text-right">Shortlisted</TableHead>
-          <TableHead className="text-[11px] text-right">Interviews</TableHead>
-          <TableHead className="text-[11px] text-right">Signed</TableHead>
-          <TableHead className="text-[11px] text-right">Last activity</TableHead>
-          <TableHead className="text-[11px] text-right">Trend</TableHead>
-          <TableHead className="text-[11px] text-right">Health</TableHead>
+          <SortHead sort={sort} sortKey="hospital" numeric={false}>Hospital</SortHead>
+          <SortHead sort={sort} sortKey="openVacancies">Open vacancies</SortHead>
+          <SortHead sort={sort} sortKey="shortlisted">Shortlisted</SortHead>
+          <SortHead sort={sort} sortKey="interviews">Interviews</SortHead>
+          <SortHead sort={sort} sortKey="signed">Signed</SortHead>
+          <SortHead sort={sort} sortKey="last">Last activity</SortHead>
+          <SortHead sort={sort} sortKey="trend">Trend</SortHead>
+          <SortHead sort={sort} sortKey="health">Health</SortHead>
         </TableRow>
       </TableHeader>
       <TableBody>
-        {rows.map(r => (
+        {sorted.map(r => (
           <TableRow key={r.hospital}>
             <TableCell className="text-[12px] font-medium">{r.hospital}</TableCell>
             <TableCell className="text-[12px] text-right tabular-nums">{r.openVacancies}</TableCell>

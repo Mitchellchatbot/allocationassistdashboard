@@ -13,16 +13,21 @@ import { MapPin, Stethoscope, Clock, Building2 } from "lucide-react";
 import { usePlacementAttempts, type PlacementAttempt } from "@/hooks/use-placement-attempts";
 import { resolveHospitalRegion } from "@/lib/hospital-region";
 import { groupSpecialty } from "@/lib/specialty-groups";
+import { BarsSkeleton, TilesSkeleton } from "@/components/reports/Skeletons";
 
 interface Props {
   range:      { from: Date; to: Date };
   hospital?:  string | null;
   specialty?: string | null;
+  /** Drop the "Which hospitals" card. Set on the Overview tab, where the
+   *  dedicated Hospitals tab already owns the per-account view — otherwise
+   *  the same ranking renders twice on one page. */
+  hideHospitals?: boolean;
 }
 
 const relocatedAt = (p: PlacementAttempt) => p.relocated_at ?? p.joined_at;
 
-export function PlacementBreakdowns({ range, hospital, specialty }: Props) {
+export function PlacementBreakdowns({ range, hospital, specialty, hideHospitals }: Props) {
   const { data: all = [], isLoading } = usePlacementAttempts();
 
   const m = useMemo(() => {
@@ -121,19 +126,21 @@ export function PlacementBreakdowns({ range, hospital, specialty }: Props) {
       </Card>
 
       {/* Which hospitals */}
+      {!hideHospitals && (
       <Card className="lg:col-span-2">
         <CardHeader className="pb-2">
           <CardTitle className="text-base flex items-center gap-2"><Building2 className="h-4 w-4 text-teal-600" /> Which hospitals</CardTitle>
           <CardDescription className="text-[11px]">Placements active in the window, by hospital (clean names — includes the imported reports).</CardDescription>
         </CardHeader>
         <CardContent>
-          {isLoading ? <Loading /> : m.hospitals.length === 0 ? <Empty /> : (
+          {isLoading ? <Loading rows={6} /> : m.hospitals.length === 0 ? <Empty /> : (
             <div className="grid grid-cols-1 sm:grid-cols-2 gap-x-6 gap-y-1.5">
               {m.hospitals.map(([h, v]) => <Bar key={h} label={h} value={v.placements} max={maxHosp} sub={v.signed ? `${v.signed} signed` : undefined} />)}
             </div>
           )}
         </CardContent>
       </Card>
+      )}
 
       {/* Lifecycle */}
       <Card className="lg:col-span-2">
@@ -142,11 +149,13 @@ export function PlacementBreakdowns({ range, hospital, specialty }: Props) {
           <CardDescription className="text-[11px]">How long each stage takes, for doctors who reached it in the window.</CardDescription>
         </CardHeader>
         <CardContent>
+          {isLoading ? <TilesSkeleton count={3} cols="sm:grid-cols-3" /> : (
           <div className="grid grid-cols-2 sm:grid-cols-3 gap-3">
             <LifeTile label="Shortlist → Sign" days={m.avgS2S} />
             <LifeTile label="Sign → Relocate" days={m.avgS2R} />
             <LifeTile label="Shortlist → Relocate" days={m.avgS2S != null && m.avgS2R != null ? m.avgS2S + m.avgS2R : null} />
           </div>
+          )}
         </CardContent>
       </Card>
     </div>
@@ -176,5 +185,5 @@ function LifeTile({ label, days }: { label: string; days: number | null }) {
     </div>
   );
 }
-function Loading() { return <div className="py-6 text-center text-[11px] text-muted-foreground">Loading…</div>; }
+function Loading({ rows = 5 }: { rows?: number }) { return <BarsSkeleton rows={rows} />; }
 function Empty() { return <div className="py-6 text-center text-[11px] text-muted-foreground">No placements in this window.</div>; }

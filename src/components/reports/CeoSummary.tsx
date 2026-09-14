@@ -18,6 +18,8 @@ import { useMemo, useState } from "react";
 import { Card, CardContent } from "@/components/ui/card";
 import { TrendingUp, TrendingDown, Minus, ListChecks, CalendarCheck, CheckCircle2, Plane } from "lucide-react";
 import { usePlacementAttempts, type PlacementAttempt } from "@/hooks/use-placement-attempts";
+import { Skeleton } from "@/components/ui/skeleton";
+import { TilesSkeleton } from "@/components/reports/Skeletons";
 
 type Period = "weekly" | "monthly";
 
@@ -138,9 +140,16 @@ export function CeoSummary({ hospital, specialty }: { hospital?: string | null; 
                 {(hospital || specialty) && <span className="ml-1 normal-case font-normal">· filtered</span>}
               </span>
             </div>
-            <p className="mt-1.5 text-[17px] sm:text-[18px] font-semibold leading-snug text-slate-900 max-w-[52ch]">
-              {headline}
-            </p>
+            {isLoading ? (
+              <div className="mt-2 space-y-2">
+                <Skeleton className="h-4 w-[380px] max-w-full" />
+                <Skeleton className="h-4 w-[240px] max-w-full" />
+              </div>
+            ) : (
+              <p className="mt-1.5 text-[17px] sm:text-[18px] font-semibold leading-snug text-slate-900 max-w-[52ch]">
+                {headline}
+              </p>
+            )}
             {trendClause && (
               <p className={`mt-1 text-[12px] font-medium ${
                 trendClause.tone === "up" ? "text-emerald-600" : trendClause.tone === "down" ? "text-rose-600" : "text-slate-500"
@@ -162,9 +171,18 @@ export function CeoSummary({ hospital, specialty }: { hospital?: string | null; 
           </div>
         </div>
 
-        {/* Scoreboard — four milestones, results (signed/relocated) accented. */}
-        <div className="mt-4 grid grid-cols-2 lg:grid-cols-4 gap-3">
-          {stats.map(s => <ScoreTile key={s.key} stat={s} periodWord={periodWord} loading={isLoading} />)}
+        {/* Scoreboard — four milestones, results (signed/relocated) accented.
+            While the placement rows are in flight this is a skeleton rather
+            than four zeroes: a zero here reads as "a dead month", which is a
+            very different claim from "not loaded yet". */}
+        <div className="mt-4">
+          {isLoading ? (
+            <TilesSkeleton count={4} />
+          ) : (
+            <div className="grid grid-cols-2 lg:grid-cols-4 gap-3">
+              {stats.map(s => <ScoreTile key={s.key} stat={s} periodWord={periodWord} loading={false} />)}
+            </div>
+          )}
         </div>
       </CardContent>
     </Card>

@@ -1,6 +1,7 @@
 import { useMemo, useState } from "react";
 import { ResponsiveContainer, LineChart, Line, XAxis, YAxis, Tooltip as ChartTooltip, CartesianGrid, Legend } from "recharts";
 import type { useReportingMetrics } from "@/hooks/use-reporting-metrics";
+import { ChartSkeleton } from "@/components/reports/Skeletons";
 
 /**
  * Co-located recharts chart for the Reports page, split out so the
@@ -44,9 +45,14 @@ function rollupMonthly(weekly: WeeklyBucket[]) {
     }));
 }
 
-export default function ReportsTrendChart({ trend }: { trend: WeeklyBucket[] }) {
+export default function ReportsTrendChart({ trend, loading }: { trend: WeeklyBucket[]; loading?: boolean }) {
   const [gran, setGran] = useState<Granularity>("week");
   const monthly = useMemo(() => rollupMonthly(trend ?? []), [trend]);
+
+  // Loading is checked BEFORE emptiness — an unfetched range is not an empty
+  // one, and claiming "no activity" while the query is still in flight is the
+  // one thing this panel must never do.
+  if (loading) return <ChartSkeleton />;
 
   if (!trend || trend.length === 0) {
     return <div className="text-center text-[12px] text-muted-foreground py-12">No activity in this range.</div>;

@@ -8,6 +8,7 @@ import { useMemo } from "react";
 import { useNavigate } from "react-router-dom";
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "@/components/ui/card";
 import { Briefcase, ExternalLink } from "lucide-react";
+import { Skeleton } from "@/components/ui/skeleton";
 import { useVacancies } from "@/hooks/use-vacancies";
 import { resolveHospitalRegion } from "@/lib/hospital-region";
 import { groupSpecialty } from "@/lib/specialty-groups";
@@ -56,7 +57,19 @@ export function VacanciesSummary() {
       </CardHeader>
       <CardContent>
         {isLoading ? (
-          <div className="py-6 text-center text-[11px] text-muted-foreground">Loading…</div>
+          <div className="space-y-3">
+            <div className="flex items-center gap-2">
+              <Skeleton className="h-7 w-14" />
+              <Skeleton className="h-4 w-16" />
+              <Skeleton className="h-4 w-20 ml-auto" />
+            </div>
+            <div>
+              <Skeleton className="h-2.5 w-20 mb-2" />
+              <div className="flex flex-wrap gap-1.5">
+                {[72, 96, 64, 110, 84, 68].map((w, i) => <Skeleton key={i} className="h-5 rounded-md" style={{ width: w }} />)}
+              </div>
+            </div>
+          </div>
         ) : m.total === 0 ? (
           <div className="py-6 text-center text-[11px] text-muted-foreground">No open vacancies right now.</div>
         ) : (

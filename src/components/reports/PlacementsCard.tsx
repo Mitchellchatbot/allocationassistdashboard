@@ -18,7 +18,8 @@
 import { memo, useEffect, useMemo, useState } from "react";
 import { useSearchParams } from "react-router-dom";
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "@/components/ui/card";
-import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
+import { Table, TableBody, TableCell, TableHeader, TableRow } from "@/components/ui/table";
+import { useSort, SortHead } from "@/components/reports/sortable";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -75,6 +76,13 @@ export interface PlacementsCardProps {
   open?:         boolean;
   onOpenChange?: (open: boolean) => void;
 }
+
+/** Sortable columns. The milestone keys are the column names themselves, so
+ *  the accessor can read them straight off the row. */
+type PlacementSortKey =
+  | "doctor_name" | "hospital_name" | "doctor_specialty"
+  | "shortlisted_at" | "interviewed_at" | "offered_at"
+  | "signed_at" | "start_date" | "joined_at" | "paid";
 
 /** Most recent milestone date on a placement_attempt — used to decide
  *  whether the row "happened" in a given date window. */
@@ -183,6 +191,26 @@ export function PlacementsCard({ rangeDays, hospital, specialty, open, onOpenCha
     );
   }, [rows, search]);
 
+  // Column sorting over the filtered ledger. Default is doctor A→Z: this table
+  // is as often used to look someone up as to scan it, and alphabetical is the
+  // only order where you know where to look. Date columns sort on the parsed
+  // timestamp, not the formatted string, and blanks sink either way.
+  const sort = useSort<PlacementSortKey>("doctor_name", "asc");
+  const sorted = useMemo(() => sort.sort(filtered, (r, key) => {
+    switch (key) {
+      case "doctor_name":     return r.doctor_name;
+      case "hospital_name":   return r.hospital_name;
+      case "doctor_specialty": return r.doctor_specialty;
+      case "paid":            return r.paid_at ? 1 : 0;
+      default: {
+        const v = r[key];
+        if (!v) return null;
+        const t = new Date(v).getTime();
+        return isNaN(t) ? null : t;
+      }
+    }
+  }), [filtered, sort]);
+
   // Pagination — show 5 rows by default, bump +10 each click. Reset
   // whenever the filter changes so the user always starts at the top
   // of the new result set. Pure UI state; no fetching involved since
@@ -191,7 +219,7 @@ export function PlacementsCard({ rangeDays, hospital, specialty, open, onOpenCha
   const PAGE_STEP  = 10;
   const [visibleCount, setVisibleCount] = useState(PAGE_FIRST);
   useEffect(() => { setVisibleCount(PAGE_FIRST); }, [search, hospital, specialty, rangeDays]);
-  const visibleRows = filtered.slice(0, visibleCount);
+  const visibleRows = sorted.slice(0, visibleCount);
   const remaining   = filtered.length - visibleRows.length;
 
   // The header title + chevron is the collapse trigger; the action
@@ -280,16 +308,16 @@ export function PlacementsCard({ rangeDays, hospital, specialty, open, onOpenCha
             <Table>
               <TableHeader>
                 <TableRow className="text-[10px] uppercase">
-                  <TableHead className="text-[10px]">Doctor</TableHead>
-                  <TableHead className="text-[10px]">Hospital</TableHead>
-                  <TableHead className="text-[10px]">Specialty</TableHead>
-                  <TableHead className="text-[10px]">Shortlist</TableHead>
-                  <TableHead className="text-[10px]">Interview</TableHead>
-                  <TableHead className="text-[10px]">Offered</TableHead>
-                  <TableHead className="text-[10px]">Signed</TableHead>
-                  <TableHead className="text-[10px]">Start</TableHead>
-                  <TableHead className="text-[10px]">Joined</TableHead>
-                  <TableHead className="text-[10px]">45-day</TableHead>
+                  <SortHead sort={sort} sortKey="doctor_name"      numeric={false}>Doctor</SortHead>
+                  <SortHead sort={sort} sortKey="hospital_name"    numeric={false}>Hospital</SortHead>
+                  <SortHead sort={sort} sortKey="doctor_specialty" numeric={false}>Specialty</SortHead>
+                  <SortHead sort={sort} sortKey="shortlisted_at"   numeric={false}>Shortlist</SortHead>
+                  <SortHead sort={sort} sortKey="interviewed_at"   numeric={false}>Interview</SortHead>
+                  <SortHead sort={sort} sortKey="offered_at"       numeric={false}>Offered</SortHead>
+                  <SortHead sort={sort} sortKey="signed_at"        numeric={false}>Signed</SortHead>
+                  <SortHead sort={sort} sortKey="start_date"       numeric={false}>Start</SortHead>
+                  <SortHead sort={sort} sortKey="joined_at"        numeric={false}>Joined</SortHead>
+                  <SortHead sort={sort} sortKey="paid"             numeric={false}>45-day</SortHead>
                 </TableRow>
               </TableHeader>
               <TableBody>
@@ -527,7 +555,7 @@ function DateField({ label, value, onChange }: { label: string; value: string; o
  * then create the placement_attempt row. Same doctor can be added at
  * multiple hospitals (one per pair).
  * ──────────────────────────────────────────────────────────────────── */
-function NewPlacementDialog({ open, existingAttempts, preselectDoctorId, onClose, onCreated }: {
+export function NewPlacementDialog({ open, existingAttempts, preselectDoctorId, onClose, onCreated }: {
   open:              boolean;
   existingAttempts:  PlacementAttempt[];
   preselectDoctorId: string | null;

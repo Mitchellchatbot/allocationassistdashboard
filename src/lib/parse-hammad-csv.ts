@@ -37,52 +37,70 @@ export interface ParseResult {
   weekSections: number;
 }
 
-/** Split a CSV line into fields, respecting quoted fields. The Hammad
- *  sheet doesn't seem to have quoted commas in practice but defensive
- *  parsing avoids surprises. */
-function splitLine(line: string): string[] {
-  const out: string[] = [];
+/** Split the whole file into records, respecting quoted fields. A quoted
+ *  cell may contain a newline — the specialty column regularly does — so
+ *  records can't be found by splitting on "\n" first. */
+function splitRecords(text: string): string[][] {
+  const records: string[][] = [];
+  let row: string[] = [];
   let cur = "";
   let inQuotes = false;
-  for (let i = 0; i < line.length; i++) {
-    const ch = line[i];
-    if (ch === '"') { inQuotes = !inQuotes; continue; }
-    if (ch === "," && !inQuotes) { out.push(cur); cur = ""; continue; }
+  const endCell = () => { row.push(cur.trim()); cur = ""; };
+  const endRow  = () => { endCell(); records.push(row); row = []; };
+
+  for (let i = 0; i < text.length; i++) {
+    const ch = text[i];
+    if (inQuotes) {
+      if (ch === '"') {
+        if (text[i + 1] === '"') { cur += '"'; i++; } else { inQuotes = false; }
+      } else cur += ch;
+      continue;
+    }
+    if (ch === '"')  { inQuotes = true; continue; }
+    if (ch === ",")  { endCell(); continue; }
+    if (ch === "\n") { endRow(); continue; }
+    if (ch === "\r") continue;
     cur += ch;
   }
-  out.push(cur);
-  return out.map(s => s.trim());
+  if (cur || row.length) endRow();
+  return records;
 }
 
-/** Try to parse a date string like "1/5/2026" or "12/15/2025". Returns
- *  ISO at UTC midnight, or null. Treats "Added" / "SENT" / "X" / "-"
- *  as not-a-date (those land in the notes column instead). */
-function parseDateCell(raw: string | undefined): string | null {
-  if (!raw) return null;
-  const s = raw.trim();
-  if (!s) return null;
-  // Reject obvious notes-not-dates
-  if (/^(added|sent|x|-|none|n\/a)$/i.test(s)) return null;
-  // M/D/YYYY or MM/DD/YYYY (Hammad sheet uses US format)
-  const m = s.match(/^(\d{1,2})\/(\d{1,2})\/(\d{2,4})$/);
+/** A date cell, plus whatever free text was written next to it
+ *  ("7/2/2026 Revise" happens). The text is kept so it can join notes
+ *  rather than silently sinking the date. */
+interface DateCell { iso: string | null; note: string | null }
+
+const NO_DATE: DateCell = { iso: null, note: null };
+
+function parseDateCell(raw: string | undefined): DateCell {
+  if (!raw) return NO_DATE;
+  const s = raw.trim().replace(/\s+/g, " ");
+  if (!s) return NO_DATE;
+  // Obvious notes-not-dates keep their text but yield no date.
+  if (/^(added|sent|x|-|none|n\/a)$/i.test(s)) return { iso: null, note: s };
+
+  const m = s.match(/^(\d{1,2})\/(\d{1,2})\/(\d{2,4})\b/);
   if (m) {
-    const mo = parseInt(m[1], 10);
-    const d  = parseInt(m[2], 10);
+    let mo = parseInt(m[1], 10);
+    let d  = parseInt(m[2], 10);
     let y  = parseInt(m[3], 10);
     if (y < 100) y += 2000;
-    if (mo < 1 || mo > 12 || d < 1 || d > 31) return null;
+    // The sheet is mostly M/D/YYYY but a few cells are typed D/M/YYYY.
+    // A month above 12 is unambiguous, so swap rather than drop the date.
+    if (mo > 12 && d <= 12) [mo, d] = [d, mo];
+    if (mo < 1 || mo > 12 || d < 1 || d > 31) return { iso: null, note: s };
     const date = new Date(Date.UTC(y, mo - 1, d));
-    if (isNaN(date.getTime())) return null;
-    return date.toISOString();
+    const rest = s.slice(m[0].length).trim();
+    return { iso: isNaN(date.getTime()) ? null : date.toISOString(), note: rest || null };
   }
-  // ISO yyyy-mm-dd
+
   const m2 = s.match(/^(\d{4})-(\d{2})-(\d{2})$/);
   if (m2) {
     const date = new Date(Date.UTC(parseInt(m2[1]), parseInt(m2[2]) - 1, parseInt(m2[3])));
-    if (isNaN(date.getTime())) return null;
-    return date.toISOString();
+    return { iso: isNaN(date.getTime()) ? null : date.toISOString(), note: null };
   }
-  return null;
+  return { iso: null, note: s };
 }
 
 /** Strip "Dr. " prefix + collapse whitespace. */
@@ -111,15 +129,12 @@ function isSummaryRow(cols: string[]): boolean {
 }
 
 export function parseHammadCsv(text: string): ParseResult {
-  const lines = text.replace(/\r\n/g, "\n").split("\n");
   const rows: ParsedRow[] = [];
   let skippedRows = 0;
   let weekSections = 0;
 
-  for (const rawLine of lines) {
-    const line = rawLine.trim();
-    if (!line) continue;
-    const cols = splitLine(rawLine);
+  for (const cols of splitRecords(text)) {
+    if (cols.every(c => !c)) continue;
 
     if (isHeaderRow(cols)) { weekSections++; continue; }
     if (isSummaryRow(cols)) continue;
@@ -133,9 +148,9 @@ export function parseHammadCsv(text: string): ParseResult {
     // Sanity: a Hospital cell that's actually a date (column 0 of a
     // section header that has a date in the index slot) means we
     // mis-aligned — skip it.
-    if (parseDateCell(hospital)) { skippedRows++; continue; }
+    if (parseDateCell(hospital).iso) { skippedRows++; continue; }
 
-    const specialty = cols[3]?.trim() || null;
+    const specialty = cols[3]?.trim().replace(/\s+/g, " ") || null;
     const shortlisted = parseDateCell(cols[4]);
     const interviewed = parseDateCell(cols[5]);
     const offered     = parseDateCell(cols[6]);
@@ -143,30 +158,28 @@ export function parseHammadCsv(text: string): ParseResult {
     const startDate   = parseDateCell(cols[8]);
     const joined      = parseDateCell(cols[9]);
 
-    // Trailing free-text notes — columns 10+ are usually "Added", "SENT", "X".
+    // Trailing free-text notes — columns 10+ are usually "Added", "SENT", "X" —
+    // plus anything written alongside a date ("7/2/2026 Revise").
     const notesParts: string[] = [];
+    for (const c of [shortlisted, interviewed, offered, signed, startDate, joined]) {
+      if (c.note) notesParts.push(c.note);
+    }
     for (let i = 10; i < cols.length; i++) {
       const v = cols[i]?.trim();
       if (v) notesParts.push(v);
-    }
-
-    // Reject rows where NO dates parsed at all (probably noise).
-    if (!shortlisted && !interviewed && !offered && !signed && !startDate && !joined) {
-      skippedRows++;
-      continue;
     }
 
     rows.push({
       doctor_name:      normaliseName(doctor),
       doctor_specialty: specialty,
       hospital_name:    hospital,
-      shortlisted_at:   shortlisted,
-      interviewed_at:   interviewed,
-      offered_at:       offered,
-      signed_at:        signed,
-      start_date:       startDate,
-      joined_at:        joined,
-      notes:            notesParts.length > 0 ? notesParts.join(" · ") : null,
+      shortlisted_at:   shortlisted.iso,
+      interviewed_at:   interviewed.iso,
+      offered_at:       offered.iso,
+      signed_at:        signed.iso,
+      start_date:       startDate.iso,
+      joined_at:        joined.iso,
+      notes:            notesParts.length > 0 ? [...new Set(notesParts)].join(" · ") : null,
     });
   }
 

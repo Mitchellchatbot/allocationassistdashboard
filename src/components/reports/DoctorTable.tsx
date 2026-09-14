@@ -11,7 +11,7 @@
 import { useEffect, useMemo, useState } from "react";
 import { useQuery } from "@tanstack/react-query";
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "@/components/ui/card";
-import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
+import { Table, TableBody, TableCell, TableHeader, TableRow } from "@/components/ui/table";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Collapsible, CollapsibleTrigger, CollapsibleContent } from "@/components/ui/collapsible";
@@ -21,6 +21,7 @@ import type { FlowRun } from "@/hooks/use-automation-flows";
 import type { DoctorLifecycle } from "@/hooks/use-doctor-lifecycle";
 import { useDoctorProfiles } from "@/hooks/use-doctor-profiles";
 import { useZohoData } from "@/hooks/use-zoho-data";
+import { useSort, SortHead } from "@/components/reports/sortable";
 
 interface DoctorReportRow {
   doctor_id:    string;
@@ -35,6 +36,10 @@ interface DoctorReportRow {
   hospitals:    string[];          // distinct hospitals the doctor was sent to
   lastActivity: string | null;     // ISO of most recent run's last_event_at
 }
+
+type DocSortKey =
+  | "doctor_name" | "specialty" | "profilesSent" | "shortlists"
+  | "interviews"  | "signed"    | "joined"       | "hospitals" | "last";
 
 /** Resolve a doctor's specialty by trying the most reliable sources
  *  in order: explicit run metadata → CV-extracted doctor profile →
@@ -241,13 +246,31 @@ export function DoctorTable({ rangeDays, hospital, specialty, open, onOpenChange
   }, [allRows, rangeDays, hospital, specialty]);
   const loading = rl || ll;
 
+  // Sorting sits on top of the filtered set, so it reorders rows without
+  // changing which doctors qualify. Default is most-recently-active first —
+  // the aggregate's paid-at-the-bottom rule survives as the tiebreak, since
+  // Array.prototype.sort is stable.
+  const sort = useSort<DocSortKey>("last");
+  const sorted = useMemo(() => sort.sort(rows, (r, key) => {
+    switch (key) {
+      case "doctor_name": return r.doctor_name;
+      case "specialty":   return r.specialty;
+      case "signed":      return r.signed ? 1 : 0;
+      // One column, three states: paid outranks joined outranks neither.
+      case "joined":      return r.paid ? 2 : r.joined ? 1 : 0;
+      case "hospitals":   return r.hospitals.length;
+      case "last":        return r.lastActivity ? new Date(r.lastActivity).getTime() : null;
+      default:            return r[key];
+    }
+  }), [rows, sort]);
+
   // Show 10 doctors by default, +10 per click (mirrors PlacementsCard).
   // Reset back to the first page whenever the filters change the set.
   const PAGE_FIRST = 10;
   const PAGE_STEP  = 10;
   const [visibleCount, setVisibleCount] = useState(PAGE_FIRST);
   useEffect(() => { setVisibleCount(PAGE_FIRST); }, [rangeDays, hospital, specialty]);
-  const visibleRows = rows.slice(0, visibleCount);
+  const visibleRows = sorted.slice(0, visibleCount);
   const remaining   = rows.length - visibleRows.length;
 
   const titleBlock = (
@@ -295,15 +318,15 @@ export function DoctorTable({ rangeDays, hospital, specialty, open, onOpenChange
             <Table>
               <TableHeader>
                 <TableRow>
-                  <TableHead className="text-[11px]">Doctor</TableHead>
-                  <TableHead className="text-[11px]">Specialty</TableHead>
-                  <TableHead className="text-[11px] text-right">Profiles sent</TableHead>
-                  <TableHead className="text-[11px] text-right">Shortlists</TableHead>
-                  <TableHead className="text-[11px] text-right">Interviews</TableHead>
-                  <TableHead className="text-[11px] text-right">Signed</TableHead>
-                  <TableHead className="text-[11px] text-right">Joined</TableHead>
-                  <TableHead className="text-[11px] text-right">Hospitals</TableHead>
-                  <TableHead className="text-[11px] text-right">Last activity</TableHead>
+                  <SortHead sort={sort} sortKey="doctor_name" numeric={false}>Doctor</SortHead>
+                  <SortHead sort={sort} sortKey="specialty"   numeric={false}>Specialty</SortHead>
+                  <SortHead sort={sort} sortKey="profilesSent">Profiles sent</SortHead>
+                  <SortHead sort={sort} sortKey="shortlists">Shortlists</SortHead>
+                  <SortHead sort={sort} sortKey="interviews">Interviews</SortHead>
+                  <SortHead sort={sort} sortKey="signed">Signed</SortHead>
+                  <SortHead sort={sort} sortKey="joined">Joined</SortHead>
+                  <SortHead sort={sort} sortKey="hospitals">Hospitals</SortHead>
+                  <SortHead sort={sort} sortKey="last">Last activity</SortHead>
                 </TableRow>
               </TableHeader>
               <TableBody>
