@@ -99,6 +99,7 @@ const NAV_SECTIONS: NavSection[] = [
       { title: "Templates & Hospitals", url: "/information", icon: Library },
       { title: "Vacancies",       url: "/vacancies",       icon: ClipboardList },
       { title: "Sends",           url: "/sends",           icon: Send, badge: (c) => c.unreadReplies },
+      { title: "Processing",      url: "/processing",      icon: Workflow },
       { title: "Mail",            url: "/mail",            icon: Mail, badge: (c) => c.unreadReplies },
       { title: "Feature Lab",     url: "/feature-lab",     icon: FlaskConical },
       { title: "Reports",         url: "/reports",         icon: BarChart3 },
@@ -191,7 +192,11 @@ export function AppSidebar() {
     ? NAV_SECTIONS
     : NAV_SECTIONS
         // /mail is a companion of /sends — anyone who can see Sends sees Mail.
-        .map(s => ({ ...s, items: s.items.filter(it => it.url === "/docs" || allowedPages.includes(it.url) || (it.url === "/mail" && allowedPages.includes("/sends"))) })))
+        // /processing still gates on the legacy /automations permission key.
+        .map(s => ({ ...s, items: s.items.filter(it => it.url === "/docs"
+          || allowedPages.includes(it.url)
+          || (it.url === "/mail" && allowedPages.includes("/sends"))
+          || (it.url === "/processing" && allowedPages.includes("/automations"))) })))
     // Finance is allowlist-only — strip it for anyone not on the list, even
     // admins (mirrors the hard gate in ProtectedRoute).
     .map(s => ({ ...s, items: s.items.filter(it => it.url !== "/finance" || canSeeFinance(user?.email)) }))

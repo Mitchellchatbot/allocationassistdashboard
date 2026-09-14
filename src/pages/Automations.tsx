@@ -1,6 +1,5 @@
 import { useCallback, useEffect, useMemo, useState, memo } from "react";
 import { useSearchParams } from "react-router-dom";
-import { DashboardLayout } from "@/components/layout/DashboardLayout";
 import { AnimatedTabsList, AnimatedTabContent, AnimatedTabPanel, type AnimatedTabItem } from "@/components/AnimatedTabs";
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "@/components/ui/card";
 import { DocLink } from "@/components/DocLink";
@@ -351,14 +350,6 @@ export function EmailChainPanel({ query = "" }: { query?: string } = {}) {
         </SheetContent>
       </Sheet>
     </>
-  );
-}
-
-export default function Automations() {
-  return (
-    <DashboardLayout>
-      <EmailChainPanel />
-    </DashboardLayout>
   );
 }
 

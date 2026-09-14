@@ -71,10 +71,11 @@ const Chatbot         = lazy(() => import("./pages/Chatbot"));
 const Information      = lazy(() => import("./pages/Information"));
 const Vacancies       = lazy(() => import("./pages/Vacancies"));
 const Reports         = lazy(() => import("./pages/Reports"));
-// Five former pages (Profile Sent, Automations, Batch Sends, Replies, Past
-// Sent) are now tabs inside the unified /sends page. Their old routes redirect
-// into the matching tab (see RedirectToSends below).
+// Four former pages (Profile Sent, Batch Sends, Replies, Past Sent) are now
+// tabs inside the unified /sends page. Their old routes redirect into the
+// matching tab (see RedirectToSends below).
 const Sends           = lazy(() => import("./pages/Sends"));
+const Processing      = lazy(() => import("./pages/Processing"));
 const Mail            = lazy(() => import("./pages/Mail"));
 const FeatureLab      = lazy(() => import("./pages/FeatureLab"));
 const MyWorkspace     = lazy(() => import("./pages/MyWorkspace"));
@@ -175,15 +176,17 @@ function requiredPageForPath(pathname: string): string {
   if (pathname === "/leads-pipeline" || pathname === "/doctor-profiles" || pathname === "/wp-candidates") return "/doctors";
   // Mail is a companion view of the outbound workflow — gate it on /sends.
   if (pathname === "/mail") return "/sends";
+  // Processing kept the legacy /automations permission key so existing
+  // per-user grants keep working after the page moved out of /sends.
+  if (pathname === "/processing") return "/automations";
   return pathname;
 }
 
 /**
  * Query-preserving redirect from a legacy send-related route into the unified
  * /sends page with the right tab pre-selected. Existing deep-links keep
- * working: `/automations?flow=shortlist` → `/sends?tab=email-chain&flow=shortlist`,
- * `/batches?compose=oneoff` → `/sends?tab=batch-sends&compose=oneoff`, etc.
- * URLSearchParams.set() dedupes, so any stale `tab` on the incoming URL is
+ * working: `/batches?compose=oneoff` → `/sends?tab=batch-sends&compose=oneoff`,
+ * etc. URLSearchParams.set() dedupes, so any stale `tab` on the incoming URL is
  * replaced by the target tab rather than doubled.
  */
 function RedirectToSends({ tab }: { tab: string }) {
@@ -271,6 +274,7 @@ const App = () => {
                 <Route path="/mail"           element={<Mail />} />
                 {/* Legacy send routes → the matching tab of the unified /sends
                     page, preserving any deep-link query params (?flow=, ?compose=, ?run=). */}
+                <Route path="/processing"     element={<Processing />} />
                 <Route path="/automations"    element={<RedirectToSends tab="email-chain" />} />
                 <Route path="/information"    element={<Information />} />
                 <Route path="/doctors"        element={<Doctors />} />

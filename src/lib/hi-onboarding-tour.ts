@@ -20,7 +20,7 @@
  */
 import type { TourStep } from "@/components/OnboardingTour";
 
-export const HI_TOUR_ID = "hi-onboarding-v6";
+export const HI_TOUR_ID = "hi-onboarding-v7";
 
 export const HI_TOUR_STEPS: TourStep[] = [
   {
@@ -87,25 +87,25 @@ export const HI_TOUR_STEPS: TourStep[] = [
     placement: "auto",
   },
 
-  // ── Automations ─────────────────────────────────────────────────────
+  // ── Processing + Email Chain ────────────────────────────────────────
   {
-    target: "sidebar-automations",
-    title:  "Automations — the heart of HI",
-    body:   "Six email flows that carry a doctor from first hospital intro to first payment. The system sends the templated emails on schedule; you only step in at the handful of manual-action stages. Everything else — timing, reminders, reply-watching — runs itself. Let's look inside.",
+    target: "sidebar-processing",
+    title:  "Processing — where every doctor stands",
+    body:   "One row per doctor-and-hospital pair, with five stages across the top: Shortlisted, Interview, Offered, Signed, Join. Nothing here sends an email — you mark a stage when it actually happens and the date gets recorded, which is what the placement reports read from.",
     placement: "right",
   },
   {
-    route: "/automations",
+    route: "/processing",
     target: "automations-flows",
-    title:  "The 6 flows, one tab each",
-    body:   "Profile Sent (intro to hospital) → Shortlist (hospital's interested) → Interview (scheduling + prep tips) → Contract (milestone tracking on Placements) → Relocation (city-specific guide + attestation) → Second Payment (45-day clock with reminders). Onboarding was retired — Sales now sends the intake form from Zoho the moment a lead converts.",
+    title:  "Marking a stage",
+    body:   "Click a stage cell, pick the date it happened (you can backdate — that's the normal case), and it's logged. Click a marked one again to correct or clear it. The tabs filter to the doctors sitting at each stage, so 'who's waiting on an offer' is one click.",
     placement: "bottom",
   },
   {
-    route: "/automations",
-    target: "automations-admin",
-    title:  "Queues, Hospitals, Templates, Default Editor",
-    body:   "Four admin tabs. Queues = every run sitting at a manual stage, grouped by what it needs (profile to send, city to pick, contract to send…). Hospitals = the recruiter directory. Templates = the editable email library. Default Flow Editor = the per-stage delays and subject lines for each flow.",
+    route: "/sends?tab=email-chain",
+    target: "automations-flows",
+    title:  "Email Chain — the automated side",
+    body:   "Six email flows that carry a doctor from first hospital intro to first payment: Profile Sent → Shortlist → Interview → Contract → Relocation → Second Payment. The system sends the templated emails on schedule; you only step in at the handful of manual-action stages. Alongside them sit Queues (every run waiting on a person) and the Default Flow Editor (per-stage delays and subject lines).",
     placement: "bottom",
   },
   {

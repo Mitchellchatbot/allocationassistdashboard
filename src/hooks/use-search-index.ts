@@ -77,7 +77,8 @@ const PAGES: SearchEntity[] = [
   { id: "page:doctors",         kind: "Page", label: "Doctors",          sublabel: "Doctor Progress + Profiles in one hub", route: "/doctors", keywords: "doctors profiles wp progress pipeline lifecycle leads cv hospital introduction wordpress candidates" },
   { id: "page:my-workspace",    kind: "Page", label: "My Workspace",     sublabel: "HI personal queue + notifications", route: "/my-workspace", keywords: "workspace inbox queue tasks personal mine" },
   { id: "page:forms",           kind: "Page", label: "Forms",            sublabel: "Typeform + Consultation + DoctorsFinder submissions", route: "/forms", keywords: "forms typeform consultation doctorsfinder submissions responses leads" },
-  { id: "page:automations",     kind: "Page", label: "Email Chain",      sublabel: "Phase 1 email flows + run timeline", route: "/automations", keywords: "email chain automations flows emails onboarding shortlist interview contract relocation payment" },
+  { id: "page:processing",      kind: "Page", label: "Processing",       sublabel: "Stage tracker — shortlisted, interview, offered, signed, join", route: "/processing", keywords: "processing stages milestones mark marking dates shortlisted interview offered signed join joined placement tracker" },
+  { id: "page:automations",     kind: "Page", label: "Email Chain",      sublabel: "Phase 1 email flows + run timeline", route: "/sends?tab=email-chain", keywords: "email chain automations flows emails onboarding shortlist interview contract relocation payment" },
   { id: "page:vacancies",       kind: "Page", label: "Vacancies",        sublabel: "Open hospital roles + auto-match", route: "/vacancies", keywords: "vacancies open roles hospitals match" },
   { id: "page:batches",         kind: "Page", label: "Batch Sends",      sublabel: "Daily duo, Tuesday top 15, specialty rotation", route: "/batches", keywords: "batches send recurring daily tuesday rotation" },
   { id: "page:past-sent",       kind: "Page", label: "Past Sent",        sublabel: "Searchable history of every batch + profile sent", route: "/past-sent", keywords: "past sent history batch profile 1st 2nd first second top 15 daily specialty log audit who was sent" },
@@ -300,7 +301,7 @@ export function useSearchIndex(): SearchEntity[] {
         label:    `${r.doctor_name} · ${flow?.shortName ?? r.flow_key}`,
         sublabel: [stage?.label ?? r.current_stage, r.hospital, r.status].filter(Boolean).join(" · "),
         keywords: `flow run automation ${r.flow_key} ${r.current_stage} ${r.hospital ?? ""} ${r.status} ${r.doctor_name}`,
-        route:    `/automations?flow=${r.flow_key}`,
+        route:    `/sends?tab=email-chain&flow=${r.flow_key}`,
       });
     }
 
@@ -324,7 +325,7 @@ export function useSearchIndex(): SearchEntity[] {
         label:    h.name,
         sublabel: [h.city, h.country, h.primary_contact_name].filter(Boolean).join(" · ") || "Hospital",
         keywords: `hospital ${h.city ?? ""} ${h.country ?? ""} ${h.primary_recruiter_email ?? ""} ${h.primary_contact_name ?? ""} ${h.notes ?? ""}`,
-        route:    `/automations?tab=hospitals`,
+        route:    `/information?tab=hospitals`,
       });
     }
 
@@ -372,7 +373,7 @@ export function useSearchIndex(): SearchEntity[] {
         label:    t.name || t.key,
         sublabel: t.subject ? `"${t.subject}"` : t.flow_key ?? "Email template",
         keywords: `template email ${t.key} ${t.flow_key ?? ""} ${t.subject ?? ""}`,
-        route:    `/automations?tab=templates`,
+        route:    `/information?tab=templates`,
       });
     }
 

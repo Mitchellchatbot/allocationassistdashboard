@@ -12,6 +12,7 @@ import { buildOnboardingTour, hasOnboardingContent, ONBOARDING_TOUR_ID } from "@
 function requiredPageForPath(pathname: string): string {
   if (pathname === "/import" || pathname === "/contracts" || pathname === "/import-bulk" || pathname === "/connections") return "/";
   if (pathname === "/leads-pipeline" || pathname === "/doctor-profiles" || pathname === "/wp-candidates") return "/doctors";
+  if (pathname === "/processing") return "/automations";
   return pathname;
 }
 const basePath = (route: string) => route.split("?")[0];

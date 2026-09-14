@@ -38,7 +38,7 @@ const SECTIONS: Section[] = [
   },
   {
     // Hospital Introduction — the original tour.
-    paths: ["/", "/my-workspace", "/automations", "/doctors", "/vacancies", "/batches", "/reports"],
+    paths: ["/", "/my-workspace", "/processing", "/doctors", "/vacancies", "/batches", "/reports"],
     tour:  { id: HI_TOUR_ID, label: "Hospital Introduction", steps: HI_TOUR_STEPS },
   },
 ];
@@ -72,8 +72,8 @@ const PAGE_INTRO_STEPS: Record<string, TourStep> = {
     title: "My Workspace", body: "Your home base, scoped to just you: the doctors and tasks assigned to you. Start here each day, and click a task to jump straight to it." },
   "/doctors":     { route: "/doctors?tab=profiles",                            placement: "center",
     title: "Doctors", body: "Every doctor in one place: where they sit in the pipeline (Doctor Progress) and their profile, the record we put in front of hospitals. Click any profile to edit it inline." },
-  "/automations": { route: "/automations",       target: "automations-flows", placement: "bottom",
-    title: "Automations", body: "Six email flows that carry a doctor from the first hospital intro to payment. The system sends the emails, you just step in at the manual moments like picking a city or confirming a shortlist." },
+  "/automations": { route: "/processing",        target: "automations-flows", placement: "bottom",
+    title: "Processing", body: "Where every doctor stands at every hospital: Shortlisted, Interview, Offered, Signed, Join. Mark a stage when it happens and the date is recorded — no emails are sent from here." },
   "/vacancies":   { route: "/vacancies",         target: "vacancies-table",   placement: "auto",
     title: "Vacancies", body: "The open roles hospitals are filling. Click any row for a ranked list of matching doctors, scored from the onboarded roster." },
   "/batches":     { route: "/batches",           target: "batches-rotation",  placement: "auto",
@@ -140,6 +140,7 @@ function guardPageFor(route: string): string {
   const path = route.split("?")[0];
   if (path === "/import" || path === "/contracts" || path === "/import-bulk" || path === "/connections") return "/";
   if (path === "/leads-pipeline" || path === "/doctor-profiles" || path === "/wp-candidates") return "/doctors";
+  if (path === "/processing") return "/automations";
   return path;
 }
 
