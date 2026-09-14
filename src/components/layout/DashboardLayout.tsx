@@ -50,6 +50,10 @@ interface DashboardLayoutProps {
   /** Optional docs slug — renders a help (ⓘ) button next to the page title that
    *  deep-links to /docs?p=<slug>. */
   docSlug?: string;
+  /** Drop the content pane's padding and max-width so the page runs edge to
+   *  edge inside the card. For pages that ARE the viewport (Mail's three-pane
+   *  client) rather than a document sitting in one. */
+  fullBleed?: boolean;
 }
 
 /**
@@ -71,6 +75,7 @@ const LayoutContext = createContext<{
   setTitle:    (s: string) => void;
   setSubtitle: (s: string | undefined) => void;
   setDocSlug:  (s: string | undefined) => void;
+  setFullBleed: (v: boolean) => void;
 } | null>(null);
 
 function ViewportSpinner() {
@@ -147,7 +152,7 @@ function SidebarOpener() {
   return null;
 }
 
-export function DashboardLayout({ children, title: pageTitle, subtitle: pageSubtitle, docSlug: pageDocSlug }: DashboardLayoutProps) {
+export function DashboardLayout({ children, title: pageTitle, subtitle: pageSubtitle, docSlug: pageDocSlug, fullBleed: pageFullBleed }: DashboardLayoutProps) {
 
   // If an outer DashboardLayout has already rendered the chrome, just pass
   // children through and push the page title up to the outer instance via
@@ -159,8 +164,9 @@ export function DashboardLayout({ children, title: pageTitle, subtitle: pageSubt
       outerCtx.setTitle(pageTitle ?? "");
       outerCtx.setSubtitle(pageSubtitle);
       outerCtx.setDocSlug(pageDocSlug);
+      outerCtx.setFullBleed(!!pageFullBleed);
     }
-  }, [outerCtx, pageTitle, pageSubtitle, pageDocSlug]);
+  }, [outerCtx, pageTitle, pageSubtitle, pageDocSlug, pageFullBleed]);
   if (outerCtx?.mounted) return <>{children}</>;
 
   // Outer layout owns the title/subtitle state so nested pages can push
@@ -169,6 +175,7 @@ export function DashboardLayout({ children, title: pageTitle, subtitle: pageSubt
   const [title, setTitleState]       = useState<string>(pageTitle ?? "");
   const [subtitle, setSubtitleState] = useState<string | undefined>(pageSubtitle);
   const [docSlug, setDocSlugState]   = useState<string | undefined>(pageDocSlug);
+  const [fullBleed, setFullBleedState] = useState<boolean>(!!pageFullBleed);
 
   // The app chrome only needs `alerts` (for the notification bell). We
   // deliberately DON'T destructure filteredLeads/filteredDeals here — they were
@@ -297,7 +304,7 @@ export function DashboardLayout({ children, title: pageTitle, subtitle: pageSubt
   const onSync = useCallback(() => { sync.mutate(); }, [sync.mutate]);
 
   const layoutCtxValue = useMemo(
-    () => ({ mounted: true, setTitle: setTitleState, setSubtitle: setSubtitleState, setDocSlug: setDocSlugState }),
+    () => ({ mounted: true, setTitle: setTitleState, setSubtitle: setSubtitleState, setDocSlug: setDocSlugState, setFullBleed: setFullBleedState }),
     [],
   );
   const openSearch = useCallback(() => setSearchOpen(true), []);
@@ -414,9 +421,9 @@ export function DashboardLayout({ children, title: pageTitle, subtitle: pageSubt
               {subtitle && <p className="text-[13px] text-muted-foreground mt-1">{subtitle}</p>}
             </div>
 
-            <main className="flex-1 overflow-auto overscroll-contain px-4 lg:px-6 pb-6 pt-5">
-              <div className="max-w-[1400px] mx-auto">
-                <PageTransition>{children}</PageTransition>
+            <main className={`flex-1 overflow-auto overscroll-contain ${fullBleed ? "" : "px-4 lg:px-6 pb-6 pt-5"}`}>
+              <div className={fullBleed ? "h-full" : "max-w-[1400px] mx-auto"}>
+                <PageTransition className={fullBleed ? "h-full" : undefined}>{children}</PageTransition>
               </div>
             </main>
           </div>

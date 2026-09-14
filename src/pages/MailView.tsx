@@ -6,7 +6,7 @@ import {
   Loader2, Image as ImageIcon, UserSquare, Trash2,
 } from "lucide-react";
 import { useSentHistory, SENT_KIND_LABEL, type SentRecord } from "@/hooks/use-sent-history";
-import { useScheduledBatches, useBatchPreviewQuery, fetchBatchPreview, batchPreviewQueryKey, type ScheduledBatch, type BatchPreviewResult } from "@/hooks/use-scheduled-batches";
+import { useScheduledBatches, useBatchPreviewQuery, useCancelBatch, fetchBatchPreview, batchPreviewQueryKey, type ScheduledBatch, type BatchPreviewResult } from "@/hooks/use-scheduled-batches";
 import { useScheduledProfileSends, useCancelScheduledProfileSend, type ScheduledProfileSend } from "@/hooks/use-scheduled-profile-sends";
 import {
   useRepliesPage, useMarkReplyRead, useMarkReplyHandled,
@@ -225,8 +225,11 @@ export function MailPanel({ query }: { query: string }) {
     for (const b of nonEmptyBatches) {
       const pv = previewByBatch.get(b.id);
       const when = b.next_run_at || b.scheduled_for;
-      if (pv?.data) {
-        const emails = flattenBatchPreview(pv.data);
+      // A doctor-only batch whose doctors have no addresses flattens to nothing;
+      // fall through to the summary row so it stays visible (and cancellable)
+      // rather than silently disappearing from the folder.
+      const emails = pv?.data ? flattenBatchPreview(pv.data, b) : [];
+      if (emails.length) {
         emails.forEach((e, idx) => batchItems.push({
           id: `b:${b.id}#${idx}`,
           title: e.subject || (e.group === "doctor" ? "Working opportunity" : SENT_KIND_LABEL[b.kind] || "Scheduled send"),
@@ -243,7 +246,9 @@ export function MailPanel({ query }: { query: string }) {
           id: `b:${b.id}#0`,
           title: SENT_KIND_LABEL[b.kind] ?? "Scheduled send",
           subtitle: [b.specialty, b.country].filter(Boolean).join(" · ") || "All hospitals",
-          snippet: pv?.isError ? "Preview unavailable — open to view" : "Rendering email…",
+          snippet: pv?.isError ? "Preview unavailable — open to view"
+            : pv?.data ? "Nothing to send — no recipient for the selected legs"
+            : "Rendering email…",
           when,
           unread: false,
           accent: "bg-amber-100 text-amber-700",
@@ -305,7 +310,7 @@ export function MailPanel({ query }: { query: string }) {
     (folder === "scheduled" && (batchesQ.isLoading || profileSendsQ.isLoading));
 
   return (
-    <div className="flex gap-3 h-[calc(100vh-220px)] min-h-[440px]">
+    <div className="flex h-full min-h-[440px] gap-3 p-3">
       {/* ── Folder rail ─────────────────────────────────────────────────────── */}
       <div className="w-44 shrink-0 flex flex-col gap-1">
         <button
@@ -1039,29 +1044,35 @@ interface BatchEmailView {
 
 /** Flatten a batch preview into the individual emails it will send. A simple
  *  one-off / Top-15 batch is a single hospital email (one table BCC'd to every
- *  hospital); Daily Duo sends one hospital email per queued doctor; and when
- *  include_doctor_email is on, each doctor also gets a working-opportunity email. */
-function flattenBatchPreview(p: BatchPreviewResult): BatchEmailView[] {
+ *  hospital); Daily Duo sends one hospital email per featured doctor. The
+ *  batch's two legs are listed only when they're switched on, so this reads as
+ *  what will actually be delivered rather than what could be. */
+function flattenBatchPreview(p: BatchPreviewResult, batch: ScheduledBatch): BatchEmailView[] {
   const out: BatchEmailView[] = [];
   const hospTo = p.test_mode && p.test_recipient
     ? `test inbox (${p.test_recipient})`
     : `${p.bcc_count ?? 0} hospital${(p.bcc_count ?? 0) === 1 ? "" : "s"}`;
-  if (p.per_doctor && p.per_doctor.length) {
-    // Daily Duo: one hospital email per featured doctor.
-    p.per_doctor.forEach((d, i) => out.push({ group: "hospital", label: d.name || `Doctor ${i + 1}`, to: hospTo, subject: d.subject, html: d.html }));
-  } else {
-    out.push({ group: "hospital", label: "Available doctors", to: hospTo, subject: p.subject, html: p.html });
+  if (batch.include_hospital_email !== false) {
+    if (p.per_doctor && p.per_doctor.length) {
+      // Daily Duo: one hospital email per featured doctor.
+      p.per_doctor.forEach((d, i) => out.push({ group: "hospital", label: d.name || `Doctor ${i + 1}`, to: hospTo, subject: d.subject, html: d.html }));
+    } else {
+      out.push({ group: "hospital", label: "Available doctors", to: hospTo, subject: p.subject, html: p.html });
+    }
   }
-  (p.doctor_emails ?? []).forEach((d, i) => out.push({ group: "doctor", label: d.name || `Doctor ${i + 1}`, to: d.email || d.name || `Doctor ${i + 1}`, subject: d.subject, html: d.html }));
+  if (batch.include_doctor_email) {
+    (p.doctor_emails ?? []).forEach((d, i) => out.push({ group: "doctor", label: d.name || `Doctor ${i + 1}`, to: d.email || d.name || `Doctor ${i + 1}`, subject: d.subject, html: d.html }));
+  }
   return out;
 }
 
 function ScheduledReader({ batch, initialIndex = 0, onOpen }: { batch: ScheduledBatch; initialIndex?: number; onOpen: () => void }) {
   const [showDetails, setShowDetails] = useState(false);
+  const cancel = useCancelBatch();
   // Shared cached dry-run — the SAME render the Mail list expanded this batch
   // with, so opening a row is instant (no re-fetch) and byte-identical to send.
   const previewQ = useBatchPreviewQuery(batch.id);
-  const emails = useMemo(() => previewQ.data ? flattenBatchPreview(previewQ.data) : null, [previewQ.data]);
+  const emails = useMemo(() => previewQ.data ? flattenBatchPreview(previewQ.data, batch) : null, [previewQ.data, batch]);
   const [active, setActive] = useState(initialIndex);
   // Follow the row the user clicked (a specific expanded email) + reset when a
   // different batch is opened.
@@ -1083,6 +1094,18 @@ function ScheduledReader({ batch, initialIndex = 0, onOpen }: { batch: Scheduled
           className="inline-flex items-center gap-1.5 rounded-md border border-slate-200 px-2.5 py-1 text-[11px] font-medium text-slate-600 hover:bg-slate-50"
         >
           {showDetails ? "Hide details" : "Show details"}
+        </button>
+        <button
+          type="button"
+          disabled={cancel.isPending}
+          onClick={async () => {
+            const what = SENT_KIND_LABEL[batch.kind] || "scheduled send";
+            if (!confirm(`Cancel this ${what}? It won't go out.`)) return;
+            try { await cancel.mutateAsync(batch.id); } catch { /* surfaced elsewhere */ }
+          }}
+          className="inline-flex items-center gap-1.5 rounded-md border border-rose-200 px-2.5 py-1 text-[11px] font-medium text-rose-600 hover:bg-rose-50 disabled:opacity-50"
+        >
+          <Trash2 className="h-3 w-3" /> Cancel send
         </button>
       </div>
 
@@ -1133,7 +1156,11 @@ function ScheduledReader({ batch, initialIndex = 0, onOpen }: { batch: Scheduled
           <Row label="Scheduled for" value={fmtFull(batch.scheduled_for)} />
           <Row label="Time" value={batch.scheduled_at_time ? `${batch.scheduled_at_time} ${batch.timezone ?? "Asia/Dubai"}` : null} />
           <Row label="Recipients" value={batch.recipient_emails?.length ? batch.recipient_emails.join(", ") : null} />
-          <Row label="Doctor email" value={batch.include_doctor_email ? "Yes — doctors also emailed" : "No"} />
+          <Row label="Who gets emailed" value={
+            batch.include_hospital_email === false ? "Doctors only — working-opportunity note"
+              : batch.include_doctor_email ? "Hospitals and doctors"
+              : "Hospitals only"
+          } />
           <Row label="Notes" value={batch.notes} />
         </div>
       )}

@@ -25,27 +25,31 @@ export default function Mail() {
   };
 
   return (
-    <DashboardLayout>
-      <div className="relative mb-3">
-        <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" />
-        <Input
-          value={q}
-          onChange={e => setQ(e.target.value)}
-          placeholder="Search mail — doctor, hospital, sender, subject, message text…"
-          className="pl-10 pr-24 h-10 text-[13px]"
-        />
-        {q && (
-          <button
-            type="button"
-            onClick={() => setQ("")}
-            className="absolute right-3 top-1/2 -translate-y-1/2 text-[11px] text-muted-foreground hover:text-slate-800"
-          >
-            Clear
-          </button>
-        )}
-      </div>
+    <DashboardLayout fullBleed>
+      <div className="flex h-full min-h-0 flex-col">
+        <div className="relative shrink-0 border-b border-border/40 px-3 py-2">
+          <Search className="absolute left-6 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" />
+          <Input
+            value={q}
+            onChange={e => setQ(e.target.value)}
+            placeholder="Search mail — doctor, hospital, sender, subject, message text…"
+            className="pl-10 pr-24 h-10 text-[13px]"
+          />
+          {q && (
+            <button
+              type="button"
+              onClick={() => setQ("")}
+              className="absolute right-6 top-1/2 -translate-y-1/2 text-[11px] text-muted-foreground hover:text-slate-800"
+            >
+              Clear
+            </button>
+          )}
+        </div>
 
-      <MailPanel query={q} />
+        <div className="min-h-0 flex-1">
+          <MailPanel query={q} />
+        </div>
+      </div>
     </DashboardLayout>
   );
 }
