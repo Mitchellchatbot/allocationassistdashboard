@@ -277,8 +277,8 @@ async function syncHospitals(supabase: ReturnType<typeof createClient>, csv: str
 async function syncVacancies(supabase: ReturnType<typeof createClient>, csv: string, openedBy: string | null) {
   // Try the clean flat format first.
   const flat = parseObjects(csv);
-  const hospH = findH(flat.headers, "hospital", "hospital name");
-  const specH = findH(flat.headers, "specialty", "speciality");
+  const hospH = findH(flat.headers, "hospital", "hospitals", "hospital name");
+  const specH = findH(flat.headers, "specialty", "speciality", "vacancy / position", "vacancy/position", "position", "vacancy", "role");
   if (hospH && specH) {
     return syncVacanciesFlat(supabase, flat.headers, flat.rows, hospH, specH, openedBy);
   }
@@ -414,7 +414,26 @@ async function syncVacanciesFlat(
 ) {
   const prioH  = findH(_headers, "priority", "pri");
   const daysH  = findH(_headers, "target fill days", "days", "fill days");
-  const notesH = findH(_headers, "notes", "requirements", "remarks");
+  const notesH = findH(_headers, "specific requirements / criteria", "requirements / criteria", "criteria", "notes", "requirements", "remarks");
+  const cityH  = findH(_headers, "location", "city", "emirate");
+  const byH    = findH(_headers, "posted by", "owner", "rep", "representative");
+
+  // Mirrors HI_TEAM_MEMBERS in src/lib/hi-team.ts — keep in lockstep. The
+  // sheet's "Posted By" column holds display names, and crediting the role to
+  // a mailbox is what makes it show up under that person in Reports.
+  const REPS: Record<string, string> = {
+    "rodaina thabit":  "Rodaina@allocationassist.com",
+    "mohamed othman":  "mohamed.othman@allocationassist.com",
+    "sohaila mohamed": "sohaila@allocationassist.com",
+    "ishak":           "ishak@allocationassist.com",
+    "ishak boulaat":   "ishak@allocationassist.com",
+  };
+  /** The sheet writes an em dash for "not applicable" — don't store it. */
+  const cell = (r: Record<string, string>, h: string | null): string | null => {
+    if (!h) return null;
+    const v = (r[h] ?? "").trim();
+    return v === "" || v === "\u2014" || v === "\u2013" || v === "-" || v.toLowerCase() === "n/a" ? null : v;
+  };
 
   const { data: allH } = await supabase.from("hospitals").select("id, name");
   const idByName = new Map<string, string>();
@@ -422,19 +441,21 @@ async function syncVacanciesFlat(
 
   let created = 0, skipped = 0;
   for (const r of rows) {
-    const name = (r[hospH] ?? "").trim();
-    const spec = (r[specH] ?? "").trim();
+    const name = cell(r, hospH);
+    const spec = cell(r, specH);
     if (!name || !spec) { skipped++; continue; }
     const rawPri = (prioH ? r[prioH] : "").trim().toLowerCase();
     const priority = ["high", "medium", "low"].includes(rawPri) ? rawPri : "medium";
+    const postedBy = cell(r, byH);
     await supabase.from("vacancies").insert({
       hospital_id:      idByName.get(name.toLowerCase()) ?? null,
       hospital_name:    name,
+      city:             cell(r, cityH),
       specialty:        spec,
       priority,
       target_fill_days: daysH && r[daysH] ? Number(r[daysH]) || null : null,
-      notes:            notesH ? r[notesH] || null : null,
-      opened_by:        openedBy,
+      notes:            cell(r, notesH),
+      opened_by:        postedBy ? (REPS[postedBy.toLowerCase()] ?? postedBy) : openedBy,
     });
     created++;
   }

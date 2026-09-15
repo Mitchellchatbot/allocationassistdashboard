@@ -9,6 +9,7 @@ import { Upload, FileSpreadsheet, CheckCircle2, AlertTriangle, ArrowRight, Build
 import { toast } from "sonner";
 import { supabase } from "@/lib/supabase";
 import { parseCsvObjects, findHeader } from "@/lib/csv-parse";
+import { HI_TEAM_MEMBERS } from "@/lib/hi-team";
 import { buildDoctorMatcher } from "@/lib/doctor-name-matcher";
 import { readTabularFile } from "@/lib/read-tabular-file";
 import { useAuth } from "@/hooks/use-auth";
@@ -211,6 +212,13 @@ function simpleHtml(plain: string): string {
   </body></html>`;
 }
 
+/** Read a column, treating the sheet's "not applicable" dashes as blank. */
+function cell(row: Record<string, string>, header: string | null): string | null {
+  if (!header) return null;
+  const v = (row[header] ?? "").trim();
+  return v === "" || v === "—" || v === "–" || v === "-" || v.toLowerCase() === "n/a" ? null : v;
+}
+
 // ── 2. Vacancies importer ──────────────────────────────────────────────────
 function VacanciesImport() {
   const { user } = useAuth();
@@ -218,18 +226,20 @@ function VacanciesImport() {
     <ImporterShell
       title="Vacancies"
       icon={ClipboardList}
-      sample={`Hospital,Specialty,Priority,Target Fill Days,Notes
-American Hospital Dubai,Pediatrics,High,3,Needs Arabic speaker
-Mediclinic City Hospital,Urology,Medium,14,SCFHS preferred`}
-      instructions={`Expected headers: Hospital (required), Specialty (required), Priority (high/medium/low), Target Fill Days, Notes.\nResolves Hospital column to a hospital_id by matching the name — make sure the hospitals are loaded first.`}
+      sample={`Hospitals,Location,Vacancy / Position,Specific Requirements / Criteria,Posted By,Priority
+SSMC,Abu Dhabi,Consultant Physician – Stroke,Tier 1,Mohamed Othman,High
+Mediclinic,Dubai,Interventional MSK Radiologist,—,Mohamed Othman,High`}
+      instructions={`Takes the "KSA / Qatar / UAE Vacancies" sheet as-is, and the older flat shape too.\n  • Hospital / Hospitals (required) — resolved to a hospital_id by name, so load the hospitals first.\n  • Vacancy / Position, or Specialty (required).\n  • Location / City — optional.\n  • Specific Requirements / Criteria, or Notes — optional.\n  • Posted By — a team member's name is resolved to their email so the role is credited to them.\n  • Priority — high/medium/low, defaults to medium.\nAn em dash (—) anywhere means "not applicable" and is stored as blank.`}
       processor={async (csv) => {
         const { headers, rows } = parseCsvObjects(csv);
-        const hospitalH = findHeader(headers, "hospital", "hospital name", "name");
-        const specH     = findHeader(headers, "specialty", "speciality");
-        if (!hospitalH || !specH) throw new Error("Missing required 'Hospital' or 'Specialty' column.");
+        const hospitalH = findHeader(headers, "hospital", "hospitals", "hospital name", "name");
+        const specH     = findHeader(headers, "specialty", "speciality", "vacancy / position", "vacancy/position", "position", "vacancy", "role");
+        if (!hospitalH || !specH) throw new Error("Missing required 'Hospital' or 'Specialty' / 'Vacancy / Position' column.");
         const prioH   = findHeader(headers, "priority", "pri");
         const daysH   = findHeader(headers, "target fill days", "target days", "days", "fill days");
-        const notesH  = findHeader(headers, "notes", "notes/requirements", "requirements");
+        const notesH  = findHeader(headers, "specific requirements / criteria", "requirements / criteria", "criteria", "notes", "notes/requirements", "requirements", "remarks");
+        const cityH   = findHeader(headers, "location", "city", "emirate");
+        const byH     = findHeader(headers, "posted by", "owner", "rep", "representative");
 
         const { data: allHospitals } = await supabase.from("hospitals").select("id, name");
         const hospitalByName = new Map<string, string>();
@@ -239,20 +249,29 @@ Mediclinic City Hospital,Urology,Medium,14,SCFHS preferred`}
 
         let created = 0, skipped = 0;
         for (const r of rows) {
-          const name = (r[hospitalH] ?? "").trim();
-          const spec = (r[specH] ?? "").trim();
+          const name = cell(r, hospitalH);
+          const spec = cell(r, specH);
           if (!name || !spec) { skipped++; continue; }
           const hid = hospitalByName.get(name.toLowerCase()) ?? null;
           const rawPriority = (prioH ? r[prioH] : "").trim().toLowerCase();
           const priority = ["high", "medium", "low"].includes(rawPriority) ? rawPriority : "medium";
+          // "Posted By" carries a person's name; credit it to their mailbox so
+          // the role shows up under them, and keep the raw text when the name
+          // isn't on the roster rather than dropping the attribution.
+          const postedBy = cell(r, byH);
+          const owner = postedBy
+            ? HI_TEAM_MEMBERS.find(m => m.name.toLowerCase() === postedBy.toLowerCase()
+                                     || m.name.toLowerCase().startsWith(postedBy.toLowerCase() + " "))?.email ?? postedBy
+            : user?.email ?? null;
           await supabase.from("vacancies").insert({
             hospital_id:      hid,
             hospital_name:    name,
+            city:             cell(r, cityH),
             specialty:        spec,
             priority,
             target_fill_days: daysH && r[daysH] ? Number(r[daysH]) || null : null,
-            notes:            notesH ? r[notesH] || null : null,
-            opened_by:        user?.email ?? null,
+            notes:            cell(r, notesH),
+            opened_by:        owner,
           });
           created++;
         }

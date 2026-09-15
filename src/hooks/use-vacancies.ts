@@ -25,6 +25,10 @@ export interface Vacancy {
   id:                    string;
   hospital_id:           string | null;
   hospital_name:         string;
+  /** Where the ROLE is, which isn't always where the hospital is: groups like
+   *  Mediclinic and Solaiman Alhabib post for a specific site. Null when the
+   *  sheet left it blank. */
+  city:                  string | null;
   specialty:             string;
   priority:              VacancyPriority;
   target_fill_days:      number | null;
@@ -44,6 +48,7 @@ export interface Vacancy {
 export interface VacancyInput {
   hospital_id?:      string | null;
   hospital_name:     string;
+  city?:             string | null;
   specialty:         string;
   priority?:         VacancyPriority;
   target_fill_days?: number | null;

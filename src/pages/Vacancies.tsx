@@ -78,6 +78,7 @@ export default function Vacancies() {
       list = list.filter(v =>
         v.hospital_name.toLowerCase().includes(q) ||
         v.specialty.toLowerCase().includes(q) ||
+        (v.city ?? "").toLowerCase().includes(q) ||
         v.notes?.toLowerCase().includes(q),
       );
     }
@@ -401,6 +402,7 @@ function VacancyRow({ v, onOpen, onStatusChange, onEdit, onDelete }: {
           <div className="flex items-center gap-1.5">
             <Building2 className="h-3.5 w-3.5 text-slate-400" />
             {v.hospital_name}
+            {v.city && <span className="text-[10px] font-normal text-muted-foreground">· {v.city}</span>}
           </div>
           {v.notes && <div className="text-[10px] text-muted-foreground mt-0.5 line-clamp-2">{v.notes}</div>}
         </button>
