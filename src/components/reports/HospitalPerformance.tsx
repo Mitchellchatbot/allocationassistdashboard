@@ -7,9 +7,12 @@
  * anything moved. Open-vacancy counts are folded in from the reporting bundle
  * when available, so an account that's hiring but idle stands out.
  *
- * The older relationship-health table (warming/cooling, health score) lives in
- * Operational detail — it answers "is this account going cold?", a different
- * question, and reads doctor_lifecycle.
+ * This IS the account view now. The older relationship-health table
+ * (warming/cooling badges, a 0-100 health score) has been removed rather than
+ * moved: it scored accounts on how recently the sends machinery had touched
+ * them, so a hospital could look "warming" on the strength of outbound email
+ * alone. "How long since anything moved", below, answers the same question
+ * from the placement record.
  */
 import { useMemo, useState } from "react";
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "@/components/ui/card";

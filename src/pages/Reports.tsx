@@ -6,36 +6,31 @@ import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
-import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue, SelectGroup, SelectLabel, SelectSeparator } from "@/components/ui/select";
-import { HI_TEAM_MEMBERS, findHiMemberByEmail } from "@/lib/hi-team";
-import { Table, TableBody, TableCell, TableHeader, TableRow } from "@/components/ui/table";
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue, SelectGroup, SelectLabel } from "@/components/ui/select";
+import { HI_TEAM_MEMBERS } from "@/lib/hi-team";
 import {
-  BarChart3, Users, Building2, TrendingUp, TrendingDown, Minus,
-  AlertCircle, Calendar, Activity, Sparkles, Send, UserCheck,
+  BarChart3, Users, Building2, Calendar, Activity, UserCheck,
   CalendarCheck, FileSignature, MapPin, CreditCard, CheckCircle2, ArrowRight,
-  Inbox, CalendarRange, ServerCog,
+  ServerCog,
 } from "lucide-react";
-import { useReportingMetrics } from "@/hooks/use-reporting-metrics";
-import { defaultRange, pctChange, type ReportingFilters, type KpiTotals } from "@/lib/hospital-reporting";
+import { usePlacementReporting, type PlacementReportingBundle } from "@/hooks/use-placement-reporting";
+import {
+  defaultRange, pctChange, passesFilters, stageAt, inRange, STAGES,
+  type ReportingFilters, type StageKey,
+} from "@/lib/placement-reporting";
 import { ExpandableKPICard } from "@/components/ExpandableKPICard";
 import { Skeleton } from "@/components/ui/skeleton";
 import { useNavigate, useSearchParams } from "react-router-dom";
-import type { FlowRun } from "@/hooks/use-automation-flows";
-import type { DoctorLifecycle } from "@/hooks/use-doctor-lifecycle";
 import { PlacementsCard } from "@/components/reports/PlacementsCard";
 import { CeoSummary } from "@/components/reports/CeoSummary";
 import { DoctorTable } from "@/components/reports/DoctorTable";
-import { CollapsibleSection, ScopeChip } from "@/components/reports/CollapsibleSection";
-import { DataGate } from "@/components/reports/AwaitingData";
+import { CollapsibleSection } from "@/components/reports/CollapsibleSection";
 import { PlacementBreakdowns } from "@/components/reports/PlacementBreakdowns";
 import { VacanciesSummary } from "@/components/reports/VacanciesSummary";
 import { DataQualityCard } from "@/components/reports/DataQualityCard";
-import { ChartSkeleton, TableRowsSkeleton } from "@/components/reports/Skeletons";
+import { ChartSkeleton } from "@/components/reports/Skeletons";
 import { TeamPerformance } from "@/components/reports/TeamPerformance";
 import { HospitalPerformance } from "@/components/reports/HospitalPerformance";
-import { useSort, SortHead } from "@/components/reports/sortable";
-import { TopOfFunnelContent, useTopOfFunnelStats } from "@/components/reports/TopOfFunnelCard";
-import { OperationsContent, useOperationsSummary } from "@/components/reports/OperationsCard";
 
 // Lazy so the recharts (vendor-charts) chunk is deferred until the trend
 // chart actually mounts. Wrapped in <Suspense> at the usage site with a
@@ -45,12 +40,25 @@ const ReportsTrendChart = lazy(() => import("./ReportsTrendChart"));
 /**
  * Phase 5 — Hospital Introduction Department reporting page.
  *
- * Date range + four filter dropdowns drive every panel:
- *   - KPI strip (shortlists, interviews, offered, signed, joined, paid, profile sends)
+ * ONE SOURCE: placement_attempts, written by exactly two things — the imported
+ * sheet and the Processing page's stage marking. Nothing here is derived from
+ * the sends machinery any more. The page used to blend automation_flow_runs
+ * and doctor_lifecycle into the same screen as the placement scoreboard, which
+ * meant two panels could give different answers to "how many did we sign?"
+ * and both be right about their own table. Removed along with those sources:
+ * the "Profile sends" tile, "By flow activity", "Top of funnel", the
+ * relationship-health score and the ops summary.
+ *
+ * Two supporting tables survive, neither sends-derived: hospitals (who
+ * represents an account — credit follows the allocation, not who clicked) and
+ * vacancies (open roles, so an account that's hiring but idle stands out).
+ *
+ * Date range + three filter dropdowns drive every panel:
+ *   - KPI strip (shortlisted / interviewed / offered / signed / relocated / paid)
  *   - Weekly trend chart (shortlisted / interviews / signed)
- *   - Per-team-member table (Rodina did X, Mohammed did Y)
- *   - Per-hospital table with relationship health score + warming/cooling badge
- *   - "Doctors on the way" panel (signed but not joined, for chase reminders)
+ *   - Per-team-member table, credited via the hospital's representative
+ *   - Per-hospital table with open roles and time since last movement
+ *   - The placement ledger + a per-doctor breakdown
  *
  * Source: Saif Ullah meeting, May 20 2026 — Phase 5 spec.
  */
@@ -85,7 +93,7 @@ export default function Reports() {
     specialty:  specialty === "__all"  ? null : specialty,
   }), [rangeDays, hospital, teamMember, specialty]);
 
-  const bundle = useReportingMetrics(filters);
+  const bundle = usePlacementReporting(filters);
 
   // CEO-first restructure (2026-07-31): the page now opens on an answer-first
   // hero (CeoSummary) + the trend + "where the wins are", and demotes ALL the
@@ -95,20 +103,8 @@ export default function Reports() {
   const [open, setOpen] = useState<Record<string, boolean>>({});
   const toggle = (k: string) => (v: boolean) => setOpen(s => ({ ...s, [k]: v }));
 
-  // Headline numbers for the collapsed triggers, so the key figure is
-  // visible WITHOUT expanding the section.
-  const { data: funnelStats, isLoading: funnelLoading } = useTopOfFunnelStats();
-  const opsSummary = useOperationsSummary();
-
   const hospitalFilter  = hospital  === "__all" ? null : hospital;
   const specialtyFilter = specialty === "__all" ? null : specialty;
-
-  // hospital name → open vacancies, folded into the By-hospital table so an
-  // account that's hiring but idle is obvious at a glance.
-  const vacancyByHospital = useMemo(
-    () => new Map(bundle.hospitals.map(h => [h.hospital, h.openVacancies])),
-    [bundle.hospitals],
-  );
 
   const rangeWord = rangeDays >= 3650 ? "all time" : rangeDays >= 365 ? "the last year" : `the last ${rangeDays} days`;
 
@@ -179,27 +175,6 @@ export default function Reports() {
             {/* Credit follows the hospital's representative — same source as
                 the Overview scoreboard, so the numbers reconcile. */}
             <TeamPerformance range={filters.range} hospital={hospitalFilter} specialty={specialtyFilter} />
-
-            {/* The older roll-up: who TRIGGERED the flows, not who owns the
-                account. Different question, kept but demoted. */}
-            <CollapsibleSection
-              title="By flow activity"
-              icon={<Users className="h-4 w-4 text-slate-600" />}
-              description="Rolls up flow actions by whoever triggered them in the dashboard, rather than by the hospital's representative."
-              summary={<SummaryBadge loading={bundle.isLoading} value={bundle.team.length} label="members" />}
-              open={!!open.team}
-              onOpenChange={toggle("team")}
-              flush
-            >
-              <DataGate
-                has={bundle.team.length > 0}
-                loading={bundle.isLoading}
-                title="No per-person results yet"
-                note="This fills in as your team marks doctors (shortlist / interview / offer / sign / relocate) in the dashboard — each marking is attributed to whoever recorded it. The imported historical placements have no owner, so they aren't counted per person here."
-              >
-                <TeamTable rows={bundle.team} loading={bundle.isLoading} />
-              </DataGate>
-            </CollapsibleSection>
           </div>
         )}
 
@@ -209,23 +184,9 @@ export default function Reports() {
               range={filters.range}
               hospital={hospitalFilter}
               specialty={specialtyFilter}
-              vacancies={vacancyByHospital}
+              vacancies={bundle.vacancyByHospital}
             />
             <VacanciesSummary />
-
-            {/* Relationship health — "is this account going cold?". Reads
-                doctor_lifecycle, so it can differ from the table above. */}
-            <CollapsibleSection
-              title="Relationship health"
-              icon={<Building2 className="h-4 w-4 text-slate-600" />}
-              description={`Warming/cooling vs the prior ${rangeDays}-day window, with a health score per account.`}
-              summary={<SummaryBadge loading={bundle.isLoading} value={bundle.hospitals.length} label="hospitals" />}
-              open={!!open.hospital}
-              onOpenChange={toggle("hospital")}
-              flush
-            >
-              <HospitalTable rows={bundle.hospitals} loading={bundle.isLoading} />
-            </CollapsibleSection>
 
             {/* Surfaces unclassified hospital regions to fix (only renders
                 when there's something to clean up). */}
@@ -241,73 +202,13 @@ export default function Reports() {
               title="All metrics · custom range"
               icon={<BarChart3 className="h-4 w-4 text-teal-600" />}
               description="Absolute totals over the date range chosen above, with per-tile drill-downs. The CEO summary at the top uses calendar weeks/months instead."
-              summary={<SummaryBadge loading={bundle.isLoading} value={bundle.kpis.signed} label="signed" />}
+              summary={<SummaryBadge loading={bundle.isLoading} value={bundle.totals.signed} label="signed" />}
               open={!!open.metrics}
               onOpenChange={toggle("metrics")}
             >
               <div className="pt-1">
                 <KpiStrip bundle={bundle} />
               </div>
-            </CollapsibleSection>
-
-            {/* Top of funnel */}
-            <CollapsibleSection
-              title="Top of funnel"
-              icon={<Inbox className="h-4 w-4 text-slate-600" />}
-              description="Form submissions + outreach coverage (new → contacted → qualified). Independent of the date filter above."
-              summary={
-                <SummaryBadge
-                  loading={funnelLoading}
-                  value={funnelStats?.total ?? 0}
-                  label="submissions"
-                />
-              }
-              open={!!open.funnel}
-              onOpenChange={toggle("funnel")}
-            >
-              <TopOfFunnelContent stats={funnelStats} loading={funnelLoading} />
-            </CollapsibleSection>
-
-            {/* Doctors on the way — signed but not yet relocated (chase list). */}
-            <CollapsibleSection
-              title="Doctors on the way"
-              icon={<Sparkles className="h-4 w-4 text-amber-600" />}
-              description="Signed but not yet joined. Tick-scheduler nudges weekly."
-              summary={<SummaryBadge loading={bundle.isLoading} value={bundle.doctorsOnTheWay.length} label="in transit" />}
-              open={!!open.dotw}
-              onOpenChange={toggle("dotw")}
-              flush
-            >
-              <DoctorsOnTheWay rows={bundle.doctorsOnTheWay} />
-            </CollapsibleSection>
-
-            {/* Pipeline health / Operations */}
-            <CollapsibleSection
-              title="Pipeline health / Operations"
-              icon={<ServerCog className="h-4 w-4 text-slate-600" />}
-              scope={<ScopeChip>Recent ops</ScopeChip>}
-              description="Contracts e-sign funnel, CV upload backlog, batch sends, and the candidate pool. Reflects recent operations, not the date filter."
-              summary={
-                <div className="flex items-center gap-1.5 justify-end flex-wrap">
-                  <Badge variant="outline" className="text-[9px] bg-emerald-50 text-emerald-700 border-emerald-200">
-                    {opsSummary.contractsSigned} signed
-                  </Badge>
-                  {opsSummary.cvPending > 0 && (
-                    <Badge variant="outline" className="text-[9px] bg-amber-50 text-amber-700 border-amber-200">
-                      {opsSummary.cvPending} CV pending
-                    </Badge>
-                  )}
-                  {opsSummary.failedBatches > 0 && (
-                    <Badge variant="outline" className="text-[9px] bg-rose-50 text-rose-700 border-rose-200">
-                      {opsSummary.failedBatches} batch failed
-                    </Badge>
-                  )}
-                </div>
-              }
-              open={!!open.ops}
-              onOpenChange={toggle("ops")}
-            >
-              <OperationsContent />
             </CollapsibleSection>
 
             {/* Placements (Ammar 2026-06-03) — replaces the Hammad sheet.
@@ -349,7 +250,7 @@ const VIEWS: Array<{ key: ViewKey; label: string; icon: typeof BarChart3; blurb:
   { key: "hospitals", label: "Hospitals", icon: Building2,
     blurb: "Which accounts are moving over {range} — activity, open roles, and relationship health." },
   { key: "detail",    label: "Detail",    icon: ServerCog,
-    blurb: "The operational layer for {range}: full metrics, funnel, chase list, placements, and per-doctor rows." },
+    blurb: "The operational layer for {range}: full metrics, the placement ledger, and per-doctor rows." },
 ];
 
 /** Segmented view switcher. Same visual language as the range picker in the
@@ -402,7 +303,7 @@ function FilterBar({ rangeDays, setRangeDays, hospital, setHospital, teamMember,
   hospital: string; setHospital: (s: string) => void;
   teamMember: string; setTeamMember: (s: string) => void;
   specialty: string; setSpecialty: (s: string) => void;
-  options: { hospitals: string[]; teamMembers: string[]; specialties: string[] };
+  options: { hospitals: string[]; specialties: string[] };
 }) {
   return (
     <div className="flex flex-wrap items-center gap-2" data-tour="reports-filters">
@@ -428,27 +329,17 @@ function FilterBar({ rangeDays, setRangeDays, hospital, setHospital, teamMember,
         <SelectTrigger className="h-8 w-[200px] text-[11px]"><SelectValue placeholder="Team member" /></SelectTrigger>
         <SelectContent>
           <SelectItem value="__all">All team members</SelectItem>
-          {/* HI roster pinned at the top — surfaced as full names so the
-              filter reads "Rodaina Thabit" rather than the raw email. */}
+          {/* The HI roster, and only the HI roster. The list used to be
+              padded with every address that had ever stamped a created_by on a
+              flow run — an artefact of the sends machinery, and not who
+              represents the account. Credit now follows the hospital's
+              assigned rep, so the roster IS the complete set of options. */}
           <SelectGroup>
             <SelectLabel className="text-[9px] uppercase tracking-wider text-muted-foreground">Hospital Introduction</SelectLabel>
             {HI_TEAM_MEMBERS.map(m => (
               <SelectItem key={m.email} value={m.email}>{m.name}</SelectItem>
             ))}
           </SelectGroup>
-          {/* Everyone else who's ever stamped a created_by (sales / admin
-              recruiters). Excludes anyone already in the HI group. */}
-          {options.teamMembers.filter(m => !findHiMemberByEmail(m)).length > 0 && (
-            <>
-              <SelectSeparator />
-              <SelectGroup>
-                <SelectLabel className="text-[9px] uppercase tracking-wider text-muted-foreground">Other</SelectLabel>
-                {options.teamMembers
-                  .filter(m => !findHiMemberByEmail(m))
-                  .map(m => <SelectItem key={m} value={m}>{m}</SelectItem>)}
-              </SelectGroup>
-            </>
-          )}
         </SelectContent>
       </Select>
       <Select value={specialty} onValueChange={setSpecialty}>
@@ -462,176 +353,101 @@ function FilterBar({ rangeDays, setRangeDays, hospital, setHospital, teamMember,
   );
 }
 
-function KpiStrip({ bundle }: { bundle: ReturnType<typeof useReportingMetrics> }) {
+/**
+ * Absolute stage totals over the chosen range, with a drill-down behind each
+ * tile.
+ *
+ * Every tile counts DISTINCT DOCTORS out of placement_attempts. The old strip
+ * led with "Profile sends" from automation_flow_runs, which measured emails
+ * leaving the building rather than placements progressing — it's gone, along
+ * with the rest of the sends-derived sources.
+ */
+function KpiStrip({ bundle }: { bundle: PlacementReportingBundle }) {
   const navigate = useNavigate();
-  const { rawRuns, rawLifecycles, filters } = bundle;
+  const { attempts, totals, totalsPrior, filters } = bundle;
 
-  // Pre-bucket all the drilldown lists ONCE per filter/data change. Doing
-  // this inside useMemo means the flip animation never re-runs the
-  // filter+sort + JSX build mid-rotation — the back face just paints what's
-  // already in memory.
+  // Pre-bucket the drilldown lists ONCE per filter/data change, so the flip
+  // animation never re-runs the filter+sort mid-rotation — the back face just
+  // paints what's already in memory.
   const drilldowns = useMemo(() => {
-    const inRange = (iso: string | null | undefined): boolean => {
-      if (!iso) return false;
-      const t = new Date(iso).getTime();
-      // range.to is local midnight of the last selected day — treat it as
-      // end-of-day (+1 day, exclusive) so the final day is included, matching
-      // the app-wide convention used by Sales/Marketing/Finance.
-      return t >= filters.range.from.getTime() && t < filters.range.to.getTime() + 86_400_000;
-    };
-    const passesRunFilters = (r: FlowRun): boolean => {
-      if (filters.hospital   && r.hospital   !== filters.hospital)   return false;
-      if (filters.doctorId   && r.doctor_id  !== filters.doctorId)   return false;
-      if (filters.teamMember && (r.created_by ?? "").toLowerCase() !== filters.teamMember.toLowerCase()) return false;
-      if (filters.specialty) {
-        const sp = (r.metadata as Record<string, unknown> | null)?.doctor_speciality as string | undefined;
-        if (!sp || !sp.toLowerCase().includes(filters.specialty.toLowerCase())) return false;
+    const out = {} as Record<StageKey, AttemptHit[]>;
+    for (const stage of STAGES) {
+      const hits: AttemptHit[] = [];
+      const seen = new Set<string>();
+      for (const a of attempts) {
+        if (!passesFilters(a, filters)) continue;
+        const t = stageAt(a, stage);
+        if (!inRange(t, filters.range)) continue;
+        // One entry per doctor, matching the headline count. The first hit
+        // wins, so the listed hospital is that doctor's earliest at this stage.
+        if (seen.has(a.doctor_id)) continue;
+        seen.add(a.doctor_id);
+        hits.push({ doctorId: a.doctor_id, name: a.doctor_name, hospital: a.hospital_name, at: t! });
       }
-      return true;
-    };
-    const filteredRunsByKey = (flowKey: string): FlowRun[] =>
-      rawRuns
-        .filter(r => r.flow_key === flowKey && passesRunFilters(r) && inRange(r.started_at))
-        .sort((a, b) => new Date(b.started_at).getTime() - new Date(a.started_at).getTime());
+      out[stage.key] = hits.sort((x, y) => y.at - x.at);
+    }
+    return out;
+  }, [attempts, filters]);
 
-    const usingFilter = !!(filters.doctorId || filters.hospital || filters.teamMember || filters.specialty);
-    const eligibleDoctorIds: Set<string> | null = usingFilter
-      ? (() => {
-          const set = new Set<string>();
-          for (const r of rawRuns) if (passesRunFilters(r) && r.doctor_id) set.add(r.doctor_id);
-          return set;
-        })()
-      : null;
-    const passesLifecycleFilters = (l: DoctorLifecycle) => !eligibleDoctorIds || eligibleDoctorIds.has(l.doctor_id);
-    const lifecyclesByMilestone = (
-      key: "shortlisted_at" | "interviewed_at" | "offered_at" | "signed_at" | "joined_at" | "paid_at",
-    ): DoctorLifecycle[] =>
-      rawLifecycles
-        .filter(l => l[key] && inRange(l[key]) && passesLifecycleFilters(l))
-        .sort((a, b) => new Date(b[key] as string).getTime() - new Date(a[key] as string).getTime());
-    // Relocated = explicit relocation marking, else the actual join.
-    const relocatedList = rawLifecycles
-      .filter(l => (l.relocated_at ?? l.joined_at) && inRange(l.relocated_at ?? l.joined_at) && passesLifecycleFilters(l))
-      .sort((a, b) => new Date((b.relocated_at ?? b.joined_at) as string).getTime() - new Date((a.relocated_at ?? a.joined_at) as string).getTime());
+  const tiles = useMemo(() => TILES.map(t => ({
+    ...t,
+    value: totals[t.key],
+    delta: pctChange(totals[t.key], totalsPrior[t.key]),
+    drilldown: (
+      <AttemptList
+        rows={drilldowns[t.key]}
+        onJump={(id) => navigate(`/doctors?tab=profiles&id=${encodeURIComponent(id)}`)}
+      />
+    ),
+    onClickThrough: () => navigate("/processing"),
+  })), [drilldowns, totals, totalsPrior, navigate]);
 
-    return {
-      profile_sent:     filteredRunsByKey("profile_sent"),
-      shortlisted:      lifecyclesByMilestone("shortlisted_at"),
-      interviewed:      lifecyclesByMilestone("interviewed_at"),
-      offered:          lifecyclesByMilestone("offered_at"),
-      signed:           lifecyclesByMilestone("signed_at"),
-      relocated:        relocatedList,
-      paid:             lifecyclesByMilestone("paid_at"),
-    };
-  }, [rawRuns, rawLifecycles, filters]);
+  const pipeline = tiles.filter(t => t.group === "pipeline");
+  const outcomes = tiles.filter(t => t.group === "outcomes");
 
-  const tiles = useMemo<Array<{
-    label: string;
-    value: number;
-    icon: typeof Send;
-    color: string;
-    bg: string;
-    drilldown: React.ReactNode;
-    onClickThrough: () => void;
-    meaning: string;
-    source: string;
-    /** Which cluster the tile belongs to — "pipeline" = work in
-     *  progress (sends → offered), "outcomes" = results (signed → paid).
-     *  Realises the grouping the old grid-cols-7 only hinted at in a
-     *  comment. */
-    group: "pipeline" | "outcomes";
-  }>>(() => [
-    // Palette is deliberately quieter than v1: every tile sits on the same
-    // bg-card neutral, only the thin accent stripe + icon carry stage color.
-    // Reads as one visual unit, not a 7-colour rainbow.
-    {
-      label: "Profile sends",   value: bundle.kpis.profilesSent, icon: Send,
-      color: "text-slate-600",  bg: "bg-card", group: "pipeline",
-      meaning: "Doctor profiles emailed to a hospital recruiter in the selected window.",
-      source:  "automation_flow_runs · flow_key=profile_sent",
-      onClickThrough: () => navigate("/sends?tab=email-chain&flow=profile_sent"),
-      drilldown: <RunsList rows={drilldowns.profile_sent} kind="hospital" emptyCta="profile_sent" onJump={() => navigate(`/sends?tab=email-chain&flow=profile_sent`)} />,
-    },
-    {
-      label: "Shortlisted",     value: bundle.kpis.shortlisted, icon: UserCheck,
-      color: "text-indigo-600", bg: "bg-card", group: "pipeline",
-      meaning: "Doctors shortlisted in the window (from the marking system + imported reports).",
-      source: "doctor_lifecycle.shortlisted_at",
-      onClickThrough: () => navigate("/doctors?tab=profiles"),
-      drilldown: <LifecycleList rows={drilldowns.shortlisted} milestone="shortlisted_at" onJump={(id) => navigate(`/doctors?tab=profiles&id=${encodeURIComponent(id)}`)} />,
-    },
-    {
-      label: "Interviews",      value: bundle.kpis.interviews, icon: CalendarCheck,
-      color: "text-sky-600",    bg: "bg-card", group: "pipeline",
-      meaning: "Doctors interviewed in the window (from the marking system + imported reports).",
-      source: "doctor_lifecycle.interviewed_at",
-      onClickThrough: () => navigate("/doctors?tab=profiles"),
-      drilldown: <LifecycleList rows={drilldowns.interviewed} milestone="interviewed_at" onJump={(id) => navigate(`/doctors?tab=profiles&id=${encodeURIComponent(id)}`)} />,
-    },
-    {
-      label: "Offered",         value: bundle.kpis.offered, icon: FileSignature,
-      color: "text-amber-600",  bg: "bg-card", group: "pipeline",
-      meaning: "Doctors offered in the window (from the marking system + imported reports).",
-      source: "doctor_lifecycle.offered_at",
-      onClickThrough: () => navigate("/doctors?tab=profiles"),
-      drilldown: <LifecycleList rows={drilldowns.offered} milestone="offered_at" onJump={(id) => navigate(`/doctors?tab=profiles&id=${encodeURIComponent(id)}`)} />,
-    },
-    // Won column — all share the emerald family so the eye reads them as
-    // related milestones rather than three different states.
-    {
-      label: "Signed",          value: bundle.kpis.signed, icon: CheckCircle2,
-      color: "text-emerald-600", bg: "bg-card", group: "outcomes",
-      meaning: "Doctors who signed their contract in the window.",
-      source: "doctor_lifecycle.signed_at",
-      onClickThrough: () => navigate("/doctors?tab=profiles"),
-      drilldown: <LifecycleList rows={drilldowns.signed} milestone="signed_at" onJump={(id) => navigate(`/doctors?tab=profiles&id=${encodeURIComponent(id)}`)} />,
-    },
-    {
-      label: "Relocated",       value: bundle.kpis.joined, icon: MapPin,
-      color: "text-emerald-700", bg: "bg-card", group: "outcomes",
-      meaning: "Doctors who relocated / started at the hospital in the window (explicit relocation marking, else the confirmed joining date).",
-      source: "doctor_lifecycle.relocated_at ?? joined_at",
-      onClickThrough: () => navigate("/doctors?tab=profiles"),
-      drilldown: <LifecycleList rows={drilldowns.relocated} milestone="joined_at" onJump={(id) => navigate(`/doctors?tab=profiles&id=${encodeURIComponent(id)}`)} />,
-    },
-    {
-      label: "Paid",            value: bundle.kpis.paid, icon: CreditCard,
-      color: "text-emerald-800", bg: "bg-card", group: "outcomes",
-      meaning: "Doctors whose second-payment invoice was marked paid in the window.",
-      source: "doctor_lifecycle.paid_at",
-      onClickThrough: () => navigate("/doctors?tab=profiles"),
-      drilldown: <LifecycleList rows={drilldowns.paid} milestone="paid_at" onJump={(id) => navigate(`/doctors?tab=profiles&id=${encodeURIComponent(id)}`)} />,
-    },
-  ], [drilldowns, bundle.kpis, navigate]);
-
-  // Attach a period-over-period delta to each tile (▲/▼ vs the prior equal
-  // window). Keyed by the tile label so the value + delta stay in lockstep.
-  const KEY_BY_LABEL: Record<string, keyof KpiTotals> = {
-    "Profile sends": "profilesSent", "Shortlisted": "shortlisted", "Interviews": "interviews",
-    "Offered": "offered", "Signed": "signed", "Relocated": "joined", "Paid": "paid",
-  };
-  const tilesD = tiles.map(t => {
-    const k = KEY_BY_LABEL[t.label];
-    return { ...t, delta: k ? pctChange(bundle.kpis[k], bundle.kpisPrior[k]) : undefined };
-  });
-  const pipeline = tilesD.filter(t => t.group === "pipeline");
-  const outcomes = tilesD.filter(t => t.group === "outcomes");
-
-  // Two labeled clusters: "Pipeline" (work in progress) + "Outcomes"
-  // (results). Realises the grouping the old single grid-cols-7 only
-  // gestured at in a comment.
   return (
-    <div className="grid grid-cols-1 lg:grid-cols-7 gap-4">
-      <KpiCluster label="Pipeline" tiles={pipeline} className="lg:col-span-4" innerCols="lg:grid-cols-4" />
+    <div className="grid grid-cols-1 lg:grid-cols-6 gap-4">
+      <KpiCluster label="Pipeline" tiles={pipeline} className="lg:col-span-3" innerCols="lg:grid-cols-3" />
       <KpiCluster label="Outcomes" tiles={outcomes} className="lg:col-span-3" innerCols="lg:grid-cols-3" baseDelay={pipeline.length} />
     </div>
   );
 }
 
+/** One doctor's appearance at a stage, for the tile drill-downs. */
+interface AttemptHit { doctorId: string; name: string; hospital: string; at: number }
+
+/**
+ * Tile definitions. `source` is shown in the card's hint, and now names one
+ * table for every tile — the whole point of the change.
+ */
+const TILES: Array<{
+  key: StageKey; label: string; icon: typeof UserCheck; color: string; bg: string;
+  meaning: string; source: string; group: "pipeline" | "outcomes";
+}> = [
+  { key: "shortlisted", label: "Shortlisted", icon: UserCheck,     color: "text-indigo-600", bg: "bg-indigo-50/60",  group: "pipeline",
+    meaning: "Doctors shortlisted in the window — from the imported sheet and the Processing page.",
+    source:  "placement_attempts.shortlisted_at" },
+  { key: "interviewed", label: "Interviews",  icon: CalendarCheck, color: "text-sky-600", bg: "bg-sky-50/60",     group: "pipeline",
+    meaning: "Doctors interviewed in the window.",
+    source:  "placement_attempts.interviewed_at" },
+  { key: "offered",     label: "Offered",     icon: FileSignature, color: "text-amber-600", bg: "bg-amber-50/60",   group: "pipeline",
+    meaning: "Doctors offered a role in the window.",
+    source:  "placement_attempts.offered_at" },
+  { key: "signed",      label: "Signed",      icon: CheckCircle2,  color: "text-emerald-600", bg: "bg-emerald-50/60", group: "outcomes",
+    meaning: "Doctors who signed with a hospital in the window.",
+    source:  "placement_attempts.signed_at" },
+  { key: "relocated",   label: "Relocated",   icon: MapPin,        color: "text-emerald-700", bg: "bg-emerald-50/80", group: "outcomes",
+    meaning: "Doctors who relocated / started in the window (explicit relocation marking, else the confirmed join).",
+    source:  "placement_attempts.relocated_at ?? joined_at" },
+  { key: "paid",        label: "Paid",        icon: CreditCard,    color: "text-emerald-800", bg: "bg-emerald-100/60", group: "outcomes",
+    meaning: "Doctors whose second-payment invoice was marked paid in the window.",
+    source:  "placement_attempts.paid_at" },
+];
+
 function KpiCluster({ label, tiles, className, innerCols, baseDelay = 0 }: {
   label: string;
   tiles: Array<{
-    label: string; value: number; icon: typeof Send; color: string; bg: string;
+    label: string; value: number; icon: typeof UserCheck; color: string; bg: string;
     drilldown: React.ReactNode; onClickThrough: () => void; meaning: string; source: string;
     delta?: number | null;
   }>;
@@ -675,16 +491,22 @@ function KpiCluster({ label, tiles, className, innerCols, baseDelay = 0 }: {
   );
 }
 
-const RunsList = memo(function RunsList({ rows, kind, emptyCta, onJump }: {
-  rows: FlowRun[];
-  kind: "hospital" | "stage";
-  emptyCta: string;
-  onJump: (r: FlowRun) => void;
+/**
+ * Drill-down body behind a KPI tile: the doctors counted by that tile, most
+ * recent first.
+ *
+ * One row per doctor, matching the headline number exactly — the tile would
+ * otherwise say 12 and list 17, which is the kind of mismatch that makes people
+ * stop trusting the page.
+ */
+const AttemptList = memo(function AttemptList({ rows, onJump }: {
+  rows: AttemptHit[];
+  onJump: (doctorId: string) => void;
 }) {
   if (rows.length === 0) {
     return (
       <div className="text-center py-4 text-[11px] text-muted-foreground italic">
-        Nothing in this window. Trigger one from the {emptyCta} flow.
+        Nothing in this window. Mark a stage on the Processing page, or import an updated sheet.
       </div>
     );
   }
@@ -692,14 +514,13 @@ const RunsList = memo(function RunsList({ rows, kind, emptyCta, onJump }: {
     <div className="space-y-1">
       {rows.slice(0, 8).map(r => (
         <button
-          key={r.id}
-          onClick={(e) => { e.stopPropagation(); onJump(r); }}
+          key={r.doctorId}
+          onClick={(e) => { e.stopPropagation(); onJump(r.doctorId); }}
           className="w-full text-left px-2 py-1.5 rounded-md hover:bg-slate-50 transition-colors"
         >
-          <div className="text-[11px] font-medium text-slate-900 truncate">{r.doctor_name}</div>
+          <div className="text-[11px] font-medium text-slate-900 truncate">{r.name}</div>
           <div className="text-[9px] text-muted-foreground truncate">
-            {kind === "hospital" && r.hospital ? r.hospital : r.current_stage}
-            <> · {relativeShort(r.started_at)}</>
+            {r.hospital || "—"} · {relativeShort(new Date(r.at).toISOString())}
           </div>
         </button>
       ))}
@@ -711,42 +532,6 @@ const RunsList = memo(function RunsList({ rows, kind, emptyCta, onJump }: {
     </div>
   );
 });
-
-const LifecycleList = memo(function LifecycleList({ rows, milestone, onJump }: {
-  rows: DoctorLifecycle[];
-  milestone: "shortlisted_at" | "interviewed_at" | "offered_at" | "signed_at" | "joined_at" | "paid_at";
-  onJump: (doctorId: string) => void;
-}) {
-  if (rows.length === 0) {
-    return (
-      <div className="text-center py-4 text-[11px] text-muted-foreground italic">
-        Nothing in this window.
-      </div>
-    );
-  }
-  return (
-    <div className="space-y-1">
-      {rows.slice(0, 8).map(l => (
-        <button
-          key={l.doctor_id}
-          onClick={(e) => { e.stopPropagation(); onJump(l.doctor_id); }}
-          className="w-full text-left px-2 py-1.5 rounded-md hover:bg-slate-50 transition-colors"
-        >
-          <div className="text-[11px] font-medium text-slate-900 truncate">{l.doctor_name ?? l.doctor_id}</div>
-          <div className="text-[9px] text-muted-foreground truncate">
-            {relativeShort(l[milestone])}
-          </div>
-        </button>
-      ))}
-      {rows.length > 8 && (
-        <div className="text-[10px] text-muted-foreground italic text-center pt-1">
-          +{rows.length - 8} more
-        </div>
-      )}
-    </div>
-  );
-});
-
 
 function relativeShort(iso: string | null | undefined): string {
   if (!iso) return "—";
@@ -759,184 +544,6 @@ function relativeShort(iso: string | null | undefined): string {
   if (hrs  < 24)  return `${hrs}h ago`;
   if (days === 1) return "yesterday";
   if (days < 30)  return `${days}d ago`;
-  try { return new Date(iso).toLocaleDateString(undefined, { month: "short", day: "numeric" }); }
-  catch { return iso; }
-}
-
-type TeamSortKey = "member" | "profilesSent" | "shortlisted" | "interviews" | "offered" | "signed" | "total";
-
-function TeamTable({ rows, loading }: { rows: ReturnType<typeof useReportingMetrics>["team"]; loading: boolean }) {
-  const sort = useSort<TeamSortKey>("total");
-  const sorted = useMemo(() => sort.sort(rows, (r, key) =>
-    key === "member" ? (findHiMemberByEmail(r.email)?.name ?? r.email) : r[key],
-  ), [rows, sort]);
-
-  if (loading) return <TableRowsSkeleton rows={4} cols={7} />;
-  if (rows.length === 0) {
-    return (
-      <div className="px-4 py-12 text-center text-[12px] text-muted-foreground">
-        No team-attributed activity in this range yet. Once Rodina, Mohammed et al. start triggering flows in the dashboard, their counts will roll up here.
-      </div>
-    );
-  }
-  return (
-    <Table>
-      <TableHeader>
-        <TableRow>
-          <SortHead sort={sort} sortKey="member" numeric={false}>Team member</SortHead>
-          <SortHead sort={sort} sortKey="profilesSent">Profile sends</SortHead>
-          <SortHead sort={sort} sortKey="shortlisted">Shortlisted</SortHead>
-          <SortHead sort={sort} sortKey="interviews">Interviews</SortHead>
-          <SortHead sort={sort} sortKey="offered">Offered</SortHead>
-          <SortHead sort={sort} sortKey="signed">Signed</SortHead>
-          <SortHead sort={sort} sortKey="total">Total</SortHead>
-        </TableRow>
-      </TableHeader>
-      <TableBody>
-        {sorted.map(r => (
-          <TableRow key={r.email}>
-            <TableCell className="text-[12px] font-medium">{findHiMemberByEmail(r.email)?.name ?? r.email}</TableCell>
-            <TableCell className="text-[12px] text-right tabular-nums">{r.profilesSent}</TableCell>
-            <TableCell className="text-[12px] text-right tabular-nums">{r.shortlisted}</TableCell>
-            <TableCell className="text-[12px] text-right tabular-nums">{r.interviews}</TableCell>
-            <TableCell className="text-[12px] text-right tabular-nums">{r.offered}</TableCell>
-            <TableCell className="text-[12px] text-right tabular-nums text-emerald-700 font-medium">{r.signed}</TableCell>
-            <TableCell className="text-[12px] text-right tabular-nums font-medium">{r.total}</TableCell>
-          </TableRow>
-        ))}
-      </TableBody>
-    </Table>
-  );
-}
-
-type HospSortKey = "hospital" | "openVacancies" | "shortlisted" | "interviews" | "signed" | "last" | "trend" | "health";
-
-// Warming → steady → cooling is an ordering, not three unrelated labels, so
-// the Trend column sorts on that scale rather than alphabetically.
-const TREND_RANK = { warming: 2, steady: 1, cooling: 0 } as const;
-
-function HospitalTable({ rows, loading }: { rows: ReturnType<typeof useReportingMetrics>["hospitals"]; loading: boolean }) {
-  const sort = useSort<HospSortKey>("signed");
-  const sorted = useMemo(() => sort.sort(rows, (r, key) => {
-    switch (key) {
-      case "hospital": return r.hospital;
-      // Most-recently-touched first when descending: fewer days = more recent,
-      // so negate rather than showing the stalest accounts under "Last activity ▼".
-      case "last":     return r.daysSinceLastInteraction == null ? null : -r.daysSinceLastInteraction;
-      case "trend":    return TREND_RANK[r.trend];
-      default:         return r[key];
-    }
-  }), [rows, sort]);
-
-  if (loading) return <TableRowsSkeleton rows={6} cols={8} />;
-  if (rows.length === 0) {
-    return (
-      <div className="px-4 py-12 text-center text-[12px] text-muted-foreground">
-        No hospital activity in this range. Try widening the date filter, or trigger a few flows from Automations.
-      </div>
-    );
-  }
-  return (
-    <Table>
-      <TableHeader>
-        <TableRow>
-          <SortHead sort={sort} sortKey="hospital" numeric={false}>Hospital</SortHead>
-          <SortHead sort={sort} sortKey="openVacancies">Open vacancies</SortHead>
-          <SortHead sort={sort} sortKey="shortlisted">Shortlisted</SortHead>
-          <SortHead sort={sort} sortKey="interviews">Interviews</SortHead>
-          <SortHead sort={sort} sortKey="signed">Signed</SortHead>
-          <SortHead sort={sort} sortKey="last">Last activity</SortHead>
-          <SortHead sort={sort} sortKey="trend">Trend</SortHead>
-          <SortHead sort={sort} sortKey="health">Health</SortHead>
-        </TableRow>
-      </TableHeader>
-      <TableBody>
-        {sorted.map(r => (
-          <TableRow key={r.hospital}>
-            <TableCell className="text-[12px] font-medium">{r.hospital}</TableCell>
-            <TableCell className="text-[12px] text-right tabular-nums">{r.openVacancies}</TableCell>
-            <TableCell className="text-[12px] text-right tabular-nums">{r.shortlisted}</TableCell>
-            <TableCell className="text-[12px] text-right tabular-nums">{r.interviews}</TableCell>
-            <TableCell className="text-[12px] text-right tabular-nums">{r.signed}</TableCell>
-            <TableCell className="text-[12px] text-right tabular-nums">
-              {r.daysSinceLastInteraction == null
-                ? <span className="text-muted-foreground">—</span>
-                : r.daysSinceLastInteraction === 0
-                  ? "today"
-                  : `${r.daysSinceLastInteraction}d ago`}
-            </TableCell>
-            <TableCell className="text-right">
-              <TrendBadge trend={r.trend} signed={r.signed} prior={r.signedPrior} />
-            </TableCell>
-            <TableCell className="text-right">
-              <HealthBadge score={r.health} />
-            </TableCell>
-          </TableRow>
-        ))}
-      </TableBody>
-    </Table>
-  );
-}
-
-function TrendBadge({ trend, signed, prior }: { trend: "warming" | "steady" | "cooling"; signed: number; prior: number }) {
-  const Icon = trend === "warming" ? TrendingUp : trend === "cooling" ? TrendingDown : Minus;
-  const cls = trend === "warming" ? "bg-emerald-50 text-emerald-700 border-emerald-200"
-            : trend === "cooling" ? "bg-rose-50 text-rose-700 border-rose-200"
-            : "bg-slate-50 text-slate-600 border-slate-200";
-  return (
-    <Badge variant="outline" className={`${cls} text-[9px] uppercase tracking-wider`} title={`${signed} signed vs ${prior} in the prior window`}>
-      <Icon className="h-2.5 w-2.5 mr-1" /> {trend}
-    </Badge>
-  );
-}
-
-function HealthBadge({ score }: { score: number }) {
-  const tone =
-    score >= 70 ? "bg-emerald-100 text-emerald-800 border-emerald-200" :
-    score >= 40 ? "bg-amber-100 text-amber-800 border-amber-200"      :
-                  "bg-rose-100 text-rose-800 border-rose-200";
-  return (
-    <Badge variant="outline" className={`${tone} tabular-nums text-[10px]`}>
-      {score}
-    </Badge>
-  );
-}
-
-function DoctorsOnTheWay({ rows }: { rows: ReturnType<typeof useReportingMetrics>["doctorsOnTheWay"] }) {
-  if (rows.length === 0) {
-    return (
-      <div className="px-4 py-8 text-center text-[12px] text-muted-foreground">
-        Nobody's mid-relocation right now.
-      </div>
-    );
-  }
-  return (
-    <div className="divide-y max-h-[260px] overflow-y-auto">
-      {rows.slice(0, 20).map(r => {
-        const overdue = r.daysSinceSigned > 14;
-        return (
-          <div key={r.doctor_id} className={`px-3 py-2 flex items-center gap-2 ${overdue ? "bg-amber-50/40" : ""}`}>
-            {overdue && <AlertCircle className="h-3.5 w-3.5 text-amber-600 shrink-0" />}
-            <div className="flex-1 min-w-0">
-              <div className="text-[12px] font-medium truncate">{r.doctor_name}</div>
-              <div className="text-[10px] text-muted-foreground">
-                Signed {formatDate(r.signed_at)} · {r.daysSinceSigned}d ago
-              </div>
-            </div>
-          </div>
-        );
-      })}
-      {rows.length > 20 && (
-        <div className="px-3 py-2 text-[10px] text-muted-foreground bg-slate-50">
-          +{rows.length - 20} more
-        </div>
-      )}
-    </div>
-  );
-}
-
-function formatDate(iso: string | null): string {
-  if (!iso) return "—";
   try { return new Date(iso).toLocaleDateString(undefined, { month: "short", day: "numeric" }); }
   catch { return iso; }
 }

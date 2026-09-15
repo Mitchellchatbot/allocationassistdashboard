@@ -1,56 +1,61 @@
 /**
- * Per-doctor breakdown — parallels the Hospital relationships table
- * but aggregates by doctor across their pipeline (Ammar 2026-06-03:
- * "we can just add another table over here for the individual
- * doctors themselves").
+ * Per-doctor breakdown — parallels the Hospital relationships table but
+ * aggregates by doctor across their pipeline (Ammar 2026-06-03: "we can just
+ * add another table over here for the individual doctors themselves").
  *
- * Each row is one doctor. Counts come from flow runs (profile_sent,
- * shortlist, interview, contract_signing) + the lifecycle row for
- * signed / joined.
+ * Every number here comes from placement_attempts — the imported sheet plus
+ * the Processing page's stage marking. It used to be assembled from
+ * automation_flow_runs (a "Profiles sent" column, counting emails) and
+ * doctor_lifecycle, which meant this table could disagree with the scoreboard
+ * directly above it. The send-count column is gone rather than reproduced:
+ * there's no placement record of it, and it measured outbound effort rather
+ * than progress.
+ *
+ * Counting rule: one row per doctor, and each stage counts the number of
+ * HOSPITALS that doctor reached it at. A doctor shortlisted at four accounts
+ * shows 4 — four separate conversations, which is exactly what this table
+ * exists to show. (The KPI tiles deliberately count the same doctor once.)
  */
 import { useEffect, useMemo, useState } from "react";
-import { useQuery } from "@tanstack/react-query";
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "@/components/ui/card";
 import { Table, TableBody, TableCell, TableHeader, TableRow } from "@/components/ui/table";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Collapsible, CollapsibleTrigger, CollapsibleContent } from "@/components/ui/collapsible";
 import { User2, ChevronDown, ChevronRight } from "lucide-react";
-import { supabase } from "@/lib/supabase";
-import type { FlowRun } from "@/hooks/use-automation-flows";
-import type { DoctorLifecycle } from "@/hooks/use-doctor-lifecycle";
+import { usePlacementAttempts, type PlacementAttempt } from "@/hooks/use-placement-attempts";
 import { useDoctorProfiles } from "@/hooks/use-doctor-profiles";
 import { useZohoData } from "@/hooks/use-zoho-data";
 import { useSort, SortHead } from "@/components/reports/sortable";
+import { defaultRange, inRange, stageAt, STAGES, type DateRange } from "@/lib/placement-reporting";
 
 interface DoctorReportRow {
   doctor_id:    string;
   doctor_name:  string;
   specialty:    string | null;
-  profilesSent: number;
   shortlists:   number;
   interviews:   number;
+  offers:       number;
   signed:       boolean;
   joined:       boolean;
   paid:         boolean;
-  hospitals:    string[];          // distinct hospitals the doctor was sent to
-  lastActivity: string | null;     // ISO of most recent run's last_event_at
+  hospitals:    string[];          // distinct hospitals this doctor was put to
+  lastActivity: string | null;     // ISO of the most recent milestone in range
 }
 
 type DocSortKey =
-  | "doctor_name" | "specialty" | "profilesSent" | "shortlists"
-  | "interviews"  | "signed"    | "joined"       | "hospitals" | "last";
+  | "doctor_name" | "specialty" | "shortlists" | "interviews"
+  | "offers"      | "signed"    | "joined"     | "hospitals" | "last";
 
-/** Resolve a doctor's specialty by trying the most reliable sources
- *  in order: explicit run metadata → CV-extracted doctor profile →
- *  Zoho lead/DoB record. Returns the first non-empty hit. */
+/** Resolve a doctor's specialty by trying the most reliable sources in order:
+ *  the placement row → CV-extracted doctor profile → Zoho lead/DoB record. */
 function resolveSpecialty(
   doctorId: string,
-  runMetadataSpec: string | null | undefined,
+  attemptSpec: string | null | undefined,
   profileMap: Map<string, { title?: string | null; area_of_interest?: string | null }>,
   zohoSpecMap: Map<string, string>,
 ): string | null {
-  if (runMetadataSpec && runMetadataSpec.trim()) return runMetadataSpec.trim();
+  if (attemptSpec && attemptSpec.trim()) return attemptSpec.trim();
   const profile = profileMap.get(doctorId);
   if (profile?.title?.trim()) return profile.title.trim();
   if (profile?.area_of_interest?.trim()) return profile.area_of_interest.trim();
@@ -59,71 +64,68 @@ function resolveSpecialty(
   return null;
 }
 
+const [SHORTLISTED, INTERVIEWED, OFFERED, SIGNED, RELOCATED, PAID] = STAGES;
+
+/**
+ * Fold placement rows into one row per doctor.
+ *
+ * `range` gates the COUNTS, not the doctor: a doctor whose only in-window
+ * event is an interview still shows their signed/joined badges, because those
+ * are statements about the person rather than about the window. Rows with no
+ * in-window milestone at all are dropped by the caller.
+ */
 function aggregateDoctorRows(
-  runs: FlowRun[],
-  lifecycles: DoctorLifecycle[],
+  attempts: PlacementAttempt[],
+  range: DateRange,
   profileMap: Map<string, { title?: string | null; area_of_interest?: string | null }>,
   zohoSpecMap: Map<string, string>,
 ): DoctorReportRow[] {
   const byDoctor = new Map<string, DoctorReportRow>();
-  const lifeMap = new Map<string, DoctorLifecycle>();
-  for (const l of lifecycles) lifeMap.set(l.doctor_id, l);
 
-  for (const r of runs) {
-    if (!r.doctor_id) continue;
-    let row = byDoctor.get(r.doctor_id);
+  for (const a of attempts) {
+    if (!a.doctor_id) continue;
+    let row = byDoctor.get(a.doctor_id);
     if (!row) {
-      const runSpec = (r.metadata as Record<string, unknown> | null)?.doctor_speciality as string | undefined;
-      const life = lifeMap.get(r.doctor_id);
       row = {
-        doctor_id:    r.doctor_id,
-        doctor_name:  r.doctor_name ?? life?.doctor_name ?? r.doctor_id,
-        specialty:    resolveSpecialty(r.doctor_id, runSpec, profileMap, zohoSpecMap),
-        profilesSent: 0,
-        shortlists:   0,
-        interviews:   0,
-        signed:       !!life?.signed_at,
-        joined:       !!life?.joined_at,
-        paid:         !!life?.paid_at,
+        doctor_id:    a.doctor_id,
+        doctor_name:  a.doctor_name ?? a.doctor_id,
+        specialty:    resolveSpecialty(a.doctor_id, a.doctor_specialty, profileMap, zohoSpecMap),
+        shortlists:   0, interviews: 0, offers: 0,
+        signed:       false, joined: false, paid: false,
         hospitals:    [],
         lastActivity: null,
       };
-      byDoctor.set(r.doctor_id, row);
+      byDoctor.set(a.doctor_id, row);
     }
-    if (r.flow_key === "profile_sent") row.profilesSent++;
-    if (r.flow_key === "shortlist")    row.shortlists++;
-    if (r.flow_key === "interview")    row.interviews++;
-    if (r.hospital && !row.hospitals.includes(r.hospital)) row.hospitals.push(r.hospital);
+    // Specialty can be blank on one attempt and filled on another — take the
+    // first row that actually knows.
+    if (!row.specialty) row.specialty = resolveSpecialty(a.doctor_id, a.doctor_specialty, profileMap, zohoSpecMap);
 
-    const lastEvt = r.last_event_at ?? r.started_at;
-    if (lastEvt && (!row.lastActivity || new Date(lastEvt) > new Date(row.lastActivity))) {
-      row.lastActivity = lastEvt;
+    const hospital = a.hospital_name?.trim();
+    if (hospital && !row.hospitals.includes(hospital)) row.hospitals.push(hospital);
+
+    if (inRange(stageAt(a, SHORTLISTED), range)) row.shortlists++;
+    if (inRange(stageAt(a, INTERVIEWED), range)) row.interviews++;
+    if (inRange(stageAt(a, OFFERED),     range)) row.offers++;
+
+    // Status badges are unconditional: "signed" doesn't stop being true
+    // because you narrowed the date filter.
+    if (stageAt(a, SIGNED)    != null) row.signed = true;
+    if (stageAt(a, RELOCATED) != null) row.joined = true;
+    if (stageAt(a, PAID)      != null) row.paid   = true;
+
+    for (const s of STAGES) {
+      const t = stageAt(a, s);
+      if (!inRange(t, range)) continue;
+      if (!row.lastActivity || t! > new Date(row.lastActivity).getTime()) {
+        row.lastActivity = new Date(t!).toISOString();
+      }
     }
-  }
-
-  // Include lifecycles for doctors with no runs but with a milestone
-  // logged (e.g. team backfilled placements before any flow ran).
-  for (const l of lifecycles) {
-    if (byDoctor.has(l.doctor_id)) continue;
-    if (!l.shortlisted_at && !l.interviewed_at && !l.signed_at && !l.joined_at) continue;
-    byDoctor.set(l.doctor_id, {
-      doctor_id:    l.doctor_id,
-      doctor_name:  l.doctor_name ?? l.doctor_id,
-      specialty:    resolveSpecialty(l.doctor_id, null, profileMap, zohoSpecMap),
-      profilesSent: 0,
-      shortlists:   l.shortlisted_at ? 1 : 0,
-      interviews:   l.interviewed_at ? 1 : 0,
-      signed:       !!l.signed_at,
-      joined:       !!l.joined_at,
-      paid:         !!l.paid_at,
-      hospitals:    l.placement_hospital_name ? [l.placement_hospital_name] : [],
-      lastActivity: l.updated_at,
-    });
   }
 
   return Array.from(byDoctor.values()).sort((a, b) => {
-    // Sort: paid doctors at the bottom, then those with the most recent
-    // activity, then name.
+    // Default order: paid doctors at the bottom (nothing left to chase), then
+    // most recent activity, then name.
     if (a.paid !== b.paid) return a.paid ? 1 : -1;
     if (a.lastActivity && b.lastActivity) return new Date(b.lastActivity).getTime() - new Date(a.lastActivity).getTime();
     if (a.lastActivity) return -1;
@@ -143,8 +145,8 @@ function relativeShort(iso: string | null | undefined): string {
 }
 
 export interface DoctorTableProps {
-  /** Show only doctors with at least one run-event or milestone date
-   *  within the last N days. When null, no time filter (all doctors). */
+  /** Show only doctors with at least one milestone within the last N days.
+   *  When null, no time filter (all doctors). */
   rangeDays?: number | null;
   hospital?:  string | null;
   specialty?: string | null;
@@ -158,49 +160,15 @@ export interface DoctorTableProps {
 export function DoctorTable({ rangeDays, hospital, specialty, open, onOpenChange }: DoctorTableProps = {}) {
   const collapsible = onOpenChange !== undefined;
   const isOpen = collapsible ? !!open : true;
-  // Paginate both queries — Supabase API gateway caps at 1000 server-
-  // side regardless of .limit().
-  const { data: runs = [], isLoading: rl } = useQuery<FlowRun[]>({
-    queryKey: ["doctor-table-runs"],
-    queryFn: async () => {
-      const PAGE = 1000;
-      const all: FlowRun[] = [];
-      for (let from = 0; from < 50_000; from += PAGE) {
-        const { data, error } = await supabase
-          .from("automation_flow_runs").select("*")
-          .order("started_at", { ascending: false })
-          .range(from, from + PAGE - 1);
-        if (error) throw error;
-        const batch = (data ?? []) as FlowRun[];
-        all.push(...batch);
-        if (batch.length < PAGE) break;
-      }
-      return all;
-    },
-    staleTime: 60_000,
-  });
-  const { data: lifecycles = [], isLoading: ll } = useQuery<DoctorLifecycle[]>({
-    queryKey: ["doctor-table-lifecycles"],
-    queryFn: async () => {
-      const PAGE = 1000;
-      const all: DoctorLifecycle[] = [];
-      for (let from = 0; from < 50_000; from += PAGE) {
-        const { data, error } = await supabase.from("doctor_lifecycle").select("*")
-          .range(from, from + PAGE - 1);
-        if (error) throw error;
-        const batch = (data ?? []) as DoctorLifecycle[];
-        all.push(...batch);
-        if (batch.length < PAGE) break;
-      }
-      return all;
-    },
-    staleTime: 60_000,
-  });
+
+  // One source, shared with the rest of Reports through React Query's cache —
+  // so this table can't disagree with the tiles above it.
+  const { data: attempts = [], isLoading: al } = usePlacementAttempts();
 
   // Pull specialty from the most reliable sources: CV-extracted
   // doctor_profiles.title first (most accurate), Zoho leads + DoB
-  // second. Without this, the column was '—' for every row because
-  // run.metadata.doctor_speciality is rarely populated.
+  // second. placement_attempts.doctor_specialty is often blank on the
+  // imported rows.
   const { data: profiles = [] } = useDoctorProfiles();
   const { data: zoho }          = useZohoData();
 
@@ -223,28 +191,26 @@ export function DoctorTable({ rangeDays, hospital, specialty, open, onOpenChange
     return m;
   }, [zoho?.rawLeads, zoho?.rawDoctorsOnBoard]);
 
+  // A very large rangeDays ("All") still produces a real window — one that
+  // starts long before the earliest imported row — so the counting path is
+  // identical either way.
+  const range = useMemo(() => defaultRange(rangeDays ?? 36_500), [rangeDays]);
+
   const allRows = useMemo(
-    () => aggregateDoctorRows(runs, lifecycles, profileMap, zohoSpecMap),
-    [runs, lifecycles, profileMap, zohoSpecMap],
+    () => aggregateDoctorRows(attempts, range, profileMap, zohoSpecMap),
+    [attempts, range, profileMap, zohoSpecMap],
   );
 
-  // Apply the Reports top-bar filters here so the table follows the
-  // 7/30/90-day selector + hospital/specialty pickers consistently
-  // with the rest of the page.
-  const rows = useMemo(() => {
-    if (!rangeDays && !hospital && !specialty) return allRows;
-    const cutoffMs = rangeDays ? Date.now() - rangeDays * 86_400_000 : 0;
-    return allRows.filter(r => {
-      if (rangeDays) {
-        if (!r.lastActivity) return false;
-        if (new Date(r.lastActivity).getTime() < cutoffMs) return false;
-      }
-      if (hospital  && !r.hospitals.some(h => h.toLowerCase().includes(hospital.toLowerCase()))) return false;
-      if (specialty && !(r.specialty ?? "").toLowerCase().includes(specialty.toLowerCase()))   return false;
-      return true;
-    });
-  }, [allRows, rangeDays, hospital, specialty]);
-  const loading = rl || ll;
+  // The Reports top-bar hospital/specialty pickers. The date range is already
+  // applied inside the aggregate, so here it only decides whether a doctor
+  // with zero in-window milestones is shown at all.
+  const rows = useMemo(() => allRows.filter(r => {
+    if (!r.lastActivity) return false;
+    if (hospital  && !r.hospitals.some(h => h.toLowerCase().includes(hospital.toLowerCase()))) return false;
+    if (specialty && !(r.specialty ?? "").toLowerCase().includes(specialty.toLowerCase()))     return false;
+    return true;
+  }), [allRows, hospital, specialty]);
+  const loading = al;
 
   // Sorting sits on top of the filtered set, so it reorders rows without
   // changing which doctors qualify. Default is most-recently-active first —
@@ -288,7 +254,7 @@ export function DoctorTable({ rangeDays, hospital, specialty, open, onOpenChange
         )}
       </CardTitle>
       <CardDescription className="text-[11px]">
-        Each row is one doctor across their pipeline. Mirrors the hospital table; useful for tracking individual journeys.
+        Each row is one doctor across their pipeline, from the imported sheet and the Processing page. Stage counts are per hospital, so a doctor shortlisted at three accounts shows 3.
       </CardDescription>
     </div>
   );
@@ -311,7 +277,7 @@ export function DoctorTable({ rangeDays, hospital, specialty, open, onOpenChange
           <div className="px-4 py-6 text-[11px] text-muted-foreground">Loading…</div>
         ) : rows.length === 0 ? (
           <div className="px-4 py-12 text-center text-[12px] text-muted-foreground">
-            No doctor activity yet. Send a profile from Automations or log a milestone in Doctor Profiles to populate this table.
+            No placement activity in this range. Mark a stage on the Processing page, or import an updated sheet.
           </div>
         ) : (
           <div className="overflow-x-auto">
@@ -320,9 +286,9 @@ export function DoctorTable({ rangeDays, hospital, specialty, open, onOpenChange
                 <TableRow>
                   <SortHead sort={sort} sortKey="doctor_name" numeric={false}>Doctor</SortHead>
                   <SortHead sort={sort} sortKey="specialty"   numeric={false}>Specialty</SortHead>
-                  <SortHead sort={sort} sortKey="profilesSent">Profiles sent</SortHead>
                   <SortHead sort={sort} sortKey="shortlists">Shortlists</SortHead>
                   <SortHead sort={sort} sortKey="interviews">Interviews</SortHead>
+                  <SortHead sort={sort} sortKey="offers">Offers</SortHead>
                   <SortHead sort={sort} sortKey="signed">Signed</SortHead>
                   <SortHead sort={sort} sortKey="joined">Joined</SortHead>
                   <SortHead sort={sort} sortKey="hospitals">Hospitals</SortHead>
@@ -334,9 +300,9 @@ export function DoctorTable({ rangeDays, hospital, specialty, open, onOpenChange
                   <TableRow key={r.doctor_id}>
                     <TableCell className="text-[12px] font-medium">{r.doctor_name}</TableCell>
                     <TableCell className="text-[12px]">{r.specialty ?? "—"}</TableCell>
-                    <TableCell className="text-[12px] text-right tabular-nums">{r.profilesSent}</TableCell>
                     <TableCell className="text-[12px] text-right tabular-nums">{r.shortlists}</TableCell>
                     <TableCell className="text-[12px] text-right tabular-nums">{r.interviews}</TableCell>
+                    <TableCell className="text-[12px] text-right tabular-nums">{r.offers}</TableCell>
                     <TableCell className="text-right">
                       {r.signed
                         ? <Badge variant="outline" className="bg-emerald-50 text-emerald-700 border-emerald-200 text-[9px]">Signed</Badge>

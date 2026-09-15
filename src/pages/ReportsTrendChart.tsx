@@ -1,6 +1,6 @@
 import { useMemo, useState } from "react";
 import { ResponsiveContainer, LineChart, Line, XAxis, YAxis, Tooltip as ChartTooltip, CartesianGrid, Legend } from "recharts";
-import type { useReportingMetrics } from "@/hooks/use-reporting-metrics";
+import type { TrendBucket } from "@/lib/placement-reporting";
 import { ChartSkeleton } from "@/components/reports/Skeletons";
 
 /**
@@ -19,7 +19,10 @@ import { ChartSkeleton } from "@/components/reports/Skeletons";
  * local parts (never an ISO round-trip) so they don't drift a day in
  * off-UTC timezones the way `new Date("YYYY-MM-01")` would.
  */
-type WeeklyBucket = ReturnType<typeof useReportingMetrics>["trend"][number];
+// Weekly buckets now come straight out of placement_attempts (the sheet +
+// the Processing page) rather than the sends machinery. The shape is
+// unchanged, so the chart itself didn't need touching.
+type WeeklyBucket = TrendBucket;
 type Granularity = "week" | "month";
 
 function rollupMonthly(weekly: WeeklyBucket[]) {
