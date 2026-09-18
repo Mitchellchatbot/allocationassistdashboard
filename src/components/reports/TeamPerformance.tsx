@@ -26,7 +26,6 @@ import { buildHospitalMatcher } from "@/lib/hospital-rep";
 import { HI_TEAM_MEMBERS, findHiMemberByEmail } from "@/lib/hi-team";
 import { RepRowsSkeleton, STAGE_COL } from "@/components/reports/Skeletons";
 import { useSort, SortLabel } from "@/components/reports/sortable";
-import { Hint, HintTitle, HintNote, HoverInfo } from "@/components/reports/HoverHint";
 
 interface Props {
   range:      { from: Date; to: Date };
@@ -156,37 +155,14 @@ export function TeamPerformance({ range, hospital, specialty }: Props) {
 
   const loading = isLoading || hospitalsLoading;
 
-  // Leaderboard cards: ranked by signings, then relocations, then shortlists.
-  const ranked = useMemo(
-    () => [...rows].sort((a, b) =>
-      b.counts.signed.size - a.counts.signed.size ||
-      b.counts.relocated.size - a.counts.relocated.size ||
-      b.counts.shortlisted.size - a.counts.shortlisted.size),
-    [rows],
-  );
-  const openBook = (email: string) => {
-    setExpanded(s => ({ ...s, [email]: true }));
-    requestAnimationFrame(() => document.getElementById("s-team")?.scrollIntoView({ behavior: "smooth", block: "start" }));
-  };
-
   return (
-    <div className="space-y-6">
-    <div className="grid grid-cols-2 lg:grid-cols-4 gap-4" id="s-reps">
-      {loading
-        ? Array.from({ length: 4 }).map((_, i) => <div key={i} className="h-[108px] rounded-xl bg-muted/40 animate-pulse" />)
-        : ranked.map((r, i) => <RepCard key={r.email} row={r} rank={i + 1} tone={REP_TONES[i % REP_TONES.length]} delay={i * 50} onOpen={() => openBook(r.email)} />)}
-    </div>
-    <Card id="s-team">
+    <Card>
       <CardHeader className="pb-2">
         <CardTitle className="text-base flex items-center gap-2">
           <Users className="h-4 w-4 text-violet-600" /> Team performance
-          <HoverInfo
-            meaning="Each member's allocated hospitals and everything those accounts delivered in the period. Distinct doctors, same source as the Overview scoreboard. Hospitals with nothing moving still show inside the book."
-            source="hospitals.owner_email × placement_attempts."
-          />
         </CardTitle>
         <CardDescription className="text-[11px]">
-          Credit follows the hospital's representative. Click a row (or a card above) to open that member's book.
+          Each member's allocated hospitals and everything those accounts delivered in the range. Expand a row to see the book. Distinct doctors, same source as the Overview scoreboard.
         </CardDescription>
       </CardHeader>
       <CardContent>
@@ -236,74 +212,6 @@ export function TeamPerformance({ range, hospital, specialty }: Props) {
         )}
       </CardContent>
     </Card>
-    </div>
-  );
-}
-
-// Literal class strings (Tailwind only keeps classes it can see written out).
-const REP_TONES = [
-  { bg: "bg-violet-50",  bar: "bg-violet-600",  text: "text-violet-600",  chip: "text-violet-700" },
-  { bg: "bg-sky-50",     bar: "bg-sky-600",     text: "text-sky-600",     chip: "text-sky-700" },
-  { bg: "bg-amber-50",   bar: "bg-amber-600",   text: "text-amber-600",   chip: "text-amber-700" },
-  { bg: "bg-rose-50",    bar: "bg-rose-600",    text: "text-rose-600",    chip: "text-rose-700" },
-  { bg: "bg-emerald-50", bar: "bg-emerald-600", text: "text-emerald-600", chip: "text-emerald-700" },
-] as const;
-
-const STAGE_HEX: Record<StageKey, string> = {
-  shortlisted: "#4f46e5", interviewed: "#0284c7", offered: "#d97706", signed: "#059669", relocated: "#047857",
-};
-
-/** One rep, in the Dashboard's KPI-card style: signings up front, the stage mix underneath. */
-function RepCard({ row, rank, tone, delay, onOpen }: {
-  row: RepRow; rank: number; tone: (typeof REP_TONES)[number]; delay: number; onOpen: () => void;
-}) {
-  const initials = row.name.split(/\s+/).slice(0, 2).map(w => w[0]).join("").toUpperCase();
-  const active = row.hospitals.filter(h => totalOf(h.counts) > 0);
-  const quiet = row.hospitals.length - active.length;
-  const busiest = [...active].sort((a, b) => totalOf(b.counts) - totalOf(a.counts))[0];
-  const total = totalOf(row.counts);
-  return (
-    <Hint content={
-      <>
-        <HintTitle>{row.name} · #{rank} by signings</HintTitle>
-        <p>{row.hospitals.length} hospital{row.hospitals.length === 1 ? "" : "s"} in the book · {active.length} active{quiet ? `, ${quiet} quiet` : ""}</p>
-        {busiest && <p>Busiest: {busiest.name}</p>}
-        <div className="mt-1.5 grid grid-cols-[auto_auto] gap-x-3.5">
-          {STAGES.map(s => (
-            <div key={s.key} className="contents">
-              <span className="text-muted-foreground">{s.label}</span>
-              <b className="tabular-nums">{row.counts[s.key].size}</b>
-            </div>
-          ))}
-        </div>
-        <HintNote>Click to open the book in the table below.</HintNote>
-      </>
-    }>
-      <button
-        type="button"
-        onClick={onOpen}
-        className={`relative h-[108px] w-full text-left rounded-xl border border-kpi/60 ${tone.bg} shadow-sm transition-all duration-200 hover:shadow-md hover:scale-[1.01] overflow-hidden flex flex-col aa-fade-up`}
-        style={{ animationDelay: `${delay}ms` }}
-      >
-        <div className={`h-1 shrink-0 w-full ${tone.bar}`} />
-        <div className="px-4 py-3 flex-1 w-full flex flex-col justify-between">
-          <div className="flex items-center gap-2 min-w-0">
-            <span className={`h-7 w-7 rounded-full bg-card/80 ${tone.chip} text-[10px] font-bold flex items-center justify-center shrink-0`}>{initials}</span>
-            <p className="text-[11px] font-medium text-muted-foreground truncate flex-1">{row.name}</p>
-            <span className={`text-[10px] font-semibold ${tone.chip}`}>#{rank}</span>
-          </div>
-          <div className="flex items-baseline gap-1.5">
-            <p className={`text-[24px] font-bold tabular-nums leading-none ${tone.text}`}>{row.counts.signed.size}</p>
-            <span className="text-[10px] text-muted-foreground">signed · {row.hospitals.length} hospital{row.hospitals.length === 1 ? "" : "s"}</span>
-          </div>
-          <div className="flex h-1.5 rounded-full overflow-hidden gap-px bg-card/60">
-            {total > 0 && STAGES.map(s => (
-              <span key={s.key} style={{ flex: row.counts[s.key].size, background: STAGE_HEX[s.key] }} />
-            ))}
-          </div>
-        </div>
-      </button>
-    </Hint>
   );
 }
 

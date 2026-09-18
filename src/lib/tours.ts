@@ -79,7 +79,7 @@ const PAGE_INTRO_STEPS: Record<string, TourStep> = {
   "/batches":     { route: "/batches",           target: "batches-rotation",  placement: "auto",
     title: "Batch Sends", body: "Country-by-country broadcasts to hospital recruiters: the daily picks, the Tuesday top 15, and the specialty of the day." },
   "/reports":     { route: "/reports",           target: "reports-filters",   placement: "bottom",
-    title: "Reports", body: "How things are tracking, one week, month or year at a time. Pick the period here, then use the arrows on either side of the report to step back and forward — hover an arrow to jump straight to any week or month." },
+    title: "Reports", body: "How things are tracking, plus the placements tracker (one row per doctor-and-hospital pair). Filter by hospital, person, specialty, or date." },
   "/forms":       { route: "/forms",             target: "forms-tabs",        placement: "bottom",
     title: "Forms", body: "Every submission from the public forms. Triage outreach, link to Zoho, and stage doctor profiles for the website." },
   "/sales":       { route: "/sales",             target: "sales-kpis",        placement: "auto",
