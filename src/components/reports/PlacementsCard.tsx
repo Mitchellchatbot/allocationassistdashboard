@@ -35,6 +35,7 @@ import { useHospitals, type Hospital } from "@/hooks/use-hospitals";
 import { useZohoData } from "@/hooks/use-zoho-data";
 import { toast } from "sonner";
 import { CsvImportDialog } from "@/components/reports/CsvImportDialog";
+import { Hint, HintTitle, HintNote } from "@/components/reports/HoverHint";
 
 const fmtDate = (iso: string | null | undefined): string => {
   if (!iso) return "—";
@@ -51,18 +52,32 @@ const daysSince = (iso: string | null): number | null => {
 };
 
 const PaymentStatus = memo(function PaymentStatus({ row }: { row: PlacementAttempt }) {
+  const joined = row.joined_at ? fmtDate(row.joined_at) : null;
+  const dueIso = row.joined_at ? new Date(new Date(row.joined_at).getTime() + 45 * 86_400_000).toISOString() : null;
+  const hint = (body: React.ReactNode) => (
+    <><HintTitle>45-day payment clock</HintTitle>{body}<HintNote>Starts on Joined, stops when the invoice is marked paid.</HintNote></>
+  );
   if (row.paid_at) {
-    return <Badge variant="outline" className="bg-emerald-50 text-emerald-700 border-emerald-200 text-[9px]">Paid</Badge>;
+    return (
+      <Hint content={hint(<>Joined {joined ?? "—"} · invoice paid {fmtDate(row.paid_at)}</>)}>
+        <span tabIndex={0} className="inline-flex"><Badge variant="outline" className="bg-emerald-50 text-emerald-700 border-emerald-200 text-[9px] cursor-default">Paid</Badge></span>
+      </Hint>
+    );
   }
   const days = daysSince(row.joined_at);
   if (days == null) return <span className="text-[10px] text-muted-foreground">—</span>;
   const remaining = 45 - days;
-  if (remaining < 0)        return <Badge variant="outline" className="bg-rose-50 text-rose-700 border-rose-200 text-[9px]">Overdue · {Math.abs(remaining)}d</Badge>;
-  if (remaining <= 15)      return <Badge variant="outline" className="bg-amber-50 text-amber-700 border-amber-200 text-[9px]">Due in {remaining}d</Badge>;
-  return <Badge variant="outline" className="bg-sky-50 text-sky-700 border-sky-200 text-[9px]">{remaining}d left</Badge>;
+  const detail = hint(<>Joined {joined} · 45-day mark {remaining < 0 ? "was" : "is"} {fmtDate(dueIso)}</>);
+  if (remaining < 0)        return <Hint content={detail}><span tabIndex={0} className="inline-flex"><Badge variant="outline" className="bg-rose-50 text-rose-700 border-rose-200 text-[9px] cursor-default">Overdue · {Math.abs(remaining)}d</Badge></span></Hint>;
+  if (remaining <= 15)      return <Hint content={detail}><span tabIndex={0} className="inline-flex"><Badge variant="outline" className="bg-amber-50 text-amber-700 border-amber-200 text-[9px] cursor-default">Due in {remaining}d</Badge></span></Hint>;
+  return <Hint content={detail}><span tabIndex={0} className="inline-flex"><Badge variant="outline" className="bg-sky-50 text-sky-700 border-sky-200 text-[9px] cursor-default">{remaining}d left</Badge></span></Hint>;
 });
 
 export interface PlacementsCardProps {
+  /** Show only attempts with at least one milestone inside this window (the
+   *  Reports page's selected week / month / year). Takes precedence over
+   *  `rangeDays`. */
+  range?: { from: Date; to: Date } | null;
   /** Show only attempts whose MOST RECENT milestone date falls within
    *  the last N days. When null, no time filter applied (all rows). */
   rangeDays?: number | null;
@@ -90,7 +105,12 @@ function latestMilestone(r: PlacementAttempt): string | null {
   return r.paid_at || r.joined_at || r.start_date || r.signed_at || r.offered_at || r.interviewed_at || r.shortlisted_at;
 }
 
-export function PlacementsCard({ rangeDays, hospital, specialty, open, onOpenChange }: PlacementsCardProps = {}) {
+/** Every date a row carries — used to decide whether it "happened" in a window. */
+function milestones(r: PlacementAttempt): Array<string | null> {
+  return [r.shortlisted_at, r.interviewed_at, r.offered_at, r.signed_at, r.start_date, r.joined_at, r.relocated_at, r.paid_at];
+}
+
+export function PlacementsCard({ range, rangeDays, hospital, specialty, open, onOpenChange }: PlacementsCardProps = {}) {
   // When the caller drives a Collapsible, header is the trigger + body is
   // gated. When not, the section is permanently open (legacy behaviour).
   const collapsible = onOpenChange !== undefined;
@@ -101,8 +121,17 @@ export function PlacementsCard({ rangeDays, hospital, specialty, open, onOpenCha
   // result of this so 'find Anas in last 30d' works.
   const rows = useMemo(() => {
     const cutoffMs = rangeDays ? Date.now() - rangeDays * 86_400_000 : 0;
+    const lo = range ? range.from.getTime() : 0;
+    const hi = range ? range.to.getTime() + 86_400_000 : 0;   // inclusive end-of-day
     return rawRows.filter(r => {
-      if (rangeDays) {
+      if (range) {
+        const hit = milestones(r).some(iso => {
+          if (!iso) return false;
+          const t = new Date(iso).getTime();
+          return !isNaN(t) && t >= lo && t < hi;
+        });
+        if (!hit) return false;
+      } else if (rangeDays) {
         const latest = latestMilestone(r);
         if (!latest) return false;
         if (new Date(latest).getTime() < cutoffMs) return false;
@@ -111,7 +140,7 @@ export function PlacementsCard({ rangeDays, hospital, specialty, open, onOpenCha
       if (specialty && !(r.doctor_specialty ?? "").toLowerCase().includes(specialty.toLowerCase())) return false;
       return true;
     });
-  }, [rawRows, rangeDays, hospital, specialty]);
+  }, [rawRows, range, rangeDays, hospital, specialty]);
   const { data: zoho }                 = useZohoData();
   const [editingId, setEditingId] = useState<string | null>(null);
   const [pickerOpen, setPickerOpen] = useState(false);
@@ -218,7 +247,7 @@ export function PlacementsCard({ rangeDays, hospital, specialty, open, onOpenCha
   const PAGE_FIRST = 5;
   const PAGE_STEP  = 10;
   const [visibleCount, setVisibleCount] = useState(PAGE_FIRST);
-  useEffect(() => { setVisibleCount(PAGE_FIRST); }, [search, hospital, specialty, rangeDays]);
+  useEffect(() => { setVisibleCount(PAGE_FIRST); }, [search, hospital, specialty, rangeDays, range]);
   const visibleRows = sorted.slice(0, visibleCount);
   const remaining   = filtered.length - visibleRows.length;
 

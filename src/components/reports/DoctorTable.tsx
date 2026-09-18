@@ -145,6 +145,9 @@ function relativeShort(iso: string | null | undefined): string {
 }
 
 export interface DoctorTableProps {
+  /** Count only milestones inside this window (the Reports page's selected
+   *  week / month / year). Takes precedence over `rangeDays`. */
+  range?: { from: Date; to: Date } | null;
   /** Show only doctors with at least one milestone within the last N days.
    *  When null, no time filter (all doctors). */
   rangeDays?: number | null;
@@ -157,7 +160,7 @@ export interface DoctorTableProps {
   onOpenChange?: (open: boolean) => void;
 }
 
-export function DoctorTable({ rangeDays, hospital, specialty, open, onOpenChange }: DoctorTableProps = {}) {
+export function DoctorTable({ range: rangeProp, rangeDays, hospital, specialty, open, onOpenChange }: DoctorTableProps = {}) {
   const collapsible = onOpenChange !== undefined;
   const isOpen = collapsible ? !!open : true;
 
@@ -194,7 +197,7 @@ export function DoctorTable({ rangeDays, hospital, specialty, open, onOpenChange
   // A very large rangeDays ("All") still produces a real window — one that
   // starts long before the earliest imported row — so the counting path is
   // identical either way.
-  const range = useMemo(() => defaultRange(rangeDays ?? 36_500), [rangeDays]);
+  const range = useMemo(() => rangeProp ?? defaultRange(rangeDays ?? 36_500), [rangeProp, rangeDays]);
 
   const allRows = useMemo(
     () => aggregateDoctorRows(attempts, range, profileMap, zohoSpecMap),
@@ -235,7 +238,7 @@ export function DoctorTable({ rangeDays, hospital, specialty, open, onOpenChange
   const PAGE_FIRST = 10;
   const PAGE_STEP  = 10;
   const [visibleCount, setVisibleCount] = useState(PAGE_FIRST);
-  useEffect(() => { setVisibleCount(PAGE_FIRST); }, [rangeDays, hospital, specialty]);
+  useEffect(() => { setVisibleCount(PAGE_FIRST); }, [range, hospital, specialty]);
   const visibleRows = sorted.slice(0, visibleCount);
   const remaining   = rows.length - visibleRows.length;
 
