@@ -32,6 +32,9 @@ export interface PlacementAttempt {
   paid_at:          string | null;
   notes:            string | null;
   source:           string;
+  /** When a person last changed this row in the app. Set, the sheet importer
+   *  leaves the row alone. */
+  manual_edited_at: string | null;
   created_by:       string | null;
   created_at:       string;
   updated_at:       string;
@@ -126,6 +129,8 @@ export function useUpsertPlacementAttempt() {
         notes:            input.notes ?? null,
         source:           input.source ?? "manual",
         created_by:       createdBy,
+        // Typed by a person: from here on the sheet importer keeps its hands off.
+        manual_edited_at: new Date().toISOString(),
         updated_at:       new Date().toISOString(),
       };
       // Upsert on the (doctor_id, hospital_name) unique key so calling
@@ -163,8 +168,11 @@ export function useUpsertPlacementAttempt() {
   });
 }
 
-/** The five milestones the /processing tracker marks. */
-export type MilestoneColumn =
+/** The five milestones the /processing tracker marks. Not MilestoneColumn:
+ *  that one is the importer's six columns and includes start_date, which the
+ *  tracker has no button for. Both names used to live here, and the second
+ *  declaration silently won. */
+export type MarkableMilestone =
   | "shortlisted_at" | "interviewed_at" | "offered_at" | "signed_at" | "joined_at";
 
 /**
@@ -178,10 +186,10 @@ export type MilestoneColumn =
 export function useMarkPlacementMilestone() {
   const qc = useQueryClient();
   return useMutation({
-    mutationFn: async ({ id, column, date }: { id: string; column: MilestoneColumn; date: string | null }) => {
+    mutationFn: async ({ id, column, date }: { id: string; column: MarkableMilestone; date: string | null }) => {
       const { error } = await supabase
         .from("placement_attempts")
-        .update({ [column]: date, updated_at: new Date().toISOString() })
+        .update({ [column]: date, manual_edited_at: new Date().toISOString(), updated_at: new Date().toISOString() })
         .eq("id", id);
       if (error) throw error;
     },
@@ -275,10 +283,44 @@ export type MilestoneColumn = typeof MILESTONE_COLUMNS[number];
 export interface MergePlan {
   inserts: UpsertAttemptInput[];
   /** Existing row id → the full merged milestone set to write. */
-  updates: Array<{ id: string; row: PlacementAttempt; merged: Record<MilestoneColumn, string | null>; filled: MilestoneColumn[]; notes: string | null }>;
+  updates: Array<{
+    id: string;
+    row: PlacementAttempt;
+    merged: Record<MilestoneColumn, string | null>;
+    /** Stages that were blank here and arrive from the sheet. */
+    filled: MilestoneColumn[];
+    /** Stages the sheet gives a DIFFERENT date for, inside a month it owns. */
+    corrected: MilestoneColumn[];
+    /** Stages the sheet no longer records at all, inside a month it owns. */
+    cleared: MilestoneColumn[];
+    notes: string | null;
+  }>;
   /** Parsed rows that matched an existing row and added nothing new. */
   unchanged: number;
+  /** Rows a person edited in the app, left untouched. */
+  protected: number;
 }
+
+export interface ImportPlanOptions {
+  /**
+   * Months (YYYY-MM) the uploaded sheets speak for — normally the months of
+   * their week headers. Inside these months the sheet is the truth: a date
+   * that disagrees is corrected, and a stage the sheet no longer records is
+   * cleared. Outside them the old rule stands: earliest date wins and nothing
+   * is removed. With none given, nothing is corrected or cleared.
+   */
+  authoritativeMonths?: Iterable<string>;
+}
+
+/** Compare two timestamps by instant, never as text: the database hands back
+ *  "2026-01-05T00:00:00+00:00" while the parser produces
+ *  "2026-01-05T00:00:00.000Z" — the same moment, different strings. */
+const at = (iso: string | null) => (iso ? Date.parse(iso) : NaN);
+const sameInstant = (a: string | null, b: string | null) => at(a) === at(b);
+
+/** A row whose dates came from a sheet and that nobody has edited by hand. */
+const sheetOwned = (row: PlacementAttempt) =>
+  !row.manual_edited_at && ["csv_import", "monthly_report_import", "csv_seed_2026_01"].includes(row.source);
 
 const mergeKey = (doctorId: string, hospital: string) =>
   `${doctorId}|${hospital.toLowerCase().replace(/\s*-\s*/g, "-").replace(/\s+/g, " ").trim()}`;
@@ -286,7 +328,7 @@ const mergeKey = (doctorId: string, hospital: string) =>
 /** Earliest date wins: a doctor shortlisted in July and again in August is one
  *  journey, and the July date is when it actually happened. */
 const earlier = (a: string | null, b: string | null) =>
-  a && b ? (a < b ? a : b) : (a ?? b);
+  a && b ? (Date.parse(a) <= Date.parse(b) ? a : b) : (a ?? b);
 
 const joinNotes = (a: string | null | undefined, b: string | null | undefined) => {
   const parts = [...(a ?? "").split(" · "), ...(b ?? "").split(" · ")].map(s => s.trim()).filter(Boolean);
@@ -301,7 +343,13 @@ const joinNotes = (a: string | null | undefined, b: string | null | undefined) =
  * journey each, and an existing row only ever gains dates it was missing. A
  * date already in the database is never overwritten by a later sheet.
  */
-export function planPlacementImport(rows: UpsertAttemptInput[], existing: PlacementAttempt[]): MergePlan {
+export function planPlacementImport(
+  rows: UpsertAttemptInput[],
+  existing: PlacementAttempt[],
+  options: ImportPlanOptions = {},
+): MergePlan {
+  const owns = new Set(options.authoritativeMonths ?? []);
+  const inOwnedMonth = (iso: string | null) => !!iso && owns.has(iso.slice(0, 7));
   const collapsed = new Map<string, UpsertAttemptInput>();
   for (const r of rows) {
     const k = mergeKey(r.doctor_id, r.hospital_name);
@@ -319,20 +367,39 @@ export function planPlacementImport(rows: UpsertAttemptInput[], existing: Placem
     if (!byKey.has(k)) byKey.set(k, a);
   }
 
-  const plan: MergePlan = { inserts: [], updates: [], unchanged: 0 };
+  const plan: MergePlan = { inserts: [], updates: [], unchanged: 0, protected: 0 };
   for (const [k, r] of collapsed) {
     const hit = byKey.get(k);
     if (!hit) { plan.inserts.push(r); continue; }
+    // A row someone edited in the app is theirs — a sheet never overrules it.
+    if (!sheetOwned(hit)) { plan.protected++; continue; }
+
     const merged = {} as Record<MilestoneColumn, string | null>;
     const filled: MilestoneColumn[] = [];
+    const corrected: MilestoneColumn[] = [];
+    const cleared: MilestoneColumn[] = [];
     for (const c of MILESTONE_COLUMNS) {
       const incoming = r[c] ?? null;
-      merged[c] = hit[c] ?? incoming;
-      if (!hit[c] && incoming) filled.push(c);
+      const current  = hit[c] ?? null;
+      if (!current) {
+        merged[c] = incoming;
+        if (incoming) filled.push(c);
+      } else if (incoming && at(incoming) < at(current)) {
+        // Earliest wins: the journey started before this sheet recorded it.
+        merged[c] = incoming;
+        corrected.push(c);
+      } else if (inOwnedMonth(current) && !sameInstant(incoming, current)) {
+        // The sheet speaks for the month this date sits in, so it decides —
+        // including deciding the stage never happened.
+        merged[c] = incoming;
+        if (incoming) corrected.push(c); else cleared.push(c);
+      } else {
+        merged[c] = current;
+      }
     }
     const notes = joinNotes(hit.notes, r.notes);
-    if (!filled.length && notes === hit.notes) { plan.unchanged++; continue; }
-    plan.updates.push({ id: hit.id, row: hit, merged, filled, notes });
+    if (!filled.length && !corrected.length && !cleared.length && notes === hit.notes) { plan.unchanged++; continue; }
+    plan.updates.push({ id: hit.id, row: hit, merged, filled, corrected, cleared, notes });
   }
   return plan;
 }

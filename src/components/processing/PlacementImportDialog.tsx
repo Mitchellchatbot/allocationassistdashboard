@@ -15,7 +15,7 @@ import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from "
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { Upload, FileText, CheckCircle2, AlertCircle, X } from "lucide-react";
-import { parseHammadCsv } from "@/lib/parse-hammad-csv";
+import { parseHammadCsv, type ParseWarning } from "@/lib/parse-hammad-csv";
 import { readTabularFile } from "@/lib/read-tabular-file";
 import {
   planPlacementImport, useApplyPlacementImport,
@@ -60,11 +60,17 @@ export function PlacementImportDialog({ open, existing, onClose }: Props) {
 
   const parsed = useMemo(() => {
     const rows: UpsertAttemptInput[] = [];
+    const months = new Set<string>();
+    const warnings: ParseWarning[] = [];
     let skipped = 0;
     for (const f of files) {
       const r = parseHammadCsv(f.text);
       skipped += r.skippedRows;
+      warnings.push(...r.warnings);
       for (const row of r.rows) {
+        // The months these sheets speak for: inside them the sheet decides,
+        // so re-uploading a corrected month fixes what an older copy left.
+        if (row.block_date) months.add(row.block_date.slice(0, 7));
         const hospital = resolveHospital(row.hospital_name);
         rows.push({
           doctor_id:        resolveDoctor(row.doctor_name).doctor_id,
@@ -83,12 +89,15 @@ export function PlacementImportDialog({ open, existing, onClose }: Props) {
         });
       }
     }
-    return { rows, skipped };
+    return { rows, skipped, months, warnings };
   }, [files, resolveDoctor, resolveHospital]);
 
-  const plan = useMemo(() => planPlacementImport(parsed.rows, existing), [parsed.rows, existing]);
+  const plan = useMemo(
+    () => planPlacementImport(parsed.rows, existing, { authoritativeMonths: parsed.months }),
+    [parsed.rows, parsed.months, existing],
+  );
 
-  const zohoLinked = plan.inserts.filter(r => !r.doctor_id.startsWith("csv:")).length;
+  const corrected = plan.updates.filter(u => u.corrected.length || u.cleared.length).length;
 
   const handleFiles = async (picked: FileList) => {
     const next: LoadedFile[] = [];
@@ -180,10 +189,25 @@ export function PlacementImportDialog({ open, existing, onClose }: Props) {
               <>
                 <div className="grid grid-cols-2 sm:grid-cols-4 gap-2 text-center">
                   <Stat label="New pairs"    value={plan.inserts.length} tone="emerald" />
-                  <Stat label="Filled in"    value={plan.updates.length} tone="sky" />
+                  <Stat label="Filled in"    value={plan.updates.length - corrected} tone="sky" />
+                  <Stat label="Corrected"    value={corrected}           tone="amber" />
                   <Stat label="Up to date"   value={plan.unchanged}      tone="slate" />
-                  <Stat label="Zoho-matched" value={zohoLinked}          tone="indigo" />
                 </div>
+
+                {parsed.warnings.length > 0 && (
+                  <div className="rounded-md border border-amber-200 bg-amber-50/40 px-3 py-2 text-[10px] text-amber-900 max-h-[120px] overflow-y-auto">
+                    <p className="text-[11px] font-medium mb-1">
+                      <AlertCircle className="h-3.5 w-3.5 inline mr-1" />
+                      {parsed.warnings.length} thing{parsed.warnings.length === 1 ? "" : "s"} to check in the sheet
+                    </p>
+                    <ul className="space-y-0.5">
+                      {parsed.warnings.slice(0, 8).map((w, i) => (
+                        <li key={i}>line {w.line}: {w.message}</li>
+                      ))}
+                      {parsed.warnings.length > 8 && <li>…and {parsed.warnings.length - 8} more.</li>}
+                    </ul>
+                  </div>
+                )}
 
                 {nothingToDo ? (
                   <div className="rounded-md border border-amber-200 bg-amber-50/40 px-3 py-2 text-[11px] text-amber-900">
@@ -213,7 +237,11 @@ export function PlacementImportDialog({ open, existing, onClose }: Props) {
                             <td className="px-2 py-1">{u.row.doctor_name}</td>
                             <td className="px-2 py-1">{u.row.hospital_name}</td>
                             <td className="px-2 py-1 text-sky-800">
-                              {u.filled.length ? `+ ${u.filled.map(c => c.replace(/_at$|_date$/, "")).join(", ")}` : "notes"}
+                              {[
+                                u.filled.length    && `+ ${u.filled.map(stageName).join(", ")}`,
+                                u.corrected.length && `fixed ${u.corrected.map(stageName).join(", ")}`,
+                                u.cleared.length   && `cleared ${u.cleared.map(stageName).join(", ")}`,
+                              ].filter(Boolean).join(" · ") || "notes"}
                             </td>
                           </tr>
                         ))}
@@ -243,12 +271,15 @@ export function PlacementImportDialog({ open, existing, onClose }: Props) {
   );
 }
 
-function Stat({ label, value, tone }: { label: string; value: number; tone: "emerald" | "slate" | "indigo" | "sky" }) {
+const stageName = (c: string) => c.replace(/_at$|_date$/, "").replace("start", "start date");
+
+function Stat({ label, value, tone }: { label: string; value: number; tone: "emerald" | "slate" | "indigo" | "sky" | "amber" }) {
   const toneCls = {
     emerald: "bg-emerald-50 text-emerald-700 border-emerald-200",
     slate:   "bg-slate-50 text-slate-700 border-slate-200",
     indigo:  "bg-indigo-50 text-indigo-700 border-indigo-200",
     sky:     "bg-sky-50 text-sky-700 border-sky-200",
+    amber:   "bg-amber-50 text-amber-700 border-amber-200",
   }[tone];
   return (
     <div className={`rounded-md border ${toneCls} px-2 py-2`}>
