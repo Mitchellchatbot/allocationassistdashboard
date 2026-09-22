@@ -405,21 +405,24 @@ export function planPlacementImport(
 }
 
 /**
- * Apply a MergePlan. Deliberately does NOT call ensureSecondPaymentRun the way
+ * Apply a MergePlan through apply_placement_import: one database call, so the
+ * whole import lands or none of it does, with every changed row copied to
+ * placement_import_log first (undoPlacementImport puts them back).
+ *
+ * Deliberately does NOT call ensureSecondPaymentRun the way
  * useBulkInsertPlacementAttempts does: this path backfills historical sheets,
- * and a months-old join date must not kick off a live payment email.
+ * and a months-old join date must not kick off a live payment email. The
+ * function also runs with the doctor_lifecycle sync trigger off, so old dates
+ * can't reach the scheduler as if they were today's news.
  */
+export interface ImportResult { batch: string; inserted: number; updated: number; unchanged: number }
+
 export function useApplyPlacementImport() {
   const qc = useQueryClient();
   return useMutation({
-    mutationFn: async (plan: MergePlan) => {
-      const { data: sess } = await supabase.auth.getSession();
-      const createdBy = sess.session?.user.email ?? null;
-      const CHUNK = 500;
-
-      let inserted = 0;
-      for (let i = 0; i < plan.inserts.length; i += CHUNK) {
-        const payload = plan.inserts.slice(i, i + CHUNK).map(r => ({
+    mutationFn: async ({ plan, label }: { plan: MergePlan; label?: string }): Promise<ImportResult> => {
+      const { data, error } = await supabase.rpc("apply_placement_import", {
+        p_inserts: plan.inserts.map(r => ({
           doctor_id:        r.doctor_id,
           doctor_name:      r.doctor_name,
           doctor_specialty: r.doctor_specialty ?? null,
@@ -433,40 +436,31 @@ export function useApplyPlacementImport() {
           joined_at:        r.joined_at ?? null,
           notes:            r.notes ?? null,
           source:           r.source ?? "csv_import",
-          created_by:       createdBy,
-        }));
-        const { data, error } = await supabase
-          .from("placement_attempts")
-          .upsert(payload, { onConflict: "doctor_id,hospital_name", ignoreDuplicates: true })
-          .select("id");
-        if (error) throw error;
-        inserted += data?.length ?? 0;
-      }
+        })),
+        p_updates: plan.updates.map(u => ({ id: u.id, merged: u.merged, notes: u.notes })),
+        p_label:   label ?? null,
+      });
+      if (error) throw error;
+      const row = (data as Array<{ batch: string; inserted: number; updated: number }>)[0];
+      return { ...row, unchanged: plan.unchanged };
+    },
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: KEY });
+      qc.invalidateQueries({ queryKey: ["doctor-lifecycles"] });
+      qc.invalidateQueries({ queryKey: ["placements"] });
+      qc.invalidateQueries({ queryKey: ["recap-lifecycles"] });
+    },
+  });
+}
 
-      let updated = 0;
-      for (let i = 0; i < plan.updates.length; i += CHUNK) {
-        // An upsert is an INSERT that falls back to UPDATE, so Postgres builds the
-        // whole candidate row before it looks at the conflict — the NOT NULL
-        // identity columns must be present even though only milestones change.
-        // Every object also carries the same keys, because PostgREST nulls out
-        // columns that are missing from some rows of a batch.
-        const payload = plan.updates.slice(i, i + CHUNK).map(u => ({
-          id:            u.id,
-          doctor_id:     u.row.doctor_id,
-          doctor_name:   u.row.doctor_name,
-          hospital_name: u.row.hospital_name,
-          ...u.merged,
-          notes:         u.notes,
-        }));
-        const { data, error } = await supabase
-          .from("placement_attempts")
-          .upsert(payload, { onConflict: "id" })
-          .select("id");
-        if (error) throw error;
-        updated += data?.length ?? 0;
-      }
-
-      return { inserted, updated, unchanged: plan.unchanged };
+/** Undo one import: rows it added go, rows it changed return to what they were. */
+export function useUndoPlacementImport() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: async (batch: string) => {
+      const { data, error } = await supabase.rpc("undo_placement_import", { p_batch: batch });
+      if (error) throw error;
+      return (data as Array<{ removed: number; restored: number }>)[0];
     },
     onSuccess: () => {
       qc.invalidateQueries({ queryKey: KEY });
