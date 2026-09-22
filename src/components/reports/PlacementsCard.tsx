@@ -34,7 +34,7 @@ import {
 import { useHospitals, type Hospital } from "@/hooks/use-hospitals";
 import { useZohoData } from "@/hooks/use-zoho-data";
 import { toast } from "sonner";
-import { CsvImportDialog } from "@/components/reports/CsvImportDialog";
+import { PlacementImportDialog } from "@/components/processing/PlacementImportDialog";
 import { Hint, HintTitle, HintNote } from "@/components/reports/HoverHint";
 
 const fmtDate = (iso: string | null | undefined): string => {
@@ -439,7 +439,10 @@ export function PlacementsCard({ range, rangeDays, hospital, specialty, open, on
         }}
       />
 
-      <CsvImportDialog open={csvOpen} onClose={() => setCsvOpen(false)} />
+      {/* Same importer as Processing: merges into existing journeys (a date
+          already recorded wins) and sends nothing. The old CsvImportDialog
+          inserted blindly and fired the Second Payment flow per join date. */}
+      <PlacementImportDialog open={csvOpen} existing={rawRows} onClose={() => setCsvOpen(false)} />
     </Card>
   );
 }
