@@ -15,14 +15,16 @@ import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from "
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { Upload, FileText, CheckCircle2, AlertCircle, X } from "lucide-react";
-import { parseHammadCsv, doctorSlug } from "@/lib/parse-hammad-csv";
+import { parseHammadCsv } from "@/lib/parse-hammad-csv";
 import { readTabularFile } from "@/lib/read-tabular-file";
 import {
   planPlacementImport, useApplyPlacementImport,
   type PlacementAttempt, type UpsertAttemptInput,
 } from "@/hooks/use-placement-attempts";
 import { useZohoData } from "@/hooks/use-zoho-data";
-import { useHospitals } from "@/hooks/use-hospitals";
+import { useHospitalAliases } from "@/hooks/use-hospital-aliases";
+import { buildHospitalResolver } from "@/lib/hospital-alias";
+import { buildDoctorResolver } from "@/lib/doctor-identity";
 import { toast } from "sonner";
 
 interface Props {
@@ -33,7 +35,8 @@ interface Props {
 
 interface LoadedFile { name: string; text: string; rows: number }
 
-const normName = (s: string) => s.replace(/^\s*dr\.?\s+/i, "").toLowerCase().replace(/\s+/g, " ").trim();
+const zohoName = (r: { Full_Name?: string | null; First_Name?: string | null; Last_Name?: string | null }) =>
+  (r.Full_Name || `${r.First_Name ?? ""} ${r.Last_Name ?? ""}`).trim();
 
 export function PlacementImportDialog({ open, existing, onClose }: Props) {
   const [files, setFiles]   = useState<LoadedFile[]>([]);
@@ -41,31 +44,19 @@ export function PlacementImportDialog({ open, existing, onClose }: Props) {
   const [result, setResult] = useState<{ inserted: number; updated: number; unchanged: number } | null>(null);
   const apply               = useApplyPlacementImport();
   const { data: zoho }      = useZohoData();
-  const { data: hospitals = [] } = useHospitals();
+  const { data: aliases = [] } = useHospitalAliases();
 
-  const nameToZohoId = useMemo(() => {
-    const m = new Map<string, string>();
-    for (const l of zoho?.rawLeads ?? []) {
-      const name = (l.Full_Name || `${l.First_Name ?? ""} ${l.Last_Name ?? ""}`).trim();
-      if (name) m.set(normName(name), `lead:${l.id}`);
-    }
-    for (const d of zoho?.rawDoctorsOnBoard ?? []) {
-      const name = (d.Full_Name || `${d.First_Name ?? ""} ${d.Last_Name ?? ""}`).trim();
-      // A doctor on board outranks a same-named lead — further down the pipeline.
-      if (name) m.set(normName(name), `dob:${d.id}`);
-    }
-    return m;
-  }, [zoho?.rawLeads, zoho?.rawDoctorsOnBoard]);
+  // A doctor keeps the id they already have in the table; otherwise Zoho
+  // (doctor on board before lead); otherwise a new csv: id.
+  const resolveDoctor = useMemo(() => buildDoctorResolver({
+    existing:       existing,
+    doctorsOnBoard: (zoho?.rawDoctorsOnBoard ?? []).map(d => ({ id: `dob:${d.id}`, name: zohoName(d) })).filter(d => d.name),
+    leads:          (zoho?.rawLeads ?? []).map(l => ({ id: `lead:${l.id}`, name: zohoName(l) })).filter(l => l.name),
+  }), [existing, zoho?.rawLeads, zoho?.rawDoctorsOnBoard]);
 
-  const hospitalLookup = useMemo(() => {
-    const byName = new Map<string, string>();
-    for (const h of hospitals) byName.set(h.name.toLowerCase(), h.id);
-    return (raw: string): string | null => {
-      const q = raw.trim().toLowerCase();
-      if (!q) return null;
-      return byName.get(q) ?? hospitals.find(h => h.name.toLowerCase().includes(q))?.id ?? null;
-    };
-  }, [hospitals]);
+  // Every spelling becomes the agreed hospital name, so "NMC -AUH" and
+  // "NMC-AUH" meet the same journey instead of starting a second one.
+  const resolveHospital = useMemo(() => buildHospitalResolver(aliases), [aliases]);
 
   const parsed = useMemo(() => {
     const rows: UpsertAttemptInput[] = [];
@@ -74,12 +65,13 @@ export function PlacementImportDialog({ open, existing, onClose }: Props) {
       const r = parseHammadCsv(f.text);
       skipped += r.skippedRows;
       for (const row of r.rows) {
+        const hospital = resolveHospital(row.hospital_name);
         rows.push({
-          doctor_id:        nameToZohoId.get(normName(row.doctor_name)) ?? doctorSlug(row.doctor_name),
+          doctor_id:        resolveDoctor(row.doctor_name).doctor_id,
           doctor_name:      row.doctor_name,
           doctor_specialty: row.doctor_specialty,
-          hospital_id:      hospitalLookup(row.hospital_name),
-          hospital_name:    row.hospital_name,
+          hospital_id:      hospital.hospital_id,
+          hospital_name:    hospital.hospital_name,
           shortlisted_at:   row.shortlisted_at,
           interviewed_at:   row.interviewed_at,
           offered_at:       row.offered_at,
@@ -92,7 +84,7 @@ export function PlacementImportDialog({ open, existing, onClose }: Props) {
       }
     }
     return { rows, skipped };
-  }, [files, nameToZohoId, hospitalLookup]);
+  }, [files, resolveDoctor, resolveHospital]);
 
   const plan = useMemo(() => planPlacementImport(parsed.rows, existing), [parsed.rows, existing]);
 
