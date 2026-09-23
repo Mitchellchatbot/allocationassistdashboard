@@ -14,7 +14,8 @@ const sheet = (over: Partial<UpsertAttemptInput> = {}): UpsertAttemptInput => ({
   doctor_id: "dob:1", doctor_name: "Ali Khan", hospital_name: "NMC Abu Dhabi", source: "csv_import", ...over,
 });
 
-const JUNE = { authoritativeMonths: ["2026-06"] };
+/** A sheet whose week headers run through June. */
+const JUNE = { authoritativeFrom: "2026-06-01T00:00:00.000Z", authoritativeTo: "2026-06-30T00:00:00.000Z" };
 
 describe("planPlacementImport", () => {
   it("fills stages the row is missing", () => {
@@ -54,7 +55,7 @@ describe("planPlacementImport", () => {
     expect(plan.updates[0].merged.shortlisted_at).toBe("2026-02-03T00:00:00.000Z");
   });
 
-  it("changes nothing without an authoritative month, even when dates disagree", () => {
+  it("changes nothing outside the weeks the sheet covers, even when dates disagree", () => {
     const plan = planPlacementImport([sheet({ shortlisted_at: "2026-06-20T00:00:00.000Z" })], [row({ shortlisted_at: "2026-06-12T00:00:00.000Z" })]);
     expect(plan.unchanged).toBe(1);
   });
@@ -102,5 +103,26 @@ describe("timestamps from the database vs the parser", () => {
   it("still sees a genuinely earlier date across formats", () => {
     const plan = planPlacementImport([sheet({ shortlisted_at: "2026-02-03T00:00:00.000Z" })], [row({ shortlisted_at: PG })], JUNE);
     expect(plan.updates[0].merged.shortlisted_at).toBe("2026-02-03T00:00:00.000Z");
+  });
+});
+
+describe("the span a sheet speaks for", () => {
+  // September's sheet opens with the last week of August. It speaks for that
+  // week, not for all of August — whose own sheet holds the rest of the month.
+  const SEPT = { authoritativeFrom: "2026-08-31T00:00:00.000Z", authoritativeTo: "2026-09-20T00:00:00.000Z" };
+
+  it("leaves earlier August dates alone", () => {
+    const plan = planPlacementImport([sheet({ interviewed_at: "2026-09-09T00:00:00.000Z" })], [row({
+      shortlisted_at: "2026-08-10T00:00:00.000Z",
+    })], SEPT);
+    expect(plan.updates[0].cleared).toEqual([]);
+    expect(plan.updates[0].merged.shortlisted_at).toBe("2026-08-10T00:00:00.000Z");
+  });
+
+  it("still corrects the last days of August, which it does cover", () => {
+    const plan = planPlacementImport([sheet({ shortlisted_at: "2026-09-01T00:00:00.000Z" })], [row({
+      shortlisted_at: "2026-08-31T00:00:00.000Z",
+    })], SEPT);
+    expect(plan.updates[0].corrected).toEqual(["shortlisted_at"]);
   });
 });

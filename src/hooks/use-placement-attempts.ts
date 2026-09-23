@@ -303,13 +303,19 @@ export interface MergePlan {
 
 export interface ImportPlanOptions {
   /**
-   * Months (YYYY-MM) the uploaded sheets speak for — normally the months of
-   * their week headers. Inside these months the sheet is the truth: a date
-   * that disagrees is corrected, and a stage the sheet no longer records is
-   * cleared. Outside them the old rule stands: earliest date wins and nothing
-   * is removed. With none given, nothing is corrected or cleared.
+   * The span the uploaded sheets actually cover: the first and last week
+   * header in them. Inside it the sheet is the truth — a date that disagrees
+   * is corrected, and a stage the sheet no longer records is cleared. Outside
+   * it the old rule stands: earliest date wins and nothing is removed.
+   *
+   * A span, not whole months, because a sheet often opens with the last week
+   * of the previous month. September's sheet starting on 31 August speaks for
+   * that one day, not for all of August, whose own sheet holds the rest.
+   *
+   * With none given, nothing is corrected or cleared.
    */
-  authoritativeMonths?: Iterable<string>;
+  authoritativeFrom?: string;
+  authoritativeTo?:   string;
 }
 
 /** Compare two timestamps by instant, never as text: the database hands back
@@ -348,8 +354,10 @@ export function planPlacementImport(
   existing: PlacementAttempt[],
   options: ImportPlanOptions = {},
 ): MergePlan {
-  const owns = new Set(options.authoritativeMonths ?? []);
-  const inOwnedMonth = (iso: string | null) => !!iso && owns.has(iso.slice(0, 7));
+  const from = options.authoritativeFrom ? Date.parse(options.authoritativeFrom) : NaN;
+  const to   = options.authoritativeTo   ? Date.parse(options.authoritativeTo)   : NaN;
+  const inCoveredWeeks = (iso: string | null) =>
+    !!iso && !isNaN(from) && !isNaN(to) && Date.parse(iso) >= from && Date.parse(iso) <= to;
   const collapsed = new Map<string, UpsertAttemptInput>();
   for (const r of rows) {
     const k = mergeKey(r.doctor_id, r.hospital_name);
@@ -388,8 +396,8 @@ export function planPlacementImport(
         // Earliest wins: the journey started before this sheet recorded it.
         merged[c] = incoming;
         corrected.push(c);
-      } else if (inOwnedMonth(current) && !sameInstant(incoming, current)) {
-        // The sheet speaks for the month this date sits in, so it decides —
+      } else if (inCoveredWeeks(current) && !sameInstant(incoming, current)) {
+        // The sheet covers the week this date sits in, so it decides —
         // including deciding the stage never happened.
         merged[c] = incoming;
         if (incoming) corrected.push(c); else cleared.push(c);
