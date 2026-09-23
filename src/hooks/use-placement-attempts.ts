@@ -32,6 +32,9 @@ export interface PlacementAttempt {
   paid_at:          string | null;
   notes:            string | null;
   source:           string;
+  /** When a person last changed this row in the app. Set, the sheet importer
+   *  leaves the row alone. */
+  manual_edited_at: string | null;
   created_by:       string | null;
   created_at:       string;
   updated_at:       string;
@@ -101,6 +104,11 @@ export interface UpsertAttemptInput {
   paid_at?:         string | null;
   notes?:           string | null;
   source?:          string;
+  /** Stages this sheet actively says did NOT happen — a join the team marked
+   *  HOLD and someone confirmed. An ordinary blank cell is not one of these:
+   *  the sheets are an event log, so a week that records an offer says nothing
+   *  about the interview, which may sit in an earlier month's sheet. */
+  stated_empty?:    MilestoneColumn[];
 }
 
 export function useUpsertPlacementAttempt() {
@@ -126,6 +134,8 @@ export function useUpsertPlacementAttempt() {
         notes:            input.notes ?? null,
         source:           input.source ?? "manual",
         created_by:       createdBy,
+        // Typed by a person: from here on the sheet importer keeps its hands off.
+        manual_edited_at: new Date().toISOString(),
         updated_at:       new Date().toISOString(),
       };
       // Upsert on the (doctor_id, hospital_name) unique key so calling
@@ -163,8 +173,11 @@ export function useUpsertPlacementAttempt() {
   });
 }
 
-/** The five milestones the /processing tracker marks. */
-export type MilestoneColumn =
+/** The five milestones the /processing tracker marks. Not MilestoneColumn:
+ *  that one is the importer's six columns and includes start_date, which the
+ *  tracker has no button for. Both names used to live here, and the second
+ *  declaration silently won. */
+export type MarkableMilestone =
   | "shortlisted_at" | "interviewed_at" | "offered_at" | "signed_at" | "joined_at";
 
 /**
@@ -178,10 +191,10 @@ export type MilestoneColumn =
 export function useMarkPlacementMilestone() {
   const qc = useQueryClient();
   return useMutation({
-    mutationFn: async ({ id, column, date }: { id: string; column: MilestoneColumn; date: string | null }) => {
+    mutationFn: async ({ id, column, date }: { id: string; column: MarkableMilestone; date: string | null }) => {
       const { error } = await supabase
         .from("placement_attempts")
-        .update({ [column]: date, updated_at: new Date().toISOString() })
+        .update({ [column]: date, manual_edited_at: new Date().toISOString(), updated_at: new Date().toISOString() })
         .eq("id", id);
       if (error) throw error;
     },
@@ -275,10 +288,50 @@ export type MilestoneColumn = typeof MILESTONE_COLUMNS[number];
 export interface MergePlan {
   inserts: UpsertAttemptInput[];
   /** Existing row id → the full merged milestone set to write. */
-  updates: Array<{ id: string; row: PlacementAttempt; merged: Record<MilestoneColumn, string | null>; filled: MilestoneColumn[]; notes: string | null }>;
+  updates: Array<{
+    id: string;
+    row: PlacementAttempt;
+    merged: Record<MilestoneColumn, string | null>;
+    /** Stages that were blank here and arrive from the sheet. */
+    filled: MilestoneColumn[];
+    /** Stages the sheet gives a DIFFERENT date for, inside a month it owns. */
+    corrected: MilestoneColumn[];
+    /** Stages the sheet no longer records at all, inside a month it owns. */
+    cleared: MilestoneColumn[];
+    notes: string | null;
+  }>;
   /** Parsed rows that matched an existing row and added nothing new. */
   unchanged: number;
+  /** Rows a person edited in the app, left untouched. */
+  protected: number;
 }
+
+export interface ImportPlanOptions {
+  /**
+   * The span the uploaded sheets actually cover: the first and last week
+   * header in them. Inside it the sheet is the truth — a date that disagrees
+   * is corrected, and a stage the sheet no longer records is cleared. Outside
+   * it the old rule stands: earliest date wins and nothing is removed.
+   *
+   * A span, not whole months, because a sheet often opens with the last week
+   * of the previous month. September's sheet starting on 31 August speaks for
+   * that one day, not for all of August, whose own sheet holds the rest.
+   *
+   * With none given, nothing is corrected or cleared.
+   */
+  authoritativeFrom?: string;
+  authoritativeTo?:   string;
+}
+
+/** Compare two timestamps by instant, never as text: the database hands back
+ *  "2026-01-05T00:00:00+00:00" while the parser produces
+ *  "2026-01-05T00:00:00.000Z" — the same moment, different strings. */
+const at = (iso: string | null) => (iso ? Date.parse(iso) : NaN);
+const sameInstant = (a: string | null, b: string | null) => at(a) === at(b);
+
+/** A row whose dates came from a sheet and that nobody has edited by hand. */
+const sheetOwned = (row: PlacementAttempt) =>
+  !row.manual_edited_at && ["csv_import", "monthly_report_import", "csv_seed_2026_01"].includes(row.source);
 
 const mergeKey = (doctorId: string, hospital: string) =>
   `${doctorId}|${hospital.toLowerCase().replace(/\s*-\s*/g, "-").replace(/\s+/g, " ").trim()}`;
@@ -286,7 +339,7 @@ const mergeKey = (doctorId: string, hospital: string) =>
 /** Earliest date wins: a doctor shortlisted in July and again in August is one
  *  journey, and the July date is when it actually happened. */
 const earlier = (a: string | null, b: string | null) =>
-  a && b ? (a < b ? a : b) : (a ?? b);
+  a && b ? (Date.parse(a) <= Date.parse(b) ? a : b) : (a ?? b);
 
 const joinNotes = (a: string | null | undefined, b: string | null | undefined) => {
   const parts = [...(a ?? "").split(" · "), ...(b ?? "").split(" · ")].map(s => s.trim()).filter(Boolean);
@@ -301,13 +354,22 @@ const joinNotes = (a: string | null | undefined, b: string | null | undefined) =
  * journey each, and an existing row only ever gains dates it was missing. A
  * date already in the database is never overwritten by a later sheet.
  */
-export function planPlacementImport(rows: UpsertAttemptInput[], existing: PlacementAttempt[]): MergePlan {
+export function planPlacementImport(
+  rows: UpsertAttemptInput[],
+  existing: PlacementAttempt[],
+  options: ImportPlanOptions = {},
+): MergePlan {
+  const from = options.authoritativeFrom ? Date.parse(options.authoritativeFrom) : NaN;
+  const to   = options.authoritativeTo   ? Date.parse(options.authoritativeTo)   : NaN;
+  const inCoveredWeeks = (iso: string | null) =>
+    !!iso && !isNaN(from) && !isNaN(to) && Date.parse(iso) >= from && Date.parse(iso) <= to;
   const collapsed = new Map<string, UpsertAttemptInput>();
   for (const r of rows) {
     const k = mergeKey(r.doctor_id, r.hospital_name);
     const prev = collapsed.get(k);
     if (!prev) { collapsed.set(k, { ...r }); continue; }
     for (const c of MILESTONE_COLUMNS) prev[c] = earlier(prev[c] ?? null, r[c] ?? null);
+    if (r.stated_empty?.length) prev.stated_empty = [...new Set([...(prev.stated_empty ?? []), ...r.stated_empty])];
     prev.notes = joinNotes(prev.notes, r.notes);
     prev.doctor_specialty ??= r.doctor_specialty;
     prev.hospital_id ??= r.hospital_id;
@@ -319,40 +381,65 @@ export function planPlacementImport(rows: UpsertAttemptInput[], existing: Placem
     if (!byKey.has(k)) byKey.set(k, a);
   }
 
-  const plan: MergePlan = { inserts: [], updates: [], unchanged: 0 };
+  const plan: MergePlan = { inserts: [], updates: [], unchanged: 0, protected: 0 };
   for (const [k, r] of collapsed) {
     const hit = byKey.get(k);
     if (!hit) { plan.inserts.push(r); continue; }
+    // A row someone edited in the app is theirs — a sheet never overrules it.
+    if (!sheetOwned(hit)) { plan.protected++; continue; }
+
     const merged = {} as Record<MilestoneColumn, string | null>;
     const filled: MilestoneColumn[] = [];
+    const corrected: MilestoneColumn[] = [];
+    const cleared: MilestoneColumn[] = [];
     for (const c of MILESTONE_COLUMNS) {
       const incoming = r[c] ?? null;
-      merged[c] = hit[c] ?? incoming;
-      if (!hit[c] && incoming) filled.push(c);
+      const current  = hit[c] ?? null;
+      if (!current) {
+        merged[c] = incoming;
+        if (incoming) filled.push(c);
+      } else if (incoming && at(incoming) < at(current)) {
+        // Earliest wins: the journey started before this sheet recorded it.
+        merged[c] = incoming;
+        corrected.push(c);
+      } else if (inCoveredWeeks(current) && !sameInstant(incoming, current)
+                 && (incoming || r.stated_empty?.includes(c))) {
+        // Inside the weeks it covers the sheet decides — but only about stages
+        // it actually writes something about. A blank cell means "nothing this
+        // week", not "never happened": these sheets log events week by week, so
+        // an interview can sit in an earlier month's file.
+        merged[c] = incoming;
+        if (incoming) corrected.push(c); else cleared.push(c);
+      } else {
+        merged[c] = current;
+      }
     }
     const notes = joinNotes(hit.notes, r.notes);
-    if (!filled.length && notes === hit.notes) { plan.unchanged++; continue; }
-    plan.updates.push({ id: hit.id, row: hit, merged, filled, notes });
+    if (!filled.length && !corrected.length && !cleared.length && notes === hit.notes) { plan.unchanged++; continue; }
+    plan.updates.push({ id: hit.id, row: hit, merged, filled, corrected, cleared, notes });
   }
   return plan;
 }
 
 /**
- * Apply a MergePlan. Deliberately does NOT call ensureSecondPaymentRun the way
+ * Apply a MergePlan through apply_placement_import: one database call, so the
+ * whole import lands or none of it does, with every changed row copied to
+ * placement_import_log first (undoPlacementImport puts them back).
+ *
+ * Deliberately does NOT call ensureSecondPaymentRun the way
  * useBulkInsertPlacementAttempts does: this path backfills historical sheets,
- * and a months-old join date must not kick off a live payment email.
+ * and a months-old join date must not kick off a live payment email. The
+ * function also runs with the doctor_lifecycle sync trigger off, so old dates
+ * can't reach the scheduler as if they were today's news.
  */
+export interface ImportResult { batch: string; inserted: number; updated: number; unchanged: number }
+
 export function useApplyPlacementImport() {
   const qc = useQueryClient();
   return useMutation({
-    mutationFn: async (plan: MergePlan) => {
-      const { data: sess } = await supabase.auth.getSession();
-      const createdBy = sess.session?.user.email ?? null;
-      const CHUNK = 500;
-
-      let inserted = 0;
-      for (let i = 0; i < plan.inserts.length; i += CHUNK) {
-        const payload = plan.inserts.slice(i, i + CHUNK).map(r => ({
+    mutationFn: async ({ plan, label }: { plan: MergePlan; label?: string }): Promise<ImportResult> => {
+      const { data, error } = await supabase.rpc("apply_placement_import", {
+        p_inserts: plan.inserts.map(r => ({
           doctor_id:        r.doctor_id,
           doctor_name:      r.doctor_name,
           doctor_specialty: r.doctor_specialty ?? null,
@@ -366,40 +453,31 @@ export function useApplyPlacementImport() {
           joined_at:        r.joined_at ?? null,
           notes:            r.notes ?? null,
           source:           r.source ?? "csv_import",
-          created_by:       createdBy,
-        }));
-        const { data, error } = await supabase
-          .from("placement_attempts")
-          .upsert(payload, { onConflict: "doctor_id,hospital_name", ignoreDuplicates: true })
-          .select("id");
-        if (error) throw error;
-        inserted += data?.length ?? 0;
-      }
+        })),
+        p_updates: plan.updates.map(u => ({ id: u.id, merged: u.merged, notes: u.notes })),
+        p_label:   label ?? null,
+      });
+      if (error) throw error;
+      const row = (data as Array<{ batch: string; inserted: number; updated: number }>)[0];
+      return { ...row, unchanged: plan.unchanged };
+    },
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: KEY });
+      qc.invalidateQueries({ queryKey: ["doctor-lifecycles"] });
+      qc.invalidateQueries({ queryKey: ["placements"] });
+      qc.invalidateQueries({ queryKey: ["recap-lifecycles"] });
+    },
+  });
+}
 
-      let updated = 0;
-      for (let i = 0; i < plan.updates.length; i += CHUNK) {
-        // An upsert is an INSERT that falls back to UPDATE, so Postgres builds the
-        // whole candidate row before it looks at the conflict — the NOT NULL
-        // identity columns must be present even though only milestones change.
-        // Every object also carries the same keys, because PostgREST nulls out
-        // columns that are missing from some rows of a batch.
-        const payload = plan.updates.slice(i, i + CHUNK).map(u => ({
-          id:            u.id,
-          doctor_id:     u.row.doctor_id,
-          doctor_name:   u.row.doctor_name,
-          hospital_name: u.row.hospital_name,
-          ...u.merged,
-          notes:         u.notes,
-        }));
-        const { data, error } = await supabase
-          .from("placement_attempts")
-          .upsert(payload, { onConflict: "id" })
-          .select("id");
-        if (error) throw error;
-        updated += data?.length ?? 0;
-      }
-
-      return { inserted, updated, unchanged: plan.unchanged };
+/** Undo one import: rows it added go, rows it changed return to what they were. */
+export function useUndoPlacementImport() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: async (batch: string) => {
+      const { data, error } = await supabase.rpc("undo_placement_import", { p_batch: batch });
+      if (error) throw error;
+      return (data as Array<{ removed: number; restored: number }>)[0];
     },
     onSuccess: () => {
       qc.invalidateQueries({ queryKey: KEY });

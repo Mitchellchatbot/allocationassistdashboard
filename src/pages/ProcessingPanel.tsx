@@ -34,7 +34,7 @@ import { ListChecks, Plus, Check, X as XIcon, MailX, Upload } from "lucide-react
 import { toast } from "sonner";
 import {
   usePlacementAttempts, useMarkPlacementMilestone,
-  type PlacementAttempt, type MilestoneColumn,
+  type PlacementAttempt, type MarkableMilestone,
 } from "@/hooks/use-placement-attempts";
 import { useZohoData } from "@/hooks/use-zoho-data";
 import { useHospitals } from "@/hooks/use-hospitals";
@@ -45,7 +45,7 @@ import { PlacementImportDialog } from "@/components/processing/PlacementImportDi
 
 interface Stage {
   key:    string;
-  column: MilestoneColumn;
+  column: MarkableMilestone;
   label:  string;
   /** Tailwind classes for the marked-state chip. */
   tone:   string;
