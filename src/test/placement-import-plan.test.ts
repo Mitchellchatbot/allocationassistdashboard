@@ -34,12 +34,30 @@ describe("planPlacementImport", () => {
     expect(plan.updates[0].merged.shortlisted_at).toBe("2026-06-20T00:00:00.000Z");
   });
 
-  it("clears a stage the sheet no longer records in its own month", () => {
-    const plan = planPlacementImport([sheet({ shortlisted_at: "2026-06-02T00:00:00.000Z" })], [row({
+  it("clears a stage only when the sheet, or a person, says it did not happen", () => {
+    // A blank cell says nothing: these sheets log what moved each week, so an
+    // interview can sit in an earlier month's file.
+    const blank = planPlacementImport([sheet({ shortlisted_at: "2026-06-02T00:00:00.000Z" })], [row({
       shortlisted_at: "2026-06-02T00:00:00.000Z", interviewed_at: "2026-06-12T00:00:00.000Z",
     })], JUNE);
-    expect(plan.updates[0].cleared).toEqual(["interviewed_at"]);
-    expect(plan.updates[0].merged.interviewed_at).toBeNull();
+    expect(blank).toMatchObject({ updates: [], unchanged: 1 });
+
+    // Unticking a HOLD join in the preview is a decision, and does clear it.
+    const decided = planPlacementImport([sheet({ shortlisted_at: "2026-06-02T00:00:00.000Z", stated_empty: ["joined_at"] })], [row({
+      shortlisted_at: "2026-06-02T00:00:00.000Z", joined_at: "2026-06-15T00:00:00.000Z",
+    })], JUNE);
+    expect(decided.updates[0].cleared).toEqual(["joined_at"]);
+    expect(decided.updates[0].merged.joined_at).toBeNull();
+  });
+
+  it("keeps a stage recorded in an earlier month's sheet", () => {
+    // Anand Balasubramanian: interviewed 9 March per February's sheet, offered
+    // and signed per March's. March's silence about the interview is not news.
+    const plan = planPlacementImport([sheet({
+      offered_at: "2026-06-11T00:00:00.000Z", signed_at: "2026-06-13T00:00:00.000Z",
+    })], [row({ interviewed_at: "2026-06-09T00:00:00.000Z" })], JUNE);
+    expect(plan.updates[0].merged.interviewed_at).toBe("2026-06-09T00:00:00.000Z");
+    expect(plan.updates[0].cleared).toEqual([]);
   });
 
   it("leaves other months alone", () => {
@@ -128,22 +146,14 @@ describe("the span a sheet speaks for", () => {
 });
 
 describe("a stage the sheet could not state", () => {
-  const SEPT = { authoritativeFrom: "2026-04-05T00:00:00.000Z", authoritativeTo: "2026-04-26T00:00:00.000Z" };
+  const APRIL = { authoritativeFrom: "2026-04-05T00:00:00.000Z", authoritativeTo: "2026-04-26T00:00:00.000Z" };
 
   it("leaves a join date alone when the sheet's Joined cell is unreadable", () => {
-    // Luca Pianta's join was typed one column past Joined, so the cell is
+    // Luca Pianta's join was typed one column past Joined, so the cell reads
     // empty. That is not the sheet saying he never joined.
-    const plan = planPlacementImport([sheet({ start_date: "2026-03-30T00:00:00.000Z", uncertain: ["joined_at"] })], [row({
+    const plan = planPlacementImport([sheet({ start_date: "2026-03-30T00:00:00.000Z" })], [row({
       joined_at: "2026-04-21T00:00:00.000Z",
-    })], SEPT);
+    })], APRIL);
     expect(plan.updates.flatMap(u => u.cleared)).toEqual([]);
-    expect(plan.unchanged + plan.updates.length).toBe(1);
-  });
-
-  it("still clears a stage the sheet plainly leaves blank", () => {
-    const plan = planPlacementImport([sheet({ start_date: "2026-04-10T00:00:00.000Z" })], [row({
-      joined_at: "2026-04-21T00:00:00.000Z",
-    })], SEPT);
-    expect(plan.updates[0].cleared).toEqual(["joined_at"]);
   });
 });

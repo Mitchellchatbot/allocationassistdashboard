@@ -104,10 +104,11 @@ export interface UpsertAttemptInput {
   paid_at?:         string | null;
   notes?:           string | null;
   source?:          string;
-  /** Stages this sheet could not state reliably — a date typed into the wrong
-   *  column, say. Blank here means "the sheet doesn't say", never "it did not
-   *  happen", so these are never corrected or cleared. */
-  uncertain?:       MilestoneColumn[];
+  /** Stages this sheet actively says did NOT happen — a join the team marked
+   *  HOLD and someone confirmed. An ordinary blank cell is not one of these:
+   *  the sheets are an event log, so a week that records an offer says nothing
+   *  about the interview, which may sit in an earlier month's sheet. */
+  stated_empty?:    MilestoneColumn[];
 }
 
 export function useUpsertPlacementAttempt() {
@@ -368,7 +369,7 @@ export function planPlacementImport(
     const prev = collapsed.get(k);
     if (!prev) { collapsed.set(k, { ...r }); continue; }
     for (const c of MILESTONE_COLUMNS) prev[c] = earlier(prev[c] ?? null, r[c] ?? null);
-    if (r.uncertain?.length) prev.uncertain = [...new Set([...(prev.uncertain ?? []), ...r.uncertain])];
+    if (r.stated_empty?.length) prev.stated_empty = [...new Set([...(prev.stated_empty ?? []), ...r.stated_empty])];
     prev.notes = joinNotes(prev.notes, r.notes);
     prev.doctor_specialty ??= r.doctor_specialty;
     prev.hospital_id ??= r.hospital_id;
@@ -401,9 +402,12 @@ export function planPlacementImport(
         // Earliest wins: the journey started before this sheet recorded it.
         merged[c] = incoming;
         corrected.push(c);
-      } else if (inCoveredWeeks(current) && !r.uncertain?.includes(c) && !sameInstant(incoming, current)) {
-        // The sheet covers the week this date sits in, so it decides —
-        // including deciding the stage never happened.
+      } else if (inCoveredWeeks(current) && !sameInstant(incoming, current)
+                 && (incoming || r.stated_empty?.includes(c))) {
+        // Inside the weeks it covers the sheet decides — but only about stages
+        // it actually writes something about. A blank cell means "nothing this
+        // week", not "never happened": these sheets log events week by week, so
+        // an interview can sit in an earlier month's file.
         merged[c] = incoming;
         if (incoming) corrected.push(c); else cleared.push(c);
       } else {
