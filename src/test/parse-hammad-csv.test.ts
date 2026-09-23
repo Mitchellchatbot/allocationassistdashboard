@@ -173,3 +173,20 @@ describe("rows that need a person before they are saved", () => {
     expect(notAdded.warnings.map(w => w.kind)).toContain("hold");
   });
 });
+
+describe("a date typed into the wrong column", () => {
+  it("flags a date sitting past an empty Joined cell", () => {
+    const csv = ["4/20/2026,Hospital,Doctors / candidates,Specialty,Shortlisted,Interview,offered,Signed,Start job Date,Joined,",
+                 `7,SKMC,Luca Pianta,Consultant ENT Surgeon,,,,,3/30/2026,,4/21/2026`].join("\n");
+    const { rows, warnings } = parseHammadCsv(csv, { today: new Date("2026-09-23T00:00:00Z") });
+    expect(rows[0].joined_at).toBeNull();
+    expect(warnings.map(w => w.kind)).toContain("date_in_notes");
+  });
+
+  it("says nothing when the Joined cell is filled", () => {
+    const csv = ["6/28/2026,Hospital,Doctors / candidates,Specialty,Shortlisted,Interview,offered,Signed,Start job Date,Joined,",
+                 `3,AH,Judit Konya,Family Medicine,,,,,,6/28/2026,17/07,ADDED`].join("\n");
+    const { warnings } = parseHammadCsv(csv, { today: new Date("2026-09-23T00:00:00Z") });
+    expect(warnings.map(w => w.kind)).not.toContain("date_in_notes");
+  });
+});

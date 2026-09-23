@@ -126,3 +126,24 @@ describe("the span a sheet speaks for", () => {
     expect(plan.updates[0].corrected).toEqual(["shortlisted_at"]);
   });
 });
+
+describe("a stage the sheet could not state", () => {
+  const SEPT = { authoritativeFrom: "2026-04-05T00:00:00.000Z", authoritativeTo: "2026-04-26T00:00:00.000Z" };
+
+  it("leaves a join date alone when the sheet's Joined cell is unreadable", () => {
+    // Luca Pianta's join was typed one column past Joined, so the cell is
+    // empty. That is not the sheet saying he never joined.
+    const plan = planPlacementImport([sheet({ start_date: "2026-03-30T00:00:00.000Z", uncertain: ["joined_at"] })], [row({
+      joined_at: "2026-04-21T00:00:00.000Z",
+    })], SEPT);
+    expect(plan.updates.flatMap(u => u.cleared)).toEqual([]);
+    expect(plan.unchanged + plan.updates.length).toBe(1);
+  });
+
+  it("still clears a stage the sheet plainly leaves blank", () => {
+    const plan = planPlacementImport([sheet({ start_date: "2026-04-10T00:00:00.000Z" })], [row({
+      joined_at: "2026-04-21T00:00:00.000Z",
+    })], SEPT);
+    expect(plan.updates[0].cleared).toEqual(["joined_at"]);
+  });
+});

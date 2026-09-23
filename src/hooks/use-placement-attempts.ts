@@ -104,6 +104,10 @@ export interface UpsertAttemptInput {
   paid_at?:         string | null;
   notes?:           string | null;
   source?:          string;
+  /** Stages this sheet could not state reliably — a date typed into the wrong
+   *  column, say. Blank here means "the sheet doesn't say", never "it did not
+   *  happen", so these are never corrected or cleared. */
+  uncertain?:       MilestoneColumn[];
 }
 
 export function useUpsertPlacementAttempt() {
@@ -364,6 +368,7 @@ export function planPlacementImport(
     const prev = collapsed.get(k);
     if (!prev) { collapsed.set(k, { ...r }); continue; }
     for (const c of MILESTONE_COLUMNS) prev[c] = earlier(prev[c] ?? null, r[c] ?? null);
+    if (r.uncertain?.length) prev.uncertain = [...new Set([...(prev.uncertain ?? []), ...r.uncertain])];
     prev.notes = joinNotes(prev.notes, r.notes);
     prev.doctor_specialty ??= r.doctor_specialty;
     prev.hospital_id ??= r.hospital_id;
@@ -396,7 +401,7 @@ export function planPlacementImport(
         // Earliest wins: the journey started before this sheet recorded it.
         merged[c] = incoming;
         corrected.push(c);
-      } else if (inCoveredWeeks(current) && !sameInstant(incoming, current)) {
+      } else if (inCoveredWeeks(current) && !r.uncertain?.includes(c) && !sameInstant(incoming, current)) {
         // The sheet covers the week this date sits in, so it decides —
         // including deciding the stage never happened.
         merged[c] = incoming;

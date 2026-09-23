@@ -49,6 +49,7 @@ export type ParseWarningKind =
   | "future"           // after today — a planned date, not an event yet
   | "unreadable_date"  // a date cell the parser could not read
   | "hold"             // HOLD / NOT ADDED / cancelled written on the row
+  | "date_in_notes"     // a date typed past the Joined column, which is empty
   | "no_hospital"      // a doctor with dates but no hospital — row skipped
   | "no_doctor";       // a hospital with dates but no doctor — row skipped
 
@@ -357,6 +358,19 @@ export function parseHammadCsv(text: string, options: ParseOptions = {}): ParseR
         kind: "hold", line, doctor, hospital, column: dates.joined_at ? "joined_at" : "start_date",
         typed: notes, read_as: dates.joined_at ?? dates.start_date,
         message: `${doctor} @ ${hospital}: the row says "${notes}" next to a join/start date`,
+      });
+    }
+
+    // A date typed one column too far right leaves Joined empty, which would
+    // otherwise read as "this journey never joined" and wipe a real join date.
+    const strayDate = !dates.joined_at && notes
+      ? notes.split(" · ").find(n => /^\d{1,2}\/\d{1,2}(\/\d{2,4})?$/.test(n.trim()))
+      : undefined;
+    if (strayDate) {
+      warnings.push({
+        kind: "date_in_notes", line, doctor, hospital, column: "joined_at",
+        typed: strayDate, read_as: null,
+        message: `${doctor} @ ${hospital}: "${strayDate}" sits past the Joined column, which is empty — the join date is left as it is`,
       });
     }
 
