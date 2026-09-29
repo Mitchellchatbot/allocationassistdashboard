@@ -217,7 +217,12 @@ const daysBetween = (a: Date, b: Date) => (a.getTime() - b.getTime()) / DAY;
 /** A header or plain date cell: month-first, swapped only when the first
  *  number cannot be a month. No context — used for the week header itself. */
 function parsePlainDate(raw: string | undefined): Date | null {
-  const m = (raw ?? "").trim().match(/^(\d{1,2})\/(\d{1,2})\/(\d{2,4})$/);
+  const trimmed = (raw ?? "").trim();
+  // yyyy-mm-dd only ever comes from a real date cell in the workbook, never
+  // from someone typing into the sheet, so it is taken at face value.
+  const iso = trimmed.match(/^(\d{4})-(\d{2})-(\d{2})$/);
+  if (iso) return utc(+iso[1], +iso[2], +iso[3]);
+  const m = trimmed.match(/^(\d{1,2})\/(\d{1,2})\/(\d{2,4})$/);
   if (!m) return null;
   let a = parseInt(m[1], 10), b = parseInt(m[2], 10);
   let y = parseInt(m[3], 10);
@@ -250,6 +255,20 @@ function parseDateCell(raw: string | undefined, block: Date | null, today: Date,
   if (!s) return NO_DATE;
   // Obvious notes-not-dates keep their text but yield no date.
   if (/^(added|sent|x|-|none|n\/a|hold|not added)$/i.test(s)) return { iso: null, note: s };
+
+  // A real date cell from the workbook, handed over as yyyy-mm-dd. Nobody
+  // types that into these sheets, so it is unambiguous and none of the
+  // guessing below should touch it: the day-first and wrong-year rules exist
+  // to rescue text, and applied here they would rewrite a date we know.
+  const isoCell = s.match(/^(\d{4})-(\d{2})-(\d{2})\b/);
+  if (isoCell) {
+    const d = utc(+isoCell[1], +isoCell[2], +isoCell[3]);
+    const rest = s.slice(isoCell[0].length).trim() || null;
+    if (!d) return { iso: null, note: s };
+    return d > today && !planned
+      ? { iso: d.toISOString(), note: rest, warning: { kind: "future", message: `${fmt(d)} is in the future` } }
+      : { iso: d.toISOString(), note: rest };
+  }
 
   const m = s.match(/^(\d{1,2})\/(\d{1,2})\/(\d{2,4})\b/);
   if (m) {
@@ -373,6 +392,15 @@ function resolveBlockRep(
 }
 
 export function parseHammadCsv(text: string, options: ParseOptions = {}): ParseResult {
+  return parseRecords(splitRecords(text), options);
+}
+
+/** The same reading, over rows that came from somewhere other than CSV text —
+ *  a workbook sheet, where the dates are real values rather than typing. */
+export function parseRecords(
+  records: Array<{ cells: string[]; line: number }>,
+  options: ParseOptions = {},
+): ParseResult {
   const today = options.today ?? new Date();
   const rows: ParsedRow[] = [];
   const warnings: ParseWarning[] = [];
@@ -395,7 +423,7 @@ export function parseHammadCsv(text: string, options: ParseOptions = {}): ParseR
     pending = [];
   };
 
-  for (const { cells: cols, line } of splitRecords(text)) {
+  for (const { cells: cols, line } of records) {
     if (cols.every(c => !c)) continue;
 
     if (isHeaderRow(cols)) { closeBlock(); weekSections++; block = parsePlainDate(cols[0]); continue; }
