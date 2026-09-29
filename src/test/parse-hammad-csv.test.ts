@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { parseHammadCsv, doctorSlug, cleanDoctorName, cleanHospitalName, doctorKey } from "@/lib/parse-hammad-csv";
+import { parseHammadCsv, doctorSlug, cleanDoctorName, cleanHospitalName, doctorKey, weekEnding } from "@/lib/parse-hammad-csv";
 
 const HEADER = "1/1/2026,Hospital,Doctors / candidates,Specialty,Shortlisted,Interview,offered,Signed,Start job Date,Joined,";
 
@@ -188,5 +188,102 @@ describe("a date typed into the wrong column", () => {
                  `3,AH,Judit Konya,Family Medicine,,,,,,6/28/2026,17/07,ADDED`].join("\n");
     const { warnings } = parseHammadCsv(csv, { today: new Date("2026-09-23T00:00:00Z") });
     expect(warnings.map(w => w.kind)).not.toContain("date_in_notes");
+  });
+});
+
+describe("weekEnding", () => {
+  it("names a week after the Saturday that closes it", () => {
+    expect(weekEnding("2026-08-15")).toBe("2026-08-15");  // a Saturday is its own week
+    expect(weekEnding("2026-08-14")).toBe("2026-08-15");  // Friday
+    expect(weekEnding("2026-08-09")).toBe("2026-08-15");  // Sunday opens that week
+  });
+
+  it("carries the last days of a month into the next month's week", () => {
+    // Sun 26 Jul - Sat 1 Aug is an August week, which is why 32 shortlisted
+    // rows sitting in the July sheet belong to August's figures.
+    expect(weekEnding("2026-07-26")).toBe("2026-08-01");
+    expect(weekEnding("2026-07-31")).toBe("2026-08-01");
+  });
+});
+
+describe("events", () => {
+  it("emits one event per stage the line reports", () => {
+    const csv = [HEADER, `1,AHD,Ali Khan,Cardiology,8/13/2026,8/14/2026,,,,,`].join("\n");
+    const { rows } = parseHammadCsv(csv);
+    expect(rows[0].events.map(e => [e.stage, e.occurred_at, e.week_ending])).toEqual([
+      ["shortlisted", "2026-08-13", "2026-08-15"],
+      ["interviewed", "2026-08-14", "2026-08-15"],
+    ]);
+  });
+
+  it("keeps both lines when a doctor is put forward twice at one hospital", () => {
+    // The journey row can hold only one interviewed_at; the team counts both.
+    const csv = [HEADER,
+                 `1,AHD,Aamer Alhamwi,Surgery,,8/5/2026,,,,,`,
+                 `2,AHD,Aamer Alhamwi,Surgery,,8/19/2026,,,,,`].join("\n");
+    const { rows } = parseHammadCsv(csv);
+    const interviews = rows.flatMap(r => r.events).filter(e => e.stage === "interviewed");
+    expect(interviews.map(e => e.occurred_at)).toEqual(["2026-08-05", "2026-08-19"]);
+  });
+
+  it("makes no event for a start date, which is a plan and not an event", () => {
+    const csv = [HEADER, `1,AHD,Ali Khan,Cardiology,,,,,9/1/2026,,`].join("\n");
+    expect(parseHammadCsv(csv).rows[0].events).toEqual([]);
+  });
+});
+
+describe("block rep", () => {
+  const repFor = (h: string) => {
+    const owners: Record<string, { rep: string; country: string | null }> = {
+      AHD:            { rep: "Ishak",   country: "UAE" },
+      "NMC - AUH":    { rep: "Ishak",   country: "UAE" },
+      Garhoud:        { rep: "Mohamed", country: "UAE" },
+      Prime:          { rep: "Mohamed", country: "UAE" },
+      HMG:            { rep: "Sohaila", country: "KSA/Qatar" },
+      MNGHA:          { rep: "Sohaila", country: "KSA/Qatar" },
+    };
+    return owners[h] ?? null;
+  };
+
+  it("stamps every row and event in a block with the block's rep", () => {
+    const csv = [HEADER,
+                 `1,HMG,Faheem Seedat,Endocrinology,8/13/2026,,,,,,`,
+                 `2,MNGHA,Dalia Ahmed,Cardiac Imaging,8/13/2026,,,,,,`].join("\n");
+    const { rows } = parseHammadCsv(csv, { repFor });
+    expect(rows.map(r => r.rep)).toEqual(["Sohaila", "Sohaila"]);
+    expect(rows[0].country).toBe("KSA/Qatar");
+    expect(rows[0].events[0].rep).toBe("Sohaila");
+  });
+
+  it("gives a shared hospital name the rep of the block it sits in", () => {
+    // "SGH" is Saudi German, which is on both Sohaila's and Ishak's lists.
+    // In a block of Ishak's hospitals it is the Dubai one.
+    const csv = [HEADER,
+                 `1,AHD,Ali Al-Haboubi,Emergency,8/9/2026,,,,,,`,
+                 `2,AHD,Miriam Ghaly,Family Medicine,8/9/2026,,,,,,`,
+                 `3,SGH,Luis Teran,Anesthesia,8/9/2026,,,,,,`].join("\n");
+    const { rows } = parseHammadCsv(csv, { repFor });
+    expect(rows.find(r => r.hospital_name === "SGH")?.rep).toBe("Ishak");
+  });
+
+  it("keeps each block's own rep when a file holds several", () => {
+    const csv = [HEADER,
+                 `1,Garhoud,Monika Kodeboina,Cardiology,8/27/2026,,,,,,`,
+                 HEADER,
+                 `1,HMG,Fady Zakharious,Internal Medicine,8/13/2026,,,,,,`].join("\n");
+    const { rows } = parseHammadCsv(csv, { repFor });
+    expect(rows.map(r => r.rep)).toEqual(["Mohamed", "Sohaila"]);
+  });
+
+  it("leaves a block unattributed rather than guessing a tie", () => {
+    const csv = [HEADER,
+                 `1,AHD,Ali Khan,Cardiology,8/13/2026,,,,,,`,
+                 `2,Garhoud,Sara Ali,Cardiology,8/13/2026,,,,,,`].join("\n");
+    expect(parseHammadCsv(csv, { repFor }).rows.every(r => r.rep === null)).toBe(true);
+  });
+
+  it("carries no rep when no owner map is given", () => {
+    const csv = [HEADER, `1,AHD,Ali Khan,Cardiology,8/13/2026,,,,,,`].join("\n");
+    expect(parseHammadCsv(csv).rows[0].rep).toBeNull();
   });
 });
