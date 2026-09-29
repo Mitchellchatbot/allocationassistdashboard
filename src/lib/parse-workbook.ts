@@ -18,7 +18,6 @@
  * six of the nine months to within four rows.
  */
 
-import * as XLSX from "xlsx";
 import { parseRecords, type ParseOptions, type ParseResult } from "./parse-hammad-csv";
 
 export interface SheetResult extends ParseResult {
@@ -53,28 +52,43 @@ function cellText(v: unknown): string {
  *
  *  Tabs are not filtered by name: a month is whatever the team called the tab,
  *  and a tab with no week blocks in it simply yields no rows. */
-export function parseWorkbook(
-  data: ArrayBuffer | Uint8Array,
-  options: ParseOptions = {},
-): WorkbookResult {
-  const wb = XLSX.read(data, { type: "array", cellDates: true });
-  const sheets: SheetResult[] = [];
+export interface SheetRecords {
+  sheet:   string;
+  records: Array<{ cells: string[]; line: number }>;
+}
 
-  for (const name of wb.SheetNames) {
-    const ws = wb.Sheets[name];
+/** Every tab's rows as cells, ready for parseRecords.
+ *
+ *  Kept apart from parsing because reading the file is asynchronous while
+ *  parsing is not: the import dialog reads once, then re-parses whenever the
+ *  hospital owners arrive or someone maps a spelling. */
+export async function workbookRecords(data: ArrayBuffer | Uint8Array): Promise<SheetRecords[]> {
+  // Lazy, like read-tabular-file: SheetJS is large and only an import needs
+  // it, so it stays out of the main bundle.
+  const XLSX = await import("xlsx");
+  // cellDates is the whole point — without it SheetJS hands back the serial
+  // numbers as text and every date is a guess again.
+  const wb = XLSX.read(data, { type: "array", cellDates: true });
+  const out: SheetRecords[] = [];
+  for (const sheet of wb.SheetNames) {
+    const ws = wb.Sheets[sheet];
     if (!ws) continue;
     const grid = XLSX.utils.sheet_to_json<unknown[]>(ws, { header: 1, raw: true, defval: "", blankrows: true });
     // The line number is the row's place in the tab, so a warning can say
     // "August, row 206" and someone can go straight to it.
-    const records = grid.map((row, i) => ({
-      cells: (row ?? []).map(cellText),
-      line:  i + 1,
-    }));
-    sheets.push({
-      ...parseRecords(records, { ...options, sourceFile: options.sourceFile ?? name }),
-      sheet: name,
-    });
+    out.push({ sheet, records: grid.map((row, i) => ({ cells: (row ?? []).map(cellText), line: i + 1 })) });
   }
+  return out;
+}
+
+export async function parseWorkbook(
+  data: ArrayBuffer | Uint8Array,
+  options: ParseOptions = {},
+): Promise<WorkbookResult> {
+  const sheets: SheetResult[] = (await workbookRecords(data)).map(({ sheet, records }) => ({
+    ...parseRecords(records, { ...options, sourceFile: options.sourceFile ?? sheet }),
+    sheet,
+  }));
 
   return {
     sheets,
