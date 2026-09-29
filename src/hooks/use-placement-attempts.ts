@@ -432,12 +432,38 @@ export function planPlacementImport(
  * function also runs with the doctor_lifecycle sync trigger off, so old dates
  * can't reach the scheduler as if they were today's news.
  */
-export interface ImportResult { batch: string; inserted: number; updated: number; unchanged: number }
+export interface ImportResult { batch: string; inserted: number; updated: number; unchanged: number; events: number }
+
+/**
+ * One line as the sheet logged it, saved beside the journey.
+ *
+ * A journey row keeps a single date per stage, but the team counts lines, and
+ * a doctor is regularly put forward at the same hospital more than once — 811
+ * interview lines in the 2026 workbook against 671 distinct doctor+hospital
+ * pairs. Those extra 140 are what placement_events keeps.
+ *
+ * `rep` comes from the sheet block the line sat in, not from the hospital:
+ * several hospital names sit under two reps, so the same doctor and hospital
+ * logged by two people is deliberately two events.
+ */
+export interface PlanEvent {
+  doctor_id:     string;
+  hospital_name: string;
+  stage:         "shortlisted" | "interviewed" | "offered" | "signed" | "joined";
+  /** ISO date, yyyy-mm-dd. */
+  occurred_at:   string;
+  rep:           string | null;
+  country:       string | null;
+  source_file:   string | null;
+  source_line:   number | null;
+}
 
 export function useApplyPlacementImport() {
   const qc = useQueryClient();
   return useMutation({
-    mutationFn: async ({ plan, label }: { plan: MergePlan; label?: string }): Promise<ImportResult> => {
+    mutationFn: async (
+      { plan, label, events = [] }: { plan: MergePlan; label?: string; events?: PlanEvent[] },
+    ): Promise<ImportResult> => {
       const { data, error } = await supabase.rpc("apply_placement_import", {
         p_inserts: plan.inserts.map(r => ({
           doctor_id:        r.doctor_id,
@@ -456,9 +482,10 @@ export function useApplyPlacementImport() {
         })),
         p_updates: plan.updates.map(u => ({ id: u.id, merged: u.merged, notes: u.notes })),
         p_label:   label ?? null,
+        p_events:  events,
       });
       if (error) throw error;
-      const row = (data as Array<{ batch: string; inserted: number; updated: number }>)[0];
+      const row = (data as Array<{ batch: string; inserted: number; updated: number; events: number }>)[0];
       return { ...row, unchanged: plan.unchanged };
     },
     onSuccess: () => {
