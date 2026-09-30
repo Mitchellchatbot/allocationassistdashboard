@@ -8,7 +8,10 @@
 -- Events arrive keyed by (doctor_id, hospital_name) rather than by journey id,
 -- because the journeys they belong to may be created by this very call.
 
+-- Both functions gain an output column, and Postgres will not let
+-- "create or replace" change a return type, so they are dropped first.
 drop function if exists public.apply_placement_import(jsonb, jsonb, text);
+drop function if exists public.undo_placement_import(uuid);
 
 -- p_inserts: whole rows to add. p_updates: [{ id, merged: {stage: date|null}, notes }].
 -- p_events:  [{ doctor_id, hospital_name, stage, occurred_at, rep, country,
