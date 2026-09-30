@@ -262,12 +262,44 @@ function parseDateCell(raw: string | undefined, block: Date | null, today: Date,
   // to rescue text, and applied here they would rewrite a date we know.
   const isoCell = s.match(/^(\d{4})-(\d{2})-(\d{2})\b/);
   if (isoCell) {
-    const d = utc(+isoCell[1], +isoCell[2], +isoCell[3]);
+    const y = +isoCell[1], mo = +isoCell[2], dd = +isoCell[3];
     const rest = s.slice(isoCell[0].length).trim() || null;
-    if (!d) return { iso: null, note: s };
-    return d > today && !planned
-      ? { iso: d.toISOString(), note: rest, warning: { kind: "future", message: `${fmt(d)} is in the future` } }
-      : { iso: d.toISOString(), note: rest };
+    let date = utc(y, mo, dd);
+    if (!date) return { iso: null, note: s };
+    let warning: DateCell["warning"];
+
+    // A real date cell needs no guessing — but the sheet sometimes holds the
+    // wrong date, because the guessing already happened when someone typed it.
+    // "12/4/2026" meant 12 April and was stored as 4 December, and five HMG
+    // rows in the April tab still carry it. So the week-anchored rule the typed
+    // dates get applies here too: swap month and day only when the stored date
+    // lands months AFTER the week the row was written in and the swap lands
+    // inside it. Dates carried forward are always in the past, so this never
+    // touches those.
+    const swapped = mo !== dd && dd <= 12 ? utc(y, dd, mo) : null;
+    if (block && swapped && !planned) {
+      const gap   = daysBetween(date, block);
+      const swGap = Math.abs(daysBetween(swapped, block));
+      if (gap > NEAR_DAYS && swGap <= NEAR_DAYS) {
+        warning = { kind: "day_first", message: `the cell holds ${fmt(date)}, months after this week (${fmt(block)}) — read as ${fmt(swapped)}` };
+        date = swapped;
+      }
+    }
+    // Same for a mistyped year: one August row holds 2028. Corrected only when
+    // the right year puts the date inside the week it was written in.
+    if (!warning && block && date.getUTCFullYear() !== block.getUTCFullYear()) {
+      const fixed = utc(block.getUTCFullYear(), date.getUTCMonth() + 1, date.getUTCDate());
+      if (fixed && Math.abs(daysBetween(date, block)) > 180 && Math.abs(daysBetween(fixed, block)) <= NEAR_DAYS) {
+        warning = { kind: "year_fixed", message: `the cell holds ${fmt(date)}; read as ${fmt(fixed)}, in this week (${fmt(block)})` };
+        date = fixed;
+      } else {
+        warning = { kind: "other_year", message: `the cell holds ${fmt(date)}, not ${block.getUTCFullYear()} — kept as it is` };
+      }
+    }
+    if (!warning && date > today && !planned) {
+      warning = { kind: "future", message: `${fmt(date)} is after today — a planned date, not an event yet` };
+    }
+    return { iso: date.toISOString(), note: rest, warning };
   }
 
   const m = s.match(/^(\d{1,2})\/(\d{1,2})\/(\d{2,4})\b/);

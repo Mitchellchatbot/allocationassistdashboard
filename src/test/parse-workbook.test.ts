@@ -89,3 +89,43 @@ describe("workbookDay", () => {
     expect(workbookDay(new Date("2025-12-31T19:00:00.000Z"))).toBe("2026-01-01");
   });
 });
+
+describe("a real date cell the sheet got wrong", () => {
+  const APR = ["4/13/2026", "Hospital", "Doctors / candidates", "Specialty",
+               "Shortlisted", "Interview", "offered", "Signed", "Start job Date", "Joined"];
+
+  it("swaps month and day when the stored date lands months after its week", async () => {
+    // "12/4/2026" was typed for 12 April and stored as 4 December. Five HMG
+    // rows in the April tab still carry it, and a straight read would push
+    // them into December — undoing a fix already made in the database.
+    const wb = await parseWorkbook(book({
+      April: [APR, [1, "HMG", "Bahaa Madi", "Internal Medicine", d(2026, 12, 4), "", "", "", "", ""]],
+    }));
+    expect(wb.rows[0].shortlisted_at).toBe("2026-04-12T00:00:00.000Z");
+    expect(wb.warnings.map(w => w.kind)).toContain("day_first");
+  });
+
+  it("leaves a date alone when the swap would not land in the week", async () => {
+    const wb = await parseWorkbook(book({
+      April: [APR, [1, "HMG", "Ali Khan", "Cardiology", d(2026, 4, 14), "", "", "", "", ""]],
+    }));
+    expect(wb.rows[0].shortlisted_at).toBe("2026-04-14T00:00:00.000Z");
+    expect(wb.warnings.map(w => w.kind)).not.toContain("day_first");
+  });
+
+  it("never moves a date that is already in the past of its week", async () => {
+    // A stage carried forward from an earlier month is normal and must stay.
+    const wb = await parseWorkbook(book({
+      April: [APR, [1, "HMG", "Ali Khan", "Cardiology", d(2026, 2, 3), "", "", "", "", ""]],
+    }));
+    expect(wb.rows[0].shortlisted_at).toBe("2026-02-03T00:00:00.000Z");
+  });
+
+  it("corrects a mistyped year when the right one lands in the week", async () => {
+    const wb = await parseWorkbook(book({
+      April: [APR, [1, "HMG", "Ali Khan", "Cardiology", d(2028, 4, 14), "", "", "", "", ""]],
+    }));
+    expect(wb.rows[0].shortlisted_at).toBe("2026-04-14T00:00:00.000Z");
+    expect(wb.warnings.map(w => w.kind)).toContain("year_fixed");
+  });
+});
