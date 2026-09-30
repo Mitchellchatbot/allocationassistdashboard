@@ -32,10 +32,31 @@ const MONTHS_LONG  = ["January", "February", "March", "April", "May", "June", "J
 
 const midnight = (d: Date) => { const o = new Date(d); o.setHours(0, 0, 0, 0); return o; };
 const addDays  = (d: Date, n: number) => { const o = new Date(d); o.setDate(o.getDate() + n); return o; };
-/** First of the month `n` months after the month containing `d`. */
-const monthStart = (d: Date, n = 0) => new Date(d.getFullYear(), d.getMonth() + n, 1);
-/** Last day (midnight) of the month `n` months after the month containing `d`. */
-const monthEnd   = (d: Date, n = 0) => new Date(d.getFullYear(), d.getMonth() + n + 1, 0);
+/**
+ * A month is whole weeks, not calendar days.
+ *
+ * The team works Sunday to Saturday and counts a week in the month its Sunday
+ * falls in, so August 2026 opens on Sunday 2 August and closes on Saturday
+ * 5 September. The week ending Saturday 1 August began on 26 July and belongs
+ * to July — reading it as August is what made August look 34 rows short when
+ * it wasn't. Checked across nine months against the team's tracker, this rule
+ * brings the year to within 8 rows of 2,024, and August to 209 against 211.
+ *
+ * monthStart: the first Sunday of the month `n` months from `d`.
+ * monthEnd:   the Saturday closing the week that the month's last Sunday opens.
+ */
+const monthStart = (d: Date, n = 0) => {
+  const first = new Date(d.getFullYear(), d.getMonth() + n, 1);
+  // getDay() 0 = Sunday, so this stays put when the 1st is itself a Sunday.
+  first.setDate(first.getDate() + ((7 - first.getDay()) % 7));
+  return midnight(first);
+};
+const monthEnd = (d: Date, n = 0) => {
+  const last = new Date(d.getFullYear(), d.getMonth() + n + 1, 0);   // last calendar day
+  const lastSunday = new Date(last);
+  lastSunday.setDate(last.getDate() - last.getDay());                // back to its Sunday
+  return midnight(addDays(lastSunday, 6));                           // that week's Saturday
+};
 
 export const shortDate = (d: Date) => `${d.getDate()} ${MONTHS_SHORT[d.getMonth()]}`;
 export const monthLabel = (d: Date, long = false) =>
@@ -79,9 +100,12 @@ export function periodLabels(period: Period, offset: number, now: Date = new Dat
     phrase = label;
     lead   = offset === 0 ? "This month" : `In ${MONTHS_LONG[r.from.getMonth()]}`;
   } else {
-    label  = `${monthLabel(r.from)} – ${monthLabel(r.to)}`;
-    phrase = `the 12 months to ${monthLabel(r.to, true)}`;
-    lead   = offset === 0 ? "Over the last 12 months" : `In the 12 months to ${monthLabel(r.to)}`;
+    // A month now closes on a Saturday that can fall in the next month, so the
+    // label names the month the window belongs to rather than the day it ends.
+    const endMonth = new Date(now.getFullYear(), now.getMonth() + offset * 12, 1);
+    label  = `${monthLabel(r.from)} – ${monthLabel(endMonth)}`;
+    phrase = `the 12 months to ${monthLabel(endMonth, true)}`;
+    lead   = offset === 0 ? "Over the last 12 months" : `In the 12 months to ${monthLabel(endMonth)}`;
   }
   return { range: r, word, rel, label, phrase, lead };
 }
@@ -95,7 +119,11 @@ export function offsetOf(period: Period, date: Date, now: Date = new Date()): nu
     const diff = startOfWeek(date).getTime() - startOfWeek(now).getTime();
     return Math.round(diff / (7 * 86_400_000)) || 0;
   }
-  const months = (date.getFullYear() - now.getFullYear()) * 12 + (date.getMonth() - now.getMonth());
+  // A month is whole weeks, so which month a date belongs to is decided by the
+  // Sunday that opens its week — 1 September 2026 is a Tuesday in the week
+  // opening Sunday 30 August, and so counts in August.
+  const a = startOfWeek(date), b = startOfWeek(now);
+  const months = (a.getFullYear() - b.getFullYear()) * 12 + (a.getMonth() - b.getMonth());
   if (period === "monthly") return months;
   // Rolling years: months 0..-11 are the current window, -12..-23 the one before, …
   // (`|| 0` folds the -0 that negating a zero quotient produces.)
