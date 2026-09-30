@@ -1,6 +1,6 @@
 import { describe, it, expect } from "vitest";
 import * as XLSX from "xlsx";
-import { parseWorkbook, isWorkbook } from "@/lib/parse-workbook";
+import { parseWorkbook, isWorkbook, workbookDay } from "@/lib/parse-workbook";
 
 const HEADER = ["8/2/2026", "Hospital", "Doctors / candidates", "Specialty",
                 "Shortlisted", "Interview", "offered", "Signed", "Start job Date", "Joined"];
@@ -66,5 +66,26 @@ describe("parseWorkbook", () => {
   it("knows which files are workbooks", () => {
     expect(isWorkbook({ name: "report.xlsx" })).toBe(true);
     expect(isWorkbook({ name: "report.csv" })).toBe(false);
+  });
+});
+
+describe("workbookDay", () => {
+  it("reads the day a cell means, wherever the code runs", () => {
+    // SheetJS hands a wall-clock day back as an instant near midnight: this is
+    // how 5 January 2026 arrives on a machine five hours ahead of UTC. Reading
+    // the local parts gives 4 January there, and every date in the file shifts
+    // with it — which made an import of already-correct data look like 2,088
+    // corrections.
+    expect(workbookDay(new Date("2026-01-04T19:00:00.000Z"))).toBe("2026-01-05");
+    // And this is the same day on a machine five hours behind.
+    expect(workbookDay(new Date("2026-01-05T05:00:00.000Z"))).toBe("2026-01-05");
+    // Plain UTC midnight, and the few-seconds rounding SheetJS sometimes adds.
+    expect(workbookDay(new Date("2026-01-05T00:00:00.000Z"))).toBe("2026-01-05");
+    expect(workbookDay(new Date("2026-02-28T18:59:48.000Z"))).toBe("2026-03-01");
+  });
+
+  it("holds at a month and a year boundary", () => {
+    expect(workbookDay(new Date("2026-07-31T19:00:00.000Z"))).toBe("2026-08-01");
+    expect(workbookDay(new Date("2025-12-31T19:00:00.000Z"))).toBe("2026-01-01");
   });
 });

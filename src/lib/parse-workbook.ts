@@ -37,14 +37,25 @@ export interface WorkbookResult {
 
 /** A cell as the parser wants it: text, except a real date, which becomes
  *  yyyy-mm-dd so it is read rather than guessed at. */
-function cellText(v: unknown): string {
-  if (v == null) return "";
-  if (v instanceof Date) {
-    // The workbook stores a wall-clock day. Read the local parts, so a date
-    // never slips to the day before in a negative-offset timezone.
-    const y = v.getFullYear(), m = v.getMonth() + 1, d = v.getDate();
+export function workbookDay(v: Date): string {
+  {
+    // A workbook cell holds a wall-clock day, but SheetJS hands it back as an
+    // instant a few hours either side of midnight — 1 March 2026 arrives as
+    // 2026-02-28T18:59:48Z. Reading the local parts therefore answers
+    // differently depending on where the code runs: in UTC that cell reads as
+    // 28 February, a day early, and every date in the file shifts with it —
+    // which made an import of already-correct data look like 2,088
+    // corrections. Rounding to the nearest day is the only reading that does
+    // not depend on the machine's timezone.
+    const t = new Date(v.getTime() + 12 * 60 * 60 * 1000);
+    const y = t.getUTCFullYear(), m = t.getUTCMonth() + 1, d = t.getUTCDate();
     return `${y}-${String(m).padStart(2, "0")}-${String(d).padStart(2, "0")}`;
   }
+}
+
+function cellText(v: unknown): string {
+  if (v == null) return "";
+  if (v instanceof Date) return workbookDay(v);
   return String(v).trim();
 }
 
