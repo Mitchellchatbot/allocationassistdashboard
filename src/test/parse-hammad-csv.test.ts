@@ -165,12 +165,22 @@ describe("rows that need a person before they are saved", () => {
     expect(parseHammadCsv([HEADER, `12,,,,,,,,,,`].join("\n"), TODAY).warnings).toEqual([]);
   });
 
-  it("keeps a join date written beside HOLD or NOT ADDED, but flags it", () => {
+  it("keeps a join date written beside HOLD, but flags it", () => {
     const hold = parseHammadCsv([HEADER, `4,NMC-Sh,Sachin Bansod,ENT,,,,,,6/15/2026,HOLD ,HOLD `].join("\n"), TODAY);
     expect(hold.rows[0].joined_at).toBe("2026-06-15T00:00:00.000Z");
     expect(hold.warnings).toMatchObject([{ kind: "hold", column: "joined_at" }]);
+  });
+
+  it("lets ADDED and NOT ADDED through, because they are the team's own bookkeeping", () => {
+    // They mark an internal step of the team's after a join, not whether the
+    // doctor started, so reading them as a hold kept real joins out.
     const notAdded = parseHammadCsv([HEADER, `10,SSMC,Freddy Graterol,Cardiology,,,,,7/20/2026,7/20/2026,NOT ADDED,`].join("\n"), TODAY);
-    expect(notAdded.warnings.map(w => w.kind)).toContain("hold");
+    expect(notAdded.warnings.map(w => w.kind)).not.toContain("hold");
+    expect(notAdded.rows[0].joined_at).toBe("2026-07-20T00:00:00.000Z");
+
+    const added = parseHammadCsv([HEADER, `2,Harley Clinic,Yazeed Alsanad,Psychiatry,,,,,,8/3/2026,SENT,ADDED`].join("\n"), TODAY);
+    expect(added.warnings.map(w => w.kind)).not.toContain("hold");
+    expect(added.rows[0].joined_at).toBe("2026-08-03T00:00:00.000Z");
   });
 });
 

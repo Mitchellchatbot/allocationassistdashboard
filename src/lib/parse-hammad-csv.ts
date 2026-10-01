@@ -37,6 +37,9 @@ export interface ParsedRow {
   line:             number;
   /** The date in the header of the week block the row sits under. */
   block_date:       string | null;
+  /** The tab the row came from, so a question about it can be taken back to
+   *  the sheet: "September row 294" rather than "row 294 of something". */
+  sheet:            string | null;
   /** Whose weekly block this row sat in. See resolveBlockRep. */
   rep:              string | null;
   country:          string | null;
@@ -94,6 +97,8 @@ export type ParseWarningKind =
 
 export interface ParseWarning {
   kind:     ParseWarningKind;
+  /** The tab the row came from — see ParsedRow.sheet. */
+  sheet:    string | null;
   line:     number;
   doctor:   string | null;
   hospital: string | null;
@@ -381,8 +386,12 @@ function isSummaryRow(cols: string[]): boolean {
   return /^\d+/.test(tail);
 }
 
-/** Words on a row that mean a stage did not really happen. */
-const HOLD = /\b(hold|not added|cancell?ed|withdrawn)\b/i;
+/** Words on a row that mean a stage did not really happen.
+ *
+ *  "ADDED" and "NOT ADDED" are deliberately absent: the team uses those to
+ *  track an internal step of their own after a join, not to say whether the
+ *  doctor started. Reading them as a hold kept real joins out of the figures. */
+const HOLD = /\b(hold|cancell?ed|withdrawn)\b/i;
 
 const DATE_COLUMNS: Array<[DateColumn, number]> = [
   ["shortlisted_at", 4], ["interviewed_at", 5], ["offered_at", 6],
@@ -434,6 +443,7 @@ export function parseRecords(
   options: ParseOptions = {},
 ): ParseResult {
   const today = options.today ?? new Date();
+  const sheet = options.sourceFile ?? null;
   const rows: ParsedRow[] = [];
   const warnings: ParseWarning[] = [];
   let skippedRows = 0;
@@ -472,7 +482,7 @@ export function parseRecords(
       skippedRows++;
       if ((hospital || doctor) && hasDates) {
         warnings.push({
-          kind: hospital ? "no_doctor" : "no_hospital", line,
+          kind: hospital ? "no_doctor" : "no_hospital", sheet, line,
           doctor: doctor || null, hospital: hospital || null, column: null, typed: null, read_as: null,
           message: hospital ? `${hospital}: a row with dates but no doctor — skipped` : `${doctor}: a row with dates but no hospital — skipped`,
         });
@@ -494,7 +504,7 @@ export function parseRecords(
       // Free text written alongside a date ("7/2/2026 Revise") joins the notes.
       if (cell.note) notesParts.push(cell.note);
       if (cell.warning) {
-        warnings.push({ ...cell.warning, line, doctor, hospital, column: col, typed: cols[idx] ?? null, read_as: cell.iso });
+        warnings.push({ ...cell.warning, sheet, line, doctor, hospital, column: col, typed: cols[idx] ?? null, read_as: cell.iso });
       }
     }
     // Trailing free-text notes — columns 10+ are usually "Added", "SENT", "X".
@@ -509,7 +519,7 @@ export function parseRecords(
     // never saved without someone seeing this.
     if (notes && HOLD.test(notes) && (dates.joined_at || dates.start_date)) {
       warnings.push({
-        kind: "hold", line, doctor, hospital, column: dates.joined_at ? "joined_at" : "start_date",
+        kind: "hold", sheet, line, doctor, hospital, column: dates.joined_at ? "joined_at" : "start_date",
         typed: notes, read_as: dates.joined_at ?? dates.start_date,
         message: `${doctor} @ ${hospital}: the row says "${notes}" next to a join/start date`,
       });
@@ -522,7 +532,7 @@ export function parseRecords(
       : undefined;
     if (strayDate) {
       warnings.push({
-        kind: "date_in_notes", line, doctor, hospital, column: "joined_at",
+        kind: "date_in_notes", sheet, line, doctor, hospital, column: "joined_at",
         typed: strayDate, read_as: null,
         message: `${doctor} @ ${hospital}: "${strayDate}" sits past the Joined column, which is empty — the join date is left as it is`,
       });
@@ -545,6 +555,7 @@ export function parseRecords(
       ...dates,
       notes,
       line,
+      sheet,
       block_date:       block ? block.toISOString() : null,
       rep:              null,
       country:          null,
