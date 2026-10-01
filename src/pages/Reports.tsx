@@ -239,6 +239,7 @@ export default function Reports() {
                   <CeoSummary
                     range={range}
                     prior={prior}
+                    side={side}
                     word={labels.word}
                     lead={labels.lead}
                     label={labels.label}

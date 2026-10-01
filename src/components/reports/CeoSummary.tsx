@@ -24,7 +24,10 @@ import { Skeleton } from "@/components/ui/skeleton";
 import { TilesSkeleton } from "@/components/reports/Skeletons";
 import { Hint, HintTitle, HintNote, HoverInfo } from "@/components/reports/HoverHint";
 import { STAGES, stageAt, inRange, type DateRange } from "@/lib/placement-reporting";
-import { countInRange, type TrackedKey } from "@/lib/report-period";
+import { type TrackedKey } from "@/lib/report-period";
+import { usePlacementEvents } from "@/hooks/use-placement-events";
+import { computeEventTotals } from "@/lib/placement-reporting";
+import { reportSide } from "@/lib/hospital-region";
 
 interface Milestone { key: TrackedKey; label: string; icon: typeof CheckCircle2; result?: boolean }
 const MILESTONES: Milestone[] = [
@@ -48,15 +51,25 @@ export interface CeoSummaryProps {
   /** "September 2026", "14 Sep – 20 Sep 2026" … */
   label:     string;
   isCurrent: boolean;
+  /** Which half of the monthly report to show, or null for both. */
+  side:      "UAE" | "KSA/Qatar" | null;
 }
 
-export function CeoSummary({ range, prior, word, lead, label, isCurrent }: CeoSummaryProps) {
+export function CeoSummary({ range, prior, word, lead, label, isCurrent, side }: CeoSummaryProps) {
   const { data: rows = [], isLoading } = usePlacementAttempts();
+  const { data: events = [], isLoading: el } = usePlacementEvents();
 
+  // The headline counts every line the team logged, not distinct doctors:
+  // a doctor put forward at the same hospital twice is two to them, and the
+  // same pair logged by two reps is two. Journey rows cannot say that, so
+  // these come from placement_events - which is also where the UAE /
+  // KSA-Qatar split lives.
   const stats = useMemo(() => {
-    const now = countInRange(rows, range), before = countInRange(rows, prior);
+    const opts = { country: side ?? undefined };
+    const now = computeEventTotals(events, range, opts);
+    const before = computeEventTotals(events, prior, opts);
     return MILESTONES.map(m => ({ ...m, count: now[m.key], prior: before[m.key] }));
-  }, [rows, range, prior]);
+  }, [events, range, prior, side]);
 
   // The three most recent doctors behind each tile, for its hover card.
   const recent = useMemo(() => {
@@ -66,6 +79,7 @@ export function CeoSummary({ range, prior, word, lead, label, isCurrent }: CeoSu
       const seen = new Set<string>();
       const hits: Recent[] = [];
       for (const a of rows as PlacementAttempt[]) {
+        if (side && reportSide(a.hospital_name) !== side) continue;
         const t = stageAt(a, stage);
         if (!inRange(t, range) || seen.has(a.doctor_id)) continue;
         seen.add(a.doctor_id);
@@ -74,7 +88,7 @@ export function CeoSummary({ range, prior, word, lead, label, isCurrent }: CeoSu
       out[m.key] = hits.sort((x, y) => y.at - x.at).slice(0, 3);
     }
     return out;
-  }, [rows, range]);
+  }, [rows, range, side]);
 
   const byKey = Object.fromEntries(stats.map(s => [s.key, s])) as Record<TrackedKey, (typeof stats)[number]>;
   const { signed, relocated, interviewed, shortlisted } = byKey;
@@ -89,7 +103,7 @@ export function CeoSummary({ range, prior, word, lead, label, isCurrent }: CeoSu
   const dot = status === "good" ? "bg-emerald-500" : status === "watch" ? "bg-amber-500" : "bg-slate-300";
 
   const headline = (() => {
-    if (isLoading) return "";
+    if (isLoading || el) return "";
     if (totalNow === 0) {
       return wonPrior > 0
         ? `${isCurrent ? `Quiet ${word} so far` : `A quiet ${word}`} — nothing marked. The ${word} before: ${plural(signed.prior, "signing")}, ${relocated.prior} relocated.`
@@ -99,7 +113,7 @@ export function CeoSummary({ range, prior, word, lead, label, isCurrent }: CeoSu
   })();
 
   const trendClause = (() => {
-    if (isLoading || totalNow === 0) return null;
+    if (isLoading || el || totalNow === 0) return null;
     if (wonPrior === 0) return { text: `${wonNow} signed + relocated · none the ${word} before`, tone: "neutral" as const };
     const pct = Math.round(((wonNow - wonPrior) / wonPrior) * 100);
     if (pct === 0) return { text: `level with the ${word} before`, tone: "neutral" as const };
