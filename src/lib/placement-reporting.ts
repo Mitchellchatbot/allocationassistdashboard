@@ -256,6 +256,11 @@ const EVENT_TO_STAGE: Record<EventStageKey, StageKey> = {
   joined:      "relocated",
 };
 
+/** A Date as the calendar day it is locally, yyyy-mm-dd. */
+function localDay(d: Date): string {
+  return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`;
+}
+
 /** A logged line, as placement_events stores it. */
 export interface EventRow {
   stage:       EventStageKey;
@@ -282,13 +287,17 @@ export function computeEventTotals(
   opts: { country?: string; rep?: string } = {},
 ): StageTotals {
   const out = emptyTotals();
-  const from = range.from.getTime();
-  const to   = range.to.getTime();
+  // Compared as calendar days, not as instants. An event holds a day
+  // ("2026-09-05") while a DateRange ends at local midnight, so reading the
+  // day as UTC puts it AFTER the range's end anywhere east of UTC — and the
+  // last day of every period dropped out without a trace.
+  const from = localDay(range.from);
+  const to   = localDay(range.to);
   for (const e of events) {
     if (opts.country && e.country !== opts.country) continue;
     if (opts.rep && e.rep !== opts.rep) continue;
-    const t = Date.parse(`${e.occurred_at}T00:00:00Z`);
-    if (Number.isNaN(t) || t < from || t > to) continue;
+    const day = e.occurred_at?.slice(0, 10);
+    if (!day || day < from || day > to) continue;
     const key = EVENT_TO_STAGE[e.stage];
     if (key) out[key]++;
   }

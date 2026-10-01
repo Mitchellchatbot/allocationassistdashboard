@@ -248,3 +248,23 @@ describe("weekEndingOf", () => {
     expect(weekEndingOf("2026-07-31")).toBe("2026-08-01");
   });
 });
+
+describe("computeEventTotals range edges", () => {
+  const ev = (occurred_at: string): EventRow =>
+    ({ stage: "shortlisted", occurred_at, week_ending: "2026-09-05", rep: null, country: null });
+
+  it("counts the last day of the period, not everything but it", () => {
+    // August runs Sun 2 Aug to Sat 5 Sep. The range ends at local midnight on
+    // the 5th; reading the event's day as UTC put it after that, so the whole
+    // last day of every period went missing east of UTC.
+    const aug = { from: new Date(2026, 7, 2), to: new Date(2026, 8, 5) };
+    expect(computeEventTotals([ev("2026-09-05")], aug).shortlisted).toBe(1);
+    expect(computeEventTotals([ev("2026-08-02")], aug).shortlisted).toBe(1);
+  });
+
+  it("leaves out the days either side", () => {
+    const aug = { from: new Date(2026, 7, 2), to: new Date(2026, 8, 5) };
+    expect(computeEventTotals([ev("2026-08-01")], aug).shortlisted).toBe(0);
+    expect(computeEventTotals([ev("2026-09-06")], aug).shortlisted).toBe(0);
+  });
+});

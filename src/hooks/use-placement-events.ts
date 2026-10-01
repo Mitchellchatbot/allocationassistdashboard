@@ -35,7 +35,11 @@ export function usePlacementEvents() {
         const { data, error } = await supabase
           .from("placement_events")
           .select("id, attempt_id, stage, occurred_at, week_ending, rep, country")
+          // id breaks ties: paging on a non-unique sort lets rows with the
+          // same date repeat on one page and vanish from another, which
+          // quietly loses whole stages when thousands share a handful of days.
           .order("occurred_at", { ascending: true })
+          .order("id", { ascending: true })
           .range(from, from + PAGE - 1);
         if (error) throw error;
         const page = (data ?? []) as PlacementEvent[];
