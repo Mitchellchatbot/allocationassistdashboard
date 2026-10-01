@@ -29,6 +29,9 @@ export interface ReportingFilters {
   teamMember: string | null;
   specialty:  string | null;
   doctorId?:  string | null;
+  /** Which half of the team's monthly report to show — it publishes UAE and
+   *  KSA separately, with Qatar inside the second. Null shows both together. */
+  side?:      "UAE" | "KSA/Qatar" | null;
 }
 
 /**

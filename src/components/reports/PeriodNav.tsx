@@ -40,9 +40,28 @@ export function PeriodPill({ period, onChange }: { period: Period; onChange: (p:
       onChange={onChange}
       ariaLabel="Report period"
       options={[
-        { key: "weekly",  label: "Weekly",  hint: "One week at a time (Monday – Sunday)" },
-        { key: "monthly", label: "Monthly", hint: "One calendar month at a time" },
+        { key: "weekly",  label: "Weekly",  hint: "One week at a time (Sunday – Saturday)" },
+        { key: "monthly", label: "Monthly", hint: "One month at a time, counted as whole weeks" },
         { key: "yearly",  label: "Yearly",  hint: "The last 12 months vs the 12 before" },
+      ]}
+    />
+  );
+}
+
+/** The two halves of the monthly report the team publishes, plus both together.
+ *  Qatar is reported inside KSA, because one person covers both books. */
+export function SidePill(
+  { value, onChange }: { value: "UAE" | "KSA/Qatar" | null; onChange: (v: "UAE" | "KSA/Qatar" | null) => void },
+) {
+  return (
+    <PillToggle
+      value={value ?? "all"}
+      onChange={v => onChange(v === "all" ? null : (v as "UAE" | "KSA/Qatar"))}
+      ariaLabel="Region"
+      options={[
+        { key: "all",       label: "All",       hint: "Both sides together" },
+        { key: "UAE",       label: "UAE",       hint: "UAE accounts only" },
+        { key: "KSA/Qatar", label: "KSA/Qatar", hint: "Saudi and Qatar accounts, as the monthly report groups them" },
       ]}
     />
   );
