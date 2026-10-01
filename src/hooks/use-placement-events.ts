@@ -13,7 +13,7 @@
  * number the team publishes.
  */
 import { useQuery } from "@tanstack/react-query";
-import { supabase } from "@/integrations/supabase/client";
+import { supabase } from "@/lib/supabase";
 import type { EventRow } from "@/lib/placement-reporting";
 
 export interface PlacementEvent extends EventRow {
