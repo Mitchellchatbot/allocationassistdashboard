@@ -71,8 +71,14 @@ export function weekEnding(iso: string): string {
   return d.toISOString().slice(0, 10);
 }
 
-/** Which stage each journey column reports. start_date is a plan rather than
- *  something that happened, so it produces no event. */
+/** Which stage each journey column reports.
+ *
+ *  start_date is deliberately absent. It is the date a doctor is *projected*
+ *  to start, agreed ahead of time and often moved; joined_at is the date they
+ *  actually did. Counting the projection would report starts that have not
+ *  happened, and would double-count the ones that later do. The date is still
+ *  saved on the journey - it just never becomes an event, so nothing on
+ *  Reports is counted from it. */
 const EVENT_STAGE: Partial<Record<DateColumn, EventStage>> = {
   shortlisted_at: "shortlisted",
   interviewed_at: "interviewed",

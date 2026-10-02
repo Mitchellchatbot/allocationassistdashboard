@@ -18,7 +18,7 @@
  */
 import { useMemo } from "react";
 import { Card, CardContent } from "@/components/ui/card";
-import { TrendingUp, TrendingDown, Minus, ListChecks, CalendarCheck, CheckCircle2, Plane } from "lucide-react";
+import { TrendingUp, TrendingDown, Minus, ListChecks, CalendarCheck, CheckCircle2, FileSignature, Plane } from "lucide-react";
 import { usePlacementAttempts, type PlacementAttempt } from "@/hooks/use-placement-attempts";
 import { Skeleton } from "@/components/ui/skeleton";
 import { TilesSkeleton } from "@/components/reports/Skeletons";
@@ -30,11 +30,17 @@ import { computeEventTotals } from "@/lib/placement-reporting";
 import { reportSide } from "@/lib/hospital-region";
 
 interface Milestone { key: TrackedKey; label: string; icon: typeof CheckCircle2; result?: boolean }
+/** The five stages the team's own monthly report publishes, in its order.
+ *
+ *  "Joined" is the stage keyed `relocated` — it reads relocated_at or
+ *  joined_at, whichever the row has — and it counts the date a doctor actually
+ *  started, never the projected start date. */
 const MILESTONES: Milestone[] = [
   { key: "shortlisted", label: "Shortlisted", icon: ListChecks },
-  { key: "interviewed", label: "Interviewed", icon: CalendarCheck },
+  { key: "interviewed", label: "Interview",   icon: CalendarCheck },
+  { key: "offered",     label: "Offered",     icon: FileSignature },
   { key: "signed",      label: "Signed",      icon: CheckCircle2, result: true },
-  { key: "relocated",   label: "Relocated",   icon: Plane,        result: true },
+  { key: "relocated",   label: "Joined",      icon: Plane,        result: true },
 ];
 
 const plural = (n: number, one: string, many = one + "s") => `${n} ${n === 1 ? one : many}`;
