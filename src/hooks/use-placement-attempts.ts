@@ -14,6 +14,7 @@
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { supabase } from "@/lib/supabase";
 import { ensureSecondPaymentRun } from "@/hooks/use-doctor-lifecycle";
+import { reportSide } from "@/lib/hospital-region";
 
 export interface PlacementAttempt {
   id:               string;
@@ -169,6 +170,7 @@ export function useUpsertPlacementAttempt() {
       qc.invalidateQueries({ queryKey: ["placements"] });           // legacy key from B1
       qc.invalidateQueries({ queryKey: ["recap-lifecycles"] });
       qc.invalidateQueries({ queryKey: ["search-placements"] });
+      qc.invalidateQueries({ queryKey: ["placement-events"] });
     },
   });
 }
@@ -179,6 +181,15 @@ export function useUpsertPlacementAttempt() {
  *  declaration silently won. */
 export type MarkableMilestone =
   | "shortlisted_at" | "interviewed_at" | "offered_at" | "signed_at" | "joined_at";
+
+/** The stage each markable column records, for the matching event. */
+const EVENT_STAGE_OF: Record<MarkableMilestone, PlanEvent["stage"]> = {
+  shortlisted_at: "shortlisted",
+  interviewed_at: "interviewed",
+  offered_at:     "offered",
+  signed_at:      "signed",
+  joined_at:      "joined",
+};
 
 /**
  * Set (or clear) ONE milestone date on an existing attempt.
@@ -191,12 +202,40 @@ export type MarkableMilestone =
 export function useMarkPlacementMilestone() {
   const qc = useQueryClient();
   return useMutation({
-    mutationFn: async ({ id, column, date }: { id: string; column: MarkableMilestone; date: string | null }) => {
+    mutationFn: async (
+      { id, column, date, hospital_name }:
+      { id: string; column: MarkableMilestone; date: string | null; hospital_name?: string },
+    ) => {
       const { error } = await supabase
         .from("placement_attempts")
         .update({ [column]: date, manual_edited_at: new Date().toISOString(), updated_at: new Date().toISOString() })
         .eq("id", id);
       if (error) throw error;
+
+      // The reports count placement_events, so a stage marked here has to
+      // leave one too — otherwise work done on this page is invisible on
+      // Reports, which only ever saw the imported sheet.
+      const stage = EVENT_STAGE_OF[column];
+      if (!stage) return;
+      if (!date) {
+        const { error: delErr } = await supabase
+          .from("placement_events").delete().eq("attempt_id", id).eq("stage", stage).eq("rep", "manual");
+        if (delErr) throw delErr;
+        return;
+      }
+      // One manual mark per stage: clear any earlier one first, so changing a
+      // date moves the event rather than leaving the old one behind.
+      await supabase.from("placement_events").delete()
+        .eq("attempt_id", id).eq("stage", stage).eq("rep", "manual");
+      const { error: evErr } = await supabase.from("placement_events").insert({
+        attempt_id:  id,
+        stage,
+        occurred_at: date.slice(0, 10),
+        rep:         "manual",
+        country:     hospital_name ? reportSide(hospital_name) : null,
+        source_file: "marked in Processing",
+      });
+      if (evErr) throw evErr;
     },
     onSuccess: () => {
       qc.invalidateQueries({ queryKey: KEY });
