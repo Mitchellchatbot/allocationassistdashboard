@@ -37,7 +37,55 @@ export interface ParsedRow {
   line:             number;
   /** The date in the header of the week block the row sits under. */
   block_date:       string | null;
+  /** The tab the row came from, so a question about it can be taken back to
+   *  the sheet: "September row 294" rather than "row 294 of something". */
+  sheet:            string | null;
+  /** Whose weekly block this row sat in. See resolveBlockRep. */
+  rep:              string | null;
+  country:          string | null;
+  /** One per stage date on the line. The journey row keeps a single date per
+   *  stage; these keep every line, because the team counts lines and a doctor
+   *  is regularly put forward at the same hospital more than once. */
+  events:           ParsedEvent[];
 }
+
+export type EventStage = "shortlisted" | "interviewed" | "offered" | "signed" | "joined";
+
+export interface ParsedEvent {
+  stage:       EventStage;
+  /** ISO date (yyyy-mm-dd). */
+  occurred_at: string;
+  /** The Saturday closing the Sunday–Saturday week holding occurred_at. */
+  week_ending: string;
+  rep:         string | null;
+  country:     string | null;
+  line:        number;
+}
+
+/** The Saturday that ends the Sunday–Saturday week containing `iso`.
+ *  The team's week runs Sunday to Saturday and is named after the Saturday,
+ *  so 2026-08-14 (a Friday) belongs to the week ending 2026-08-15. */
+export function weekEnding(iso: string): string {
+  const d = new Date(`${iso.slice(0, 10)}T00:00:00Z`);
+  d.setUTCDate(d.getUTCDate() + (6 - d.getUTCDay()));
+  return d.toISOString().slice(0, 10);
+}
+
+/** Which stage each journey column reports.
+ *
+ *  start_date is deliberately absent. It is the date a doctor is *projected*
+ *  to start, agreed ahead of time and often moved; joined_at is the date they
+ *  actually did. Counting the projection would report starts that have not
+ *  happened, and would double-count the ones that later do. The date is still
+ *  saved on the journey - it just never becomes an event, so nothing on
+ *  Reports is counted from it. */
+const EVENT_STAGE: Partial<Record<DateColumn, EventStage>> = {
+  shortlisted_at: "shortlisted",
+  interviewed_at: "interviewed",
+  offered_at:     "offered",
+  signed_at:      "signed",
+  joined_at:      "joined",
+};
 
 export type DateColumn = "shortlisted_at" | "interviewed_at" | "offered_at" | "signed_at" | "start_date" | "joined_at";
 
@@ -55,6 +103,8 @@ export type ParseWarningKind =
 
 export interface ParseWarning {
   kind:     ParseWarningKind;
+  /** The tab the row came from — see ParsedRow.sheet. */
+  sheet:    string | null;
   line:     number;
   doctor:   string | null;
   hospital: string | null;
@@ -76,6 +126,12 @@ export interface ParseResult {
 export interface ParseOptions {
   /** "Now" for the future-date check. Defaults to the current time. */
   today?: Date;
+  /** Who owns a hospital, from hospitals.owner_email. Used to work out whose
+   *  weekly block each section is — see resolveBlockRep. Without it, rows
+   *  carry no rep and reporting can't split UAE from KSA/Qatar. */
+  repFor?: (hospital: string) => { rep: string; country: string | null } | null;
+  /** The file the rows came from, recorded on each event. */
+  sourceFile?: string;
 }
 
 /** Split the whole file into records, respecting quoted fields. A quoted
@@ -172,7 +228,12 @@ const daysBetween = (a: Date, b: Date) => (a.getTime() - b.getTime()) / DAY;
 /** A header or plain date cell: month-first, swapped only when the first
  *  number cannot be a month. No context — used for the week header itself. */
 function parsePlainDate(raw: string | undefined): Date | null {
-  const m = (raw ?? "").trim().match(/^(\d{1,2})\/(\d{1,2})\/(\d{2,4})$/);
+  const trimmed = (raw ?? "").trim();
+  // yyyy-mm-dd only ever comes from a real date cell in the workbook, never
+  // from someone typing into the sheet, so it is taken at face value.
+  const iso = trimmed.match(/^(\d{4})-(\d{2})-(\d{2})$/);
+  if (iso) return utc(+iso[1], +iso[2], +iso[3]);
+  const m = trimmed.match(/^(\d{1,2})\/(\d{1,2})\/(\d{2,4})$/);
   if (!m) return null;
   let a = parseInt(m[1], 10), b = parseInt(m[2], 10);
   let y = parseInt(m[3], 10);
@@ -205,6 +266,52 @@ function parseDateCell(raw: string | undefined, block: Date | null, today: Date,
   if (!s) return NO_DATE;
   // Obvious notes-not-dates keep their text but yield no date.
   if (/^(added|sent|x|-|none|n\/a|hold|not added)$/i.test(s)) return { iso: null, note: s };
+
+  // A real date cell from the workbook, handed over as yyyy-mm-dd. Nobody
+  // types that into these sheets, so it is unambiguous and none of the
+  // guessing below should touch it: the day-first and wrong-year rules exist
+  // to rescue text, and applied here they would rewrite a date we know.
+  const isoCell = s.match(/^(\d{4})-(\d{2})-(\d{2})\b/);
+  if (isoCell) {
+    const y = +isoCell[1], mo = +isoCell[2], dd = +isoCell[3];
+    const rest = s.slice(isoCell[0].length).trim() || null;
+    let date = utc(y, mo, dd);
+    if (!date) return { iso: null, note: s };
+    let warning: DateCell["warning"];
+
+    // A real date cell needs no guessing — but the sheet sometimes holds the
+    // wrong date, because the guessing already happened when someone typed it.
+    // "12/4/2026" meant 12 April and was stored as 4 December, and five HMG
+    // rows in the April tab still carry it. So the week-anchored rule the typed
+    // dates get applies here too: swap month and day only when the stored date
+    // lands months AFTER the week the row was written in and the swap lands
+    // inside it. Dates carried forward are always in the past, so this never
+    // touches those.
+    const swapped = mo !== dd && dd <= 12 ? utc(y, dd, mo) : null;
+    if (block && swapped && !planned) {
+      const gap   = daysBetween(date, block);
+      const swGap = Math.abs(daysBetween(swapped, block));
+      if (gap > NEAR_DAYS && swGap <= NEAR_DAYS) {
+        warning = { kind: "day_first", message: `the cell holds ${fmt(date)}, months after this week (${fmt(block)}) — read as ${fmt(swapped)}` };
+        date = swapped;
+      }
+    }
+    // Same for a mistyped year: one August row holds 2028. Corrected only when
+    // the right year puts the date inside the week it was written in.
+    if (!warning && block && date.getUTCFullYear() !== block.getUTCFullYear()) {
+      const fixed = utc(block.getUTCFullYear(), date.getUTCMonth() + 1, date.getUTCDate());
+      if (fixed && Math.abs(daysBetween(date, block)) > 180 && Math.abs(daysBetween(fixed, block)) <= NEAR_DAYS) {
+        warning = { kind: "year_fixed", message: `the cell holds ${fmt(date)}; read as ${fmt(fixed)}, in this week (${fmt(block)})` };
+        date = fixed;
+      } else {
+        warning = { kind: "other_year", message: `the cell holds ${fmt(date)}, not ${block.getUTCFullYear()} — kept as it is` };
+      }
+    }
+    if (!warning && date > today && !planned) {
+      warning = { kind: "future", message: `${fmt(date)} is after today — a planned date, not an event yet` };
+    }
+    return { iso: date.toISOString(), note: rest, warning };
+  }
 
   const m = s.match(/^(\d{1,2})\/(\d{1,2})\/(\d{2,4})\b/);
   if (m) {
@@ -285,26 +392,89 @@ function isSummaryRow(cols: string[]): boolean {
   return /^\d+/.test(tail);
 }
 
-/** Words on a row that mean a stage did not really happen. */
-const HOLD = /\b(hold|not added|cancell?ed|withdrawn)\b/i;
+/** Words on a row that mean a stage did not really happen.
+ *
+ *  "ADDED" and "NOT ADDED" are deliberately absent: the team uses those to
+ *  track an internal step of their own after a join, not to say whether the
+ *  doctor started. Reading them as a hold kept real joins out of the figures. */
+const HOLD = /\b(hold|cancell?ed|withdrawn)\b/i;
 
 const DATE_COLUMNS: Array<[DateColumn, number]> = [
   ["shortlisted_at", 4], ["interviewed_at", 5], ["offered_at", 6],
   ["signed_at", 7], ["start_date", 8], ["joined_at", 9],
 ];
 
+/** Whose block this is, decided by the hospitals in it rather than by any
+ *  cell — the sheet never names the rep.
+ *
+ *  Each section of the sheet is one rep's weekly submission: checked against
+ *  the tracker, ten of August's fifteen rep-weeks match its per-rep cells
+ *  exactly, and every August block is owned by a single rep. That matters
+ *  because the hospital name alone often can't say whose a line is —
+ *  "Saudi German Hospital" sits on both Sohaila's and Ishak's lists, and
+ *  SKMC, NMC, Mediclinic, KCH and FUH each appear under two reps. Reading the
+ *  block settles those: "SGH" in Sohaila's block is Jeddah, in Ishak's it is
+ *  Dubai.
+ *
+ *  A plurality wins rather than a majority, because a block regularly holds a
+ *  few hospitals from a shared brand. Ties leave the block unattributed — the
+ *  preview asks rather than guesses. */
+function resolveBlockRep(
+  hospitals: string[],
+  repFor: ParseOptions["repFor"],
+): { rep: string | null; country: string | null } {
+  if (!repFor) return { rep: null, country: null };
+  const votes = new Map<string, { n: number; country: string | null }>();
+  for (const h of hospitals) {
+    const owner = repFor(h);
+    if (!owner) continue;
+    const seen = votes.get(owner.rep);
+    if (seen) seen.n++;
+    else votes.set(owner.rep, { n: 1, country: owner.country });
+  }
+  if (votes.size === 0) return { rep: null, country: null };
+  const ranked = [...votes.entries()].sort((a, b) => b[1].n - a[1].n);
+  if (ranked.length > 1 && ranked[0][1].n === ranked[1][1].n) return { rep: null, country: null };
+  return { rep: ranked[0][0], country: ranked[0][1].country };
+}
+
 export function parseHammadCsv(text: string, options: ParseOptions = {}): ParseResult {
+  return parseRecords(splitRecords(text), options);
+}
+
+/** The same reading, over rows that came from somewhere other than CSV text —
+ *  a workbook sheet, where the dates are real values rather than typing. */
+export function parseRecords(
+  records: Array<{ cells: string[]; line: number }>,
+  options: ParseOptions = {},
+): ParseResult {
   const today = options.today ?? new Date();
+  const sheet = options.sourceFile ?? null;
   const rows: ParsedRow[] = [];
   const warnings: ParseWarning[] = [];
   let skippedRows = 0;
   let weekSections = 0;
   let block: Date | null = null;
 
-  for (const { cells: cols, line } of splitRecords(text)) {
+  // Rows wait here until the block ends, because the rep is decided by the
+  // whole block and every row in it — and every event — is then stamped.
+  let pending: ParsedRow[] = [];
+  const closeBlock = () => {
+    if (pending.length === 0) return;
+    const { rep, country } = resolveBlockRep(pending.map(r => r.hospital_name), options.repFor);
+    for (const row of pending) {
+      row.rep = rep;
+      row.country = country;
+      for (const ev of row.events) { ev.rep = rep; ev.country = country; }
+      rows.push(row);
+    }
+    pending = [];
+  };
+
+  for (const { cells: cols, line } of records) {
     if (cols.every(c => !c)) continue;
 
-    if (isHeaderRow(cols)) { weekSections++; block = parsePlainDate(cols[0]); continue; }
+    if (isHeaderRow(cols)) { closeBlock(); weekSections++; block = parsePlainDate(cols[0]); continue; }
     if (isSummaryRow(cols)) continue;
 
     const hospital = cleanHospitalName(cols[1] ?? "");
@@ -318,7 +488,7 @@ export function parseHammadCsv(text: string, options: ParseOptions = {}): ParseR
       skippedRows++;
       if ((hospital || doctor) && hasDates) {
         warnings.push({
-          kind: hospital ? "no_doctor" : "no_hospital", line,
+          kind: hospital ? "no_doctor" : "no_hospital", sheet, line,
           doctor: doctor || null, hospital: hospital || null, column: null, typed: null, read_as: null,
           message: hospital ? `${hospital}: a row with dates but no doctor — skipped` : `${doctor}: a row with dates but no hospital — skipped`,
         });
@@ -340,7 +510,7 @@ export function parseHammadCsv(text: string, options: ParseOptions = {}): ParseR
       // Free text written alongside a date ("7/2/2026 Revise") joins the notes.
       if (cell.note) notesParts.push(cell.note);
       if (cell.warning) {
-        warnings.push({ ...cell.warning, line, doctor, hospital, column: col, typed: cols[idx] ?? null, read_as: cell.iso });
+        warnings.push({ ...cell.warning, sheet, line, doctor, hospital, column: col, typed: cols[idx] ?? null, read_as: cell.iso });
       }
     }
     // Trailing free-text notes — columns 10+ are usually "Added", "SENT", "X".
@@ -355,7 +525,7 @@ export function parseHammadCsv(text: string, options: ParseOptions = {}): ParseR
     // never saved without someone seeing this.
     if (notes && HOLD.test(notes) && (dates.joined_at || dates.start_date)) {
       warnings.push({
-        kind: "hold", line, doctor, hospital, column: dates.joined_at ? "joined_at" : "start_date",
+        kind: "hold", sheet, line, doctor, hospital, column: dates.joined_at ? "joined_at" : "start_date",
         typed: notes, read_as: dates.joined_at ?? dates.start_date,
         message: `${doctor} @ ${hospital}: the row says "${notes}" next to a join/start date`,
       });
@@ -368,22 +538,37 @@ export function parseHammadCsv(text: string, options: ParseOptions = {}): ParseR
       : undefined;
     if (strayDate) {
       warnings.push({
-        kind: "date_in_notes", line, doctor, hospital, column: "joined_at",
+        kind: "date_in_notes", sheet, line, doctor, hospital, column: "joined_at",
         typed: strayDate, read_as: null,
         message: `${doctor} @ ${hospital}: "${strayDate}" sits past the Joined column, which is empty — the join date is left as it is`,
       });
     }
 
-    rows.push({
+    // One event per stage the line actually reports. rep and country are
+    // filled in by closeBlock once the whole block has been read.
+    const events: ParsedEvent[] = [];
+    for (const [col, stage] of Object.entries(EVENT_STAGE) as Array<[DateColumn, EventStage]>) {
+      const iso = dates[col];
+      if (!iso) continue;
+      const day = iso.slice(0, 10);
+      events.push({ stage, occurred_at: day, week_ending: weekEnding(day), rep: null, country: null, line });
+    }
+
+    pending.push({
       doctor_name:      doctor,
       doctor_specialty: specialty,
       hospital_name:    hospital,
       ...dates,
       notes,
       line,
+      sheet,
       block_date:       block ? block.toISOString() : null,
+      rep:              null,
+      country:          null,
+      events,
     });
   }
+  closeBlock();
 
   return { rows, skippedRows, weekSections, warnings };
 }

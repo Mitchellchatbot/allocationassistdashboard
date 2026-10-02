@@ -11,7 +11,7 @@ import {
 import { usePlacementAttempts } from "@/hooks/use-placement-attempts";
 import { usePlacementReporting, type PlacementReportingBundle } from "@/hooks/use-placement-reporting";
 import {
-  pctChange, passesFilters, stageAt, inRange, computeStageTotals, STAGES,
+  pctChange, passesFilters, stageAt, inRange, STAGES,
   type ReportingFilters, type StageKey, type StageTotals, type DateRange,
 } from "@/lib/placement-reporting";
 import {
@@ -34,7 +34,7 @@ import { SpecialtyTiles } from "@/components/reports/SpecialtyTiles";
 import { TrendCard } from "@/components/reports/TrendCard";
 import { AttentionCard, type ReportView } from "@/components/reports/AttentionCard";
 import { JumpRail, scrollParent } from "@/components/reports/JumpRail";
-import { PeriodArrow, PeriodChip, PeriodPill } from "@/components/reports/PeriodNav";
+import { PeriodArrow, PeriodChip, PeriodPill, SidePill } from "@/components/reports/PeriodNav";
 import { Hint } from "@/components/reports/HoverHint";
 
 /**
@@ -81,20 +81,27 @@ export default function Reports() {
   const range: DateRange = labels.range;
   const prior: DateRange = useMemo(() => periodRange(period, offset - 1), [period, offset]);
 
-  const filters: ReportingFilters = useMemo(() => ({
-    range, hospital: null, teamMember: null, specialty: null,
-  }), [range]);
-  const bundle = usePlacementReporting(filters);
-  const totalsPrior = useMemo(
-    () => computeStageTotals(bundle.attempts, { ...filters, range: prior }),
-    [bundle.attempts, filters, prior],
-  );
+  // Which half of the monthly report to show. The team publishes UAE and KSA
+  // separately, with Qatar inside the second, so the dashboard has to be able
+  // to say the same thing. Absent means both together.
+  const sideRaw = searchParams.get("side");
+  const side: ReportingFilters["side"] =
+    sideRaw === "UAE" || sideRaw === "KSA/Qatar" ? sideRaw : null;
 
-  const setParams = useCallback((next: Partial<{ view: string; per: Period; off: number }>) => {
+  const filters: ReportingFilters = useMemo(() => ({
+    range, hospital: null, teamMember: null, specialty: null, side,
+  }), [range, side]);
+  const bundle = usePlacementReporting(filters);
+  // The bundle already counts the prior window the same way it counts this
+  // one — by logged lines — so the deltas compare like with like.
+  const totalsPrior = bundle.totalsPrior;
+
+  const setParams = useCallback((next: Partial<{ view: string; per: Period; off: number; side: string | null }>) => {
     setSearchParams(prev => {
       const p = new URLSearchParams(prev);
       // Drop the old free-range filters if an old bookmark still carries them.
       for (const k of ["range", "hospital", "team", "specialty"]) p.delete(k);
+      if (next.side !== undefined) { if (!next.side) p.delete("side"); else p.set("side", next.side); }
       if (next.view !== undefined) { if (next.view === "overview") p.delete("view"); else p.set("view", next.view); }
       if (next.per !== undefined)  { if (next.per === "monthly") p.delete("per"); else p.set("per", next.per); }
       if (next.off !== undefined)  { if (next.off === 0) p.delete("off"); else p.set("off", String(next.off)); }
@@ -215,6 +222,7 @@ export default function Reports() {
           <div className="flex items-center gap-2 flex-wrap" data-tour="reports-filters">
             <PeriodChip {...nav} />
             <PeriodPill period={period} onChange={p => go({ per: p, off: 0 })} />
+            <SidePill value={side} onChange={v => setParams({ side: v })} />
           </div>
         </div>
 
@@ -231,6 +239,7 @@ export default function Reports() {
                   <CeoSummary
                     range={range}
                     prior={prior}
+                    side={side}
                     word={labels.word}
                     lead={labels.lead}
                     label={labels.label}

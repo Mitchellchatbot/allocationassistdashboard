@@ -1,4 +1,5 @@
 import { describe, it, expect } from "vitest";
+import { reportSide } from "@/lib/hospital-region";
 import { buildRepLookup, buildHospitalMatcher } from "@/lib/hospital-rep";
 import { HI_TEAM_MEMBERS } from "@/lib/hi-team";
 
@@ -71,5 +72,34 @@ describe("buildHospitalMatcher", () => {
 
   it("returns null when the branches disagree on the rep", () => {
     expect(match("Mediclinic")).toBeNull();
+  });
+});
+
+describe("reportSide", () => {
+  it("puts the UAE accounts on the UAE side", () => {
+    for (const h of ["AHD", "AH", "Mediclinic", "NMC - AUH", "NMC Sharjah", "Burjeel -DXB", "STMC",
+                     "SKMC", "Garhoud", "Prime", "RAK", "FUH", "SSMC", "Ain Al Khaleej", "Medcare",
+                     "Al Dhafra"]) {
+      expect([h, reportSide(h)]).toEqual([h, "UAE"]);
+    }
+  });
+
+  it("reports Saudi and Qatar together, as the team does", () => {
+    for (const h of ["HMG", "HMG Riyadh", "HMG Al Qassim", "MNGHA Jeddah", "KFSH", "Alrajhi",
+                     "Dallah", "KKSEH", "Aramco", "Saudi German Jeddah",
+                     "Sidra", "Aman", "The View", "Al Ahli Qatar", "MMCH", "Hamad"]) {
+      expect([h, reportSide(h)]).toEqual([h, "KSA/Qatar"]);
+    }
+  });
+
+  it("keeps a Dubai branch of a Saudi chain on the UAE side", () => {
+    // "HMG- Dubai" is a UAE account even though HMG is a Saudi chain.
+    expect(reportSide("HMG- Dubai")).toBe("UAE");
+    expect(reportSide("HMG Dubai")).toBe("UAE");
+  });
+
+  it("gives no side to a name it cannot place, rather than guessing one", () => {
+    expect(reportSide("Trellis Hospital")).toBeNull();
+    expect(reportSide("")).toBeNull();
   });
 });

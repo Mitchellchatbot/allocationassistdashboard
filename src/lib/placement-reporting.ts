@@ -29,6 +29,9 @@ export interface ReportingFilters {
   teamMember: string | null;
   specialty:  string | null;
   doctorId?:  string | null;
+  /** Which half of the team's monthly report to show — it publishes UAE and
+   *  KSA separately, with Qatar inside the second. Null shows both together. */
+  side?:      "UAE" | "KSA/Qatar" | null;
 }
 
 /**
@@ -214,12 +217,90 @@ export function computeHospitalActivity(
   });
 }
 
+/** The Sunday opening the week that holds `d`.
+ *
+ *  The team's week runs Sunday to Saturday, not Monday to Sunday, and every
+ *  number they publish is bucketed that way. Reading it the other way moves
+ *  rows across both week and month boundaries: 32 of the 33 rows in the week
+ *  ending 1 August are dated 26-31 July, so a Monday week files them under
+ *  July and August loses them. Checked against the tracker over nine months,
+ *  Sunday-Saturday scored a total error of 149 where every alternative
+ *  scored 240-264. */
 export function startOfWeek(d: Date): Date {
   const out = new Date(d);
   out.setHours(0, 0, 0, 0);
-  const dow = out.getDay();             // 0 Sun .. 6 Sat
-  const shift = (dow + 6) % 7;          // distance back to Monday
-  out.setDate(out.getDate() - shift);
+  out.setDate(out.getDate() - out.getDay());   // getDay(): 0 Sun .. 6 Sat
+  return out;
+}
+
+/** The Saturday closing the week that holds `iso` — the name the team gives
+ *  that week. Mirrors the generated week_ending column on placement_events. */
+export function weekEndingOf(iso: string): string {
+  const d = new Date(`${iso.slice(0, 10)}T00:00:00Z`);
+  d.setUTCDate(d.getUTCDate() + (6 - d.getUTCDay()));
+  return d.toISOString().slice(0, 10);
+}
+
+/** The stages placement_events records. The sheet has no "relocated" or
+ *  "paid" column, so those two reporting stages have no event of their own. */
+export type EventStageKey = "shortlisted" | "interviewed" | "offered" | "signed" | "joined";
+
+/** The sheet's "Joined" column is the same milestone the reports call
+ *  relocated — STAGES already reads relocated_at or joined_at, whichever the
+ *  journey has. */
+const EVENT_TO_STAGE: Record<EventStageKey, StageKey> = {
+  shortlisted: "shortlisted",
+  interviewed: "interviewed",
+  offered:     "offered",
+  signed:      "signed",
+  joined:      "relocated",
+};
+
+/** A Date as the calendar day it is locally, yyyy-mm-dd. */
+function localDay(d: Date): string {
+  return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`;
+}
+
+/** A logged line, as placement_events stores it. */
+export interface EventRow {
+  stage:       EventStageKey;
+  occurred_at: string;
+  week_ending: string;
+  rep:         string | null;
+  country:     string | null;
+}
+
+/**
+ * Stage totals the way the team counts them: every logged line.
+ *
+ * Not distinct doctors, and not distinct doctor+hospital pairs either — a
+ * doctor put forward at the same hospital twice is two lines and counts twice,
+ * and the same pair logged by two reps counts twice as well. Deduplicating
+ * measurably moves the numbers away from the tracker rather than towards it
+ * (total error 149 counting lines, 150 per week, 161 per month).
+ *
+ * `country` narrows to one side of the report — "UAE" or "KSA/Qatar".
+ */
+export function computeEventTotals(
+  events: EventRow[],
+  range: DateRange,
+  opts: { country?: string; rep?: string } = {},
+): StageTotals {
+  const out = emptyTotals();
+  // Compared as calendar days, not as instants. An event holds a day
+  // ("2026-09-05") while a DateRange ends at local midnight, so reading the
+  // day as UTC puts it AFTER the range's end anywhere east of UTC — and the
+  // last day of every period dropped out without a trace.
+  const from = localDay(range.from);
+  const to   = localDay(range.to);
+  for (const e of events) {
+    if (opts.country && e.country !== opts.country) continue;
+    if (opts.rep && e.rep !== opts.rep) continue;
+    const day = e.occurred_at?.slice(0, 10);
+    if (!day || day < from || day > to) continue;
+    const key = EVENT_TO_STAGE[e.stage];
+    if (key) out[key]++;
+  }
   return out;
 }
 

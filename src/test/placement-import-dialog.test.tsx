@@ -39,7 +39,9 @@ const dropFile = async (csv: string) => {
   const file = Object.assign(new File([csv], "June.csv", { type: "text/csv" }), { text: async () => csv });
   Object.defineProperty(input, "files", { value: [file], configurable: true });
   fireEvent.change(input);
-  await screen.findByText(/June\.csv/);
+  // The name shows twice now — on the file chip, and beside any row the
+  // preview asks about ("June.csv row 3") — so wait for any of them.
+  await screen.findAllByText(/June\.csv/);
 };
 
 const renderDialog = (existing: PlacementAttempt[] = []) => {

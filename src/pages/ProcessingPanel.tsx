@@ -107,10 +107,13 @@ const normName = (s: string) => s.trim().toLowerCase().replace(/\s+/g, " ");
 /** Which filter bucket a row belongs to. Doctors with no hospital get their
  *  own bucket rather than falling into "Not started", which would bury the
  *  handful of genuinely untouched attempts under thousands of them. */
-function bucketOf(row: Row): string {
-  if (!row.attempt) return "no-hospital";
-  const idx = currentStageIndex(row.attempt);
-  return idx < 0 ? "not-started" : STAGES[idx].key;
+function bucketsOf(row: Row): string[] {
+  if (!row.attempt) return ["no-hospital"];
+  // Every stage the pair has reached, not just the furthest: a doctor who was
+  // shortlisted and then interviewed belongs under both, the way the reports
+  // count them. So the chip counts no longer sum to the total, and shouldn't.
+  const reached = STAGES.filter(s => !!row.attempt![s.column]).map(s => s.key);
+  return reached.length ? reached : ["not-started"];
 }
 
 export function ProcessingPanel({ query = "" }: { query?: string } = {}) {
@@ -190,7 +193,7 @@ export function ProcessingPanel({ query = "" }: { query?: string } = {}) {
   const byStage = useMemo(() => {
     const m: Record<string, Row[]> = { "not-started": [], "no-hospital": [] };
     for (const s of STAGES) m[s.key] = [];
-    for (const r of searched) m[bucketOf(r)].push(r);
+    for (const r of searched) for (const b of bucketsOf(r)) m[b].push(r);
     return m;
   }, [searched]);
 
@@ -200,7 +203,7 @@ export function ProcessingPanel({ query = "" }: { query?: string } = {}) {
     const wanted = new Set(activeStages);
     // Filter `searched` rather than concatenating buckets so rows keep their
     // original order no matter which order the boxes were checked in.
-    return searched.filter(r => wanted.has(bucketOf(r)));
+    return searched.filter(r => bucketsOf(r).some(b => wanted.has(b)));
   }, [activeStages, searched]);
 
   const [page, setPage] = useState(1);
@@ -424,7 +427,7 @@ function StageCell({ row, stage }: { row: PlacementAttempt; stage: Stage }) {
 
   const save = async (date: string | null) => {
     try {
-      await mark.mutateAsync({ id: row.id, column: stage.column, date });
+      await mark.mutateAsync({ id: row.id, column: stage.column, date, hospital_name: row.hospital_name });
       setOpen(false);
       toast.success(date
         ? `${row.doctor_name} — ${stage.label} marked ${fmtDate(date)}.`
