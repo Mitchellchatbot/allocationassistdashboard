@@ -3,7 +3,7 @@
  *
  * Executive dashboards should answer "how are we doing?" in ~3 seconds, on one
  * screen, in plain language. This is that layer: a one-sentence written
- * headline ("This month, the team signed 8 doctors and relocated 5 …") and a
+ * headline ("This month, the team signed 8 doctors and 5 joined …") and a
  * tight scoreboard of the four milestones the stakeholder actually asked for
  * (shortlisted / interviewed / signed / relocated), each with the change vs
  * the period before.
@@ -115,7 +115,7 @@ export function CeoSummary({ range, prior, word, lead, label, isCurrent, side }:
         ? `${isCurrent ? `Quiet ${word} so far` : `A quiet ${word}`} — nothing marked. The ${word} before: ${plural(signed.prior, "signing")}, ${relocated.prior} relocated.`
         : `${isCurrent ? `Quiet ${word} so far` : `A quiet ${word}`} — nothing marked.`;
     }
-    return `${lead}, the team ${isCurrent ? "has signed" : "signed"} ${plural(signed.count, "doctor")} and relocated ${relocated.count} — with ${interviewed.count} interviewed and ${shortlisted.count} shortlisted.`;
+    return `${lead}, the team ${isCurrent ? "has signed" : "signed"} ${plural(signed.count, "doctor")} and ${relocated.count} joined — with ${interviewed.count} interviewed and ${shortlisted.count} shortlisted.`;
   })();
 
   const trendClause = (() => {
@@ -163,9 +163,9 @@ export function CeoSummary({ range, prior, word, lead, label, isCurrent, side }:
             different claim from "not loaded yet". */}
         <div className="mt-4">
           {isLoading ? (
-            <TilesSkeleton count={4} />
+            <TilesSkeleton count={5} />
           ) : (
-            <div className="grid grid-cols-2 lg:grid-cols-4 gap-3">
+            <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-5 gap-3">
               {stats.map(s => <ScoreTile key={s.key} stat={s} word={word} label={label} recent={recent[s.key]} />)}
             </div>
           )}
