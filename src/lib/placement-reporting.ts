@@ -22,8 +22,26 @@ import type { PlacementAttempt } from "@/hooks/use-placement-attempts";
 
 export interface DateRange { from: Date; to: Date }
 
+/**
+ * The day the reporting calendar changes.
+ *
+ * Before it the team counted Sunday–Saturday weeks and months made of whole
+ * weeks; from it they count calendar months and Monday–Sunday weeks clipped to
+ * the month. History keeps the old rule so published figures do not move.
+ * `report-period.ts` builds both calendars around this date, and the
+ * `week_ending` column on placement_events switches on the same day.
+ */
+export const CALENDAR_FROM_ISO = "2026-09-01";
+export const CALENDAR_FROM = new Date(2026, 8, 1);
+/** The last day the old rule covers. */
+export const LEGACY_END_ISO = "2026-08-31";
+
 export interface ReportingFilters {
   range:      DateRange;
+  /** The period immediately before `range`, for the ▲▼ deltas. The caller
+   *  knows the real previous period; `priorRangeOf` can only guess an
+   *  equal-length span, which is wrong once months differ in length. */
+  prior?:     DateRange;
   hospital:   string | null;
   /** Rep email. Resolved to hospitals via the allocation, not via who clicked. */
   teamMember: string | null;
@@ -125,6 +143,10 @@ export function computeStageTotals(attempts: PlacementAttempt[], f: ReportingFil
 
 /**
  * Weekly buckets for the trend chart.
+ *
+ * Legacy: these are always Sunday weeks and ignore CALENDAR_FROM. The Reports
+ * page builds its own buckets from `report-period.ts`, which knows both
+ * calendars; nothing reads the `trend` this produces.
  *
  * Buckets are seeded across the whole range before counting, so a quiet week
  * renders as a zero rather than vanishing — a line that skips empty weeks
@@ -233,12 +255,31 @@ export function startOfWeek(d: Date): Date {
   return out;
 }
 
-/** The Saturday closing the week that holds `iso` — the name the team gives
- *  that week. Mirrors the generated week_ending column on placement_events. */
+/**
+ * The last day of the week that holds `iso` — the name the team gives that
+ * week. Mirrors the generated week_ending column on placement_events, so the
+ * two must change together.
+ *
+ * Before CALENDAR_FROM that is the Saturday closing a Sunday–Saturday week.
+ * From it, weeks run Monday–Sunday and stop at the month end, so it is the
+ * following Sunday or the last day of the month, whichever comes first.
+ */
 export function weekEndingOf(iso: string): string {
-  const d = new Date(`${iso.slice(0, 10)}T00:00:00Z`);
-  d.setUTCDate(d.getUTCDate() + (6 - d.getUTCDay()));
-  return d.toISOString().slice(0, 10);
+  const day = iso.slice(0, 10);
+  const d = new Date(`${day}T00:00:00Z`);
+  if (day < CALENDAR_FROM_ISO) {
+    d.setUTCDate(d.getUTCDate() + (6 - d.getUTCDay()));
+    // The seam week is cut short: the week opening Sunday 30 August 2026 used
+    // to close on Saturday 5 September, but those days now belong to the new
+    // September, so the last legacy week ends on the 31st.
+    const iso = d.toISOString().slice(0, 10);
+    return iso < CALENDAR_FROM_ISO ? iso : LEGACY_END_ISO;
+  }
+  const sunday = new Date(d);
+  // getUTCDay(): 0 Sun .. 6 Sat, so a Sunday stays where it is.
+  sunday.setUTCDate(d.getUTCDate() + ((7 - d.getUTCDay()) % 7));
+  const monthEnd = new Date(Date.UTC(d.getUTCFullYear(), d.getUTCMonth() + 1, 0));
+  return (sunday < monthEnd ? sunday : monthEnd).toISOString().slice(0, 10);
 }
 
 /** The stages placement_events records. The sheet has no "relocated" or

@@ -89,8 +89,8 @@ export default function Reports() {
     sideRaw === "UAE" || sideRaw === "KSA/Qatar" ? sideRaw : null;
 
   const filters: ReportingFilters = useMemo(() => ({
-    range, hospital: null, teamMember: null, specialty: null, side,
-  }), [range, side]);
+    range, prior, hospital: null, teamMember: null, specialty: null, side,
+  }), [range, prior, side]);
   const bundle = usePlacementReporting(filters);
   // The bundle already counts the prior window the same way it counts this
   // one — by logged lines — so the deltas compare like with like.

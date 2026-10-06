@@ -107,7 +107,10 @@ export function usePlacementReporting(filters: ReportingFilters): PlacementRepor
     isLoading:   al || hl || vl || el,
     eventsLoaded: events.length > 0,
     totals:      computeEventTotals(countable, filters.range, { country: filters.side ?? undefined }),
-    totalsPrior: computeEventTotals(countable, priorRangeOf(filters.range), { country: filters.side ?? undefined }),
+    // The caller passes the real previous period; priorRangeOf only guesses an
+    // equal-length span, which stops being the month before once months differ
+    // in length (September is 30 days, August 31).
+    totalsPrior: computeEventTotals(countable, filters.prior ?? priorRangeOf(filters.range), { country: filters.side ?? undefined }),
     trend:       computeTrendBuckets(scoped, filters),
     hospitals:   computeHospitalActivity(scoped, vacancyByHospital, filters),
     vacancyByHospital,

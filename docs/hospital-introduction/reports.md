@@ -20,6 +20,17 @@ marking) and the hospital/vacancy data into one view, and it's where the team
 
 - The **Weekly · Monthly · Yearly** pill (top right) sets the period for every
   panel on the page. *Yearly* is the last 12 months against the 12 before.
+- **What a week and a month are.** From **1 September 2026** a month is the
+  calendar month, the 1st to the last day, and a week runs **Monday to Sunday
+  but never crosses a month end** — September 2026 opens on Tuesday the 1st, so
+  its first week is Tue 1 – Sun 6 and its last is Mon 28 – Wed 30. Because of
+  that, the weeks of a month add up exactly to the month.
+  Everything **before** that date keeps the rule the team's own figures were
+  built on: a **Sunday to Saturday** week, and a month made of **whole weeks**
+  (first Sunday of the month to the Saturday closing the week its last Sunday
+  opens), so history still matches what was already reported. August 2026 is
+  the seam — it used to run to Saturday 5 September and now stops on the 31st,
+  so the first days of September are counted once, in September.
 - The **round arrows** on either side of the report step one period back or
   forward, with a slide. The **← →** keys do the same.
 - **Hover an arrow** and it opens into a *jump-to* grid of every week / month /
@@ -126,7 +137,11 @@ Placements table surfaces the countdown so overdue invoices are obvious.
 batches to get past the API's row cap). `placement-reporting.ts` holds the
 counting rules (distinct doctors, the relocated → joined fallback), and
 `report-period.ts` turns the Weekly / Monthly / Yearly selection into date
-windows and trend buckets. `usePlacementReporting` adds `hospitals` (the rep
+windows and trend buckets — it enumerates the whole calendar rather than doing
+arithmetic, because a week clipped to its month is not always seven days long.
+The same 1 September 2026 switch is mirrored by `weekEndingOf()` and by the
+generated `week_ending` column on `placement_events`, so the importer files a
+line in the week the page will show it in. `usePlacementReporting` adds `hospitals` (the rep
 behind each account) and `vacancies` (open roles). Nothing on the page is
 derived from the sends machinery — Reports measures placement, not outbound
 email.

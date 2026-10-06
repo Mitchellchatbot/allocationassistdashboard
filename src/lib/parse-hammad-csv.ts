@@ -21,6 +21,7 @@
  * milestone dates parsed into ISO, plus a warning for anything the importer
  * preview should show a person before it is saved.
  */
+import { weekEndingOf as weekEnding } from "@/lib/placement-reporting";
 
 export interface ParsedRow {
   doctor_name:      string;
@@ -55,21 +56,18 @@ export interface ParsedEvent {
   stage:       EventStage;
   /** ISO date (yyyy-mm-dd). */
   occurred_at: string;
-  /** The Saturday closing the Sunday–Saturday week holding occurred_at. */
+  /** The day closing the week holding occurred_at — see `weekEnding` below. */
   week_ending: string;
   rep:         string | null;
   country:     string | null;
   line:        number;
 }
 
-/** The Saturday that ends the Sunday–Saturday week containing `iso`.
- *  The team's week runs Sunday to Saturday and is named after the Saturday,
- *  so 2026-08-14 (a Friday) belongs to the week ending 2026-08-15. */
-export function weekEnding(iso: string): string {
-  const d = new Date(`${iso.slice(0, 10)}T00:00:00Z`);
-  d.setUTCDate(d.getUTCDate() + (6 - d.getUTCDay()));
-  return d.toISOString().slice(0, 10);
-}
+/** The day that ends the week containing `iso` — the name the team gives that
+ *  week. One implementation, shared with the reports and mirrored by the
+ *  generated week_ending column so the three can never drift: Sunday–Saturday
+ *  before September 2026, Monday–Sunday clipped to the month from it. */
+export { weekEnding };
 
 /** Which stage each journey column reports.
  *

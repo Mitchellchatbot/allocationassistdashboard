@@ -236,13 +236,31 @@ describe("computeEventTotals", () => {
 });
 
 describe("weekEndingOf", () => {
-  it("names a week after the Saturday closing it", () => {
+  it("names a week after the Sunday closing it, from September 2026", () => {
+    expect(weekEndingOf("2026-09-01")).toBe("2026-09-06");   // Tuesday the 1st
+    expect(weekEndingOf("2026-09-06")).toBe("2026-09-06");   // the Sunday itself
+    expect(weekEndingOf("2026-09-07")).toBe("2026-09-13");   // the Monday that opens the next
+  });
+
+  it("cuts the seam week at 31 August rather than running into September", () => {
+    expect(weekEndingOf("2026-08-29")).toBe("2026-08-29");   // last whole Sunday week
+    expect(weekEndingOf("2026-08-30")).toBe("2026-08-31");   // would have been 5 Sep
+    expect(weekEndingOf("2026-08-31")).toBe("2026-08-31");
+  });
+
+  it("stops a week at the month end rather than running into the next", () => {
+    expect(weekEndingOf("2026-09-29")).toBe("2026-09-30");   // would otherwise be Sun 4 Oct
+    expect(weekEndingOf("2026-09-30")).toBe("2026-09-30");
+    expect(weekEndingOf("2026-10-01")).toBe("2026-10-04");   // October starts clean
+  });
+
+  it("names a week after the Saturday closing it, before September 2026", () => {
     expect(weekEndingOf("2026-08-14")).toBe("2026-08-15");   // Friday
     expect(weekEndingOf("2026-08-15")).toBe("2026-08-15");   // the Saturday itself
     expect(weekEndingOf("2026-08-09")).toBe("2026-08-15");   // the Sunday that opens it
   });
 
-  it("carries the last days of July into an August week", () => {
+  it("carries the last days of July into an August week, under the old rule", () => {
     // Why 32 rows sitting in the July sheet belong to August's figures.
     expect(weekEndingOf("2026-07-26")).toBe("2026-08-01");
     expect(weekEndingOf("2026-07-31")).toBe("2026-08-01");
