@@ -44,6 +44,26 @@ const dropFile = async (csv: string) => {
   await screen.findAllByText(/June\.csv/);
 };
 
+/** Build a real workbook and hand it over the way the file input does.
+ *  jsdom's File has no arrayBuffer(), which the workbook path calls. */
+const dropWorkbook = async (tabs: Record<string, string[][]>) => {
+  const XLSX = await import("xlsx");
+  const wb = XLSX.utils.book_new();
+  for (const [name, rows] of Object.entries(tabs)) {
+    XLSX.utils.book_append_sheet(wb, XLSX.utils.aoa_to_sheet(rows), name);
+  }
+  const buf = XLSX.write(wb, { type: "array", bookType: "xlsx" }) as ArrayBuffer;
+  const input = screen.getByLabelText(/Pick .csv or .xlsx files/i) as HTMLInputElement;
+  const file = Object.assign(new File([buf], "Report.xlsx"), { arrayBuffer: async () => buf });
+  Object.defineProperty(input, "files", { value: [file], configurable: true });
+  fireEvent.change(input);
+  await screen.findAllByText(/Report\.xlsx/);
+};
+
+const SHEET_HEAD = ["09/01/2026 - 09/05/2026", "Hospital", "Doctors / candidates", "Specialty",
+  "Shortlisted", "Interview", "offered", "Signed", "Start job Date", "Joined"];
+const sheetRow = (doctor: string) => ["1", "SKMC", doctor, "Cardiology", "9/2/2026", "", "", "", "", ""];
+
 const renderDialog = (existing: PlacementAttempt[] = []) => {
   const qc = new QueryClient({ defaultOptions: { queries: { retry: false } } });
   return render(
@@ -56,6 +76,30 @@ const renderDialog = (existing: PlacementAttempt[] = []) => {
 beforeEach(() => { applyMock.mockClear(); addAliasMock.mockClear(); });
 
 describe("PlacementImportDialog", () => {
+  it("leaves out a workbook tab that was unticked", async () => {
+    // A workbook carries an old copy of a month beside the corrected one.
+    // Importing both would put the same weeks in twice.
+    renderDialog();
+    await dropWorkbook({
+      "New September":  [SHEET_HEAD, sheetRow("Ali Khan")],
+      "COPY SEPTEMBER": [SHEET_HEAD, sheetRow("Sara Noor")],
+    });
+
+    await screen.findByText(/Tabs to import · 2 of 2/);
+    expect(screen.getByText("2 rows")).toBeInTheDocument();
+
+    fireEvent.click(screen.getByLabelText("Import the COPY SEPTEMBER tab"));
+
+    await screen.findByText(/Tabs to import · 1 of 2/);
+    expect(screen.getByText("1 rows")).toBeInTheDocument();
+
+    fireEvent.click(screen.getByRole("button", { name: /Import 1 placement/i }));
+    await waitFor(() => expect(applyMock).toHaveBeenCalled());
+    const { inserts } = applyMock.mock.calls[0][0].plan;
+    expect(inserts.map((r: { doctor_name: string }) => r.doctor_name)).toEqual(["Ali Khan"]);
+  });
+
+
   it("will not import while a hospital spelling is unmapped, and remembers the answer", async () => {
     renderDialog();
     await dropFile([HEADER, `1,NMC-Qusais,Ali Khan,Cardiology,6/8/2026,,,,,,`].join("\n"));
