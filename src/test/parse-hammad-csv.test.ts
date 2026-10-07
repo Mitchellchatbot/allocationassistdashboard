@@ -12,6 +12,24 @@ describe("parseHammadCsv", () => {
     expect(rows[0].shortlisted_at).toBe("2026-07-14T00:00:00.000Z");
   });
 
+  it("anchors a block on a week header written as a span", () => {
+    // From September 2026 the team heads each block with the week's range
+    // rather than one day. Without the anchor the day-first repair is off, so
+    // this also proves the repair still fires.
+    const head = "09/01/2026 - 09/05/2026,Hospital,Doctors / candidates,Specialty,Shortlisted,Interview,offered,Signed,Start job Date,Joined,";
+    const csv = [head, `1,AHD,Ali Khan,Cardiology,12/09/2026,,,,,,`].join("\n");
+    const { rows, warnings } = parseHammadCsv(csv);
+    expect(rows[0].block_date).toBe("2026-09-01T00:00:00.000Z");
+    expect(rows[0].shortlisted_at).toBe("2026-09-12T00:00:00.000Z");
+    expect(warnings.filter(w => w.kind === "day_first")).toHaveLength(1);
+  });
+
+  it("still reads a header that holds a single date", () => {
+    const head = "2026-08-31,Hospital,Doctors / candidates,Specialty,Shortlisted,Interview,offered,Signed,Start job Date,Joined,";
+    const csv = [head, `1,AHD,Ali Khan,Cardiology,9/1/2026,,,,,,`].join("\n");
+    expect(parseHammadCsv(csv).rows[0].block_date).toBe("2026-08-31T00:00:00.000Z");
+  });
+
   it("reads day-first dates when the month is out of range", () => {
     const csv = [HEADER, `1,AHD,Ali Khan,Cardiology,14/09/2026,,,,,,`].join("\n");
     expect(parseHammadCsv(csv).rows[0].shortlisted_at).toBe("2026-09-14T00:00:00.000Z");

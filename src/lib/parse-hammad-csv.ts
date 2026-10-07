@@ -240,6 +240,24 @@ function parsePlainDate(raw: string | undefined): Date | null {
   return utc(y, a, b);
 }
 
+/**
+ * The date a week header names.
+ *
+ * From September 2026 the team writes the week as a span — "09/01/2026 -
+ * 09/05/2026" — where it used to write a single day. Only the first date is
+ * taken: it anchors the day-first and wrong-year repairs and decides which
+ * months the sheet speaks for, and the week's own start answers both.
+ *
+ * The first date-shaped token is pulled out rather than splitting on the dash,
+ * because an ISO cell ("2026-08-31") is full of dashes itself. A header with
+ * no date in it still yields null, as before.
+ */
+function parseHeaderDate(raw: string | undefined): Date | null {
+  const trimmed = (raw ?? "").trim();
+  const first = trimmed.match(/\d{1,4}[/-]\d{1,2}[/-]\d{1,4}/)?.[0];
+  return parsePlainDate(first ?? trimmed);
+}
+
 /** A date cell, plus whatever free text was written next to it
  *  ("7/2/2026 Revise" happens). The text is kept so it can join notes
  *  rather than silently sinking the date. */
@@ -472,7 +490,7 @@ export function parseRecords(
   for (const { cells: cols, line } of records) {
     if (cols.every(c => !c)) continue;
 
-    if (isHeaderRow(cols)) { closeBlock(); weekSections++; block = parsePlainDate(cols[0]); continue; }
+    if (isHeaderRow(cols)) { closeBlock(); weekSections++; block = parseHeaderDate(cols[0]); continue; }
     if (isSummaryRow(cols)) continue;
 
     const hospital = cleanHospitalName(cols[1] ?? "");
