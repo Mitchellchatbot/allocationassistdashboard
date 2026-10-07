@@ -236,10 +236,10 @@ describe("computeEventTotals", () => {
 });
 
 describe("weekEndingOf", () => {
-  it("names a week after the Sunday closing it, from September 2026", () => {
-    expect(weekEndingOf("2026-09-01")).toBe("2026-09-06");   // Tuesday the 1st
-    expect(weekEndingOf("2026-09-06")).toBe("2026-09-06");   // the Sunday itself
-    expect(weekEndingOf("2026-09-07")).toBe("2026-09-13");   // the Monday that opens the next
+  it("still names a week after its Saturday, from September 2026", () => {
+    expect(weekEndingOf("2026-09-01")).toBe("2026-09-05");   // Tuesday the 1st
+    expect(weekEndingOf("2026-09-05")).toBe("2026-09-05");   // the Saturday itself
+    expect(weekEndingOf("2026-09-06")).toBe("2026-09-12");   // the Sunday that opens the next
   });
 
   it("cuts the seam week at 31 August rather than running into September", () => {
@@ -249,9 +249,11 @@ describe("weekEndingOf", () => {
   });
 
   it("stops a week at the month end rather than running into the next", () => {
-    expect(weekEndingOf("2026-09-29")).toBe("2026-09-30");   // would otherwise be Sun 4 Oct
+    expect(weekEndingOf("2026-09-28")).toBe("2026-09-30");   // would otherwise be Sat 3 Oct
     expect(weekEndingOf("2026-09-30")).toBe("2026-09-30");
-    expect(weekEndingOf("2026-10-01")).toBe("2026-10-04");   // October starts clean
+    // October opens on a Thursday, so its first week is Thu 1 - Sat 3.
+    expect(weekEndingOf("2026-10-01")).toBe("2026-10-03");
+    expect(weekEndingOf("2026-10-04")).toBe("2026-10-10");
   });
 
   it("names a week after the Saturday closing it, before September 2026", () => {

@@ -4,8 +4,8 @@
  * hold in any timezone.
  *
  * The calendar changes on 1 September 2026 (CALENDAR_FROM): before it a week
- * ran Sunday–Saturday and a month was whole weeks; from it a month is the
- * calendar month and a week runs Monday–Sunday clipped to that month. NOW sits
+ * A week always runs Sunday–Saturday. What changes is the month: whole weeks
+ * before, the calendar month after, with weeks cut at the month end. NOW sits
  * after the seam, so both regimes are in play here.
  */
 import { describe, it, expect } from "vitest";
@@ -30,39 +30,49 @@ function attempt(over: Partial<PlacementAttempt>): PlacementAttempt {
 }
 
 describe("periodRange", () => {
-  it("weekly runs Monday → Sunday from September 2026", () => {
+  it("weekly runs Sunday → Saturday", () => {
     const r = periodRange("weekly", 0, NOW);          // NOW is Fri 18 Sep 2026
-    expect(same(r.from, d(2026, 9, 14))).toBe(true);  // Monday
-    expect(same(r.to, d(2026, 9, 20))).toBe(true);    // Sunday
+    expect(same(r.from, d(2026, 9, 13))).toBe(true);  // Sunday
+    expect(same(r.to, d(2026, 9, 19))).toBe(true);    // Saturday
     const prev = periodRange("weekly", -1, NOW);
-    expect(same(prev.from, d(2026, 9, 7))).toBe(true);
+    expect(same(prev.from, d(2026, 9, 6))).toBe(true);
   });
 
-  it("clips the first and last week of a month to the month", () => {
-    // 1 Sep 2026 is a Tuesday, so September opens with a six-day week and
-    // closes on Wednesday the 30th.
-    const first = periodRange("weekly", -2, NOW);
-    expect(same(first.from, d(2026, 9, 1))).toBe(true);
-    expect(same(first.to, d(2026, 9, 6))).toBe(true);
+  it("cuts a week where the month ends, from September 2026", () => {
+    // October 2026 opens on a Thursday, so its first week is three days and
+    // the one after it is whole again.
+    const oct1 = offsetOf("weekly", d(2026, 10, 1), NOW);
+    const first = periodRange("weekly", oct1, NOW);
+    expect(same(first.from, d(2026, 10, 1))).toBe(true);   // Thursday
+    expect(same(first.to, d(2026, 10, 3))).toBe(true);     // Saturday
+    const second = periodRange("weekly", oct1 + 1, NOW);
+    expect(same(second.from, d(2026, 10, 4))).toBe(true);  // Sunday
+    expect(same(second.to, d(2026, 10, 10))).toBe(true);   // Saturday
 
-    // The weeks of September tile it exactly, with no day in two of them.
+    // September's weeks tile the month exactly, with no day in two of them.
     const weeks = [-2, -1, 0, 1, 2].map(o => periodRange("weekly", o, NOW));
-    expect(same(weeks[0].from, d(2026, 9, 1))).toBe(true);
-    expect(same(weeks[4].from, d(2026, 9, 28))).toBe(true);
-    expect(same(weeks[4].to, d(2026, 9, 30))).toBe(true);
+    expect(same(weeks[0].from, d(2026, 9, 1))).toBe(true);   // Tue 1st, clipped
+    expect(same(weeks[0].to, d(2026, 9, 5))).toBe(true);     // Saturday
+    expect(same(weeks[4].from, d(2026, 9, 27))).toBe(true);
+    expect(same(weeks[4].to, d(2026, 9, 30))).toBe(true);    // clipped at the month end
     for (let i = 1; i < weeks.length; i++) {
       const gap = (weeks[i].from.getTime() - weeks[i - 1].to.getTime()) / 86_400_000;
       expect(gap).toBe(1);
     }
   });
 
-  it("keeps Sunday weeks before the switch, and cuts the seam week at 31 Aug", () => {
+  it("lets a week cross the month end before the switch, except at the seam", () => {
+    // The old rule: the week opening Sun 26 Jul closes Sat 1 Aug and counts
+    // into August, which is how the team's published figures are built.
+    const jul26 = offsetOf("weekly", d(2026, 7, 26), NOW);
+    expect(same(periodRange("weekly", jul26, NOW).to, d(2026, 8, 1))).toBe(true);
+    // The seam is the exception: 30 Aug would have closed on 5 September.
     const stub = periodRange("weekly", -3, NOW);
-    expect(same(stub.from, d(2026, 8, 30))).toBe(true);   // the Sunday
-    expect(same(stub.to, d(2026, 8, 31))).toBe(true);     // cut, not 5 Sep
+    expect(same(stub.from, d(2026, 8, 30))).toBe(true);
+    expect(same(stub.to, d(2026, 8, 31))).toBe(true);
     const before = periodRange("weekly", -4, NOW);
-    expect(same(before.from, d(2026, 8, 23))).toBe(true); // Sunday
-    expect(same(before.to, d(2026, 8, 29))).toBe(true);   // Saturday
+    expect(same(before.from, d(2026, 8, 23))).toBe(true);
+    expect(same(before.to, d(2026, 8, 29))).toBe(true);
   });
 
   it("monthly is the calendar month from September, whole weeks before it", () => {
@@ -97,13 +107,24 @@ describe("periodRange", () => {
     expect(same(prev.to, d(2025, 10, 4))).toBe(true);
   });
 
-  it("a month opening on a Sunday gives that day its own week", () => {
-    // 1 Nov 2026 is a Sunday, so it closes a Monday–Sunday week on its own.
-    const o = offsetOf("weekly", d(2026, 11, 1), NOW);
+  it("leaves a month's last days as a short week of their own", () => {
+    // November 2026 ends on a Monday, so its last week is Sun 29 - Mon 30.
+    const o = offsetOf("weekly", d(2026, 11, 30), NOW);
     const r = periodRange("weekly", o, NOW);
-    expect(same(r.from, d(2026, 11, 1))).toBe(true);
-    expect(same(r.to, d(2026, 11, 1))).toBe(true);
-    expect(periodLabels("weekly", o, NOW).label).toBe("1 Nov 2026");
+    expect(same(r.from, d(2026, 11, 29))).toBe(true);
+    expect(same(r.to, d(2026, 11, 30))).toBe(true);
+  });
+
+  it("names a one-day week by that day alone", () => {
+    // 31 Jan 2027 is a Sunday: it opens a week the month end cuts at once.
+    // Read from a "now" inside 2027, since the calendar runs to the end of the
+    // current year.
+    const now = new Date(2027, 0, 15);
+    const o = offsetOf("weekly", d(2027, 1, 31), now);
+    const r = periodRange("weekly", o, now);
+    expect(same(r.from, d(2027, 1, 31))).toBe(true);
+    expect(same(r.to, d(2027, 1, 31))).toBe(true);
+    expect(periodLabels("weekly", o, now).label).toBe("31 Jan 2027");
   });
 });
 
@@ -155,7 +176,7 @@ describe("periodLabels", () => {
     expect(periodLabels("monthly", 0, NOW).label).toBe("September 2026");
     expect(periodLabels("monthly", -1, NOW).label).toBe("August 2026");
     expect(periodLabels("weekly", -3, NOW).rel).toBe("3 weeks ago");
-    expect(periodLabels("weekly", 0, NOW).label).toBe("14 Sep – 20 Sep 2026");
+    expect(periodLabels("weekly", 0, NOW).label).toBe("13 Sep – 19 Sep 2026");
     expect(periodLabels("yearly", 0, NOW).label).toBe("Oct 2025 – Sep 2026");
   });
 });

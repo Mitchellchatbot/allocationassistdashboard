@@ -41,7 +41,7 @@ export function PeriodPill({ period, onChange }: { period: Period; onChange: (p:
       onChange={onChange}
       ariaLabel="Report period"
       options={[
-        { key: "weekly",  label: "Weekly",  hint: "One week at a time (Monday – Sunday, never crossing a month end). Before September 2026 weeks ran Sunday – Saturday." },
+        { key: "weekly",  label: "Weekly",  hint: "One week at a time, Sunday – Saturday. From September 2026 a week is cut where the month ends, so October opens with Thu 1 – Sat 3." },
         { key: "monthly", label: "Monthly", hint: "One month at a time, the 1st to the last day. Before September 2026 a month was counted as whole weeks." },
         { key: "yearly",  label: "Yearly",  hint: "The last 12 months vs the 12 before" },
       ]}

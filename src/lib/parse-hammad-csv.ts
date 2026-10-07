@@ -66,7 +66,7 @@ export interface ParsedEvent {
 /** The day that ends the week containing `iso` — the name the team gives that
  *  week. One implementation, shared with the reports and mirrored by the
  *  generated week_ending column so the three can never drift: Sunday–Saturday
- *  before September 2026, Monday–Sunday clipped to the month from it. */
+ *  always Sunday–Saturday, and cut at the month end from September 2026. */
 export { weekEnding };
 
 /** Which stage each journey column reports.

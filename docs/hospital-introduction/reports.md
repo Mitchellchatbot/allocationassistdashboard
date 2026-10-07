@@ -20,17 +20,19 @@ marking) and the hospital/vacancy data into one view, and it's where the team
 
 - The **Weekly · Monthly · Yearly** pill (top right) sets the period for every
   panel on the page. *Yearly* is the last 12 months against the 12 before.
-- **What a week and a month are.** From **1 September 2026** a month is the
-  calendar month, the 1st to the last day, and a week runs **Monday to Sunday
-  but never crosses a month end** — September 2026 opens on Tuesday the 1st, so
-  its first week is Tue 1 – Sun 6 and its last is Mon 28 – Wed 30. Because of
-  that, the weeks of a month add up exactly to the month.
+- **What a week and a month are.** A week always runs **Sunday to Saturday**.
+  What changed on **1 September 2026** is the month: it is now the calendar
+  month, the 1st to the last day, and **a week is cut where the month ends**
+  rather than carrying days across. October 2026 opens on a Thursday, so its
+  first week is Thu 1 – Sat 3 and the next is the whole Sun 4 – Sat 10. Because
+  of that, the weeks of a month add up exactly to the month.
   Everything **before** that date keeps the rule the team's own figures were
-  built on: a **Sunday to Saturday** week, and a month made of **whole weeks**
-  (first Sunday of the month to the Saturday closing the week its last Sunday
-  opens), so history still matches what was already reported. August 2026 is
-  the seam — it used to run to Saturday 5 September and now stops on the 31st,
-  so the first days of September are counted once, in September.
+  built on: a month made of **whole weeks** — first Sunday of the month to the
+  Saturday closing the week its last Sunday opens — so a week opening in
+  February carried its March days into February, and history still matches what
+  was already reported. August 2026 is the seam: it used to run to Saturday 5
+  September and now stops on the 31st, so the first days of September are
+  counted once, in September.
 - The **round arrows** on either side of the report step one period back or
   forward, with a slide. The **← →** keys do the same.
 - **Hover an arrow** and it opens into a *jump-to* grid of every week / month /

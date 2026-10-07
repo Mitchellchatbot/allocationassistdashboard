@@ -5,19 +5,21 @@
  * 12 months — and steps through them with the side arrows. `offset` is how many
  * periods back from the current one (0 = now, -1 = the one before, …).
  *
- * TWO CALENDARS LIVE HERE, split by `CALENDAR_FROM` (1 September 2026).
+ * A WEEK ALWAYS RUNS SUNDAY → SATURDAY. What changes on `CALENDAR_FROM`
+ * (1 September 2026) is where a month begins and ends, and whether a week is
+ * allowed to straddle that boundary.
  *
  *   Before it (how the team used to count, and how every figure they have
- *   already published is bucketed): a week runs Sunday → Saturday, and a month
- *   is WHOLE WEEKS — the first Sunday of the month to the Saturday closing the
- *   week its last Sunday opens. That rule was measured against nine months of
- *   the team's tracker and beat every alternative, so history keeps it.
+ *   already published is bucketed): a month is WHOLE WEEKS — the first Sunday
+ *   of the month to the Saturday closing the week its last Sunday opens — so a
+ *   week that opens in February carries its March days into February. That
+ *   rule was measured against nine months of the team's tracker and beat every
+ *   alternative, so history keeps it.
  *
  *   From it (what the client asked for): a month is the calendar month, 1st to
- *   last day, and a week runs Monday → Sunday but NEVER crosses a month end —
- *   when the 1st is a Tuesday that month's first week is Tue 1 → Sun 6, and the
- *   last week is cut at the last day. Weekly numbers therefore add up exactly
- *   to the month's.
+ *   last day, and a week is CUT where the month ends. October 2026 opens on a
+ *   Thursday, so its first week is Thu 1 → Sat 3 and the next is the whole
+ *   Sun 4 → Sat 10. Weekly numbers therefore add up exactly to the month's.
  *
  * August 2026 is the seam: under the old rule it ran to Saturday 5 September,
  * so it is cut at 31 August and the 1st–5th belong to the new September.
@@ -136,13 +138,15 @@ function buildWeeks(now: Date): PeriodWindow[] {
     cur = addDays(end, 1);
   }
 
-  // The new half: Monday → Sunday, clipped to the month on both ends.
+  // The new half: still Sunday → Saturday, but cut where the month ends. A
+  // month opening on a Thursday therefore starts with a three-day week
+  // (Thu 1 – Sat 3 October), and the one after it is whole again.
   for (const m of months) {
     if (m.legacy) continue;
     let c = m.from;
     while (c.getTime() <= m.to.getTime()) {
-      // Days from `c` to the Sunday closing its week (0 when c IS a Sunday).
-      const end = addDays(c, 6 - ((c.getDay() + 6) % 7));
+      // Days from `c` to the Saturday closing its week (0 when c IS a Saturday).
+      const end = addDays(c, 6 - c.getDay());
       const to  = end.getTime() > m.to.getTime() ? m.to : end;
       out.push({ from: c, to, year: m.year, month: m.month, legacy: false });
       c = addDays(to, 1);

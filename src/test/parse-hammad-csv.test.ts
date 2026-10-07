@@ -215,11 +215,12 @@ describe("weekEnding", () => {
     expect(weekEnding("2026-07-31")).toBe("2026-08-01");
   });
 
-  it("switches to Monday-Sunday weeks, clipped to the month, in September 2026", () => {
+  it("cuts a week at the month end from September 2026", () => {
     // The importer and the reports read the same function, so an imported
     // line lands in the week the dashboard will show it in.
-    expect(weekEnding("2026-09-01")).toBe("2026-09-06");   // Tue 1st closes on the Sunday
-    expect(weekEnding("2026-09-29")).toBe("2026-09-30");   // cut at the month end
+    expect(weekEnding("2026-09-01")).toBe("2026-09-05");   // Tue 1st closes on the Saturday
+    expect(weekEnding("2026-09-28")).toBe("2026-09-30");   // cut at the month end
+    expect(weekEnding("2026-10-01")).toBe("2026-10-03");   // October opens on a Thursday
   });
 });
 

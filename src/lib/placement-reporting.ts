@@ -260,9 +260,9 @@ export function startOfWeek(d: Date): Date {
  * week. Mirrors the generated week_ending column on placement_events, so the
  * two must change together.
  *
- * Before CALENDAR_FROM that is the Saturday closing a Sunday–Saturday week.
- * From it, weeks run Monday–Sunday and stop at the month end, so it is the
- * following Sunday or the last day of the month, whichever comes first.
+ * A week always runs Sunday–Saturday, so this is the Saturday closing it —
+ * except that from CALENDAR_FROM a week is cut where the month ends, making it
+ * the following Saturday or the last day of the month, whichever comes first.
  */
 export function weekEndingOf(iso: string): string {
   const day = iso.slice(0, 10);
@@ -275,11 +275,11 @@ export function weekEndingOf(iso: string): string {
     const iso = d.toISOString().slice(0, 10);
     return iso < CALENDAR_FROM_ISO ? iso : LEGACY_END_ISO;
   }
-  const sunday = new Date(d);
-  // getUTCDay(): 0 Sun .. 6 Sat, so a Sunday stays where it is.
-  sunday.setUTCDate(d.getUTCDate() + ((7 - d.getUTCDay()) % 7));
+  const saturday = new Date(d);
+  // getUTCDay(): 0 Sun .. 6 Sat, so a Saturday stays where it is.
+  saturday.setUTCDate(d.getUTCDate() + (6 - d.getUTCDay()));
   const monthEnd = new Date(Date.UTC(d.getUTCFullYear(), d.getUTCMonth() + 1, 0));
-  return (sunday < monthEnd ? sunday : monthEnd).toISOString().slice(0, 10);
+  return (saturday < monthEnd ? saturday : monthEnd).toISOString().slice(0, 10);
 }
 
 /** The stages placement_events records. The sheet has no "relocated" or
