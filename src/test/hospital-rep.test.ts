@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { reportSide } from "@/lib/hospital-region";
+import { reportSide, reportSideFromState } from "@/lib/hospital-region";
 import { buildRepLookup, buildHospitalMatcher } from "@/lib/hospital-rep";
 import { HI_TEAM_MEMBERS } from "@/lib/hi-team";
 
@@ -72,6 +72,25 @@ describe("buildHospitalMatcher", () => {
 
   it("returns null when the branches disagree on the rep", () => {
     expect(match("Mediclinic")).toBeNull();
+  });
+});
+
+describe("reportSideFromState", () => {
+  it("reads the country off the sheet's State column", () => {
+    for (const s of ["Dubai, UAE", "Abu Dhabi, UAE", "Fujairah, UAE", "Ras Al Kaimah, UAE", "Sharjah, UAE"]) {
+      expect([s, reportSideFromState(s)]).toEqual([s, "UAE"]);
+    }
+    for (const s of ["KSA", "Qatar", "Riyadh, KSA", "Jeddah, Saudi Arabia", "Doha, Qatar"]) {
+      expect([s, reportSideFromState(s)]).toEqual([s, "KSA/Qatar"]);
+    }
+  });
+
+  it("gives nothing to fall back on when the cell is blank or unknown", () => {
+    // October's column is still being filled in, so blanks are expected and
+    // the caller drops back to reading the hospital name.
+    for (const s of [null, undefined, "", "   ", "Oman", "tbc"]) {
+      expect(reportSideFromState(s)).toBeNull();
+    }
   });
 });
 

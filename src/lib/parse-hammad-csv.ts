@@ -41,6 +41,10 @@ export interface ParsedRow {
   /** The tab the row came from, so a question about it can be taken back to
    *  the sheet: "September row 294" rather than "row 294 of something". */
   sheet:            string | null;
+  /** Where the sheet says the hospital is ("Dubai, UAE", "KSA", "Qatar").
+   *  Present from September 2026; null on older sheets, which have no such
+   *  column and fall back to reading the country off the hospital name. */
+  state:            string | null;
   /** Whose weekly block this row sat in. See resolveBlockRep. */
   rep:              string | null;
   country:          string | null;
@@ -388,24 +392,83 @@ function parseDateCell(raw: string | undefined, block: Date | null, today: Date,
 
 // ── Rows ─────────────────────────────────────────────────────────────
 
-/** Detect whether a row is a section header — first non-numeric col,
- *  then "Hospital", then "Doctors / candidates", etc. */
+/** Detect whether a row is a section header.
+ *
+ *  Matched on content, not position: September 2026 gained a "State" column
+ *  between Hospital and the doctor, and a positional check both missed the
+ *  header and left every date column reading its neighbour. */
 function isHeaderRow(cols: string[]): boolean {
-  // The header row's second column is "Hospital" (case-insensitive).
-  return (cols[1] ?? "").toLowerCase() === "hospital"
-      && (cols[2] ?? "").toLowerCase().includes("doctor");
+  return cols.some(c => (c ?? "").trim().toLowerCase() === "hospital")
+      && cols.some(c => /doctor|candidate/i.test(c ?? ""));
 }
 
-/** Detect summary count rows like ",,,,43,8,,,," — the row index is
- *  empty and the first numeric column lives at position 4 (Shortlisted
- *  count). We check that columns 0-3 are empty AND at least one of 4-9
- *  is a small integer. */
-function isSummaryRow(cols: string[]): boolean {
-  const first4Empty = (cols[0] ?? "") === "" && (cols[1] ?? "") === ""
-                   && (cols[2] ?? "") === "" && (cols[3] ?? "") === "";
-  if (!first4Empty) return false;
-  const tail = cols.slice(4, 10).join("");
-  return /^\d+/.test(tail);
+/**
+ * Where each field sits on a row.
+ *
+ * The sheet's shape is read from its own header rather than assumed, because
+ * it changes: a "State" column arrived in September 2026 and shifted
+ * everything after Hospital one to the right. Every block carries its own
+ * header, so one workbook may hold both shapes at once.
+ */
+interface Layout {
+  hospital:  number;
+  /** The location column, when the sheet has one. */
+  state:     number | null;
+  doctor:    number;
+  specialty: number;
+  dates:     Array<[DateColumn, number]>;
+  /** First column treated as trailing free-text notes. */
+  notesFrom: number;
+}
+
+/** The shape every sheet had before September 2026, and the fallback for a
+ *  header we cannot read. */
+const LEGACY_LAYOUT: Layout = {
+  hospital: 1, state: null, doctor: 2, specialty: 3,
+  dates: [
+    ["shortlisted_at", 4], ["interviewed_at", 5], ["offered_at", 6],
+    ["signed_at", 7], ["start_date", 8], ["joined_at", 9],
+  ],
+  notesFrom: 10,
+};
+
+const DATE_HEADINGS: Array<[DateColumn, RegExp]> = [
+  ["shortlisted_at", /shortlist/i], ["interviewed_at", /interview/i],
+  ["offered_at",     /offer/i],     ["signed_at",      /sign/i],
+  ["start_date",     /start/i],     ["joined_at",      /join/i],
+];
+
+function layoutFrom(cols: string[]): Layout {
+  const find = (re: RegExp) => cols.findIndex(c => re.test((c ?? "").trim()));
+  const hospital = find(/^hospital$/i);
+  const doctor   = find(/doctor|candidate/i);
+  const dates    = DATE_HEADINGS
+    .map(([col, re]) => [col, find(re)] as [DateColumn, number])
+    .filter(([, i]) => i >= 0);
+  // Anything short of the full set of stages is a header we do not
+  // recognise; reading a partial one would misalign dates silently.
+  if (hospital < 0 || doctor < 0 || dates.length < DATE_HEADINGS.length) return LEGACY_LAYOUT;
+  const specialty = find(/special/i);
+  let state       = find(/^(state|location|city|country)$/i);
+  // Only the first block of a tab actually labels the column; every header
+  // after it leaves that cell blank while the column and its values stay put.
+  // So an unnamed column sitting between Hospital and the doctor is the state.
+  if (state < 0 && doctor - hospital === 2) state = hospital + 1;
+  return {
+    hospital, doctor,
+    state:     state < 0 ? null : state,
+    specialty: specialty < 0 ? doctor + 1 : specialty,
+    dates,
+    notesFrom: Math.max(...dates.map(([, i]) => i)) + 1,
+  };
+}
+
+/** Detect summary count rows like ",,,,43,8,,,," — every column before the
+ *  stages is empty and the stage columns start with a count. */
+function isSummaryRow(cols: string[], layout: Layout): boolean {
+  const firstDate = Math.min(...layout.dates.map(([, i]) => i));
+  for (let i = 0; i < firstDate; i++) if ((cols[i] ?? "") !== "") return false;
+  return /^\d+/.test(cols.slice(firstDate, firstDate + 6).join(""));
 }
 
 /** Words on a row that mean a stage did not really happen.
@@ -414,11 +477,6 @@ function isSummaryRow(cols: string[]): boolean {
  *  track an internal step of their own after a join, not to say whether the
  *  doctor started. Reading them as a hold kept real joins out of the figures. */
 const HOLD = /\b(hold|cancell?ed|withdrawn)\b/i;
-
-const DATE_COLUMNS: Array<[DateColumn, number]> = [
-  ["shortlisted_at", 4], ["interviewed_at", 5], ["offered_at", 6],
-  ["signed_at", 7], ["start_date", 8], ["joined_at", 9],
-];
 
 /** Whose block this is, decided by the hospitals in it rather than by any
  *  cell — the sheet never names the rep.
@@ -471,6 +529,8 @@ export function parseRecords(
   let skippedRows = 0;
   let weekSections = 0;
   let block: Date | null = null;
+  // Re-read at every header, since blocks in one file can differ.
+  let layout: Layout = LEGACY_LAYOUT;
 
   // Rows wait here until the block ends, because the rep is decided by the
   // whole block and every row in it — and every event — is then stamped.
@@ -490,12 +550,17 @@ export function parseRecords(
   for (const { cells: cols, line } of records) {
     if (cols.every(c => !c)) continue;
 
-    if (isHeaderRow(cols)) { closeBlock(); weekSections++; block = parseHeaderDate(cols[0]); continue; }
-    if (isSummaryRow(cols)) continue;
+    if (isHeaderRow(cols)) {
+      closeBlock(); weekSections++;
+      layout = layoutFrom(cols);
+      block  = parseHeaderDate(cols[0]);
+      continue;
+    }
+    if (isSummaryRow(cols, layout)) continue;
 
-    const hospital = cleanHospitalName(cols[1] ?? "");
-    const doctor   = cleanDoctorName(cols[2] ?? "");
-    const hasDates = cols.slice(4, 10).some(c => parsePlainDate(c?.replace(/\s.*$/, "")));
+    const hospital = cleanHospitalName(cols[layout.hospital] ?? "");
+    const doctor   = cleanDoctorName(cols[layout.doctor] ?? "");
+    const hasDates = layout.dates.some(([, i]) => parsePlainDate(cols[i]?.replace(/\s.*$/, "")));
 
     // Rows missing a hospital or a doctor can't become a placement. Blank
     // dividers are skipped quietly; one that carries dates is surfaced so
@@ -517,10 +582,13 @@ export function parseRecords(
     // mis-aligned — skip it.
     if (parsePlainDate(hospital)) { skippedRows++; continue; }
 
-    const specialty = cols[3]?.trim().replace(/\s+/g, " ") || null;
+    const specialty = cols[layout.specialty]?.trim().replace(/\s+/g, " ") || null;
+    // Where the team says the hospital is. Authoritative for the UAE vs
+    // KSA/Qatar split, which until now was guessed from the hospital name.
+    const state = layout.state == null ? null : (cols[layout.state] ?? "").trim() || null;
     const dates = {} as Record<DateColumn, string | null>;
     const notesParts: string[] = [];
-    for (const [col, idx] of DATE_COLUMNS) {
+    for (const [col, idx] of layout.dates) {
       const cell = parseDateCell(cols[idx], block, today, PLANNED.has(col));
       dates[col] = cell.iso;
       // Free text written alongside a date ("7/2/2026 Revise") joins the notes.
@@ -529,8 +597,8 @@ export function parseRecords(
         warnings.push({ ...cell.warning, sheet, line, doctor, hospital, column: col, typed: cols[idx] ?? null, read_as: cell.iso });
       }
     }
-    // Trailing free-text notes — columns 10+ are usually "Added", "SENT", "X".
-    for (let i = 10; i < cols.length; i++) {
+    // Trailing free-text notes — past the last stage, usually "Added", "SENT", "X".
+    for (let i = layout.notesFrom; i < cols.length; i++) {
       const v = cols[i]?.trim();
       if (v) notesParts.push(v);
     }
@@ -578,6 +646,7 @@ export function parseRecords(
       notes,
       line,
       sheet,
+      state,
       block_date:       block ? block.toISOString() : null,
       rep:              null,
       country:          null,

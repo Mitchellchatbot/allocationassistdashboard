@@ -166,6 +166,28 @@ export type ReportSide = "UAE" | "KSA/Qatar";
  * name gives no region — those lines show up in neither side rather than being
  * guessed into one.
  */
+/**
+ * Which side of the monthly report a row counts on, read from the sheet's own
+ * "State" column rather than guessed from the hospital name.
+ *
+ * From September 2026 the team writes where each hospital is — "Dubai, UAE",
+ * "Abu Dhabi, UAE", "KSA", "Qatar". That settles the names the hospital alone
+ * never could: SGH, SKMC, NMC, Mediclinic, KCH and FUH each sit on both sides,
+ * and the side had to be inferred from the block's rep and the spelling.
+ *
+ * The country is the last comma-separated part, so a city in front is fine and
+ * a bare country works too. Anything unrecognised returns null and the caller
+ * falls back to reading the hospital name.
+ */
+export function reportSideFromState(state: string | null | undefined): ReportSide | null {
+  const last = (state ?? "").split(",").pop()?.trim().toLowerCase() ?? "";
+  if (!last) return null;
+  if (/\buae\b|emirates/.test(last)) return "UAE";
+  if (/\bksa\b|saudi/.test(last)) return "KSA/Qatar";
+  if (/qatar/.test(last)) return "KSA/Qatar";
+  return null;
+}
+
 export function reportSide(hospitalName: string): ReportSide | null {
   const { country } = resolveHospitalRegion(hospitalName);
   if (country === "UAE") return "UAE";

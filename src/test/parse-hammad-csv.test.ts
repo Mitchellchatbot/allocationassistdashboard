@@ -12,6 +12,48 @@ describe("parseHammadCsv", () => {
     expect(rows[0].shortlisted_at).toBe("2026-07-14T00:00:00.000Z");
   });
 
+  it("follows the header when a State column shifts every other column", () => {
+    // September 2026 inserted "State" between Hospital and the doctor. Read by
+    // position, the doctor would be "Abu Dhabi, UAE", the specialty would be
+    // the doctor, and every stage date would be its neighbour's.
+    const head = "09/01/2026 - 09/05/2026,Hospital,State,Doctors / candidates,Specialty,Shortlisted,Interview,offered,Signed,Start job Date,Joined,";
+    const csv = [head, `1,SKMC,"Abu Dhabi, UAE",Lia Lijnzaat,Anesthesiologist,9/2/2026,,,,,9/4/2026,ADDED`].join("\n");
+    const { rows } = parseHammadCsv(csv);
+    expect(rows).toHaveLength(1);
+    expect(rows[0].doctor_name).toBe("Lia Lijnzaat");
+    expect(rows[0].hospital_name).toBe("SKMC");
+    expect(rows[0].doctor_specialty).toBe("Anesthesiologist");
+    expect(rows[0].state).toBe("Abu Dhabi, UAE");
+    expect(rows[0].shortlisted_at).toBe("2026-09-02T00:00:00.000Z");
+    expect(rows[0].joined_at).toBe("2026-09-04T00:00:00.000Z");
+    expect(rows[0].notes).toBe("ADDED");
+  });
+
+  it("still finds the State column when a later block leaves the heading blank", () => {
+    // Only the first block of a tab labels it; the other fourteen headers in
+    // New September have an empty cell there while the column keeps its data.
+    const labelled = "09/01/2026 - 09/05/2026,Hospital,State,Doctors / candidates,Specialty,Shortlisted,Interview,offered,Signed,Start job Date,Joined,";
+    const blank    = "09/06/2026 - 09/12/2026,Hospital,,Doctors / candidates,Speciality,Shortlisted,Interview,Offered,Signed,Start job Date,Joined,";
+    const csv = [
+      labelled, `1,SKMC,"Abu Dhabi, UAE",Lia Lijnzaat,Anesthesiologist,9/2/2026,,,,,,`,
+      blank,    `1,SGH,"Dubai, UAE",Ali Khan,Cardiology,9/8/2026,,,,,,`,
+    ].join("\n");
+    const { rows } = parseHammadCsv(csv);
+    expect(rows.map(r => [r.doctor_name, r.state])).toEqual([
+      ["Lia Lijnzaat", "Abu Dhabi, UAE"],
+      ["Ali Khan", "Dubai, UAE"],
+    ]);
+    expect(rows[1].shortlisted_at).toBe("2026-09-08T00:00:00.000Z");
+  });
+
+  it("keeps reading a sheet that has no State column", () => {
+    const csv = [HEADER, `1,AHD,Ali Khan,Cardiology,8/13/2026,8/14/2026,,,,,`].join("\n");
+    const { rows } = parseHammadCsv(csv);
+    expect(rows[0].doctor_name).toBe("Ali Khan");
+    expect(rows[0].state).toBeNull();
+    expect(rows[0].shortlisted_at).toBe("2026-08-13T00:00:00.000Z");
+  });
+
   it("anchors a block on a week header written as a span", () => {
     // From September 2026 the team heads each block with the week's range
     // rather than one day. Without the anchor the day-first repair is off, so
