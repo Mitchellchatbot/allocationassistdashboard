@@ -22,13 +22,34 @@ import type { PlacementAttempt } from "@/hooks/use-placement-attempts";
 
 export interface DateRange { from: Date; to: Date }
 
+/**
+ * The day the reporting calendar changes.
+ *
+ * Before it the team counted Sunday–Saturday weeks and months made of whole
+ * weeks; from it they count calendar months and Monday–Sunday weeks clipped to
+ * the month. History keeps the old rule so published figures do not move.
+ * `report-period.ts` builds both calendars around this date, and the
+ * `week_ending` column on placement_events switches on the same day.
+ */
+export const CALENDAR_FROM_ISO = "2026-09-01";
+export const CALENDAR_FROM = new Date(2026, 8, 1);
+/** The last day the old rule covers. */
+export const LEGACY_END_ISO = "2026-08-31";
+
 export interface ReportingFilters {
   range:      DateRange;
+  /** The period immediately before `range`, for the ▲▼ deltas. The caller
+   *  knows the real previous period; `priorRangeOf` can only guess an
+   *  equal-length span, which is wrong once months differ in length. */
+  prior?:     DateRange;
   hospital:   string | null;
   /** Rep email. Resolved to hospitals via the allocation, not via who clicked. */
   teamMember: string | null;
   specialty:  string | null;
   doctorId?:  string | null;
+  /** Which half of the team's monthly report to show — it publishes UAE and
+   *  KSA separately, with Qatar inside the second. Null shows both together. */
+  side?:      "UAE" | "KSA/Qatar" | null;
 }
 
 /**
@@ -123,6 +144,10 @@ export function computeStageTotals(attempts: PlacementAttempt[], f: ReportingFil
 /**
  * Weekly buckets for the trend chart.
  *
+ * Legacy: these are always Sunday weeks and ignore CALENDAR_FROM. The Reports
+ * page builds its own buckets from `report-period.ts`, which knows both
+ * calendars; nothing reads the `trend` this produces.
+ *
  * Buckets are seeded across the whole range before counting, so a quiet week
  * renders as a zero rather than vanishing — a line that skips empty weeks
  * silently compresses the x-axis and makes a dip look like steady progress.
@@ -214,12 +239,109 @@ export function computeHospitalActivity(
   });
 }
 
+/** The Sunday opening the week that holds `d`.
+ *
+ *  The team's week runs Sunday to Saturday, not Monday to Sunday, and every
+ *  number they publish is bucketed that way. Reading it the other way moves
+ *  rows across both week and month boundaries: 32 of the 33 rows in the week
+ *  ending 1 August are dated 26-31 July, so a Monday week files them under
+ *  July and August loses them. Checked against the tracker over nine months,
+ *  Sunday-Saturday scored a total error of 149 where every alternative
+ *  scored 240-264. */
 export function startOfWeek(d: Date): Date {
   const out = new Date(d);
   out.setHours(0, 0, 0, 0);
-  const dow = out.getDay();             // 0 Sun .. 6 Sat
-  const shift = (dow + 6) % 7;          // distance back to Monday
-  out.setDate(out.getDate() - shift);
+  out.setDate(out.getDate() - out.getDay());   // getDay(): 0 Sun .. 6 Sat
+  return out;
+}
+
+/**
+ * The last day of the week that holds `iso` — the name the team gives that
+ * week. Mirrors the generated week_ending column on placement_events, so the
+ * two must change together.
+ *
+ * A week always runs Sunday–Saturday, so this is the Saturday closing it —
+ * except that from CALENDAR_FROM a week is cut where the month ends, making it
+ * the following Saturday or the last day of the month, whichever comes first.
+ */
+export function weekEndingOf(iso: string): string {
+  const day = iso.slice(0, 10);
+  const d = new Date(`${day}T00:00:00Z`);
+  if (day < CALENDAR_FROM_ISO) {
+    d.setUTCDate(d.getUTCDate() + (6 - d.getUTCDay()));
+    // The seam week is cut short: the week opening Sunday 30 August 2026 used
+    // to close on Saturday 5 September, but those days now belong to the new
+    // September, so the last legacy week ends on the 31st.
+    const iso = d.toISOString().slice(0, 10);
+    return iso < CALENDAR_FROM_ISO ? iso : LEGACY_END_ISO;
+  }
+  const saturday = new Date(d);
+  // getUTCDay(): 0 Sun .. 6 Sat, so a Saturday stays where it is.
+  saturday.setUTCDate(d.getUTCDate() + (6 - d.getUTCDay()));
+  const monthEnd = new Date(Date.UTC(d.getUTCFullYear(), d.getUTCMonth() + 1, 0));
+  return (saturday < monthEnd ? saturday : monthEnd).toISOString().slice(0, 10);
+}
+
+/** The stages placement_events records. The sheet has no "relocated" or
+ *  "paid" column, so those two reporting stages have no event of their own. */
+export type EventStageKey = "shortlisted" | "interviewed" | "offered" | "signed" | "joined";
+
+/** The sheet's "Joined" column is the same milestone the reports call
+ *  relocated — STAGES already reads relocated_at or joined_at, whichever the
+ *  journey has. */
+const EVENT_TO_STAGE: Record<EventStageKey, StageKey> = {
+  shortlisted: "shortlisted",
+  interviewed: "interviewed",
+  offered:     "offered",
+  signed:      "signed",
+  joined:      "relocated",
+};
+
+/** A Date as the calendar day it is locally, yyyy-mm-dd. */
+function localDay(d: Date): string {
+  return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`;
+}
+
+/** A logged line, as placement_events stores it. */
+export interface EventRow {
+  stage:       EventStageKey;
+  occurred_at: string;
+  week_ending: string;
+  rep:         string | null;
+  country:     string | null;
+}
+
+/**
+ * Stage totals the way the team counts them: every logged line.
+ *
+ * Not distinct doctors, and not distinct doctor+hospital pairs either — a
+ * doctor put forward at the same hospital twice is two lines and counts twice,
+ * and the same pair logged by two reps counts twice as well. Deduplicating
+ * measurably moves the numbers away from the tracker rather than towards it
+ * (total error 149 counting lines, 150 per week, 161 per month).
+ *
+ * `country` narrows to one side of the report — "UAE" or "KSA/Qatar".
+ */
+export function computeEventTotals(
+  events: EventRow[],
+  range: DateRange,
+  opts: { country?: string; rep?: string } = {},
+): StageTotals {
+  const out = emptyTotals();
+  // Compared as calendar days, not as instants. An event holds a day
+  // ("2026-09-05") while a DateRange ends at local midnight, so reading the
+  // day as UTC puts it AFTER the range's end anywhere east of UTC — and the
+  // last day of every period dropped out without a trace.
+  const from = localDay(range.from);
+  const to   = localDay(range.to);
+  for (const e of events) {
+    if (opts.country && e.country !== opts.country) continue;
+    if (opts.rep && e.rep !== opts.rep) continue;
+    const day = e.occurred_at?.slice(0, 10);
+    if (!day || day < from || day > to) continue;
+    const key = EVENT_TO_STAGE[e.stage];
+    if (key) out[key]++;
+  }
   return out;
 }
 

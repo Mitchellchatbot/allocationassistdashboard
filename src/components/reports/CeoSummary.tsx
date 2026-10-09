@@ -3,7 +3,7 @@
  *
  * Executive dashboards should answer "how are we doing?" in ~3 seconds, on one
  * screen, in plain language. This is that layer: a one-sentence written
- * headline ("This month, the team signed 8 doctors and relocated 5 …") and a
+ * headline ("This month, the team signed 8 doctors and 5 joined …") and a
  * tight scoreboard of the four milestones the stakeholder actually asked for
  * (shortlisted / interviewed / signed / relocated), each with the change vs
  * the period before.
@@ -18,20 +18,29 @@
  */
 import { useMemo } from "react";
 import { Card, CardContent } from "@/components/ui/card";
-import { TrendingUp, TrendingDown, Minus, ListChecks, CalendarCheck, CheckCircle2, Plane } from "lucide-react";
+import { TrendingUp, TrendingDown, Minus, ListChecks, CalendarCheck, CheckCircle2, FileSignature, Plane } from "lucide-react";
 import { usePlacementAttempts, type PlacementAttempt } from "@/hooks/use-placement-attempts";
 import { Skeleton } from "@/components/ui/skeleton";
 import { TilesSkeleton } from "@/components/reports/Skeletons";
 import { Hint, HintTitle, HintNote, HoverInfo } from "@/components/reports/HoverHint";
 import { STAGES, stageAt, inRange, type DateRange } from "@/lib/placement-reporting";
-import { countInRange, type TrackedKey } from "@/lib/report-period";
+import { type TrackedKey } from "@/lib/report-period";
+import { usePlacementEvents } from "@/hooks/use-placement-events";
+import { computeEventTotals } from "@/lib/placement-reporting";
+import { reportSide } from "@/lib/hospital-region";
 
 interface Milestone { key: TrackedKey; label: string; icon: typeof CheckCircle2; result?: boolean }
+/** The five stages the team's own monthly report publishes, in its order.
+ *
+ *  "Joined" is the stage keyed `relocated` — it reads relocated_at or
+ *  joined_at, whichever the row has — and it counts the date a doctor actually
+ *  started, never the projected start date. */
 const MILESTONES: Milestone[] = [
   { key: "shortlisted", label: "Shortlisted", icon: ListChecks },
-  { key: "interviewed", label: "Interviewed", icon: CalendarCheck },
+  { key: "interviewed", label: "Interview",   icon: CalendarCheck },
+  { key: "offered",     label: "Offered",     icon: FileSignature },
   { key: "signed",      label: "Signed",      icon: CheckCircle2, result: true },
-  { key: "relocated",   label: "Relocated",   icon: Plane,        result: true },
+  { key: "relocated",   label: "Joined",      icon: Plane,        result: true },
 ];
 
 const plural = (n: number, one: string, many = one + "s") => `${n} ${n === 1 ? one : many}`;
@@ -48,15 +57,25 @@ export interface CeoSummaryProps {
   /** "September 2026", "14 Sep – 20 Sep 2026" … */
   label:     string;
   isCurrent: boolean;
+  /** Which half of the monthly report to show, or null for both. */
+  side:      "UAE" | "KSA/Qatar" | null;
 }
 
-export function CeoSummary({ range, prior, word, lead, label, isCurrent }: CeoSummaryProps) {
+export function CeoSummary({ range, prior, word, lead, label, isCurrent, side }: CeoSummaryProps) {
   const { data: rows = [], isLoading } = usePlacementAttempts();
+  const { data: events = [], isLoading: el } = usePlacementEvents();
 
+  // The headline counts every line the team logged, not distinct doctors:
+  // a doctor put forward at the same hospital twice is two to them, and the
+  // same pair logged by two reps is two. Journey rows cannot say that, so
+  // these come from placement_events - which is also where the UAE /
+  // KSA-Qatar split lives.
   const stats = useMemo(() => {
-    const now = countInRange(rows, range), before = countInRange(rows, prior);
+    const opts = { country: side ?? undefined };
+    const now = computeEventTotals(events, range, opts);
+    const before = computeEventTotals(events, prior, opts);
     return MILESTONES.map(m => ({ ...m, count: now[m.key], prior: before[m.key] }));
-  }, [rows, range, prior]);
+  }, [events, range, prior, side]);
 
   // The three most recent doctors behind each tile, for its hover card.
   const recent = useMemo(() => {
@@ -66,6 +85,7 @@ export function CeoSummary({ range, prior, word, lead, label, isCurrent }: CeoSu
       const seen = new Set<string>();
       const hits: Recent[] = [];
       for (const a of rows as PlacementAttempt[]) {
+        if (side && reportSide(a.hospital_name) !== side) continue;
         const t = stageAt(a, stage);
         if (!inRange(t, range) || seen.has(a.doctor_id)) continue;
         seen.add(a.doctor_id);
@@ -74,7 +94,7 @@ export function CeoSummary({ range, prior, word, lead, label, isCurrent }: CeoSu
       out[m.key] = hits.sort((x, y) => y.at - x.at).slice(0, 3);
     }
     return out;
-  }, [rows, range]);
+  }, [rows, range, side]);
 
   const byKey = Object.fromEntries(stats.map(s => [s.key, s])) as Record<TrackedKey, (typeof stats)[number]>;
   const { signed, relocated, interviewed, shortlisted } = byKey;
@@ -89,17 +109,17 @@ export function CeoSummary({ range, prior, word, lead, label, isCurrent }: CeoSu
   const dot = status === "good" ? "bg-emerald-500" : status === "watch" ? "bg-amber-500" : "bg-slate-300";
 
   const headline = (() => {
-    if (isLoading) return "";
+    if (isLoading || el) return "";
     if (totalNow === 0) {
       return wonPrior > 0
         ? `${isCurrent ? `Quiet ${word} so far` : `A quiet ${word}`} — nothing marked. The ${word} before: ${plural(signed.prior, "signing")}, ${relocated.prior} relocated.`
         : `${isCurrent ? `Quiet ${word} so far` : `A quiet ${word}`} — nothing marked.`;
     }
-    return `${lead}, the team ${isCurrent ? "has signed" : "signed"} ${plural(signed.count, "doctor")} and relocated ${relocated.count} — with ${interviewed.count} interviewed and ${shortlisted.count} shortlisted.`;
+    return `${lead}, the team ${isCurrent ? "has signed" : "signed"} ${plural(signed.count, "doctor")} and ${relocated.count} joined — with ${interviewed.count} interviewed and ${shortlisted.count} shortlisted.`;
   })();
 
   const trendClause = (() => {
-    if (isLoading || totalNow === 0) return null;
+    if (isLoading || el || totalNow === 0) return null;
     if (wonPrior === 0) return { text: `${wonNow} signed + relocated · none the ${word} before`, tone: "neutral" as const };
     const pct = Math.round(((wonNow - wonPrior) / wonPrior) * 100);
     if (pct === 0) return { text: `level with the ${word} before`, tone: "neutral" as const };
@@ -143,9 +163,9 @@ export function CeoSummary({ range, prior, word, lead, label, isCurrent }: CeoSu
             different claim from "not loaded yet". */}
         <div className="mt-4">
           {isLoading ? (
-            <TilesSkeleton count={4} />
+            <TilesSkeleton count={5} />
           ) : (
-            <div className="grid grid-cols-2 lg:grid-cols-4 gap-3">
+            <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-5 gap-3">
               {stats.map(s => <ScoreTile key={s.key} stat={s} word={word} label={label} recent={recent[s.key]} />)}
             </div>
           )}

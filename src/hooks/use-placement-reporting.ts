@@ -17,8 +17,9 @@ import { usePlacementAttempts, type PlacementAttempt } from "@/hooks/use-placeme
 import { useHospitals } from "@/hooks/use-hospitals";
 import { useVacancies } from "@/hooks/use-vacancies";
 import { buildRepLookup } from "@/lib/hospital-rep";
+import { usePlacementEvents } from "@/hooks/use-placement-events";
 import {
-  computeStageTotals, computeTrendBuckets, computeHospitalActivity, priorRangeOf,
+  computeEventTotals, computeTrendBuckets, computeHospitalActivity, priorRangeOf,
   type ReportingFilters, type StageTotals, type TrendBucket, type HospitalActivityRow,
 } from "@/lib/placement-reporting";
 
@@ -35,6 +36,10 @@ export interface PlacementReportingBundle {
     hospitals:   string[];
     specialties: string[];
   };
+  /** Whether any logged lines exist yet. False before a sheet has been
+   *  imported through the events-aware importer, when the headline totals
+   *  would otherwise read zero. */
+  eventsLoaded: boolean;
   /** Attempts after the team-member filter, for panels that do their own math. */
   attempts: PlacementAttempt[];
   filters:  ReportingFilters;
@@ -44,8 +49,17 @@ export function usePlacementReporting(filters: ReportingFilters): PlacementRepor
   const { data: attempts = [],  isLoading: al } = usePlacementAttempts();
   const { data: hospitals = [], isLoading: hl } = useHospitals();
   const { data: vacancies = [], isLoading: vl } = useVacancies();
+  const { data: events = [],    isLoading: el } = usePlacementEvents();
 
   const repFor = useMemo(() => buildRepLookup(hospitals), [hospitals]);
+
+  /** An event knows its journey, not its hospital, so the hospital and
+   *  team-member filters resolve through this. */
+  const byAttempt = useMemo(() => {
+    const m = new Map<string, string>();
+    for (const a of attempts) m.set(a.id, a.hospital_name);
+    return m;
+  }, [attempts]);
 
   const vacancyByHospital = useMemo(() => {
     const m = new Map<string, number>();
@@ -68,10 +82,35 @@ export function usePlacementReporting(filters: ReportingFilters): PlacementRepor
     return attempts.filter(a => (repFor(a.hospital_name)?.email ?? "").toLowerCase() === want);
   }, [attempts, repFor, filters.teamMember]);
 
+  // The headline figures count logged lines, not distinct doctors: the team's
+  // report counts a doctor put forward at the same hospital twice as two, and
+  // the same pair logged by two reps as two. The journey rows cannot express
+  // that, so these come from placement_events — which is also where the
+  // UAE / KSA-Qatar split and the Sunday-Saturday week live.
+  //
+  // The other panels still read journeys, because "which hospitals are busy"
+  // and "where is this doctor up to" are questions about journeys.
+  const countable = useMemo(() => {
+    let out = events;
+    if (filters.hospital)   out = out.filter(e => byAttempt.get(e.attempt_id) === filters.hospital);
+    if (filters.teamMember) {
+      const want = filters.teamMember.toLowerCase();
+      out = out.filter(e => {
+        const h = byAttempt.get(e.attempt_id);
+        return !!h && (repFor(h)?.email ?? "").toLowerCase() === want;
+      });
+    }
+    return out;
+  }, [events, byAttempt, repFor, filters.hospital, filters.teamMember]);
+
   return useMemo<PlacementReportingBundle>(() => ({
-    isLoading:   al || hl || vl,
-    totals:      computeStageTotals(scoped, filters),
-    totalsPrior: computeStageTotals(scoped, { ...filters, range: priorRangeOf(filters.range) }),
+    isLoading:   al || hl || vl || el,
+    eventsLoaded: events.length > 0,
+    totals:      computeEventTotals(countable, filters.range, { country: filters.side ?? undefined }),
+    // The caller passes the real previous period; priorRangeOf only guesses an
+    // equal-length span, which stops being the month before once months differ
+    // in length (September is 30 days, August 31).
+    totalsPrior: computeEventTotals(countable, filters.prior ?? priorRangeOf(filters.range), { country: filters.side ?? undefined }),
     trend:       computeTrendBuckets(scoped, filters),
     hospitals:   computeHospitalActivity(scoped, vacancyByHospital, filters),
     vacancyByHospital,
@@ -83,7 +122,7 @@ export function usePlacementReporting(filters: ReportingFilters): PlacementRepor
     },
     attempts: scoped,
     filters,
-  }), [scoped, attempts, hospitals, vacancyByHospital, filters, al, hl, vl]);
+  }), [scoped, countable, events.length, attempts, hospitals, vacancyByHospital, filters, al, hl, vl, el]);
 }
 
 function distinct<T>(xs: T[]): T[] {

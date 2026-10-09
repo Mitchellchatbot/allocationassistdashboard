@@ -68,6 +68,9 @@ function chainInfo(n: string): Chain | null {
   if (/almoss?a|almosa/.test(n)) return { name: "Almoosa", country: "Saudi Arabia" };
   if (/al ?amal|alamal/.test(n)) return { name: "Al Amal Psychiatry", country: "Saudi Arabia" };
   if (/al ?kalma|alkalma/.test(n)) return { name: "Al Kalma Health", country: "UAE", city: "Abu Dhabi" };
+  if (/kkseh|king khaled eye/.test(n)) return { name: "King Khaled Eye Specialist", country: "Saudi Arabia", city: "Riyadh" };
+  if (/aramco/.test(n)) return { name: "Aramco", country: "Saudi Arabia" };
+  if (/ain al khaleej/.test(n)) return { name: "Ain Al Khaleej", country: "UAE", city: "Abu Dhabi" };
   if (/al ?zahra|alzhara|al ?zhara/.test(n)) return { name: "Al Zahra", country: "UAE" };
   if (/red sea|amaa?la|turtle bay|\bneom\b/.test(n)) return { name: "Red Sea Project", country: "Saudi Arabia" };
   if (/womens health|\bwhh\b/.test(n)) return { name: "Women's Health Hospital", country: "Saudi Arabia" };
@@ -148,4 +151,46 @@ export function resolveHospitalRegion(raw: string): HospitalRegion {
   }
 
   return { hospital, city, country };
+}
+
+/** The two sides the team's monthly report is split into. Saudi Arabia and
+ *  Qatar are reported together, because one person covers both books. */
+export type ReportSide = "UAE" | "KSA/Qatar";
+
+/**
+ * Which side of the report a hospital counts on.
+ *
+ * Follows the hospital, never whoever logged the line: a rep sourcing
+ * UAE-based doctors for a Saudi account still counts on the Saudi side, which
+ * is how the team's own UAE and KSA figures are built. Returns null when the
+ * name gives no region — those lines show up in neither side rather than being
+ * guessed into one.
+ */
+/**
+ * Which side of the monthly report a row counts on, read from the sheet's own
+ * "State" column rather than guessed from the hospital name.
+ *
+ * From September 2026 the team writes where each hospital is — "Dubai, UAE",
+ * "Abu Dhabi, UAE", "KSA", "Qatar". That settles the names the hospital alone
+ * never could: SGH, SKMC, NMC, Mediclinic, KCH and FUH each sit on both sides,
+ * and the side had to be inferred from the block's rep and the spelling.
+ *
+ * The country is the last comma-separated part, so a city in front is fine and
+ * a bare country works too. Anything unrecognised returns null and the caller
+ * falls back to reading the hospital name.
+ */
+export function reportSideFromState(state: string | null | undefined): ReportSide | null {
+  const last = (state ?? "").split(",").pop()?.trim().toLowerCase() ?? "";
+  if (!last) return null;
+  if (/\buae\b|emirates/.test(last)) return "UAE";
+  if (/\bksa\b|saudi/.test(last)) return "KSA/Qatar";
+  if (/qatar/.test(last)) return "KSA/Qatar";
+  return null;
+}
+
+export function reportSide(hospitalName: string): ReportSide | null {
+  const { country } = resolveHospitalRegion(hospitalName);
+  if (country === "UAE") return "UAE";
+  if (country === "Saudi Arabia" || country === "Qatar") return "KSA/Qatar";
+  return null;
 }
