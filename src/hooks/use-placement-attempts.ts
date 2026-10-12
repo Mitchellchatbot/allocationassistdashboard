@@ -14,6 +14,7 @@
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { supabase } from "@/lib/supabase";
 import { ensureSecondPaymentRun } from "@/hooks/use-doctor-lifecycle";
+import { reportSide } from "@/lib/hospital-region";
 
 export interface PlacementAttempt {
   id:               string;
@@ -169,6 +170,7 @@ export function useUpsertPlacementAttempt() {
       qc.invalidateQueries({ queryKey: ["placements"] });           // legacy key from B1
       qc.invalidateQueries({ queryKey: ["recap-lifecycles"] });
       qc.invalidateQueries({ queryKey: ["search-placements"] });
+      qc.invalidateQueries({ queryKey: ["placement-events"] });
     },
   });
 }
@@ -179,6 +181,15 @@ export function useUpsertPlacementAttempt() {
  *  declaration silently won. */
 export type MarkableMilestone =
   | "shortlisted_at" | "interviewed_at" | "offered_at" | "signed_at" | "joined_at";
+
+/** The stage each markable column records, for the matching event. */
+const EVENT_STAGE_OF: Record<MarkableMilestone, PlanEvent["stage"]> = {
+  shortlisted_at: "shortlisted",
+  interviewed_at: "interviewed",
+  offered_at:     "offered",
+  signed_at:      "signed",
+  joined_at:      "joined",
+};
 
 /**
  * Set (or clear) ONE milestone date on an existing attempt.
@@ -191,12 +202,40 @@ export type MarkableMilestone =
 export function useMarkPlacementMilestone() {
   const qc = useQueryClient();
   return useMutation({
-    mutationFn: async ({ id, column, date }: { id: string; column: MarkableMilestone; date: string | null }) => {
+    mutationFn: async (
+      { id, column, date, hospital_name }:
+      { id: string; column: MarkableMilestone; date: string | null; hospital_name?: string },
+    ) => {
       const { error } = await supabase
         .from("placement_attempts")
         .update({ [column]: date, manual_edited_at: new Date().toISOString(), updated_at: new Date().toISOString() })
         .eq("id", id);
       if (error) throw error;
+
+      // The reports count placement_events, so a stage marked here has to
+      // leave one too — otherwise work done on this page is invisible on
+      // Reports, which only ever saw the imported sheet.
+      const stage = EVENT_STAGE_OF[column];
+      if (!stage) return;
+      if (!date) {
+        const { error: delErr } = await supabase
+          .from("placement_events").delete().eq("attempt_id", id).eq("stage", stage).eq("rep", "manual");
+        if (delErr) throw delErr;
+        return;
+      }
+      // One manual mark per stage: clear any earlier one first, so changing a
+      // date moves the event rather than leaving the old one behind.
+      await supabase.from("placement_events").delete()
+        .eq("attempt_id", id).eq("stage", stage).eq("rep", "manual");
+      const { error: evErr } = await supabase.from("placement_events").insert({
+        attempt_id:  id,
+        stage,
+        occurred_at: date.slice(0, 10),
+        rep:         "manual",
+        country:     hospital_name ? reportSide(hospital_name) : null,
+        source_file: "marked in Processing",
+      });
+      if (evErr) throw evErr;
     },
     onSuccess: () => {
       qc.invalidateQueries({ queryKey: KEY });
@@ -432,12 +471,38 @@ export function planPlacementImport(
  * function also runs with the doctor_lifecycle sync trigger off, so old dates
  * can't reach the scheduler as if they were today's news.
  */
-export interface ImportResult { batch: string; inserted: number; updated: number; unchanged: number }
+export interface ImportResult { batch: string; inserted: number; updated: number; unchanged: number; events: number }
+
+/**
+ * One line as the sheet logged it, saved beside the journey.
+ *
+ * A journey row keeps a single date per stage, but the team counts lines, and
+ * a doctor is regularly put forward at the same hospital more than once — 811
+ * interview lines in the 2026 workbook against 671 distinct doctor+hospital
+ * pairs. Those extra 140 are what placement_events keeps.
+ *
+ * `rep` comes from the sheet block the line sat in, not from the hospital:
+ * several hospital names sit under two reps, so the same doctor and hospital
+ * logged by two people is deliberately two events.
+ */
+export interface PlanEvent {
+  doctor_id:     string;
+  hospital_name: string;
+  stage:         "shortlisted" | "interviewed" | "offered" | "signed" | "joined";
+  /** ISO date, yyyy-mm-dd. */
+  occurred_at:   string;
+  rep:           string | null;
+  country:       string | null;
+  source_file:   string | null;
+  source_line:   number | null;
+}
 
 export function useApplyPlacementImport() {
   const qc = useQueryClient();
   return useMutation({
-    mutationFn: async ({ plan, label }: { plan: MergePlan; label?: string }): Promise<ImportResult> => {
+    mutationFn: async (
+      { plan, label, events = [] }: { plan: MergePlan; label?: string; events?: PlanEvent[] },
+    ): Promise<ImportResult> => {
       const { data, error } = await supabase.rpc("apply_placement_import", {
         p_inserts: plan.inserts.map(r => ({
           doctor_id:        r.doctor_id,
@@ -456,9 +521,10 @@ export function useApplyPlacementImport() {
         })),
         p_updates: plan.updates.map(u => ({ id: u.id, merged: u.merged, notes: u.notes })),
         p_label:   label ?? null,
+        p_events:  events,
       });
       if (error) throw error;
-      const row = (data as Array<{ batch: string; inserted: number; updated: number }>)[0];
+      const row = (data as Array<{ batch: string; inserted: number; updated: number; events: number }>)[0];
       return { ...row, unchanged: plan.unchanged };
     },
     onSuccess: () => {

@@ -17,7 +17,8 @@ import { CalendarDays, ChevronDown, ChevronLeft, ChevronRight } from "lucide-rea
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
 import { Hint, PillToggle } from "@/components/reports/HoverHint";
 import {
-  PERIOD_WORD, MONTHS_SHORT, monthLabel, offsetOf, periodLabels, periodRange, shortDate,
+  PERIOD_WORD, MONTHS_SHORT, monthLabel, monthWindows, offsetOf, periodLabels,
+  periodRange, periodWindow, shortDate,
   type Period,
 } from "@/lib/report-period";
 import type { DateRange } from "@/lib/placement-reporting";
@@ -40,9 +41,28 @@ export function PeriodPill({ period, onChange }: { period: Period; onChange: (p:
       onChange={onChange}
       ariaLabel="Report period"
       options={[
-        { key: "weekly",  label: "Weekly",  hint: "One week at a time (Monday – Sunday)" },
-        { key: "monthly", label: "Monthly", hint: "One calendar month at a time" },
+        { key: "weekly",  label: "Weekly",  hint: "One week at a time, Sunday – Saturday. From September 2026 a week is cut where the month ends, so October opens with Thu 1 – Sat 3." },
+        { key: "monthly", label: "Monthly", hint: "One month at a time, the 1st to the last day. Before September 2026 a month was counted as whole weeks." },
         { key: "yearly",  label: "Yearly",  hint: "The last 12 months vs the 12 before" },
+      ]}
+    />
+  );
+}
+
+/** The two halves of the monthly report the team publishes, plus both together.
+ *  Qatar is reported inside KSA, because one person covers both books. */
+export function SidePill(
+  { value, onChange }: { value: "UAE" | "KSA/Qatar" | null; onChange: (v: "UAE" | "KSA/Qatar" | null) => void },
+) {
+  return (
+    <PillToggle
+      value={value ?? "all"}
+      onChange={v => onChange(v === "all" ? null : (v as "UAE" | "KSA/Qatar"))}
+      ariaLabel="Region"
+      options={[
+        { key: "all",       label: "All",       hint: "Both sides together" },
+        { key: "UAE",       label: "UAE",       hint: "UAE accounts only" },
+        { key: "KSA/Qatar", label: "KSA/Qatar", hint: "Saudi and Qatar accounts, as the monthly report groups them" },
       ]}
     />
   );
@@ -177,11 +197,18 @@ function PeriodPicker({ period, offset, minOffset, onJump, signedIn }: PeriodNav
 
   const { cells, title, prev, next } = useMemo((): { cells: Cell[]; title: ReactNode; prev?: () => void; next?: () => void } => {
     if (period === "monthly") {
-      const cells = MONTHS_SHORT.map((m, i) => {
-        const from = new Date(year, i, 1);
-        const o = offsetOf("monthly", from, now);
-        return { offset: o, top: m, sub: String(year), title: monthLabel(from, true), range: periodRange("monthly", o, now) };
-      });
+      // Built from the calendar itself, so a cell's label and its range can
+      // never name different months — a legacy month starts on its first
+      // Sunday, which is not the 1st.
+      const cells = monthWindows(now)
+        .filter(w => w.year === year)
+        .map(w => ({
+          offset: offsetOf("monthly", w.from, now),
+          top:    MONTHS_SHORT[w.month],
+          sub:    String(w.year),
+          title:  monthLabel(w.from, true),
+          range:  { from: w.from, to: w.to },
+        }));
       return {
         cells, title: year,
         prev: year > oldestYear ? () => setYear(y => y - 1) : undefined,
@@ -192,8 +219,17 @@ function PeriodPicker({ period, offset, minOffset, onJump, signedIn }: PeriodNav
       const end = -weekPage * 12;
       const cells = Array.from({ length: 12 }, (_, k) => {
         const o = end - 11 + k;
-        const r = periodRange("weekly", o, now);
-        return { offset: o, top: shortDate(r.from), sub: `W${isoWeek(r.from)}`, title: `${shortDate(r.from)} – ${shortDate(r.to)} ${r.to.getFullYear()}`, range: r };
+        const w = periodWindow("weekly", o, now);
+        const r = { from: w.from, to: w.to };
+        // The month, not an ISO week number: ISO weeks are Monday-based and
+        // know nothing about the month clipping, so the number would lie.
+        return {
+          offset: o, top: shortDate(r.from), sub: MONTHS_SHORT[w.month],
+          title: r.from.getTime() === r.to.getTime()
+            ? `${shortDate(r.from)} ${r.to.getFullYear()}`
+            : `${shortDate(r.from)} – ${shortDate(r.to)} ${r.to.getFullYear()}`,
+          range: r,
+        };
       });
       return {
         cells, title: `${shortDate(cells[0].range.from)} – ${shortDate(cells[11].range.to)}`,
@@ -267,13 +303,4 @@ function PeriodPicker({ period, offset, minOffset, onJump, signedIn }: PeriodNav
       </div>
     </div>
   );
-}
-
-/** ISO-8601 week number. */
-function isoWeek(d: Date): number {
-  const t = new Date(Date.UTC(d.getFullYear(), d.getMonth(), d.getDate()));
-  const day = t.getUTCDay() || 7;
-  t.setUTCDate(t.getUTCDate() + 4 - day);
-  const y0 = new Date(Date.UTC(t.getUTCFullYear(), 0, 1));
-  return Math.ceil(((t.getTime() - y0.getTime()) / 86_400_000 + 1) / 7);
 }
