@@ -34,7 +34,13 @@ const METRICS: Array<{ key: TrackedKey; label: string; icon: typeof ListChecks; 
   { key: "shortlisted", label: "Shortlisted", icon: ListChecks,    color: "#4f46e5", text: "text-indigo-600",  bg: "bg-indigo-50" },
   { key: "interviewed", label: "Interviewed", icon: CalendarCheck, color: "#0284c7", text: "text-sky-600",     bg: "bg-sky-50" },
   { key: "signed",      label: "Signed",      icon: CheckCircle2,  color: "#059669", text: "text-emerald-600", bg: "bg-emerald-50" },
-  { key: "relocated",   label: "Relocated",   icon: Plane,         color: "#047857", text: "text-emerald-700", bg: "bg-emerald-50" },
+  // Purple, not a second green. Signed and Relocated were emerald-600 and
+  // emerald-700 — one step apart on the same ramp, which is readable as a
+  // filled tile and not readable at all as two 2px lines crossing each other.
+  // Purple is the only hue the stage palette has left: indigo, sky and amber
+  // are taken by Shortlisted, Interviewed and Offered, teal sits between sky
+  // and emerald, and rose means "down" everywhere else on the page.
+  { key: "relocated",   label: "Relocated",   icon: Plane,         color: "#9333ea", text: "text-purple-600",  bg: "bg-purple-50" },
 ];
 
 const sum = (a: number[]) => a.reduce((x, y) => x + y, 0);

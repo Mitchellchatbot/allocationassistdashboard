@@ -250,7 +250,9 @@ const REP_TONES = [
 ] as const;
 
 const STAGE_HEX: Record<StageKey, string> = {
-  shortlisted: "#4f46e5", interviewed: "#0284c7", offered: "#d97706", signed: "#059669", relocated: "#047857",
+  // Relocated is purple, matching the Trend card — see the note there on why
+  // it stopped being a second green.
+  shortlisted: "#4f46e5", interviewed: "#0284c7", offered: "#d97706", signed: "#059669", relocated: "#9333ea",
 };
 
 /** One rep, in the Dashboard's KPI-card style: signings up front, the stage mix underneath. */
