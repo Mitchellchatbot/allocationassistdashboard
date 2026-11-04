@@ -85,10 +85,25 @@ export function StageFunnel({ totals, loading, word }: { totals: StageTotals; lo
   );
 }
 
+/**
+ * Average lifecycle ignores anything before this date.
+ *
+ * Everything earlier was back-filled from the monthly sheets long after the
+ * fact, so a stage date records when someone wrote it down rather than when it
+ * happened, and the gaps between those dates do not measure how long anything
+ * actually took. September 2026 is where the team began logging week by week,
+ * so it is the first month whose durations mean something. Deliberately its
+ * own constant, not CALENDAR_FROM: the two dates coincide today but answer
+ * different questions.
+ */
+const LIFECYCLE_FROM_ISO = "2026-09-01";
+const LIFECYCLE_FROM_LABEL = "September 2026";
+
 function useBreakdowns(range: DateRange) {
   const { data: all = [], isLoading } = usePlacementAttempts();
   const m = useMemo(() => {
     const inR = (iso: string | null | undefined) => inRange(ts(iso), range);
+    const since = (iso: string | null | undefined) => (iso ?? "") >= LIFECYCLE_FROM_ISO;
     const byCountry = new Map<string, { n: number; cities: Map<string, number> }>();
     const byCity = new Map<string, number>();
     const s2s: number[] = [], s2r: number[] = [];
@@ -107,8 +122,10 @@ function useBreakdowns(range: DateRange) {
       }
       const diff = (a: string | null, b: string | null | undefined) =>
         a && b ? (new Date(b).getTime() - new Date(a).getTime()) / 86_400_000 : null;
-      if (inR(p.signed_at)) { const d = diff(p.shortlisted_at, p.signed_at); if (d != null && d >= 0) s2s.push(d); }
-      if (inR(reloc))       { const d = diff(p.signed_at, reloc);            if (d != null && d >= 0) s2r.push(d); }
+      // Lifecycle counts only milestones from LIFECYCLE_FROM on; the region
+      // roll-up above still counts everything in the period.
+      if (inR(p.signed_at) && since(p.signed_at)) { const d = diff(p.shortlisted_at, p.signed_at); if (d != null && d >= 0) s2s.push(d); }
+      if (inR(reloc) && since(reloc))             { const d = diff(p.signed_at, reloc);            if (d != null && d >= 0) s2r.push(d); }
     }
     const avg = (xs: number[]) => (xs.length ? Math.round(xs.reduce((a, b) => a + b, 0) / xs.length) : null);
     const span = (xs: number[]) => (xs.length ? { min: Math.round(Math.min(...xs)), max: Math.round(Math.max(...xs)), n: xs.length } : null);
@@ -184,8 +201,8 @@ export function RegionCard({ range, word }: { range: DateRange; word: string }) 
 export function LifecycleCard({ range, word }: { range: DateRange; word: string }) {
   const { m, isLoading } = useBreakdowns(range);
   const tiles: Array<{ label: string; days: number | null; hint: React.ReactNode }> = [
-    { label: "Shortlist → Sign", days: m.avgS2S, hint: m.spanS2S ? <>Fastest {m.spanS2S.min} days · slowest {m.spanS2S.max} days<br />across {m.spanS2S.n} signing{m.spanS2S.n === 1 ? "" : "s"} this {word}</> : `No signings this ${word}` },
-    { label: "Sign → Relocate", days: m.avgS2R, hint: m.spanS2R ? <>Fastest {m.spanS2R.min} days · slowest {m.spanS2R.max} days<br />across {m.spanS2R.n} relocation{m.spanS2R.n === 1 ? "" : "s"} this {word}</> : `No relocations this ${word}` },
+    { label: "Shortlist → Sign", days: m.avgS2S, hint: m.spanS2S ? <>Fastest {m.spanS2S.min} days · slowest {m.spanS2S.max} days<br />across {m.spanS2S.n} signing{m.spanS2S.n === 1 ? "" : "s"} this {word}</> : `No signings this ${word} since ${LIFECYCLE_FROM_LABEL}` },
+    { label: "Sign → Relocate", days: m.avgS2R, hint: m.spanS2R ? <>Fastest {m.spanS2R.min} days · slowest {m.spanS2R.max} days<br />across {m.spanS2R.n} relocation{m.spanS2R.n === 1 ? "" : "s"} this {word}</> : `No relocations this ${word} since ${LIFECYCLE_FROM_LABEL}` },
     { label: "Shortlist → Relocate", days: m.avgS2S != null && m.avgS2R != null ? m.avgS2S + m.avgS2R : null, hint: "End to end: the two averages added together." },
   ];
   return (
@@ -193,8 +210,9 @@ export function LifecycleCard({ range, word }: { range: DateRange; word: string 
       <CardHead
         icon={<Clock className="h-4 w-4 text-teal-600" />}
         title="Average lifecycle"
-        info="How long each stage takes, for doctors who reached it in the period. Hover a tile for the fastest and slowest."
+        info={`How long each stage takes, for doctors who reached it in the period. Only milestones from ${LIFECYCLE_FROM_LABEL} on are counted — earlier months were back-filled from the sheets months later, so their dates say when they were written down, not when they happened. Hover a tile for the fastest and slowest.`}
         source="placement_attempts (stage dates)."
+        subtitle={`From ${LIFECYCLE_FROM_LABEL} on`}
       />
       <div className="px-4 pb-4 pt-2">
         {isLoading ? <TilesSkeleton count={3} cols="sm:grid-cols-3" /> : (

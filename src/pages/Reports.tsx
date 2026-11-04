@@ -4,7 +4,7 @@ import { DashboardLayout } from "@/components/layout/DashboardLayout";
 import { DocLink } from "@/components/DocLink";
 import { Badge } from "@/components/ui/badge";
 import {
-  BarChart3, Users, Building2, Activity, UserCheck,
+  BarChart3, Building2, Activity, UserCheck,
   CalendarCheck, FileSignature, MapPin, CreditCard, CheckCircle2, ArrowRight,
   ServerCog,
 } from "lucide-react";
@@ -64,7 +64,11 @@ import { Hint } from "@/components/reports/HoverHint";
  */
 export default function Reports() {
   const [searchParams, setSearchParams] = useSearchParams();
-  const view   = (searchParams.get("view") ?? "overview") as ReportView;
+  // Validated rather than cast: the Team tab used to exist and its links are
+  // still out there, so an unknown view falls back to Overview — where the
+  // team numbers now live — instead of rendering an empty page.
+  const viewRaw = searchParams.get("view");
+  const view: ReportView = VIEWS.some(v => v.key === viewRaw) ? (viewRaw as ReportView) : "overview";
   const perRaw = searchParams.get("per");
   const period: Period = isPeriod(perRaw) ? perRaw : "monthly";
   const offRaw = Math.min(0, Math.trunc(Number(searchParams.get("off")) || 0));
@@ -254,18 +258,24 @@ export default function Reports() {
                   <div className="lg:col-span-2"><RegionCard range={range} word={labels.word} /></div>
                 </div>
                 <LifecycleCard range={range} word={labels.word} />
-              </>
-            )}
 
-            {view === "team" && (
-              // Credit follows the hospital's representative — same source as
-              // the Overview scoreboard, so the numbers reconcile.
-              <TeamPerformance range={range} />
+                {/* Credit follows the hospital's representative — same source
+                    as the scoreboard above, so the numbers reconcile. Used to
+                    be its own tab; it answers "how are we doing" too, so it
+                    reads better here than one click away. */}
+                <TeamPerformance range={range} />
+
+                {/* Per-doctor breakdown — also moved up from Detail. Closed
+                    on first paint, since it is the longest thing on the page. */}
+                <div id="s-doctors">
+                  <DoctorTable range={range} open={!!open.doctors} onOpenChange={toggle("doctors")} />
+                </div>
+              </>
             )}
 
             {view === "hospitals" && (
               <>
-                <HospitalPerformance range={range} vacancies={bundle.vacancyByHospital} word={labels.word} />
+                <HospitalPerformance range={range} side={side} vacancies={bundle.vacancyByHospital} word={labels.word} />
                 <div id="s-vacancies"><VacanciesSummary /></div>
                 {/* Only renders when there's an unclassified region to clean up. */}
                 <div id="s-quality"><DataQualityCard /></div>
@@ -294,11 +304,6 @@ export default function Reports() {
                 <div id="s-placements">
                   <PlacementsCard range={range} open={!!open.placements} onOpenChange={toggle("placements")} />
                 </div>
-
-                {/* Per-doctor breakdown — companion to the hospital table. */}
-                <div id="s-doctors">
-                  <DoctorTable range={range} open={!!open.doctors} onOpenChange={toggle("doctors")} />
-                </div>
               </>
             )}
           </motion.div>
@@ -318,14 +323,12 @@ export default function Reports() {
 
 /** The four questions the page answers, in the order you'd ask them. */
 const VIEWS: Array<{ key: ReportView; label: string; icon: typeof BarChart3; question: string; blurb: string }> = [
-  { key: "overview",  label: "Overview",  icon: Activity,  question: "How are we doing? Results, trend, and where the wins come from.",
-    blurb: "How the Hospital Introduction department did in {range} — results, trend, and where the wins come from." },
-  { key: "team",      label: "Team",      icon: Users,     question: "Who's delivering? Every stage is credited to the hospital's rep.",
-    blurb: "Who delivered in {range}. Every stage is credited to the representative who owns the hospital." },
+  { key: "overview",  label: "Overview",  icon: Activity,  question: "How are we doing? Results, trend, the team and every doctor.",
+    blurb: "How the Hospital Introduction department did in {range} — results, trend, who delivered, and every doctor." },
   { key: "hospitals", label: "Hospitals", icon: Building2, question: "Which accounts are moving — and which have gone quiet?",
     blurb: "Which accounts moved in {range} — activity, open roles, and account health." },
-  { key: "detail",    label: "Detail",    icon: ServerCog, question: "Full metrics, the placement ledger and per-doctor rows.",
-    blurb: "The operational layer for {range}: full metrics, the placement ledger, and per-doctor rows." },
+  { key: "detail",    label: "Detail",    icon: ServerCog, question: "Full metrics and the placement ledger.",
+    blurb: "The operational layer for {range}: full metrics and the placement ledger." },
 ];
 
 /** Segmented view switcher; each tab says what question it answers on hover. */

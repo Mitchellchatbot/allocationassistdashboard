@@ -1,21 +1,21 @@
 /**
- * Specialties getting jobs — a tile map.
+ * Specialties getting jobs — one line each.
  *
- * Tile AREA is doctors placed (signed or relocated) in the selected period, so
- * the biggest specialty is simply the biggest block; shade deepens with volume.
- * Each tile carries its change vs the period before and how many roles are
- * still open for it on the vacancy list, so delivery and demand sit side by
- * side. Hover any tile for the breakdown.
+ * A ranked list, read the same way as By region: the specialty, how many
+ * doctors it placed (signed or relocated) in the period, and a bar for its
+ * share of the biggest. The change on the period before and the roles still
+ * open sit on the same line, so delivery and demand are side by side with
+ * nothing to decode. Hover a row for the full breakdown.
  *
- * Above the tiles, three callouts answer the questions the stakeholder asks
+ * Above the list, three callouts answer the questions the stakeholder asks
  * first: what's placing most, what's growing, and where open roles are piling
- * up with too few placements. Below, specialties that have open roles but no
- * placements at all — they can't have a tile, so they get a chip.
+ * up with too few placements. Below, specialties with open roles but no
+ * placements at all — they have no line to sit on, so they get a chip.
  *
  * Same source as the rest of the page (placement_attempts), same counting rule
  * (distinct doctors).
  */
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useMemo } from "react";
 import { Card } from "@/components/ui/card";
 import { Stethoscope, Trophy, TrendingUp, AlertTriangle } from "lucide-react";
 import { Skeleton } from "@/components/ui/skeleton";
@@ -36,7 +36,8 @@ interface Spec {
   topHospital: string | null;
 }
 
-const MAX_TILES = 14;
+/** Rows past this collapse into one "N more" line so the list stays short. */
+const MAX_ROWS = 12;
 const specOf = (raw: string | null | undefined) => (raw ? groupSpecialty(raw) || raw.trim() : null);
 const relocatedAt = (p: PlacementAttempt) => p.relocated_at ?? p.joined_at;
 
@@ -107,7 +108,7 @@ export function SpecialtyTiles({ range, prior, word }: { range: DateRange; prior
         title="Specialties getting jobs"
         info="Doctors signed or relocated in the selected period, grouped by specialty. Open roles come from the live vacancy list, so demand and delivery sit side by side."
         source="placement_attempts × vacancies."
-        subtitle="Tile size = doctors placed · hover any tile for the full story"
+        subtitle="Ranked by doctors placed · hover a row for the full story"
       />
       <div className="px-4 pb-4 pt-2">
         {loading ? (
@@ -150,7 +151,7 @@ export function SpecialtyTiles({ range, prior, word }: { range: DateRange; prior
                 No doctors signed or relocated this {word}.
               </div>
             ) : (
-              <Treemap specs={specs} total={total} word={word} />
+              <SpecRows specs={specs} total={total} word={word} />
             )}
 
             {unfilled.length > 0 && (
@@ -217,126 +218,65 @@ function SpecHint({ s, total, word }: { s: Spec; total: number; word: string }) 
   );
 }
 
-/* ── Squarified treemap ─────────────────────────────────────────────────── */
+/* ── The list ───────────────────────────────────────────────────────────── */
 
-interface Rect<T> { item: T; x: number; y: number; w: number; h: number }
-
-/** Bruls et al. squarify: lays items (area `a`) into w×h keeping tiles near-square. */
-function squarify<T extends { a: number }>(items: T[], x: number, y: number, w: number, h: number): Rect<T>[] {
-  const out: Rect<T>[] = [];
-  let row: T[] = [];
-  const rest = items.slice();
-  const sum = (r: T[]) => r.reduce((n, i) => n + i.a, 0);
-  const worst = (r: T[], len: number) => {
-    const s = sum(r), mx = Math.max(...r.map(i => i.a)), mn = Math.min(...r.map(i => i.a));
-    return Math.max((len * len * mx) / (s * s), (s * s) / (len * len * mn));
-  };
-  const lay = () => {
-    const s = sum(row);
-    if (w >= h) {
-      const cw = s / h; let yy = y;
-      for (const i of row) { const hh = i.a / cw; out.push({ item: i, x, y: yy, w: cw, h: hh }); yy += hh; }
-      x += cw; w -= cw;
-    } else {
-      const rh = s / w; let xx = x;
-      for (const i of row) { const ww = i.a / rh; out.push({ item: i, x: xx, y, w: ww, h: rh }); xx += ww; }
-      y += rh; h -= rh;
-    }
-    row = [];
-  };
-  while (rest.length) {
-    const len = Math.min(w, h), c = rest[0];
-    if (!row.length || worst([...row, c], len) <= worst(row, len)) { row.push(c); rest.shift(); }
-    else lay();
-  }
-  if (row.length) lay();
-  return out;
-}
-
-function Treemap({ specs, total, word }: { specs: Spec[]; total: number; word: string }) {
-  const box = useRef<HTMLDivElement>(null);
-  const [size, setSize] = useState({ w: 0, h: 0 });
-  useEffect(() => {
-    const el = box.current;
-    if (!el) return;
-    const ro = new ResizeObserver(([e]) => setSize({ w: e.contentRect.width, h: e.contentRect.height }));
-    ro.observe(el);
-    return () => ro.disconnect();
-  }, []);
-
-  // Long tails become one "N more" tile so small specialties stay legible.
-  const items = useMemo(() => {
-    const head = specs.slice(0, MAX_TILES);
-    const tail = specs.slice(MAX_TILES);
-    const list: Array<Spec & { other?: Spec[] }> = [...head];
-    if (tail.length) {
-      list.push({
-        name: `${tail.length} more`, placed: tail.reduce((n, s) => n + s.placed, 0),
-        signed: tail.reduce((n, s) => n + s.signed, 0), relocated: tail.reduce((n, s) => n + s.relocated, 0),
-        prior: tail.reduce((n, s) => n + s.prior, 0), open: tail.reduce((n, s) => n + s.open, 0),
-        avgDays: null, topHospital: null, other: tail,
-      });
-    }
-    return list;
+function SpecRows({ specs, total, word }: { specs: Spec[]; total: number; word: string }) {
+  // A long tail becomes one "N more" line, so the rows that matter stay legible.
+  const rows = useMemo(() => {
+    const head = specs.slice(0, MAX_ROWS);
+    const tail = specs.slice(MAX_ROWS);
+    if (!tail.length) return head as Array<Spec & { other?: Spec[] }>;
+    return [...head, {
+      name: `${tail.length} more`,
+      placed: tail.reduce((n, s) => n + s.placed, 0),
+      signed: tail.reduce((n, s) => n + s.signed, 0),
+      relocated: tail.reduce((n, s) => n + s.relocated, 0),
+      prior: tail.reduce((n, s) => n + s.prior, 0),
+      open: tail.reduce((n, s) => n + s.open, 0),
+      avgDays: null, topHospital: null, other: tail,
+    }] as Array<Spec & { other?: Spec[] }>;
   }, [specs]);
 
-  const rects = useMemo(() => {
-    if (!size.w || !size.h) return [];
-    const sum = items.reduce((n, s) => n + s.placed, 0) || 1;
-    return squarify(items.map(s => ({ ...s, a: (s.placed / sum) * size.w * size.h })), 0, 0, size.w, size.h);
-  }, [items, size]);
-
-  const max = Math.max(1, ...items.map(s => s.placed));
+  const max = Math.max(1, ...rows.map(s => s.placed));
 
   return (
-    <div ref={box} className="relative w-full h-[320px]">
-      {rects.map(({ item: s, x, y, w, h }) => {
-        const k = s.placed / max;
-        const light = Math.round(62 - k * 32);                     // emerald scale
-        const dark = light < 50;
-        const small = w < 110 || h < 70, tiny = w < 64 || h < 44;
+    <div className="divide-y divide-border/30">
+      {rows.map(s => {
         const d = s.placed - s.prior;
         const other = s.other;
         return (
-          <div
-            key={s.name}
-            className="absolute p-[3px]"
-            style={{ left: `${(x / size.w) * 100}%`, top: `${(y / size.h) * 100}%`, width: `${(w / size.w) * 100}%`, height: `${(h / size.h) * 100}%` }}
+          <Hint key={s.name} align="start" content={other
+            ? <><HintTitle>{other.length} smaller specialties</HintTitle>{other.slice(0, 8).map(o => <p key={o.name}>• {o.name} — {o.placed}</p>)}{other.length > 8 && <HintNote>+{other.length - 8} more</HintNote>}</>
+            : <SpecHint s={s} total={total} word={word} />}
           >
-            <Hint content={other
-              ? <><HintTitle>{other.length} smaller specialties</HintTitle>{other.slice(0, 8).map(o => <p key={o.name}>• {o.name} — {o.placed}</p>)}{other.length > 8 && <HintNote>+{other.length - 8} more</HintNote>}</>
-              : <SpecHint s={s} total={total} word={word} />}
-            >
-              <div
-                tabIndex={0}
-                className="h-full w-full rounded-xl p-2.5 flex flex-col justify-between overflow-hidden cursor-default outline-none transition-[filter,box-shadow] duration-150 hover:brightness-105 hover:shadow-[0_0_0_2px_#fff,0_0_0_4px_hsl(var(--primary)/0.5)] focus-visible:shadow-[0_0_0_2px_#fff,0_0_0_4px_hsl(var(--primary)/0.5)]"
-                style={{ background: `hsl(158 ${48 + k * 10}% ${light}%)`, color: dark ? "#fff" : "#064e3b" }}
-              >
-                {tiny ? (
-                  <div className="text-[11px] font-bold tabular-nums">{s.placed}</div>
-                ) : (
-                  <>
-                    <div className="min-w-0">
-                      <div className={`${small ? "text-[10.5px]" : "text-[12.5px]"} font-semibold leading-tight truncate`}>{s.name}</div>
-                      {!small && (
-                        <div className="text-[10px] mt-0.5" style={{ color: dark ? "rgba(255,255,255,.82)" : "rgba(6,78,59,.75)" }}>
-                          {d > 0 ? `▲ +${d}` : d < 0 ? `▼ ${d}` : "— no change"} vs before
-                        </div>
-                      )}
-                    </div>
-                    <div className="flex items-end justify-between gap-1">
-                      <div className={`${small ? "text-[16px]" : "text-[28px]"} font-bold leading-none tabular-nums`}>{s.placed}</div>
-                      {!small && s.open > 0 && (
-                        <span className="text-[10px] rounded-full px-1.5 py-0.5 font-medium" style={{ background: dark ? "rgba(255,255,255,.18)" : "rgba(255,255,255,.6)" }}>
-                          {s.open} open role{s.open === 1 ? "" : "s"}
-                        </span>
-                      )}
-                    </div>
-                  </>
-                )}
+            <div tabIndex={0} className="py-2 cursor-default outline-none focus-visible:ring-2 focus-visible:ring-primary/40 rounded-sm">
+              <div className="flex items-center justify-between gap-3 mb-1">
+                <div className="flex items-center gap-2 min-w-0">
+                  <Stethoscope className={`h-3.5 w-3.5 shrink-0 ${other ? "text-muted-foreground" : "text-emerald-600"}`} />
+                  <span className={`text-[13px] font-medium truncate ${other ? "text-muted-foreground" : "text-foreground"}`}>{s.name}</span>
+                  {s.open > 0 && (
+                    <span className="shrink-0 text-[10px] rounded-full border border-amber-200 bg-amber-50 text-amber-700 px-1.5 py-0.5 font-medium">
+                      {s.open} open
+                    </span>
+                  )}
+                </div>
+                <div className="flex items-baseline gap-2 shrink-0">
+                  {d !== 0 && (
+                    <span className={`text-[10px] font-semibold ${d > 0 ? "text-emerald-600" : "text-rose-600"}`}>
+                      {d > 0 ? `▲ +${d}` : `▼ ${d}`}
+                    </span>
+                  )}
+                  <span className="text-[14px] font-semibold tabular-nums">{s.placed.toLocaleString()}</span>
+                </div>
               </div>
-            </Hint>
-          </div>
+              <div className="h-1 bg-muted/60 rounded-full overflow-hidden">
+                <div
+                  className={`h-full rounded-full transition-all ${other ? "bg-slate-300" : "bg-emerald-500"}`}
+                  style={{ width: `${(s.placed / max) * 100}%` }}
+                />
+              </div>
+            </div>
+          </Hint>
         );
       })}
     </div>

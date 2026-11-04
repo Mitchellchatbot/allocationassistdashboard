@@ -34,12 +34,18 @@ import { Building2, CheckCircle2, Clock, AlertTriangle } from "lucide-react";
 import { usePlacementAttempts, type PlacementAttempt } from "@/hooks/use-placement-attempts";
 import { useHospitals } from "@/hooks/use-hospitals";
 import { buildRepLookup } from "@/lib/hospital-rep";
+import { reportSide, type ReportSide } from "@/lib/hospital-region";
 import { Hint, HintTitle, HintNote, HoverInfo } from "@/components/reports/HoverHint";
 
 interface Props {
   range:      { from: Date; to: Date };
   hospital?:  string | null;
   specialty?: string | null;
+  /** Which side of the monthly report to show, from the page's region pill.
+   *  Null shows both. An account whose name has no region yet is dropped when
+   *  a side is picked — it cannot be claimed for either — and the count of
+   *  those is surfaced below the table rather than left to be noticed. */
+  side?:      ReportSide | null;
   /** hospital name → open vacancies, from the reporting bundle. Optional. */
   vacancies?: Map<string, number>;
   /** "week" | "month" | "year" — for copy only. */
@@ -78,7 +84,7 @@ const DAY = 86_400_000;
 
 const PAGE = 12;
 
-export function HospitalPerformance({ range, hospital, specialty, vacancies, word = "period" }: Props) {
+export function HospitalPerformance({ range, hospital, specialty, side = null, vacancies, word = "period" }: Props) {
   const { data: attempts = [], isLoading } = usePlacementAttempts();
   const { data: hospitals = [], isLoading: hospitalsLoading } = useHospitals();
   const repFor = useMemo(() => buildRepLookup(hospitals), [hospitals]);
@@ -96,7 +102,7 @@ export function HospitalPerformance({ range, hospital, specialty, vacancies, wor
     return d == null || d > 30 ? "idle" : d > 14 ? "slowing" : "moving";
   };
 
-  const { rows, all } = useMemo(() => {
+  const { rows, all, unplaced } = useMemo(() => {
     const from = range.from.getTime();
     const to   = range.to.getTime() + DAY;
     const ts = (iso: string | null | undefined) => {
@@ -107,11 +113,18 @@ export function HospitalPerformance({ range, hospital, specialty, vacancies, wor
     const inR = (t: number | null) => t != null && t >= from && t < to;
 
     const by = new Map<string, Row>();
+    const unplaced = new Set<string>();
     for (const a of attempts) {
       const name = a.hospital_name?.trim();
       if (!name) continue;
       if (hospital  && !name.toLowerCase().includes(hospital.toLowerCase())) continue;
       if (specialty && !(a.doctor_specialty ?? "").toLowerCase().includes(specialty.toLowerCase())) continue;
+      if (side) {
+        const s = reportSide(name);
+        // No region mapped: counted aside, not silently folded into a side.
+        if (s == null) { unplaced.add(name); continue; }
+        if (s !== side) continue;
+      }
 
       let row = by.get(name);
       if (!row) {
@@ -138,8 +151,8 @@ export function HospitalPerformance({ range, hospital, specialty, vacancies, wor
 
     const total = (r: Row) => STAGES.reduce((n, s) => n + r.counts[s.key].size, 0);
     const all = [...by.values()].filter(r => r.lastEver != null);
-    return { rows: all.filter(r => total(r) > 0), all };
-  }, [attempts, repFor, range, hospital, specialty, ref]);
+    return { rows: all.filter(r => total(r) > 0), all, unplaced: unplaced.size };
+  }, [attempts, repFor, range, hospital, specialty, side, ref]);
 
   // Account health across every hospital we've worked with up to this point.
   const health = useMemo(() => {
@@ -221,6 +234,10 @@ export function HospitalPerformance({ range, hospital, specialty, vacancies, wor
               </CardTitle>
               <CardDescription className="text-[11px]">
                 Each account's activity this {word}, open roles and representative. Click any column to re-sort.
+                {side && <> Showing <b className="text-foreground">{side}</b> accounts only.</>}
+                {side && unplaced > 0 && (
+                  <> <span className="text-amber-700">{unplaced} account{unplaced === 1 ? "" : "s"} with no region yet {unplaced === 1 ? "is" : "are"} left out</span> — see Data quality below.</>
+                )}
               </CardDescription>
             </div>
             {loading ? (
