@@ -66,6 +66,27 @@ export function findHiMemberByEmail(email: string | null | undefined): HiTeamMem
   return HI_TEAM_MEMBERS.find(m => m.email.toLowerCase() === lower) ?? null;
 }
 
+/**
+ * Quick lookup by the name the placement sheet writes.
+ *
+ * The sheet's "H & I Representative" column is hand-typed and informal — a
+ * full name for one person ("Mohamed Othman") and a first name for the next
+ * ("Ishak", "Sohaila") — while everything downstream keys on the roster email.
+ * Full name first, then first name, so a first name can never shadow someone
+ * whose full name matches exactly.
+ *
+ * Returns null for a name nobody on the roster answers to; the importer
+ * surfaces that rather than guessing a person.
+ */
+export function findHiMemberByName(name: string | null | undefined): HiTeamMember | null {
+  const n = (name ?? "").toLowerCase().replace(/\s+/g, " ").trim();
+  if (!n) return null;
+  const at = (m: HiTeamMember) => m.name.toLowerCase();
+  return HI_TEAM_MEMBERS.find(m => at(m) === n)
+      ?? HI_TEAM_MEMBERS.find(m => at(m).split(" ")[0] === n)
+      ?? null;
+}
+
 /** Lookup across the broader sender roster (HI team + Ammar). */
 export function findSenderByEmail(email: string | null | undefined): HiTeamMember | null {
   if (!email) return null;

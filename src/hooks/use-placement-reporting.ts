@@ -93,15 +93,16 @@ export function usePlacementReporting(filters: ReportingFilters): PlacementRepor
   const countable = useMemo(() => {
     let out = events;
     if (filters.hospital)   out = out.filter(e => byAttempt.get(e.attempt_id) === filters.hospital);
+    // A line says who logged it (the sheet's Representative column, September
+    // 2026 on), so narrowing to a member means their lines - not the lines at
+    // the accounts they represent. The journey panels above still have to go
+    // through the allocation, because a journey row carries no rep.
     if (filters.teamMember) {
       const want = filters.teamMember.toLowerCase();
-      out = out.filter(e => {
-        const h = byAttempt.get(e.attempt_id);
-        return !!h && (repFor(h)?.email ?? "").toLowerCase() === want;
-      });
+      out = out.filter(e => (e.rep ?? "").toLowerCase() === want);
     }
     return out;
-  }, [events, byAttempt, repFor, filters.hospital, filters.teamMember]);
+  }, [events, byAttempt, filters.hospital, filters.teamMember]);
 
   return useMemo<PlacementReportingBundle>(() => ({
     isLoading:   al || hl || vl || el,

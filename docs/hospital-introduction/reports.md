@@ -67,8 +67,11 @@ Three tabs, one question each (hover a tab for it):
   - **How doctors move from shortlist to paid**, **By region**, and **Average
     lifecycle** (counted from September 2026 on — see below).
   - **Who's delivering:** one card per rep (ranked by signings), then the team
-    table; open a row to see that rep's hospitals. Credit follows the
-    hospital's representative.
+    table; open a row to see the accounts that rep logged lines at. Credit
+    follows the **representative named on the line** - the sheet's *H & I
+    Representative* column, from September 2026 on. Only reps who appear in
+    the period are listed, so someone who has left stops showing a row of
+    zeroes. Counts **logged lines**, the same measure as the Summary tiles.
   - **Per-doctor:** one row per doctor, closed on first paint. The hospital
     column shows the first account plus a **+N** chip; hover either for every
     hospital that doctor was put to.
@@ -93,10 +96,12 @@ highlights the one you're scrolled to.
   a link to the full list.
 - Hospital **status** is measured from the last movement up to the end of the
   selected period: within 14 days *Moving*, 15–30 *Slowing*, over 30 *Idle*.
-- The **region pill** (UAE / KSA+Qatar) narrows the Hospitals tab too. An
-  account whose name has no region yet can't be claimed for either side, so it
-  drops out while a side is picked — the table says how many, and *Data
-  quality* lists them.
+- The **region pill** (UAE / KSA+Qatar) narrows the Hospitals tab too. The
+  side comes from the sheet's own **State** column where there is one
+  (September 2026 on, e.g. "Dubai, UAE", "KSA", "Qatar"); on older sheets it
+  is read off the hospital name, and a name with no region can't be claimed
+  for either side, so it drops out while a side is picked — the table says how
+  many, and *Data quality* lists them.
 - **Average lifecycle counts only milestones from 1 September 2026 on.**
   Everything earlier was back-filled from the sheets months after the fact, so
   those stage dates record when someone wrote them down rather than when they
@@ -157,7 +162,10 @@ windows and trend buckets — it enumerates the whole calendar rather than doing
 arithmetic, because a week clipped to its month is not always seven days long.
 The same 1 September 2026 switch is mirrored by `weekEndingOf()` and by the
 generated `week_ending` column on `placement_events`, so the importer files a
-line in the week the page will show it in. `usePlacementReporting` adds `hospitals` (the rep
+line in the week the page will show it in. Each event also carries the **rep**
+who logged it, read from the sheet's *H & I Representative* column; before that
+column existed the rep had to be voted for by the hospitals in each weekly
+block, which can't settle an account two people share. `usePlacementReporting` adds `hospitals` (the rep
 behind each account) and `vacancies` (open roles). Nothing on the page is
 derived from the sends machinery — Reports measures placement, not outbound
 email.

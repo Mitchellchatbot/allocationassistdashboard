@@ -286,10 +286,14 @@ export function weekEndingOf(iso: string): string {
  *  "paid" column, so those two reporting stages have no event of their own. */
 export type EventStageKey = "shortlisted" | "interviewed" | "offered" | "signed" | "joined";
 
+/** The reporting stages a logged line can land on. Paid is the one stage with
+ *  no column in the sheet, so no event ever carries it. */
+export type EventBackedStage = Exclude<StageKey, "paid">;
+
 /** The sheet's "Joined" column is the same milestone the reports call
  *  relocated — STAGES already reads relocated_at or joined_at, whichever the
  *  journey has. */
-const EVENT_TO_STAGE: Record<EventStageKey, StageKey> = {
+export const EVENT_TO_STAGE: Record<EventStageKey, EventBackedStage> = {
   shortlisted: "shortlisted",
   interviewed: "interviewed",
   offered:     "offered",
