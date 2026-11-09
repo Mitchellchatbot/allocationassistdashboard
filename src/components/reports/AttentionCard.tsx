@@ -19,7 +19,7 @@ import { groupSpecialty } from "@/lib/specialty-groups";
 import { STAGES, stageAt, ts, inRange, type DateRange } from "@/lib/placement-reporting";
 import { Hint, HintTitle, HintNote } from "@/components/reports/HoverHint";
 
-export type ReportView = "overview" | "team" | "hospitals" | "detail";
+export type ReportView = "overview" | "hospitals" | "detail";
 type Jump = (view: ReportView, section: string) => void;
 
 interface Item { key: string; dot: string; text: React.ReactNode; hint: React.ReactNode; to: [ReportView, string] }

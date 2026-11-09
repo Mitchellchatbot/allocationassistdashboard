@@ -22,6 +22,7 @@
  * preview should show a person before it is saved.
  */
 import { weekEndingOf as weekEnding } from "@/lib/placement-reporting";
+import { findHiMemberByName } from "@/lib/hi-team";
 
 export interface ParsedRow {
   doctor_name:      string;
@@ -45,7 +46,10 @@ export interface ParsedRow {
    *  Present from September 2026; null on older sheets, which have no such
    *  column and fall back to reading the country off the hospital name. */
   state:            string | null;
-  /** Whose weekly block this row sat in. See resolveBlockRep. */
+  /** Who the line belongs to, as a roster email.
+   *  From the sheet's own "H & I Representative" column where it has one
+   *  (September 2026 on); otherwise inferred from the block — see
+   *  resolveBlockRep. */
   rep:              string | null;
   country:          string | null;
   /** One per stage date on the line. The journey row keeps a single date per
@@ -101,7 +105,9 @@ export type ParseWarningKind =
   | "hold"             // HOLD / NOT ADDED / cancelled written on the row
   | "date_in_notes"     // a date typed past the Joined column, which is empty
   | "no_hospital"      // a doctor with dates but no hospital — row skipped
-  | "no_doctor";       // a hospital with dates but no doctor — row skipped
+  | "no_doctor"        // a hospital with dates but no doctor — row skipped
+  | "no_rep"           // the sheet has a Representative column and this line left it blank
+  | "unknown_rep";     // a Representative name that is not on the roster
 
 export interface ParseWarning {
   kind:     ParseWarningKind;
@@ -412,6 +418,8 @@ function isHeaderRow(cols: string[]): boolean {
  */
 interface Layout {
   hospital:  number;
+  /** The "H & I Representative" column, when the sheet has one. */
+  rep:       number | null;
   /** The location column, when the sheet has one. */
   state:     number | null;
   doctor:    number;
@@ -424,7 +432,7 @@ interface Layout {
 /** The shape every sheet had before September 2026, and the fallback for a
  *  header we cannot read. */
 const LEGACY_LAYOUT: Layout = {
-  hospital: 1, state: null, doctor: 2, specialty: 3,
+  hospital: 1, rep: null, state: null, doctor: 2, specialty: 3,
   dates: [
     ["shortlisted_at", 4], ["interviewed_at", 5], ["offered_at", 6],
     ["signed_at", 7], ["start_date", 8], ["joined_at", 9],
@@ -450,12 +458,18 @@ function layoutFrom(cols: string[]): Layout {
   if (hospital < 0 || doctor < 0 || dates.length < DATE_HEADINGS.length) return LEGACY_LAYOUT;
   const specialty = find(/special/i);
   let state       = find(/^(state|location|city|country)$/i);
+  let rep         = find(/represent/i);
+  // Column 0 is always the week header / line number, so a column sitting
+  // between it and Hospital is the representative. Same reason as the state
+  // fallback below: only a tab's first block labels these cells.
+  if (rep < 0 && hospital >= 2) rep = hospital - 1;
   // Only the first block of a tab actually labels the column; every header
   // after it leaves that cell blank while the column and its values stay put.
   // So an unnamed column sitting between Hospital and the doctor is the state.
   if (state < 0 && doctor - hospital === 2) state = hospital + 1;
   return {
     hospital, doctor,
+    rep:       rep < 0 ? null : rep,
     state:     state < 0 ? null : state,
     specialty: specialty < 0 ? doctor + 1 : specialty,
     dates,
@@ -532,16 +546,18 @@ export function parseRecords(
   // Re-read at every header, since blocks in one file can differ.
   let layout: Layout = LEGACY_LAYOUT;
 
-  // Rows wait here until the block ends, because the rep is decided by the
-  // whole block and every row in it — and every event — is then stamped.
+  // Rows wait here until the block ends, because a block without a
+  // Representative column has its rep decided by the whole block, and every
+  // row in it — and every event — is then stamped. A row that named its own
+  // rep keeps it; the vote only fills the blanks.
   let pending: ParsedRow[] = [];
   const closeBlock = () => {
     if (pending.length === 0) return;
     const { rep, country } = resolveBlockRep(pending.map(r => r.hospital_name), options.repFor);
     for (const row of pending) {
-      row.rep = rep;
+      row.rep ??= rep;
       row.country = country;
-      for (const ev of row.events) { ev.rep = rep; ev.country = country; }
+      for (const ev of row.events) { ev.rep = row.rep; ev.country = country; }
       rows.push(row);
     }
     pending = [];
@@ -583,6 +599,32 @@ export function parseRecords(
     if (parsePlainDate(hospital)) { skippedRows++; continue; }
 
     const specialty = cols[layout.specialty]?.trim().replace(/\s+/g, " ") || null;
+    // Who logged the line. Until September 2026 the sheet never said, and the
+    // rep had to be voted for by the hospitals in the block — which cannot
+    // settle the accounts two reps share. Now the team writes it on every
+    // line, so read it and say so when a line leaves it out.
+    let rep: string | null = null;
+    if (layout.rep != null) {
+      const typed = (cols[layout.rep] ?? "").trim();
+      const member = findHiMemberByName(typed);
+      if (member) rep = member.email;
+      else if (typed) {
+        // Kept as typed rather than dropped: an unrecognised name shows up as
+        // its own row on Reports, which is how a misspelling gets noticed.
+        rep = typed;
+        warnings.push({
+          kind: "unknown_rep", sheet, line, doctor, hospital, column: null,
+          typed, read_as: null,
+          message: `${doctor} @ ${hospital}: "${typed}" is not a name on the team roster — the line is credited to it as typed`,
+        });
+      } else {
+        warnings.push({
+          kind: "no_rep", sheet, line, doctor, hospital, column: null,
+          typed: null, read_as: null,
+          message: `${doctor} @ ${hospital}: no representative on the line — credited to whoever the rest of the block belongs to`,
+        });
+      }
+    }
     // Where the team says the hospital is. Authoritative for the UAE vs
     // KSA/Qatar split, which until now was guessed from the hospital name.
     const state = layout.state == null ? null : (cols[layout.state] ?? "").trim() || null;
@@ -648,7 +690,7 @@ export function parseRecords(
       sheet,
       state,
       block_date:       block ? block.toISOString() : null,
-      rep:              null,
+      rep,
       country:          null,
       events,
     });

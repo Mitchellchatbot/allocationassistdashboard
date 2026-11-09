@@ -118,7 +118,22 @@ describe("reportSide", () => {
   });
 
   it("gives no side to a name it cannot place, rather than guessing one", () => {
-    expect(reportSide("Trellis Hospital")).toBeNull();
+    // Trellis used to stand here. The team filled in its region, so it is
+    // placed now - which is the point of that round trip, and why this case
+    // needs a name nobody has mapped yet.
+    expect(reportSide("Riverside Clinic")).toBeNull();
     expect(reportSide("")).toBeNull();
+  });
+
+  it("places the hospitals the team mapped by hand", () => {
+    // Returned in Hospitals_unknownRegion.xlsx, 2026-11-04. These 11 were the
+    // whole of Data quality's "no region" list.
+    for (const name of ["HMS", "Zayed Military", "Pure-health", "Novomed",
+                        "Trellis Hospital", "Health Pay", "EIH", "SAKINA"]) {
+      expect(reportSide(name), name).toBe("UAE");
+    }
+    for (const name of ["Almoosa", "Mohammad Alfagih", "Child Fertility"]) {
+      expect(reportSide(name), name).toBe("KSA/Qatar");
+    }
   });
 });

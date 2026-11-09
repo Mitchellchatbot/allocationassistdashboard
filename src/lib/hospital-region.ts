@@ -65,8 +65,10 @@ function chainInfo(n: string): Chain | null {
   if (/dallah/.test(n)) return { name: "Dallah", country: "Saudi Arabia", city: "Riyadh" };
   if (/saudi german|\bsgh\b/.test(n)) return { name: "Saudi German Hospital", country: "Saudi Arabia" };
   if (/alrajhi/.test(n)) return { name: "Alrajhi", country: "Saudi Arabia" };
-  if (/almoss?a|almosa/.test(n)) return { name: "Almoosa", country: "Saudi Arabia" };
+  if (/almoo?ss?a|almosa/.test(n)) return { name: "Almoosa", country: "Saudi Arabia", city: "Al Ahsa" };
   if (/al ?amal|alamal/.test(n)) return { name: "Al Amal Psychiatry", country: "Saudi Arabia" };
+  if (/al ?fagih|alfagih/.test(n)) return { name: "Mohammed Alfagih", country: "Saudi Arabia", city: "Riyadh" };
+  if (/child fertility/.test(n)) return { name: "Child Fertility Centre", country: "Saudi Arabia", city: "Riyadh" };
   if (/al ?kalma|alkalma/.test(n)) return { name: "Al Kalma Health", country: "UAE", city: "Abu Dhabi" };
   if (/kkseh|king khaled eye/.test(n)) return { name: "King Khaled Eye Specialist", country: "Saudi Arabia", city: "Riyadh" };
   if (/aramco/.test(n)) return { name: "Aramco", country: "Saudi Arabia" };
@@ -104,6 +106,14 @@ function chainInfo(n: string): Chain | null {
   if (/\bkch\b|kings college/.test(n)) return { name: "King's College Hospital", country: "UAE", city: "Dubai" };
   if (/harl/.test(n)) return { name: "Harley Street", country: "UAE", city: "Dubai" };
   if (/tarmeem/.test(n)) return { name: "Tarmeem", country: "UAE", city: "Abu Dhabi" };
+  if (/\bhms\b/.test(n)) return { name: "HMS", country: "UAE", city: "Dubai" };
+  if (/pure ?health/.test(n)) return { name: "Pure Health", country: "UAE", city: "Dubai" };
+  if (/novomed/.test(n)) return { name: "Novomed", country: "UAE", city: "Dubai" };
+  if (/trellis/.test(n)) return { name: "Trellis Hospital", country: "UAE", city: "Dubai" };
+  if (/health ?pay/.test(n)) return { name: "Health Pay", country: "UAE", city: "Dubai" };
+  if (/\beih\b/.test(n)) return { name: "EIH", country: "UAE", city: "Al Ain" };
+  if (/sakina/.test(n)) return { name: "Sakina", country: "UAE", city: "Abu Dhabi" };
+  if (/zayed military|\bzmh\b/.test(n)) return { name: "Zayed Military Hospital", country: "UAE", city: "Abu Dhabi" };
   return null;
 }
 

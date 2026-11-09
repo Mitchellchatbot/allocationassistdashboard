@@ -23,12 +23,14 @@ import { useSort, SortHead } from "@/components/reports/sortable";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
+import { Checkbox } from "@/components/ui/checkbox";
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from "@/components/ui/dialog";
-import { Briefcase, ListChecks, Calendar, AlertCircle, CheckCircle2, Plus, Search, UserSquare, Trash2, Upload, Link2, ChevronDown, ChevronRight } from "lucide-react";
+import { Briefcase, ListChecks, Calendar, AlertCircle, CheckCircle2, Plus, Search, UserSquare, Trash2, Upload, Link2, ChevronDown, ChevronRight, X } from "lucide-react";
 import { Collapsible, CollapsibleTrigger, CollapsibleContent } from "@/components/ui/collapsible";
 import { supabase } from "@/lib/supabase";
 import {
   usePlacementAttempts, useUpsertPlacementAttempt, useDeletePlacementAttempt,
+  useMarkPlacementMilestone,
   type PlacementAttempt,
 } from "@/hooks/use-placement-attempts";
 import { useHospitals, type Hospital } from "@/hooks/use-hospitals";
@@ -432,10 +434,12 @@ export function PlacementsCard({ range, rangeDays, hospital, specialty, open, on
         existingAttempts={rawRows}
         preselectDoctorId={pendingNewDoctor?.doctorId ?? null}
         onClose={() => { setPickerOpen(false); setPendingNewDoctor(null); }}
-        onCreated={(id) => {
+        onCreated={(ids) => {
           setPickerOpen(false);
           setPendingNewDoctor(null);
-          setEditingId(id);
+          // Straight into the editor for a single placement. For several there
+          // is no one row to open, and the toast already says what landed.
+          if (ids.length === 1) setEditingId(ids[0]);
         }}
       />
 
@@ -587,29 +591,45 @@ function DateField({ label, value, onChange }: { label: string; value: string; o
  * then create the placement_attempt row. Same doctor can be added at
  * multiple hospitals (one per pair).
  * ──────────────────────────────────────────────────────────────────── */
+/** A hospital chosen for a new placement. `id` is null for a free-text name. */
+interface PickedHospital { id: string | null; name: string; city?: string | null; country?: string | null }
+
+const FREE_TEXT_PLACEHOLDER = 'e.g. "STMC", "AH", "MNGHA Riyadh"';
+
+const todayISO = () => {
+  const d = new Date();
+  return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`;
+};
+
 export function NewPlacementDialog({ open, existingAttempts, preselectDoctorId, onClose, onCreated }: {
   open:              boolean;
   existingAttempts:  PlacementAttempt[];
   preselectDoctorId: string | null;
   onClose:           () => void;
-  onCreated:         (id: string) => void;
+  /** Ids of every attempt created — one per hospital picked. */
+  onCreated:         (ids: string[]) => void;
 }) {
   const { data: zoho }      = useZohoData();
   const { data: hospitals = [] } = useHospitals();
   const upsert              = useUpsertPlacementAttempt();
+  const markMilestone       = useMarkPlacementMilestone();
   const [doctorSearch, setDoctorSearch]     = useState("");
   const [hospitalSearch, setHospitalSearch] = useState("");
   const [pickedDoctor, setPickedDoctor]     = useState<{ id: string; name: string; specialty: string } | null>(null);
-  const [pickedHospital, setPickedHospital] = useState<Hospital | null>(null);
+  // A doctor goes to several hospitals at once as often as not — one row per
+  // (doctor, hospital), which is what placement_attempts is keyed on.
+  const [picked, setPicked]                 = useState<PickedHospital[]>([]);
   const [hospitalFreeText, setHospitalFreeText] = useState("");   // for CSV-style names not in hospitals table
+  const [shortlistedOn, setShortlistedOn]   = useState(todayISO);
   const [creating, setCreating]             = useState(false);
 
   // Reset when reopening.
   useEffect(() => {
     if (open) {
       setPickedDoctor(null);
-      setPickedHospital(null);
+      setPicked([]);
       setHospitalFreeText("");
+      setShortlistedOn(todayISO());
       setDoctorSearch("");
       setHospitalSearch("");
     }
@@ -678,33 +698,64 @@ export function NewPlacementDialog({ open, existingAttempts, preselectDoctorId, 
     ).slice(0, 30);
   }, [hospitals, hospitalSearch]);
 
-  const doctorAlreadyAtHospital = useMemo(() => {
-    if (!pickedDoctor) return null;
-    const hospName = pickedHospital?.name ?? hospitalFreeText.trim();
-    if (!hospName) return null;
-    return existingAttempts.find(a =>
-      a.doctor_id === pickedDoctor.id &&
-      a.hospital_name.toLowerCase() === hospName.toLowerCase(),
-    ) ?? null;
-  }, [pickedDoctor, pickedHospital, hospitalFreeText, existingAttempts]);
+  /** Hospitals this doctor is already tracked at, lower-cased for matching. */
+  const alreadyTracked = useMemo(() => {
+    const out = new Set<string>();
+    if (!pickedDoctor) return out;
+    for (const a of existingAttempts) {
+      if (a.doctor_id === pickedDoctor.id) out.add(a.hospital_name.trim().toLowerCase());
+    }
+    return out;
+  }, [pickedDoctor, existingAttempts]);
 
-  const canCreate = !!pickedDoctor && !!(pickedHospital || hospitalFreeText.trim()) && !doctorAlreadyAtHospital;
+  const isPicked = (name: string) => picked.some(h => h.name.toLowerCase() === name.toLowerCase());
+
+  const toggleHospital = (h: PickedHospital) =>
+    setPicked(prev => (prev.some(x => x.name.toLowerCase() === h.name.toLowerCase())
+      ? prev.filter(x => x.name.toLowerCase() !== h.name.toLowerCase())
+      : [...prev, h]));
+
+  const addFreeText = () => {
+    const name = hospitalFreeText.trim();
+    if (!name || alreadyTracked.has(name.toLowerCase()) || isPicked(name)) return;
+    setPicked(prev => [...prev, { id: null, name }]);
+    setHospitalFreeText("");
+  };
+
+  const canCreate = !!pickedDoctor && picked.length > 0;
 
   const handleCreate = async () => {
-    if (!pickedDoctor) return;
+    if (!pickedDoctor || picked.length === 0) return;
     setCreating(true);
     try {
-      const hospitalName = pickedHospital?.name ?? hospitalFreeText.trim();
-      const created = await upsert.mutateAsync({
-        doctor_id:        pickedDoctor.id,
-        doctor_name:      pickedDoctor.name,
-        doctor_specialty: pickedDoctor.specialty || null,
-        hospital_id:      pickedHospital?.id ?? null,
-        hospital_name:    hospitalName,
-        source:           "manual",
-      });
-      toast.success(`Started tracking ${pickedDoctor.name} @ ${hospitalName}.`);
-      onCreated(created.id);
+      const ids: string[] = [];
+      // Sequential, not Promise.all: each upsert fires its own cache
+      // invalidations, and a handful of hospitals is not worth the parallelism.
+      for (const h of picked) {
+        const created = await upsert.mutateAsync({
+          doctor_id:        pickedDoctor.id,
+          doctor_name:      pickedDoctor.name,
+          doctor_specialty: pickedDoctor.specialty || null,
+          hospital_id:      h.id,
+          hospital_name:    h.name,
+          source:           "manual",
+        });
+        ids.push(created.id);
+        // The shortlist date goes through the milestone marker, never the
+        // upsert payload: only the marker also writes the placement_events
+        // row, and the Reports headline counts events. Set it on the row
+        // alone and the attempt-counted panels would show it while the
+        // event-counted ones did not.
+        if (shortlistedOn) {
+          await markMilestone.mutateAsync({
+            id: created.id, column: "shortlisted_at", date: shortlistedOn, hospital_name: h.name,
+          });
+        }
+      }
+      toast.success(picked.length === 1
+        ? `Started tracking ${pickedDoctor.name} @ ${picked[0].name}.`
+        : `Started tracking ${pickedDoctor.name} at ${picked.length} hospitals.`);
+      onCreated(ids);
     } catch (e) {
       toast.error(e instanceof Error ? e.message : "Create failed");
     } finally {
@@ -772,40 +823,72 @@ export function NewPlacementDialog({ open, existingAttempts, preselectDoctorId, 
           {/* Hospital picker */}
           <div className="space-y-1">
             <label className="text-[11px] font-medium text-muted-foreground">Hospital</label>
-            {pickedHospital ? (
-              <button
-                type="button"
-                onClick={() => setPickedHospital(null)}
-                className="w-full text-left rounded-md border border-sky-200 bg-sky-50/40 px-3 py-2"
-              >
-                <div className="text-[12px] font-medium text-slate-900">{pickedHospital.name}</div>
-                <div className="text-[10px] text-muted-foreground">{[pickedHospital.city, pickedHospital.country].filter(Boolean).join(" · ") || "—"} · click to change</div>
-              </button>
-            ) : (
-              <>
-                <div className="relative">
-                  <Search className="absolute left-2.5 top-1/2 -translate-y-1/2 h-3.5 w-3.5 text-muted-foreground" />
-                  <Input value={hospitalSearch} onChange={e => setHospitalSearch(e.target.value)} placeholder="Search hospitals…" className="pl-8 h-8 text-[12px]" />
-                </div>
-                <div className="mt-1 max-h-[180px] overflow-y-auto rounded-md border bg-slate-50/40">
-                  {filteredHospitals.length === 0 ? (
-                    <div className="px-3 py-4 text-center text-[11px] text-muted-foreground">No matches.</div>
-                  ) : filteredHospitals.map(h => (
-                    <button
-                      key={h.id}
-                      type="button"
-                      onClick={() => setPickedHospital(h)}
-                      className="w-full text-left px-2.5 py-1.5 hover:bg-white border-b border-slate-200/60 last:border-b-0"
-                    >
+            {/* Chosen hospitals, removable. The list below stays open so more
+                can be ticked — a doctor usually goes to several at once. */}
+            {picked.length > 0 && (
+              <div className="flex flex-wrap gap-1 rounded-md border border-sky-200 bg-sky-50/40 px-2 py-1.5">
+                {picked.map(h => (
+                  <button
+                    key={h.name}
+                    type="button"
+                    onClick={() => toggleHospital(h)}
+                    aria-label={`Remove ${h.name}`}
+                    className="inline-flex items-center gap-1 rounded-full border border-sky-300 bg-white px-2 py-0.5 text-[10.5px] font-medium text-sky-900 hover:bg-sky-100"
+                  >
+                    {h.name}
+                    <X className="h-3 w-3 opacity-60" />
+                  </button>
+                ))}
+              </div>
+            )}
+            <div className="relative">
+              <Search className="absolute left-2.5 top-1/2 -translate-y-1/2 h-3.5 w-3.5 text-muted-foreground" />
+              <Input value={hospitalSearch} onChange={e => setHospitalSearch(e.target.value)} placeholder="Search hospitals…" className="pl-8 h-8 text-[12px]" />
+            </div>
+            <div className="mt-1 max-h-[180px] overflow-y-auto rounded-md border bg-slate-50/40">
+              {filteredHospitals.length === 0 ? (
+                <div className="px-3 py-4 text-center text-[11px] text-muted-foreground">No matches.</div>
+              ) : filteredHospitals.map(h => {
+                const tracked = alreadyTracked.has(h.name.trim().toLowerCase());
+                const checked = isPicked(h.name);
+                return (
+                  <label
+                    key={h.id}
+                    className={`flex items-center gap-2 px-2.5 py-1.5 border-b border-slate-200/60 last:border-b-0 ${
+                      tracked ? "opacity-55 cursor-not-allowed" : "hover:bg-white cursor-pointer"
+                    }`}
+                  >
+                    <Checkbox
+                      checked={checked}
+                      disabled={tracked}
+                      onCheckedChange={() => toggleHospital({ id: h.id, name: h.name, city: h.city, country: h.country })}
+                      aria-label={`Add ${h.name}`}
+                      className="h-3.5 w-3.5 shrink-0"
+                    />
+                    <div className="flex-1 min-w-0">
                       <div className="text-[11px] font-medium text-slate-800 truncate">{h.name}</div>
                       <div className="text-[10px] text-muted-foreground truncate">{[h.city, h.country].filter(Boolean).join(" · ") || "—"}</div>
-                    </button>
-                  ))}
-                </div>
-                <p className="text-[10px] text-muted-foreground/80">Or type a free-text name (e.g. CSV-style abbreviations):</p>
-                <Input value={hospitalFreeText} onChange={e => setHospitalFreeText(e.target.value)} placeholder='e.g. "STMC", "AH", "MNGHA Riyadh"' className="h-8 text-[11px]" />
-              </>
-            )}
+                    </div>
+                    {tracked && (
+                      <Badge variant="outline" className="text-[9px] shrink-0 bg-white border-slate-200 text-slate-500">already tracked</Badge>
+                    )}
+                  </label>
+                );
+              })}
+            </div>
+            <p className="text-[10px] text-muted-foreground/80">Or add a free-text name (e.g. CSV-style abbreviations):</p>
+            <div className="flex gap-1.5">
+              <Input
+                value={hospitalFreeText}
+                onChange={e => setHospitalFreeText(e.target.value)}
+                onKeyDown={e => { if (e.key === "Enter") { e.preventDefault(); addFreeText(); } }}
+                placeholder={FREE_TEXT_PLACEHOLDER}
+                className="h-8 text-[11px]"
+              />
+              <Button type="button" variant="outline" size="sm" className="h-8 shrink-0" onClick={addFreeText} disabled={!hospitalFreeText.trim()}>
+                Add
+              </Button>
+            </div>
           </div>
         </div>
 
@@ -833,12 +916,24 @@ export function NewPlacementDialog({ open, existingAttempts, preselectDoctorId, 
           );
         })()}
 
-        {doctorAlreadyAtHospital && (
-          <div className="rounded-md border border-amber-200 bg-amber-50/40 px-3 py-2 text-[11px] text-amber-900 mt-1">
-            <AlertCircle className="h-3.5 w-3.5 inline mr-1" />
-            {pickedDoctor?.name} already has a placement attempt at <strong>{doctorAlreadyAtHospital.hospital_name}</strong>. Cancel and click the existing row to edit it.
+        {/* One date for the whole batch — the action being recorded is
+            "shortlisted at these hospitals today". Clear it to create the
+            pairings blank and log the dates later. */}
+        <div className="flex items-end gap-2 mt-1">
+          <div className="space-y-1">
+            <label htmlFor="new-placement-shortlisted" className="text-[11px] font-medium text-muted-foreground">Shortlisted on</label>
+            <Input
+              id="new-placement-shortlisted"
+              type="date"
+              value={shortlistedOn}
+              onChange={e => setShortlistedOn(e.target.value)}
+              className="h-8 text-[11px] w-[150px]"
+            />
           </div>
-        )}
+          <p className="text-[10px] text-muted-foreground/80 pb-1.5">
+            Applied to every hospital above. Leave it empty to add no date yet.
+          </p>
+        </div>
 
         <DialogFooter className="mt-2">
           <Button variant="outline" onClick={onClose} disabled={creating}>Cancel</Button>

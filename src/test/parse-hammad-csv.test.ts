@@ -365,3 +365,79 @@ describe("block rep", () => {
     expect(parseHammadCsv(csv).rows[0].rep).toBeNull();
   });
 });
+
+describe("the rep named on the line", () => {
+  // September 2026 onwards the sheet writes the representative in column B, so
+  // the block vote is no longer the only way to attribute a line - and it is
+  // the only way to attribute the accounts two reps share.
+  const HEAD = "11/01/2026 - 11/07/2026,H & I Representative,Hospital,State,Doctors / candidates,Specialty,Shortlisted,Interview,offered,Signed,Start job Date,Joined,";
+
+  it("reads the column and resolves the name to a roster email", () => {
+    const csv = [HEAD,
+                 `1,Mohamed Othman,SKMC,"Abu Dhabi, UAE",Ali Khan,Cardiology,11/02/2026,,,,,,`,
+                 `2,Ishak,Garhoud,"Dubai, UAE",Sara Ali,ENT,11/03/2026,,,,,,`,
+                 `3,Sohaila,HMG,KSA,Omar Said,Neurology,11/03/2026,,,,,,`].join("\n");
+    const { rows } = parseHammadCsv(csv);
+    expect(rows.map(r => r.rep)).toEqual([
+      "mohamed.othman@allocationassist.com",
+      "ishak@allocationassist.com",
+      "sohaila@allocationassist.com",
+    ]);
+    // Every event on the line carries it too - that is what Reports groups by.
+    expect(rows.flatMap(r => r.events.map(e => e.rep))).toEqual([
+      "mohamed.othman@allocationassist.com",
+      "ishak@allocationassist.com",
+      "sohaila@allocationassist.com",
+    ]);
+  });
+
+  it("beats the block vote, which cannot settle a shared account", () => {
+    // Three Garhoud lines would vote the whole block to Garhoud's owner; the
+    // middle line says otherwise and keeps its own rep.
+    const repFor = (h: string) => (h === "Garhoud" ? { rep: "Mohamed", country: null } : null);
+    const csv = [HEAD,
+                 `1,,Garhoud,"Dubai, UAE",Ali Khan,Cardiology,11/02/2026,,,,,,`,
+                 `2,Ishak,Garhoud,"Dubai, UAE",Sara Ali,ENT,11/02/2026,,,,,,`,
+                 `3,,Garhoud,"Dubai, UAE",Omar Said,ENT,11/02/2026,,,,,,`].join("\n");
+    const { rows } = parseHammadCsv(csv, { repFor });
+    expect(rows.map(r => r.rep)).toEqual(["Mohamed", "ishak@allocationassist.com", "Mohamed"]);
+  });
+
+  it("flags a line that left the column blank", () => {
+    const csv = [HEAD, `1,,SKMC,"Abu Dhabi, UAE",Ali Khan,Cardiology,11/02/2026,,,,,,`].join("\n");
+    const { warnings } = parseHammadCsv(csv);
+    expect(warnings.map(w => w.kind)).toEqual(["no_rep"]);
+    expect(warnings[0].line).toBe(2);
+  });
+
+  it("keeps an unrecognised name as typed, and says so", () => {
+    const csv = [HEAD, `1,Mohammed Othmann,SKMC,"Abu Dhabi, UAE",Ali Khan,Cardiology,11/02/2026,,,,,,`].join("\n");
+    const { rows, warnings } = parseHammadCsv(csv);
+    expect(rows[0].rep).toBe("Mohammed Othmann");
+    expect(warnings.map(w => w.kind)).toEqual(["unknown_rep"]);
+  });
+
+  it("says nothing about a rep on a sheet that has no such column", () => {
+    // Every month before September 2026. A no_rep warning on each of 3,000
+    // historical lines would bury the ones that matter.
+    const csv = [HEADER, `1,AHD,Ali Khan,Cardiology,8/13/2026,,,,,,`].join("\n");
+    const { rows, warnings } = parseHammadCsv(csv);
+    expect(rows[0].rep).toBeNull();
+    expect(warnings.filter(w => w.kind === "no_rep" || w.kind === "unknown_rep")).toEqual([]);
+  });
+
+  it("finds the column when a later block leaves its heading blank", () => {
+    // Only a tab's first block labels these cells; the column and its values
+    // stay put underneath. Same quirk the State column has.
+    const blank = "11/08/2026 - 11/14/2026,,Hospital,,Doctors / candidates,Specialty,Shortlisted,Interview,offered,Signed,Start job Date,Joined,";
+    const csv = [HEAD,
+                 `1,Ishak,Garhoud,"Dubai, UAE",Ali Khan,Cardiology,11/02/2026,,,,,,`,
+                 blank,
+                 `1,Sohaila,HMG,KSA,Omar Said,Neurology,11/09/2026,,,,,,`].join("\n");
+    const { rows } = parseHammadCsv(csv);
+    expect(rows.map(r => [r.rep, r.state])).toEqual([
+      ["ishak@allocationassist.com", "Dubai, UAE"],
+      ["sohaila@allocationassist.com", "KSA"],
+    ]);
+  });
+});

@@ -1,29 +1,30 @@
 /**
- * Team performance — built from the hospital allocation.
+ * Team performance — built from the rep written on each line.
  *
- * The org model (Ammar/Saif, 2026-09): every hospital has ONE representative
- * (hospitals.owner_email), and that person owns everything that happens there.
- * So a member's book is their allocated hospitals, and their numbers are simply
- * the sum of those hospitals' stages. Expanding a member lists the accounts
- * they hold, including the quiet ones — a rep sitting on twelve hospitals with
- * nothing moving is the thing you want this page to show.
+ * The sheet names the representative on every line from September 2026 ("H & I
+ * Representative", column B), so credit follows the person who logged the work.
+ * Before that it named nobody and the rep had to be voted for by the hospitals
+ * in each weekly block, which cannot settle an account two reps share — SGH,
+ * SKMC, NMC, Mediclinic, KCH and FUH all sit on two books. The column settles
+ * them, and a line the sheet left blank falls back to the block vote at import
+ * time, not here.
  *
- * The roster comes from the hospitals table, NOT from activity: a hospital with
- * no placements this range still counts toward its owner's book and shows as a
- * zero row rather than disappearing.
+ * The roster comes from the DATA, not from a hard-coded list: only reps who
+ * appear in the period are shown. Someone who has left stops appearing instead
+ * of sitting at the top of the table on a row of zeroes forever.
  *
- * Reads placement_attempts (not doctor_lifecycle) so the totals reconcile with
- * the Overview scoreboard and the Hospitals tab. Counts DISTINCT DOCTORS per
- * stage, matching the hero.
+ * Reads placement_events, so a member's book is the accounts they actually
+ * logged lines at, and counts LOGGED LINES per stage — the same measure as the
+ * Overview scoreboard, and the one the team's own report publishes.
  */
 import { useCallback, useMemo, useState } from "react";
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { Users, ChevronDown, ChevronRight, Building2 } from "lucide-react";
-import { usePlacementAttempts, type PlacementAttempt } from "@/hooks/use-placement-attempts";
-import { useHospitals } from "@/hooks/use-hospitals";
-import { buildHospitalMatcher } from "@/lib/hospital-rep";
-import { HI_TEAM_MEMBERS, findHiMemberByEmail } from "@/lib/hi-team";
+import { usePlacementAttempts } from "@/hooks/use-placement-attempts";
+import { usePlacementEvents } from "@/hooks/use-placement-events";
+import { findHiMemberByEmail } from "@/lib/hi-team";
+import { EVENT_TO_STAGE, type EventBackedStage } from "@/lib/placement-reporting";
 import { RepRowsSkeleton, STAGE_COL } from "@/components/reports/Skeletons";
 import { useSort, SortLabel } from "@/components/reports/sortable";
 import { Hint, HintTitle, HintNote, HoverInfo } from "@/components/reports/HoverHint";
@@ -35,14 +36,17 @@ interface Props {
 }
 
 const STAGES = [
-  { key: "shortlisted", label: "Shortlisted", cols: ["shortlisted_at"] },
-  { key: "interviewed", label: "Interviewed", cols: ["interviewed_at"] },
-  { key: "offered",     label: "Offered",     cols: ["offered_at"] },
-  { key: "signed",      label: "Signed",      cols: ["signed_at"] },
-  { key: "relocated",   label: "Relocated",   cols: ["relocated_at", "joined_at"] },
-] as const satisfies ReadonlyArray<{ key: string; label: string; cols: ReadonlyArray<keyof PlacementAttempt> }>;
+  { key: "shortlisted", label: "Shortlisted" },
+  { key: "interviewed", label: "Interviewed" },
+  { key: "offered",     label: "Offered" },
+  { key: "signed",      label: "Signed" },
+  { key: "relocated",   label: "Relocated" },
+] as const satisfies ReadonlyArray<{ key: EventBackedStage; label: string }>;
 
 type StageKey = (typeof STAGES)[number]["key"];
+
+/** Event ids, so a set's size is a count of LINES. Two lines for one doctor at
+ *  one hospital are two, which is how the team counts — see placement_events. */
 type Counts = Record<StageKey, Set<string>>;
 
 const emptyCounts = (): Counts =>
@@ -61,70 +65,76 @@ interface RepRow {
   hospitals: HospitalRow[];
 }
 
-/** Bucket for hospitals with no owner set — shown last, never ranked. */
+/** Bucket for lines the sheet never attributed — shown last, never ranked. */
 const UNASSIGNED = "__unassigned";
+
+/** rep values that mean "nobody in particular": the column's own default, and
+ *  the marker the Processing page stamps on a stage someone set by hand. */
+const NO_REP = new Set(["", "unknown", "manual"]);
+
+/** A Date as the calendar day it is locally. An event holds a day, so reading
+ *  it as an instant puts the last day of the period after the range's end
+ *  everywhere east of UTC. */
+const localDay = (d: Date) =>
+  `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`;
 
 export function TeamPerformance({ range, hospital, specialty }: Props) {
   const { data: attempts = [], isLoading } = usePlacementAttempts();
-  const { data: hospitals = [], isLoading: hospitalsLoading } = useHospitals();
-  const matchHospital = useMemo(() => buildHospitalMatcher(hospitals), [hospitals]);
+  const { data: events = [], isLoading: eventsLoading } = usePlacementEvents();
   const [expanded, setExpanded] = useState<Record<string, boolean>>({});
   const sort = useSort<SortKey>("signed");
 
-  const { rows, unassigned, maxTotal } = useMemo(() => {
-    const from = range.from.getTime();
-    const to   = range.to.getTime() + 86_400_000;     // inclusive end-of-day
-    const inR = (iso: string | null | undefined) => {
-      if (!iso) return false;
-      const t = new Date(iso).getTime();
-      return !isNaN(t) && t >= from && t < to;
-    };
-    const nameMatches = (n: string) => !hospital || n.toLowerCase().includes(hospital.toLowerCase());
+  // Which hospital and specialty a line belongs to: the event keeps neither,
+  // because the journey it hangs off already does.
+  const byAttempt = useMemo(() => {
+    const m = new Map<string, { hospital: string; specialty: string | null }>();
+    for (const a of attempts) m.set(a.id, { hospital: a.hospital_name, specialty: a.doctor_specialty });
+    return m;
+  }, [attempts]);
 
-    // 1. The books. Seeded from the hospitals table so allocation — not
-    //    activity — decides who appears and how many accounts they hold.
+  const { rows, unassigned, maxTotal } = useMemo(() => {
+    const from = localDay(range.from);
+    const to   = localDay(range.to);
+
     const by = new Map<string, RepRow>();
-    const bucket = new Map<string, Map<string, Counts>>();   // repKey → hospital → counts
+    const bucket = new Map<string, Map<string, Counts>>();   // repKey -> hospital -> counts
     const ensure = (key: string, email: string, name: string) => {
       let row = by.get(key);
       if (!row) { row = { email, name, counts: emptyCounts(), hospitals: [] }; by.set(key, row); bucket.set(key, new Map()); }
       return row;
     };
-    for (const m of HI_TEAM_MEMBERS) ensure(m.email.toLowerCase(), m.email, m.name);
-    ensure(UNASSIGNED, UNASSIGNED, "No representative");
 
-    for (const h of hospitals) {
-      if (!h.name || !nameMatches(h.name)) continue;
-      const rep = findHiMemberByEmail(h.owner_email);
-      const key = rep ? rep.email.toLowerCase() : UNASSIGNED;
-      ensure(key, rep?.email ?? UNASSIGNED, rep?.name ?? "No representative");
+    for (const ev of events) {
+      const day = ev.occurred_at?.slice(0, 10);
+      if (!day || day < from || day > to) continue;
+      const stage = EVENT_TO_STAGE[ev.stage];
+      if (!stage) continue;
+
+      const journey = byAttempt.get(ev.attempt_id);
+      const name = journey?.hospital?.trim();
+      if (!name) continue;
+      if (hospital && !name.toLowerCase().includes(hospital.toLowerCase())) continue;
+      if (specialty && !(journey?.specialty ?? "").toLowerCase().includes(specialty.toLowerCase())) continue;
+
+      const typed = (ev.rep ?? "").trim();
+      const member = findHiMemberByEmail(typed);
+      // An unrecognised rep keeps its own row under the name as recorded —
+      // that is how a misspelling in the sheet becomes visible instead of
+      // quietly merging into someone else's book.
+      const key = member ? member.email.toLowerCase()
+                : NO_REP.has(typed.toLowerCase()) ? UNASSIGNED
+                : typed.toLowerCase();
+      const row = ensure(
+        key,
+        member?.email ?? (key === UNASSIGNED ? UNASSIGNED : typed),
+        member?.name  ?? (key === UNASSIGNED ? "No representative" : typed),
+      );
+
       const book = bucket.get(key)!;
-      if (!book.has(h.name)) book.set(h.name, emptyCounts());
-    }
-
-    // 2. The activity, attributed through the hospital it happened at.
-    for (const a of attempts) {
-      const raw = a.hospital_name?.trim();
-      if (!raw || !nameMatches(raw)) continue;
-      if (specialty && !(a.doctor_specialty ?? "").toLowerCase().includes(specialty.toLowerCase())) continue;
-
-      const hit = matchHospital(raw);
-      const key = hit ? hit.rep.email.toLowerCase() : UNASSIGNED;
-      const row = ensure(key, hit?.rep.email ?? UNASSIGNED, hit?.rep.name ?? "No representative");
-      // Prefer the canonical record name so "NMC (Sharjah)" and "NMC Sharjah"
-      // land on one line; fall back to the sheet's own spelling when the
-      // match was to the owner rather than to a single branch.
-      const label = hit?.hospital ?? raw;
-      const book = bucket.get(key)!;
-      let counts = book.get(label);
-      if (!counts) { counts = emptyCounts(); book.set(label, counts); }
-
-      for (const s of STAGES) {
-        if (s.cols.some(c => inR(a[c] as string | null))) {
-          counts[s.key].add(a.doctor_id);
-          row.counts[s.key].add(a.doctor_id);
-        }
-      }
+      let counts = book.get(name);
+      if (!counts) { counts = emptyCounts(); book.set(name, counts); }
+      counts[stage].add(ev.id);
+      row.counts[stage].add(ev.id);
     }
 
     for (const [key, row] of by) {
@@ -132,13 +142,13 @@ export function TeamPerformance({ range, hospital, specialty }: Props) {
     }
 
     const all = [...by.values()];
-    const un  = all.find(r => r.email === UNASSIGNED)!;
+    const un  = all.find(r => r.email === UNASSIGNED) ?? null;
     return {
       rows: all.filter(r => r.email !== UNASSIGNED),
-      unassigned: totalOf(un.counts) > 0 || un.hospitals.length > 0 ? un : null,
+      unassigned: un && totalOf(un.counts) > 0 ? un : null,
       maxTotal: Math.max(1, ...all.map(r => totalOf(r.counts))),
     };
-  }, [attempts, hospitals, matchHospital, range, hospital, specialty]);
+  }, [events, byAttempt, range, hospital, specialty]);
 
   // Ordering is applied after the roll-up and reuses one comparator for both
   // levels: sorting by "Signed" ranks the members AND the hospitals inside
@@ -154,7 +164,7 @@ export function TeamPerformance({ range, hospital, specialty }: Props) {
     [sort],
   );
 
-  const loading = isLoading || hospitalsLoading;
+  const loading = isLoading || eventsLoading;
 
   // Leaderboard cards: ranked by signings, then relocations, then shortlists.
   const ranked = useMemo(
@@ -181,12 +191,12 @@ export function TeamPerformance({ range, hospital, specialty }: Props) {
         <CardTitle className="text-base flex items-center gap-2">
           <Users className="h-4 w-4 text-violet-600" /> Team performance
           <HoverInfo
-            meaning="Each member's allocated hospitals and everything those accounts delivered in the period. Distinct doctors, same source as the Overview scoreboard. Hospitals with nothing moving still show inside the book."
-            source="hospitals.owner_email × placement_attempts."
+            meaning="Every line a member logged in the period, counted the way the team counts — lines, not distinct doctors, the same measure as the Overview scoreboard. Open a member to see which accounts the lines were at. Only members who appear in the period are listed."
+            source="placement_events.rep, from the sheet's H & I Representative column."
           />
         </CardTitle>
         <CardDescription className="text-[11px]">
-          Credit follows the hospital's representative. Click a row (or a card above) to open that member's book.
+          Credit follows the representative named on the line. Click a row (or a card above) to open that member's book.
         </CardDescription>
       </CardHeader>
       <CardContent>
@@ -228,7 +238,7 @@ export function TeamPerformance({ range, hospital, specialty }: Props) {
                   onToggle={() => setExpanded(s => ({ ...s, [UNASSIGNED]: !s[UNASSIGNED] }))}
                 />
                 <p className="text-[10px] text-muted-foreground pt-1.5 px-2">
-                  These hospitals have no owner set, so nothing that happens there is credited to anyone. Set a representative on the hospital record to fold them into a book.
+                  These lines name no representative — an older sheet that had no such column, a line that left it blank, or a stage marked by hand in Processing. Fill the Representative column in the sheet and re-import to fold them into a book.
                 </p>
               </div>
             )}
@@ -250,7 +260,9 @@ const REP_TONES = [
 ] as const;
 
 const STAGE_HEX: Record<StageKey, string> = {
-  shortlisted: "#4f46e5", interviewed: "#0284c7", offered: "#d97706", signed: "#059669", relocated: "#047857",
+  // Relocated is purple, matching the Trend card — see the note there on why
+  // it stopped being a second green.
+  shortlisted: "#4f46e5", interviewed: "#0284c7", offered: "#d97706", signed: "#059669", relocated: "#9333ea",
 };
 
 /** One rep, in the Dashboard's KPI-card style: signings up front, the stage mix underneath. */
@@ -258,15 +270,13 @@ function RepCard({ row, rank, tone, delay, onOpen }: {
   row: RepRow; rank: number; tone: (typeof REP_TONES)[number]; delay: number; onOpen: () => void;
 }) {
   const initials = row.name.split(/\s+/).slice(0, 2).map(w => w[0]).join("").toUpperCase();
-  const active = row.hospitals.filter(h => totalOf(h.counts) > 0);
-  const quiet = row.hospitals.length - active.length;
-  const busiest = [...active].sort((a, b) => totalOf(b.counts) - totalOf(a.counts))[0];
+  const busiest = [...row.hospitals].sort((a, b) => totalOf(b.counts) - totalOf(a.counts))[0];
   const total = totalOf(row.counts);
   return (
     <Hint content={
       <>
         <HintTitle>{row.name} · #{rank} by signings</HintTitle>
-        <p>{row.hospitals.length} hospital{row.hospitals.length === 1 ? "" : "s"} in the book · {active.length} active{quiet ? `, ${quiet} quiet` : ""}</p>
+        <p>{totalOf(row.counts)} line{totalOf(row.counts) === 1 ? "" : "s"} across {row.hospitals.length} hospital{row.hospitals.length === 1 ? "" : "s"}</p>
         {busiest && <p>Busiest: {busiest.name}</p>}
         <div className="mt-1.5 grid grid-cols-[auto_auto] gap-x-3.5">
           {STAGES.map(s => (

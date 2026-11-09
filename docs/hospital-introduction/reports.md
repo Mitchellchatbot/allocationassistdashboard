@@ -46,7 +46,7 @@ marking) and the hospital/vacancy data into one view, and it's where the team
 
 ## What you see
 
-Four tabs, one question each (hover a tab for it):
+Three tabs, one question each (hover a tab for it):
 
 - **Overview — how are we doing?**
   - **Summary:** a one-sentence headline and four tiles (Shortlisted,
@@ -55,24 +55,33 @@ Four tabs, one question each (hover a tab for it):
   - **Worth a look:** hospitals with open roles but nothing moving in 30+ days,
     45-day payments overdue or due this week, and specialties with open roles
     but no placements. Click one to jump to its section.
-  - **Specialties getting jobs:** a tile map — tile size is doctors placed,
-    each tile shows its change and open roles. Callouts name the top,
-    fastest-growing and falling-behind specialties.
-  - **Trend:** pick a stage to chart it against the same weeks/months a year
-    earlier (best and quietest pinned), or switch to the **heatmap** to see
-    every stage at once. The selected week/month is shaded.
+  - **Specialties getting jobs:** one line per specialty, ranked by doctors
+    placed, with a bar for its share, the change on the period before and its
+    open roles. Callouts name the top, fastest-growing and falling-behind
+    specialties.
+  - **Trend:** every stage on **one chart, one line each**, so they can be
+    compared directly. Click a stage tile to drop it out; down to a single
+    stage the chart fills and pins its best and quietest. **A year earlier**
+    is off by default and overlays each stage's dashed twin. Or switch to the
+    **heatmap** for every stage in every bucket at once.
   - **How doctors move from shortlist to paid**, **By region**, and **Average
-    lifecycle**.
-- **Team — who's delivering?** One card per rep (ranked by signings), then the
-  team table; open a row to see that rep's hospitals. Credit follows the
-  hospital's representative.
+    lifecycle** (counted from September 2026 on — see below).
+  - **Who's delivering:** one card per rep (ranked by signings), then the team
+    table; open a row to see the accounts that rep logged lines at. Credit
+    follows the **representative named on the line** - the sheet's *H & I
+    Representative* column, from September 2026 on. Only reps who appear in
+    the period are listed, so someone who has left stops showing a row of
+    zeroes. Counts **logged lines**, the same measure as the Summary tiles.
+  - **Per-doctor:** one row per doctor, closed on first paint. The hospital
+    column shows the first account plus a **+N** chip; hover either for every
+    hospital that doctor was put to.
 - **Hospitals — which accounts are moving?** Account health (Moving / Slowing /
   Idle-but-hiring), the per-hospital table with a status dot, open vacancies,
   and data quality.
-- **Detail** — **All metrics** (six tiles with drill-downs), the **Placements**
-  ledger, and the per-doctor breakdown.
+- **Detail** — **All metrics** (six tiles with drill-downs) and the
+  **Placements** ledger.
 
-The **Jump to** panel on the right lists every section across all four tabs and
+The **Jump to** panel on the right lists every section across all three tabs and
 highlights the one you're scrolled to.
 
 ## How to use it
@@ -87,6 +96,16 @@ highlights the one you're scrolled to.
   a link to the full list.
 - Hospital **status** is measured from the last movement up to the end of the
   selected period: within 14 days *Moving*, 15–30 *Slowing*, over 30 *Idle*.
+- The **region pill** (UAE / KSA+Qatar) narrows the Hospitals tab too. The
+  side comes from the sheet's own **State** column where there is one
+  (September 2026 on, e.g. "Dubai, UAE", "KSA", "Qatar"); on older sheets it
+  is read off the hospital name, and a name with no region can't be claimed
+  for either side, so it drops out while a side is picked — the table says how
+  many, and *Data quality* lists them.
+- **Average lifecycle counts only milestones from 1 September 2026 on.**
+  Everything earlier was back-filled from the sheets months after the fact, so
+  those stage dates record when someone wrote them down rather than when they
+  happened, and the gaps between them don't measure how long anything took.
 
 ### The Placements workflow (the important one)
 
@@ -143,7 +162,10 @@ windows and trend buckets — it enumerates the whole calendar rather than doing
 arithmetic, because a week clipped to its month is not always seven days long.
 The same 1 September 2026 switch is mirrored by `weekEndingOf()` and by the
 generated `week_ending` column on `placement_events`, so the importer files a
-line in the week the page will show it in. `usePlacementReporting` adds `hospitals` (the rep
+line in the week the page will show it in. Each event also carries the **rep**
+who logged it, read from the sheet's *H & I Representative* column; before that
+column existed the rep had to be voted for by the hospitals in each weekly
+block, which can't settle an account two people share. `usePlacementReporting` adds `hospitals` (the rep
 behind each account) and `vacancies` (open roles). Nothing on the page is
 derived from the sends machinery — Reports measures placement, not outbound
 email.

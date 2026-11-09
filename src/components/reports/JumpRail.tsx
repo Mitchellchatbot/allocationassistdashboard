@@ -25,10 +25,9 @@ export const JUMP_GROUPS: Array<{ view: ReportView; label: string; accent: strin
     { id: "s-funnel",      label: "Shortlist → paid", icon: Filter,      hint: "How many make it through each stage" },
     { id: "s-region",      label: "By region",        icon: MapPin,      hint: "Placements by country and city" },
     { id: "s-lifecycle",   label: "Lifecycle",        icon: Clock,       hint: "Average days between stages" },
-  ] },
-  { view: "team", label: "Team", accent: "#8b5cf6", sections: [
-    { id: "s-reps", label: "Leaderboard",      icon: Trophy, hint: "One card per rep, ranked by signings" },
-    { id: "s-team", label: "Team performance", icon: Users,  hint: "Every rep's book and numbers" },
+    { id: "s-reps",        label: "Leaderboard",      icon: Trophy,      hint: "One card per rep, ranked by signings" },
+    { id: "s-team",        label: "Team performance", icon: Users,       hint: "Every rep's book and numbers" },
+    { id: "s-doctors",     label: "Per-doctor",       icon: User2,       hint: "One row per doctor" },
   ] },
   { view: "hospitals", label: "Hospitals", accent: "#0ea5e9", sections: [
     { id: "s-health",    label: "Account health", icon: HeartPulse,    hint: "Moving, slowing and idle accounts" },
@@ -39,7 +38,6 @@ export const JUMP_GROUPS: Array<{ view: ReportView; label: string; accent: strin
   { view: "detail", label: "Detail", accent: "#f59e0b", sections: [
     { id: "s-metrics",    label: "All metrics", icon: BarChart3,  hint: "Six totals with per-tile drill-downs" },
     { id: "s-placements", label: "Placements",  icon: ListChecks, hint: "The ledger and the 45-day payment clock" },
-    { id: "s-doctors",    label: "Per-doctor",  icon: User2,      hint: "One row per doctor" },
   ] },
 ];
 

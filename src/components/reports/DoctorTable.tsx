@@ -28,6 +28,7 @@ import { useDoctorProfiles } from "@/hooks/use-doctor-profiles";
 import { useZohoData } from "@/hooks/use-zoho-data";
 import { useSort, SortHead } from "@/components/reports/sortable";
 import { defaultRange, inRange, stageAt, STAGES, type DateRange } from "@/lib/placement-reporting";
+import { Hint, HintTitle, HintNote } from "@/components/reports/HoverHint";
 
 interface DoctorReportRow {
   doctor_id:    string;
@@ -319,12 +320,36 @@ export function DoctorTable({ range: rangeProp, rangeDays, hospital, specialty, 
                         : <span className="text-[10px] text-muted-foreground">—</span>}
                     </TableCell>
                     <TableCell className="text-[11px] text-right">
-                      {r.hospitals.length === 0
-                        ? <span className="text-muted-foreground">—</span>
-                        : r.hospitals.length === 1
-                        ? r.hospitals[0]
-                        : <span title={r.hospitals.join(", ")}>{r.hospitals[0]} <span className="text-muted-foreground">+{r.hospitals.length - 1}</span></span>
-                      }
+                      {r.hospitals.length === 0 ? (
+                        <span className="text-muted-foreground">—</span>
+                      ) : (
+                        // The overflow used to be a bare "+3" carrying the
+                        // browser's own title tooltip — unstyled, slow to
+                        // appear and invisible on touch. Chips plus the page's
+                        // Hint card name every hospital the way the rest of
+                        // the page does.
+                        <Hint align="end" content={
+                          <>
+                            <HintTitle>{r.doctor_name} · {r.hospitals.length} hospital{r.hospitals.length === 1 ? "" : "s"}</HintTitle>
+                            {r.hospitals.map(h => <p key={h}>• {h}</p>)}
+                            {r.hospitals.length > 1 && <HintNote>Each account is a separate conversation.</HintNote>}
+                          </>
+                        }>
+                          <span
+                            tabIndex={0}
+                            className="inline-flex items-center justify-end gap-1 cursor-default outline-none focus-visible:ring-2 focus-visible:ring-primary/40 rounded-sm"
+                          >
+                            <span className="rounded-md border border-border/60 bg-muted/40 px-1.5 py-0.5 max-w-[160px] truncate">
+                              {r.hospitals[0]}
+                            </span>
+                            {r.hospitals.length > 1 && (
+                              <span className="shrink-0 rounded-md border border-sky-200 bg-sky-50 px-1.5 py-0.5 font-semibold text-sky-700">
+                                +{r.hospitals.length - 1}
+                              </span>
+                            )}
+                          </span>
+                        </Hint>
+                      )}
                     </TableCell>
                     <TableCell className="text-[11px] text-right text-muted-foreground tabular-nums">{relativeShort(r.lastActivity)}</TableCell>
                   </TableRow>
