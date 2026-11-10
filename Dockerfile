@@ -15,13 +15,14 @@ ENV VITE_META_ACCESS_TOKEN=$VITE_META_ACCESS_TOKEN
 ENV VITE_GOOGLE_OAUTH_CLIENT_ID=$VITE_GOOGLE_OAUTH_CLIENT_ID
 RUN npm run build
 
-FROM node:20-alpine
-WORKDIR /app
-RUN npm install -g serve
-COPY --from=builder /app/dist ./dist
+# Caddy, not `serve`: besides the dashboard it forwards Scaled Admissions'
+# onboarding form (/get-started) so that link stays on this domain. See Caddyfile.
+FROM caddy:2.10-alpine
+COPY --from=builder /app/dist /srv
+COPY Caddyfile /etc/caddy/Caddyfile
 # Stale-asset recovery is handled at runtime in src/main.tsx — when the
 # browser fails to fetch a hashed chunk (old index.html cached after a
 # new deploy), main.tsx triggers a one-shot hard reload to pull the
-# fresh entrypoint. No serve.json needed (it crashed serve on startup).
+# fresh entrypoint.
 EXPOSE 3000
-CMD sh -c "serve -s dist -l ${PORT:-3000}"
+CMD ["caddy", "run", "--config", "/etc/caddy/Caddyfile", "--adapter", "caddyfile"]
