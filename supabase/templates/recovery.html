@@ -1,0 +1,27 @@
+<!--
+  Supabase → Authentication → Email Templates → "Reset Password"
+  Subject: Reset your Allocation Assist password
+
+  Paste this whole file into the template body. The link uses the token-hash
+  pattern so it opens in any browser; {{ .RedirectTo }} is the dashboard's
+  /auth/confirm URL, which the app passes in and which must be on the
+  Redirect URLs allow-list (otherwise Supabase substitutes the Site URL and
+  the link lands on the wrong page). See docs/admin/settings.md.
+-->
+<div style="font-family:-apple-system,Segoe UI,Roboto,Helvetica,Arial,sans-serif;max-width:480px;margin:0 auto;padding:32px 24px;color:#1f2937">
+  <p style="font-size:13px;font-weight:600;letter-spacing:.04em;text-transform:uppercase;color:#1f6b5c;margin:0 0 24px">Allocation Assist</p>
+  <h1 style="font-size:20px;margin:0 0 12px">Reset your password</h1>
+  <p style="font-size:14px;line-height:1.6;margin:0 0 24px">
+    Someone asked to reset the password for <strong>{{ .Email }}</strong>.
+    If that was you, choose a new one below. The link works once and expires in an hour.
+  </p>
+  <p style="margin:0 0 24px">
+    <a href="{{ .RedirectTo }}?token_hash={{ .TokenHash }}&type=recovery"
+       style="display:inline-block;background:#1f6b5c;color:#fff;text-decoration:none;font-size:14px;font-weight:600;padding:12px 20px;border-radius:10px">
+      Choose a new password
+    </a>
+  </p>
+  <p style="font-size:12px;line-height:1.6;color:#6b7280;margin:0">
+    Didn't ask for this? Ignore this email — your password stays the same.
+  </p>
+</div>

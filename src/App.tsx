@@ -87,6 +87,11 @@ const Doctors         = lazy(() => import("./pages/Doctors"));
 const Docs            = lazy(() => import("./pages/Docs"));
 const Feedback        = lazy(() => import("./pages/Feedback"));
 const NotFound        = lazy(() => import("./pages/NotFound"));
+// Signed-out auth pages: password reset, the email-link landing, set password.
+const ForgotPassword  = lazy(() => import("./pages/ForgotPassword"));
+const AuthConfirm     = lazy(() => import("./pages/AuthConfirm"));
+const SetPassword     = lazy(() => import("./pages/SetPassword"));
+const NoAccess        = lazy(() => import("./pages/NoAccess"));
 
 // Global react-query defaults tuned for this dashboard:
 //   - 60s staleTime cuts refetch chatter when navigating between tabs that
@@ -249,6 +254,10 @@ const App = () => {
             <Routes>
               {/* Public */}
               <Route path="/login" element={<Login />} />
+              <Route path="/forgot-password" element={<ForgotPassword />} />
+              <Route path="/auth/confirm" element={<AuthConfirm />} />
+              <Route path="/set-password" element={<SetPassword />} />
+              <Route path="/no-access" element={<NoAccess />} />
               <Route path="/shared-profile/:token" element={<SharedProfile />} />
 
               {/* Protected — one shell, many children. The shell renders the
