@@ -21,8 +21,10 @@ manage who's on the team and what each person can see. This is where the
     verify the webhook.
   - *Your Slack handle* (any user): set your Slack username so notifications
     assigned to you **@-mention** you instead of just emailing.
+- **Password** (everyone) — change your own password. You type your current one
+  first; afterwards you're signed out on every other device.
 - **Users** (admin only) — the team list with each person's role, allowed pages,
-  and Add / Edit / Delete.
+  and Add / Edit / Delete, plus password tools (send a reset link, set a password).
 
 ## How to use it
 
@@ -33,10 +35,22 @@ manage who's on the team and what each person can see. This is where the
 
 **Create a user (admin)**
 1. Users tab → **Add User**.
-2. Enter name, email, a temporary password.
-3. Pick a **role** — it auto-fills the **page access** from that role's preset; or
+2. Enter name and email.
+3. Choose how they sign in:
+   - **Email an invite** (default) — they get an email with a link to choose their
+     own password. The link works once and lasts an hour.
+   - **Set a password** — you type or generate one and pass it on. This is the
+     only option for `@sales.com` logins, which have no inbox.
+4. Pick a **role** — it auto-fills the **page access** from that role's preset; or
    pick "custom" and tick pages by hand.
-4. **Create User** — they can sign in immediately (no email confirmation step).
+5. **Send invite** / **Create User**.
+
+**Someone forgot their password**
+- People with a real inbox use **Forgot password?** on the sign-in page and get a
+  reset link by email. You can also send one for them: ✎ on the user →
+  **Send reset link**.
+- `@sales.com` logins can't receive email. ✎ on the user → **Set password** →
+  type or generate one → **Set this password**, then pass it on.
 
 **Edit access (admin)**
 1. Click the ✎ on a user → change their role and/or toggle individual pages → Save.
@@ -67,8 +81,11 @@ reports success/failure.
   - `ProtectedRoute` checks, per page, whether your `allowed_pages` includes it
     (admins pass everything; Documentation is always allowed);
   - the **sidebar** only shows nav items you can access;
-  - if a profile row is missing, the app falls back to sensible **email-based
-    defaults** so nobody is locked out.
+  - if a profile row is missing, the app falls back by email, and that fallback
+    **fails closed**: `@sales.com` logins get the worker view, Hospital
+    Introduction team emails get the HI pages, and **anyone else gets no access**.
+    They see a "No access yet — ask an admin" screen with a Retry button. (This
+    fallback used to hand unknown emails every page.)
 - **Slack handle** is saved via a security-definer RPC (`set_my_slack_handle`) so a
   user can only set *their own* handle (their session proves identity). The
   notifier (`_shared/notify.ts`) uses it to @-mention the assignee; the webhook URL
@@ -89,8 +106,46 @@ A worked example: give a finance contractor access to only Finance and Settings.
 
 Two things are always available regardless of role: **Documentation** (everyone
 can read the guides) and the **Notifications** tab (so everyone can set their own
-Slack handle). And the email-based fallback means a brand-new or seeded account
-still gets a sensible default rather than an empty dashboard.
+Slack handle). Every account should have a profile row — create users from this
+tab so they get one. An account without a row and with an unrecognised email
+lands on the no-access screen until an admin gives it a role. (Migration
+`20261112000000_backfill_user_profiles.sql` gave rows to the three accounts
+that had none — `admin@`, `worker@` and `worker2@allocationassist.com`, all as
+admin, which is the access they already had. Run it before deploying the
+fail-closed change.)
+
+## Passwords and sign-in emails
+
+How the flows fit together:
+
+1. **Forgot password** (`/forgot-password`) asks Supabase to email a reset link.
+   The page shows the same message whether or not the account exists.
+2. The link in the email opens **`/auth/confirm`**. The person presses
+   **Continue**, which exchanges the one-time token for a session. It doesn't
+   happen on page load because email security scanners open links before the
+   recipient does, and would otherwise use the token up.
+3. **`/set-password`** saves the new password and signs out every other session.
+
+Invites use the same `/auth/confirm` → `/set-password` path.
+
+**One-time Supabase setup** (dashboard, not code):
+
+- **SMTP** (Authentication → Emails → SMTP Settings): host `smtp.resend.com`,
+  port `465`, username `resend`, password = the Resend API key, sender = an
+  address on a domain verified in Resend. Supabase's built-in sender is
+  rate-limited to a few emails an hour and isn't meant for production.
+- **URL configuration** (Authentication → URL Configuration): set **Site URL**
+  to the dashboard's address, and add the production `https://<dashboard>/auth/confirm`
+  and `http://localhost:8080/auth/confirm` to **Redirect URLs**. If the
+  `/auth/confirm` address isn't on that list, Supabase swaps in the Site URL and
+  the email link lands on the wrong page.
+- **Email templates** (Authentication → Emails → Templates): paste
+  `supabase/templates/recovery.html` into **Reset Password** and
+  `supabase/templates/invite.html` into **Invite user**. Subjects are noted at
+  the top of each file.
+- **Password policy** (Authentication → Providers → Email): minimum length
+  **10**, matching `MIN_PASSWORD_LENGTH` in `src/lib/password-policy.ts`. Email
+  link expiry 1 hour (3600 s).
 
 ## Why it's built this way
 

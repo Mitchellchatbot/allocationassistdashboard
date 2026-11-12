@@ -1,6 +1,7 @@
 import { Navigate } from "react-router-dom";
 import { useAuth } from "@/hooks/use-auth";
 import { canSeeFinance } from "@/lib/finance-access";
+import { hasAnyAccess, NO_ACCESS_PATH } from "@/lib/access";
 
 interface ProtectedRouteProps {
   children: React.ReactNode;
@@ -20,6 +21,13 @@ export function ProtectedRoute({ children, requiredPage }: ProtectedRouteProps) 
 
   if (!session) {
     return <Navigate to="/login" replace />;
+  }
+
+  // Signed in but no pages at all (unknown email, no profile row): send them
+  // to the no-access screen. Without this the "first allowed page" fallback
+  // below has nowhere to go and bounces to /worker, which bounces again.
+  if (!hasAnyAccess({ role, allowedPages })) {
+    return <Navigate to={NO_ACCESS_PATH} replace />;
   }
 
   // Finance is gated by a hard email allowlist — even admins must be on it.

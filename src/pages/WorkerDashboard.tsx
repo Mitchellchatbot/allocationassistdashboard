@@ -13,8 +13,9 @@ import { InfoIcon } from "@/components/InfoIcon";
 import {
   ClipboardList, PlusCircle, LogOut, Loader2, Save, Trash2,
   CalendarDays, Clock, BarChart2, ChevronDown, Check, X,
-  Users, LayoutDashboard, Search, Award, Phone,
+  Users, LayoutDashboard, Search, Award, Phone, KeyRound,
 } from "lucide-react";
+import { ChangePasswordDialog } from "@/components/auth/ChangePasswordForm";
 
 // Charts are code-split into a co-located module so the recharts (vendor-charts)
 // chunk is only fetched when a chart first mounts. Each is lazily imported and
@@ -1027,6 +1028,8 @@ function WorkerSidebar({ tab, setTab, isAdmin }: { tab: Tab; setTab: (t: Tab) =>
   const { signOut, user } = useAuth();
   const navigate = useNavigate();
   const handleSignOut = async () => { await signOut(); navigate("/login", { replace: true }); };
+  // Workers can't reach /settings, so their password change lives here.
+  const [pwOpen, setPwOpen] = useState(false);
 
   const workerNav: { id: Tab; icon: React.ElementType; label: string }[] = [
     { id: "overview",    icon: LayoutDashboard, label: "Overview"       },
@@ -1078,11 +1081,17 @@ function WorkerSidebar({ tab, setTab, isAdmin }: { tab: Tab; setTab: (t: Tab) =>
             <p className="text-[8px] text-white/40">{isAdmin ? "Administrator" : "Worker"}</p>
           </div>
         </div>
+        <button onClick={() => setPwOpen(true)}
+          className="w-full flex items-center gap-2 px-3 py-1.5 rounded-md text-[11px] text-white/50 hover:text-white hover:bg-white/10 transition-colors">
+          <KeyRound className="h-3 w-3" />
+          Change password
+        </button>
         <button onClick={handleSignOut}
           className="w-full flex items-center gap-2 px-3 py-1.5 rounded-md text-[11px] text-white/50 hover:text-white hover:bg-white/10 transition-colors">
           <LogOut className="h-3 w-3" />
           Sign out
         </button>
+        <ChangePasswordDialog open={pwOpen} onOpenChange={setPwOpen} />
       </div>
     </aside>
   );

@@ -1,0 +1,26 @@
+<!--
+  Supabase → Authentication → Email Templates → "Invite user"
+  Subject: You've been invited to Allocation Assist
+
+  Paste this whole file into the template body. Sent when an admin adds a
+  user from Settings → Users without setting a password. {{ .RedirectTo }} is
+  the dashboard's /auth/confirm URL and must be on the Redirect URLs
+  allow-list. See docs/admin/settings.md.
+-->
+<div style="font-family:-apple-system,Segoe UI,Roboto,Helvetica,Arial,sans-serif;max-width:480px;margin:0 auto;padding:32px 24px;color:#1f2937">
+  <p style="font-size:13px;font-weight:600;letter-spacing:.04em;text-transform:uppercase;color:#1f6b5c;margin:0 0 24px">Allocation Assist</p>
+  <h1 style="font-size:20px;margin:0 0 12px">You've been invited</h1>
+  <p style="font-size:14px;line-height:1.6;margin:0 0 24px">
+    An admin has set up an Allocation Assist dashboard account for <strong>{{ .Email }}</strong>.
+    Choose a password to finish setting it up. The link works once and expires in an hour.
+  </p>
+  <p style="margin:0 0 24px">
+    <a href="{{ .RedirectTo }}?token_hash={{ .TokenHash }}&type=invite"
+       style="display:inline-block;background:#1f6b5c;color:#fff;text-decoration:none;font-size:14px;font-weight:600;padding:12px 20px;border-radius:10px">
+      Set up my account
+    </a>
+  </p>
+  <p style="font-size:12px;line-height:1.6;color:#6b7280;margin:0">
+    If the link has expired, ask the admin who invited you to send a new one.
+  </p>
+</div>

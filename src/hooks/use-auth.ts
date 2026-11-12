@@ -1,72 +1,19 @@
-import { useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { supabase } from "@/lib/supabase";
 import { clearQueryCachePersist } from "@/lib/query-persist";
 import type { Session, User } from "@supabase/supabase-js";
-import { hasHiSectionAccess, findHiAccessByEmail } from "@/lib/hi-team";
+import {
+  accessFromEmail, resolveFetchedAccess, resolveLoginEmail,
+  type Access, type ProfileRow,
+} from "@/lib/access";
 
-// Map short usernames → Supabase emails for convenient login
-export const USERNAME_MAP: Record<string, string> = {
-  admin:   "admin@allocationassist.com",
-  worker:  "worker@allocationassist.com",
-  worker2: "worker2@allocationassist.com",
-};
+// The page lists and role presets live in lib/access (pure, testable).
+// Re-exported so existing `from "@/hooks/use-auth"` imports keep working.
+export {
+  USERNAME_MAP, WORKER_EMAIL_TO_NAME, ALL_PAGES, HI_MEMBER_PAGES, ROLE_PRESETS,
+} from "@/lib/access";
 
-// Worker email → full name as it appears in weekly_sales.member_name.
-// Used as a fallback so the worker portal can still match performance rows
-// when the user_profiles fetch times out or fails.
-export const WORKER_EMAIL_TO_NAME: Record<string, string> = {
-  "abraham@sales.com": "Abraham",
-  "ahmed@sales.com":   "Ahmed",
-  "asser@sales.com":   "Asser",
-  "mohamed@sales.com": "Mohamed Othaman",
-  "peter@sales.com":   "Peter",
-  "sohaila@sales.com": "Sohaila",
-  "sumia@sales.com":   "Sumia",
-};
-
-// All pages that exist in the app (used for admin fallback)
-// /doctors is the unified shell — the old /leads-pipeline, /doctor-profiles
-// and /wp-candidates URLs redirect into it, so they don't need their own
-// entry in the access list. Anyone who can see "doctors" sees all three tabs.
-export const ALL_PAGES = ["/", "/my-workspace", "/sales", "/marketing", "/doctors", "/team", "/finance", "/meta-ads", "/settings", "/worker", "/calls", "/chatbot", "/follow-ups", "/sends", "/automations", "/information", "/vacancies", "/reports", "/batches", "/profile-sent", "/import-bulk", "/connections", "/forms", "/feedback"];
-
-// Hospital Introduction team page set. They land on /my-workspace and
-// only see the surfaces that matter for moving doctors through the
-// pipeline. Marketing/Sales/Finance/Admin tabs are hidden.
-export const HI_MEMBER_PAGES = [
-  "/",
-  "/my-workspace",
-  "/sends",
-  // Legacy send routes kept so old bookmarks/deep-links still pass the page
-  // gate and redirect into /sends (they now resolve to tabs on that page).
-  "/automations",
-  "/information",
-  "/doctors",
-  "/vacancies",
-  "/profile-sent",
-  "/batches",
-  "/reports",
-  "/forms",
-];
-
-// Role presets — selected in the Add User dialog
-export const ROLE_PRESETS: Record<string, string[]> = {
-  admin:     ALL_PAGES,
-  // /settings included in every non-worker preset so users can manage
-  // their own Slack handle + notification preferences. The page itself
-  // hides admin-only tabs (Users, organization-level Slack webhook
-  // test) when role !== "admin".
-  sales:     ["/", "/sales", "/marketing", "/doctors", "/team", "/calls", "/chatbot", "/settings"],
-  finance:   ["/", "/finance", "/settings"],
-  worker:    ["/worker"],
-  hi_member: [...HI_MEMBER_PAGES, "/settings"],
-};
-
-interface UserProfile {
-  role: string;
-  allowedPages: string[];
-  fullName: string | null;
-}
+type UserProfile = Access;
 
 export function useAuth() {
   const [session, setSession]     = useState<Session | null>(null);
@@ -82,30 +29,16 @@ export function useAuth() {
     setProfile(p);
   }
 
-  // Fetch DB profile for a user. If the row exists, use it. If not / timeout,
-  // fall back based on email pattern: @sales.com → worker, anything else → admin.
+  // Fetch the user's user_profiles row. resolveFetchedAccess decides what a
+  // missing row means: keep the cached profile on a re-fetch (a NULL there is
+  // almost always the 8s timeout, and must never change what the user can
+  // see), and only on first load fall back by email — which never grants
+  // admin. An unknown email with no row gets no pages and the no-access screen.
   async function fetchProfile(u: User) {
     const timeout = new Promise<{ data: null }>(resolve =>
       setTimeout(() => resolve({ data: null }), 8000)
     );
-    function fallbackByEmail() {
-      const email = (u.email ?? "").toLowerCase();
-      // Sales workers always default to /worker only — never admin
-      if (email.endsWith("@sales.com")) {
-        const name = WORKER_EMAIL_TO_NAME[email] ?? email.split("@")[0];
-        applyProfile({ role: "worker", allowedPages: ["/worker"], fullName: name });
-        return;
-      }
-      // Hospital Introduction team (specialists + granted guests) — restricted
-      // to their workspace + the tabs they actually work in. Falls through to
-      // admin for anyone else.
-      const hi = findHiAccessByEmail(email);
-      if (hi) {
-        applyProfile({ role: "hi_member", allowedPages: HI_MEMBER_PAGES, fullName: hi.name });
-        return;
-      }
-      applyProfile({ role: "admin", allowedPages: ALL_PAGES, fullName: null });
-    }
+    let row: ProfileRow | null = null;
     try {
       const { data } = await Promise.race([
         supabase
@@ -115,26 +48,11 @@ export function useAuth() {
           .maybeSingle(),
         timeout,
       ]);
-
-      if (data) {
-        applyProfile({
-          role:         data.role,
-          allowedPages: data.allowed_pages ?? [],
-          fullName:     data.full_name ?? null,
-        });
-      } else if (!profileCache.current) {
-        // First load only. fetchProfile re-runs on every auth event (token
-        // refresh, tab focus); a NULL here is almost always the 8s timeout, not
-        // a deleted row. The email fallback defaults unknown emails to ADMIN /
-        // ALL_PAGES, so applying it on a re-fetch would ELEVATE a restricted
-        // user to "see every tab" until the next good fetch (the reported
-        // "other tabs appear for a couple of minutes" bug — a fail-open). Once
-        // we've loaded a real profile, keep it on any transient failure.
-        fallbackByEmail();
-      }
+      row = (data as ProfileRow | null) ?? null;
     } catch {
-      if (!profileCache.current) fallbackByEmail();
+      row = null;
     }
+    applyProfile(resolveFetchedAccess({ email: u.email, row, cached: profileCache.current }));
   }
 
   useEffect(() => {
@@ -179,27 +97,31 @@ export function useAuth() {
     return () => subscription.unsubscribe();
   }, []);
 
-  const signIn = (usernameOrEmail: string, password: string) => {
-    const email = USERNAME_MAP[usernameOrEmail.toLowerCase()] ?? usernameOrEmail;
-    return supabase.auth.signInWithPassword({ email, password });
-  };
+  const signIn = (usernameOrEmail: string, password: string) =>
+    supabase.auth.signInWithPassword({ email: resolveLoginEmail(usernameOrEmail), password });
 
   // Drop the persisted query snapshot on sign-out so the next user on a shared
   // machine doesn't get handed the previous one's cached data.
   const signOut = () => { clearQueryCachePersist(); return supabase.auth.signOut(); };
 
+  // Re-read the profile row, dropping the cache first so a row an admin has
+  // just created (or a first load that timed out) actually takes effect.
+  // Used by the no-access screen's Retry.
+  const refreshProfile = useCallback(async () => {
+    if (!user) return;
+    profileCache.current = null;
+    await fetchProfile(user);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [user]);
+
   // Use cached profile if current profile is null (prevents nav flashing empty during re-fetches)
   const effectiveProfile = profile ?? profileCache.current;
-  // Default by email pattern so users don't briefly see admin nav before
-  // the profile fetch resolves.
-  const lowerEmail = (user?.email ?? "").toLowerCase();
-  const emailBasedDefault = lowerEmail.endsWith("@sales.com")
-    ? { role: "worker",    pages: ["/worker"] }
-    : hasHiSectionAccess(lowerEmail)
-      ? { role: "hi_member", pages: HI_MEMBER_PAGES }
-      : { role: "admin",     pages: ALL_PAGES };
+  // Until the profile resolves, default by email so nobody briefly sees nav
+  // they shouldn't. Same restrictive rule as the fetch fallback — never admin.
+  const emailBasedDefault = accessFromEmail(user?.email);
   const role         = effectiveProfile?.role         ?? emailBasedDefault.role;
-  const allowedPages = effectiveProfile?.allowedPages ?? emailBasedDefault.pages;
+  const allowedPages = effectiveProfile?.allowedPages ?? emailBasedDefault.allowedPages;
+  const fullName     = effectiveProfile?.fullName     ?? emailBasedDefault.fullName;
 
-  return { session, user, loading, signIn, signOut, role, allowedPages, profile };
+  return { session, user, loading, signIn, signOut, refreshProfile, role, allowedPages, fullName, profile };
 }

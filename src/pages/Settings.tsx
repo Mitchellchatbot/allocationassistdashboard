@@ -7,9 +7,14 @@ import { Label } from "@/components/ui/label";
 import { Switch } from "@/components/ui/switch";
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from "@/components/ui/dialog";
 import { useAuth, ROLE_PRESETS, ALL_PAGES } from "@/hooks/use-auth";
-import { Trash2, Plus, UserCog, Slack as SlackIcon, Send, Loader2, CheckCircle2, AlertCircle, Pencil, Building2, Mail } from "lucide-react";
+import { Trash2, Plus, UserCog, Slack as SlackIcon, Send, Loader2, CheckCircle2, AlertCircle, Pencil, Building2, Mail, KeyRound } from "lucide-react";
 import { supabase } from "@/lib/supabase";
 import { toast } from "sonner";
+import { isSalesWorkerEmail, canSelfReset } from "@/lib/access";
+import { validatePassword } from "@/lib/password-policy";
+import { confirmUrl } from "@/lib/auth-links";
+import { ChangePasswordForm } from "@/components/auth/ChangePasswordForm";
+import { AdminPasswordField } from "@/components/auth/AdminPasswordField";
 
 const SUPABASE_URL      = import.meta.env.VITE_SUPABASE_URL as string;
 const SUPABASE_ANON_KEY = import.meta.env.VITE_SUPABASE_ANON_KEY as string;
@@ -78,6 +83,11 @@ function AddUserDialog({
   const [role,         setRole]         = useState("sales");
   const [pages,        setPages]        = useState<string[]>(ROLE_PRESETS.sales);
   const [saving,       setSaving]       = useState(false);
+  // "invite" emails a link so the person picks their own password.
+  // "password" is for logins with no inbox (@sales.com) — the admin sets one.
+  const [mode,         setMode]         = useState<"invite" | "password">("invite");
+  const noInbox = isSalesWorkerEmail(email);
+  const effectiveMode = noInbox ? "password" : mode;
 
   // When role preset changes, auto-populate pages
   function handleRoleChange(r: string) {
@@ -90,7 +100,11 @@ function AddUserDialog({
   }
 
   async function handleSave() {
-    if (!email || !password) { toast.error("Email and password are required"); return; }
+    if (!email) { toast.error("Email is required"); return; }
+    if (effectiveMode === "password") {
+      const problem = validatePassword(password);
+      if (problem) { toast.error(problem); return; }
+    }
     setSaving(true);
     try {
       const res = await fetch(`${SUPABASE_URL}/functions/v1/create-user`, {
@@ -100,14 +114,19 @@ function AddUserDialog({
           "Authorization": `Bearer ${session?.access_token}`,
           "Content-Type":  "application/json",
         },
-        body: JSON.stringify({ email, password, full_name: fullName || null, role, allowed_pages: pages }),
+        body: JSON.stringify({
+          email: email.trim(),
+          // No password → create-user sends an invite email instead.
+          ...(effectiveMode === "password" ? { password } : { redirect_to: confirmUrl() }),
+          full_name: fullName || null, role, allowed_pages: pages,
+        }),
       });
       const json = await res.json();
       if (!res.ok) throw new Error(json.error ?? "Failed to create user");
-      toast.success(`User ${email} created`);
+      toast.success(effectiveMode === "invite" ? `Invite sent to ${email}` : `User ${email} created`);
       onCreated();
       onClose();
-      setEmail(""); setPassword(""); setFullName(""); setRole("sales"); setPages(ROLE_PRESETS.sales);
+      setEmail(""); setPassword(""); setFullName(""); setRole("sales"); setPages(ROLE_PRESETS.sales); setMode("invite");
     } catch (err) {
       toast.error(String(err instanceof Error ? err.message : err));
     } finally {
@@ -131,9 +150,35 @@ function AddUserDialog({
             <Label className="text-[11px]">Email</Label>
             <Input value={email} onChange={e => setEmail(e.target.value)} type="email" className="h-8 text-[12px]" placeholder="jane@example.com" />
           </div>
-          <div className="space-y-1">
-            <Label className="text-[11px]">Password</Label>
-            <Input value={password} onChange={e => setPassword(e.target.value)} type="text" className="h-8 text-[12px]" placeholder="Temporary password" />
+          <div className="space-y-1.5">
+            <Label className="text-[11px]">Sign-in</Label>
+            {noInbox ? (
+              <p className="text-[11px] text-muted-foreground">
+                @sales.com logins have no inbox, so set their password here and pass it on.
+              </p>
+            ) : (
+              <div className="flex gap-1.5">
+                {([["invite", "Email an invite"], ["password", "Set a password"]] as const).map(([m, label]) => (
+                  <button
+                    key={m}
+                    type="button"
+                    onClick={() => setMode(m)}
+                    className={`px-3 py-1 rounded-full text-[11px] font-medium border transition-colors ${
+                      mode === m ? "bg-primary text-white border-primary" : "border-border text-muted-foreground hover:border-primary/50"
+                    }`}
+                  >
+                    {label}
+                  </button>
+                ))}
+              </div>
+            )}
+            {effectiveMode === "invite" ? (
+              <p className="text-[11px] text-muted-foreground">
+                They'll get an email with a link to choose their own password. The link lasts an hour.
+              </p>
+            ) : (
+              <AdminPasswordField id="add-user-password" value={password} onChange={setPassword} />
+            )}
           </div>
 
           {/* Role selector */}
@@ -178,7 +223,7 @@ function AddUserDialog({
         <DialogFooter>
           <Button variant="outline" size="sm" onClick={onClose} className="h-7 text-[11px]">Cancel</Button>
           <Button size="sm" onClick={handleSave} disabled={saving} className="h-7 text-[11px]">
-            {saving ? "Creating…" : "Create User"}
+            {saving ? "Creating…" : effectiveMode === "invite" ? "Send invite" : "Create User"}
           </Button>
         </DialogFooter>
       </DialogContent>
@@ -205,6 +250,12 @@ function EditUserDialog({
   const [role,     setRole]     = useState("custom");
   const [pages,    setPages]    = useState<string[]>([]);
   const [saving,   setSaving]   = useState(false);
+  // Password tools: a reset link for real inboxes, a direct set for everyone
+  // (and the only option for @sales.com logins).
+  const [pwOpen,      setPwOpen]      = useState(false);
+  const [newPassword, setNewPassword] = useState("");
+  const [pwSaving,    setPwSaving]    = useState(false);
+  const [resetting,   setResetting]   = useState(false);
 
   // Re-seed the form whenever a different user is opened for editing.
   useEffect(() => {
@@ -212,7 +263,45 @@ function EditUserDialog({
     setFullName(user.full_name ?? "");
     setRole(user.role);
     setPages(user.allowed_pages ?? []);
+    setPwOpen(false);
+    setNewPassword("");
   }, [user?.id]);
+
+  async function sendResetLink() {
+    if (!user) return;
+    setResetting(true);
+    const { error } = await supabase.auth.resetPasswordForEmail(user.email, { redirectTo: confirmUrl() });
+    setResetting(false);
+    if (error) toast.error(error.message);
+    else toast.success(`Reset link sent to ${user.email}`);
+  }
+
+  async function setUserPassword() {
+    if (!user) return;
+    const problem = validatePassword(newPassword);
+    if (problem) { toast.error(problem); return; }
+    setPwSaving(true);
+    try {
+      const res = await fetch(`${SUPABASE_URL}/functions/v1/update-user`, {
+        method:  "POST",
+        headers: {
+          "apikey":        SUPABASE_ANON_KEY,
+          "Authorization": `Bearer ${session?.access_token}`,
+          "Content-Type":  "application/json",
+        },
+        body: JSON.stringify({ userId: user.id, password: newPassword }),
+      });
+      const json = await res.json();
+      if (!res.ok) throw new Error(json.error ?? "Failed to set password");
+      toast.success(`Password set for ${user.email}. Pass it on securely.`);
+      setPwOpen(false);
+      setNewPassword("");
+    } catch (err) {
+      toast.error(String(err instanceof Error ? err.message : err));
+    } finally {
+      setPwSaving(false);
+    }
+  }
 
   function handleRoleChange(r: string) {
     setRole(r);
@@ -266,6 +355,34 @@ function EditUserDialog({
           <div className="space-y-1">
             <Label className="text-[11px]">Full Name</Label>
             <Input value={fullName} onChange={e => setFullName(e.target.value)} className="h-8 text-[12px]" placeholder="Jane Smith" />
+          </div>
+
+          {/* Password — acts immediately, separate from "Save changes" below */}
+          <div className="space-y-1.5 rounded-md border border-border/60 p-2.5">
+            <Label className="text-[11px] flex items-center gap-1.5"><KeyRound className="h-3 w-3" /> Password</Label>
+            <div className="flex flex-wrap gap-1.5">
+              {user && canSelfReset(user.email) && (
+                <Button type="button" variant="outline" size="sm" className="h-7 text-[11px]" onClick={sendResetLink} disabled={resetting}>
+                  {resetting ? "Sending…" : "Send reset link"}
+                </Button>
+              )}
+              <Button type="button" variant="outline" size="sm" className="h-7 text-[11px]" onClick={() => setPwOpen(o => !o)}>
+                Set password
+              </Button>
+            </div>
+            {user && !canSelfReset(user.email) && (
+              <p className="text-[10px] text-muted-foreground">This login has no inbox, so a reset link can't reach it.</p>
+            )}
+            {pwOpen && (
+              <div className="space-y-1.5 pt-1">
+                <AdminPasswordField id="edit-user-password" value={newPassword} onChange={setNewPassword} />
+                <div className="flex justify-end">
+                  <Button type="button" size="sm" className="h-7 text-[11px]" onClick={setUserPassword} disabled={pwSaving}>
+                    {pwSaving ? "Setting…" : "Set this password"}
+                  </Button>
+                </div>
+              </div>
+            )}
           </div>
 
           {/* Role selector — picking a preset re-fills the page list; "custom" leaves it as-is */}
@@ -457,7 +574,7 @@ function UsersTab({ session }: { session: { access_token: string } | null }) {
 
 // ── Settings Page ─────────────────────────────────────────────────────────────
 
-type Tab = "general" | "notifications" | "users";
+type Tab = "general" | "notifications" | "password" | "users";
 
 const ORG_SETTINGS_KEY = "aa-org-settings";
 
@@ -492,7 +609,7 @@ const Settings = () => {
     <DashboardLayout title="Settings" subtitle="Account and notification preferences" docSlug="admin/settings">
       {/* Tab bar */}
       <div className="flex gap-1 mb-4 border-b border-border/50" data-tour="settings-tabs">
-        {(["general", "notifications", ...(role === "admin" ? ["users"] : [])] as Tab[]).map(t => (
+        {(["general", "notifications", "password", ...(role === "admin" ? ["users"] : [])] as Tab[]).map(t => (
           <button
             key={t}
             onClick={() => setTab(t)}
@@ -550,6 +667,27 @@ const Settings = () => {
               <Button onClick={saveGeneral} className="w-full h-10 text-[13px] mt-1">
                 {savedFlash ? <><CheckCircle2 className="h-4 w-4 mr-1.5" /> Saved</> : "Save changes"}
               </Button>
+            </CardContent>
+          </Card>
+        </div>
+      )}
+
+      {tab === "password" && (
+        <div className="mx-auto w-full max-w-lg mt-6 sm:mt-10">
+          <Card className="shadow-sm border-border/60">
+            <CardHeader className="pb-3 pt-5 px-6">
+              <div className="flex items-center gap-3">
+                <div className="h-10 w-10 rounded-xl bg-primary/10 flex items-center justify-center shrink-0">
+                  <KeyRound className="h-5 w-5 text-primary" />
+                </div>
+                <div>
+                  <CardTitle className="text-[15px] font-semibold">Password</CardTitle>
+                  <CardDescription className="text-[12px]">Changing it signs you out on your other devices</CardDescription>
+                </div>
+              </div>
+            </CardHeader>
+            <CardContent className="px-6 pb-6 pt-1">
+              <ChangePasswordForm />
             </CardContent>
           </Card>
         </div>
