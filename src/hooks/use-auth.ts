@@ -1,7 +1,7 @@
-import { useCallback, useEffect, useRef, useState } from "react";
+import { useCallback, useSyncExternalStore } from "react";
 import { supabase } from "@/lib/supabase";
 import { clearQueryCachePersist } from "@/lib/query-persist";
-import type { Session, User } from "@supabase/supabase-js";
+import type { AuthChangeEvent, Session, User } from "@supabase/supabase-js";
 import {
   accessFromEmail, resolveFetchedAccess, resolveLoginEmail,
   type Access, type ProfileRow,
@@ -15,113 +15,181 @@ export {
 
 type UserProfile = Access;
 
-export function useAuth() {
-  const [session, setSession]     = useState<Session | null>(null);
-  const [user, setUser]           = useState<User | null>(null);
-  const [loading, setLoading]     = useState(true);
-  const [profile, setProfile]     = useState<UserProfile | null>(null);
+/*
+ * Auth state is one shared store, not per-component state.
+ *
+ * useAuth() is called from ~30 components. When each call kept its own state,
+ * each one read the session, subscribed to auth events and fetched the
+ * profile — and its event handler awaited a Supabase query. Supabase fires
+ * some auth events while holding its auth lock, and every query needs that
+ * lock to read the token, so those handlers deadlocked until the library's
+ * 5 s lock timeout broke them. Right after signing in, a dozen components
+ * mounting at once queued behind each other and the spinner ran for minutes;
+ * a page refresh (session already settled) "fixed" it.
+ *
+ * Now there is one subscription and one profile fetch, and the event handler
+ * is synchronous: anything that calls Supabase is deferred with setTimeout,
+ * as Supabase's docs recommend, so it runs after the lock is released.
+ */
 
-  // Cache the last known good profile so nav never flashes empty during re-fetches
-  const profileCache = useRef<UserProfile | null>(null);
+interface AuthState {
+  session: Session | null;
+  user:    User | null;
+  loading: boolean;
+  profile: UserProfile | null;
+}
 
-  function applyProfile(p: UserProfile) {
-    profileCache.current = p;
-    setProfile(p);
+const PROFILE_TIMEOUT_MS = 8000;
+// If Supabase never reports the initial session (GoTrue unreachable, a stuck
+// lock), stop waiting and show the login screen instead of a spinner.
+const INITIAL_SESSION_TIMEOUT_MS = 8000;
+
+let state: AuthState = { session: null, user: null, loading: true, profile: null };
+// Last known good profile, so a failed or timed-out re-fetch never changes
+// what a signed-in user can see.
+let profileCache: UserProfile | null = null;
+// Bumped on every profile load and sign-out; a load that finishes after a
+// newer one started (or after sign-out) is dropped.
+let profileSeq = 0;
+let started = false;
+const listeners = new Set<() => void>();
+
+function setState(patch: Partial<AuthState>) {
+  state = { ...state, ...patch };
+  listeners.forEach(l => l());
+}
+
+type RowResult =
+  | { kind: "row"; row: ProfileRow }
+  | { kind: "missing" }   // the database answered: there is no row
+  | { kind: "failed" };   // timed out or errored: we don't know
+
+const PROFILE_ATTEMPTS = 3;
+
+async function fetchRow(u: User): Promise<RowResult> {
+  const timeout = new Promise<"timeout">(resolve =>
+    setTimeout(() => resolve("timeout"), PROFILE_TIMEOUT_MS)
+  );
+  try {
+    const res = await Promise.race([
+      supabase
+        .from("user_profiles")
+        .select("role, allowed_pages, full_name")
+        .eq("id", u.id)
+        .maybeSingle(),
+      timeout,
+    ]);
+    if (res === "timeout" || res.error) return { kind: "failed" };
+    return res.data ? { kind: "row", row: res.data as ProfileRow } : { kind: "missing" };
+  } catch {
+    return { kind: "failed" };
   }
+}
 
-  // Fetch the user's user_profiles row. resolveFetchedAccess decides what a
-  // missing row means: keep the cached profile on a re-fetch (a NULL there is
-  // almost always the 8s timeout, and must never change what the user can
-  // see), and only on first load fall back by email — which never grants
-  // admin. An unknown email with no row gets no pages and the no-access screen.
-  async function fetchProfile(u: User) {
-    const timeout = new Promise<{ data: null }>(resolve =>
-      setTimeout(() => resolve({ data: null }), 8000)
-    );
-    let row: ProfileRow | null = null;
-    try {
-      const { data } = await Promise.race([
-        supabase
-          .from("user_profiles")
-          .select("role, allowed_pages, full_name")
-          .eq("id", u.id)
-          .maybeSingle(),
-        timeout,
-      ]);
-      row = (data as ProfileRow | null) ?? null;
-    } catch {
-      row = null;
+// One profile load per user at a time. Supabase can report the same sign-in
+// more than once; each report used to start its own query, and a slow
+// duplicate could time out and overwrite the good answer.
+let inflight: { userId: string; promise: Promise<void> } | null = null;
+
+function loadProfile(u: User): Promise<void> {
+  if (inflight?.userId === u.id) return inflight.promise;
+  const seq = ++profileSeq;
+  const promise = (async () => {
+    let result: RowResult = { kind: "failed" };
+    for (let i = 0; i < PROFILE_ATTEMPTS && result.kind === "failed"; i++) {
+      // A known-good profile already on screen doesn't need retrying.
+      if (i > 0 && profileCache) break;
+      result = await fetchRow(u);
+      if (seq !== profileSeq) return;
     }
-    applyProfile(resolveFetchedAccess({ email: u.email, row, cached: profileCache.current }));
+    if (seq !== profileSeq) return;
+    if (result.kind === "failed" && profileCache) return;  // keep what we have
+    // A timeout is not "no row": only fall back by email (fail closed) once the
+    // database has said there's no row, or every attempt failed.
+    const row = result.kind === "row" ? result.row : null;
+    profileCache = resolveFetchedAccess({ email: u.email, row, cached: profileCache });
+    setState({ profile: profileCache });
+  })().finally(() => {
+    if (inflight?.promise === promise) inflight = null;
+  });
+  inflight = { userId: u.id, promise };
+  return promise;
+}
+
+function handleAuthEvent(event: AuthChangeEvent, session: Session | null) {
+  const u = session?.user ?? null;
+  const sameUser = !!u && u.id === state.user?.id;
+  setState({ session, user: u });
+
+  if (!u) {
+    profileCache = null;
+    profileSeq++;
+    inflight = null;
+    setState({ profile: null, loading: false });
+    return;
   }
+  // A token refresh doesn't change who you are or what you can see.
+  if (event === "TOKEN_REFRESHED" && sameUser && profileCache) {
+    setState({ loading: false });
+    return;
+  }
+  if (!sameUser) {
+    // A different account: never show the previous one's access meanwhile.
+    profileCache = null;
+    setState({ profile: null });
+  }
+  void loadProfile(u).finally(() => setState({ loading: false }));
+}
 
-  useEffect(() => {
-    // getSession() is not guaranteed to settle. When GoTrue is unreachable it
-    // retries the token refresh behind a Web Lock, so the promise can hang
-    // indefinitely; a hard network failure rejects it instead. In both cases a
-    // bare .then() never runs and setLoading(false) never fires, which strands
-    // the app on ProtectedRoute's spinner. Race a timeout and swallow the
-    // rejection so we always fall through to the login screen.
-    type SessionResult = { data: { session: Session | null } };
-    const sessionTimeout = new Promise<SessionResult>(resolve =>
-      setTimeout(() => resolve({ data: { session: null } }), 8000)
-    );
+function start() {
+  if (started) return;
+  started = true;
 
-    Promise.race<SessionResult>([supabase.auth.getSession(), sessionTimeout])
-      .catch(() => ({ data: { session: null } }))
-      .then(async ({ data }) => {
-        try {
-          const s = data.session;
-          setSession(s);
-          setUser(s?.user ?? null);
-          if (s?.user) await fetchProfile(s.user);
-        } finally {
-          setLoading(false);
-        }
-      });
+  const giveUp = setTimeout(() => {
+    if (state.loading) setState({ loading: false });
+  }, INITIAL_SESSION_TIMEOUT_MS);
 
-    const { data: { subscription } } = supabase.auth.onAuthStateChange(async (_event, newSession) => {
-      setSession(newSession);
-      const u = newSession?.user ?? null;
-      setUser(u);
-      if (u) {
-        await fetchProfile(u);
-      } else {
-        profileCache.current = null;
-        setProfile(null);
-      }
-      // Note: setLoading(false) is NOT called here — loading is an initial-load concept
-      // handled by getSession above. onAuthStateChange handles post-login auth events.
-    });
+  supabase.auth.onAuthStateChange((event, session) => {
+    // Synchronous on purpose — see the comment at the top. Never await a
+    // Supabase call in here.
+    if (event === "INITIAL_SESSION") clearTimeout(giveUp);
+    setTimeout(() => handleAuthEvent(event, session), 0);
+  });
+}
 
-    return () => subscription.unsubscribe();
-  }, []);
+function subscribe(listener: () => void) {
+  start();
+  listeners.add(listener);
+  return () => { listeners.delete(listener); };
+}
 
-  const signIn = (usernameOrEmail: string, password: string) =>
-    supabase.auth.signInWithPassword({ email: resolveLoginEmail(usernameOrEmail), password });
+const getSnapshot = () => state;
+
+export function useAuth() {
+  const { session, user, loading, profile } = useSyncExternalStore(subscribe, getSnapshot);
+
+  const signIn = useCallback((usernameOrEmail: string, password: string) =>
+    supabase.auth.signInWithPassword({ email: resolveLoginEmail(usernameOrEmail), password }), []);
 
   // Drop the persisted query snapshot on sign-out so the next user on a shared
   // machine doesn't get handed the previous one's cached data.
-  const signOut = () => { clearQueryCachePersist(); return supabase.auth.signOut(); };
+  const signOut = useCallback(() => { clearQueryCachePersist(); return supabase.auth.signOut(); }, []);
 
   // Re-read the profile row, dropping the cache first so a row an admin has
   // just created (or a first load that timed out) actually takes effect.
   // Used by the no-access screen's Retry.
   const refreshProfile = useCallback(async () => {
-    if (!user) return;
-    profileCache.current = null;
-    await fetchProfile(user);
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [user]);
+    if (!state.user) return;
+    profileCache = null;
+    await loadProfile(state.user);
+  }, []);
 
-  // Use cached profile if current profile is null (prevents nav flashing empty during re-fetches)
-  const effectiveProfile = profile ?? profileCache.current;
   // Until the profile resolves, default by email so nobody briefly sees nav
   // they shouldn't. Same restrictive rule as the fetch fallback — never admin.
   const emailBasedDefault = accessFromEmail(user?.email);
-  const role         = effectiveProfile?.role         ?? emailBasedDefault.role;
-  const allowedPages = effectiveProfile?.allowedPages ?? emailBasedDefault.allowedPages;
-  const fullName     = effectiveProfile?.fullName     ?? emailBasedDefault.fullName;
+  const role         = profile?.role         ?? emailBasedDefault.role;
+  const allowedPages = profile?.allowedPages ?? emailBasedDefault.allowedPages;
+  const fullName     = profile?.fullName     ?? emailBasedDefault.fullName;
 
   return { session, user, loading, signIn, signOut, refreshProfile, role, allowedPages, fullName, profile };
 }
