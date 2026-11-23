@@ -672,7 +672,10 @@ export function useBackfillFormCsv() {
         const phone = pickFirst(lower, ["phone", "phonenumber", "mobile", "tel", "telephone", "whatsapp"]);
         const first = pickFirst(lower, ["firstname", "fname", "givenname"]);
         const last  = pickFirst(lower, ["lastname", "lname", "surname", "familyname"]);
-        const full  = pickFirst(lower, ["fullname", "name"]);
+        // "contactname" is what the Doctors Finder export calls it; without
+        // it every imported enquiry read "Anonymous" while the name sat
+        // unused in the answers.
+        const full  = pickFirst(lower, ["fullname", "name", "contactname", "patientname", "yourname"]);
         const dateRaw = pickFirst(lower, [
           "submittedat", "submitteddate", "date", "createdat", "created", "orderdate", "ordertime", "timestamp", "time",
         ]);
@@ -686,7 +689,7 @@ export function useBackfillFormCsv() {
           "email", "emailaddress", "respondentemail",
           "firstname", "fname", "givenname",
           "lastname", "lname", "surname", "familyname",
-          "fullname", "name",
+          "fullname", "name", "contactname", "patientname", "yourname",
           "submittedat", "submitteddate", "date", "createdat", "created", "orderdate", "ordertime", "timestamp", "time",
         ]);
         const answers: Record<string, string> = {};

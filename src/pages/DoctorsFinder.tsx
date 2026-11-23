@@ -23,7 +23,7 @@ import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/com
 import { Input } from "@/components/ui/input";
 import { Badge } from "@/components/ui/badge";
 import { Skeleton } from "@/components/ui/skeleton";
-import { Search, Stethoscope, Inbox, Mail, Phone, Building2, ExternalLink, CalendarDays } from "lucide-react";
+import { Search, Stethoscope, Inbox, Mail, Phone, Building2, ExternalLink, CalendarDays, MapPin } from "lucide-react";
 import { useDoctorsFinderEnquiries, volumeByDoctor, type Enquiry } from "@/hooks/use-doctors-finder";
 
 /** Answer keys that are plumbing, not enquiry detail. Both Doctors Finder
@@ -37,7 +37,9 @@ const NOT_DETAIL = new Set([
   // split in two, which the row already prints in full on the right - seeing
   // "23 Nov 2026, 22:51" and then "Date: November 23, 2026 / Time: 5:51 pm"
   // underneath reads like three different facts.
-  "date", "time", "createdat", "submissionid", "formid", "formname",
+  // "formnameid" is the CSV export's "Form Name (ID)" column - the form is
+  // already named in the badge beside the doctor.
+  "date", "time", "createdat", "submissionid", "formid", "formname", "formnameid",
   "pageid", "pageurl", "pagetitle", "postid", "queriedid",
   "userid", "useragent", "userip", "remoteip", "referrer",
 ]);
@@ -46,26 +48,57 @@ const NOT_DETAIL = new Set([
  *  the CSV export ("Form Name (ID)"), so compare them stripped. */
 const keyOf = (k: string) => k.toLowerCase().replace(/[^a-z0-9]/g, "");
 
-/** Detail fields worth leading with, in the order a reader wants them.
- *  Anything else the form collects still shows, just after these. */
-const DETAIL_ORDER = [
-  "Symptoms or Reason for Visit", "Message", "Subject",
-  "Severity", "Preferred Date", "Available Date:", "Preferred Location", "Location",
-  "Relevant Medical History", "Additional Notes",
-];
+/** The fields both forms ask in their own words. Each is pulled out and given
+ *  its own shape below, because an enquiry read as nine identical label/value
+ *  rows buries the one line that matters — what the patient actually wants. */
+const FIELD = {
+  reason:   ["symptomsorreasonforvisit", "message", "subject"],
+  severity: ["severity"],
+  when:     ["preferreddate", "availabledate", "preferredtime"],
+  where:    ["preferredlocation"],
+  located:  ["location"],
+  history:  ["relevantmedicalhistory", "medicalhistory"],
+  notes:    ["additionalnotes", "notes"],
+  name:     ["contactname", "name", "patientname", "fullname"],
+} as const;
 
-function detailPairs(answers: Record<string, string>): Array<[string, string]> {
-  const kept = Object.entries(answers).filter(([k, v]) => v?.trim() && !NOT_DETAIL.has(keyOf(k)));
-  const rank = (k: string) => {
-    const i = DETAIL_ORDER.findIndex(d => d.toLowerCase() === k.trim().toLowerCase());
-    return i === -1 ? DETAIL_ORDER.length : i;
-  };
-  return kept.sort((a, b) => rank(a[0]) - rank(b[0]));
+/** Keys differ by punctuation and case between the webhook ("form_id") and
+ *  the CSV export ("Form Name (ID)"), so compare them stripped. */
+const keyOf = (k: string) => k.toLowerCase().replace(/[^a-z0-9]/g, "");
+
+function pickKey(answers: Record<string, string>, keys: readonly string[]): string | null {
+  for (const want of keys) {
+    for (const [k, v] of Object.entries(answers)) {
+      if (keyOf(k) === want && v?.trim()) return v.trim();
+    }
+  }
+  return null;
 }
 
 const pick = (answers: Record<string, string>, re: RegExp): string | null => {
   for (const [k, v] of Object.entries(answers)) if (re.test(k) && v?.trim()) return v.trim();
   return null;
+};
+
+/** Whatever the form collected that the layout above does not already show.
+ *  Nothing is dropped silently — an unrecognised question still renders, it
+ *  just renders last. */
+function leftoverPairs(answers: Record<string, string>): Array<[string, string]> {
+  const claimed = new Set<string>([...Object.values(FIELD).flat(), ...NOT_DETAIL]);
+  return Object.entries(answers).filter(([k, v]) => {
+    // A blank heading is the Elementor consent checkbox, which exports as a
+    // nameless column holding "on". It rendered as an orphan value with no
+    // label - a row that said nothing at all.
+    if (!k.trim() || !v?.trim()) return false;
+    return !claimed.has(keyOf(k));
+  });
+}
+
+const SEVERITY_STYLE: Record<string, string> = {
+  mild:     "bg-emerald-50 text-emerald-700 border-emerald-200",
+  moderate: "bg-amber-50 text-amber-700 border-amber-200",
+  severe:   "bg-rose-50 text-rose-700 border-rose-200",
+  urgent:   "bg-rose-50 text-rose-700 border-rose-200",
 };
 
 function fmtDate(iso: string): string {
@@ -225,8 +258,26 @@ export default function DoctorsFinder() {
 }
 
 function EnquiryRow({ e }: { e: Enquiry }) {
-  const phone  = pick(e.answers, /phone|mobile|tel|whatsapp/i);
-  const detail = detailPairs(e.answers);
+  const phone = pick(e.answers, /phone|mobile|tel|whatsapp/i);
+  // The CSV backfill never recognised "Contact Name" as a name, so rows
+  // imported from the export have a null respondent and used to read
+  // "Anonymous" while their name sat in the answers. Fall back to it.
+  const who = e.enquirer_name || pickKey(e.answers, FIELD.name);
+
+  const reason   = pickKey(e.answers, FIELD.reason);
+  const severity = pickKey(e.answers, FIELD.severity);
+  const when     = pickKey(e.answers, FIELD.when);
+  const where    = pickKey(e.answers, FIELD.where);
+  const located  = pickKey(e.answers, FIELD.located);
+  const history  = pickKey(e.answers, FIELD.history);
+  const notes    = pickKey(e.answers, FIELD.notes);
+  const leftover = leftoverPairs(e.answers);
+
+  // Both place fields, but only once when the patient typed the same thing
+  // in each ("Dubai" / "Dubai"); twice when they differ ("DUBAI" / "US"),
+  // because then one is where they want care and the other is where they are.
+  const places = [where, located].filter(Boolean)
+    .filter((p, i, a) => a.findIndex(x => x!.toLowerCase() === p!.toLowerCase()) === i);
 
   return (
     <div className="py-3">
@@ -247,7 +298,7 @@ function EnquiryRow({ e }: { e: Enquiry }) {
             <Badge variant="outline" className="text-[10px] font-normal">{e.form_name}</Badge>
           </div>
           <div className="mt-0.5 text-xs text-muted-foreground flex items-center gap-x-3 gap-y-0.5 flex-wrap">
-            <span>{e.enquirer_name || "Anonymous"}</span>
+            <span className={who ? "font-medium text-foreground" : ""}>{who || "Anonymous"}</span>
             {e.enquirer_email && (
               <a href={`mailto:${e.enquirer_email}`} className="inline-flex items-center gap-1 hover:underline">
                 <Mail className="h-3 w-3" />{e.enquirer_email}
@@ -276,11 +327,37 @@ function EnquiryRow({ e }: { e: Enquiry }) {
         </div>
       </div>
 
-      {detail.length > 0 && (
-        <dl className="mt-2 grid grid-cols-1 sm:grid-cols-[auto_minmax(0,1fr)] gap-x-3 gap-y-0.5 text-xs">
-          {detail.map(([k, v]) => (
+      {/* What they actually want, in their own words. This is the enquiry;
+          everything else is qualifier, so it leads and the rest sits under. */}
+      {reason && <p className="mt-2 text-sm break-words">{reason}</p>}
+
+      {(severity || when || places.length > 0) && (
+        <div className="mt-1.5 flex items-center gap-1.5 flex-wrap text-[11px]">
+          {severity && (
+            <span className={`px-1.5 py-0.5 rounded border ${SEVERITY_STYLE[severity.toLowerCase()] ?? "bg-slate-50 text-slate-600 border-slate-200"}`}>
+              {severity}
+            </span>
+          )}
+          {when && (
+            <span className="px-1.5 py-0.5 rounded border border-slate-200 text-muted-foreground inline-flex items-center gap-1">
+              <CalendarDays className="h-3 w-3" />{when}
+            </span>
+          )}
+          {places.map(p => (
+            <span key={p} className="px-1.5 py-0.5 rounded border border-slate-200 text-muted-foreground inline-flex items-center gap-1">
+              <MapPin className="h-3 w-3" />{p}
+            </span>
+          ))}
+        </div>
+      )}
+
+      {(history || notes || leftover.length > 0) && (
+        <dl className="mt-1.5 grid grid-cols-1 sm:grid-cols-[auto_minmax(0,1fr)] gap-x-3 gap-y-0.5 text-[11px] text-muted-foreground">
+          {history && <div className="contents"><dt>Medical history</dt><dd className="min-w-0 break-words">{history}</dd></div>}
+          {notes   && <div className="contents"><dt>Notes</dt><dd className="min-w-0 break-words">{notes}</dd></div>}
+          {leftover.map(([k, v]) => (
             <div key={k} className="contents">
-              <dt className="text-muted-foreground whitespace-nowrap">{k.replace(/:$/, "")}</dt>
+              <dt className="whitespace-nowrap">{k.replace(/:$/, "")}</dt>
               <dd className="min-w-0 break-words">{v}</dd>
             </div>
           ))}
