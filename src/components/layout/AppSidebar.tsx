@@ -124,9 +124,19 @@ const NAV_SECTIONS: NavSection[] = [
       { title: "Meta Ads",          url: "/meta-ads",        icon: Image },
       { title: "Chatbot",           url: "/chatbot",         icon: Bot },
       { title: "Forms",             url: "/forms",           icon: ClipboardList },
-      { title: "Doctors Finder",    url: "/doctors-finder",  icon: Stethoscope },
       { title: "Team Performance",  url: "/team",            icon: UsersIcon },
       { title: "Finance",           url: "/finance",         icon: DollarSign },
+    ],
+  },
+  {
+    // Its own block rather than a line under Growth: doctorsfinder.com is a
+    // separate product with its own audience, and enquiries arriving on it
+    // are not the team's own marketing output. Room here for the hospital
+    // enquiries and the directory's other surfaces as they arrive.
+    label: "Doctors Finder",
+    accent: "#2dd4bf",  // vivid teal
+    items: [
+      { title: "Enquiries",         url: "/doctors-finder",  icon: Stethoscope },
     ],
   },
 ];
