@@ -62,10 +62,6 @@ const FIELD = {
   name:     ["contactname", "name", "patientname", "fullname"],
 } as const;
 
-/** Keys differ by punctuation and case between the webhook ("form_id") and
- *  the CSV export ("Form Name (ID)"), so compare them stripped. */
-const keyOf = (k: string) => k.toLowerCase().replace(/[^a-z0-9]/g, "");
-
 function pickKey(answers: Record<string, string>, keys: readonly string[]): string | null {
   for (const want of keys) {
     for (const [k, v] of Object.entries(answers)) {
