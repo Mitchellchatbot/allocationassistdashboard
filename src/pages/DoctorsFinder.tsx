@@ -116,11 +116,6 @@ export default function DoctorsFinder() {
 
   const doctors = useMemo(() => volumeByDoctor(enquiries), [enquiries]);
 
-  const unattributed = useMemo(
-    () => enquiries.filter(e => e.target_kind !== "doctor" || !e.target_slug).length,
-    [enquiries],
-  );
-
   const thisMonth = useMemo(() => {
     const now = new Date();
     const from = new Date(now.getFullYear(), now.getMonth(), 1).getTime();
@@ -152,15 +147,13 @@ export default function DoctorsFinder() {
           </p>
         </div>
 
-        {/* Four counts is the most a strip can carry and still be read at a
-            glance. "Not identified" earns its place because it is the honest
-            limit of everything else on the page. */}
-        <div className="grid grid-cols-2 lg:grid-cols-4 gap-4">
-          <Kpi label="Enquiries"             value={enquiries.length} loading={isLoading} />
-          <Kpi label="This month"            value={thisMonth}        loading={isLoading} />
-          <Kpi label="Doctors approached"    value={doctors.length}   loading={isLoading} />
-          <Kpi label="Doctor not identified" value={unattributed}     loading={isLoading} muted
-               hint="Submitted from a page that names no doctor — a blog post, or with no referrer at all." />
+        {/* An enquiry whose page named no doctor still appears in the list,
+            labelled as such on its own row - it just no longer gets a tile
+            of its own up here. */}
+        <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
+          <Kpi label="Enquiries"          value={enquiries.length} loading={isLoading} />
+          <Kpi label="This month"         value={thisMonth}        loading={isLoading} />
+          <Kpi label="Doctors approached" value={doctors.length}   loading={isLoading} />
         </div>
 
         <div className="grid grid-cols-1 lg:grid-cols-[minmax(0,22rem)_minmax(0,1fr)] gap-6 items-start">
@@ -363,16 +356,14 @@ function EnquiryRow({ e }: { e: Enquiry }) {
   );
 }
 
-function Kpi({ label, value, loading, muted, hint }: {
-  label: string; value: number; loading: boolean; muted?: boolean; hint?: string;
-}) {
+function Kpi({ label, value, loading }: { label: string; value: number; loading: boolean }) {
   return (
-    <Card title={hint}>
+    <Card>
       <CardContent className="p-4">
         <div className="text-xs text-muted-foreground">{label}</div>
         {loading
           ? <Skeleton className="h-7 w-12 mt-1" />
-          : <div className={`text-2xl font-semibold tabular-nums mt-0.5 ${muted ? "text-muted-foreground" : ""}`}>{value}</div>}
+          : <div className="text-2xl font-semibold tabular-nums mt-0.5">{value}</div>}
       </CardContent>
     </Card>
   );
