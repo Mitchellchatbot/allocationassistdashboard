@@ -83,6 +83,7 @@ const BulkImport      = lazy(() => import("./pages/BulkImport"));
 const Connections     = lazy(() => import("./pages/Connections"));
 const SharedProfile   = lazy(() => import("./pages/SharedProfile"));
 const Forms           = lazy(() => import("./pages/Forms"));
+const DoctorsFinder   = lazy(() => import("./pages/DoctorsFinder"));
 const Doctors         = lazy(() => import("./pages/Doctors"));
 const Docs            = lazy(() => import("./pages/Docs"));
 const Feedback        = lazy(() => import("./pages/Feedback"));
@@ -302,6 +303,7 @@ const App = () => {
                 <Route path="/import-bulk"    element={<BulkImport />} />
                 <Route path="/connections"    element={<Connections />} />
                 <Route path="/forms"          element={<Forms />} />
+                <Route path="/doctors-finder" element={<DoctorsFinder />} />
                 {/* Documentation — open to every signed-in user (gated as a
                     special case in ProtectedRoute). */}
                 <Route path="/docs"           element={<Docs />} />

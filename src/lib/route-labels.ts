@@ -20,6 +20,7 @@ export const ROUTE_LABELS: Record<string, { label: string; section: string }> = 
   "/my-workspace":     { label: "My Workspace",     section: "Hospital Introduction" },
   "/doctors":          { label: "Doctors",          section: "Hospital Introduction" },
   "/forms":            { label: "Forms",            section: "Growth" },
+  "/doctors-finder":   { label: "Enquiries",        section: "Doctors Finder" },
   // Legacy paths still kept for breadcrumb labels on direct visits —
   // App.tsx redirects them into /doctors with the right tab pre-selected.
   "/leads-pipeline":   { label: "Doctor Progress",  section: "Hospital Introduction" },

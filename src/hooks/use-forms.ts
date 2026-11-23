@@ -14,6 +14,7 @@ import { useQuery, useMutation, useQueryClient, useInfiniteQuery, keepPreviousDa
 import { supabase } from "@/lib/supabase";
 import { useCallback } from "react";
 import { useTableSubscription } from "@/lib/realtime-registry";
+import { enquiryTargetFrom, findTargetUrl } from "@/lib/enquiry-target";
 
 export interface Form {
   id:                string;
@@ -55,6 +56,14 @@ export interface FormResponse {
   respondent_name:       string | null;
   respondent_email:      string | null;
   doctor_id:             string | null;
+
+  /** Who the enquiry was ABOUT, parsed from the page it was submitted from.
+   *  Not to be confused with doctor_id, which is the AA lead/DoB of whoever
+   *  SENT it. Null when the submission carried no identifying page URL. */
+  target_kind:           "doctor" | "hospital" | null;
+  /** Identity of that profile. Group and count by this, never by name. */
+  target_slug:           string | null;
+  target_name:           string | null;
 
   // Outreach lifecycle.
   outreach_status:       OutreachStatus;
@@ -663,7 +672,10 @@ export function useBackfillFormCsv() {
         const phone = pickFirst(lower, ["phone", "phonenumber", "mobile", "tel", "telephone", "whatsapp"]);
         const first = pickFirst(lower, ["firstname", "fname", "givenname"]);
         const last  = pickFirst(lower, ["lastname", "lname", "surname", "familyname"]);
-        const full  = pickFirst(lower, ["fullname", "name"]);
+        // "contactname" is what the Doctors Finder export calls it; without
+        // it every imported enquiry read "Anonymous" while the name sat
+        // unused in the answers.
+        const full  = pickFirst(lower, ["fullname", "name", "contactname", "patientname", "yourname"]);
         const dateRaw = pickFirst(lower, [
           "submittedat", "submitteddate", "date", "createdat", "created", "orderdate", "ordertime", "timestamp", "time",
         ]);
@@ -677,7 +689,7 @@ export function useBackfillFormCsv() {
           "email", "emailaddress", "respondentemail",
           "firstname", "fname", "givenname",
           "lastname", "lname", "surname", "familyname",
-          "fullname", "name",
+          "fullname", "name", "contactname", "patientname", "yourname",
           "submittedat", "submitteddate", "date", "createdat", "created", "orderdate", "ordertime", "timestamp", "time",
         ]);
         const answers: Record<string, string> = {};
@@ -700,6 +712,13 @@ export function useBackfillFormCsv() {
         const fingerprint = `${formId}|${respondent_email ?? ""}|${submitted_at}|${respondent_name ?? ""}`;
         const provider_response_id = "csv:" + await sha256Hex(fingerprint);
 
+        // Who the enquiry was about. The export calls the column "Referrer";
+        // findTargetUrl also copes with the other names Elementor uses, and
+        // falls back to any value in the row that resolves to a profile.
+        const target = enquiryTargetFrom(findTargetUrl(
+          Object.fromEntries(Object.entries(row).map(([k, v]) => [k, String(v ?? "")])),
+        ));
+
         return {
           form_id:        formId,
           provider_response_id,
@@ -709,6 +728,9 @@ export function useBackfillFormCsv() {
           respondent_name,
           respondent_email,
           outreach_status: "new",
+          target_kind:    target?.kind ?? null,
+          target_slug:    target?.slug ?? null,
+          target_name:    target?.name ?? null,
         };
       }));
 
@@ -723,7 +745,10 @@ export function useBackfillFormCsv() {
           .from("form_responses")
           .upsert(slice, { onConflict: "form_id,provider_response_id", ignoreDuplicates: true })
           .select("id");
-        if (error) throw error;
+        // A PostgrestError is a plain object, not an Error, so throwing it
+        // raw left the page showing a bare "CSV import failed" - which is
+        // what an RLS refusal looked like for months. Say what happened.
+        if (error) throw new Error(error.message || "Importing the CSV failed");
         inserted += data?.length ?? 0;
       }
       return { inserted, skipped: prepared.length - inserted, total: prepared.length };

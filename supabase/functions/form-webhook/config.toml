@@ -1,0 +1,10 @@
+# Elementor's "Webhook" action posts a bare form-encoded body: it cannot set
+# an Authorization header, so a JWT check would reject every submission before
+# the function ran.
+#
+# The endpoint is not unauthenticated, though - it is authenticated by the
+# `?key=` secret, which is unique per form, looked up against
+# forms.webhook_secret, and refused with a 401 when it matches no form. The
+# secret is the credential; a JWT would only be a second one Elementor has no
+# way to present.
+verify_jwt = false

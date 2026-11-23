@@ -22,6 +22,7 @@
  */
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2.45.0";
 import { notify } from "../_shared/notify.ts";
+import { enquiryTargetFrom, findTargetUrl } from "../_shared/enquiry-target.ts";
 
 const supabaseUrl = Deno.env.get("SUPABASE_URL") ?? "";
 const serviceKey  = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY") ?? "";
@@ -176,6 +177,16 @@ Deno.serve(async (req: Request) => {
     else if (typeof data === "string") doctorId = data;
   }
 
+  // ── 5b. Who the enquiry was about ──────────────────────────────
+  // Doctors Finder's forms sit on a doctor's profile page and never ask which
+  // doctor, so the page URL is the only evidence. Parsed here, at write time,
+  // because the Doctors Finder section groups by it and re-deriving it on
+  // every render would mean running the parser over rows it has already seen.
+  // Null is a real answer: a submission from a blog post, or with no
+  // referrer at all, is genuinely unattributable.
+  const targetUrl = findTargetUrl(flat);
+  const target    = enquiryTargetFrom(targetUrl);
+
   // ── 6. Insert (idempotent) ─────────────────────────────────────────
   const { error: insErr } = await supabase
     .from("form_responses")
@@ -188,6 +199,9 @@ Deno.serve(async (req: Request) => {
       respondent_name:       respondentName || null,
       respondent_email:      respondentEmail || null,
       doctor_id:             doctorId,
+      target_kind:           target?.kind ?? null,
+      target_slug:           target?.slug ?? null,
+      target_name:           target?.name ?? null,
     }, { onConflict: "form_id,provider_response_id", ignoreDuplicates: true });
 
   if (insErr) {

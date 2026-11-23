@@ -1,0 +1,379 @@
+/**
+ * Doctors Finder — every enquiry from doctorsfinder.com, and who it was for.
+ *
+ * The brief was "lists every form submission as it comes in, with the date,
+ * the enquiry details, and the doctor it was sent to, so we can start
+ * tracking volume per doctor. Keep it simple and easy to read." So: two
+ * blocks and nothing else. Per doctor on the left, because that is the
+ * question being asked; the raw feed beside it, because that is the evidence
+ * for it.
+ *
+ * Deliberately separate from /forms. That page is a tab per form with an
+ * outreach workflow attached; this one spans the forms and counts by doctor,
+ * and the two shapes fight each other on one screen.
+ *
+ * The doctor comes from the page a submission was made on - see
+ * enquiry-target.ts. Some submissions have none, and those are shown as a
+ * stated count rather than hidden, because the team needs to know how much
+ * of the picture is missing.
+ */
+import { useMemo, useState } from "react";
+import { DashboardLayout } from "@/components/layout/DashboardLayout";
+import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
+import { Input } from "@/components/ui/input";
+import { Badge } from "@/components/ui/badge";
+import { Skeleton } from "@/components/ui/skeleton";
+import { Search, Stethoscope, Inbox, Mail, Phone, Building2, ExternalLink, CalendarDays, MapPin } from "lucide-react";
+import { useDoctorsFinderEnquiries, volumeByDoctor, type Enquiry } from "@/hooks/use-doctors-finder";
+
+/** Answer keys that are plumbing, not enquiry detail. Both Doctors Finder
+ *  forms ship the enquirer's own contact details as answers; those already
+ *  have their own line, so repeating them in the detail block is noise. */
+const NOT_DETAIL = new Set([
+  // Already on the row's own line.
+  "contactname", "name", "firstname", "lastname",
+  "email", "emailaddress", "phone", "phonenumber",
+  // Elementor's own meta. "date" and "time" are the submission's timestamp
+  // split in two, which the row already prints in full on the right - seeing
+  // "23 Nov 2026, 22:51" and then "Date: November 23, 2026 / Time: 5:51 pm"
+  // underneath reads like three different facts.
+  // "formnameid" is the CSV export's "Form Name (ID)" column - the form is
+  // already named in the badge beside the doctor.
+  "date", "time", "createdat", "submissionid", "formid", "formname", "formnameid",
+  "pageid", "pageurl", "pagetitle", "postid", "queriedid",
+  "userid", "useragent", "userip", "remoteip", "referrer",
+]);
+
+/** Keys differ by punctuation and case between the webhook ("form_id") and
+ *  the CSV export ("Form Name (ID)"), so compare them stripped. */
+const keyOf = (k: string) => k.toLowerCase().replace(/[^a-z0-9]/g, "");
+
+/** The fields both forms ask in their own words. Each is pulled out and given
+ *  its own shape below, because an enquiry read as nine identical label/value
+ *  rows buries the one line that matters — what the patient actually wants. */
+const FIELD = {
+  reason:   ["symptomsorreasonforvisit", "message", "subject"],
+  severity: ["severity"],
+  when:     ["preferreddate", "availabledate", "preferredtime"],
+  where:    ["preferredlocation"],
+  located:  ["location"],
+  history:  ["relevantmedicalhistory", "medicalhistory"],
+  notes:    ["additionalnotes", "notes"],
+  name:     ["contactname", "name", "patientname", "fullname"],
+} as const;
+
+function pickKey(answers: Record<string, string>, keys: readonly string[]): string | null {
+  for (const want of keys) {
+    for (const [k, v] of Object.entries(answers)) {
+      if (keyOf(k) === want && v?.trim()) return v.trim();
+    }
+  }
+  return null;
+}
+
+const pick = (answers: Record<string, string>, re: RegExp): string | null => {
+  for (const [k, v] of Object.entries(answers)) if (re.test(k) && v?.trim()) return v.trim();
+  return null;
+};
+
+/** Whatever the form collected that the layout above does not already show.
+ *  Nothing is dropped silently — an unrecognised question still renders, it
+ *  just renders last. */
+function leftoverPairs(answers: Record<string, string>): Array<[string, string]> {
+  const claimed = new Set<string>([...Object.values(FIELD).flat(), ...NOT_DETAIL]);
+  return Object.entries(answers).filter(([k, v]) => {
+    // A blank heading is the Elementor consent checkbox, which exports as a
+    // nameless column holding "on". It rendered as an orphan value with no
+    // label - a row that said nothing at all.
+    if (!k.trim() || !v?.trim()) return false;
+    return !claimed.has(keyOf(k));
+  });
+}
+
+const SEVERITY_STYLE: Record<string, string> = {
+  mild:     "bg-emerald-50 text-emerald-700 border-emerald-200",
+  moderate: "bg-amber-50 text-amber-700 border-amber-200",
+  severe:   "bg-rose-50 text-rose-700 border-rose-200",
+  urgent:   "bg-rose-50 text-rose-700 border-rose-200",
+};
+
+function fmtDate(iso: string): string {
+  const d = new Date(iso);
+  if (isNaN(d.getTime())) return "—";
+  return d.toLocaleString("en-GB", { day: "numeric", month: "short", year: "numeric", hour: "2-digit", minute: "2-digit" });
+}
+
+function fmtDay(iso: string): string {
+  const d = new Date(iso);
+  if (isNaN(d.getTime())) return "—";
+  return d.toLocaleDateString("en-GB", { day: "numeric", month: "short", year: "numeric" });
+}
+
+export default function DoctorsFinder() {
+  const { data: enquiries = [], isLoading } = useDoctorsFinderEnquiries();
+  const [search, setSearch] = useState("");
+  const [onlyDoctor, setOnlyDoctor] = useState<string | null>(null);
+
+  const doctors = useMemo(() => volumeByDoctor(enquiries), [enquiries]);
+
+  const thisMonth = useMemo(() => {
+    const now = new Date();
+    const from = new Date(now.getFullYear(), now.getMonth(), 1).getTime();
+    return enquiries.filter(e => new Date(e.submitted_at).getTime() >= from).length;
+  }, [enquiries]);
+
+  const shown = useMemo(() => {
+    const q = search.trim().toLowerCase();
+    return enquiries.filter(e => {
+      if (onlyDoctor && e.target_slug !== onlyDoctor) return false;
+      if (!q) return true;
+      const hay = [e.target_name, e.enquirer_name, e.enquirer_email, e.form_name, ...Object.values(e.answers)]
+        .filter(Boolean).join(" ").toLowerCase();
+      return hay.includes(q);
+    });
+  }, [enquiries, search, onlyDoctor]);
+
+  const topCount = doctors[0]?.count ?? 1;
+
+  return (
+    <DashboardLayout>
+      <div className="space-y-6 p-4 md:p-6">
+        <div>
+          <h1 className="text-xl font-semibold flex items-center gap-2">
+            <Stethoscope className="h-5 w-5 text-violet-600" /> Doctors Finder
+          </h1>
+          <p className="text-sm text-muted-foreground mt-0.5">
+            Every enquiry from doctorsfinder.com, and which doctor it was sent to.
+          </p>
+        </div>
+
+        {/* An enquiry whose page named no doctor still appears in the list,
+            labelled as such on its own row - it just no longer gets a tile
+            of its own up here. */}
+        <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
+          <Kpi label="Enquiries"          value={enquiries.length} loading={isLoading} />
+          <Kpi label="This month"         value={thisMonth}        loading={isLoading} />
+          <Kpi label="Doctors approached" value={doctors.length}   loading={isLoading} />
+        </div>
+
+        <div className="grid grid-cols-1 lg:grid-cols-[minmax(0,22rem)_minmax(0,1fr)] gap-6 items-start">
+          {/* ── Volume per doctor ─────────────────────────────────── */}
+          <Card>
+            <CardHeader className="pb-2">
+              <CardTitle className="text-base">Enquiries per doctor</CardTitle>
+              <CardDescription className="text-[11px]">
+                Click a doctor to filter the list. The green figure is the last 30 days.
+              </CardDescription>
+            </CardHeader>
+            <CardContent className="pt-0">
+              {isLoading ? (
+                <div className="space-y-2">{Array.from({ length: 6 }).map((_, i) => <Skeleton key={i} className="h-8 w-full" />)}</div>
+              ) : doctors.length === 0 ? (
+                <Empty>No enquiry has named a doctor yet.</Empty>
+              ) : (
+                <div className="divide-y divide-slate-100">
+                  {doctors.map(d => (
+                    <button
+                      key={d.slug}
+                      type="button"
+                      aria-pressed={onlyDoctor === d.slug}
+                      onClick={() => setOnlyDoctor(onlyDoctor === d.slug ? null : d.slug)}
+                      className={`w-full text-left py-2 px-1 rounded transition-colors ${onlyDoctor === d.slug ? "bg-violet-50" : "hover:bg-slate-50"}`}
+                    >
+                      <div className="flex items-baseline gap-2">
+                        <span className="flex-1 min-w-0 truncate text-sm">{d.name}</span>
+                        <span className="tabular-nums text-sm font-semibold">{d.count}</span>
+                        {d.recent > 0 && <span className="tabular-nums text-[10px] text-emerald-600">+{d.recent}</span>}
+                      </div>
+                      <div className="mt-1 h-1 rounded bg-slate-100 overflow-hidden">
+                        <div className="h-full bg-violet-500" style={{ width: `${Math.max(4, (d.count / topCount) * 100)}%` }} />
+                      </div>
+                      <div className="mt-1 text-[10px] text-muted-foreground">Last {fmtDay(d.lastAt)}</div>
+                    </button>
+                  ))}
+                </div>
+              )}
+            </CardContent>
+          </Card>
+
+          {/* ── The feed ──────────────────────────────────────────── */}
+          <Card>
+            <CardHeader className="pb-3">
+              <div className="flex items-center justify-between gap-3 flex-wrap">
+                <div>
+                  <CardTitle className="text-base">Enquiries</CardTitle>
+                  <CardDescription className="text-[11px]">Newest first, updating as they arrive.</CardDescription>
+                </div>
+                <div className="relative w-full sm:w-64">
+                  <Search className="absolute left-2.5 top-1/2 -translate-y-1/2 h-3.5 w-3.5 text-muted-foreground" />
+                  <Input
+                    value={search}
+                    onChange={e => setSearch(e.target.value)}
+                    placeholder="Search name, doctor, message…"
+                    className="pl-8 h-8 text-sm"
+                  />
+                </div>
+              </div>
+              {onlyDoctor && (
+                <button
+                  type="button"
+                  onClick={() => setOnlyDoctor(null)}
+                  className="self-start text-[11px] text-violet-700 underline underline-offset-2"
+                >
+                  Showing {doctors.find(d => d.slug === onlyDoctor)?.name ?? onlyDoctor} only — clear
+                </button>
+              )}
+            </CardHeader>
+            <CardContent className="pt-0">
+              {isLoading ? (
+                <div className="space-y-3">{Array.from({ length: 5 }).map((_, i) => <Skeleton key={i} className="h-20 w-full" />)}</div>
+              ) : shown.length === 0 ? (
+                <Empty>
+                  {enquiries.length === 0
+                    ? "Nothing yet. Once a Doctors Finder form is wired to its webhook on the Forms page, submissions appear here as they arrive."
+                    : "No enquiry matches that search."}
+                </Empty>
+              ) : (
+                <div className="divide-y divide-slate-100">
+                  {shown.map(e => <EnquiryRow key={e.id} e={e} />)}
+                </div>
+              )}
+            </CardContent>
+          </Card>
+        </div>
+      </div>
+    </DashboardLayout>
+  );
+}
+
+function EnquiryRow({ e }: { e: Enquiry }) {
+  const phone = pick(e.answers, /phone|mobile|tel|whatsapp/i);
+  // The CSV backfill never recognised "Contact Name" as a name, so rows
+  // imported from the export have a null respondent and used to read
+  // "Anonymous" while their name sat in the answers. Fall back to it.
+  const who = e.enquirer_name || pickKey(e.answers, FIELD.name);
+
+  const reason   = pickKey(e.answers, FIELD.reason);
+  const severity = pickKey(e.answers, FIELD.severity);
+  const when     = pickKey(e.answers, FIELD.when);
+  const where    = pickKey(e.answers, FIELD.where);
+  const located  = pickKey(e.answers, FIELD.located);
+  const history  = pickKey(e.answers, FIELD.history);
+  const notes    = pickKey(e.answers, FIELD.notes);
+  const leftover = leftoverPairs(e.answers);
+
+  // Both place fields, but only once when the patient typed the same thing
+  // in each ("Dubai" / "Dubai"); twice when they differ ("DUBAI" / "US"),
+  // because then one is where they want care and the other is where they are.
+  const places = [where, located].filter(Boolean)
+    .filter((p, i, a) => a.findIndex(x => x!.toLowerCase() === p!.toLowerCase()) === i);
+
+  return (
+    <div className="py-3">
+      <div className="flex items-start justify-between gap-3 flex-wrap">
+        <div className="min-w-0">
+          <div className="flex items-center gap-2 flex-wrap">
+            {e.target_kind === "doctor" && e.target_name ? (
+              <span className="text-sm font-medium flex items-center gap-1.5">
+                <Stethoscope className="h-3.5 w-3.5 text-violet-600" /> {e.target_name}
+              </span>
+            ) : e.target_kind === "hospital" && e.target_name ? (
+              <span className="text-sm font-medium flex items-center gap-1.5">
+                <Building2 className="h-3.5 w-3.5 text-sky-600" /> {e.target_name}
+              </span>
+            ) : (
+              <span className="text-sm text-muted-foreground italic">Doctor not identified</span>
+            )}
+            <Badge variant="outline" className="text-[10px] font-normal">{e.form_name}</Badge>
+          </div>
+          <div className="mt-0.5 text-xs text-muted-foreground flex items-center gap-x-3 gap-y-0.5 flex-wrap">
+            <span className={who ? "font-medium text-foreground" : ""}>{who || "Anonymous"}</span>
+            {e.enquirer_email && (
+              <a href={`mailto:${e.enquirer_email}`} className="inline-flex items-center gap-1 hover:underline">
+                <Mail className="h-3 w-3" />{e.enquirer_email}
+              </a>
+            )}
+            {phone && (
+              <a href={`tel:${phone}`} className="inline-flex items-center gap-1 hover:underline">
+                <Phone className="h-3 w-3" />{phone}
+              </a>
+            )}
+          </div>
+        </div>
+        <div className="text-xs text-muted-foreground whitespace-nowrap flex items-center gap-1.5 shrink-0">
+          <CalendarDays className="h-3 w-3" />{fmtDate(e.submitted_at)}
+          {e.target_kind === "doctor" && e.target_slug && (
+            <a
+              href={`https://doctorsfinder.com/doctor/${e.target_slug}/`}
+              target="_blank"
+              rel="noreferrer noopener"
+              title="Open this doctor's profile on doctorsfinder.com"
+              className="hover:text-violet-600"
+            >
+              <ExternalLink className="h-3 w-3" />
+            </a>
+          )}
+        </div>
+      </div>
+
+      {/* What they actually want, in their own words. This is the enquiry;
+          everything else is qualifier, so it leads and the rest sits under. */}
+      {reason && <p className="mt-2 text-sm break-words">{reason}</p>}
+
+      {(severity || when || places.length > 0) && (
+        <div className="mt-1.5 flex items-center gap-1.5 flex-wrap text-[11px]">
+          {severity && (
+            <span className={`px-1.5 py-0.5 rounded border ${SEVERITY_STYLE[severity.toLowerCase()] ?? "bg-slate-50 text-slate-600 border-slate-200"}`}>
+              {severity}
+            </span>
+          )}
+          {when && (
+            <span className="px-1.5 py-0.5 rounded border border-slate-200 text-muted-foreground inline-flex items-center gap-1">
+              <CalendarDays className="h-3 w-3" />{when}
+            </span>
+          )}
+          {places.map(p => (
+            <span key={p} className="px-1.5 py-0.5 rounded border border-slate-200 text-muted-foreground inline-flex items-center gap-1">
+              <MapPin className="h-3 w-3" />{p}
+            </span>
+          ))}
+        </div>
+      )}
+
+      {(history || notes || leftover.length > 0) && (
+        <dl className="mt-1.5 grid grid-cols-1 sm:grid-cols-[auto_minmax(0,1fr)] gap-x-3 gap-y-0.5 text-[11px] text-muted-foreground">
+          {history && <div className="contents"><dt>Medical history</dt><dd className="min-w-0 break-words">{history}</dd></div>}
+          {notes   && <div className="contents"><dt>Notes</dt><dd className="min-w-0 break-words">{notes}</dd></div>}
+          {leftover.map(([k, v]) => (
+            <div key={k} className="contents">
+              <dt className="whitespace-nowrap">{k.replace(/:$/, "")}</dt>
+              <dd className="min-w-0 break-words">{v}</dd>
+            </div>
+          ))}
+        </dl>
+      )}
+    </div>
+  );
+}
+
+function Kpi({ label, value, loading }: { label: string; value: number; loading: boolean }) {
+  return (
+    <Card>
+      <CardContent className="p-4">
+        <div className="text-xs text-muted-foreground">{label}</div>
+        {loading
+          ? <Skeleton className="h-7 w-12 mt-1" />
+          : <div className="text-2xl font-semibold tabular-nums mt-0.5">{value}</div>}
+      </CardContent>
+    </Card>
+  );
+}
+
+function Empty({ children }: { children: React.ReactNode }) {
+  return (
+    <div className="py-10 text-center text-sm text-muted-foreground flex flex-col items-center gap-2">
+      <Inbox className="h-5 w-5 opacity-50" />
+      <p className="max-w-sm">{children}</p>
+    </div>
+  );
+}
