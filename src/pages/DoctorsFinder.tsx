@@ -29,7 +29,22 @@ import { useDoctorsFinderEnquiries, volumeByDoctor, type Enquiry } from "@/hooks
 /** Answer keys that are plumbing, not enquiry detail. Both Doctors Finder
  *  forms ship the enquirer's own contact details as answers; those already
  *  have their own line, so repeating them in the detail block is noise. */
-const NOT_DETAIL = /^(contact ?name|name|first ?name|last ?name|email|email ?address|phone|phone ?number|submission id|form name.*|user id|user agent|user ip|referrer|created at)$/i;
+const NOT_DETAIL = new Set([
+  // Already on the row's own line.
+  "contactname", "name", "firstname", "lastname",
+  "email", "emailaddress", "phone", "phonenumber",
+  // Elementor's own meta. "date" and "time" are the submission's timestamp
+  // split in two, which the row already prints in full on the right - seeing
+  // "23 Nov 2026, 22:51" and then "Date: November 23, 2026 / Time: 5:51 pm"
+  // underneath reads like three different facts.
+  "date", "time", "createdat", "submissionid", "formid", "formname",
+  "pageid", "pageurl", "pagetitle", "postid", "queriedid",
+  "userid", "useragent", "userip", "remoteip", "referrer",
+]);
+
+/** Keys differ by punctuation and case between the webhook ("form_id") and
+ *  the CSV export ("Form Name (ID)"), so compare them stripped. */
+const keyOf = (k: string) => k.toLowerCase().replace(/[^a-z0-9]/g, "");
 
 /** Detail fields worth leading with, in the order a reader wants them.
  *  Anything else the form collects still shows, just after these. */
@@ -40,7 +55,7 @@ const DETAIL_ORDER = [
 ];
 
 function detailPairs(answers: Record<string, string>): Array<[string, string]> {
-  const kept = Object.entries(answers).filter(([k, v]) => v?.trim() && !NOT_DETAIL.test(k.trim()));
+  const kept = Object.entries(answers).filter(([k, v]) => v?.trim() && !NOT_DETAIL.has(keyOf(k)));
   const rank = (k: string) => {
     const i = DETAIL_ORDER.findIndex(d => d.toLowerCase() === k.trim().toLowerCase());
     return i === -1 ? DETAIL_ORDER.length : i;
