@@ -742,7 +742,10 @@ export function useBackfillFormCsv() {
           .from("form_responses")
           .upsert(slice, { onConflict: "form_id,provider_response_id", ignoreDuplicates: true })
           .select("id");
-        if (error) throw error;
+        // A PostgrestError is a plain object, not an Error, so throwing it
+        // raw left the page showing a bare "CSV import failed" - which is
+        // what an RLS refusal looked like for months. Say what happened.
+        if (error) throw new Error(error.message || "Importing the CSV failed");
         inserted += data?.length ?? 0;
       }
       return { inserted, skipped: prepared.length - inserted, total: prepared.length };
