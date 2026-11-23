@@ -14,6 +14,7 @@ import { useQuery, useMutation, useQueryClient, useInfiniteQuery, keepPreviousDa
 import { supabase } from "@/lib/supabase";
 import { useCallback } from "react";
 import { useTableSubscription } from "@/lib/realtime-registry";
+import { enquiryTargetFrom, findTargetUrl } from "@/lib/enquiry-target";
 
 export interface Form {
   id:                string;
@@ -55,6 +56,14 @@ export interface FormResponse {
   respondent_name:       string | null;
   respondent_email:      string | null;
   doctor_id:             string | null;
+
+  /** Who the enquiry was ABOUT, parsed from the page it was submitted from.
+   *  Not to be confused with doctor_id, which is the AA lead/DoB of whoever
+   *  SENT it. Null when the submission carried no identifying page URL. */
+  target_kind:           "doctor" | "hospital" | null;
+  /** Identity of that profile. Group and count by this, never by name. */
+  target_slug:           string | null;
+  target_name:           string | null;
 
   // Outreach lifecycle.
   outreach_status:       OutreachStatus;
@@ -700,6 +709,13 @@ export function useBackfillFormCsv() {
         const fingerprint = `${formId}|${respondent_email ?? ""}|${submitted_at}|${respondent_name ?? ""}`;
         const provider_response_id = "csv:" + await sha256Hex(fingerprint);
 
+        // Who the enquiry was about. The export calls the column "Referrer";
+        // findTargetUrl also copes with the other names Elementor uses, and
+        // falls back to any value in the row that resolves to a profile.
+        const target = enquiryTargetFrom(findTargetUrl(
+          Object.fromEntries(Object.entries(row).map(([k, v]) => [k, String(v ?? "")])),
+        ));
+
         return {
           form_id:        formId,
           provider_response_id,
@@ -709,6 +725,9 @@ export function useBackfillFormCsv() {
           respondent_name,
           respondent_email,
           outreach_status: "new",
+          target_kind:    target?.kind ?? null,
+          target_slug:    target?.slug ?? null,
+          target_name:    target?.name ?? null,
         };
       }));
 
