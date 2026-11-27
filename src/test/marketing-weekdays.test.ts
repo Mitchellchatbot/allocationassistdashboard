@@ -1,0 +1,138 @@
+import { describe, it, expect } from "vitest";
+import { buildWeekdayStats, bestWeekday, type TrendLead, type TrendConversion } from "@/lib/marketing-weekdays";
+
+// Timestamps without an offset parse as local time, so these assertions hold
+// whatever timezone the test runner is in. 2026-11-02 is a Monday.
+const lead = (t: string, status = "Not Contacted", channel = "Meta"): TrendLead =>
+  ({ Created_Time: t, Lead_Status: status, channel });
+const conv = (t: string, channel = "Meta"): TrendConversion => ({ Created_Time: t, channel });
+const d = (y: number, m: number, day: number) => new Date(y, m - 1, day);
+const NOW = new Date(2026, 11, 31, 12);   // after all the data
+
+describe("buildWeekdayStats", () => {
+  it("counts leads, qualified and conversions by weekday, Monday first", () => {
+    const rows = buildWeekdayStats({
+      leads: [
+        lead("2026-11-02T09:00:00", "Initial Sales Call Completed"),   // Mon
+        lead("2026-11-09T23:30:00"),                                   // Mon
+        lead("2026-11-03T10:00:00", "High Priority Follow up"),        // Tue
+        lead("2026-11-08T10:00:00"),                                   // Sun
+      ],
+      conversions: [conv("2026-11-04T12:00:00")],                      // Wed
+      from: d(2026, 11, 2), to: d(2026, 11, 15), now: NOW,
+    });
+    expect(rows.map(r => r.day)).toEqual(["Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday", "Sunday"]);
+    expect(rows[0]).toMatchObject({ leads: 2, qualified: 1, converted: 0, occurrences: 2, avgLeads: 1 });
+    expect(rows[1]).toMatchObject({ leads: 1, qualified: 1 });
+    expect(rows[2]).toMatchObject({ converted: 1, avgConverted: 0.5 });
+    expect(rows[6]).toMatchObject({ leads: 1 });
+  });
+
+  it("does not count Contact in Future as qualified", () => {
+    const rows = buildWeekdayStats({
+      leads: [lead("2026-11-03T10:00:00", "Contact in Future")],
+      conversions: [], from: d(2026, 11, 2), to: d(2026, 11, 8), now: NOW,
+    });
+    expect(rows[1].qualified).toBe(0);
+  });
+
+  it("averages per occurrence so a weekday that appears more often gets no head start", () => {
+    // Mon 2 Nov → Tue 10 Nov: two Mondays and two Tuesdays, one of everything else.
+    const rows = buildWeekdayStats({
+      leads: [
+        lead("2026-11-02T10:00:00"), lead("2026-11-09T10:00:00"),   // 2 Monday leads over 2 Mondays
+        lead("2026-11-05T10:00:00"), lead("2026-11-05T11:00:00"),   // 2 Thursday leads over 1 Thursday
+      ],
+      conversions: [], from: d(2026, 11, 2), to: d(2026, 11, 10), now: NOW,
+    });
+    expect(rows[0]).toMatchObject({ leads: 2, occurrences: 2, avgLeads: 1 });
+    expect(rows[3]).toMatchObject({ leads: 2, occurrences: 1, avgLeads: 2 });
+    expect(bestWeekday(rows, "avgLeads")?.day).toBe("Thursday");
+  });
+
+  it("starts counting days at the first event, so All time doesn't divide by every day since 2000", () => {
+    const rows = buildWeekdayStats({
+      leads: [lead("2026-11-02T10:00:00")],
+      conversions: [], from: d(2000, 1, 1), to: d(2026, 11, 8), now: NOW,
+    });
+    expect(rows.every(r => r.occurrences === 1)).toBe(true);
+    expect(rows[0].avgLeads).toBe(1);
+  });
+
+  it("stops counting days at today when the range runs into the future", () => {
+    const rows = buildWeekdayStats({
+      leads: [lead("2026-11-02T10:00:00")],
+      conversions: [], from: d(2026, 11, 2), to: d(2026, 11, 30),
+      now: new Date(2026, 10, 4, 12),   // Wednesday 4 Nov
+    });
+    expect(rows.map(r => r.occurrences)).toEqual([1, 1, 1, 0, 0, 0, 0]);
+  });
+
+  it("keeps the inclusive end day and drops anything outside the range", () => {
+    const rows = buildWeekdayStats({
+      leads: [lead("2026-11-01T23:59:00"), lead("2026-11-08T23:59:00"), lead("2026-11-09T00:00:00")],
+      conversions: [], from: d(2026, 11, 2), to: d(2026, 11, 8), now: NOW,
+    });
+    expect(rows.reduce((s, r) => s + r.leads, 0)).toBe(1);
+    expect(rows[6].leads).toBe(1);
+  });
+
+  it("filters to one channel when asked", () => {
+    const rows = buildWeekdayStats({
+      leads: [lead("2026-11-03T10:00:00", "Not Contacted", "Meta"), lead("2026-11-03T11:00:00", "Not Contacted", "Google Ads")],
+      conversions: [conv("2026-11-04T10:00:00", "Google Ads")],
+      from: d(2026, 11, 2), to: d(2026, 11, 8), channel: "Meta", now: NOW,
+    });
+    expect(rows[1].leads).toBe(1);
+    expect(rows[2].converted).toBe(0);
+  });
+
+  it("ignores rows with missing or invalid timestamps, and returns nothing for an empty range", () => {
+    const rows = buildWeekdayStats({
+      leads: [lead("2026-11-03T10:00:00"), { Created_Time: null, Lead_Status: null, channel: "Meta" }, lead("not a date")],
+      conversions: [{ Created_Time: null, channel: "Meta" }],
+      from: d(2026, 11, 2), to: d(2026, 11, 8), now: NOW,
+    });
+    expect(rows.reduce((s, r) => s + r.leads + r.converted, 0)).toBe(1);
+    expect(buildWeekdayStats({ leads: [], conversions: [], from: d(2026, 11, 2), to: d(2026, 11, 8), now: NOW })).toEqual([]);
+  });
+});
+
+describe("bestWeekday", () => {
+  it("returns null when the metric is zero everywhere", () => {
+    const rows = buildWeekdayStats({
+      leads: [lead("2026-11-03T10:00:00")], conversions: [],
+      from: d(2026, 11, 2), to: d(2026, 11, 8), now: NOW,
+    });
+    expect(bestWeekday(rows, "avgLeads")?.day).toBe("Tuesday");
+    expect(bestWeekday(rows, "avgConverted")).toBeNull();
+  });
+});
+
+describe("weekday dates", () => {
+  const input = {
+    leads: [
+      lead("2026-11-02T10:00:00", "Initial Sales Call Completed"),   // Mon 2 Nov
+      lead("2026-11-02T15:00:00"),
+      lead("2026-11-16T10:00:00"),                                   // Mon 16 Nov (Mon 9 Nov empty)
+    ],
+    conversions: [conv("2026-11-16T12:00:00")],
+    from: d(2026, 11, 1), to: d(2026, 11, 22), now: NOW,
+  };
+
+  it("lists every date of the weekday with its own counts, newest first, including empty days", () => {
+    const monday = buildWeekdayStats(input)[0];
+    expect(monday.dates.map(x => [x.date.getDate(), x.leads, x.qualified, x.converted])).toEqual([
+      [16, 1, 0, 1], [9, 0, 0, 0], [2, 2, 1, 0],
+    ]);
+  });
+
+  it("adds up to the weekday's totals and occurrences", () => {
+    for (const r of buildWeekdayStats(input)) {
+      expect(r.dates.length).toBe(r.occurrences);
+      expect(r.dates.reduce((s, x) => s + x.leads, 0)).toBe(r.leads);
+      expect(r.dates.reduce((s, x) => s + x.converted, 0)).toBe(r.converted);
+      expect(r.dates.every(x => (x.date.getDay() + 6) % 7 === r.index)).toBe(true);
+    }
+  });
+});

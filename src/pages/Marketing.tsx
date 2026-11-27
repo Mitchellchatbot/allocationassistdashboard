@@ -5,7 +5,8 @@ import {
   BarChart, Bar, XAxis, YAxis, Tooltip, ResponsiveContainer, CartesianGrid, Cell, LabelList,
 } from "recharts";
 import { InfoIcon } from "@/components/InfoIcon";
-import { User, ArrowLeft, X, UserX, Check } from "lucide-react";
+import { buildWeekdayStats, bestWeekday, type WeekdayRow, type WeekdayMetric } from "@/lib/marketing-weekdays";
+import { User, ArrowLeft, X, UserX, Check, CalendarDays, ChevronRight } from "lucide-react";
 import { EmptyState } from "@/components/ui/empty-state";
 import { ChannelIcon } from "@/components/ChannelIcon";
 import { motion, LayoutGroup } from "framer-motion";
@@ -23,7 +24,7 @@ import { useCurrency } from "@/lib/CurrencyProvider";
 import { normalizeChannelKey } from "@/lib/channel-mapping";
 import { useFilters } from "@/lib/filters";
 import { Link } from "react-router-dom";
-import { useMemo, useState } from "react";
+import { Fragment, useMemo, useState } from "react";
 
 const tip = {
   backgroundColor: "#fff",
@@ -63,6 +64,28 @@ const Marketing = () => {
   const metaApiSpend        = metaApi?.summary?.spend ?? null;        // AED, may be 0 outside window
   const metaFormQualified   = metaStats?.qualifiedCount ?? null;      // form-side qualified count
 
+  // Meta attribution override (Ammar 2026-06-02), NARROWED 2026-06-19.
+  // Original intent: rescue the "XXXX → Meta" miscategorisation — leads with a
+  // junk/blank Lead_Source that actually came in from a Meta form. But
+  // meta_leads now holds 16K+ form submissions, so a blanket "in meta_leads ⇒
+  // Meta" wrongly relabels anyone who ever touched a Meta ad — stealing
+  // chatgpt/Website/LinkedIn-sourced conversions into Meta. So we now ONLY
+  // override when the recruiter gave us no real source (displaySource ===
+  // "Undefined"); a real channel always wins. One definition shared by the
+  // table, the conversions drill-down and the trend card, so they can't drift.
+  const channelOf = useMemo(() => {
+    const metaEmails = metaStats?.metaLeadEmails instanceof Set ? metaStats.metaLeadEmails : new Set<string>();
+    const metaPhones = metaStats?.metaLeadPhones instanceof Set ? metaStats.metaLeadPhones : new Set<string>();
+    return (email: string | null | undefined, phone: string | null | undefined, src: string | null | undefined): string => {
+      const ds = displaySource(src ?? null);
+      if (ds !== "Undefined") return ds;          // a real channel always wins
+      const e = normalizeEmail(email);
+      const p = normalizePhone(phone);
+      if ((e && metaEmails.has(e)) || (p && metaPhones.has(p))) return "Meta";
+      return ds;
+    };
+  }, [metaStats?.metaLeadEmails, metaStats?.metaLeadPhones]);
+
   const marketing = useMemo(() => {
     if (!zoho?.rawLeads) return [];
     const fromMs = dateRange.from.getTime();
@@ -89,27 +112,6 @@ const Marketing = () => {
     const qualifiedStatuses = new Set([
       'Initial Sales Call Completed', 'High Priority Follow up',
     ]);
-
-    // Meta attribution override (Ammar 2026-06-02), NARROWED 2026-06-19.
-    // Original intent: rescue the "XXXX → Meta" miscategorisation — leads with a
-    // junk/blank Lead_Source that actually came in from a Meta form. But
-    // meta_leads now holds 16K+ form submissions, so a blanket "in meta_leads ⇒
-    // Meta" wrongly relabels anyone who ever touched a Meta ad — stealing
-    // chatgpt/Website/LinkedIn-sourced conversions into Meta. So we now ONLY
-    // override when the recruiter gave us no real source (displaySource ===
-    // "Undefined"); a real channel always wins. `channelOf` resolves the final
-    // channel: trust the Lead_Source, fall back to the meta_leads signal only
-    // when the source is junk.
-    const metaEmails = metaStats?.metaLeadEmails instanceof Set ? metaStats.metaLeadEmails : new Set<string>();
-    const metaPhones = metaStats?.metaLeadPhones instanceof Set ? metaStats.metaLeadPhones : new Set<string>();
-    const channelOf = (email: string | null | undefined, phone: string | null | undefined, src: string | null | undefined): string => {
-      const ds = displaySource(src);
-      if (ds !== "Undefined") return ds;          // a real channel always wins
-      const e = normalizeEmail(email);
-      const p = normalizePhone(phone);
-      if ((e && metaEmails.has(e)) || (p && metaPhones.has(p))) return "Meta";
-      return ds;
-    };
 
     for (const l of recentLeads) {
       const ch = channelOf(l.Email, l.Phone ?? l.Mobile, l.Lead_Source);
@@ -175,7 +177,7 @@ const Marketing = () => {
         const revenue        = revenueByChannel[channel] ?? 0;
         return { channel, doctors, contacted, uncontacted, qualified, converted, contactRate, qualifiedRate, conversionRate, revenue };
       });
-  }, [zoho?.rawLeads, zoho?.rawDoctorsOnBoard, dateRange, metaStats?.metaLeadEmails, metaStats?.metaLeadPhones, revenueForDoctor]);
+  }, [zoho?.rawLeads, zoho?.rawDoctorsOnBoard, dateRange, channelOf, revenueForDoctor]);
 
   // Top-8 channels for the two bar charts — stable reference so recharts can
   // skip reconciliation when `marketing` is unchanged.
@@ -361,24 +363,15 @@ const Marketing = () => {
     if (!selectedKpiChannel || !zoho?.rawDoctorsOnBoard) return [];
     const fromMs = dateRange.from.getTime();
     const toMs   = dateRange.to.getTime() + 86_400_000;
-    const metaEmails = metaStats?.metaLeadEmails instanceof Set ? metaStats.metaLeadEmails : new Set<string>();
-    const metaPhones = metaStats?.metaLeadPhones instanceof Set ? metaStats.metaLeadPhones : new Set<string>();
-    const chOf = (email: string | null | undefined, phone: string | null | undefined, src: string | null | undefined) => {
-      const ds = displaySource(src ?? null);
-      if (ds !== "Undefined") return ds;          // a real channel always wins
-      const e = normalizeEmail(email), p = normalizePhone(phone);
-      if ((e && metaEmails.has(e)) || (p && metaPhones.has(p))) return "Meta";
-      return ds;
-    };
     return zoho.rawDoctorsOnBoard.filter(d => {
       const t = d.Created_Time ? new Date(d.Created_Time).getTime() : NaN;
-      return !isNaN(t) && t >= fromMs && t < toMs && chOf(d.Email, d.Phone ?? d.Mobile, d.Lead_Source) === selectedKpiChannel;
+      return !isNaN(t) && t >= fromMs && t < toMs && channelOf(d.Email, d.Phone ?? d.Mobile, d.Lead_Source) === selectedKpiChannel;
     }).map(d => ({
       name:      d.Full_Name || `${d.First_Name ?? ''} ${d.Last_Name ?? ''}`.trim() || '—',
       specialty: d.Specialty_New || d.Speciality || '—',
       hospital:  (d.Account_Name as { name?: string } | null)?.name ?? null,
     }));
-  }, [selectedKpiChannel, zoho?.rawDoctorsOnBoard, dateRange, metaStats?.metaLeadEmails, metaStats?.metaLeadPhones]);
+  }, [selectedKpiChannel, zoho?.rawDoctorsOnBoard, dateRange, channelOf]);
 
   // Flip state for chart cards
   const [acquiredChannel, setAcquiredChannel] = useState<string | null>(null);
@@ -413,6 +406,31 @@ const Marketing = () => {
       specialty: l.Specialty ?? l.Specialty_New ?? '—',
     }));
   }, [uncontactedChannel, zoho?.rawLeads, dateRange]);
+
+  // ── Best days of the week ────────────────────────────────────────────
+  // Channel is resolved once per row with the same channelOf the table uses,
+  // so filtering to "Meta" counts exactly the leads the Meta row does.
+  const [trendChannel, setTrendChannel] = useState<string | null>(null);
+  const trendLeads = useMemo(() => (zoho?.rawLeads ?? []).map(l => ({
+    Created_Time: l.Created_Time,
+    Lead_Status:  l.Lead_Status,
+    channel:      channelOf(l.Email, l.Phone ?? l.Mobile, l.Lead_Source),
+  })), [zoho?.rawLeads, channelOf]);
+  const trendConversions = useMemo(() => (zoho?.rawDoctorsOnBoard ?? []).map(d => ({
+    Created_Time: d.Created_Time,
+    channel:      channelOf(d.Email, d.Phone ?? d.Mobile, d.Lead_Source),
+  })), [zoho?.rawDoctorsOnBoard, channelOf]);
+  const weekdayRows = useMemo(() => buildWeekdayStats({
+    leads: trendLeads, conversions: trendConversions,
+    from: dateRange.from, to: dateRange.to, channel: trendChannel,
+  }), [trendLeads, trendConversions, dateRange, trendChannel]);
+  // Keep a selected channel in the list even if the new date range has no
+  // leads for it — otherwise the select silently shows "All channels" while
+  // the chart is still filtered.
+  const trendChannelOptions = useMemo(() => {
+    const names = marketing.map(c => c.channel);
+    return trendChannel && !names.includes(trendChannel) ? [trendChannel, ...names] : names;
+  }, [marketing, trendChannel]);
 
   return (
     <DashboardLayout title="Marketing" subtitle="See which channels bring in the most doctors and how well they convert" docSlug="growth/marketing">
@@ -741,6 +759,13 @@ const Marketing = () => {
         )}
       </div>
 
+      <BestDaysCard
+        rows={weekdayRows}
+        channel={trendChannel}
+        onChannel={setTrendChannel}
+        channelOptions={trendChannelOptions}
+      />
+
       <div className="grid grid-cols-1 lg:grid-cols-2 gap-4 mb-5">
         {/* Doctors Acquired by Channel — top 8, horizontal — flippable */}
         <div style={{ perspective: '1000px' }} className="rounded-lg">
@@ -929,5 +954,151 @@ const Marketing = () => {
     </DashboardLayout>
   );
 };
+
+// One decimal under 10 so a quiet channel's "0.4 a day" doesn't round to 0.
+const fmtAvg = (n: number) => (n >= 10 ? Math.round(n).toLocaleString() : n.toFixed(1));
+
+const DAY_METRICS: { key: WeekdayMetric; total: "leads" | "qualified" | "converted"; label: string; best: string; bar: string; tint: string }[] = [
+  { key: "avgLeads",     total: "leads",     label: "Leads",     best: "Most leads",       bar: "bg-sky-500",     tint: "bg-sky-50 text-sky-900" },
+  { key: "avgQualified", total: "qualified", label: "Qualified", best: "Most qualified",   bar: "bg-violet-500",  tint: "bg-violet-50 text-violet-900" },
+  { key: "avgConverted", total: "converted", label: "Converted", best: "Most conversions", bar: "bg-emerald-500", tint: "bg-emerald-50 text-emerald-900" },
+];
+// "All time" can hold a hundred-plus Mondays; show the latest few and let the
+// rest be opened on request so one expanded day doesn't swallow the page.
+const DATES_SHOWN = 8;
+const longDate = (d: Date) => d.toLocaleDateString("en-GB", { weekday: "short", day: "numeric", month: "short", year: "numeric" });
+
+function BestDaysCard({ rows, channel, onChannel, channelOptions }: {
+  rows: WeekdayRow[];
+  channel: string | null;
+  onChannel: (c: string | null) => void;
+  channelOptions: string[];
+}) {
+  const best = useMemo(() => Object.fromEntries(DAY_METRICS.map(m => [m.key, bestWeekday(rows, m.key)])) as Record<WeekdayMetric, WeekdayRow | null>, [rows]);
+  const max = useMemo(() => Object.fromEntries(DAY_METRICS.map(m => [m.key, Math.max(0, ...rows.map(r => r[m.key]))])) as Record<WeekdayMetric, number>, [rows]);
+  const [open, setOpen] = useState<Set<string>>(new Set());
+  const [showAll, setShowAll] = useState<Set<string>>(new Set());
+  const toggle = (set: Set<string>, day: string) => { const n = new Set(set); if (n.has(day)) n.delete(day); else n.add(day); return n; };
+
+  return (
+    <Card className="mb-6 shadow-sm border-border/50">
+      <CardHeader className="pb-2 pt-4 px-5">
+        <div className="flex items-start justify-between gap-3 flex-wrap">
+          <div>
+            <CardTitle className="text-[14px] font-semibold text-foreground flex items-center gap-1.5">
+              <CalendarDays className="h-3.5 w-3.5 text-primary" /> Best Days of the Week
+              <InfoIcon
+                meaning={'For each weekday, the average number of leads, qualified leads and conversions on that day across the selected date range. Averages rather than totals, because a range can contain five Mondays but only four Tuesdays. Leads and qualified use the day the lead came in; qualified = the lead\'s status today is "Initial Sales Call Completed" or "High Priority Follow up". Conversions use the day the Doctor-on-Board record was created in Zoho, which is when the team logged it, not necessarily when the doctor signed. Hover a number to see the total.'}
+                source="Zoho Leads + Doctors on Board, channel resolved the same way as the table above."
+              />
+            </CardTitle>
+            <p className="text-[11px] text-muted-foreground/80 mt-0.5">Average per day in the selected range · click a day for its dates</p>
+          </div>
+          <select
+            value={channel ?? ""}
+            onChange={e => onChannel(e.target.value || null)}
+            className="h-[26px] rounded-md border border-border/60 bg-card px-2 text-[11px] text-foreground"
+            aria-label="Filter by channel"
+          >
+            <option value="">All channels</option>
+            {channelOptions.map(c => <option key={c} value={c}>{c}</option>)}
+          </select>
+        </div>
+      </CardHeader>
+      <CardContent className="px-5 pb-5">
+        {rows.length === 0 ? (
+          <p className="text-[12px] text-muted-foreground py-8 text-center">No leads or conversions in this period{channel ? ` for ${channel}` : ""}.</p>
+        ) : (
+          <>
+            <div className="grid grid-cols-1 sm:grid-cols-3 gap-3 mb-4">
+              {DAY_METRICS.map(m => {
+                const b = best[m.key];
+                return (
+                  <div key={m.key} className={`rounded-lg px-4 py-3 ${m.tint}`}>
+                    <p className="text-[10px] uppercase tracking-wide font-semibold opacity-70">{m.best}</p>
+                    <p className="text-[20px] font-semibold leading-tight mt-0.5">{b ? b.day : "—"}</p>
+                    <p className="text-[11px] opacity-75">
+                      {b ? `${fmtAvg(b[m.key])} ${m.label.toLowerCase()} on an average ${b.day}` : `No ${m.label.toLowerCase()} in this period`}
+                    </p>
+                  </div>
+                );
+              })}
+            </div>
+
+            <table className="w-full text-[12px] tabular-nums">
+              <thead className="text-[10px] uppercase tracking-wide text-muted-foreground border-b border-border/60">
+                <tr>
+                  <th className="text-left font-semibold py-2 pr-3 w-[170px]">Day</th>
+                  {DAY_METRICS.map(m => <th key={m.key} className="text-left font-semibold py-2 px-3">{m.label} / day</th>)}
+                </tr>
+              </thead>
+              <tbody>
+                {rows.map(r => {
+                  const isOpen = open.has(r.day);
+                  const dates = showAll.has(r.day) ? r.dates : r.dates.slice(0, DATES_SHOWN);
+                  return (
+                    <Fragment key={r.day}>
+                      <tr
+                        className="border-t border-border/40 cursor-pointer hover:bg-muted/30"
+                        onClick={() => setOpen(o => toggle(o, r.day))}
+                        aria-expanded={isOpen}
+                      >
+                        <td className="py-2 pr-3 font-medium text-foreground">
+                          <span className="inline-flex items-center gap-1">
+                            <ChevronRight className={`h-3.5 w-3.5 text-muted-foreground transition-transform ${isOpen ? "rotate-90" : ""}`} />
+                            {r.day}
+                            <span className="text-[10px] font-normal text-muted-foreground ml-1">{r.occurrences} day{r.occurrences === 1 ? "" : "s"}</span>
+                          </span>
+                        </td>
+                        {DAY_METRICS.map(m => {
+                          const isBest = best[m.key]?.day === r.day;
+                          const pct = max[m.key] > 0 ? (r[m.key] / max[m.key]) * 100 : 0;
+                          return (
+                            <td key={m.key} className="py-2 px-3" title={`${r[m.total].toLocaleString()} ${m.label.toLowerCase()} across ${r.occurrences} ${r.day}${r.occurrences === 1 ? "" : "s"}`}>
+                              <div className="flex items-center gap-2">
+                                <span className={`w-10 text-right ${isBest ? "font-bold text-foreground" : "text-muted-foreground"}`}>{fmtAvg(r[m.key])}</span>
+                                <div className="flex-1 h-2 rounded-full bg-muted/60 overflow-hidden">
+                                  <div className={`h-full rounded-full ${m.bar} ${isBest ? "" : "opacity-50"}`} style={{ width: `${pct}%` }} />
+                                </div>
+                              </div>
+                            </td>
+                          );
+                        })}
+                      </tr>
+                      {isOpen && dates.map(x => (
+                        <tr key={x.date.getTime()} className="bg-muted/20 text-[11px]">
+                          <td className="py-1 pr-3 pl-6 text-muted-foreground whitespace-nowrap">{longDate(x.date)}</td>
+                          {DAY_METRICS.map(m => (
+                            <td key={m.key} className={`py-1 px-3 ${x[m.total] > 0 ? "text-foreground" : "text-muted-foreground/50"}`}>
+                              <span className="inline-block w-10 text-right">{x[m.total]}</span>
+                            </td>
+                          ))}
+                        </tr>
+                      ))}
+                      {isOpen && r.dates.length > DATES_SHOWN && (
+                        <tr className="bg-muted/20">
+                          <td colSpan={DAY_METRICS.length + 1} className="py-1 pl-6">
+                            <button
+                              type="button"
+                              onClick={() => setShowAll(sa => toggle(sa, r.day))}
+                              className="text-[11px] text-primary hover:text-primary/80 font-medium"
+                            >
+                              {showAll.has(r.day) ? "Show fewer" : `Show all ${r.dates.length} ${r.day}s`}
+                            </button>
+                          </td>
+                        </tr>
+                      )}
+                    </Fragment>
+                  );
+                })}
+              </tbody>
+            </table>
+            <p className="text-[10px] text-muted-foreground mt-2">Click a day to see each date with its own numbers.</p>
+          </>
+        )}
+      </CardContent>
+    </Card>
+  );
+}
 
 export default Marketing;
