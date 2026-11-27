@@ -26,12 +26,11 @@ doctors get in the pipeline, and what each channel costs per result. It answers
 - **A drill-down** — click a channel to see its doctors split into *Contacted* vs
   *To Reach*, with links into Doctor Progress filtered to that source.
 - **Best Days of the Week** — which weekday brings the most leads, qualified leads
-  and conversions. Three tiles name the winning day for each. Below them, a
-  **calendar**: Monday–Sunday columns, one row per week (newest first), each cell
-  showing the date and that day's count, shaded darker the busier the day. A
-  *Week total* column answers "how many did we get that week", and a pinned
-  *Average* row shows each weekday's average, best in bold. A Leads / Qualified /
-  Converted switch picks which number the calendar shows. Optional channel filter.
+  and conversions. Three tiles name the winning day for each, and a Monday–Sunday
+  table shows the average per day with a bar, best day in bold. **Click a day** to
+  expand it into each actual date (e.g. every Monday in the range) with that
+  date's own leads, qualified and converted, newest first — the latest 8, with a
+  "Show all" link for long ranges. Optional channel filter.
 - **Charts:** doctors acquired by channel, contacted-vs-uncontacted (click a bar to
   get the list of uncontacted doctors to call), and a spend-allocation donut.
 
@@ -75,13 +74,13 @@ A date-range picker scopes everything.
 
 ## Reading Best Days of the Week
 
-- **The tiles and the Average row are averages per day**, not totals. A 30-day range holds five of two
-  weekdays and four of the rest, so totals would give those two a ~25% head start.
-  Hover an average for the total and how many of that day were counted; hover a
-  calendar day for all three of its numbers.
-- **Greyed-out calendar days** are outside the counted span (before the first lead
-  in the range, after the range end, or in the future) — they're blank, not zero.
-  A week with such days is tagged *partial*, since its total covers fewer days.
+- **The tiles and the weekday rows are averages per day**, not totals. A 30-day
+  range holds five of two weekdays and four of the rest, so totals would give
+  those two a ~25% head start. Hover an average for the total and how many of that
+  day were counted.
+- **The dates under an expanded weekday add up to its total**, and include days
+  with zero — a quiet Monday is part of the answer. Only counted days are listed
+  (from the first lead in the range up to the range end or today).
 - Counting starts at the first lead in the range (so "All time" doesn't divide by
   every day since 2000) and stops at today.
 - **Leads** and **Qualified** use the day the lead came in. Qualified = the lead's

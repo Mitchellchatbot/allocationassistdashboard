@@ -39,6 +39,15 @@ export interface WeekdayRow {
   avgLeads: number;
   avgQualified: number;
   avgConverted: number;
+  /** Each date of this weekday in the range with its own counts, newest first. */
+  dates: WeekdayDate[];
+}
+
+export interface WeekdayDate {
+  date: Date;
+  leads: number;
+  qualified: number;
+  converted: number;
 }
 
 export interface WeekdayInput {
@@ -67,8 +76,8 @@ interface DailyTally {
   last: Date;
 }
 
-// One per-day tally feeds both the weekday averages and the calendar, so the
-// calendar's Average row can never disagree with the "best day" tiles.
+// Per-day counts first, then rolled up by weekday — so the dates listed under a
+// weekday always add up to that weekday's total.
 function tallyByDay(input: WeekdayInput): DailyTally | null {
   const { leads, conversions, from, to, channel = null } = input;
   const fromMs = dayStart(from).getTime();
@@ -115,7 +124,7 @@ export function buildWeekdayStats(input: WeekdayInput): WeekdayRow[] {
   const tally = tallyByDay(input);
   if (!tally) return [];
   const rows: WeekdayRow[] = WEEKDAYS.map((day, index) => ({
-    index, day, occurrences: 0, leads: 0, qualified: 0, converted: 0, avgLeads: 0, avgQualified: 0, avgConverted: 0,
+    index, day, occurrences: 0, leads: 0, qualified: 0, converted: 0, avgLeads: 0, avgQualified: 0, avgConverted: 0, dates: [],
   }));
   // Averages, not totals: a 30-day range holds five of two weekdays and four
   // of the rest, which would hand those two a 25% head start on raw counts.
@@ -123,51 +132,19 @@ export function buildWeekdayStats(input: WeekdayInput): WeekdayRow[] {
   for (let d = tally.first; d <= tally.last; d = addDays(d, 1)) {
     const r = rows[weekdayIndex(d)];
     r.occurrences++;
-    const c = tally.byDay.get(dayKey(d));
-    if (c) { r.leads += c.leads; r.qualified += c.qualified; r.converted += c.converted; }
+    const c = tally.byDay.get(dayKey(d)) ?? { leads: 0, qualified: 0, converted: 0 };
+    r.leads += c.leads; r.qualified += c.qualified; r.converted += c.converted;
+    // Zero days are listed too — a quiet Monday is part of the answer.
+    r.dates.push({ date: d, ...c });
   }
   for (const r of rows) {
+    r.dates.reverse();
     const n = r.occurrences || 1;
     r.avgLeads = r.leads / n;
     r.avgQualified = r.qualified / n;
     r.avgConverted = r.converted / n;
   }
   return rows;
-}
-
-export interface CalendarDay extends DayCounts {
-  date: Date;
-  /** False for days outside the counted span — shown blank, not as zero. */
-  inRange: boolean;
-}
-
-export interface CalendarWeek extends DayCounts {
-  /** Monday of the week. */
-  start: Date;
-  /** Monday … Sunday. */
-  days: CalendarDay[];
-  /** Some of the week's days fall outside the counted span, so its total covers fewer than 7 days. */
-  partial: boolean;
-}
-
-/** Monday-start weeks with each day's counts, newest week first. */
-export function buildCalendarWeeks(input: WeekdayInput): CalendarWeek[] {
-  const tally = tallyByDay(input);
-  if (!tally) return [];
-  const weeks: CalendarWeek[] = [];
-  for (let start = addDays(tally.first, -weekdayIndex(tally.first)); start <= tally.last; start = addDays(start, 7)) {
-    const week: CalendarWeek = { start, days: [], partial: false, leads: 0, qualified: 0, converted: 0 };
-    for (let i = 0; i < 7; i++) {
-      const date = addDays(start, i);
-      const inRange = date >= tally.first && date <= tally.last;
-      const c = (inRange && tally.byDay.get(dayKey(date))) || { leads: 0, qualified: 0, converted: 0 };
-      week.days.push({ date, inRange, ...c });
-      if (!inRange) week.partial = true;
-      week.leads += c.leads; week.qualified += c.qualified; week.converted += c.converted;
-    }
-    weeks.push(week);
-  }
-  return weeks.reverse();
 }
 
 export type WeekdayMetric = "avgLeads" | "avgQualified" | "avgConverted";
