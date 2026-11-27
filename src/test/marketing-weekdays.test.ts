@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { buildWeekdayStats, bestWeekday, type TrendLead, type TrendConversion } from "@/lib/marketing-weekdays";
+import { buildWeekdayStats, bestWeekday, buildCalendarWeeks, type TrendLead, type TrendConversion } from "@/lib/marketing-weekdays";
 
 // Timestamps without an offset parse as local time, so these assertions hold
 // whatever timezone the test runner is in. 2026-11-02 is a Monday.
@@ -106,5 +106,53 @@ describe("bestWeekday", () => {
     });
     expect(bestWeekday(rows, "avgLeads")?.day).toBe("Tuesday");
     expect(bestWeekday(rows, "avgConverted")).toBeNull();
+  });
+});
+
+describe("buildCalendarWeeks", () => {
+  const leads = [
+    lead("2026-11-04T10:00:00", "Initial Sales Call Completed"),   // Wed, week of 2 Nov
+    lead("2026-11-04T15:00:00"),
+    lead("2026-11-08T10:00:00"),                                   // Sun, week of 2 Nov
+    lead("2026-11-16T10:00:00"),                                   // Mon, week of 16 Nov (9 Nov week is empty)
+  ];
+  const conversions = [conv("2026-11-05T10:00:00")];                // Thu, week of 2 Nov
+
+  it("lays days out Monday to Sunday with dates and counts, newest week first", () => {
+    const weeks = buildCalendarWeeks({ leads, conversions, from: d(2026, 11, 1), to: d(2026, 11, 22), now: NOW });
+    expect(weeks.map(w => w.start.getDate())).toEqual([16, 9, 2]);
+    const first = weeks[2];
+    expect(first.days.map(x => x.date.getDate())).toEqual([2, 3, 4, 5, 6, 7, 8]);
+    expect(first.days[2]).toMatchObject({ leads: 2, qualified: 1, converted: 0 });
+    expect(first.days[3]).toMatchObject({ converted: 1 });
+    expect(first).toMatchObject({ leads: 3, qualified: 1, converted: 1 });
+  });
+
+  it("keeps an empty week in the grid with zeros", () => {
+    const weeks = buildCalendarWeeks({ leads, conversions, from: d(2026, 11, 1), to: d(2026, 11, 22), now: NOW });
+    expect(weeks[1]).toMatchObject({ leads: 0, qualified: 0, converted: 0, partial: false });
+  });
+
+  it("blanks days before the first lead and after the range, and marks those weeks partial", () => {
+    const weeks = buildCalendarWeeks({ leads, conversions, from: d(2026, 11, 1), to: d(2026, 11, 18), now: NOW });
+    const first = weeks[weeks.length - 1], last = weeks[0];
+    expect(first.days.map(x => x.inRange)).toEqual([false, false, true, true, true, true, true]);   // counting starts Wed 4 Nov
+    expect(last.days.map(x => x.inRange)).toEqual([true, true, true, false, false, false, false]);  // range ends Wed 18 Nov
+    expect(first.partial && last.partial).toBe(true);
+  });
+
+  it("agrees with the weekday averages", () => {
+    const input = { leads, conversions, from: d(2026, 11, 1), to: d(2026, 11, 22), now: NOW };
+    const weeks = buildCalendarWeeks(input);
+    const stats = buildWeekdayStats(input);
+    for (let i = 0; i < 7; i++) {
+      const days = weeks.map(w => w.days[i]).filter(x => x.inRange);
+      expect(days.length).toBe(stats[i].occurrences);
+      expect(days.reduce((s, x) => s + x.leads, 0)).toBe(stats[i].leads);
+    }
+  });
+
+  it("returns nothing for an empty range", () => {
+    expect(buildCalendarWeeks({ leads: [], conversions: [], from: d(2026, 11, 2), to: d(2026, 11, 8), now: NOW })).toEqual([]);
   });
 });

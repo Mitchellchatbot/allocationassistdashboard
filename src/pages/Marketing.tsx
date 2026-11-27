@@ -5,7 +5,7 @@ import {
   BarChart, Bar, XAxis, YAxis, Tooltip, ResponsiveContainer, CartesianGrid, Cell, LabelList,
 } from "recharts";
 import { InfoIcon } from "@/components/InfoIcon";
-import { buildWeekdayStats, bestWeekday, type WeekdayRow, type WeekdayMetric } from "@/lib/marketing-weekdays";
+import { buildWeekdayStats, buildCalendarWeeks, bestWeekday, type WeekdayRow, type WeekdayMetric, type CalendarWeek } from "@/lib/marketing-weekdays";
 import { User, ArrowLeft, X, UserX, Check, CalendarDays } from "lucide-react";
 import { EmptyState } from "@/components/ui/empty-state";
 import { ChannelIcon } from "@/components/ChannelIcon";
@@ -424,6 +424,10 @@ const Marketing = () => {
     leads: trendLeads, conversions: trendConversions,
     from: dateRange.from, to: dateRange.to, channel: trendChannel,
   }), [trendLeads, trendConversions, dateRange, trendChannel]);
+  const calendarWeeks = useMemo(() => buildCalendarWeeks({
+    leads: trendLeads, conversions: trendConversions,
+    from: dateRange.from, to: dateRange.to, channel: trendChannel,
+  }), [trendLeads, trendConversions, dateRange, trendChannel]);
   // Keep a selected channel in the list even if the new date range has no
   // leads for it — otherwise the select silently shows "All channels" while
   // the chart is still filtered.
@@ -761,6 +765,7 @@ const Marketing = () => {
 
       <BestDaysCard
         rows={weekdayRows}
+        weeks={calendarWeeks}
         channel={trendChannel}
         onChannel={setTrendChannel}
         channelOptions={trendChannelOptions}
@@ -958,20 +963,30 @@ const Marketing = () => {
 // One decimal under 10 so a quiet channel's "0.4 a day" doesn't round to 0.
 const fmtAvg = (n: number) => (n >= 10 ? Math.round(n).toLocaleString() : n.toFixed(1));
 
-const DAY_METRICS: { key: WeekdayMetric; total: "leads" | "qualified" | "converted"; label: string; best: string; bar: string; tint: string }[] = [
-  { key: "avgLeads",     total: "leads",     label: "Leads",     best: "Most leads",       bar: "bg-sky-500",     tint: "bg-sky-50 text-sky-900" },
-  { key: "avgQualified", total: "qualified", label: "Qualified", best: "Most qualified",   bar: "bg-violet-500",  tint: "bg-violet-50 text-violet-900" },
-  { key: "avgConverted", total: "converted", label: "Converted", best: "Most conversions", bar: "bg-emerald-500", tint: "bg-emerald-50 text-emerald-900" },
+// rgb is the cell shade; its strength scales with how busy the day was.
+const DAY_METRICS: { key: WeekdayMetric; total: "leads" | "qualified" | "converted"; label: string; best: string; rgb: string; tint: string }[] = [
+  { key: "avgLeads",     total: "leads",     label: "Leads",     best: "Most leads",       rgb: "14,165,233",  tint: "bg-sky-50 text-sky-900" },
+  { key: "avgQualified", total: "qualified", label: "Qualified", best: "Most qualified",   rgb: "139,92,246",  tint: "bg-violet-50 text-violet-900" },
+  { key: "avgConverted", total: "converted", label: "Converted", best: "Most conversions", rgb: "16,185,129",  tint: "bg-emerald-50 text-emerald-900" },
 ];
+const WEEKDAY_SHORT = ["Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun"];
+const dayMonth = (d: Date) => d.toLocaleDateString("en-GB", { day: "numeric", month: "short" });
 
-function BestDaysCard({ rows, channel, onChannel, channelOptions }: {
+function BestDaysCard({ rows, weeks, channel, onChannel, channelOptions }: {
   rows: WeekdayRow[];
+  weeks: CalendarWeek[];
   channel: string | null;
   onChannel: (c: string | null) => void;
   channelOptions: string[];
 }) {
   const best = useMemo(() => Object.fromEntries(DAY_METRICS.map(m => [m.key, bestWeekday(rows, m.key)])) as Record<WeekdayMetric, WeekdayRow | null>, [rows]);
-  const max = useMemo(() => Object.fromEntries(DAY_METRICS.map(m => [m.key, Math.max(0, ...rows.map(r => r[m.key]))])) as Record<WeekdayMetric, number>, [rows]);
+  const [metricKey, setMetricKey] = useState<WeekdayMetric>("avgLeads");
+  const metric = DAY_METRICS.find(m => m.key === metricKey)!;
+  // Shade against the busiest single day, so one standout day reads darkest.
+  const dayMax = useMemo(
+    () => Math.max(0, ...weeks.flatMap(w => w.days.filter(x => x.inRange).map(x => x[metric.total]))),
+    [weeks, metric.total],
+  );
 
   return (
     <Card className="mb-6 shadow-sm border-border/50">
@@ -985,7 +1000,7 @@ function BestDaysCard({ rows, channel, onChannel, channelOptions }: {
                 source="Zoho Leads + Doctors on Board, channel resolved the same way as the table above."
               />
             </CardTitle>
-            <p className="text-[11px] text-muted-foreground/80 mt-0.5">Average per day in the selected range</p>
+            <p className="text-[11px] text-muted-foreground/80 mt-0.5">Which weekday works best, and how each day actually went</p>
           </div>
           <select
             value={channel ?? ""}
@@ -1018,35 +1033,89 @@ function BestDaysCard({ rows, channel, onChannel, channelOptions }: {
               })}
             </div>
 
-            <table className="w-full text-[12px] tabular-nums">
-              <thead className="text-[10px] uppercase tracking-wide text-muted-foreground border-b border-border/60">
-                <tr>
-                  <th className="text-left font-semibold py-2 pr-3 w-[110px]">Day</th>
-                  {DAY_METRICS.map(m => <th key={m.key} className="text-left font-semibold py-2 px-3">{m.label} / day</th>)}
-                </tr>
-              </thead>
-              <tbody className="divide-y divide-border/40">
-                {rows.map(r => (
-                  <tr key={r.day}>
-                    <td className="py-2 pr-3 font-medium text-foreground">{r.day}</td>
-                    {DAY_METRICS.map(m => {
-                      const isBest = best[m.key]?.day === r.day;
-                      const pct = max[m.key] > 0 ? (r[m.key] / max[m.key]) * 100 : 0;
+            <div className="flex items-center justify-between gap-3 flex-wrap mb-2">
+              <p className="text-[11px] text-muted-foreground">Each day of the range, newest week first · darker = busier day</p>
+              <div className="inline-flex rounded-md border border-border/60 overflow-hidden text-[10px] font-medium">
+                {DAY_METRICS.map(m => (
+                  <button
+                    key={m.key}
+                    type="button"
+                    onClick={() => setMetricKey(m.key)}
+                    className={`px-3 py-1 transition-colors ${metricKey === m.key ? "bg-primary text-white" : "bg-card text-muted-foreground hover:bg-muted/40"}`}
+                  >
+                    {m.label}
+                  </button>
+                ))}
+              </div>
+            </div>
+
+            <div className="max-h-[440px] overflow-auto rounded-md border border-border/50">
+              <table className="w-full min-w-[640px] border-separate border-spacing-1 text-[12px] tabular-nums">
+                <thead className="sticky top-0 z-10 bg-card text-[10px] uppercase tracking-wide text-muted-foreground">
+                  <tr>
+                    <th className="text-left font-semibold px-2 py-1.5 w-[96px]">Week</th>
+                    {WEEKDAY_SHORT.map(w => <th key={w} className="font-semibold px-1 py-1.5">{w}</th>)}
+                    <th className="text-right font-semibold px-2 py-1.5 w-[64px]">Week total</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {weeks.map(w => (
+                    <tr key={w.start.getTime()}>
+                      <td className="px-2 text-[11px] text-muted-foreground whitespace-nowrap">
+                        {dayMonth(w.start)} – {dayMonth(w.days[6].date)}
+                      </td>
+                      {w.days.map(x => {
+                        if (!x.inRange) {
+                          return (
+                            <td key={x.date.getTime()} className="rounded-md bg-muted/20 px-2 py-1.5 align-top">
+                              <span className="text-[10px] text-muted-foreground/40">{dayMonth(x.date)}</span>
+                            </td>
+                          );
+                        }
+                        const v = x[metric.total];
+                        const strength = dayMax > 0 ? v / dayMax : 0;
+                        const dark = strength > 0.55;
+                        return (
+                          <td
+                            key={x.date.getTime()}
+                            className="rounded-md px-2 py-1.5 align-top"
+                            style={{ backgroundColor: v > 0 ? `rgba(${metric.rgb},${0.12 + strength * 0.78})` : "hsl(var(--muted) / 0.45)" }}
+                            title={`${x.date.toLocaleDateString("en-GB", { weekday: "long", day: "numeric", month: "long", year: "numeric" })}: ${x.leads} leads · ${x.qualified} qualified · ${x.converted} converted`}
+                          >
+                            <span className={`block text-[10px] ${dark ? "text-white/80" : "text-muted-foreground"}`}>{dayMonth(x.date)}</span>
+                            <span className={`block text-[15px] font-semibold leading-tight ${dark ? "text-white" : v > 0 ? "text-foreground" : "text-muted-foreground/60"}`}>{v}</span>
+                          </td>
+                        );
+                      })}
+                      <td className="px-2 text-right">
+                        <span className="text-[14px] font-semibold text-foreground">{w[metric.total].toLocaleString()}</span>
+                        {w.partial && <span className="block text-[9px] uppercase tracking-wide text-muted-foreground/70" title="Part of this week is outside the date range">partial</span>}
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+                {/* Pinned to the bottom so the answer — which weekday wins on
+                    average — stays in view however far back you scroll. */}
+                <tfoot className="sticky bottom-0 z-10 bg-card">
+                  <tr>
+                    <td className="px-2 py-1.5 text-[10px] uppercase tracking-wide font-semibold text-muted-foreground border-t border-border/60">Average</td>
+                    {rows.map(r => {
+                      const isBest = best[metric.key]?.day === r.day;
                       return (
-                        <td key={m.key} className="py-2 px-3" title={`${r[m.total].toLocaleString()} ${m.label.toLowerCase()} across ${r.occurrences} ${r.day}${r.occurrences === 1 ? "" : "s"}`}>
-                          <div className="flex items-center gap-2">
-                            <span className={`w-10 text-right ${isBest ? "font-bold text-foreground" : "text-muted-foreground"}`}>{fmtAvg(r[m.key])}</span>
-                            <div className="flex-1 h-2 rounded-full bg-muted/60 overflow-hidden">
-                              <div className={`h-full rounded-full ${m.bar} ${isBest ? "" : "opacity-50"}`} style={{ width: `${pct}%` }} />
-                            </div>
-                          </div>
+                        <td
+                          key={r.day}
+                          className={`px-2 py-1.5 text-center border-t border-border/60 ${isBest ? "font-bold text-foreground" : "text-muted-foreground"}`}
+                          title={`${r[metric.total].toLocaleString()} ${metric.label.toLowerCase()} across ${r.occurrences} ${r.day}${r.occurrences === 1 ? "" : "s"}`}
+                        >
+                          {fmtAvg(r[metric.key])}
                         </td>
                       );
                     })}
+                    <td className="border-t border-border/60" />
                   </tr>
-                ))}
-              </tbody>
-            </table>
+                </tfoot>
+              </table>
+            </div>
           </>
         )}
       </CardContent>
