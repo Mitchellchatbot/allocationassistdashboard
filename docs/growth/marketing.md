@@ -25,10 +25,10 @@ doctors get in the pipeline, and what each channel costs per result. It answers
   badged.
 - **A drill-down** — click a channel to see its doctors split into *Contacted* vs
   *To Reach*, with links into Doctor Progress filtered to that source.
-- **Lead Trend** — leads, qualified and conversions per day / week / month (weekly
-  by default), with an optional channel filter. A chart plus a newest-first table
-  with the change vs the previous period, the average per period and the best
-  period. Answers "how many leads did we get each week?".
+- **Best Days of the Week** — which weekday brings the most leads, qualified leads
+  and conversions. Three tiles name the winning day for each, and a Monday–Sunday
+  table shows the average per day with a bar, best day in bold. Optional channel
+  filter.
 - **Charts:** doctors acquired by channel, contacted-vs-uncontacted (click a bar to
   get the list of uncontacted doctors to call), and a spend-allocation donut.
 
@@ -70,29 +70,26 @@ A date-range picker scopes everything.
   Doctors not invoiced yet fall back to the shared constant
   (`REVENUE_PER_CONVERSION_AED` = AED 20,000, ≈ USD 5,446.56 at the AED peg).
 
-## Reading the Lead Trend
+## Reading Best Days of the Week
 
-- **Leads** are grouped by the day the lead was created in Zoho; **Converted** by the
-  day its Doctor-on-Board record was created. Both are real event dates.
-- **Qualified is a cohort, not an event.** Zoho only stores a lead's *current*
-  status, not when it changed, so "qualified" for a week means "leads that arrived
-  that week and are qualified today". A recent week reads low until its leads have
-  been called, so weeks that ended in the last 21 days are faded and starred
-  ("still maturing"). Don't read that as a drop. A true "qualified on Tuesday"
-  number would need the Zoho sync to start recording status changes, and that
-  history would only exist from then on.
-- **Partial periods** (cut by the date range, or the current week still in progress)
-  have faded leads bars and a *partial* tag, and are left out of the average and the
-  "best" pick, so a 3-day stub doesn't look like a collapse.
-- **Empty weeks show as zero**, not skipped, so gaps are visible.
+- **Numbers are averages per day**, not totals. A 30-day range holds five of two
+  weekdays and four of the rest, so totals would give those two a ~25% head start.
+  Hover a number for the total and how many of that day were counted.
+- Counting starts at the first lead in the range (so "All time" doesn't divide by
+  every day since 2000) and stops at today.
+- **Leads** and **Qualified** use the day the lead came in. Qualified = the lead's
+  status today is "Initial Sales Call Completed" or "High Priority Follow up"; Zoho
+  doesn't record when a lead became qualified, so this answers "which day's leads
+  turn out best", not "which day the team qualifies most".
+- **Converted** uses the day the Doctor-on-Board record was created in Zoho, which is
+  when the team logged it, not necessarily the day the doctor signed. Expect
+  weekend conversions to be near zero for that reason.
 - **Channel filter** uses the same attribution as the table (including the Meta
-  override for junk sources), so filtering to a channel counts the same leads as
-  its row. One difference: the table's Meta *Qualified* uses the form-side count
-  from `meta_leads`, while the trend always uses Zoho status.
-- Weeks start on **Monday**. Days are cut at midnight in the viewer's browser
-  time zone, the same as the date-range picker and every other count on the page.
-- The logic is in `src/lib/marketing-trend.ts` (tested in
-  `src/test/marketing-trend.test.ts`).
+  override for junk sources). One difference: the table's Meta *Qualified* uses the
+  form-side count from `meta_leads`; this card always uses Zoho status.
+- Days are cut at midnight in the viewer's browser time zone, the same as the
+  date-range picker. Logic: `src/lib/marketing-weekdays.ts` (tested in
+  `src/test/marketing-weekdays.test.ts`).
 
 ## Reading the channel table (column by column)
 

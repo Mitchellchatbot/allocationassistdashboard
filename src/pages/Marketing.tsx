@@ -3,13 +3,10 @@ import { SectionDateRange } from "@/components/SectionDateRange";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import {
   BarChart, Bar, XAxis, YAxis, Tooltip, ResponsiveContainer, CartesianGrid, Cell, LabelList,
-  ComposedChart, Line, Legend,
 } from "recharts";
 import { InfoIcon } from "@/components/InfoIcon";
-import { GranularityToggle } from "@/components/GranularityToggle";
-import { buildMarketingTrend, summarizeTrend, QUALIFIED_MATURITY_DAYS, type TrendRow } from "@/lib/marketing-trend";
-import type { Granularity } from "@/lib/time-buckets";
-import { User, ArrowLeft, X, UserX, Check, TrendingUp } from "lucide-react";
+import { buildWeekdayStats, bestWeekday, type WeekdayRow, type WeekdayMetric } from "@/lib/marketing-weekdays";
+import { User, ArrowLeft, X, UserX, Check, CalendarDays } from "lucide-react";
 import { EmptyState } from "@/components/ui/empty-state";
 import { ChannelIcon } from "@/components/ChannelIcon";
 import { motion, LayoutGroup } from "framer-motion";
@@ -410,10 +407,9 @@ const Marketing = () => {
     }));
   }, [uncontactedChannel, zoho?.rawLeads, dateRange]);
 
-  // ── Lead trend (day / week / month) ──────────────────────────────────
+  // ── Best days of the week ────────────────────────────────────────────
   // Channel is resolved once per row with the same channelOf the table uses,
-  // so filtering the trend to "Meta" counts exactly the leads the Meta row does.
-  const [trendGran, setTrendGran] = useState<Granularity>("week");
+  // so filtering to "Meta" counts exactly the leads the Meta row does.
   const [trendChannel, setTrendChannel] = useState<string | null>(null);
   const trendLeads = useMemo(() => (zoho?.rawLeads ?? []).map(l => ({
     Created_Time: l.Created_Time,
@@ -424,10 +420,10 @@ const Marketing = () => {
     Created_Time: d.Created_Time,
     channel:      channelOf(d.Email, d.Phone ?? d.Mobile, d.Lead_Source),
   })), [zoho?.rawDoctorsOnBoard, channelOf]);
-  const trendRows = useMemo(() => buildMarketingTrend({
+  const weekdayRows = useMemo(() => buildWeekdayStats({
     leads: trendLeads, conversions: trendConversions,
-    from: dateRange.from, to: dateRange.to, granularity: trendGran, channel: trendChannel,
-  }), [trendLeads, trendConversions, dateRange, trendGran, trendChannel]);
+    from: dateRange.from, to: dateRange.to, channel: trendChannel,
+  }), [trendLeads, trendConversions, dateRange, trendChannel]);
   // Keep a selected channel in the list even if the new date range has no
   // leads for it — otherwise the select silently shows "All channels" while
   // the chart is still filtered.
@@ -763,10 +759,8 @@ const Marketing = () => {
         )}
       </div>
 
-      <LeadTrendCard
-        rows={trendRows}
-        granularity={trendGran}
-        onGranularity={setTrendGran}
+      <BestDaysCard
+        rows={weekdayRows}
         channel={trendChannel}
         onChannel={setTrendChannel}
         channelOptions={trendChannelOptions}
@@ -961,29 +955,23 @@ const Marketing = () => {
   );
 };
 
-// Lives in this module rather than its own file so every recharts import on
-// the page stays in one place (see the vendor-charts TDZ note in vite.config).
-const UNIT: Record<Granularity, string> = { day: "day", week: "week", month: "month" };
-const shortDate = (d: Date) => d.toLocaleDateString("en-GB", { day: "numeric", month: "short" });
-function rowRange(r: TrendRow, g: Granularity): string {
-  if (g === "day")   return r.start.toLocaleDateString("en-GB", { weekday: "short", day: "numeric", month: "short", year: "numeric" });
-  if (g === "month") return r.start.toLocaleDateString("en-GB", { month: "long", year: "numeric" });
-  return `${shortDate(r.start)} – ${shortDate(r.end)} ${r.end.getFullYear()}`;
-}
+// One decimal under 10 so a quiet channel's "0.4 a day" doesn't round to 0.
+const fmtAvg = (n: number) => (n >= 10 ? Math.round(n).toLocaleString() : n.toFixed(1));
 
-function LeadTrendCard({ rows, granularity, onGranularity, channel, onChannel, channelOptions }: {
-  rows: TrendRow[];
-  granularity: Granularity;
-  onGranularity: (g: Granularity) => void;
+const DAY_METRICS: { key: WeekdayMetric; total: "leads" | "qualified" | "converted"; label: string; best: string; bar: string; tint: string }[] = [
+  { key: "avgLeads",     total: "leads",     label: "Leads",     best: "Most leads",       bar: "bg-sky-500",     tint: "bg-sky-50 text-sky-900" },
+  { key: "avgQualified", total: "qualified", label: "Qualified", best: "Most qualified",   bar: "bg-violet-500",  tint: "bg-violet-50 text-violet-900" },
+  { key: "avgConverted", total: "converted", label: "Converted", best: "Most conversions", bar: "bg-emerald-500", tint: "bg-emerald-50 text-emerald-900" },
+];
+
+function BestDaysCard({ rows, channel, onChannel, channelOptions }: {
+  rows: WeekdayRow[];
   channel: string | null;
   onChannel: (c: string | null) => void;
   channelOptions: string[];
 }) {
-  const summary = useMemo(() => summarizeTrend(rows), [rows]);
-  // Newest first in the table — "how did last week go" is the usual question.
-  const tableRows = useMemo(() => [...rows].reverse(), [rows]);
-  const unit = UNIT[granularity];
-  const anyMaturing = rows.some(r => r.maturing && r.leads > 0);
+  const best = useMemo(() => Object.fromEntries(DAY_METRICS.map(m => [m.key, bestWeekday(rows, m.key)])) as Record<WeekdayMetric, WeekdayRow | null>, [rows]);
+  const max = useMemo(() => Object.fromEntries(DAY_METRICS.map(m => [m.key, Math.max(0, ...rows.map(r => r[m.key]))])) as Record<WeekdayMetric, number>, [rows]);
 
   return (
     <Card className="mb-6 shadow-sm border-border/50">
@@ -991,32 +979,23 @@ function LeadTrendCard({ rows, granularity, onGranularity, channel, onChannel, c
         <div className="flex items-start justify-between gap-3 flex-wrap">
           <div>
             <CardTitle className="text-[14px] font-semibold text-foreground flex items-center gap-1.5">
-              <TrendingUp className="h-3.5 w-3.5 text-primary" /> Lead Trend
+              <CalendarDays className="h-3.5 w-3.5 text-primary" /> Best Days of the Week
               <InfoIcon
-                meaning={`Leads, qualified leads and conversions per ${unit}. Leads and qualified are grouped by the day the lead was created in Zoho. Qualified = the lead's status today is "Initial Sales Call Completed" or "High Priority Follow up" — Zoho doesn't record when a lead became qualified, so a recent ${unit} reads low until its leads have been called (faded bars, last ${QUALIFIED_MATURITY_DAYS} days). Conversions are grouped by the day the Doctor-on-Board record was created. Faded leads bars = a ${unit} only partly inside the date range, or still in progress.`}
+                meaning={'For each weekday, the average number of leads, qualified leads and conversions on that day across the selected date range. Averages rather than totals, because a range can contain five Mondays but only four Tuesdays. Leads and qualified use the day the lead came in; qualified = the lead\'s status today is "Initial Sales Call Completed" or "High Priority Follow up". Conversions use the day the Doctor-on-Board record was created in Zoho, which is when the team logged it, not necessarily when the doctor signed. Hover a number to see the total.'}
                 source="Zoho Leads + Doctors on Board, channel resolved the same way as the table above."
               />
             </CardTitle>
-            {rows.length > 0 && (
-              <p className="text-[11px] text-muted-foreground/80 mt-0.5">
-                {summary.totalLeads.toLocaleString()} leads · {summary.totalQualified.toLocaleString()} qualified · {summary.totalConverted.toLocaleString()} converted
-                {summary.avgLeads !== null && <> · avg {Math.round(summary.avgLeads).toLocaleString()} leads / {unit}</>}
-                {summary.best && <> · best {unit}: <span className="font-medium text-foreground">{rowRange(summary.best, granularity)}</span> ({summary.best.leads.toLocaleString()})</>}
-              </p>
-            )}
+            <p className="text-[11px] text-muted-foreground/80 mt-0.5">Average per day in the selected range</p>
           </div>
-          <div className="flex items-center gap-2">
-            <select
-              value={channel ?? ""}
-              onChange={e => onChannel(e.target.value || null)}
-              className="h-[26px] rounded-md border border-border/60 bg-card px-2 text-[11px] text-foreground"
-              aria-label="Filter trend by channel"
-            >
-              <option value="">All channels</option>
-              {channelOptions.map(c => <option key={c} value={c}>{c}</option>)}
-            </select>
-            <GranularityToggle value={granularity} onChange={onGranularity} />
-          </div>
+          <select
+            value={channel ?? ""}
+            onChange={e => onChannel(e.target.value || null)}
+            className="h-[26px] rounded-md border border-border/60 bg-card px-2 text-[11px] text-foreground"
+            aria-label="Filter by channel"
+          >
+            <option value="">All channels</option>
+            {channelOptions.map(c => <option key={c} value={c}>{c}</option>)}
+          </select>
         </div>
       </CardHeader>
       <CardContent className="px-5 pb-5">
@@ -1024,72 +1003,50 @@ function LeadTrendCard({ rows, granularity, onGranularity, channel, onChannel, c
           <p className="text-[12px] text-muted-foreground py-8 text-center">No leads or conversions in this period{channel ? ` for ${channel}` : ""}.</p>
         ) : (
           <>
-            <ResponsiveContainer width="100%" height={260}>
-              <ComposedChart data={rows} margin={{ top: 8, right: 4, left: 0, bottom: 0 }}>
-                <CartesianGrid strokeDasharray="3 3" stroke="hsl(220,14%,92%)" vertical={false} />
-                <XAxis dataKey="label" tick={{ fontSize: 10 }} tickLine={false} axisLine={false} interval="preserveStartEnd" />
-                {/* Conversions are a handful per week against hundreds of leads —
-                    on a shared axis the line would sit flat on the floor. */}
-                <YAxis yAxisId="left"  tick={{ fontSize: 10, fill: "#0ea5e9" }} tickLine={false} axisLine={false} allowDecimals={false} width={36} />
-                <YAxis yAxisId="right" orientation="right" tick={{ fontSize: 10, fill: "#0d9488" }} tickLine={false} axisLine={false} allowDecimals={false} width={28} />
-                <Tooltip
-                  contentStyle={tip}
-                  labelFormatter={(_, p) => { const r = p?.[0]?.payload as TrendRow | undefined; return r ? rowRange(r, granularity) : ""; }}
-                />
-                <Legend wrapperStyle={{ fontSize: 10 }} iconType="circle" />
-                <Bar yAxisId="left" dataKey="leads" name="Leads" fill="#0ea5e9" radius={[3, 3, 0, 0]} maxBarSize={granularity === "day" ? 8 : 22}>
-                  {rows.map(r => <Cell key={r.key} fillOpacity={r.partial ? 0.4 : 1} />)}
-                </Bar>
-                <Bar yAxisId="left" dataKey="qualified" name="Qualified" fill="#8b5cf6" radius={[3, 3, 0, 0]} maxBarSize={granularity === "day" ? 8 : 22}>
-                  {rows.map(r => <Cell key={r.key} fillOpacity={r.maturing || r.partial ? 0.35 : 1} />)}
-                </Bar>
-                <Line yAxisId="right" dataKey="converted" name="Converted" stroke="#0d9488" strokeWidth={2.5} dot={{ r: 3 }} />
-              </ComposedChart>
-            </ResponsiveContainer>
-
-            <div className="mt-4 max-h-[280px] overflow-y-auto rounded-md border border-border/50">
-              <table className="w-full text-[12px] tabular-nums">
-                <thead className="sticky top-0 bg-muted/60 backdrop-blur text-[10px] uppercase tracking-wide text-muted-foreground">
-                  <tr>
-                    <th className="text-left font-semibold px-3 py-2 capitalize">{unit}</th>
-                    <th className="text-right font-semibold px-3 py-2">Leads</th>
-                    <th className="text-right font-semibold px-3 py-2">vs prev</th>
-                    <th className="text-right font-semibold px-3 py-2">Qualified</th>
-                    <th className="text-right font-semibold px-3 py-2">Converted</th>
-                  </tr>
-                </thead>
-                <tbody className="divide-y divide-border/40">
-                  {tableRows.map(r => {
-                    const qualPct = r.leads > 0 ? Math.round((r.qualified / r.leads) * 100) : null;
-                    return (
-                      <tr key={r.key} className="hover:bg-muted/30">
-                        <td className="px-3 py-1.5 text-left">
-                          {rowRange(r, granularity)}
-                          {r.partial && <span className="ml-1.5 text-[9px] uppercase tracking-wide text-muted-foreground/70 font-semibold">partial</span>}
-                        </td>
-                        <td className="px-3 py-1.5 text-right font-semibold">{r.leads.toLocaleString()}</td>
-                        <td className={`px-3 py-1.5 text-right ${
-                          r.leadsDelta === null || r.leadsDelta === 0 ? "text-muted-foreground" : r.leadsDelta > 0 ? "text-emerald-600" : "text-rose-600"
-                        }`}>
-                          {r.leadsDelta === null ? "—" : r.leadsDelta > 0 ? `+${r.leadsDelta}` : r.leadsDelta}
-                        </td>
-                        <td className={`px-3 py-1.5 text-right ${r.maturing ? "text-muted-foreground" : ""}`}>
-                          {r.qualified.toLocaleString()}
-                          {qualPct !== null && <span className="text-muted-foreground ml-1">({qualPct}%)</span>}
-                          {r.maturing && r.leads > 0 && <span title={`Ended within the last ${QUALIFIED_MATURITY_DAYS} days — leads may not have been called yet`}>*</span>}
-                        </td>
-                        <td className="px-3 py-1.5 text-right">{r.converted.toLocaleString()}</td>
-                      </tr>
-                    );
-                  })}
-                </tbody>
-              </table>
+            <div className="grid grid-cols-1 sm:grid-cols-3 gap-3 mb-4">
+              {DAY_METRICS.map(m => {
+                const b = best[m.key];
+                return (
+                  <div key={m.key} className={`rounded-lg px-4 py-3 ${m.tint}`}>
+                    <p className="text-[10px] uppercase tracking-wide font-semibold opacity-70">{m.best}</p>
+                    <p className="text-[20px] font-semibold leading-tight mt-0.5">{b ? b.day : "—"}</p>
+                    <p className="text-[11px] opacity-75">
+                      {b ? `${fmtAvg(b[m.key])} ${m.label.toLowerCase()} on an average ${b.day}` : `No ${m.label.toLowerCase()} in this period`}
+                    </p>
+                  </div>
+                );
+              })}
             </div>
-            {anyMaturing && (
-              <p className="text-[10px] text-muted-foreground mt-2">
-                * Still maturing — these leads arrived in the last {QUALIFIED_MATURITY_DAYS} days and may not have had their first call yet, so qualified will rise.
-              </p>
-            )}
+
+            <table className="w-full text-[12px] tabular-nums">
+              <thead className="text-[10px] uppercase tracking-wide text-muted-foreground border-b border-border/60">
+                <tr>
+                  <th className="text-left font-semibold py-2 pr-3 w-[110px]">Day</th>
+                  {DAY_METRICS.map(m => <th key={m.key} className="text-left font-semibold py-2 px-3">{m.label} / day</th>)}
+                </tr>
+              </thead>
+              <tbody className="divide-y divide-border/40">
+                {rows.map(r => (
+                  <tr key={r.day}>
+                    <td className="py-2 pr-3 font-medium text-foreground">{r.day}</td>
+                    {DAY_METRICS.map(m => {
+                      const isBest = best[m.key]?.day === r.day;
+                      const pct = max[m.key] > 0 ? (r[m.key] / max[m.key]) * 100 : 0;
+                      return (
+                        <td key={m.key} className="py-2 px-3" title={`${r[m.total].toLocaleString()} ${m.label.toLowerCase()} across ${r.occurrences} ${r.day}${r.occurrences === 1 ? "" : "s"}`}>
+                          <div className="flex items-center gap-2">
+                            <span className={`w-10 text-right ${isBest ? "font-bold text-foreground" : "text-muted-foreground"}`}>{fmtAvg(r[m.key])}</span>
+                            <div className="flex-1 h-2 rounded-full bg-muted/60 overflow-hidden">
+                              <div className={`h-full rounded-full ${m.bar} ${isBest ? "" : "opacity-50"}`} style={{ width: `${pct}%` }} />
+                            </div>
+                          </div>
+                        </td>
+                      );
+                    })}
+                  </tr>
+                ))}
+              </tbody>
+            </table>
           </>
         )}
       </CardContent>
